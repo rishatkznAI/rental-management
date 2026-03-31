@@ -70,6 +70,19 @@ const selectClass =
   'focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] ' +
   'dark:border-gray-600 dark:bg-gray-700 dark:text-white';
 
+// ─── LabeledInput — Input с заголовком (Input сам по себе не рендерит label) ─
+function LabeledInput({
+  label,
+  ...props
+}: React.ComponentProps<typeof Input> & { label: string }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
+      <Input {...props} />
+    </div>
+  );
+}
+
 // ========== Return Modal =====================================================
 interface ReturnModalProps {
   open: boolean;
@@ -107,7 +120,7 @@ export function ReturnModal({ open, rental, onClose, onConfirm }: ReturnModalPro
         )}
 
         <div className="space-y-4">
-          <Input
+          <LabeledInput
             label="Дата возврата"
             type="date"
             value={returnDate}
@@ -208,8 +221,8 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Начало"    type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            <Input label="Окончание" type="date" value={endDate}   onChange={(e) => setEndDate(e.target.value)} />
+            <LabeledInput label="Начало"    type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <LabeledInput label="Окончание" type="date" value={endDate}   onChange={(e) => setEndDate(e.target.value)} />
           </div>
 
           <div>
@@ -352,13 +365,13 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
 
           {/* Даты — перед выбором техники, чтобы сразу проверить доступность */}
           <div className="grid grid-cols-2 gap-3">
-            <Input
+            <LabeledInput
               label="Дата начала"
               type="date"
               value={startDate}
               onChange={e => setStartDate(e.target.value)}
             />
-            <Input
+            <LabeledInput
               label="Дата окончания"
               type="date"
               value={endDate}
@@ -422,8 +435,8 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
 
           {/* Менеджер + Сумма */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Менеджер
               </label>
               <select value={manager} onChange={e => setManager(e.target.value)} className={selectClass}>
@@ -433,7 +446,7 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
                 ))}
               </select>
             </div>
-            <Input
+            <LabeledInput
               label="Сумма (₽)"
               type="number"
               placeholder="0"

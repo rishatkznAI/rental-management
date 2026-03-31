@@ -117,7 +117,7 @@ function detectConflicts(rentals: GanttRentalData[], equipmentInv: string): Set<
 
 // ========== Main Component ==========
 export default function Rentals() {
-  const today = useMemo(() => startOfDay(new Date('2026-03-03')), []);
+  const today = useMemo(() => startOfDay(new Date()), []);
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>(() => loadGanttRentals());
   const [equipmentList, setEquipmentList] = useState(() => loadEquipment());
 
@@ -206,7 +206,7 @@ export default function Rentals() {
       if (filterStatus) rentals = rentals.filter(r => r.status === filterStatus);
     }
     return rentals;
-  }, [filtersApplied, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
+  }, [ganttRentals, filtersApplied, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
 
   // Conflict detection for all equipment
   const conflictSets = useMemo(() => {

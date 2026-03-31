@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, RotateCcw, CirclePause as PauseCircle } from 'lucide-react';
-import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
 import type { GanttRentalData } from '../../mock-data';
 import { mockEquipment } from '../../mock-data';
 

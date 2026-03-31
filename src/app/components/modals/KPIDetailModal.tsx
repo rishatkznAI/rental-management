@@ -2,7 +2,7 @@ import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X, TrendingUp, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router';
-import { Button } from '../ui/Button';
+import { Button } from '../ui/button';
 import { formatCurrency, formatDate } from '../../lib/utils';
 
 interface KPIDetailModalProps {

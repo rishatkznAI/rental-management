@@ -1,0 +1,800 @@
+import React, { useState, useMemo, useRef, useCallback } from 'react';
+import {
+  Plus, ChevronLeft, ChevronRight, RotateCcw, CirclePause as PauseCircle,
+  Search, CircleCheck, CircleAlert, CreditCard,
+  AlertTriangle, Wrench
+} from 'lucide-react';
+import { Button } from '../components/ui/Button';
+import { RentalDrawer } from '../components/gantt/RentalDrawer';
+import { ReturnModal, DowntimeModal, NewRentalModal } from '../components/gantt/GanttModals';
+import {
+  mockDowntimes,
+  mockServicePeriods,
+  loadEquipment, EQUIPMENT_STORAGE_KEY,
+  loadGanttRentals, saveGanttRentals, GANTT_RENTALS_STORAGE_KEY,
+} from '../mock-data';
+import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
+import type { Equipment, EquipmentType } from '../types';
+import {
+  addDays, differenceInDays, format, startOfDay,
+  isSameDay, isWeekend, max as dateMax, min as dateMin
+} from 'date-fns';
+import { ru } from 'date-fns/locale';
+
+// ========== Constants & Types ==========
+type Scale = 'day' | 'week' | 'month';
+
+const SCALE_CONFIG: Record<Scale, { dayWidth: number; totalDays: number; label: string }> = {
+  day: { dayWidth: 80, totalDays: 14, label: 'День' },
+  week: { dayWidth: 40, totalDays: 28, label: 'Неделя' },
+  month: { dayWidth: 14, totalDays: 90, label: 'Месяц' },
+};
+
+const LEFT_PANEL_WIDTH = 280;
+const ROW_HEIGHT = 72;
+
+const TYPE_LABELS: Record<EquipmentType, string> = {
+  scissor: 'Ножничный',
+  articulated: 'Коленчатый',
+  telescopic: 'Телескопический',
+};
+
+const EQ_STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  available: { label: 'Свободна', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+  rented: { label: 'В аренде', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+  reserved: { label: 'Бронь', color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
+  in_service: { label: 'В сервисе', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+  inactive: { label: 'Списан', color: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' },
+};
+
+const RENTAL_BAR_COLORS: Record<GanttRentalData['status'], string> = {
+  active: 'bg-blue-600 dark:bg-blue-500',
+  created: 'bg-slate-500 dark:bg-slate-400',
+  returned: 'bg-green-600 dark:bg-green-500',
+  closed: 'bg-gray-400 dark:bg-gray-500',
+};
+
+const PAYMENT_STATUS_FILTERS = [
+  { value: '', label: 'Все' },
+  { value: 'paid', label: 'Оплачено' },
+  { value: 'unpaid', label: 'Не оплачено' },
+  { value: 'partial', label: 'Частично' },
+];
+
+const RENTAL_STATUS_FILTERS = [
+  { value: '', label: 'Все статусы' },
+  { value: 'created', label: 'Создана' },
+  { value: 'active', label: 'В аренде' },
+  { value: 'returned', label: 'Возвращена' },
+  { value: 'closed', label: 'Закрыта' },
+];
+
+// ========== Helpers ==========
+function getVisibleRange(baseDate: Date, scale: Scale) {
+  const cfg = SCALE_CONFIG[scale];
+  const offset = Math.floor(cfg.totalDays / 3);
+  const viewStart = startOfDay(addDays(baseDate, -offset));
+  const viewEnd = startOfDay(addDays(viewStart, cfg.totalDays));
+  return { viewStart, viewEnd, totalDays: cfg.totalDays };
+}
+
+function barPosition(
+  barStart: Date, barEnd: Date, viewStart: Date, totalDays: number, dayWidth: number
+) {
+  const clampedStart = dateMax([barStart, viewStart]);
+  const viewEnd = addDays(viewStart, totalDays);
+  const clampedEnd = dateMin([barEnd, viewEnd]);
+  if (clampedStart >= clampedEnd) return null;
+
+  const leftDays = differenceInDays(clampedStart, viewStart);
+  const widthDays = differenceInDays(clampedEnd, clampedStart);
+  return {
+    left: leftDays * dayWidth,
+    width: Math.max(widthDays * dayWidth, dayWidth * 0.5),
+  };
+}
+
+function detectConflicts(rentals: GanttRentalData[], equipmentInv: string): Set<string> {
+  const eqRentals = rentals.filter(r => r.equipmentInv === equipmentInv);
+  const conflictIds = new Set<string>();
+
+  for (let i = 0; i < eqRentals.length; i++) {
+    for (let j = i + 1; j < eqRentals.length; j++) {
+      const a = eqRentals[i];
+      const b = eqRentals[j];
+      const aStart = new Date(a.startDate);
+      const aEnd = new Date(a.endDate);
+      const bStart = new Date(b.startDate);
+      const bEnd = new Date(b.endDate);
+      if (aStart < bEnd && bStart < aEnd) {
+        conflictIds.add(a.id);
+        conflictIds.add(b.id);
+      }
+    }
+  }
+  return conflictIds;
+}
+
+// ========== Main Component ==========
+export default function Rentals() {
+  const today = useMemo(() => startOfDay(new Date('2026-03-03')), []);
+  const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>(() => loadGanttRentals());
+  const [equipmentList, setEquipmentList] = useState(() => loadEquipment());
+
+  React.useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === GANTT_RENTALS_STORAGE_KEY) setGanttRentals(loadGanttRentals());
+      if (e.key === EQUIPMENT_STORAGE_KEY) setEquipmentList(loadEquipment());
+    };
+    const onFocus = () => { setGanttRentals(loadGanttRentals()); setEquipmentList(loadEquipment()); };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('focus', onFocus);
+    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('focus', onFocus); };
+  }, []);
+
+  const [scale, setScale] = useState<Scale>('week');
+  const [baseDate, setBaseDate] = useState(today);
+  const [selectedRental, setSelectedRental] = useState<GanttRentalData | null>(null);
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [showDowntimeModal, setShowDowntimeModal] = useState(false);
+  const [showNewRentalModal, setShowNewRentalModal] = useState(false);
+  const [preselectedEquipment, setPreselectedEquipment] = useState('');
+  const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
+
+  // Filters
+  const [filterModel, setFilterModel] = useState('');
+  const [filterManager, setFilterManager] = useState('');
+  const [filterClient, setFilterClient] = useState('');
+  const [filterUpd, setFilterUpd] = useState('');
+  const [filterPayment, setFilterPayment] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filtersApplied, setFiltersApplied] = useState(false);
+
+  // Refs
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // ===== Computed =====
+  const { viewStart, viewEnd, totalDays } = useMemo(
+    () => getVisibleRange(baseDate, scale),
+    [baseDate, scale]
+  );
+  const dayWidth = SCALE_CONFIG[scale].dayWidth;
+  const timelineWidth = totalDays * dayWidth;
+
+  // Generate day columns
+  const days = useMemo(() => {
+    const result: Date[] = [];
+    for (let i = 0; i < totalDays; i++) {
+      result.push(addDays(viewStart, i));
+    }
+    return result;
+  }, [viewStart, totalDays]);
+
+  // Group days by month for header
+  const monthGroups = useMemo(() => {
+    const groups: { month: string; startIdx: number; count: number }[] = [];
+    days.forEach((day, idx) => {
+      const monthLabel = format(day, 'LLLL yyyy', { locale: ru });
+      const last = groups[groups.length - 1];
+      if (last && last.month === monthLabel) {
+        last.count++;
+      } else {
+        groups.push({ month: monthLabel, startIdx: idx, count: 1 });
+      }
+    });
+    return groups;
+  }, [days]);
+
+  // Filter equipment
+  const filteredEquipment = useMemo(() => {
+    let eq = [...equipmentList];
+    if (filtersApplied && filterModel) {
+      eq = eq.filter(e => e.model.toLowerCase().includes(filterModel.toLowerCase()) || e.inventoryNumber.toLowerCase().includes(filterModel.toLowerCase()));
+    }
+    return eq;
+  }, [equipmentList, filterModel, filtersApplied]);
+
+  // Filter rentals
+  const filteredRentals = useMemo(() => {
+    let rentals = [...ganttRentals];
+    if (filtersApplied) {
+      if (filterManager) rentals = rentals.filter(r => r.manager === filterManager);
+      if (filterClient) rentals = rentals.filter(r => r.client.toLowerCase().includes(filterClient.toLowerCase()));
+      if (filterUpd === 'yes') rentals = rentals.filter(r => r.updSigned);
+      if (filterUpd === 'no') rentals = rentals.filter(r => !r.updSigned);
+      if (filterPayment) rentals = rentals.filter(r => r.paymentStatus === filterPayment);
+      if (filterStatus) rentals = rentals.filter(r => r.status === filterStatus);
+    }
+    return rentals;
+  }, [filtersApplied, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
+
+  // Conflict detection for all equipment
+  const conflictSets = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    filteredEquipment.forEach(eq => {
+      map.set(eq.inventoryNumber, detectConflicts(filteredRentals, eq.inventoryNumber));
+    });
+    return map;
+  }, [filteredEquipment, filteredRentals]);
+
+  // Stats
+  const totalEquipment = equipmentList.length;
+  const totalRentals = ganttRentals.length;
+  const shownEquipment = filteredEquipment.length;
+  const shownRentals = filteredRentals.length;
+
+  // ===== Handlers =====
+  const navigateTime = useCallback((direction: 'prev' | 'next' | 'today') => {
+    if (direction === 'today') {
+      setBaseDate(today);
+      return;
+    }
+    const offsets: Record<Scale, number> = { day: 7, week: 14, month: 30 };
+    const offset = offsets[scale] * (direction === 'prev' ? -1 : 1);
+    setBaseDate(prev => addDays(prev, offset));
+  }, [scale, today]);
+
+  const applyFilters = () => setFiltersApplied(true);
+  const resetFilters = () => {
+    setFilterModel('');
+    setFilterManager('');
+    setFilterClient('');
+    setFilterUpd('');
+    setFilterPayment('');
+    setFilterStatus('');
+    setFiltersApplied(false);
+  };
+
+  const handleOpenReturn = (rental?: GanttRentalData) => {
+    setReturnRental(rental || null);
+    setShowReturnModal(true);
+  };
+
+  const handleOpenDowntime = (equipmentInv?: string) => {
+    setPreselectedEquipment(equipmentInv || '');
+    setShowDowntimeModal(true);
+  };
+
+  const handleOpenNewRental = (equipmentInv?: string) => {
+    setPreselectedEquipment(equipmentInv || '');
+    setShowNewRentalModal(true);
+  };
+
+  // ===== Today line position =====
+  const todayOffset = useMemo(() => {
+    const diff = differenceInDays(today, viewStart);
+    if (diff < 0 || diff > totalDays) return null;
+    return diff * dayWidth;
+  }, [today, viewStart, totalDays, dayWidth]);
+
+  return (
+    <div className="flex h-[calc(100vh)] flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
+      {/* ===== Toolbar ===== */}
+      <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-5 py-3 dark:border-gray-700 dark:bg-gray-800">
+        <h1 className="mr-2 text-xl text-gray-900 dark:text-white">Планировщик аренды</h1>
+
+        {/* Scale Switcher */}
+        <div className="flex rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700">
+          {(['day', 'week', 'month'] as Scale[]).map(s => (
+            <button
+              key={s}
+              onClick={() => setScale(s)}
+              className={`px-3 py-1.5 text-xs transition-colors ${
+                scale === s
+                  ? 'bg-[--color-primary] text-white'
+                  : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600'
+              } ${s === 'day' ? 'rounded-l-lg' : s === 'month' ? 'rounded-r-lg' : ''}`}
+            >
+              {SCALE_CONFIG[s].label}
+            </button>
+          ))}
+        </div>
+
+        {/* Nav */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => navigateTime('today')}
+            className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            Сегодня
+          </button>
+          <button onClick={() => navigateTime('prev')} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button onClick={() => navigateTime('next')} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
+            {format(viewStart, 'd MMM', { locale: ru })} — {format(addDays(viewStart, totalDays - 1), 'd MMM yyyy', { locale: ru })}
+          </span>
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" onClick={() => handleOpenNewRental()}>
+            <Plus className="h-3.5 w-3.5" />
+            Новая аренда
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => handleOpenReturn()}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            Возврат техники
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => handleOpenDowntime()}>
+            <PauseCircle className="h-3.5 w-3.5" />
+            Отметить простой
+          </Button>
+        </div>
+      </div>
+
+      {/* ===== Filters ===== */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-5 py-2 dark:border-gray-700 dark:bg-gray-800">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Модель / INV"
+            value={filterModel}
+            onChange={e => setFilterModel(e.target.value)}
+            className="h-8 w-36 rounded-lg border border-gray-200 bg-gray-50 pl-7 pr-2 text-xs focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+          />
+        </div>
+
+        <select
+          value={filterManager}
+          onChange={e => setFilterManager(e.target.value)}
+          className="h-8 rounded-lg border border-gray-200 bg-gray-50 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+        >
+          <option value="">Менеджер</option>
+          <option value="Смирнова А.П.">Смирнова А.П.</option>
+          <option value="Козлов Д.В.">Козлов Д.В.</option>
+        </select>
+
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Клиент"
+            value={filterClient}
+            onChange={e => setFilterClient(e.target.value)}
+            className="h-8 w-32 rounded-lg border border-gray-200 bg-gray-50 pl-7 pr-2 text-xs focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+          />
+        </div>
+
+        <select
+          value={filterUpd}
+          onChange={e => setFilterUpd(e.target.value)}
+          className="h-8 rounded-lg border border-gray-200 bg-gray-50 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+        >
+          <option value="">УПД</option>
+          <option value="yes">Подписан</option>
+          <option value="no">Не подписан</option>
+        </select>
+
+        {/* Payment segmented */}
+        <div className="flex rounded-lg border border-gray-200 dark:border-gray-600">
+          {PAYMENT_STATUS_FILTERS.map(f => (
+            <button
+              key={f.value}
+              onClick={() => setFilterPayment(f.value)}
+              className={`px-2 py-1 text-xs transition-colors first:rounded-l-lg last:rounded-r-lg ${
+                filterPayment === f.value
+                  ? 'bg-[--color-primary] text-white'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100 dark:bg-gray-700 dark:text-gray-300'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        <select
+          value={filterStatus}
+          onChange={e => setFilterStatus(e.target.value)}
+          className="h-8 rounded-lg border border-gray-200 bg-gray-50 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+        >
+          {RENTAL_STATUS_FILTERS.map(f => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
+
+        <Button size="sm" onClick={applyFilters} className="h-8 px-3 text-xs">
+          Применить
+        </Button>
+        <Button size="sm" variant="ghost" onClick={resetFilters} className="h-8 px-3 text-xs">
+          Сброс
+        </Button>
+
+        <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">
+          Показано {shownEquipment} из {totalEquipment} ед. / {shownRentals} из {totalRentals} аренд
+        </span>
+      </div>
+
+      {/* ===== Gantt Grid ===== */}
+      <div ref={scrollContainerRef} className="flex-1 overflow-auto">
+        <div style={{ width: LEFT_PANEL_WIDTH + timelineWidth, minHeight: '100%' }}>
+          {/* ===== Timeline Header (sticky top) ===== */}
+          <div className="sticky top-0 z-20 flex border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+            {/* Left header */}
+            <div
+              className="sticky left-0 z-30 flex shrink-0 items-center border-r border-gray-200 bg-white px-3 dark:border-gray-700 dark:bg-gray-800"
+              style={{ width: LEFT_PANEL_WIDTH }}
+            >
+              <span className="text-xs text-gray-500 dark:text-gray-400">Техника ({shownEquipment})</span>
+            </div>
+
+            {/* Month row + Day row combined */}
+            <div className="flex flex-col" style={{ width: timelineWidth }}>
+              {/* Month row */}
+              <div className="flex border-b border-gray-100 dark:border-gray-700">
+                {monthGroups.map((mg, idx) => (
+                  <div
+                    key={idx}
+                    className="border-r border-gray-100 px-2 py-1 text-xs capitalize text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                    style={{ width: mg.count * dayWidth }}
+                  >
+                    {mg.month}
+                  </div>
+                ))}
+              </div>
+              {/* Day row */}
+              <div className="relative flex">
+                {days.map((day, idx) => {
+                  const isToday = isSameDay(day, today);
+                  const weekend = isWeekend(day);
+                  return (
+                    <div
+                      key={idx}
+                      className={`flex shrink-0 flex-col items-center justify-center border-r border-gray-100 py-1 dark:border-gray-700 ${
+                        isToday ? 'bg-blue-50 dark:bg-blue-900/20' : weekend ? 'bg-gray-50/80 dark:bg-gray-800/50' : ''
+                      }`}
+                      style={{ width: dayWidth }}
+                    >
+                      {scale !== 'month' ? (
+                        <>
+                          <span className={`text-[10px] ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'}`}>
+                            {format(day, 'EEEEEE', { locale: ru })}
+                          </span>
+                          <span className={`text-xs ${isToday ? 'text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'}`}>
+                            {format(day, 'd')}
+                          </span>
+                        </>
+                      ) : (
+                        <span className={`text-[9px] ${isToday ? 'text-blue-700 dark:text-blue-300' : 'text-gray-500'}`}>
+                          {format(day, 'd')}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* ===== Equipment Rows ===== */}
+          {filteredEquipment.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <div className="text-gray-400 dark:text-gray-500">Нет данных по фильтрам</div>
+              <Button size="sm" variant="ghost" onClick={resetFilters} className="mt-2">
+                Сброс фильтров
+              </Button>
+            </div>
+          ) : (
+            filteredEquipment.map(eq => (
+              <EquipmentRow
+                key={eq.id}
+                equipment={eq}
+                rentals={filteredRentals.filter(r => r.equipmentInv === eq.inventoryNumber)}
+                downtimes={mockDowntimes.filter(d => d.equipmentInv === eq.inventoryNumber)}
+                servicePeriods={mockServicePeriods.filter(s => s.equipmentInv === eq.inventoryNumber)}
+                conflictIds={conflictSets.get(eq.inventoryNumber) || new Set()}
+                viewStart={viewStart}
+                totalDays={totalDays}
+                dayWidth={dayWidth}
+                todayOffset={todayOffset}
+                scale={scale}
+                days={days}
+                today={today}
+                onBarClick={setSelectedRental}
+                onNewRental={() => handleOpenNewRental(eq.inventoryNumber)}
+                onReturn={(rental) => handleOpenReturn(rental)}
+                onDowntime={() => handleOpenDowntime(eq.inventoryNumber)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ===== Drawer ===== */}
+      {selectedRental && (
+        <RentalDrawer
+          rental={selectedRental}
+          equipment={mockEquipment.find(e => e.inventoryNumber === selectedRental.equipmentInv)}
+          onClose={() => setSelectedRental(null)}
+          onReturn={(r) => {
+            setSelectedRental(null);
+            handleOpenReturn(r);
+          }}
+          onStatusChange={() => setSelectedRental(null)}
+        />
+      )}
+
+      {/* ===== Modals ===== */}
+      <ReturnModal
+        open={showReturnModal}
+        rental={returnRental}
+        onClose={() => { setShowReturnModal(false); setReturnRental(null); }}
+        onConfirm={(data) => {
+          console.log('Return confirmed:', data);
+          setShowReturnModal(false);
+          setReturnRental(null);
+        }}
+      />
+      <DowntimeModal
+        open={showDowntimeModal}
+        preselectedEquipment={preselectedEquipment}
+        onClose={() => setShowDowntimeModal(false)}
+        onConfirm={(data) => {
+          console.log('Downtime created:', data);
+          setShowDowntimeModal(false);
+        }}
+      />
+      <NewRentalModal
+        open={showNewRentalModal}
+        preselectedEquipment={preselectedEquipment}
+        onClose={() => setShowNewRentalModal(false)}
+        onConfirm={(data) => {
+          const newRental: GanttRentalData = {
+            id: `GR-${Date.now()}`,
+            client: data.client || '',
+            clientShort: (data.client || '').substring(0, 20),
+            equipmentInv: data.equipmentInv || '',
+            startDate: data.startDate || '',
+            endDate: data.endDate || '',
+            manager: data.manager || '',
+            managerInitials: (data.manager || '').split(' ').map((w: string) => w[0]).join('').toUpperCase(),
+            status: 'created',
+            paymentStatus: 'unpaid',
+            updSigned: false,
+            amount: Number(data.amount) || 0,
+            comments: [],
+          };
+          const updated = [...ganttRentals, newRental];
+          setGanttRentals(updated);
+          saveGanttRentals(updated);
+          setShowNewRentalModal(false);
+        }}
+      />
+    </div>
+  );
+}
+
+// ========== Equipment Row Component ==========
+interface EquipmentRowProps {
+  equipment: Equipment;
+  rentals: GanttRentalData[];
+  downtimes: DowntimePeriod[];
+  servicePeriods: ServicePeriod[];
+  conflictIds: Set<string>;
+  viewStart: Date;
+  totalDays: number;
+  dayWidth: number;
+  todayOffset: number | null;
+  scale: Scale;
+  days: Date[];
+  today: Date;
+  onBarClick: (rental: GanttRentalData) => void;
+  onNewRental: () => void;
+  onReturn: (rental: GanttRentalData) => void;
+  onDowntime: () => void;
+}
+
+function EquipmentRow({
+  equipment, rentals, downtimes, servicePeriods, conflictIds,
+  viewStart, totalDays, dayWidth, todayOffset, scale, days, today,
+  onBarClick, onNewRental, onReturn, onDowntime
+}: EquipmentRowProps) {
+  const eqStatus = EQ_STATUS_LABELS[equipment.status] || EQ_STATUS_LABELS.available;
+  const hasActiveRental = rentals.some(r => r.status === 'active');
+  const timelineWidth = totalDays * dayWidth;
+
+  return (
+    <div className="group flex border-b border-gray-100 dark:border-gray-800" style={{ minHeight: ROW_HEIGHT }}>
+      {/* Left panel */}
+      <div
+        className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200 bg-white px-3 dark:border-gray-700 dark:bg-gray-800"
+        style={{ width: LEFT_PANEL_WIDTH }}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{equipment.inventoryNumber}</span>
+            <span className="truncate text-sm text-gray-900 dark:text-white">{equipment.model}</span>
+          </div>
+          <div className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
+            <span>{TYPE_LABELS[equipment.type]}</span>
+            <span>·</span>
+            <span className="truncate">{equipment.location}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-1.5">
+            <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] ${eqStatus.color}`}>
+              {eqStatus.label}
+            </span>
+          </div>
+        </div>
+        {/* Quick actions */}
+        <div className="ml-1 flex shrink-0 flex-col gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            onClick={onNewRental}
+            className="rounded p-1 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
+            title="Создать аренду"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+          {hasActiveRental && (
+            <button
+              onClick={() => {
+                const active = rentals.find(r => r.status === 'active');
+                if (active) onReturn(active);
+              }}
+              className="rounded p-1 text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/30 dark:hover:text-green-400"
+              title="Возврат техники"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            onClick={onDowntime}
+            className="rounded p-1 text-gray-400 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/30 dark:hover:text-amber-400"
+            title="Отметить простой"
+          >
+            <PauseCircle className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Timeline area */}
+      <div className="relative" style={{ width: timelineWidth, height: ROW_HEIGHT }}>
+        {/* Day grid lines */}
+        {days.map((day, idx) => {
+          const weekend = isWeekend(day);
+          const isToday = isSameDay(day, today);
+          return (
+            <div
+              key={idx}
+              className={`absolute top-0 h-full border-r border-gray-50 dark:border-gray-800/50 ${
+                weekend ? 'bg-gray-50/50 dark:bg-gray-800/30' : ''
+              } ${isToday ? 'bg-blue-50/40 dark:bg-blue-900/10' : ''}`}
+              style={{ left: idx * dayWidth, width: dayWidth }}
+            />
+          );
+        })}
+
+        {/* Today line */}
+        {todayOffset !== null && (
+          <div
+            className="absolute top-0 z-10 h-full w-px bg-red-400 dark:bg-red-500"
+            style={{ left: todayOffset }}
+          >
+            <div className="absolute -left-[3px] -top-0.5 h-2 w-2 rounded-full bg-red-400 dark:bg-red-500" />
+          </div>
+        )}
+
+        {/* Service bars */}
+        {servicePeriods.map(sp => {
+          const pos = barPosition(new Date(sp.startDate), new Date(sp.endDate), viewStart, totalDays, dayWidth);
+          if (!pos) return null;
+          return (
+            <div
+              key={sp.id}
+              className="absolute z-[5] flex items-center rounded px-1.5 text-[10px] text-orange-700 dark:text-orange-300"
+              style={{
+                left: pos.left,
+                width: pos.width,
+                top: 4,
+                height: ROW_HEIGHT - 8,
+                background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(234,88,12,0.15) 4px, rgba(234,88,12,0.15) 8px)',
+                border: '1px solid rgba(234,88,12,0.4)',
+              }}
+              title={`Сервис: ${sp.description}`}
+            >
+              <Wrench className="mr-1 h-3 w-3 shrink-0" />
+              {pos.width > 60 && <span className="truncate">{sp.description}</span>}
+            </div>
+          );
+        })}
+
+        {/* Downtime bars */}
+        {downtimes.map(dt => {
+          const pos = barPosition(new Date(dt.startDate), new Date(dt.endDate), viewStart, totalDays, dayWidth);
+          if (!pos) return null;
+          return (
+            <div
+              key={dt.id}
+              className="absolute z-[5] flex items-center rounded px-1.5 text-[10px] text-amber-700 dark:text-amber-300"
+              style={{
+                left: pos.left,
+                width: pos.width,
+                top: 4,
+                height: ROW_HEIGHT - 8,
+                background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(217,175,37,0.15) 4px, rgba(217,175,37,0.15) 8px)',
+                border: '1px dashed rgba(217,175,37,0.6)',
+              }}
+              title={`Простой: ${dt.reason}`}
+            >
+              <PauseCircle className="mr-1 h-3 w-3 shrink-0" />
+              {pos.width > 70 && <span className="truncate">Простой{dt.reason ? `: ${dt.reason}` : ''}</span>}
+            </div>
+          );
+        })}
+
+        {/* Rental bars */}
+        {rentals.map((rental, rIdx) => {
+          const pos = barPosition(new Date(rental.startDate), new Date(rental.endDate), viewStart, totalDays, dayWidth);
+          if (!pos) return null;
+          const isConflict = conflictIds.has(rental.id);
+          const barColor = RENTAL_BAR_COLORS[rental.status];
+
+          // Stack bars vertically if there are overlaps (simple: use index-based offset)
+          const overlapping = rentals.filter((r2, j) => {
+            if (j >= rIdx) return false;
+            const s1 = new Date(rental.startDate), e1 = new Date(rental.endDate);
+            const s2 = new Date(r2.startDate), e2 = new Date(r2.endDate);
+            return s1 < e2 && s2 < e1;
+          });
+          const stackIndex = overlapping.length;
+          const barHeight = 28;
+          const topOffset = 6 + stackIndex * (barHeight + 4);
+
+          return (
+            <div
+              key={rental.id}
+              onClick={() => onBarClick(rental)}
+              className={`absolute z-[6] flex cursor-pointer items-center rounded shadow-sm transition-shadow hover:shadow-md ${barColor} ${
+                isConflict ? 'ring-2 ring-red-500 ring-offset-1 dark:ring-red-400' : ''
+              }`}
+              style={{
+                left: pos.left + 1,
+                width: pos.width - 2,
+                top: topOffset,
+                height: barHeight,
+              }}
+              title={`${rental.client} (${rental.id})`}
+            >
+              {/* Bar content */}
+              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden px-1.5">
+                {isConflict && (
+                  <AlertTriangle className="h-3 w-3 shrink-0 text-red-200" />
+                )}
+                {pos.width > 50 && (
+                  <span className="truncate text-[10px] text-white/90">
+                    {rental.clientShort}
+                  </span>
+                )}
+                {pos.width > 100 && (
+                  <span className="shrink-0 text-[9px] text-white/60">{rental.managerInitials}</span>
+                )}
+              </div>
+              {/* Right icons */}
+              <div className="mr-1 flex shrink-0 items-center gap-0.5">
+                {pos.width > 70 && (
+                  <>
+                    {rental.updSigned ? (
+                      <CircleCheck className="h-3 w-3 text-green-300" title="УПД подписан" />
+                    ) : (
+                      <CircleAlert className="h-3 w-3 text-red-300" title="УПД не подписан" />
+                    )}
+                    {rental.paymentStatus === 'paid' ? (
+                      <CreditCard className="h-3 w-3 text-green-300" title="Оплачено" />
+                    ) : rental.paymentStatus === 'partial' ? (
+                      <CreditCard className="h-3 w-3 text-yellow-300" title="Частично оплачено" />
+                    ) : (
+                      <CreditCard className="h-3 w-3 text-red-300" title="Не оплачено" />
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

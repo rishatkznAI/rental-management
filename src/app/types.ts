@@ -1,0 +1,143 @@
+// Типы данных для системы управления арендой подъёмных платформ
+
+export type EquipmentStatus = 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive';
+export type EquipmentType = 'scissor' | 'articulated' | 'telescopic';
+export type EquipmentDrive = 'diesel' | 'electric';
+export type EquipmentOwnerType = 'own' | 'investor' | 'sublease';
+export type RepairEventType = 'repair' | 'maintenance' | 'diagnostics' | 'breakdown';
+export type RepairSource = 'manual' | 'bot';
+export type ShippingEventType = 'shipping' | 'receiving';
+
+export interface Equipment {
+  id: string;
+  inventoryNumber: string;
+  manufacturer: string;
+  model: string;
+  type: EquipmentType;
+  drive: EquipmentDrive;
+  serialNumber: string;
+  year: number;
+  hours: number;
+  liftHeight: number;
+  workingHeight?: number;
+  loadCapacity?: number;
+  dimensions?: string;
+  weight?: number;
+  location: string;
+  status: EquipmentStatus;
+  owner: EquipmentOwnerType;
+  subleasePrice?: number;
+  plannedMonthlyRevenue: number;
+  nextMaintenance: string;
+  maintenanceCHTO?: string;
+  maintenancePTO?: string;
+  notes?: string;
+  currentClient?: string;
+  returnDate?: string;
+  photo?: string;
+}
+
+export interface RepairRecord {
+  id: string;
+  equipmentId: string;
+  date: string;
+  type: RepairEventType;
+  description: string;
+  comment?: string;
+  mechanic: string;
+  status: 'completed' | 'in_progress' | 'planned';
+  cost?: number;
+  source: RepairSource;
+}
+
+export interface ShippingPhoto {
+  id: string;
+  equipmentId: string;
+  date: string;
+  type: ShippingEventType;
+  uploadedBy: string;
+  photos: string[];
+  comment?: string;
+  rentalId?: string;
+  source: RepairSource;
+}
+
+export type RentalStatus = 'new' | 'confirmed' | 'delivery' | 'active' | 'return_planned' | 'closed';
+
+export interface Rental {
+  id: string;
+  client: string;
+  contact: string;
+  startDate: string;
+  plannedReturnDate: string;
+  actualReturnDate?: string;
+  equipment: string[];
+  rate: string;
+  price: number;
+  discount: number;
+  deliveryAddress: string;
+  deliveryTime?: string;
+  manager: string;
+  status: RentalStatus;
+  risk?: string;
+  documents?: string[];
+  comments?: string;
+}
+
+export type ServicePriority = 'low' | 'medium' | 'high' | 'critical';
+export type ServiceStatus = 'new' | 'in_progress' | 'waiting_parts' | 'ready' | 'closed';
+
+export interface ServiceTicket {
+  id: string;
+  equipmentId: string;
+  equipment: string;
+  reason: string;
+  description: string;
+  priority: ServicePriority;
+  sla: string;
+  assignedTo?: string;
+  status: ServiceStatus;
+  workLog: { date: string; text: string; author: string }[];
+  parts: { name: string; qty: number; cost: number }[];
+  createdAt: string;
+}
+
+export interface Client {
+  id: string;
+  company: string;
+  inn: string;
+  contact: string;
+  phone: string;
+  email: string;
+  paymentTerms: string;
+  creditLimit: number;
+  debt: number;
+  lastRentalDate?: string;
+  totalRentals: number;
+}
+
+export type DocumentType = 'contract' | 'act' | 'invoice';
+export type DocumentStatus = 'draft' | 'signed' | 'sent';
+
+export interface Document {
+  id: string;
+  type: DocumentType;
+  number: string;
+  client: string;
+  date: string;
+  amount?: number;
+  status: DocumentStatus;
+  rental?: string;
+}
+
+export type PaymentStatus = 'pending' | 'paid' | 'overdue';
+
+export interface Payment {
+  id: string;
+  invoiceNumber: string;
+  client: string;
+  amount: number;
+  dueDate: string;
+  paidDate?: string;
+  status: PaymentStatus;
+}

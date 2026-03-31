@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router';
-import { Button } from '../components/ui/Button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
-import { Badge, getEquipmentStatusBadge } from '../components/ui/Badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/Table';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Badge, getEquipmentStatusBadge } from '../components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
   DollarSign, TrendingUp, Clock, Plus, Bot, User, Calendar
@@ -15,8 +15,8 @@ import {
 import { formatDate, formatCurrency, getDaysUntil } from '../lib/utils';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Input } from '../components/ui/Input';
-import { Select } from '../components/ui/Select';
+import { Input } from '../components/ui/input';
+import { Select } from '../components/ui/select';
 import type { EquipmentOwnerType, RepairEventType } from '../types';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {

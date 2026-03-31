@@ -1,9 +1,9 @@
 import React from 'react';
 import { useNavigate, useParams, Link } from 'react-router';
-import { Button } from '../components/ui/Button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
-import { Badge } from '../components/ui/Badge';
-import { getRentalStatusBadge } from '../components/ui/Badge';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+import { getRentalStatusBadge } from '../components/ui/badge';
 import {
   ArrowLeft, Edit, FileText, DollarSign, User, Calendar,
   Truck, Clock, MessageSquare, Wrench, AlertTriangle, CircleCheck

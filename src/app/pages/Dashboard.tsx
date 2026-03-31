@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Button } from '../components/ui/Button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Plus, TrendingUp, AlertTriangle, Wrench, DollarSign, Calendar, User, Target, FileText, CreditCard } from 'lucide-react';
 import { Link } from 'react-router';
 import { formatCurrency, formatDate } from '../lib/utils';

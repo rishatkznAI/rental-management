@@ -1,8 +1,8 @@
 import React from 'react';
-import { Input } from '../components/ui/Input';
-import { Select } from '../components/ui/Select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/Table';
-import { getPaymentStatusBadge } from '../components/ui/Badge';
+import { Input } from '../components/ui/input';
+import { Select } from '../components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { getPaymentStatusBadge } from '../components/ui/badge';
 import { Search } from 'lucide-react';
 import { loadPayments, PAYMENTS_STORAGE_KEY } from '../mock-data';
 import { formatDate, formatCurrency } from '../lib/utils';

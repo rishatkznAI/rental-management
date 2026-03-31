@@ -4,7 +4,7 @@ import {
   Search, CircleCheck, CircleAlert, CreditCard,
   AlertTriangle, Wrench
 } from 'lucide-react';
-import { Button } from '../components/ui/Button';
+import { Button } from '../components/ui/button';
 import { RentalDrawer } from '../components/gantt/RentalDrawer';
 import { ReturnModal, DowntimeModal, NewRentalModal } from '../components/gantt/GanttModals';
 import {

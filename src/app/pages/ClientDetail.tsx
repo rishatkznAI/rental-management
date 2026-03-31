@@ -1,8 +1,8 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Button } from '../components/ui/Button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
-import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
 import { ArrowLeft, Edit, FileText, TrendingUp, Clock, Phone, Mail, Building2 } from 'lucide-react';
 import { formatDate, formatCurrency } from '../lib/utils';
 import { mockClients, mockRentals, mockDocuments } from '../mock-data';

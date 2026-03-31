@@ -4,9 +4,101 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select } from '../components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { ArrowLeft, Save, Tag, Wrench, MapPin, TrendingUp, FileText } from 'lucide-react';
+import {
+  ArrowLeft, Save, Tag, Wrench, MapPin, TrendingUp,
+  ClipboardList, Calendar, Info, Bot, MessageSquare, Settings,
+} from 'lucide-react';
 import type { EquipmentOwnerType } from '../types';
 import { loadEquipment, saveEquipment } from '../mock-data';
+
+// ─── вспомогательные компоненты ────────────────────────────────────────────
+
+/** Мелкая подсказка под полем */
+function FieldHint({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+      {children}
+    </p>
+  );
+}
+
+/** Поле даты с иконкой календаря */
+function DateField({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+        {label}
+      </label>
+      <div className="relative">
+        <Calendar className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+        <input
+          type="date"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className="h-9 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-sm
+                     focus:outline-none focus:ring-2 focus:ring-[--color-primary] focus:border-transparent
+                     dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+        />
+      </div>
+      <FieldHint>{hint}</FieldHint>
+    </div>
+  );
+}
+
+/** Разделитель внутри карточки */
+function InnerDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 pt-2">
+      <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 whitespace-nowrap">
+        {label}
+      </span>
+      <div className="flex-1 border-t border-gray-200 dark:border-gray-700" />
+    </div>
+  );
+}
+
+// ─── Mock-данные для журнала ────────────────────────────────────────────────
+const JOURNAL_PREVIEW = [
+  {
+    id: 'ev1',
+    date: '22.03.2026',
+    type: 'Комментарий механика',
+    text: 'Требуется замена пульта управления',
+    source: 'bot' as const,
+  },
+  {
+    id: 'ev2',
+    date: '18.03.2026',
+    type: 'Осмотр',
+    text: 'Выявлена утечка масла в гидравлическом блоке',
+    source: 'bot' as const,
+  },
+  {
+    id: 'ev3',
+    date: '12.03.2026',
+    type: 'Ремонт',
+    text: 'Замена гидравлического шланга',
+    source: 'manual' as const,
+  },
+];
+
+const eventTypeBadge: Record<string, string> = {
+  'Ремонт':              'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+  'Осмотр':              'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+  'Комментарий механика':'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+};
+
+// ───────────────────────────────────────────────────────────────────────────
 
 export default function EquipmentNew() {
   const navigate = useNavigate();
@@ -21,6 +113,8 @@ export default function EquipmentNew() {
     year: '',
     liftHeight: '',
     hours: '',
+    maintenanceCHTO: '',
+    maintenancePTO: '',
     owner: 'own' as EquipmentOwnerType,
     subleasePrice: '',
     location: '',
@@ -52,6 +146,8 @@ export default function EquipmentNew() {
       subleasePrice: form.subleasePrice ? Number(form.subleasePrice) : undefined,
       plannedMonthlyRevenue: Number(form.plannedMonthlyRevenue) || 0,
       nextMaintenance: new Date().toISOString().split('T')[0],
+      maintenanceCHTO: form.maintenanceCHTO || undefined,
+      maintenancePTO: form.maintenancePTO || undefined,
       notes: form.notes || undefined,
     };
     saveEquipment([...existing, newEquipment]);
@@ -91,36 +187,46 @@ export default function EquipmentNew() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <Input
-                label="Инвентарный номер"
-                placeholder="INV-006"
-                value={form.inventoryNumber}
-                onChange={e => update('inventoryNumber', e.target.value)}
-                required
-              />
-              <Input
-                label="Серийный номер"
-                placeholder="SN-XXXXXXXX"
-                value={form.serialNumber}
-                onChange={e => update('serialNumber', e.target.value)}
-                required
-              />
+              <div>
+                <Input
+                  label="Инвентарный номер"
+                  placeholder="Например, INV-006"
+                  value={form.inventoryNumber}
+                  onChange={e => update('inventoryNumber', e.target.value)}
+                  required
+                />
+                <FieldHint>Внутренний номер учёта из реестра компании</FieldHint>
+              </div>
+              <div>
+                <Input
+                  label="Серийный номер"
+                  placeholder="Например, GS-SN-20240012"
+                  value={form.serialNumber}
+                  onChange={e => update('serialNumber', e.target.value)}
+                  required
+                />
+                <FieldHint>Заводской номер из паспорта или шильдика</FieldHint>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Input
-                label="Производитель"
-                placeholder="Genie, JLG, Haulotte…"
-                value={form.manufacturer}
-                onChange={e => update('manufacturer', e.target.value)}
-                required
-              />
-              <Input
-                label="Модель"
-                placeholder="GS-3246"
-                value={form.model}
-                onChange={e => update('model', e.target.value)}
-                required
-              />
+              <div>
+                <Input
+                  label="Производитель"
+                  placeholder="Например, Genie, JLG, Haulotte"
+                  value={form.manufacturer}
+                  onChange={e => update('manufacturer', e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <Input
+                  label="Модель"
+                  placeholder="Например, GS-3246, S-40"
+                  value={form.model}
+                  onChange={e => update('model', e.target.value)}
+                  required
+                />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -136,52 +242,99 @@ export default function EquipmentNew() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+
+            {/* Тип и привод */}
             <div className="grid grid-cols-2 gap-4">
-              <Select
-                label="Тип подъёмника"
-                value={form.type}
-                onValueChange={v => update('type', v)}
-                options={[
-                  { value: 'scissor', label: 'Ножничный' },
-                  { value: 'articulated', label: 'Коленчатый' },
-                  { value: 'telescopic', label: 'Телескопический' },
-                ]}
+              <div>
+                <Select
+                  label="Тип подъёмника"
+                  value={form.type}
+                  onValueChange={v => update('type', v)}
+                  options={[
+                    { value: 'scissor',     label: 'Ножничный (Scissor Lift)' },
+                    { value: 'articulated', label: 'Коленчатый (Boom Lift)' },
+                    { value: 'telescopic',  label: 'Телескопический (Telehandler)' },
+                  ]}
+                />
+                <FieldHint>Конструктивный тип платформы</FieldHint>
+              </div>
+              <div>
+                <Select
+                  label="Тип привода"
+                  value={form.drive}
+                  onValueChange={v => update('drive', v)}
+                  options={[
+                    { value: 'electric', label: 'Электрический' },
+                    { value: 'diesel',   label: 'Дизельный' },
+                  ]}
+                />
+                <FieldHint>Влияет на допустимые условия работы</FieldHint>
+              </div>
+            </div>
+
+            {/* Год, высота, часы */}
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Input
+                  label="Год выпуска"
+                  type="number"
+                  placeholder="Например, 2022"
+                  min={1990}
+                  max={new Date().getFullYear()}
+                  value={form.year}
+                  onChange={e => update('year', e.target.value)}
+                  required
+                />
+                <FieldHint>Год производства из паспорта техники</FieldHint>
+              </div>
+              <div>
+                <Input
+                  label="Рабочая высота, м"
+                  type="number"
+                  step="0.1"
+                  placeholder="Например, 12.0"
+                  value={form.liftHeight}
+                  onChange={e => update('liftHeight', e.target.value)}
+                  required
+                />
+                <FieldHint>Максимальная высота подъёма платформы</FieldHint>
+              </div>
+              <div>
+                <Input
+                  label="Наработка, м/ч"
+                  type="number"
+                  placeholder="Например, 1250"
+                  value={form.hours}
+                  onChange={e => update('hours', e.target.value)}
+                />
+                <FieldHint>Моточасы с начала эксплуатации</FieldHint>
+              </div>
+            </div>
+
+            {/* Техническое обслуживание */}
+            <InnerDivider label="Техническое обслуживание" />
+
+            <div className="grid grid-cols-2 gap-4">
+              <DateField
+                label="Дата ЧТО"
+                hint="ЧТО — частичное техническое обслуживание. Дата последней плановой проверки агрегатов."
+                value={form.maintenanceCHTO}
+                onChange={v => update('maintenanceCHTO', v)}
               />
-              <Select
-                label="Тип привода"
-                value={form.drive}
-                onValueChange={v => update('drive', v)}
-                options={[
-                  { value: 'electric', label: 'Электрический' },
-                  { value: 'diesel', label: 'Дизельный' },
-                ]}
+              <DateField
+                label="Дата ПТО"
+                hint="ПТО — периодический технический осмотр. Дата последней полной проверки с заменой расходников."
+                value={form.maintenancePTO}
+                onChange={v => update('maintenancePTO', v)}
               />
             </div>
-            <div className="grid grid-cols-3 gap-4">
-              <Input
-                label="Год выпуска"
-                type="number"
-                placeholder="2022"
-                value={form.year}
-                onChange={e => update('year', e.target.value)}
-                required
-              />
-              <Input
-                label="Рабочая высота, м"
-                type="number"
-                step="0.1"
-                placeholder="12.0"
-                value={form.liftHeight}
-                onChange={e => update('liftHeight', e.target.value)}
-                required
-              />
-              <Input
-                label="Моточасы"
-                type="number"
-                placeholder="0"
-                value={form.hours}
-                onChange={e => update('hours', e.target.value)}
-              />
+
+            <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-800 dark:bg-blue-900/20">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+              <p className="text-xs text-blue-700 dark:text-blue-300">
+                Если даты неизвестны — оставьте пустыми. Система напомнит о приближении срока обслуживания на основе
+                нормативов пробега.
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -197,29 +350,45 @@ export default function EquipmentNew() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+
+            {/* Собственник + статус */}
             <div className="grid grid-cols-2 gap-4">
-              <Select
-                label="Собственник техники"
-                value={form.owner}
-                onValueChange={v => update('owner', v)}
-                options={[
-                  { value: 'own', label: 'Собственная' },
-                  { value: 'investor', label: 'Инвестор' },
-                  { value: 'sublease', label: 'Субаренда (привлечённая)' },
-                ]}
-              />
-              <Select
-                label="Статус"
-                value={form.status}
-                onValueChange={v => update('status', v)}
-                options={[
-                  { value: 'available', label: 'Свободна' },
-                  { value: 'rented', label: 'В аренде' },
-                  { value: 'reserved', label: 'Забронирована' },
-                  { value: 'in_service', label: 'В сервисе' },
-                  { value: 'inactive', label: 'Списана' },
-                ]}
-              />
+              <div>
+                <Select
+                  label="Собственник техники"
+                  value={form.owner}
+                  onValueChange={v => update('owner', v)}
+                  options={[
+                    { value: 'own',      label: 'ООО «Скайтех» (собственная)' },
+                    { value: 'investor', label: 'Инвестор 1' },
+                    { value: 'sublease', label: 'Субаренда (привлечённая)' },
+                  ]}
+                />
+                <FieldHint>
+                  Список собственников ведётся в{' '}
+                  <Link
+                    to="/settings"
+                    className="text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Настройки → Справочники
+                  </Link>
+                </FieldHint>
+              </div>
+              <div>
+                <Select
+                  label="Статус техники"
+                  value={form.status}
+                  onValueChange={v => update('status', v)}
+                  options={[
+                    { value: 'available',  label: 'Свободна' },
+                    { value: 'rented',     label: 'В аренде' },
+                    { value: 'reserved',   label: 'Забронирована' },
+                    { value: 'in_service', label: 'В сервисе' },
+                    { value: 'inactive',   label: 'Списана' },
+                  ]}
+                />
+                <FieldHint>Текущий статус на момент добавления</FieldHint>
+              </div>
             </div>
 
             {/* Условные подсказки по типу владения */}
@@ -235,35 +404,50 @@ export default function EquipmentNew() {
             )}
             {form.owner === 'sublease' && (
               <>
-                <Input
-                  label="Стоимость субаренды, ₽/мес"
-                  type="number"
-                  placeholder="55 000"
-                  value={form.subleasePrice}
-                  onChange={e => update('subleasePrice', e.target.value)}
-                  required
-                />
+                <div>
+                  <Input
+                    label="Стоимость субаренды, ₽/мес"
+                    type="number"
+                    placeholder="Например, 55 000"
+                    value={form.subleasePrice}
+                    onChange={e => update('subleasePrice', e.target.value)}
+                    required
+                  />
+                  <FieldHint>Ежемесячный платёж поставщику субаренды</FieldHint>
+                </div>
                 <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-700 dark:border-orange-800 dark:bg-orange-900/20 dark:text-orange-300">
-                  Результат = цена сдачи − стоимость субаренды
+                  Результат = цена сдачи клиенту − стоимость субаренды
                 </div>
               </>
             )}
 
-            <Select
-              label="Склад / локация"
-              value={form.location}
-              onValueChange={v => update('location', v)}
-              options={[
-                { value: '', label: '— Выберите место хранения —' },
-                { value: 'moscow_sklad_a', label: 'Москва — Склад А' },
-                { value: 'moscow_sklad_b', label: 'Москва — Склад Б' },
-                { value: 'spb_sklad_1', label: 'Санкт-Петербург — Склад 1' },
-                { value: 'kazan_sklad_1', label: 'Казань — Склад 1' },
-                { value: 'ekb_sklad_1', label: 'Екатеринбург — Склад 1' },
-                { value: 'at_client', label: 'На объекте у клиента' },
-                { value: 'at_service', label: 'В сервисном центре' },
-              ]}
-            />
+            {/* Склад */}
+            <div>
+              <Select
+                label="Склад / местонахождение"
+                value={form.location}
+                onValueChange={v => update('location', v)}
+                options={[
+                  { value: '',               label: '— Выберите место хранения —' },
+                  { value: 'moscow_sklad_a', label: 'Москва — Склад А' },
+                  { value: 'moscow_sklad_b', label: 'Москва — Склад Б' },
+                  { value: 'spb_sklad_1',    label: 'Санкт-Петербург — Склад 1' },
+                  { value: 'kazan_sklad_1',  label: 'Казань — Склад 1' },
+                  { value: 'ekb_sklad_1',    label: 'Екатеринбург — Склад 1' },
+                  { value: 'at_client',      label: 'На объекте у клиента' },
+                  { value: 'at_service',     label: 'В сервисном центре' },
+                ]}
+              />
+              <FieldHint>
+                Список складов настраивается в{' '}
+                <Link
+                  to="/settings"
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  Настройки → Справочники
+                </Link>
+              </FieldHint>
+            </div>
           </CardContent>
         </Card>
 
@@ -281,37 +465,113 @@ export default function EquipmentNew() {
             <Input
               label="Плановый доход в месяц, ₽"
               type="number"
-              placeholder="90 000"
+              placeholder="Например, 90 000"
               value={form.plannedMonthlyRevenue}
               onChange={e => update('plannedMonthlyRevenue', e.target.value)}
             />
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Используется для оценки эффективности и утилизации парка. Не влияет на расчёт фактической выручки.
-            </p>
+            <FieldHint>
+              Ориентир для расчёта утилизации парка. Не влияет на фактическую выручку по аренде.
+            </FieldHint>
           </CardContent>
         </Card>
 
-        {/* ─── Блок 5: Примечание ─── */}
+        {/* ─── Блок 5: История обслуживания и примечания ─── */}
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-gray-400" />
+              <ClipboardList className="h-4 w-4 text-gray-400" />
               <CardTitle className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                5 · Примечание
+                5 · История обслуживания и примечания
               </CardTitle>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Комментарий
-              </label>
+          <CardContent className="space-y-5">
+
+            {/* 5.1 Комментарий при создании */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <MessageSquare className="h-4 w-4 text-gray-400" />
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Комментарий при добавлении
+                </span>
+              </div>
               <textarea
-                className="flex min-h-[88px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] focus:border-transparent dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                placeholder="Особенности техники, история ремонтов, ограничения по эксплуатации…"
+                className="flex min-h-[80px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm
+                           placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary]
+                           focus:border-transparent dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                placeholder="Особенности техники, ограничения по эксплуатации, состояние при поступлении на баланс…"
                 value={form.notes}
                 onChange={e => update('notes', e.target.value)}
               />
+              <FieldHint>Комментарий сохраняется в карточке техники как первая запись.</FieldHint>
+            </div>
+
+            {/* Разделитель */}
+            <InnerDivider label="История ремонтов и событий" />
+
+            {/* 5.2 Журнал событий */}
+            <div>
+              {/* Пояснение */}
+              <div className="flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2.5 mb-4 dark:border-gray-700 dark:bg-gray-800/50">
+                <Bot className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                  После сохранения техники здесь будет отображаться хронологический журнал:
+                  ручные записи сотрудников, а также автоматические уведомления от бота
+                  (ремонты, осмотры, неисправности).
+                </p>
+              </div>
+
+              {/* Пример журнала (preview) */}
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Так будет выглядеть журнал
+              </p>
+              <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 overflow-hidden">
+                {JOURNAL_PREVIEW.map((ev, idx) => (
+                  <div
+                    key={ev.id}
+                    className={`flex items-start gap-3 px-4 py-3 ${
+                      idx < JOURNAL_PREVIEW.length - 1
+                        ? 'border-b border-gray-200 dark:border-gray-700'
+                        : ''
+                    } opacity-60`}
+                  >
+                    {/* Иконка источника */}
+                    <div className="mt-0.5 shrink-0">
+                      {ev.source === 'bot' ? (
+                        <Bot className="h-4 w-4 text-violet-400" />
+                      ) : (
+                        <MessageSquare className="h-4 w-4 text-blue-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-gray-400 dark:text-gray-500 font-mono">
+                          {ev.date}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                            eventTypeBadge[ev.type] ?? 'bg-gray-100 text-gray-600'
+                          }`}
+                        >
+                          {ev.type}
+                        </span>
+                        {ev.source === 'bot' && (
+                          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
+                            бот
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-300 truncate">
+                        {ev.text}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <FieldHint>
+                Записи «бот» поступают автоматически. Ручные записи добавляются в карточке
+                техники после её сохранения.
+              </FieldHint>
             </div>
           </CardContent>
         </Card>

@@ -8,8 +8,7 @@ import {
   ArrowLeft, Save, Tag, Wrench, MapPin, TrendingUp,
   ClipboardList, Calendar, Info, Bot, MessageSquare, Settings,
 } from 'lucide-react';
-import type { EquipmentOwnerType } from '../types';
-import { loadEquipment, saveEquipment } from '../mock-data';
+import { loadEquipment, saveEquipment, loadOwners } from '../mock-data';
 
 // ─── вспомогательные компоненты ────────────────────────────────────────────
 
@@ -103,6 +102,10 @@ const eventTypeBadge: Record<string, string> = {
 export default function EquipmentNew() {
   const navigate = useNavigate();
 
+  // Собственники подгружаются из справочника (localStorage)
+  const owners = loadOwners();
+  const defaultOwnerId = owners.length > 0 ? owners[0].id : '';
+
   const [form, setForm] = useState({
     inventoryNumber: '',
     serialNumber: '',
@@ -115,7 +118,7 @@ export default function EquipmentNew() {
     hours: '',
     maintenanceCHTO: '',
     maintenancePTO: '',
-    owner: 'own' as EquipmentOwnerType,
+    ownerId: defaultOwnerId,
     subleasePrice: '',
     location: '',
     status: 'available',
@@ -129,6 +132,14 @@ export default function EquipmentNew() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const existing = loadEquipment();
+
+    // Определяем тип владения по имени собственника
+    const selectedOwner = owners.find(o => o.id === form.ownerId);
+    const ownerName = selectedOwner?.name ?? '';
+    const ownerType = ownerName.toLowerCase().includes('субар') ? 'sublease'
+      : ownerName.toLowerCase().includes('инвест') ? 'investor'
+      : 'own';
+
     const newEquipment = {
       id: `eq-${Date.now()}`,
       inventoryNumber: form.inventoryNumber,
@@ -142,13 +153,15 @@ export default function EquipmentNew() {
       liftHeight: Number(form.liftHeight) || 0,
       location: form.location,
       status: form.status as 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive',
-      owner: form.owner,
+      owner: ownerType as 'own' | 'investor' | 'sublease',
       subleasePrice: form.subleasePrice ? Number(form.subleasePrice) : undefined,
       plannedMonthlyRevenue: Number(form.plannedMonthlyRevenue) || 0,
       nextMaintenance: new Date().toISOString().split('T')[0],
       maintenanceCHTO: form.maintenanceCHTO || undefined,
       maintenancePTO: form.maintenancePTO || undefined,
       notes: form.notes || undefined,
+      // Сохраняем имя собственника из справочника
+      ownerName: ownerName || undefined,
     };
     saveEquipment([...existing, newEquipment]);
     navigate('/equipment');
@@ -354,25 +367,35 @@ export default function EquipmentNew() {
             {/* Собственник + статус */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Select
-                  label="Собственник техники"
-                  value={form.owner}
-                  onValueChange={v => update('owner', v)}
-                  options={[
-                    { value: 'own',      label: 'ООО «Скайтех» (собственная)' },
-                    { value: 'investor', label: 'Инвестор 1' },
-                    { value: 'sublease', label: 'Субаренда (привлечённая)' },
-                  ]}
-                />
-                <FieldHint>
-                  Список собственников ведётся в{' '}
-                  <Link
-                    to="/settings"
-                    className="text-blue-600 hover:underline dark:text-blue-400"
-                  >
-                    Настройки → Справочники
-                  </Link>
-                </FieldHint>
+                {owners.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-3">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Нет добавленных собственников.{' '}
+                      <Link to="/settings" className="text-blue-600 hover:underline dark:text-blue-400">
+                        Добавьте их в настройках
+                      </Link>
+                      .
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <Select
+                      label="Собственник техники"
+                      value={form.ownerId}
+                      onValueChange={v => update('ownerId', v)}
+                      options={owners.map(o => ({ value: o.id, label: o.name }))}
+                    />
+                    <FieldHint>
+                      Список ведётся в{' '}
+                      <Link
+                        to="/settings"
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        Настройки → Справочники
+                      </Link>
+                    </FieldHint>
+                  </>
+                )}
               </div>
               <div>
                 <Select
@@ -391,35 +414,43 @@ export default function EquipmentNew() {
               </div>
             </div>
 
-            {/* Условные подсказки по типу владения */}
-            {form.owner === 'own' && (
-              <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
-                Менеджер получает <strong>3%</strong> от результата по собственной технике
-              </div>
-            )}
-            {form.owner === 'investor' && (
-              <div className="rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-700 dark:border-purple-800 dark:bg-purple-900/20 dark:text-purple-300">
-                Формула: от 40% выручки менеджер получает <strong>7%</strong>
-              </div>
-            )}
-            {form.owner === 'sublease' && (
-              <>
-                <div>
-                  <Input
-                    label="Стоимость субаренды, ₽/мес"
-                    type="number"
-                    placeholder="Например, 55 000"
-                    value={form.subleasePrice}
-                    onChange={e => update('subleasePrice', e.target.value)}
-                    required
-                  />
-                  <FieldHint>Ежемесячный платёж поставщику субаренды</FieldHint>
+            {/* Условные подсказки по типу владения (определяем по имени из справочника) */}
+            {(() => {
+              const sel = owners.find(o => o.id === form.ownerId);
+              const nm = sel?.name?.toLowerCase() ?? '';
+              if (nm.includes('субар')) {
+                return (
+                  <>
+                    <div>
+                      <Input
+                        label="Стоимость субаренды, ₽/мес"
+                        type="number"
+                        placeholder="Например, 55 000"
+                        value={form.subleasePrice}
+                        onChange={e => update('subleasePrice', e.target.value)}
+                        required
+                      />
+                      <FieldHint>Ежемесячный платёж поставщику субаренды</FieldHint>
+                    </div>
+                    <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-700 dark:border-orange-800 dark:bg-orange-900/20 dark:text-orange-300">
+                      Результат = цена сдачи клиенту − стоимость субаренды
+                    </div>
+                  </>
+                );
+              }
+              if (nm.includes('инвест')) {
+                return (
+                  <div className="rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-700 dark:border-purple-800 dark:bg-purple-900/20 dark:text-purple-300">
+                    Формула: от 40% выручки менеджер получает <strong>7%</strong>
+                  </div>
+                );
+              }
+              return (
+                <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+                  Менеджер получает <strong>3%</strong> от результата по собственной технике
                 </div>
-                <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-700 dark:border-orange-800 dark:bg-orange-900/20 dark:text-orange-300">
-                  Результат = цена сдачи клиенту − стоимость субаренды
-                </div>
-              </>
-            )}
+              );
+            })()}
 
             {/* Склад */}
             <div>

@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { Input } from '../components/ui/input';
+import { loadOwners, saveOwners, type Owner } from '../mock-data';
 
 // ── Типы ─────────────────────────────────────────────────────────────────────
 
@@ -244,10 +245,11 @@ export default function Settings() {
         {/* ── Справочники ──────────────────────────────────────────────────── */}
         <Tabs.Content value="reference">
           <div className="grid gap-6 lg:grid-cols-2">
-            <ReferenceList title="Типы техники"    items={['Ножничный', 'Коленчатый', 'Телескопический']} />
+            <ReferenceList title="Типы техники"    items={['Ножничный', 'Коленчатый', 'Телескопический', 'Мачтовый']} />
             <ReferenceList title="Локации"         items={['Москва, склад А', 'Москва, склад Б', 'Санкт-Петербург']} />
             <StatusList />
             <ReferenceList title="Причины простоя" items={['Плановое ТО', 'Ремонт', 'Ожидание запчастей', 'Калибровка']} />
+            <OwnersReferenceList />
           </div>
         </Tabs.Content>
 
@@ -488,6 +490,136 @@ function StatusList() {
               <span className="text-sm font-medium">{s.label}</span>
             </div>
           ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Справочник собственников (с персистентностью в localStorage) ──────────────
+
+function OwnersReferenceList() {
+  const [owners, setOwnersState] = React.useState<Owner[]>(loadOwners);
+  const [adding,     setAdding]    = React.useState(false);
+  const [newValue,   setNewValue]  = React.useState('');
+  const [editId,     setEditId]    = React.useState<string | null>(null);
+  const [editValue,  setEditValue] = React.useState('');
+
+  const persist = (next: Owner[]) => {
+    setOwnersState(next);
+    saveOwners(next);
+  };
+
+  const handleAdd = () => {
+    if (!newValue.trim()) return;
+    persist([...owners, { id: `own-${Date.now()}`, name: newValue.trim() }]);
+    setNewValue('');
+    setAdding(false);
+  };
+
+  const handleEditSave = (id: string) => {
+    if (!editValue.trim()) return;
+    persist(owners.map(o => o.id === id ? { ...o, name: editValue.trim() } : o));
+    setEditId(null);
+  };
+
+  const handleDelete = (id: string) => {
+    persist(owners.filter(o => o.id !== id));
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Собственники техники</CardTitle>
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => setAdding(true)} title="Добавить собственника">
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {owners.length === 0 && !adding && (
+            <p className="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
+              Нет собственников. Нажмите «+» чтобы добавить.
+            </p>
+          )}
+          {owners.map(owner => (
+            <div
+              key={owner.id}
+              className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 p-3"
+            >
+              {editId === owner.id ? (
+                <input
+                  autoFocus
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter')  handleEditSave(owner.id);
+                    if (e.key === 'Escape') setEditId(null);
+                  }}
+                  className="flex-1 mr-2 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[--color-primary]"
+                />
+              ) : (
+                <span className="text-sm font-medium flex-1">{owner.name}</span>
+              )}
+              <div className="flex gap-1">
+                {editId === owner.id ? (
+                  <>
+                    <button
+                      onClick={() => handleEditSave(owner.id)}
+                      className="rounded px-2 py-1 text-xs bg-[--color-primary] text-white hover:opacity-90"
+                    >
+                      OK
+                    </button>
+                    <button
+                      onClick={() => setEditId(null)}
+                      className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                    >
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => { setEditId(owner.id); setEditValue(owner.name); }}
+                      className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      title="Редактировать"
+                    >
+                      <Edit className="h-4 w-4 text-gray-500" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(owner.id)}
+                      className="rounded p-1 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      title="Удалить"
+                    >
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {adding && (
+            <div className="flex gap-2">
+              <input
+                autoFocus
+                value={newValue}
+                onChange={e => setNewValue(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter')  handleAdd();
+                  if (e.key === 'Escape') setAdding(false);
+                }}
+                placeholder="Например: ООО «Скайтех компани»"
+                className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary]"
+              />
+              <Button size="sm" onClick={handleAdd}>OK</Button>
+              <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>✕</Button>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

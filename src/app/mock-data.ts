@@ -138,3 +138,31 @@ export function loadPayments(): Payment[] {
 export function savePayments(list: Payment[]): void {
   localStorage.setItem(PAYMENTS_STORAGE_KEY, JSON.stringify(list));
 }
+
+// ── localStorage для собственников техники ────────────────────────────────────
+
+export interface Owner {
+  id: string;
+  name: string;
+}
+
+export const OWNERS_STORAGE_KEY = 'app_owners';
+
+const DEFAULT_OWNERS: Owner[] = [
+  { id: 'own-1', name: 'ООО «Скайтех компани»' },
+  { id: 'own-2', name: 'Частный инвестор 1' },
+  { id: 'own-3', name: 'Частный инвестор 2' },
+  { id: 'own-4', name: 'Партнёрская техника' },
+];
+
+export function loadOwners(): Owner[] {
+  try {
+    const raw = localStorage.getItem(OWNERS_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as Owner[];
+  } catch { /* ignore */ }
+  return DEFAULT_OWNERS;
+}
+
+export function saveOwners(list: Owner[]): void {
+  localStorage.setItem(OWNERS_STORAGE_KEY, JSON.stringify(list));
+}

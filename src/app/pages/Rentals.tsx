@@ -507,7 +507,7 @@ export default function Rentals() {
       {selectedRental && (
         <RentalDrawer
           rental={selectedRental}
-          equipment={mockEquipment.find(e => e.inventoryNumber === selectedRental.equipmentInv)}
+          equipment={equipmentList.find(e => e.inventoryNumber === selectedRental.equipmentInv)}
           onClose={() => setSelectedRental(null)}
           onReturn={(r) => {
             setSelectedRental(null);

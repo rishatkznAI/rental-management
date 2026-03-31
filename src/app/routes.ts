@@ -20,6 +20,8 @@ import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 
+const basename = import.meta.env.BASE_URL || '/';
+
 export const router = createBrowserRouter([
   {
     path: '/login',
@@ -53,4 +55,4 @@ export const router = createBrowserRouter([
       },
     ],
   },
-]);
+], { basename });

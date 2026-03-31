@@ -286,7 +286,8 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
     loadUsers().filter(u => u.status === 'Активен'),
   []);
 
-  const existingRentals = useMemo(() => loadGanttRentals(), []);
+  // Перезагружаем аренды каждый раз при открытии модального окна
+  const existingRentals = useMemo(() => loadGanttRentals(), [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Фильтрация техники:
@@ -324,6 +325,18 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
     if (!equipmentInv) { setConflictWarn(false); return; }
     setConflictWarn(isEquipmentBusy(equipmentInv, startDate, endDate, existingRentals));
   }, [startDate, endDate, equipmentInv, existingRentals]);
+
+  // Находим конкретную аренду, вызывающую конфликт (для отображения деталей)
+  const conflictingRental = useMemo(() => {
+    if (!conflictWarn || !equipmentInv) return null;
+    const s = new Date(startDate).getTime();
+    const e = new Date(endDate).getTime();
+    return existingRentals.find(r => {
+      if (r.equipmentInv !== equipmentInv) return false;
+      if (r.status === 'returned' || r.status === 'closed') return false;
+      return s <= new Date(r.endDate).getTime() && e >= new Date(r.startDate).getTime();
+    }) ?? null;
+  }, [conflictWarn, equipmentInv, startDate, endDate, existingRentals]);
 
   if (!open) return null;
 
@@ -425,11 +438,18 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
               </>
             )}
 
-            {/* Предупреждение о конфликте */}
+            {/* Предупреждение о конфликте с деталями */}
             {conflictWarn && (
-              <p className="mt-1.5 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700 dark:border-orange-700 dark:bg-orange-900/20 dark:text-orange-400">
-                ⚠ Техника уже занята на выбранный период. Аренды будут пересекаться.
-              </p>
+              <div className="mt-1.5 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700 dark:border-orange-700 dark:bg-orange-900/20 dark:text-orange-400">
+                <p className="font-medium">⚠ Техника уже занята на выбранный период</p>
+                {conflictingRental && (
+                  <p className="mt-0.5 text-orange-600 dark:text-orange-300">
+                    Аренда {conflictingRental.id} · {conflictingRental.client} ·{' '}
+                    {conflictingRental.startDate} — {conflictingRental.endDate}
+                  </p>
+                )}
+                <p className="mt-0.5">Аренды будут пересекаться. Проверьте даты или выберите другую технику.</p>
+              </div>
             )}
           </div>
 

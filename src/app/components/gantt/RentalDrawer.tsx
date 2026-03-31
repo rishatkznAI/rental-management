@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, Calendar, CreditCard, FileText, User, MessageSquare, ArrowRight, RotateCcw, CirclePause as PauseCircle, CircleCheck, CircleAlert, Clock } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Calendar, CreditCard, FileText, User, MessageSquare, ArrowRight, RotateCcw, CirclePause as PauseCircle, CircleCheck, CircleAlert, Clock, Trash2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { formatCurrency, formatDate } from '../../lib/utils';
@@ -12,6 +12,7 @@ interface RentalDrawerProps {
   onClose: () => void;
   onReturn: (rental: GanttRentalData) => void;
   onStatusChange: (rental: GanttRentalData) => void;
+  onDelete: (rental: GanttRentalData) => void;
 }
 
 const statusLabels: Record<GanttRentalData['status'], string> = {
@@ -40,7 +41,8 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
   partial: 'warning',
 };
 
-export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusChange }: RentalDrawerProps) {
+export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusChange, onDelete }: RentalDrawerProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   if (!rental) return null;
 
   return (
@@ -194,18 +196,21 @@ export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusCha
 
         {/* Footer Actions */}
         <div className="flex flex-wrap gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-          <Button size="sm" onClick={() => onStatusChange(rental)}>
-            <ArrowRight className="h-3.5 w-3.5" />
-            Сменить статус
-          </Button>
+          {/* Сменить статус: created→active, (active handled by Return button) */}
+          {rental.status === 'created' && (
+            <Button size="sm" onClick={() => onStatusChange(rental)}>
+              <ArrowRight className="h-3.5 w-3.5" />
+              Активировать аренду
+            </Button>
+          )}
           {rental.status === 'active' && (
-            <Button size="sm" variant="secondary" onClick={() => onReturn(rental)}>
+            <Button size="sm" onClick={() => onReturn(rental)}>
               <RotateCcw className="h-3.5 w-3.5" />
               Возврат техники
             </Button>
           )}
           {rental.status === 'returned' && (
-            <Button size="sm" variant="secondary" onClick={() => onStatusChange(rental)}>
+            <Button size="sm" onClick={() => onStatusChange(rental)}>
               <CircleCheck className="h-3.5 w-3.5" />
               Закрыть аренду
             </Button>
@@ -214,6 +219,37 @@ export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusCha
             <PauseCircle className="h-3.5 w-3.5" />
             Создать простой
           </Button>
+
+          {/* Удалить аренду — только для ещё не начатых ('created') */}
+          {(rental.status === 'created') && (
+            <div className="ml-auto flex items-center gap-2">
+              {confirmDelete ? (
+                <>
+                  <span className="text-xs text-red-600 dark:text-red-400">Удалить безвозвратно?</span>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => { setConfirmDelete(false); onDelete(rental); }}
+                  >
+                    Да, удалить
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                    Отмена
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Удалить аренду
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

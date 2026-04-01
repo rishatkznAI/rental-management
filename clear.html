@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Очистка данных аренды</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; max-width: 580px; margin: 60px auto; padding: 0 20px; color: #1f2937; }
+    h2  { font-size: 20px; }
+    .removed { background:#fee2e2; border:1px solid #fca5a5; border-radius:8px; padding:12px 16px; margin:8px 0; font-family:monospace; font-size:13px; }
+    .kept    { background:#d1fae5; border:1px solid #6ee7b7; border-radius:8px; padding:12px 16px; margin:8px 0; font-family:monospace; font-size:13px; }
+    .ok      { background:#ecfdf5; border:1px solid #6ee7b7; border-radius:8px; padding:16px; margin-top:20px; font-size:15px; font-weight:600; }
+    a.btn    { display:inline-block; margin-top:16px; padding:10px 22px; background:#2563eb; color:white; border-radius:8px; text-decoration:none; font-size:14px; }
+  </style>
+</head>
+<body>
+<h2>🧹 Автоочистка данных аренды</h2>
+<p id="status">Обработка...</p>
+<div id="out"></div>
+
+<script>
+var RENTALS_KEY = 'app_gantt_rentals';
+var EQUIP_KEY   = 'app_equipment';
+
+var out = document.getElementById('out');
+
+try {
+  var rentals = JSON.parse(localStorage.getItem(RENTALS_KEY) || '[]');
+
+  // Оставляем только возвращённые и закрытые — они не блокируют
+  var kept    = rentals.filter(function(r){ return r.status==='returned'||r.status==='closed'; });
+  var removed = rentals.filter(function(r){ return r.status!=='returned'&&r.status!=='closed'; });
+
+  localStorage.setItem(RENTALS_KEY, JSON.stringify(kept));
+
+  // Сбрасываем статус техники на «Свободна» (кроме inactive / in_service)
+  var eq = JSON.parse(localStorage.getItem(EQUIP_KEY) || '[]');
+  eq = eq.map(function(e){
+    if (e.status==='inactive'||e.status==='in_service') return e;
+    return Object.assign({}, e, { status: 'available' });
+  });
+  localStorage.setItem(EQUIP_KEY, JSON.stringify(eq));
+
+  if (removed.length === 0) {
+    out.innerHTML = '<div class="kept">Блокирующих аренд не найдено — данные уже чистые.</div>';
+  } else {
+    out.innerHTML = '<p><strong>Удалено ' + removed.length + ' блокирующих аренд:</strong></p>';
+    removed.forEach(function(r){
+      out.innerHTML += '<div class="removed">🗑 ' + r.id +
+        '&nbsp;·&nbsp;' + r.equipmentInv +
+        '&nbsp;·&nbsp;' + r.startDate + '–' + r.endDate +
+        '&nbsp;·&nbsp;[' + r.status + ']</div>';
+    });
+  }
+
+  if (kept.length > 0) {
+    out.innerHTML += '<p><strong>Сохранено (возвращённые/закрытые):</strong> ' + kept.length + '</p>';
+  }
+
+  out.innerHTML += '<div class="ok">✅ Готово! Теперь техника должна быть свободна.</div>';
+  out.innerHTML += '<a class="btn" href="/rental-management/">← Открыть приложение</a>';
+
+  document.getElementById('status').textContent = 'Очистка завершена.';
+
+} catch(e) {
+  document.getElementById('status').textContent = 'Ошибка: ' + e.message;
+}
+</script>
+</body>
+</html>

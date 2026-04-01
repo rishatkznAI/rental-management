@@ -10,7 +10,31 @@
       <meta http-equiv="Expires" content="0" />
       <title>Система управления арендой</title>
       <script>
-        // GitHub Pages SPA redirect handler
+        // ── Принудительный сброс кеша браузера ──────────────────────────────
+        // Добавляем ?v=<timestamp> к URL при первом посещении в сессии.
+        // Это делает URL уникальным → браузер обязан запросить свежий index.html
+        // с новыми хешированными именами JS-бандлов, а не отдавать старый из кеша.
+        (function() {
+          var CACHE_KEY = '__app_cache_v';
+          // Метка версии, вшитая в HTML при деплое (меняется при каждом build)
+          var BUILD_TS  = '20260401_063500';
+          var stored    = sessionStorage.getItem(CACHE_KEY);
+          if (stored !== BUILD_TS) {
+            // Первый запуск в этой сессии или новый деплой → принудительно
+            // перезагружаем страницу с cache-bust параметром
+            sessionStorage.setItem(CACHE_KEY, BUILD_TS);
+            var sep = window.location.href.indexOf('?') === -1 ? '?' : '&';
+            // reload(true) игнорируется в современных браузерах,
+            // поэтому меняем URL чтобы обойти дисковый кеш
+            if (window.location.href.indexOf('_cb=') === -1) {
+              window.location.replace(
+                window.location.href + sep + '_cb=' + BUILD_TS
+              );
+            }
+          }
+        })();
+
+        // ── GitHub Pages SPA redirect handler ───────────────────────────────
         (function(l) {
           if (l.search[1] === '/' ) {
             var decoded = l.search.slice(1).split('&').map(function(s) {

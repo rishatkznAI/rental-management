@@ -11,45 +11,21 @@ git add src/ index.html
 
 echo ""
 echo "💾 Создаём коммит..."
-git commit -m "feat(dashboard,mobile): live data dashboard + full mobile adaptation
+git commit -m "fix(equipment): full dark mode for Equipment list page
 
-Dashboard fix (feat/dashboard):
-- Load all data from localStorage: loadEquipment/Rentals/Tickets/Clients/Payments
-- Fix NaN% utilization: guard division by zero, show '—' when no equipment
-- Utilization uses activeEquipment as denominator (excludes 'inactive')
-- Auto-refresh: useEffect on window.focus + storage events for 5 keys
-- Manual refresh button with spinner
-- Manager stats: real data filtered by user.name from AuthContext;
-  empty state when no rentals assigned to current manager
-- Week revenue: sum rentals started in last 7 days, or estimated from
-  active rentals' daily rate when no recent starts
-- Overdue returns: rentals with plannedReturnDate < today and status active
-- All alerts based on real data (overdue returns, payments, service tickets)
-- Recent rentals: last 5 by startDate, with status badge and amount
-- All KPI cards show empty states: '0', '—', or helpful messages
-
-Mobile adaptation:
-- Layout.tsx: mobile top bar with hamburger, slide-in sidebar overlay,
-  fixed bottom navigation (5 tabs: Dashboard / Equipment / Rentals /
-  Service / Clients). Main content padded for top/bottom bars on mobile.
-- Sidebar.tsx: accepts isOpen/onClose props, slide-in on mobile
-  (translate-x), auto-close on navigation, X button on mobile.
-- Dashboard: responsive KPI grid (2 cols mobile → 5 cols desktop),
-  button labels truncated on mobile, spacing reduced.
-- Equipment / Clients / Service: mobile card list view replaces table
-  on small screens. Desktop table hidden with sm:hidden / hidden sm:block.
-- All pages: p-8 → p-4 sm:p-6 md:p-8, text-3xl → text-2xl sm:text-3xl,
-  page headers wrap flex-col on mobile with sm:flex-row.
-- Rentals Gantt: height calc accounts for mobile top/bottom bars.
-- RentalDetail, EquipmentDetail: action button rows wrap on mobile.
-
-Fix detail pages (Service + Clients modules):
-- ServiceDetail.tsx: was searching empty mockServiceRequests[] — fixed
-  to use loadServiceTickets(). Full card with status actions, history.
-- ClientDetail.tsx: was searching empty mockClients[] — fixed to use
-  loadClients(). Full card with inline edit mode, rental history.
-- ServiceNew.tsx, ClientNew.tsx: expanded forms, redirect to new record.
-- types.ts: extended ServiceTicket and Client with optional fields."
+- Filter bar: bg-white → dark:bg-gray-800, border-gray-200 → dark:border-gray-700
+- Table wrapper: bg-white → dark:bg-gray-800, border → dark:border-gray-700
+- Page header: text-gray-900 → dark:text-white, text-gray-500 → dark:text-gray-400
+- Table cells: added dark:text-gray-300 for content, dark:text-gray-400 for secondary
+- Mobile cards: bg-white → dark:bg-gray-800, border and hover adapted for dark
+- Mobile card labels: text-gray-700 → dark:text-gray-300, text-gray-500 → dark:text-gray-400
+- Dropdown menu (⋮): bg-white → dark:bg-gray-800, items → dark:text-gray-200 dark:hover:bg-gray-700
+- MoreVertical button: dark:text-gray-400 dark:hover:bg-gray-700
+- Empty state: bg-gray-100 → dark:bg-gray-700, text fixed for dark
+- Results counter: text-gray-500 → dark:text-gray-400
+- Search icon: dark:text-gray-500
+- All 9 spec points addressed: text contrast, table, search, badges, buttons,
+  columns, unified dark design, all states"
 
 echo ""
 echo "🚀 Пушим в main..."

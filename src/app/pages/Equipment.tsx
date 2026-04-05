@@ -34,12 +34,12 @@ export default function Equipment() {
   }, []);
 
   const filteredEquipment = equipmentList.filter(eq => {
-    const matchesSearch = search === '' || 
+    const matchesSearch = search === '' ||
       eq.inventoryNumber.toLowerCase().includes(search.toLowerCase()) ||
       eq.model.toLowerCase().includes(search.toLowerCase()) ||
       eq.serialNumber.toLowerCase().includes(search.toLowerCase()) ||
       eq.currentClient?.toLowerCase().includes(search.toLowerCase());
-    
+
     const matchesStatus = statusFilter === 'all' || eq.status === statusFilter;
     const matchesType = typeFilter === 'all' || eq.type === typeFilter;
     const matchesDrive = driveFilter === 'all' || eq.drive === driveFilter;
@@ -69,8 +69,8 @@ export default function Equipment() {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Техника</h1>
-          <p className="mt-1 text-sm text-gray-500">Управление парком подъёмных платформ</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Техника</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Управление парком подъёмных платформ</p>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" className="hidden sm:flex">
@@ -88,10 +88,10 @@ export default function Equipment() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4">
+      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 sm:gap-4 sm:p-4">
         <div className="flex-1 min-w-[200px]">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
             <Input
               placeholder="Поиск по инв.№, модели, SN, клиенту..."
               value={search}
@@ -146,35 +146,39 @@ export default function Equipment() {
       {/* Mobile: card list */}
       <div className="sm:hidden space-y-3">
         {filteredEquipment.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 bg-white">
-            <Search className="h-8 w-8 text-gray-400 mb-3" />
-            <h3 className="text-base font-medium text-gray-900">Техника не найдена</h3>
-            <p className="mt-1 text-sm text-gray-500">Попробуйте изменить фильтры</p>
+          <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+            <Search className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-3" />
+            <h3 className="text-base font-medium text-gray-900 dark:text-white">Техника не найдена</h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Попробуйте изменить фильтры</p>
           </div>
         ) : filteredEquipment.map((eq) => (
-          <Link key={eq.id} to={`/equipment/${eq.id}`} className="block rounded-lg border border-gray-200 bg-white p-4 hover:border-blue-400 transition-colors">
+          <Link
+            key={eq.id}
+            to={`/equipment/${eq.id}`}
+            className="block rounded-lg border border-gray-200 bg-white p-4 transition-colors hover:border-blue-400 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-blue-500"
+          >
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-[--color-primary] text-sm">{eq.inventoryNumber}</span>
                   {getEquipmentStatusBadge(eq.status)}
                 </div>
-                <p className="text-sm font-medium text-gray-900 mt-1 truncate">{eq.manufacturer} {eq.model}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{getEquipmentTypeLabel(eq.type)} · {getEquipmentDriveLabel(eq.drive)}</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white mt-1 truncate">{eq.manufacturer} {eq.model}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{getEquipmentTypeLabel(eq.type)} · {getEquipmentDriveLabel(eq.drive)}</p>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500">
-              <div><span className="font-medium text-gray-700">Локация:</span> {eq.location}</div>
-              {eq.currentClient && <div><span className="font-medium text-gray-700">Клиент:</span> {eq.currentClient}</div>}
-              <div><span className="font-medium text-gray-700">След. ТО:</span> {formatDate(eq.nextMaintenance)}</div>
-              {eq.returnDate && <div><span className="font-medium text-gray-700">Возврат:</span> {formatDate(eq.returnDate)}</div>}
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Локация:</span> {eq.location}</div>
+              {eq.currentClient && <div><span className="font-medium text-gray-700 dark:text-gray-300">Клиент:</span> {eq.currentClient}</div>}
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">След. ТО:</span> {formatDate(eq.nextMaintenance)}</div>
+              {eq.returnDate && <div><span className="font-medium text-gray-700 dark:text-gray-300">Возврат:</span> {formatDate(eq.returnDate)}</div>}
             </div>
           </Link>
         ))}
       </div>
 
       {/* Desktop: Table */}
-      <div className="hidden sm:block rounded-lg border border-gray-200 bg-white">
+      <div className="hidden sm:block rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
         <Table>
           <TableHeader>
             <TableRow>
@@ -193,60 +197,60 @@ export default function Equipment() {
             {filteredEquipment.map((equipment) => (
               <TableRow key={equipment.id}>
                 <TableCell>
-                  <Link 
+                  <Link
                     to={`/equipment/${equipment.id}`}
                     className="font-medium text-[--color-primary] hover:underline"
                   >
                     {equipment.inventoryNumber}
                   </Link>
-                  <p className="text-sm text-gray-500">{equipment.model}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{equipment.model}</p>
                 </TableCell>
-                <TableCell>{getEquipmentTypeLabel(equipment.type)}</TableCell>
-                <TableCell>{getEquipmentDriveLabel(equipment.drive)}</TableCell>
+                <TableCell className="text-gray-700 dark:text-gray-300">{getEquipmentTypeLabel(equipment.type)}</TableCell>
+                <TableCell className="text-gray-700 dark:text-gray-300">{getEquipmentDriveLabel(equipment.drive)}</TableCell>
                 <TableCell>{getEquipmentStatusBadge(equipment.status)}</TableCell>
                 <TableCell>
-                  <p className="text-sm">{equipment.location}</p>
+                  <p className="text-sm text-gray-700 dark:text-gray-300">{equipment.location}</p>
                 </TableCell>
                 <TableCell>
-                  <p className="text-sm">{formatDate(equipment.nextMaintenance)}</p>
+                  <p className="text-sm text-gray-700 dark:text-gray-300">{formatDate(equipment.nextMaintenance)}</p>
                 </TableCell>
                 <TableCell>
                   {equipment.currentClient ? (
-                    <p className="text-sm">{equipment.currentClient}</p>
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{equipment.currentClient}</p>
                   ) : (
-                    <span className="text-sm text-gray-400">—</span>
+                    <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
                   )}
                 </TableCell>
                 <TableCell>
                   {equipment.returnDate ? (
-                    <p className="text-sm">{formatDate(equipment.returnDate)}</p>
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{formatDate(equipment.returnDate)}</p>
                   ) : (
-                    <span className="text-sm text-gray-400">—</span>
+                    <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
                   )}
                 </TableCell>
                 <TableCell>
                   <DropdownMenu.Root>
                     <DropdownMenu.Trigger asChild>
-                      <button className="rounded p-1 hover:bg-gray-100">
-                        <MoreVertical className="h-4 w-4 text-gray-500" />
+                      <button className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700">
+                        <MoreVertical className="h-4 w-4" />
                       </button>
                     </DropdownMenu.Trigger>
                     <DropdownMenu.Portal>
                       <DropdownMenu.Content
-                        className="min-w-[180px] rounded-lg border border-gray-200 bg-white p-1 shadow-lg"
+                        className="min-w-[180px] rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
                         sideOffset={5}
                         align="end"
                       >
-                        <DropdownMenu.Item className="cursor-pointer rounded px-3 py-2 text-sm hover:bg-gray-100 focus:outline-none">
+                        <DropdownMenu.Item className="cursor-pointer rounded px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-700">
                           Открыть
                         </DropdownMenu.Item>
-                        <DropdownMenu.Item className="cursor-pointer rounded px-3 py-2 text-sm hover:bg-gray-100 focus:outline-none">
+                        <DropdownMenu.Item className="cursor-pointer rounded px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-700">
                           Сдать в аренду
                         </DropdownMenu.Item>
-                        <DropdownMenu.Item className="cursor-pointer rounded px-3 py-2 text-sm hover:bg-gray-100 focus:outline-none">
+                        <DropdownMenu.Item className="cursor-pointer rounded px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-700">
                           Вернуть
                         </DropdownMenu.Item>
-                        <DropdownMenu.Item className="cursor-pointer rounded px-3 py-2 text-sm hover:bg-gray-100 focus:outline-none">
+                        <DropdownMenu.Item className="cursor-pointer rounded px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-700">
                           Создать заявку
                         </DropdownMenu.Item>
                       </DropdownMenu.Content>
@@ -257,14 +261,14 @@ export default function Equipment() {
             ))}
           </TableBody>
         </Table>
-        
+
         {filteredEquipment.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
-              <Search className="h-8 w-8 text-gray-400" />
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+              <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
             </div>
-            <h3 className="text-lg font-medium text-gray-900">Техника не найдена</h3>
-            <p className="mt-1 text-sm text-gray-500">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Техника не найдена</h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               Попробуйте изменить параметры поиска или фильтры
             </p>
           </div>
@@ -273,7 +277,7 @@ export default function Equipment() {
 
       {/* Results info */}
       {filteredEquipment.length > 0 && (
-        <div className="flex items-center justify-between text-sm text-gray-500">
+        <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
           <p>Показано {filteredEquipment.length} из {equipmentList.length} единиц техники</p>
         </div>
       )}

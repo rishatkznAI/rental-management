@@ -11,7 +11,22 @@ git add src/ index.html
 
 echo ""
 echo "💾 Создаём коммит..."
-git commit -m "feat(mobile): full mobile adaptation + fix detail pages
+git commit -m "feat(dashboard,mobile): live data dashboard + full mobile adaptation
+
+Dashboard fix (feat/dashboard):
+- Load all data from localStorage: loadEquipment/Rentals/Tickets/Clients/Payments
+- Fix NaN% utilization: guard division by zero, show '—' when no equipment
+- Utilization uses activeEquipment as denominator (excludes 'inactive')
+- Auto-refresh: useEffect on window.focus + storage events for 5 keys
+- Manual refresh button with spinner
+- Manager stats: real data filtered by user.name from AuthContext;
+  empty state when no rentals assigned to current manager
+- Week revenue: sum rentals started in last 7 days, or estimated from
+  active rentals' daily rate when no recent starts
+- Overdue returns: rentals with plannedReturnDate < today and status active
+- All alerts based on real data (overdue returns, payments, service tickets)
+- Recent rentals: last 5 by startDate, with status badge and amount
+- All KPI cards show empty states: '0', '—', or helpful messages
 
 Mobile adaptation:
 - Layout.tsx: mobile top bar with hamburger, slide-in sidebar overlay,

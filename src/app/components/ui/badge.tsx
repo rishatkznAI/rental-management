@@ -74,9 +74,10 @@ export function getServicePriorityBadge(priority: ServicePriority) {
 
 export function getPaymentStatusBadge(status: PaymentStatus) {
   const map: Record<PaymentStatus, { label: string; variant: BadgeVariant }> = {
-    pending: { label: 'Ожидание', variant: 'warning' },
+    pending: { label: 'Не оплачено', variant: 'warning' },
     paid: { label: 'Оплачено', variant: 'success' },
     overdue: { label: 'Просрочено', variant: 'error' },
+    partial: { label: 'Частично', variant: 'info' },
   };
   const { label, variant } = map[status];
   return <Badge variant={variant}>{label}</Badge>;

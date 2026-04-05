@@ -12,10 +12,11 @@ import {
   mockServicePeriods,
   loadEquipment, saveEquipment, EQUIPMENT_STORAGE_KEY,
   loadGanttRentals, saveGanttRentals, GANTT_RENTALS_STORAGE_KEY,
+  loadPayments, savePayments, PAYMENTS_STORAGE_KEY,
 } from '../mock-data';
 import { loadUsers } from './Settings';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
-import type { Equipment, EquipmentType, EquipmentStatus } from '../types';
+import type { Equipment, EquipmentType, EquipmentStatus, Payment } from '../types';
 import {
   addDays, differenceInDays, format, startOfDay,
   isSameDay, isWeekend, max as dateMax, min as dateMin
@@ -159,14 +160,16 @@ export default function Rentals() {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>(() => loadGanttRentals());
   const [equipmentList, setEquipmentList] = useState(() => loadEquipment());
+  const [payments, setPayments] = useState<Payment[]>(() => loadPayments());
 
   React.useEffect(() => {
     const reload = () => {
       setGanttRentals(loadGanttRentals());
       setEquipmentList(loadEquipment());
+      setPayments(loadPayments());
     };
     const onStorage = (e: StorageEvent) => {
-      if (e.key === GANTT_RENTALS_STORAGE_KEY || e.key === EQUIPMENT_STORAGE_KEY) reload();
+      if (e.key === GANTT_RENTALS_STORAGE_KEY || e.key === EQUIPMENT_STORAGE_KEY || e.key === PAYMENTS_STORAGE_KEY) reload();
     };
     // Перезагружаем данные при возврате на вкладку (focus / visibilitychange)
     const onVisible = () => { if (document.visibilityState === 'visible') reload(); };
@@ -370,6 +373,101 @@ export default function Rentals() {
     setPreselectedEquipment(equipmentInv || '');
     setShowNewRentalModal(true);
   };
+
+  // ===== New handlers for RentalDrawer =====
+
+  // Add payment: creates a Payment record, updates ganttRental.paymentStatus
+  const handleAddPayment = useCallback((rentalId: string, amount: number, paidDate: string, comment: string) => {
+    const rental = ganttRentals.find(r => r.id === rentalId);
+    if (!rental) return;
+
+    const newPayment: Payment = {
+      id: `PAY-${Date.now()}`,
+      invoiceNumber: `INV-${rental.id}`,
+      rentalId,
+      client: rental.client,
+      amount: rental.amount,
+      paidAmount: amount,
+      dueDate: rental.expectedPaymentDate || rental.endDate,
+      paidDate,
+      status: 'paid',
+      comment: comment || undefined,
+    };
+
+    const allPayments = [...payments, newPayment];
+    setPayments(allPayments);
+    savePayments(allPayments);
+
+    // Recalculate paymentStatus for this rental
+    const rentalPayments = allPayments.filter(p => p.rentalId === rentalId);
+    const totalPaid = rentalPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
+    let newPaymentStatus: GanttRentalData['paymentStatus'] = 'unpaid';
+    if (totalPaid >= rental.amount) newPaymentStatus = 'paid';
+    else if (totalPaid > 0) newPaymentStatus = 'partial';
+
+    const updatedRentals = ganttRentals.map(r =>
+      r.id === rentalId ? { ...r, paymentStatus: newPaymentStatus } : r
+    );
+    setGanttRentals(updatedRentals);
+    saveGanttRentals(updatedRentals);
+
+    // Also update selectedRental to reflect new state
+    if (selectedRental?.id === rentalId) {
+      setSelectedRental(updatedRentals.find(r => r.id === rentalId) || null);
+    }
+  }, [ganttRentals, payments, selectedRental]);
+
+  // Extend rental: update endDate, update equipment returnDate
+  const handleExtend = useCallback((rental: GanttRentalData, newEndDate: string) => {
+    const updatedRentals = ganttRentals.map(r =>
+      r.id === rental.id ? { ...r, endDate: newEndDate } : r
+    );
+    setGanttRentals(updatedRentals);
+    saveGanttRentals(updatedRentals);
+
+    // Update returnDate on equipment
+    const updatedEq = equipmentList.map(e =>
+      e.inventoryNumber === rental.equipmentInv
+        ? { ...e, returnDate: newEndDate }
+        : e
+    );
+    setEquipmentList(updatedEq);
+    saveEquipment(updatedEq);
+
+    // Refresh drawer
+    if (selectedRental?.id === rental.id) {
+      setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
+    }
+  }, [ganttRentals, equipmentList, selectedRental]);
+
+  // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
+  const handleEarlyReturn = useCallback((rental: GanttRentalData, actualReturnDate: string) => {
+    const updatedRentals = ganttRentals.map(r =>
+      r.id === rental.id
+        ? { ...r, endDate: actualReturnDate, status: 'returned' as const }
+        : r
+    );
+    setGanttRentals(updatedRentals);
+    saveGanttRentals(updatedRentals);
+
+    // Clear currentClient/returnDate from equipment if no other active rentals
+    const hasOtherActive = updatedRentals.some(
+      r => r.equipmentInv === rental.equipmentInv
+        && r.id !== rental.id
+        && r.status !== 'returned' && r.status !== 'closed'
+    );
+    if (!hasOtherActive) {
+      const updatedEq = equipmentList.map(e =>
+        e.inventoryNumber === rental.equipmentInv
+          ? { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
+          : e
+      );
+      setEquipmentList(updatedEq);
+      saveEquipment(updatedEq);
+    }
+
+    setSelectedRental(null);
+  }, [ganttRentals, equipmentList]);
 
   // ===== Today line position =====
   const todayOffset = useMemo(() => {
@@ -641,7 +739,12 @@ export default function Rentals() {
         <RentalDrawer
           rental={selectedRental}
           equipment={equipmentList.find(e => e.inventoryNumber === selectedRental.equipmentInv)}
+          allRentals={ganttRentals}
+          payments={payments}
           onClose={() => setSelectedRental(null)}
+          onAddPayment={handleAddPayment}
+          onExtend={handleExtend}
+          onEarlyReturn={handleEarlyReturn}
           onReturn={(r) => {
             setSelectedRental(null);
             handleOpenReturn(r);

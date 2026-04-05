@@ -147,14 +147,17 @@ export interface Document {
   rental?: string;
 }
 
-export type PaymentStatus = 'pending' | 'paid' | 'overdue';
+export type PaymentStatus = 'pending' | 'paid' | 'overdue' | 'partial';
 
 export interface Payment {
   id: string;
   invoiceNumber: string;
+  rentalId?: string;       // link to GanttRental id
   client: string;
-  amount: number;
+  amount: number;          // total amount due
+  paidAmount?: number;     // amount actually paid (for partial)
   dueDate: string;
   paidDate?: string;
   status: PaymentStatus;
+  comment?: string;
 }

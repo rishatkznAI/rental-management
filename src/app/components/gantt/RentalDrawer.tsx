@@ -1,18 +1,28 @@
 import React, { useState } from 'react';
-import { X, Calendar, CreditCard, FileText, User, MessageSquare, ArrowRight, RotateCcw, CirclePause as PauseCircle, CircleCheck, CircleAlert, Clock, Trash2 } from 'lucide-react';
+import {
+  X, Calendar, CreditCard, FileText, User, MessageSquare,
+  ArrowRight, RotateCcw, CirclePause as PauseCircle,
+  CircleCheck, CircleAlert, Clock, Trash2, Plus, ChevronDown, ChevronUp,
+  CalendarClock, LogOut
+} from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import type { GanttRentalData } from '../../mock-data';
-import type { Equipment } from '../../types';
+import type { Equipment, Payment } from '../../types';
 
 interface RentalDrawerProps {
   rental: GanttRentalData | null;
   equipment: Equipment | undefined;
+  allRentals: GanttRentalData[];
+  payments: Payment[];
   onClose: () => void;
   onReturn: (rental: GanttRentalData) => void;
   onStatusChange: (rental: GanttRentalData) => void;
   onDelete: (rental: GanttRentalData) => void;
+  onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string) => void;
+  onExtend: (rental: GanttRentalData, newEndDate: string) => void;
+  onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
 }
 
 const statusLabels: Record<GanttRentalData['status'], string> = {
@@ -41,15 +51,106 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
   partial: 'warning',
 };
 
-export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusChange, onDelete }: RentalDrawerProps) {
+export function RentalDrawer({
+  rental, equipment, allRentals, payments,
+  onClose, onReturn, onStatusChange, onDelete,
+  onAddPayment, onExtend, onEarlyReturn,
+}: RentalDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Add payment form state
+  const [showAddPayment, setShowAddPayment] = useState(false);
+  const [payAmount, setPayAmount] = useState('');
+  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [payComment, setPayComment] = useState('');
+  const [payError, setPayError] = useState('');
+
+  // Extend rental state
+  const [showExtend, setShowExtend] = useState(false);
+  const [extendDate, setExtendDate] = useState('');
+  const [extendError, setExtendError] = useState('');
+  const [extendConfirm, setExtendConfirm] = useState(false);
+
+  // Early return state
+  const [showEarlyReturn, setShowEarlyReturn] = useState(false);
+  const [earlyReturnDate, setEarlyReturnDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [earlyReturnConfirm, setEarlyReturnConfirm] = useState(false);
+
   if (!rental) return null;
+
+  // Payments for this rental
+  const rentalPayments = payments.filter(p => p.rentalId === rental.id);
+  const totalPaid = rentalPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
+  const remaining = rental.amount - totalPaid;
+
+  // Handle add payment submit
+  const handlePaySubmit = () => {
+    const amt = parseFloat(payAmount);
+    if (!payAmount || isNaN(amt) || amt <= 0) {
+      setPayError('Введите корректную сумму');
+      return;
+    }
+    if (!payDate) {
+      setPayError('Укажите дату оплаты');
+      return;
+    }
+    setPayError('');
+    onAddPayment(rental.id, amt, payDate, payComment);
+    setPayAmount('');
+    setPayComment('');
+    setPayDate(new Date().toISOString().slice(0, 10));
+    setShowAddPayment(false);
+  };
+
+  // Handle extend submit
+  const handleExtendSubmit = () => {
+    if (!extendDate) {
+      setExtendError('Укажите новую дату возврата');
+      return;
+    }
+    if (extendDate <= rental.endDate) {
+      setExtendError('Новая дата должна быть позже текущей даты возврата');
+      return;
+    }
+    // Check conflicts: other rentals for the same equipment that overlap [rental.endDate, newEndDate]
+    const conflicts = allRentals.filter(r =>
+      r.id !== rental.id &&
+      r.equipmentInv === rental.equipmentInv &&
+      r.status !== 'returned' && r.status !== 'closed' &&
+      r.startDate < extendDate && r.endDate > rental.endDate
+    );
+    if (conflicts.length > 0) {
+      setExtendError(`Конфликт: техника занята до ${formatDate(conflicts[0].endDate)} (${conflicts[0].client})`);
+      return;
+    }
+    setExtendError('');
+    setExtendConfirm(true);
+  };
+
+  const handleExtendConfirm = () => {
+    onExtend(rental, extendDate);
+    setShowExtend(false);
+    setExtendDate('');
+    setExtendConfirm(false);
+  };
+
+  // Handle early return submit
+  const handleEarlyReturnSubmit = () => {
+    if (!earlyReturnDate) return;
+    setEarlyReturnConfirm(true);
+  };
+
+  const handleEarlyReturnConfirm = () => {
+    onEarlyReturn(rental, earlyReturnDate);
+    setShowEarlyReturn(false);
+    setEarlyReturnConfirm(false);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       {/* Overlay */}
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      
+
       {/* Drawer */}
       <div className="relative z-10 flex w-[38%] min-w-[420px] max-w-[600px] flex-col bg-white shadow-2xl dark:bg-gray-800">
         {/* Header */}
@@ -65,7 +166,10 @@ export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusCha
               <span>{rental.equipmentInv} {equipment?.model}</span>
             </div>
           </div>
-          <button onClick={onClose} className="ml-3 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700">
+          <button
+            onClick={onClose}
+            className="ml-3 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -99,23 +203,52 @@ export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusCha
             </div>
           </section>
 
-          {/* Payment */}
+          {/* Payment Block */}
           <section>
-            <div className="mb-2 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <CreditCard className="h-4 w-4" />
-              <span>Оплата</span>
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                <CreditCard className="h-4 w-4" />
+                <span>Оплата</span>
+              </div>
+              {(rental.status === 'active' || rental.status === 'created') && (
+                <button
+                  onClick={() => setShowAddPayment(v => !v)}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                >
+                  <Plus className="h-3 w-3" />
+                  Добавить оплату
+                </button>
+              )}
             </div>
+
+            {/* Payment summary */}
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
               <div className="flex items-center justify-between">
-                <div>
-                  <Badge variant={paymentVariants[rental.paymentStatus]}>
-                    {paymentLabels[rental.paymentStatus]}
-                  </Badge>
-                </div>
+                <Badge variant={paymentVariants[rental.paymentStatus]}>
+                  {paymentLabels[rental.paymentStatus]}
+                </Badge>
                 <div className="text-right">
-                  <div className="text-lg text-gray-900 dark:text-white">{formatCurrency(rental.amount)}</div>
+                  <div className="text-lg font-semibold text-gray-900 dark:text-white">{formatCurrency(rental.amount)}</div>
+                  <div className="text-xs text-gray-500">общая сумма</div>
                 </div>
               </div>
+
+              {/* Paid / Remaining */}
+              {(totalPaid > 0 || rentalPayments.length > 0) && (
+                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
+                  <div>
+                    <div className="text-xs text-gray-500">Оплачено</div>
+                    <div className="text-sm font-medium text-green-700 dark:text-green-400">{formatCurrency(totalPaid)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">Остаток</div>
+                    <div className={`text-sm font-medium ${remaining > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                      {remaining > 0 ? formatCurrency(remaining) : '—'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {rental.expectedPaymentDate && (
                 <div className="mt-2 flex items-center gap-1 text-xs text-gray-500">
                   <Clock className="h-3 w-3" />
@@ -123,7 +256,175 @@ export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusCha
                 </div>
               )}
             </div>
+
+            {/* Add payment form */}
+            {showAddPayment && (
+              <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                <div className="mb-2 text-xs font-medium text-blue-700 dark:text-blue-400">Внести оплату</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Сумма (₽) *</label>
+                    <input
+                      type="number"
+                      value={payAmount}
+                      onChange={e => setPayAmount(e.target.value)}
+                      placeholder={remaining > 0 ? String(remaining) : '0'}
+                      className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Дата оплаты *</label>
+                    <input
+                      type="date"
+                      value={payDate}
+                      onChange={e => setPayDate(e.target.value)}
+                      className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                    />
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Комментарий</label>
+                  <input
+                    type="text"
+                    value={payComment}
+                    onChange={e => setPayComment(e.target.value)}
+                    placeholder="Например: предоплата, оплата по акту..."
+                    className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                  />
+                </div>
+                {payError && <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{payError}</p>}
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" onClick={handlePaySubmit}>Сохранить</Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setShowAddPayment(false); setPayError(''); }}>Отмена</Button>
+                </div>
+              </div>
+            )}
+
+            {/* Payment history */}
+            {rentalPayments.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                <div className="text-xs text-gray-500 dark:text-gray-400">История оплат:</div>
+                {rentalPayments.map(p => (
+                  <div key={p.id} className="flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900/30">
+                    <div>
+                      <div className="text-xs font-medium text-gray-900 dark:text-white">
+                        {formatCurrency(p.paidAmount ?? p.amount)}
+                      </div>
+                      {p.comment && <div className="text-xs text-gray-500">{p.comment}</div>}
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-gray-500">{p.paidDate ? formatDate(p.paidDate) : '—'}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
+
+          {/* Extend Rental — only for active/created */}
+          {(rental.status === 'active' || rental.status === 'created') && (
+            <section>
+              <button
+                onClick={() => setShowExtend(v => !v)}
+                className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300 dark:hover:bg-gray-700/50"
+              >
+                <div className="flex items-center gap-2">
+                  <CalendarClock className="h-4 w-4 text-gray-400" />
+                  <span>Продлить аренду</span>
+                </div>
+                {showExtend ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+              </button>
+
+              {showExtend && (
+                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                  <div className="mb-2 text-xs text-amber-700 dark:text-amber-400">
+                    Текущая дата возврата: <strong>{formatDate(rental.endDate)}</strong>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Новая дата возврата *</label>
+                      <input
+                        type="date"
+                        value={extendDate}
+                        min={rental.endDate}
+                        onChange={e => { setExtendDate(e.target.value); setExtendError(''); setExtendConfirm(false); }}
+                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      />
+                    </div>
+                    {!extendConfirm ? (
+                      <Button size="sm" onClick={handleExtendSubmit}>Продлить</Button>
+                    ) : (
+                      <div className="flex gap-1">
+                        <Button size="sm" onClick={handleExtendConfirm}>Подтвердить</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setExtendConfirm(false)}>Отмена</Button>
+                      </div>
+                    )}
+                  </div>
+                  {extendError && <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{extendError}</p>}
+                  {extendConfirm && !extendError && (
+                    <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
+                      Продлить аренду до {formatDate(extendDate)}?
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Early Return — only for active */}
+          {rental.status === 'active' && (
+            <section>
+              <button
+                onClick={() => setShowEarlyReturn(v => !v)}
+                className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300 dark:hover:bg-gray-700/50"
+              >
+                <div className="flex items-center gap-2">
+                  <LogOut className="h-4 w-4 text-gray-400" />
+                  <span>Досрочный возврат</span>
+                </div>
+                {showEarlyReturn ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+              </button>
+
+              {showEarlyReturn && (
+                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+                  <div className="mb-2 text-xs text-red-700 dark:text-red-400">
+                    Техника будет помечена как возвращённая, аренда закроется.
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Фактическая дата возврата *</label>
+                      <input
+                        type="date"
+                        value={earlyReturnDate}
+                        max={rental.endDate}
+                        onChange={e => { setEarlyReturnDate(e.target.value); setEarlyReturnConfirm(false); }}
+                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      />
+                    </div>
+                    {!earlyReturnConfirm ? (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleEarlyReturnSubmit}
+                      >
+                        Оформить
+                      </Button>
+                    ) : (
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="destructive" onClick={handleEarlyReturnConfirm}>Подтвердить</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEarlyReturnConfirm(false)}>Отмена</Button>
+                      </div>
+                    )}
+                  </div>
+                  {earlyReturnConfirm && (
+                    <p className="mt-1.5 text-xs text-red-700 dark:text-red-400">
+                      Подтвердить досрочный возврат {formatDate(earlyReturnDate)}?
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Documents */}
           <section>
@@ -196,7 +497,6 @@ export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusCha
 
         {/* Footer Actions */}
         <div className="flex flex-wrap gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-          {/* Сменить статус: created→active, (active handled by Return button) */}
           {rental.status === 'created' && (
             <Button size="sm" onClick={() => onStatusChange(rental)}>
               <ArrowRight className="h-3.5 w-3.5" />
@@ -220,8 +520,7 @@ export function RentalDrawer({ rental, equipment, onClose, onReturn, onStatusCha
             Создать простой
           </Button>
 
-          {/* Удалить аренду — только для ещё не начатых ('created') */}
-          {(rental.status === 'created') && (
+          {rental.status === 'created' && (
             <div className="ml-auto flex items-center gap-2">
               {confirmDelete ? (
                 <>

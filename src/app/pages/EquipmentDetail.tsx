@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
   DollarSign, TrendingUp, Clock, Plus, Bot, User, Calendar,
-  CheckCircle, AlertTriangle, MapPin, ChevronRight,
+  CheckCircle, AlertTriangle, MapPin, ChevronRight, MessageSquare,
 } from 'lucide-react';
 import {
   mockRepairRecords, mockShippingPhotos,
@@ -19,8 +19,9 @@ import {
 import { formatDate, formatCurrency, getDaysUntil } from '../lib/utils';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Input } from '../components/ui/input';
-import { Select } from '../components/ui/select';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '../components/ui/select';
 import type { Equipment, EquipmentOwnerType, RepairEventType } from '../types';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -1183,15 +1184,25 @@ function AddRepairModal({ open, onOpenChange }: { open: boolean; onOpenChange: (
           <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-gray-400">Заполните информацию о ремонте или обслуживании</Dialog.Description>
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <Input label="Дата" type="date" value={form.date} onChange={e => update('date', e.target.value)} required />
-              <Select label="Тип события" value={form.type} onValueChange={v => update('type', v)}
-                options={[
-                  { value: 'maintenance', label: 'Обслуживание' },
-                  { value: 'repair', label: 'Ремонт' },
-                  { value: 'diagnostics', label: 'Диагностика' },
-                  { value: 'breakdown', label: 'Поломка' },
-                ]}
-              />
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Дата</label>
+                <input type="date" value={form.date} onChange={e => update('date', e.target.value)}
+                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Тип события</label>
+                <Select value={form.type} onValueChange={v => update('type', v)}>
+                  <SelectTrigger className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="maintenance">Обслуживание</SelectItem>
+                    <SelectItem value="repair">Ремонт</SelectItem>
+                    <SelectItem value="diagnostics">Диагностика</SelectItem>
+                    <SelectItem value="breakdown">Поломка</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Описание работ</label>
@@ -1206,16 +1217,30 @@ function AddRepairModal({ open, onOpenChange }: { open: boolean; onOpenChange: (
                 placeholder="Дополнительно..." value={form.comment} onChange={e => update('comment', e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Input label="Исполнитель" placeholder="Фамилия И.О." value={form.mechanic} onChange={e => update('mechanic', e.target.value)} required />
-              <Input label="Сумма (₽)" type="number" placeholder="0" value={form.cost} onChange={e => update('cost', e.target.value)} />
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Исполнитель</label>
+                <input value={form.mechanic} onChange={e => update('mechanic', e.target.value)} placeholder="Фамилия И.О."
+                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Сумма, ₽</label>
+                <input type="number" value={form.cost} onChange={e => update('cost', e.target.value)} placeholder="0"
+                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white" />
+              </div>
             </div>
-            <Select label="Статус" value={form.status} onValueChange={v => update('status', v)}
-              options={[
-                { value: 'completed', label: 'Выполнено' },
-                { value: 'in_progress', label: 'В работе' },
-                { value: 'planned', label: 'Запланировано' },
-              ]}
-            />
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Статус</label>
+              <Select value={form.status} onValueChange={v => update('status', v)}>
+                <SelectTrigger className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="completed">Выполнено</SelectItem>
+                  <SelectItem value="in_progress">В работе</SelectItem>
+                  <SelectItem value="planned">Запланировано</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div className="mt-6 flex justify-end gap-3">
             <Button variant="secondary" onClick={() => onOpenChange(false)}>Отмена</Button>
@@ -1226,6 +1251,103 @@ function AddRepairModal({ open, onOpenChange }: { open: boolean; onOpenChange: (
     </Dialog.Root>
   );
 }
+
+// ── Reusable form primitives for the Edit modal ──────────────────────────────
+
+function FormField({
+  label, hint, unit, required, children,
+}: {
+  label: string;
+  hint?: string;
+  unit?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          {label}
+          {required && <span className="ml-0.5 text-red-500">*</span>}
+        </span>
+        {unit && (
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+            {unit}
+          </span>
+        )}
+      </div>
+      {children}
+      {hint && (
+        <p className="text-xs text-gray-400 dark:text-gray-500">{hint}</p>
+      )}
+    </div>
+  );
+}
+
+function FormSection({
+  title, icon, children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2">
+        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+          {icon}
+        </div>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FieldInput({
+  value, onChange, type = 'text', placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <input
+      type={type}
+      value={value}
+      placeholder={placeholder}
+      onChange={e => onChange(e.target.value)}
+      className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+    />
+  );
+}
+
+function FieldSelect({
+  value, onValueChange, options, placeholder,
+}: {
+  value: string;
+  onValueChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+        <SelectValue placeholder={placeholder || 'Выберите...'} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map(opt => (
+          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// ── Main modal ────────────────────────────────────────────────────────────────
 
 function EditEquipmentModal({
   open, equipment, onOpenChange, onSave,
@@ -1241,68 +1363,332 @@ function EditEquipmentModal({
     if (open) setForm(equipment);
   }, [open, equipment]);
 
-  const update = (field: keyof Equipment, value: string | number) =>
+  const set = (field: keyof Equipment, value: string | number | undefined) =>
     setForm(prev => ({ ...prev, [field]: value }));
+
+  const setStr = (field: keyof Equipment) => (v: string) => set(field, v);
+  const setNum = (field: keyof Equipment) => (v: string) => set(field, v === '' ? undefined : Number(v));
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-white p-6 shadow-lg dark:bg-gray-800">
-          <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">Редактировать технику</Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-gray-400">{equipment.inventoryNumber} · {equipment.manufacturer} {equipment.model}</Dialog.Description>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-gray-900">
 
-          <div className="mt-4 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <Input label="Инвентарный номер" value={form.inventoryNumber} onChange={e => update('inventoryNumber', e.target.value)} />
-              <Input label="Серийный номер" value={form.serialNumber} onChange={e => update('serialNumber', e.target.value)} />
-              <Input label="Производитель" value={form.manufacturer} onChange={e => update('manufacturer', e.target.value)} />
-              <Input label="Модель" value={form.model} onChange={e => update('model', e.target.value)} />
-              <Select label="Тип техники" value={form.type} onValueChange={v => update('type', v as string)}
-                options={[
-                  { value: 'scissor', label: 'Ножничный' },
-                  { value: 'articulated', label: 'Коленчатый' },
-                  { value: 'telescopic', label: 'Телескопический' },
-                ]}
-              />
-              <Select label="Привод" value={form.drive} onValueChange={v => update('drive', v as string)}
-                options={[
-                  { value: 'diesel', label: 'Дизель' },
-                  { value: 'electric', label: 'Электро' },
-                ]}
-              />
-              <Input label="Год выпуска" type="number" value={String(form.year)} onChange={e => update('year', Number(e.target.value))} />
-              <Input label="Моточасы" type="number" value={String(form.hours)} onChange={e => update('hours', Number(e.target.value))} />
-              <Input label="Высота подъёма (м)" type="number" value={String(form.liftHeight)} onChange={e => update('liftHeight', Number(e.target.value))} />
-              <Input label="Рабочая высота (м)" type="number" value={String(form.workingHeight || '')} onChange={e => update('workingHeight', Number(e.target.value))} />
-              <Input label="Грузоподъёмность (кг)" type="number" value={String(form.loadCapacity || '')} onChange={e => update('loadCapacity', Number(e.target.value))} />
-              <Input label="Масса (кг)" type="number" value={String(form.weight || '')} onChange={e => update('weight', Number(e.target.value))} />
-              <Input label="Габариты" value={form.dimensions || ''} onChange={e => update('dimensions', e.target.value)} />
-              <Input label="Локация" value={form.location} onChange={e => update('location', e.target.value)} />
-              <Select label="Владелец" value={form.owner} onValueChange={v => update('owner', v as string)}
-                options={[
-                  { value: 'own', label: 'Собственная' },
-                  { value: 'investor', label: 'Техника инвестора' },
-                  { value: 'sublease', label: 'Субаренда' },
-                ]}
-              />
-              <Input label="Плановый доход/мес (₽)" type="number" value={String(form.plannedMonthlyRevenue)} onChange={e => update('plannedMonthlyRevenue', Number(e.target.value))} />
-              <Input label="Следующее ТО" type="date" value={form.nextMaintenance} onChange={e => update('nextMaintenance', e.target.value)} />
-              <Input label="Дата ЧТО" type="date" value={form.maintenanceCHTO || ''} onChange={e => update('maintenanceCHTO', e.target.value)} />
-              <Input label="Дата ПТО" type="date" value={form.maintenancePTO || ''} onChange={e => update('maintenancePTO', e.target.value)} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Примечания</label>
-              <textarea
-                className="flex min-h-[80px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                value={form.notes || ''} onChange={e => update('notes', e.target.value)} />
+          {/* Header */}
+          <div className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+            <Dialog.Title className="text-lg font-bold text-gray-900 dark:text-white">
+              Редактировать технику
+            </Dialog.Title>
+            <Dialog.Description className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+              {equipment.inventoryNumber} · {equipment.manufacturer} {equipment.model}
+            </Dialog.Description>
+          </div>
+
+          {/* Scrollable body */}
+          <div className="overflow-y-auto" style={{ maxHeight: 'calc(92vh - 130px)' }}>
+            <div className="space-y-6 px-6 py-5">
+
+              {/* ── Блок 1: Идентификация ── */}
+              <FormSection title="Идентификация" icon={<FileText className="h-3.5 w-3.5" />}>
+                <FormField
+                  label="Инвентарный номер"
+                  hint="Внутренний номер учёта техники в компании"
+                  required
+                >
+                  <FieldInput
+                    value={form.inventoryNumber}
+                    onChange={setStr('inventoryNumber')}
+                    placeholder="Например: 044, ПП-12"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Серийный номер / SN"
+                  hint="Номер с шильдика или паспорта техники"
+                >
+                  <FieldInput
+                    value={form.serialNumber}
+                    onChange={setStr('serialNumber')}
+                    placeholder="Например: B200063919"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Производитель"
+                  hint="Бренд: JLG, Genie, Haulotte, Manitou…"
+                  required
+                >
+                  <FieldInput
+                    value={form.manufacturer}
+                    onChange={setStr('manufacturer')}
+                    placeholder="Например: JLG"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Модель"
+                  hint="Заводская модель техники"
+                  required
+                >
+                  <FieldInput
+                    value={form.model}
+                    onChange={setStr('model')}
+                    placeholder="Например: 1932R"
+                  />
+                </FormField>
+              </FormSection>
+
+              <div className="border-t border-gray-100 dark:border-gray-800" />
+
+              {/* ── Блок 2: Характеристики ── */}
+              <FormSection title="Технические характеристики" icon={<Wrench className="h-3.5 w-3.5" />}>
+                <FormField label="Тип техники" hint="Выбор из справочника">
+                  <FieldSelect
+                    value={form.type}
+                    onValueChange={setStr('type')}
+                    options={[
+                      { value: 'scissor',     label: '✂  Ножничный подъёмник' },
+                      { value: 'articulated', label: '🦾 Коленчатый подъёмник' },
+                      { value: 'telescopic',  label: '🔭 Телескопический подъёмник' },
+                    ]}
+                  />
+                </FormField>
+
+                <FormField label="Привод" hint="Тип энергоустановки">
+                  <FieldSelect
+                    value={form.drive}
+                    onValueChange={setStr('drive')}
+                    options={[
+                      { value: 'diesel',   label: '⛽ Дизельный' },
+                      { value: 'electric', label: '⚡ Электрический' },
+                    ]}
+                  />
+                </FormField>
+
+                <FormField
+                  label="Год выпуска"
+                  hint="Год изготовления по паспорту техники"
+                >
+                  <FieldInput
+                    type="number"
+                    value={String(form.year)}
+                    onChange={setNum('year')}
+                    placeholder="Например: 2022"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Моточасы / наработка"
+                  unit="м/ч"
+                  hint="Текущие показания счётчика наработки"
+                >
+                  <FieldInput
+                    type="number"
+                    value={String(form.hours)}
+                    onChange={setNum('hours')}
+                    placeholder="Например: 1250"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Высота подъёма"
+                  unit="м"
+                  hint="Максимальная высота подъёма платформы"
+                >
+                  <FieldInput
+                    type="number"
+                    value={String(form.liftHeight)}
+                    onChange={setNum('liftHeight')}
+                    placeholder="Например: 8"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Рабочая высота"
+                  unit="м"
+                  hint="Максимальная рабочая высота с оператором"
+                >
+                  <FieldInput
+                    type="number"
+                    value={String(form.workingHeight || '')}
+                    onChange={setNum('workingHeight')}
+                    placeholder="Обычно = высота подъёма + 2 м"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Грузоподъёмность"
+                  unit="кг"
+                  hint="Максимальная нагрузка на платформу"
+                >
+                  <FieldInput
+                    type="number"
+                    value={String(form.loadCapacity || '')}
+                    onChange={setNum('loadCapacity')}
+                    placeholder="Например: 230"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Масса техники"
+                  unit="кг"
+                  hint="Снаряжённая масса по паспорту"
+                >
+                  <FieldInput
+                    type="number"
+                    value={String(form.weight || '')}
+                    onChange={setNum('weight')}
+                    placeholder="Например: 1800"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Габариты"
+                  hint="Длина × ширина × высота в сложенном положении"
+                  // spans full width
+                >
+                  <FieldInput
+                    value={form.dimensions || ''}
+                    onChange={setStr('dimensions')}
+                    placeholder="Например: 2.44 × 0.81 × 1.97 м"
+                  />
+                </FormField>
+              </FormSection>
+
+              <div className="border-t border-gray-100 dark:border-gray-800" />
+
+              {/* ── Блок 3: Владение и размещение ── */}
+              <FormSection title="Владение и размещение" icon={<MapPin className="h-3.5 w-3.5" />}>
+                <FormField label="Собственник техники" hint="Определяет схему расчёта комиссии менеджера">
+                  <FieldSelect
+                    value={form.owner}
+                    onValueChange={setStr('owner')}
+                    options={[
+                      { value: 'own',      label: '🏢 Собственная (компания)' },
+                      { value: 'investor', label: '👤 Техника инвестора' },
+                      { value: 'sublease', label: '🔄 Субаренда' },
+                    ]}
+                  />
+                </FormField>
+
+                {form.owner === 'sublease' && (
+                  <FormField
+                    label="Стоимость субаренды"
+                    unit="₽/мес"
+                    hint="Ежемесячная стоимость аренды у поставщика"
+                  >
+                    <FieldInput
+                      type="number"
+                      value={String(form.subleasePrice || '')}
+                      onChange={setNum('subleasePrice')}
+                      placeholder="Например: 50000"
+                    />
+                  </FormField>
+                )}
+
+                <FormField
+                  label="Локация / склад"
+                  hint="Текущее место хранения или размещения техники"
+                >
+                  <FieldInput
+                    value={form.location}
+                    onChange={setStr('location')}
+                    placeholder="Например: Казань, склад 1"
+                  />
+                </FormField>
+              </FormSection>
+
+              <div className="border-t border-gray-100 dark:border-gray-800" />
+
+              {/* ── Блок 4: Экономика и обслуживание ── */}
+              <FormSection title="Экономика и обслуживание" icon={<DollarSign className="h-3.5 w-3.5" />}>
+                <FormField
+                  label="Плановый доход в месяц"
+                  unit="₽"
+                  hint="Ориентир для оценки загрузки и эффективности"
+                >
+                  <FieldInput
+                    type="number"
+                    value={String(form.plannedMonthlyRevenue)}
+                    onChange={setNum('plannedMonthlyRevenue')}
+                    placeholder="Например: 80000"
+                  />
+                </FormField>
+
+                <FormField
+                  label="Следующее ТО"
+                  hint="Дата планового технического обслуживания"
+                  required
+                >
+                  <FieldInput
+                    type="date"
+                    value={form.nextMaintenance}
+                    onChange={setStr('nextMaintenance')}
+                  />
+                </FormField>
+
+                <FormField
+                  label="Дата ЧТО"
+                  hint="Дата последнего частичного технического обслуживания"
+                >
+                  <FieldInput
+                    type="date"
+                    value={form.maintenanceCHTO || ''}
+                    onChange={setStr('maintenanceCHTO')}
+                  />
+                </FormField>
+
+                <FormField
+                  label="Дата ПТО"
+                  hint="Дата последнего периодического технического осмотра"
+                >
+                  <FieldInput
+                    type="date"
+                    value={form.maintenancePTO || ''}
+                    onChange={setStr('maintenancePTO')}
+                  />
+                </FormField>
+              </FormSection>
+
+              <div className="border-t border-gray-100 dark:border-gray-800" />
+
+              {/* ── Блок 5: Примечание ── */}
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                    <MessageSquare className="h-3.5 w-3.5" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Примечание</h3>
+                </div>
+                <FormField
+                  label="Комментарий"
+                  hint="Любая дополнительная информация по технике: история покупки, особенности эксплуатации, ограничения"
+                >
+                  <textarea
+                    value={form.notes || ''}
+                    onChange={e => setStr('notes')(e.target.value)}
+                    placeholder="Введите произвольный комментарий..."
+                    rows={3}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+                  />
+                </FormField>
+              </div>
+
             </div>
           </div>
 
-          <div className="mt-6 flex justify-end gap-3">
-            <Button variant="secondary" onClick={() => onOpenChange(false)}>Отмена</Button>
-            <Button onClick={() => onSave(form)}>Сохранить изменения</Button>
+          {/* Footer */}
+          <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4 dark:border-gray-700">
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              Поля, отмеченные <span className="text-red-500">*</span>, обязательны
+            </p>
+            <div className="flex gap-3">
+              <Button variant="secondary" onClick={() => onOpenChange(false)}>Отмена</Button>
+              <Button onClick={() => onSave(form)}>Сохранить изменения</Button>
+            </div>
           </div>
+
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

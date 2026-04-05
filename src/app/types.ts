@@ -111,6 +111,8 @@ export interface ServiceTicket {
   createdAt: string;
 }
 
+export type ClientStatus = 'active' | 'inactive' | 'blocked';
+
 export interface Client {
   id: string;
   company: string;
@@ -118,11 +120,17 @@ export interface Client {
   contact: string;
   phone: string;
   email: string;
+  address?: string;
   paymentTerms: string;
   creditLimit: number;
   debt: number;
   lastRentalDate?: string;
   totalRentals: number;
+  manager?: string;
+  status?: ClientStatus;
+  notes?: string;
+  createdAt?: string;
+  createdBy?: string;
 }
 
 export type DocumentType = 'contract' | 'act' | 'invoice';

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -6,18 +6,24 @@ import { Badge, getEquipmentStatusBadge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
-  DollarSign, TrendingUp, Clock, Plus, Bot, User, Calendar
+  DollarSign, TrendingUp, Clock, Plus, Bot, User, Calendar,
+  CheckCircle, AlertTriangle, MapPin, ChevronRight,
 } from 'lucide-react';
 import {
-  mockEquipment, mockRentals, mockServiceTickets,
-  mockRepairRecords, mockShippingPhotos, mockGanttRentals,
+  mockRepairRecords, mockShippingPhotos,
+  loadEquipment, saveEquipment, EQUIPMENT_STORAGE_KEY,
+  loadGanttRentals, GANTT_RENTALS_STORAGE_KEY,
+  loadServiceTickets, SERVICE_STORAGE_KEY,
+  loadPayments, PAYMENTS_STORAGE_KEY,
 } from '../mock-data';
 import { formatDate, formatCurrency, getDaysUntil } from '../lib/utils';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Input } from '../components/ui/input';
 import { Select } from '../components/ui/select';
-import type { EquipmentOwnerType, RepairEventType } from '../types';
+import type { Equipment, EquipmentOwnerType, RepairEventType } from '../types';
+import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
+import { ru } from 'date-fns/locale';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -39,70 +45,168 @@ const repairTypeBadge: Record<RepairEventType, 'danger' | 'warning' | 'info' | '
   breakdown: 'error',
 };
 
+const EQ_STATUS_LABELS: Record<EquipmentStatus, string> = {
+  available: 'Свободна',
+  rented: 'В аренде',
+  reserved: 'Забронирована',
+  in_service: 'В сервисе',
+  inactive: 'Списана',
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  scissor: 'Ножничный',
+  articulated: 'Коленчатый',
+  telescopic: 'Телескопический',
+};
+
+const SERVICE_STATUS_LABELS: Record<string, string> = {
+  new: 'Новая',
+  in_progress: 'В работе',
+  waiting_parts: 'Ожидание запчастей',
+  ready: 'Готово',
+  closed: 'Закрыта',
+};
+
 export default function EquipmentDetail() {
   const { id } = useParams();
-  const equipment = mockEquipment.find(e => e.id === id);
-  const [showRepairModal, setShowRepairModal] = useState(false);
 
+  // ── Reactive data loading from localStorage ──
+  const [allEquipment, setAllEquipment] = useState(() => loadEquipment());
+  const [allGanttRentals, setAllGanttRentals] = useState(() => loadGanttRentals());
+  const [allServiceTickets, setAllServiceTickets] = useState(() => loadServiceTickets());
+  const [allPayments, setAllPayments] = useState(() => loadPayments());
+
+  useEffect(() => {
+    const reload = () => {
+      setAllEquipment(loadEquipment());
+      setAllGanttRentals(loadGanttRentals());
+      setAllServiceTickets(loadServiceTickets());
+      setAllPayments(loadPayments());
+    };
+    const onStorage = (e: StorageEvent) => {
+      if ([EQUIPMENT_STORAGE_KEY, GANTT_RENTALS_STORAGE_KEY, SERVICE_STORAGE_KEY, PAYMENTS_STORAGE_KEY].includes(e.key || '')) {
+        reload();
+      }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') reload(); };
+    window.addEventListener('focus', reload);
+    window.addEventListener('storage', onStorage);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', reload);
+      window.removeEventListener('storage', onStorage);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  // ── Find equipment (from localStorage, not empty mock) ──
+  const rawEquipment = allEquipment.find(e => e.id === id);
+
+  // ── Enrich with active rental data (currentClient / returnDate) ──
+  const activeRental = rawEquipment
+    ? allGanttRentals.find(r =>
+        r.equipmentInv === rawEquipment.inventoryNumber &&
+        (r.status === 'active' || r.status === 'created'))
+    : null;
+
+  const equipment: Equipment | null = rawEquipment ? {
+    ...rawEquipment,
+    currentClient: rawEquipment.currentClient || activeRental?.client,
+    returnDate: rawEquipment.returnDate || activeRental?.endDate,
+  } : null;
+
+  // ── Related data (all from localStorage) ──
+  const ganttRentals = useMemo(
+    () => equipment ? allGanttRentals.filter(r => r.equipmentInv === equipment.inventoryNumber).sort((a, b) => b.startDate.localeCompare(a.startDate)) : [],
+    [equipment, allGanttRentals]
+  );
+
+  const serviceHistory = useMemo(
+    () => equipment
+      ? allServiceTickets.filter(s =>
+          s.equipmentId === equipment.id ||
+          (s.inventoryNumber && s.inventoryNumber === equipment.inventoryNumber)
+        ).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      : [],
+    [equipment, allServiceTickets]
+  );
+
+  const repairRecords = [...mockRepairRecords]
+    .filter(r => r.equipmentId === id)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const shippingPhotos = [...mockShippingPhotos]
+    .filter(p => p.equipmentId === id)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  // ── Modal state ──
+  const [showRepairModal, setShowRepairModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  // ── Not found screen ──
   if (!equipment) {
     return (
       <div className="flex min-h-screen items-center justify-center p-8">
         <div className="text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+            <AlertTriangle className="h-8 w-8 text-gray-400" />
+          </div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Техника не найдена</h2>
-          <Link to="/equipment" className="mt-4 inline-block text-[--color-primary] hover:underline">
-            ← Вернуться к списку
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            Запись с ID <span className="font-mono">{id}</span> не существует или была удалена
+          </p>
+          <Link to="/equipment" className="mt-6 inline-flex items-center gap-2 text-[--color-primary] hover:underline">
+            <ArrowLeft className="h-4 w-4" />
+            Вернуться к списку
           </Link>
         </div>
       </div>
     );
   }
 
-  const rentalHistory = mockRentals.filter(r =>
-    r.equipment.includes(equipment.inventoryNumber)
-  );
-  const ganttRentals = mockGanttRentals.filter(r =>
-    r.equipmentInv === equipment.inventoryNumber
-  );
-  const serviceHistory = mockServiceTickets.filter(s =>
-    s.equipmentId === equipment.id
-  );
-  const repairRecords = mockRepairRecords.filter(r =>
-    r.equipmentId === equipment.id
-  ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  const shippingPhotos = mockShippingPhotos.filter(p =>
-    p.equipmentId === equipment.id
-  ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  // ── Financial calculations (current month, dynamic) ──
+  const today = new Date();
+  const monthStart = startOfMonth(today);
+  const monthEnd = endOfMonth(today);
+  const daysInCurrentMonth = getDaysInMonth(today);
+  const currentMonthLabel = format(today, 'LLLL yyyy', { locale: ru });
+  const monthStartStr = format(monthStart, 'yyyy-MM-dd');
+  const monthEndStr = format(monthEnd, 'yyyy-MM-dd');
 
-  const daysUntilMaintenance = getDaysUntil(equipment.nextMaintenance);
-
-  // === Финансовые расчёты ===
-  const daysInMonth = 31; // март 2026
-  const activeMonthRentals = ganttRentals.filter(r => {
-    const start = new Date(r.startDate);
-    const end = new Date(r.endDate);
-    const monthStart = new Date('2026-03-01');
-    const monthEnd = new Date('2026-03-31');
-    return start <= monthEnd && end >= monthStart;
+  const monthRentals = ganttRentals.filter(r => {
+    return r.startDate <= monthEndStr && r.endDate >= monthStartStr;
   });
 
-  const daysRentedThisMonth = activeMonthRentals.reduce((sum, r) => {
-    const start = new Date(Math.max(new Date(r.startDate).getTime(), new Date('2026-03-01').getTime()));
-    const end = new Date(Math.min(new Date(r.endDate).getTime(), new Date('2026-03-31').getTime()));
-    return sum + Math.max(0, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+  const daysRentedThisMonth = monthRentals.reduce((sum, r) => {
+    const start = r.startDate < monthStartStr ? monthStartStr : r.startDate;
+    const end = r.endDate > monthEndStr ? monthEndStr : r.endDate;
+    const diff = Math.max(0, Math.ceil(
+      (new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24)
+    ));
+    return sum + diff;
   }, 0);
 
-  const freeDaysThisMonth = daysInMonth - daysRentedThisMonth;
-  const utilizationMonth = Math.round((daysRentedThisMonth / daysInMonth) * 100);
-  const actualMonthRevenue = activeMonthRentals.reduce((sum, r) => {
-    const rentalDays = Math.ceil((new Date(r.endDate).getTime() - new Date(r.startDate).getTime()) / (1000 * 60 * 60 * 24));
-    const dailyRate = r.amount / Math.max(rentalDays, 1);
-    const start = new Date(Math.max(new Date(r.startDate).getTime(), new Date('2026-03-01').getTime()));
-    const end = new Date(Math.min(new Date(r.endDate).getTime(), new Date('2026-03-31').getTime()));
-    const daysInPeriod = Math.max(0, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+  const freeDaysThisMonth = daysInCurrentMonth - Math.min(daysRentedThisMonth, daysInCurrentMonth);
+  const utilizationMonth = Math.round((Math.min(daysRentedThisMonth, daysInCurrentMonth) / daysInCurrentMonth) * 100);
+
+  const actualMonthRevenue = monthRentals.reduce((sum, r) => {
+    const rentalDays = Math.max(1, Math.ceil(
+      (new Date(r.endDate).getTime() - new Date(r.startDate).getTime()) / (1000 * 60 * 60 * 24)
+    ));
+    const dailyRate = r.amount / rentalDays;
+    const start = r.startDate < monthStartStr ? monthStartStr : r.startDate;
+    const end = r.endDate > monthEndStr ? monthEndStr : r.endDate;
+    const daysInPeriod = Math.max(0, Math.ceil(
+      (new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24)
+    ));
     return sum + dailyRate * daysInPeriod;
   }, 0);
 
-  // Расчёт комиссии менеджера
+  const totalRevenue = ganttRentals
+    .filter(r => r.status === 'returned' || r.status === 'closed' || r.status === 'active')
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  // ── Manager commission calculation ──
   const getManagerCommission = () => {
     if (equipment.owner === 'own') {
       return { rate: '3%', commission: Math.round(actualMonthRevenue * 0.03), formula: `${formatCurrency(actualMonthRevenue)} × 3%` };
@@ -117,39 +221,215 @@ export default function EquipmentDetail() {
     }
     return { rate: '—', commission: 0, formula: '' };
   };
-
   const managerComm = getManagerCommission();
 
-  const tabTriggerClass = "border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:hover:text-gray-200";
+  // ── Maintenance alerts ──
+  const daysUntilMaintenance = getDaysUntil(equipment.nextMaintenance);
+  const openServiceTickets = serviceHistory.filter(s => s.status !== 'closed');
+  const criticalTickets = openServiceTickets.filter(s => s.priority === 'critical' || s.priority === 'high');
+
+  // ── Payments for equipment rentals ──
+  const equipmentRentalIds = new Set(ganttRentals.map(r => r.id));
+  const equipmentPayments = allPayments.filter(p => p.rentalId && equipmentRentalIds.has(p.rentalId));
+  const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
+
+  const tabTriggerClass =
+    'border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:hover:text-gray-200';
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
-      {/* Header */}
+      {/* ── Header ── */}
       <div>
-        <Link to="/equipment" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+        <Link
+          to="/equipment"
+          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        >
           <ArrowLeft className="h-4 w-4" />
           Вернуться к списку
         </Link>
+
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">{equipment.inventoryNumber}</h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">
+                {equipment.inventoryNumber}
+              </h1>
               {getEquipmentStatusBadge(equipment.status)}
               <Badge variant={equipment.owner === 'own' ? 'success' : equipment.owner === 'investor' ? 'info' : 'warning'}>
                 {ownerLabels[equipment.owner]}
               </Badge>
+              {criticalTickets.length > 0 && (
+                <Badge variant="error">
+                  {criticalTickets.length} заявок требует внимания
+                </Badge>
+              )}
             </div>
-            <p className="mt-1 text-lg text-gray-500 dark:text-gray-400">{equipment.manufacturer} {equipment.model}</p>
+            <p className="mt-1 text-lg text-gray-500 dark:text-gray-400">
+              {equipment.manufacturer} {equipment.model}
+            </p>
+            <div className="mt-1 flex items-center gap-1 text-sm text-gray-400 dark:text-gray-500">
+              <MapPin className="h-3.5 w-3.5" />
+              {equipment.location}
+            </div>
           </div>
-          <div className="flex gap-3">
-            <Button variant="secondary">Сдать</Button>
-            <Button variant="secondary">Вернуть</Button>
-            <Button variant="secondary">В сервис</Button>
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setShowEditModal(true)}>
+              Редактировать
+            </Button>
+            <Link to="/rentals">
+              <Button variant="secondary" size="sm">
+                <Calendar className="h-3.5 w-3.5" />
+                Аренды
+              </Button>
+            </Link>
+            <Link to="/service">
+              <Button variant="secondary" size="sm">
+                <Wrench className="h-3.5 w-3.5" />
+                В сервис
+              </Button>
+            </Link>
           </div>
         </div>
       </div>
 
-      {/* Photo and Key Info */}
+      {/* ── Quick Status Cards ── */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Rental status */}
+        <div className={`rounded-xl border p-4 ${
+          equipment.status === 'rented'
+            ? 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20'
+            : equipment.status === 'reserved'
+            ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
+            : equipment.status === 'in_service'
+            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+            : 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
+        }`}>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Статус</p>
+              <p className={`mt-1 text-base font-semibold ${
+                equipment.status === 'rented' ? 'text-blue-700 dark:text-blue-300' :
+                equipment.status === 'reserved' ? 'text-amber-700 dark:text-amber-300' :
+                equipment.status === 'in_service' ? 'text-red-700 dark:text-red-300' :
+                'text-green-700 dark:text-green-300'
+              }`}>{EQ_STATUS_LABELS[equipment.status]}</p>
+              {equipment.currentClient && (
+                <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">{equipment.currentClient}</p>
+              )}
+              {equipment.returnDate && (
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Возврат: {formatDate(equipment.returnDate)}
+                </p>
+              )}
+            </div>
+            <Calendar className={`h-5 w-5 ${
+              equipment.status === 'rented' ? 'text-blue-400' :
+              equipment.status === 'reserved' ? 'text-amber-400' :
+              equipment.status === 'in_service' ? 'text-red-400' :
+              'text-green-400'
+            }`} />
+          </div>
+        </div>
+
+        {/* Next maintenance */}
+        <div className={`rounded-xl border p-4 ${
+          daysUntilMaintenance <= 7
+            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+            : daysUntilMaintenance <= 30
+            ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
+            : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50'
+        }`}>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Следующее ТО</p>
+              <p className={`mt-1 text-base font-semibold ${
+                daysUntilMaintenance <= 7 ? 'text-red-700 dark:text-red-300' :
+                daysUntilMaintenance <= 30 ? 'text-amber-700 dark:text-amber-300' :
+                'text-gray-900 dark:text-white'
+              }`}>{formatDate(equipment.nextMaintenance)}</p>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {daysUntilMaintenance > 0 ? `через ${daysUntilMaintenance} дн.` : 'просрочено!'}
+              </p>
+            </div>
+            <Wrench className={`h-5 w-5 ${
+              daysUntilMaintenance <= 7 ? 'text-red-400' :
+              daysUntilMaintenance <= 30 ? 'text-amber-400' :
+              'text-gray-400'
+            }`} />
+          </div>
+        </div>
+
+        {/* Monthly utilization */}
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Утилизация · {format(today, 'MMM', { locale: ru })}</p>
+              <p className="mt-1 text-base font-semibold text-gray-900 dark:text-white">{utilizationMonth}%</p>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {daysRentedThisMonth} из {daysInCurrentMonth} дней
+              </p>
+            </div>
+            <TrendingUp className="h-5 w-5 text-purple-400" />
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+            <div className="h-full rounded-full bg-purple-500" style={{ width: `${utilizationMonth}%` }} />
+          </div>
+        </div>
+
+        {/* Open service tickets */}
+        <div className={`rounded-xl border p-4 ${
+          criticalTickets.length > 0
+            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+            : openServiceTickets.length > 0
+            ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
+            : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50'
+        }`}>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Сервисные заявки</p>
+              <p className={`mt-1 text-base font-semibold ${
+                criticalTickets.length > 0 ? 'text-red-700 dark:text-red-300' :
+                openServiceTickets.length > 0 ? 'text-amber-700 dark:text-amber-300' :
+                'text-gray-900 dark:text-white'
+              }`}>
+                {openServiceTickets.length > 0 ? `${openServiceTickets.length} открыт.` : 'Нет заявок'}
+              </p>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                всего {serviceHistory.length} в истории
+              </p>
+            </div>
+            <AlertTriangle className={`h-5 w-5 ${
+              criticalTickets.length > 0 ? 'text-red-400' :
+              openServiceTickets.length > 0 ? 'text-amber-400' :
+              'text-gray-400'
+            }`} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Maintenance / Service Alerts ── */}
+      {daysUntilMaintenance <= 30 && (
+        <div className={`rounded-lg border p-4 ${
+          daysUntilMaintenance <= 7
+            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+            : 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
+        }`}>
+          <div className="flex items-start gap-3">
+            <CircleAlert className={`mt-0.5 h-5 w-5 shrink-0 ${daysUntilMaintenance <= 7 ? 'text-red-600' : 'text-amber-600'}`} />
+            <div className="flex-1">
+              <p className={`font-medium ${daysUntilMaintenance <= 7 ? 'text-red-900 dark:text-red-200' : 'text-amber-900 dark:text-amber-200'}`}>
+                Техническое обслуживание через {daysUntilMaintenance} дней
+              </p>
+              <p className={`mt-0.5 text-sm ${daysUntilMaintenance <= 7 ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                Запланировано на {formatDate(equipment.nextMaintenance)}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Photo and Key Info ── */}
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <Card>
           <CardContent className="p-0">
@@ -168,145 +448,72 @@ export default function EquipmentDetail() {
             <CardTitle>Основные характеристики</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-3">
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Производитель</p>
-                <p className="font-medium text-gray-900 dark:text-white">{equipment.manufacturer}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Модель</p>
-                <p className="font-medium text-gray-900 dark:text-white">{equipment.model}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Тип</p>
-                <p className="font-medium text-gray-900 dark:text-white">
-                  {equipment.type === 'scissor' ? 'Ножничный' : equipment.type === 'articulated' ? 'Коленчатый' : 'Телескопический'}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Привод</p>
-                <p className="font-medium text-gray-900 dark:text-white">{equipment.drive === 'diesel' ? 'Дизель' : 'Электро'}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Серийный номер</p>
-                <p className="font-mono text-sm text-gray-900 dark:text-white">{equipment.serialNumber}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Год выпуска</p>
-                <p className="font-medium text-gray-900 dark:text-white">{equipment.year}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Моточасы</p>
-                <p className="font-medium text-gray-900 dark:text-white">{equipment.hours} ч</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Высота подъёма</p>
-                <p className="font-medium text-gray-900 dark:text-white">{equipment.liftHeight} м</p>
-              </div>
-              {equipment.workingHeight && (
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Рабочая высота</p>
-                  <p className="font-medium text-gray-900 dark:text-white">{equipment.workingHeight} м</p>
-                </div>
-              )}
-              {equipment.loadCapacity && (
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Грузоподъёмность</p>
-                  <p className="font-medium text-gray-900 dark:text-white">{equipment.loadCapacity} кг</p>
-                </div>
-              )}
-              {equipment.dimensions && (
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Габариты</p>
-                  <p className="font-medium text-gray-900 dark:text-white">{equipment.dimensions}</p>
-                </div>
-              )}
-              {equipment.weight && (
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Масса</p>
-                  <p className="font-medium text-gray-900 dark:text-white">{equipment.weight} кг</p>
-                </div>
-              )}
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Локация</p>
-                <p className="font-medium text-gray-900 dark:text-white">{equipment.location}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Владелец</p>
-                <p className="font-medium text-gray-900 dark:text-white">{ownerLabels[equipment.owner]}</p>
-              </div>
+            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+              <InfoField label="Производитель" value={equipment.manufacturer} />
+              <InfoField label="Модель" value={equipment.model} />
+              <InfoField label="Тип" value={TYPE_LABELS[equipment.type] || equipment.type} />
+              <InfoField label="Привод" value={equipment.drive === 'diesel' ? 'Дизель' : 'Электро'} />
+              <InfoField label="Серийный номер" value={equipment.serialNumber} mono />
+              <InfoField label="Инвентарный номер" value={equipment.inventoryNumber} mono />
+              <InfoField label="Год выпуска" value={String(equipment.year)} />
+              <InfoField label="Моточасы" value={`${equipment.hours} ч`} />
+              <InfoField label="Высота подъёма" value={`${equipment.liftHeight} м`} />
+              {equipment.workingHeight && <InfoField label="Рабочая высота" value={`${equipment.workingHeight} м`} />}
+              {equipment.loadCapacity && <InfoField label="Грузоподъёмность" value={`${equipment.loadCapacity} кг`} />}
+              {equipment.dimensions && <InfoField label="Габариты" value={equipment.dimensions} />}
+              {equipment.weight && <InfoField label="Масса" value={`${equipment.weight} кг`} />}
+              <InfoField label="Локация" value={equipment.location} />
+              <InfoField label="Владелец" value={ownerLabels[equipment.owner]} />
               {equipment.owner === 'sublease' && equipment.subleasePrice && (
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Стоимость субаренды</p>
-                  <p className="font-medium text-orange-600">{formatCurrency(equipment.subleasePrice)}/мес</p>
-                </div>
-              )}
-              {equipment.currentClient && (
-                <>
-                  <div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Текущий клиент</p>
-                    <p className="font-medium text-gray-900 dark:text-white">{equipment.currentClient}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Дата возврата</p>
-                    <p className="font-medium text-gray-900 dark:text-white">{equipment.returnDate ? formatDate(equipment.returnDate) : '—'}</p>
-                  </div>
-                </>
+                <InfoField label="Стоимость субаренды" value={`${formatCurrency(equipment.subleasePrice)}/мес`} highlight="orange" />
               )}
             </div>
-            {/* ТО dates */}
-            <div className="mt-4 grid grid-cols-3 gap-4 border-t border-gray-200 pt-4 dark:border-gray-700">
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">След. ТО</p>
-                <p className="font-medium text-gray-900 dark:text-white">{formatDate(equipment.nextMaintenance)}</p>
+
+            {/* Current rental info */}
+            {equipment.currentClient && (
+              <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <InfoField label="Текущий клиент" value={equipment.currentClient} />
+                  {activeRental?.startDate && (
+                    <InfoField label="Начало аренды" value={formatDate(activeRental.startDate)} />
+                  )}
+                  {equipment.returnDate && (
+                    <InfoField label="Плановый возврат" value={formatDate(equipment.returnDate)} />
+                  )}
+                  {activeRental?.manager && (
+                    <InfoField label="Менеджер" value={activeRental.manager} />
+                  )}
+                  {activeRental?.amount && (
+                    <InfoField label="Сумма аренды" value={formatCurrency(activeRental.amount)} />
+                  )}
+                </div>
               </div>
-              {equipment.maintenanceCHTO && (
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Дата ЧТО</p>
-                  <p className="font-medium text-gray-900 dark:text-white">{formatDate(equipment.maintenanceCHTO)}</p>
-                </div>
-              )}
-              {equipment.maintenancePTO && (
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Дата ПТО</p>
-                  <p className="font-medium text-gray-900 dark:text-white">{formatDate(equipment.maintenancePTO)}</p>
-                </div>
-              )}
+            )}
+
+            {/* Maintenance dates */}
+            <div className="mt-4 grid grid-cols-1 gap-3 border-t border-gray-200 pt-4 dark:border-gray-700 sm:grid-cols-3">
+              <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} />
+              {equipment.maintenanceCHTO && <InfoField label="Дата ЧТО" value={formatDate(equipment.maintenanceCHTO)} />}
+              {equipment.maintenancePTO && <InfoField label="Дата ПТО" value={formatDate(equipment.maintenancePTO)} />}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Maintenance Alert */}
-      {daysUntilMaintenance <= 30 && (
-        <div className={`rounded-lg border p-4 ${
-          daysUntilMaintenance <= 7
-            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
-            : 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20'
-        }`}>
-          <div className="flex items-start gap-3">
-            <CircleAlert className={`h-5 w-5 ${daysUntilMaintenance <= 7 ? 'text-red-600' : 'text-yellow-600'}`} />
-            <div className="flex-1">
-              <p className={`font-medium ${daysUntilMaintenance <= 7 ? 'text-red-900 dark:text-red-200' : 'text-yellow-900 dark:text-yellow-200'}`}>
-                Техническое обслуживание через {daysUntilMaintenance} дней
-              </p>
-              <p className={`mt-1 text-sm ${daysUntilMaintenance <= 7 ? 'text-red-700 dark:text-red-300' : 'text-yellow-700 dark:text-yellow-300'}`}>
-                Запланировано на {formatDate(equipment.nextMaintenance)}
-              </p>
-            </div>
-            <Button size="sm" variant="secondary">Запланировать ТО</Button>
-          </div>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <Tabs.Root defaultValue="financial" className="space-y-6">
+      {/* ── Tabs ── */}
+      <Tabs.Root defaultValue="overview" className="space-y-6">
         <Tabs.List className="flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
+          <Tabs.Trigger value="overview" className={tabTriggerClass}>
+            <span className="flex items-center gap-1.5"><CheckCircle className="h-3.5 w-3.5" /> Обзор</span>
+          </Tabs.Trigger>
           <Tabs.Trigger value="financial" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Финансы</span>
           </Tabs.Trigger>
           <Tabs.Trigger value="rental-history" className={tabTriggerClass}>
-            <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> История аренды</span>
+            <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Аренды {ganttRentals.length > 0 && <span className="rounded-full bg-gray-200 px-1.5 text-xs dark:bg-gray-700">{ganttRentals.length}</span>}</span>
+          </Tabs.Trigger>
+          <Tabs.Trigger value="service-history" className={tabTriggerClass}>
+            <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Сервис {openServiceTickets.length > 0 && <span className="rounded-full bg-red-100 px-1.5 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-400">{openServiceTickets.length}</span>}</span>
           </Tabs.Trigger>
           <Tabs.Trigger value="repair-history" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Ремонты</span>
@@ -314,25 +521,203 @@ export default function EquipmentDetail() {
           <Tabs.Trigger value="photos" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><Camera className="h-3.5 w-3.5" /> Фото</span>
           </Tabs.Trigger>
-          <Tabs.Trigger value="service-history" className={tabTriggerClass}>
-            <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Сервис</span>
-          </Tabs.Trigger>
           <Tabs.Trigger value="documents" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" /> Документы</span>
           </Tabs.Trigger>
-          <Tabs.Trigger value="overview" className={tabTriggerClass}>
-            Обзор
-          </Tabs.Trigger>
         </Tabs.List>
 
-        {/* === FINANCIAL TAB === */}
+        {/* ══ OVERVIEW TAB ══ */}
+        <Tabs.Content value="overview" className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Rental block */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <Calendar className="h-5 w-5 text-[--color-primary]" />
+                    Аренда
+                  </CardTitle>
+                  <Link to="/rentals" className="flex items-center gap-1 text-xs text-[--color-primary] hover:underline">
+                    Открыть планировщик <ChevronRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/50">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Статус аренды</p>
+                    <p className="mt-1 font-medium text-gray-900 dark:text-white">{EQ_STATUS_LABELS[equipment.status]}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/50">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Всего аренд</p>
+                    <p className="mt-1 font-medium text-gray-900 dark:text-white">{ganttRentals.length}</p>
+                  </div>
+                  {equipment.currentClient ? (
+                    <>
+                      <div className="col-span-2 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Текущий клиент</p>
+                        <p className="mt-1 font-medium text-gray-900 dark:text-white">{equipment.currentClient}</p>
+                        {equipment.returnDate && (
+                          <p className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">
+                            Возврат: {formatDate(equipment.returnDate)}
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="col-span-2 rounded-lg bg-green-50 p-3 dark:bg-green-900/20">
+                      <p className="text-sm font-medium text-green-700 dark:text-green-400">Техника свободна</p>
+                      {ganttRentals.some(r => r.status === 'created' && r.startDate > format(today, 'yyyy-MM-dd')) && (
+                        <p className="mt-0.5 text-xs text-green-600 dark:text-green-500">
+                          Есть предстоящая бронь
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Last 3 rentals */}
+                {ganttRentals.length > 0 && (
+                  <div>
+                    <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Последние аренды:</p>
+                    <div className="space-y-1.5">
+                      {ganttRentals.slice(0, 3).map(r => (
+                        <div key={r.id} className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900/30">
+                          <div>
+                            <span className="text-sm text-gray-900 dark:text-white">{r.client}</span>
+                            <span className="ml-2 text-xs text-gray-500">
+                              {formatDate(r.startDate)} — {formatDate(r.endDate)}
+                            </span>
+                          </div>
+                          <Badge variant={r.status === 'active' ? 'info' : r.status === 'returned' || r.status === 'closed' ? 'default' : 'warning'} >
+                            {r.status === 'active' ? 'Активна' : r.status === 'returned' ? 'Возвр.' : r.status === 'closed' ? 'Закр.' : 'Бронь'}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Service block */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <Wrench className="h-5 w-5 text-[--color-primary]" />
+                    Сервис
+                  </CardTitle>
+                  <Link to="/service" className="flex items-center gap-1 text-xs text-[--color-primary] hover:underline">
+                    Открыть сервис <ChevronRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className={`rounded-lg p-3 ${daysUntilMaintenance <= 7 ? 'bg-red-50 dark:bg-red-900/20' : daysUntilMaintenance <= 30 ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-gray-50 dark:bg-gray-900/50'}`}>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Следующее ТО</p>
+                    <p className={`mt-1 font-medium ${daysUntilMaintenance <= 7 ? 'text-red-700 dark:text-red-300' : daysUntilMaintenance <= 30 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-900 dark:text-white'}`}>
+                      {formatDate(equipment.nextMaintenance)}
+                    </p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      {daysUntilMaintenance > 0 ? `через ${daysUntilMaintenance} дн.` : 'просрочено'}
+                    </p>
+                  </div>
+                  {equipment.maintenanceCHTO && (
+                    <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/50">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">ЧТО</p>
+                      <p className="mt-1 font-medium text-gray-900 dark:text-white">{formatDate(equipment.maintenanceCHTO)}</p>
+                    </div>
+                  )}
+                  {equipment.maintenancePTO && (
+                    <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/50">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">ПТО</p>
+                      <p className="mt-1 font-medium text-gray-900 dark:text-white">{formatDate(equipment.maintenancePTO)}</p>
+                    </div>
+                  )}
+                  <div className={`rounded-lg p-3 ${openServiceTickets.length > 0 ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-gray-50 dark:bg-gray-900/50'}`}>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Открытых заявок</p>
+                    <p className={`mt-1 font-medium ${openServiceTickets.length > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-900 dark:text-white'}`}>
+                      {openServiceTickets.length}
+                    </p>
+                  </div>
+                </div>
+
+                {openServiceTickets.length > 0 && (
+                  <div>
+                    <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Открытые заявки:</p>
+                    <div className="space-y-1.5">
+                      {openServiceTickets.slice(0, 3).map(t => (
+                        <div key={t.id} className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900/30">
+                          <div className="min-w-0 flex-1">
+                            <span className="truncate text-sm text-gray-900 dark:text-white">{t.reason}</span>
+                          </div>
+                          <Badge variant={t.priority === 'critical' ? 'error' : t.priority === 'high' ? 'warning' : 'info'}>
+                            {t.priority === 'critical' ? 'Критич.' : t.priority === 'high' ? 'Высокий' : SERVICE_STATUS_LABELS[t.status]}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Economics summary */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <DollarSign className="h-5 w-5 text-[--color-primary]" />
+                Экономика
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+                <div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Плановый доход/мес</p>
+                  <p className="mt-1 text-lg font-semibold text-blue-700 dark:text-blue-300">{formatCurrency(equipment.plannedMonthlyRevenue)}</p>
+                </div>
+                <div className="rounded-lg bg-green-50 p-3 dark:bg-green-900/20">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Факт. доход · {format(today, 'MMM', { locale: ru })}</p>
+                  <p className="mt-1 text-lg font-semibold text-green-700 dark:text-green-300">{formatCurrency(Math.round(actualMonthRevenue))}</p>
+                </div>
+                <div className="rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Суммарная выручка</p>
+                  <p className="mt-1 text-lg font-semibold text-purple-700 dark:text-purple-300">{formatCurrency(totalRevenue)}</p>
+                  <p className="mt-0.5 text-xs text-gray-500">{ganttRentals.filter(r => r.status !== 'created').length} аренд</p>
+                </div>
+                <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-800/50">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Утилизация месяца</p>
+                  <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{utilizationMonth}%</p>
+                  <p className="mt-0.5 text-xs text-gray-500">{daysRentedThisMonth} / {daysInCurrentMonth} дн.</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Notes */}
+          {equipment.notes && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Примечания</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{equipment.notes}</p>
+              </CardContent>
+            </Card>
+          )}
+        </Tabs.Content>
+
+        {/* ══ FINANCIAL TAB ══ */}
         <Tabs.Content value="financial">
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <TrendingUp className="h-5 w-5 text-[--color-primary]" />
-                  Финансовые показатели · Март 2026
+                  Финансовые показатели · {currentMonthLabel}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -360,22 +745,34 @@ export default function EquipmentDetail() {
                   </div>
                 </div>
 
-                {/* Revenue vs plan */}
                 <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500 dark:text-gray-400">Выполнение плана</span>
                     <span className="font-medium text-gray-900 dark:text-white">
-                      {Math.round((actualMonthRevenue / equipment.plannedMonthlyRevenue) * 100)}%
+                      {equipment.plannedMonthlyRevenue > 0
+                        ? Math.round((actualMonthRevenue / equipment.plannedMonthlyRevenue) * 100)
+                        : 0}%
                     </span>
                   </div>
                   <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
                     <div
-                      className={`h-full rounded-full ${
-                        actualMonthRevenue >= equipment.plannedMonthlyRevenue ? 'bg-green-500' : 'bg-blue-500'
-                      }`}
-                      style={{ width: `${Math.min(100, Math.round((actualMonthRevenue / equipment.plannedMonthlyRevenue) * 100))}%` }}
+                      className={`h-full rounded-full ${actualMonthRevenue >= equipment.plannedMonthlyRevenue ? 'bg-green-500' : 'bg-blue-500'}`}
+                      style={{ width: `${Math.min(100, equipment.plannedMonthlyRevenue > 0 ? Math.round((actualMonthRevenue / equipment.plannedMonthlyRevenue) * 100) : 0)}%` }}
                     />
                   </div>
+                </div>
+
+                <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500 dark:text-gray-400">Суммарная выручка (все аренды)</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(totalRevenue)}</span>
+                  </div>
+                  {totalPaidRevenue > 0 && (
+                    <div className="mt-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">Из них оплачено</span>
+                      <span className="font-medium text-green-700 dark:text-green-400">{formatCurrency(totalPaidRevenue)}</span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -419,7 +816,7 @@ export default function EquipmentDetail() {
                   )}
                 </div>
 
-                <div className="text-sm text-gray-500 dark:text-gray-400 space-y-1">
+                <div className="space-y-1 text-sm text-gray-500 dark:text-gray-400">
                   <div className="flex justify-between">
                     <span>Факт. выручка за месяц</span>
                     <span className="text-gray-900 dark:text-white">{formatCurrency(Math.round(actualMonthRevenue))}</span>
@@ -440,96 +837,169 @@ export default function EquipmentDetail() {
           </div>
         </Tabs.Content>
 
-        {/* === RENTAL HISTORY TAB === */}
+        {/* ══ RENTAL HISTORY TAB ══ */}
         <Tabs.Content value="rental-history">
           <Card>
             <CardHeader>
-              <CardTitle>История аренды</CardTitle>
-              <CardDescription>{rentalHistory.length + ganttRentals.filter(g => !rentalHistory.find(r => r.id === g.id)).length} записей</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>История аренды</CardTitle>
+                  <CardDescription>{ganttRentals.length} записей</CardDescription>
+                </div>
+                <Link to="/rentals">
+                  <Button size="sm" variant="secondary">
+                    <Plus className="h-3.5 w-3.5" />
+                    Новая аренда
+                  </Button>
+                </Link>
+              </div>
             </CardHeader>
             <CardContent>
-              {(rentalHistory.length > 0 || ganttRentals.length > 0) ? (
+              {ganttRentals.length > 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>ID</TableHead>
                       <TableHead>Клиент</TableHead>
                       <TableHead>Период</TableHead>
-                      <TableHead>Длительность</TableHead>
-                      <TableHead>Менедже��</TableHead>
+                      <TableHead>Дней</TableHead>
+                      <TableHead>Менеджер</TableHead>
                       <TableHead>Стоимость</TableHead>
+                      <TableHead>Оплата</TableHead>
                       <TableHead>Статус</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {/* Combine rental sources, prefer Gantt for richer data */}
                     {ganttRentals.map(gr => {
                       const days = Math.ceil((new Date(gr.endDate).getTime() - new Date(gr.startDate).getTime()) / (1000 * 60 * 60 * 24));
+                      const rentalPmts = allPayments.filter(p => p.rentalId === gr.id);
+                      const paid = rentalPmts.reduce((s, p) => s + (p.paidAmount ?? p.amount), 0);
                       return (
                         <TableRow key={gr.id}>
                           <TableCell>
-                            <Link to={`/rentals/${gr.id.replace(/[ab]$/, '')}`} className="text-[--color-primary] hover:underline">
-                              {gr.id}
-                            </Link>
+                            <span className="font-mono text-xs text-[--color-primary]">{gr.id}</span>
                           </TableCell>
                           <TableCell>{gr.client}</TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="text-sm text-gray-600 dark:text-gray-400">
                             {formatDate(gr.startDate)} — {formatDate(gr.endDate)}
                           </TableCell>
-                          <TableCell>{days} дн.</TableCell>
-                          <TableCell>{gr.manager}</TableCell>
+                          <TableCell>{days}</TableCell>
+                          <TableCell className="text-sm">{gr.managerInitials}</TableCell>
                           <TableCell>{formatCurrency(gr.amount)}</TableCell>
                           <TableCell>
+                            <Badge variant={gr.paymentStatus === 'paid' ? 'success' : gr.paymentStatus === 'partial' ? 'warning' : 'error'}>
+                              {gr.paymentStatus === 'paid' ? 'Оплачено' : gr.paymentStatus === 'partial' ? `${formatCurrency(paid)}` : 'Не опл.'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
                             <Badge variant={
-                              gr.status === 'active' ? 'success' :
-                              gr.status === 'returned' ? 'info' :
+                              gr.status === 'active' ? 'info' :
+                              gr.status === 'returned' ? 'success' :
                               gr.status === 'closed' ? 'default' : 'warning'
                             }>
                               {gr.status === 'active' ? 'Активна' :
-                               gr.status === 'returned' ? 'Возвращена' :
-                               gr.status === 'closed' ? 'Закрыта' : 'Создана'}
+                               gr.status === 'returned' ? 'Возвр.' :
+                               gr.status === 'closed' ? 'Закр.' : 'Бронь'}
                             </Badge>
                           </TableCell>
                         </TableRow>
                       );
                     })}
-                    {/* Show standard rentals not already in gantt */}
-                    {rentalHistory
-                      .filter(r => !ganttRentals.find(g => g.id === r.id || g.id.startsWith(r.id)))
-                      .map(rental => {
-                        const days = Math.ceil((new Date(rental.plannedReturnDate).getTime() - new Date(rental.startDate).getTime()) / (1000 * 60 * 60 * 24));
-                        return (
-                          <TableRow key={rental.id}>
-                            <TableCell>
-                              <Link to={`/rentals/${rental.id}`} className="text-[--color-primary] hover:underline">
-                                {rental.id}
-                              </Link>
-                            </TableCell>
-                            <TableCell>{rental.client}</TableCell>
-                            <TableCell className="text-sm">
-                              {formatDate(rental.startDate)} — {formatDate(rental.plannedReturnDate)}
-                            </TableCell>
-                            <TableCell>{days} дн.</TableCell>
-                            <TableCell>{rental.manager}</TableCell>
-                            <TableCell>{formatCurrency(rental.price)}</TableCell>
-                            <TableCell>
-                              <Badge variant={rental.status === 'active' ? 'success' : rental.status === 'closed' ? 'default' : 'warning'}>
-                                {rental.status}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
                   </TableBody>
                 </Table>
               ) : (
-                <EmptyState icon={<Calendar className="h-12 w-12" />} text="История аренды пуста" />
+                <EmptyState icon={<Calendar className="h-12 w-12" />} text="История аренды пуста">
+                  <Link to="/rentals">
+                    <Button variant="secondary" size="sm" className="mt-4">Открыть планировщик</Button>
+                  </Link>
+                </EmptyState>
               )}
             </CardContent>
           </Card>
         </Tabs.Content>
 
-        {/* === REPAIR HISTORY TAB === */}
+        {/* ══ SERVICE HISTORY TAB ══ */}
+        <Tabs.Content value="service-history">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Сервисные заявки</CardTitle>
+                  <CardDescription>
+                    {openServiceTickets.length} открытых · {serviceHistory.length} всего
+                  </CardDescription>
+                </div>
+                <Link to="/service">
+                  <Button size="sm">
+                    <Plus className="h-3.5 w-3.5" />
+                    Создать заявку
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {serviceHistory.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Причина</TableHead>
+                      <TableHead>Описание</TableHead>
+                      <TableHead>Создана</TableHead>
+                      <TableHead>Приоритет</TableHead>
+                      <TableHead>Статус</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {serviceHistory.map(ticket => (
+                      <TableRow key={ticket.id}>
+                        <TableCell>
+                          <Link to={`/service/${ticket.id}`} className="font-mono text-xs text-[--color-primary] hover:underline">
+                            {ticket.id}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="max-w-[140px] truncate">{ticket.reason}</TableCell>
+                        <TableCell className="max-w-[200px] truncate text-sm text-gray-500 dark:text-gray-400">
+                          {ticket.description}
+                        </TableCell>
+                        <TableCell>{formatDate(ticket.createdAt)}</TableCell>
+                        <TableCell>
+                          <Badge variant={
+                            ticket.priority === 'critical' ? 'error' :
+                            ticket.priority === 'high' ? 'warning' :
+                            ticket.priority === 'medium' ? 'info' : 'default'
+                          }>
+                            {ticket.priority === 'critical' ? 'Критич.' :
+                             ticket.priority === 'high' ? 'Высокий' :
+                             ticket.priority === 'medium' ? 'Средний' : 'Низкий'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={
+                            ticket.status === 'in_progress' ? 'info' :
+                            ticket.status === 'waiting_parts' ? 'warning' :
+                            ticket.status === 'ready' ? 'success' :
+                            ticket.status === 'closed' ? 'default' : 'default'
+                          }>
+                            {SERVICE_STATUS_LABELS[ticket.status] || ticket.status}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <EmptyState icon={<Wrench className="h-12 w-12" />} text="Сервисных заявок нет">
+                  <Link to="/service">
+                    <Button variant="secondary" size="sm" className="mt-4">Создать заявку</Button>
+                  </Link>
+                </EmptyState>
+              )}
+            </CardContent>
+          </Card>
+        </Tabs.Content>
+
+        {/* ══ REPAIR HISTORY TAB ══ */}
         <Tabs.Content value="repair-history">
           <Card>
             <CardHeader>
@@ -548,38 +1018,25 @@ export default function EquipmentDetail() {
               {repairRecords.length > 0 ? (
                 <div className="space-y-3">
                   {repairRecords.map(record => (
-                    <div
-                      key={record.id}
-                      className="rounded-lg border border-gray-200 p-4 dark:border-gray-700"
-                    >
+                    <div key={record.id} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <Badge variant={repairTypeBadge[record.type]}>{repairTypeLabels[record.type]}</Badge>
-                            <Badge variant={
-                              record.status === 'completed' ? 'success' :
-                              record.status === 'in_progress' ? 'info' : 'default'
-                            }>
-                              {record.status === 'completed' ? 'Выполнено' :
-                               record.status === 'in_progress' ? 'В работе' : 'Запланировано'}
+                            <Badge variant={record.status === 'completed' ? 'success' : record.status === 'in_progress' ? 'info' : 'default'}>
+                              {record.status === 'completed' ? 'Выполнено' : record.status === 'in_progress' ? 'В работе' : 'Запланировано'}
                             </Badge>
                             {record.source === 'bot' && (
-                              <span className="flex items-center gap-1 text-xs text-gray-400">
-                                <Bot className="h-3 w-3" /> Из бота
-                              </span>
+                              <span className="flex items-center gap-1 text-xs text-gray-400"><Bot className="h-3 w-3" /> Из бота</span>
                             )}
                           </div>
                           <p className="mt-2 text-sm text-gray-900 dark:text-white">{record.description}</p>
                           {record.comment && (
                             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{record.comment}</p>
                           )}
-                          <div className="mt-2 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" /> {formatDate(record.date)}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <User className="h-3 w-3" /> {record.mechanic}
-                            </span>
+                          <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatDate(record.date)}</span>
+                            <span className="flex items-center gap-1"><User className="h-3 w-3" /> {record.mechanic}</span>
                           </div>
                         </div>
                         {record.cost != null && record.cost > 0 && (
@@ -604,7 +1061,7 @@ export default function EquipmentDetail() {
           </Card>
         </Tabs.Content>
 
-        {/* === PHOTOS TAB === */}
+        {/* ══ PHOTOS TAB ══ */}
         <Tabs.Content value="photos">
           <Card>
             <CardHeader>
@@ -631,29 +1088,16 @@ export default function EquipmentDetail() {
                           </Badge>
                           <span className="text-sm text-gray-500 dark:text-gray-400">{formatDate(event.date)}</span>
                           {event.source === 'bot' && (
-                            <span className="flex items-center gap-1 text-xs text-gray-400">
-                              <Bot className="h-3 w-3" /> Из бота
-                            </span>
+                            <span className="flex items-center gap-1 text-xs text-gray-400"><Bot className="h-3 w-3" /> Из бота</span>
                           )}
                         </div>
                         <span className="text-xs text-gray-500 dark:text-gray-400">Загрузил: {event.uploadedBy}</span>
                       </div>
-                      {event.comment && (
-                        <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">{event.comment}</p>
-                      )}
-                      {event.rentalId && (
-                        <Link to={`/rentals/${event.rentalId}`} className="mt-1 inline-block text-xs text-[--color-primary] hover:underline">
-                          Аренда {event.rentalId} →
-                        </Link>
-                      )}
+                      {event.comment && <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">{event.comment}</p>}
                       <div className="mt-3 flex gap-3 overflow-x-auto">
                         {event.photos.map((photo, idx) => (
-                          <img
-                            key={idx}
-                            src={photo}
-                            alt={`Фото ${idx + 1}`}
-                            className="h-32 w-48 rounded-lg border border-gray-200 object-cover dark:border-gray-700"
-                          />
+                          <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
+                            className="h-32 w-48 rounded-lg border border-gray-200 object-cover dark:border-gray-700" />
                         ))}
                       </div>
                     </div>
@@ -666,69 +1110,7 @@ export default function EquipmentDetail() {
           </Card>
         </Tabs.Content>
 
-        {/* === SERVICE HISTORY TAB === */}
-        <Tabs.Content value="service-history">
-          <Card>
-            <CardHeader>
-              <CardTitle>Сервисные заявки</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {serviceHistory.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Причина</TableHead>
-                      <TableHead>Дата создания</TableHead>
-                      <TableHead>Приоритет</TableHead>
-                      <TableHead>Статус</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {serviceHistory.map(ticket => (
-                      <TableRow key={ticket.id}>
-                        <TableCell>
-                          <Link to={`/service/${ticket.id}`} className="text-[--color-primary] hover:underline">
-                            {ticket.id}
-                          </Link>
-                        </TableCell>
-                        <TableCell>{ticket.reason}</TableCell>
-                        <TableCell>{formatDate(ticket.createdAt)}</TableCell>
-                        <TableCell>
-                          <Badge variant={
-                            ticket.priority === 'critical' ? 'error' :
-                            ticket.priority === 'high' ? 'warning' :
-                            ticket.priority === 'medium' ? 'info' : 'default'
-                          }>
-                            {ticket.priority === 'critical' ? 'Критический' :
-                             ticket.priority === 'high' ? 'Высокий' :
-                             ticket.priority === 'medium' ? 'Средний' : 'Низкий'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={
-                            ticket.status === 'in_progress' ? 'info' :
-                            ticket.status === 'waiting_parts' ? 'warning' :
-                            ticket.status === 'ready' ? 'success' : 'default'
-                          }>
-                            {ticket.status === 'in_progress' ? 'В работе' :
-                             ticket.status === 'waiting_parts' ? 'Ожидание запчастей' :
-                             ticket.status === 'ready' ? 'Готово' :
-                             ticket.status === 'new' ? 'Новая' : 'Закрыта'}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <EmptyState icon={<Wrench className="h-12 w-12" />} text="Сервисных заявок нет" />
-              )}
-            </CardContent>
-          </Card>
-        </Tabs.Content>
-
-        {/* === DOCUMENTS TAB === */}
+        {/* ══ DOCUMENTS TAB ══ */}
         <Tabs.Content value="documents">
           <Card>
             <CardHeader>
@@ -736,34 +1118,47 @@ export default function EquipmentDetail() {
             </CardHeader>
             <CardContent>
               <EmptyState icon={<FileText className="h-12 w-12" />} text="Документов нет">
-                <Button variant="secondary" size="sm" className="mt-4">
-                  Загрузить документ
-                </Button>
+                <Button variant="secondary" size="sm" className="mt-4">Загрузить документ</Button>
               </EmptyState>
-            </CardContent>
-          </Card>
-        </Tabs.Content>
-
-        {/* === OVERVIEW TAB === */}
-        <Tabs.Content value="overview">
-          <Card>
-            <CardHeader>
-              <CardTitle>Примечания</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-gray-900 dark:text-white">{equipment.notes || 'Примечаний нет'}</p>
             </CardContent>
           </Card>
         </Tabs.Content>
       </Tabs.Root>
 
-      {/* Add Repair Record Modal */}
+      {/* ── Modals ── */}
       <AddRepairModal open={showRepairModal} onOpenChange={setShowRepairModal} />
+      <EditEquipmentModal
+        open={showEditModal}
+        equipment={equipment}
+        onOpenChange={setShowEditModal}
+        onSave={(updated) => {
+          const list = loadEquipment().map(e => e.id === updated.id ? updated : e);
+          saveEquipment(list);
+          setAllEquipment(list);
+          setShowEditModal(false);
+        }}
+      />
     </div>
   );
 }
 
-// === Helper Components ===
+// ── Helper Components ──
+
+function InfoField({ label, value, mono, highlight }: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  highlight?: 'orange';
+}) {
+  return (
+    <div>
+      <p className="text-sm text-gray-500 dark:text-gray-400">{label}</p>
+      <p className={`font-medium ${mono ? 'font-mono text-sm' : ''} ${highlight === 'orange' ? 'text-orange-600' : 'text-gray-900 dark:text-white'}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
 
 function EmptyState({ icon, text, children }: { icon: React.ReactNode; text: string; children?: React.ReactNode }) {
   return (
@@ -776,38 +1171,20 @@ function EmptyState({ icon, text, children }: { icon: React.ReactNode; text: str
 }
 
 function AddRepairModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const [form, setForm] = useState({
-    date: '',
-    type: 'maintenance',
-    description: '',
-    comment: '',
-    mechanic: '',
-    status: 'completed',
-    cost: '',
-  });
-
-  const update = (field: string, value: string) =>
-    setForm(prev => ({ ...prev, [field]: value }));
+  const [form, setForm] = useState({ date: '', type: 'maintenance', description: '', comment: '', mechanic: '', status: 'completed', cost: '' });
+  const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white p-6 shadow-lg dark:bg-gray-800">
-          <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">
-            Добавить запись о ремонте
-          </Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Заполните информацию о ремонте или обслуживании
-          </Dialog.Description>
-
+          <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">Добавить запись о ремонте</Dialog.Title>
+          <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-gray-400">Заполните информацию о ремонте или обслуживании</Dialog.Description>
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <Input label="Дата" type="date" value={form.date} onChange={e => update('date', e.target.value)} required />
-              <Select
-                label="Тип события"
-                value={form.type}
-                onValueChange={v => update('type', v)}
+              <Select label="Тип события" value={form.type} onValueChange={v => update('type', v)}
                 options={[
                   { value: 'maintenance', label: 'Обслуживание' },
                   { value: 'repair', label: 'Ремонт' },
@@ -819,30 +1196,20 @@ function AddRepairModal({ open, onOpenChange }: { open: boolean; onOpenChange: (
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Описание работ</label>
               <textarea
-                className="flex min-h-[60px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] focus:border-transparent dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                placeholder="Что было сделано..."
-                value={form.description}
-                onChange={e => update('description', e.target.value)}
-                required
-              />
+                className="flex min-h-[60px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                placeholder="Что было сделано..." value={form.description} onChange={e => update('description', e.target.value)} />
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Комментарий</label>
               <textarea
-                className="flex min-h-[40px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] focus:border-transparent dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                placeholder="Дополнительно..."
-                value={form.comment}
-                onChange={e => update('comment', e.target.value)}
-              />
+                className="flex min-h-[40px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                placeholder="Дополнительно..." value={form.comment} onChange={e => update('comment', e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Input label="Исполнитель" placeholder="Фамилия И.О." value={form.mechanic} onChange={e => update('mechanic', e.target.value)} required />
               <Input label="Сумма (₽)" type="number" placeholder="0" value={form.cost} onChange={e => update('cost', e.target.value)} />
             </div>
-            <Select
-              label="Статус"
-              value={form.status}
-              onValueChange={v => update('status', v)}
+            <Select label="Статус" value={form.status} onValueChange={v => update('status', v)}
               options={[
                 { value: 'completed', label: 'Выполнено' },
                 { value: 'in_progress', label: 'В работе' },
@@ -850,14 +1217,91 @@ function AddRepairModal({ open, onOpenChange }: { open: boolean; onOpenChange: (
               ]}
             />
           </div>
+          <div className="mt-6 flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => onOpenChange(false)}>Отмена</Button>
+            <Button onClick={() => onOpenChange(false)}>Сохранить</Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function EditEquipmentModal({
+  open, equipment, onOpenChange, onSave,
+}: {
+  open: boolean;
+  equipment: Equipment;
+  onOpenChange: (v: boolean) => void;
+  onSave: (updated: Equipment) => void;
+}) {
+  const [form, setForm] = useState(equipment);
+
+  useEffect(() => {
+    if (open) setForm(equipment);
+  }, [open, equipment]);
+
+  const update = (field: keyof Equipment, value: string | number) =>
+    setForm(prev => ({ ...prev, [field]: value }));
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-white p-6 shadow-lg dark:bg-gray-800">
+          <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">Редактировать технику</Dialog.Title>
+          <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-gray-400">{equipment.inventoryNumber} · {equipment.manufacturer} {equipment.model}</Dialog.Description>
+
+          <div className="mt-4 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <Input label="Инвентарный номер" value={form.inventoryNumber} onChange={e => update('inventoryNumber', e.target.value)} />
+              <Input label="Серийный номер" value={form.serialNumber} onChange={e => update('serialNumber', e.target.value)} />
+              <Input label="Производитель" value={form.manufacturer} onChange={e => update('manufacturer', e.target.value)} />
+              <Input label="Модель" value={form.model} onChange={e => update('model', e.target.value)} />
+              <Select label="Тип техники" value={form.type} onValueChange={v => update('type', v as string)}
+                options={[
+                  { value: 'scissor', label: 'Ножничный' },
+                  { value: 'articulated', label: 'Коленчатый' },
+                  { value: 'telescopic', label: 'Телескопический' },
+                ]}
+              />
+              <Select label="Привод" value={form.drive} onValueChange={v => update('drive', v as string)}
+                options={[
+                  { value: 'diesel', label: 'Дизель' },
+                  { value: 'electric', label: 'Электро' },
+                ]}
+              />
+              <Input label="Год выпуска" type="number" value={String(form.year)} onChange={e => update('year', Number(e.target.value))} />
+              <Input label="Моточасы" type="number" value={String(form.hours)} onChange={e => update('hours', Number(e.target.value))} />
+              <Input label="Высота подъёма (м)" type="number" value={String(form.liftHeight)} onChange={e => update('liftHeight', Number(e.target.value))} />
+              <Input label="Рабочая высота (м)" type="number" value={String(form.workingHeight || '')} onChange={e => update('workingHeight', Number(e.target.value))} />
+              <Input label="Грузоподъёмность (кг)" type="number" value={String(form.loadCapacity || '')} onChange={e => update('loadCapacity', Number(e.target.value))} />
+              <Input label="Масса (кг)" type="number" value={String(form.weight || '')} onChange={e => update('weight', Number(e.target.value))} />
+              <Input label="Габариты" value={form.dimensions || ''} onChange={e => update('dimensions', e.target.value)} />
+              <Input label="Локация" value={form.location} onChange={e => update('location', e.target.value)} />
+              <Select label="Владелец" value={form.owner} onValueChange={v => update('owner', v as string)}
+                options={[
+                  { value: 'own', label: 'Собственная' },
+                  { value: 'investor', label: 'Техника инвестора' },
+                  { value: 'sublease', label: 'Субаренда' },
+                ]}
+              />
+              <Input label="Плановый доход/мес (₽)" type="number" value={String(form.plannedMonthlyRevenue)} onChange={e => update('plannedMonthlyRevenue', Number(e.target.value))} />
+              <Input label="Следующее ТО" type="date" value={form.nextMaintenance} onChange={e => update('nextMaintenance', e.target.value)} />
+              <Input label="Дата ЧТО" type="date" value={form.maintenanceCHTO || ''} onChange={e => update('maintenanceCHTO', e.target.value)} />
+              <Input label="Дата ПТО" type="date" value={form.maintenancePTO || ''} onChange={e => update('maintenancePTO', e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Примечания</label>
+              <textarea
+                className="flex min-h-[80px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                value={form.notes || ''} onChange={e => update('notes', e.target.value)} />
+            </div>
+          </div>
 
           <div className="mt-6 flex justify-end gap-3">
-            <Button variant="secondary" onClick={() => onOpenChange(false)}>
-              Отмена
-            </Button>
-            <Button onClick={() => onOpenChange(false)}>
-              Сохранить
-            </Button>
+            <Button variant="secondary" onClick={() => onOpenChange(false)}>Отмена</Button>
+            <Button onClick={() => onSave(form)}>Сохранить изменения</Button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

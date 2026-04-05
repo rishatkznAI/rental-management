@@ -23,6 +23,7 @@ interface RentalDrawerProps {
   onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string) => void;
   onExtend: (rental: GanttRentalData, newEndDate: string) => void;
   onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
+  onUpdChange: (rental: GanttRentalData, updSigned: boolean, updDate?: string) => void;
 }
 
 const statusLabels: Record<GanttRentalData['status'], string> = {
@@ -54,7 +55,7 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
 export function RentalDrawer({
   rental, equipment, allRentals, payments,
   onClose, onReturn, onStatusChange, onDelete,
-  onAddPayment, onExtend, onEarlyReturn,
+  onAddPayment, onExtend, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -75,6 +76,11 @@ export function RentalDrawer({
   const [showEarlyReturn, setShowEarlyReturn] = useState(false);
   const [earlyReturnDate, setEarlyReturnDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [earlyReturnConfirm, setEarlyReturnConfirm] = useState(false);
+
+  // UPD state
+  const [updEditMode, setUpdEditMode] = useState(false);
+  const [updDateInput, setUpdDateInput] = useState(() => new Date().toISOString().slice(0, 10));
+  const [updUnsignConfirm, setUpdUnsignConfirm] = useState(false);
 
   if (!rental) return null;
 
@@ -426,30 +432,113 @@ export function RentalDrawer({
             </section>
           )}
 
-          {/* Documents */}
+          {/* Documents / UPD */}
           <section>
-            <div className="mb-2 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <FileText className="h-4 w-4" />
-              <span>Документы</span>
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                <FileText className="h-4 w-4" />
+                <span>Документы</span>
+              </div>
             </div>
+
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+              {/* UPD row */}
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-700 dark:text-gray-300">УПД</span>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">УПД</span>
                 <div className="flex items-center gap-2">
                   {rental.updSigned ? (
                     <>
                       <CircleCheck className="h-4 w-4 text-green-600" />
                       <span className="text-sm text-green-700 dark:text-green-400">Подписан</span>
-                      {rental.updDate && <span className="text-xs text-gray-500">({formatDate(rental.updDate)})</span>}
+                      {rental.updDate && (
+                        <span className="text-xs text-gray-500">({formatDate(rental.updDate)})</span>
+                      )}
                     </>
                   ) : (
                     <>
-                      <CircleAlert className="h-4 w-4 text-red-500" />
-                      <span className="text-sm text-red-600 dark:text-red-400">Не подписан</span>
+                      <CircleAlert className="h-4 w-4 text-amber-500" />
+                      <span className="text-sm text-amber-600 dark:text-amber-400">Не подписан</span>
                     </>
                   )}
                 </div>
               </div>
+
+              {/* UPD action buttons */}
+              {!updEditMode && !updUnsignConfirm && (
+                <div className="mt-2 flex gap-2">
+                  {!rental.updSigned ? (
+                    <button
+                      onClick={() => { setUpdEditMode(true); setUpdDateInput(new Date().toISOString().slice(0, 10)); }}
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/20"
+                    >
+                      <CircleCheck className="h-3 w-3" />
+                      Отметить как подписан
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setUpdUnsignConfirm(true)}
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                    >
+                      <CircleAlert className="h-3 w-3" />
+                      Снять подпись
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Sign UPD form */}
+              {updEditMode && (
+                <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-2.5 dark:border-green-800 dark:bg-green-900/20">
+                  <p className="mb-2 text-xs font-medium text-green-700 dark:text-green-400">Дата подписания</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={updDateInput}
+                      onChange={e => setUpdDateInput(e.target.value)}
+                      className="h-8 flex-1 rounded border border-gray-300 bg-white px-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                    />
+                    <button
+                      onClick={() => {
+                        onUpdChange(rental, true, updDateInput || undefined);
+                        setUpdEditMode(false);
+                      }}
+                      className="rounded-md bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
+                    >
+                      Сохранить
+                    </button>
+                    <button
+                      onClick={() => setUpdEditMode(false)}
+                      className="rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Unsign confirm */}
+              {updUnsignConfirm && (
+                <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-800 dark:bg-amber-900/20">
+                  <p className="mb-2 text-xs text-amber-700 dark:text-amber-400">Снять отметку о подписании УПД?</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        onUpdChange(rental, false);
+                        setUpdUnsignConfirm(false);
+                      }}
+                      className="rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                    >
+                      Да, снять
+                    </button>
+                    <button
+                      onClick={() => setUpdUnsignConfirm(false)}
+                      className="rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
 

@@ -255,14 +255,16 @@ export default function Rentals() {
   const [preselectedEquipment, setPreselectedEquipment] = useState('');
   const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
 
-  // Filters
+  // Filters (always live — no explicit "apply" gate needed)
   const [filterModel, setFilterModel] = useState('');
   const [filterManager, setFilterManager] = useState('');
   const [filterClient, setFilterClient] = useState('');
   const [filterUpd, setFilterUpd] = useState('');
   const [filterPayment, setFilterPayment] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [filtersApplied, setFiltersApplied] = useState(false);
+
+  // Derived: any filter is currently active
+  const hasActiveFilters = !!(filterModel || filterManager || filterClient || filterUpd || filterPayment || filterStatus);
 
   // Refs
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -299,28 +301,38 @@ export default function Rentals() {
     return groups;
   }, [days]);
 
-  // Filter equipment
-  const filteredEquipment = useMemo(() => {
-    let eq = [...equipmentList];
-    if (filtersApplied && filterModel) {
-      eq = eq.filter(e => e.model.toLowerCase().includes(filterModel.toLowerCase()) || e.inventoryNumber.toLowerCase().includes(filterModel.toLowerCase()));
-    }
-    return eq;
-  }, [equipmentList, filterModel, filtersApplied]);
-
-  // Filter rentals
+  // ── Filter rentals (always live, no gate) ────────────────────────────────────
   const filteredRentals = useMemo(() => {
     let rentals = [...ganttRentals];
-    if (filtersApplied) {
-      if (filterManager) rentals = rentals.filter(r => r.manager === filterManager);
-      if (filterClient) rentals = rentals.filter(r => r.client.toLowerCase().includes(filterClient.toLowerCase()));
-      if (filterUpd === 'yes') rentals = rentals.filter(r => r.updSigned);
-      if (filterUpd === 'no') rentals = rentals.filter(r => !r.updSigned);
-      if (filterPayment) rentals = rentals.filter(r => r.paymentStatus === filterPayment);
-      if (filterStatus) rentals = rentals.filter(r => r.status === filterStatus);
-    }
+    if (filterManager) rentals = rentals.filter(r => r.manager === filterManager);
+    if (filterClient)  rentals = rentals.filter(r => r.client.toLowerCase().includes(filterClient.toLowerCase()));
+    if (filterUpd === 'yes') rentals = rentals.filter(r => r.updSigned);
+    if (filterUpd === 'no')  rentals = rentals.filter(r => !r.updSigned);
+    if (filterPayment) rentals = rentals.filter(r => r.paymentStatus === filterPayment);
+    if (filterStatus)  rentals = rentals.filter(r => r.status === filterStatus);
     return rentals;
-  }, [ganttRentals, filtersApplied, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
+  }, [ganttRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
+
+  // ── Filter equipment (always live) ───────────────────────────────────────────
+  // Step 1: filter by model/INV text
+  // Step 2 (cross-link): when rental-level filters are active, only show equipment
+  //         that has at least one rental in filteredRentals — hides empty rows.
+  const filteredEquipment = useMemo(() => {
+    let eq = [...equipmentList];
+    if (filterModel) {
+      const q = filterModel.toLowerCase();
+      eq = eq.filter(e =>
+        e.model.toLowerCase().includes(q) ||
+        e.inventoryNumber.toLowerCase().includes(q)
+      );
+    }
+    const hasRentalFilter = !!(filterManager || filterClient || filterUpd || filterPayment || filterStatus);
+    if (hasRentalFilter) {
+      const matchingInvs = new Set(filteredRentals.map(r => r.equipmentInv));
+      eq = eq.filter(e => matchingInvs.has(e.inventoryNumber));
+    }
+    return eq;
+  }, [equipmentList, filterModel, filteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
 
   // Conflict detection for all equipment
   const conflictSets = useMemo(() => {
@@ -348,7 +360,6 @@ export default function Rentals() {
     setBaseDate(prev => addDays(prev, offset));
   }, [scale, today]);
 
-  const applyFilters = () => setFiltersApplied(true);
   const resetFilters = () => {
     setFilterModel('');
     setFilterManager('');
@@ -356,7 +367,6 @@ export default function Rentals() {
     setFilterUpd('');
     setFilterPayment('');
     setFilterStatus('');
-    setFiltersApplied(false);
   };
 
   const handleOpenReturn = (rental?: GanttRentalData) => {
@@ -439,6 +449,20 @@ export default function Rentals() {
       setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
     }
   }, [ganttRentals, equipmentList, selectedRental]);
+
+  // Update UPD signed status + optional date
+  const handleUpdChange = useCallback((rental: GanttRentalData, updSigned: boolean, updDate?: string) => {
+    const updatedRentals = ganttRentals.map(r =>
+      r.id === rental.id
+        ? { ...r, updSigned, updDate: updSigned ? (updDate || r.updDate) : undefined }
+        : r
+    );
+    setGanttRentals(updatedRentals);
+    saveGanttRentals(updatedRentals);
+    if (selectedRental?.id === rental.id) {
+      setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
+    }
+  }, [ganttRentals, selectedRental]);
 
   // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
   const handleEarlyReturn = useCallback((rental: GanttRentalData, actualReturnDate: string) => {
@@ -606,15 +630,16 @@ export default function Rentals() {
           ))}
         </select>
 
-        <Button size="sm" onClick={applyFilters} className="h-8 px-3 text-xs">
-          Применить
-        </Button>
-        <Button size="sm" variant="ghost" onClick={resetFilters} className="h-8 px-3 text-xs">
-          Сброс
-        </Button>
+        {hasActiveFilters && (
+          <Button size="sm" variant="ghost" onClick={resetFilters} className="h-8 px-3 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20">
+            × Сбросить фильтры
+          </Button>
+        )}
 
         <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">
-          Показано {shownEquipment} из {totalEquipment} ед. / {shownRentals} из {totalRentals} аренд
+          {hasActiveFilters
+            ? `${shownEquipment} из ${totalEquipment} ед. · ${shownRentals} из ${totalRentals} аренд`
+            : `${totalEquipment} ед. · ${totalRentals} аренд`}
         </span>
       </div>
 
@@ -745,6 +770,7 @@ export default function Rentals() {
           onAddPayment={handleAddPayment}
           onExtend={handleExtend}
           onEarlyReturn={handleEarlyReturn}
+          onUpdChange={handleUpdChange}
           onReturn={(r) => {
             setSelectedRental(null);
             handleOpenReturn(r);

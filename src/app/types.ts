@@ -109,6 +109,7 @@ export interface ServiceTicket {
   workLog: { date: string; text: string; author: string; type?: 'comment' | 'status_change' | 'assign' }[];
   parts: { name: string; qty: number; cost: number }[];
   createdAt: string;
+  photos?: string[];
 }
 
 export type ClientStatus = 'active' | 'inactive' | 'blocked';

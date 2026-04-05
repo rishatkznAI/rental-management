@@ -1,7 +1,13 @@
 import React from 'react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Select } from '../components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getServiceStatusBadge, getServicePriorityBadge } from '../components/ui/badge';
 import { Search, Plus } from 'lucide-react';
@@ -25,11 +31,11 @@ export default function Service() {
   }, []);
 
   const filteredTickets = ticketList.filter(ticket => {
-    const matchesSearch = search === '' || 
+    const matchesSearch = search === '' ||
       ticket.id.toLowerCase().includes(search.toLowerCase()) ||
       ticket.equipment.toLowerCase().includes(search.toLowerCase()) ||
       ticket.reason.toLowerCase().includes(search.toLowerCase());
-    
+
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
     const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
 
@@ -41,8 +47,8 @@ export default function Service() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Сервис</h1>
-          <p className="mt-1 text-sm text-gray-500">Управление сервисными заявками</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Сервис</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Управление сервисными заявками</p>
         </div>
         <Link to="/service/new">
           <Button size="sm">
@@ -54,10 +60,10 @@ export default function Service() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4">
+      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 sm:gap-4 sm:p-4">
         <div className="flex-1 min-w-[200px]">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
             <Input
               placeholder="Поиск по ID, технике, причине..."
               value={search}
@@ -66,44 +72,46 @@ export default function Service() {
             />
           </div>
         </div>
-        <Select
-          value={priorityFilter}
-          onValueChange={setPriorityFilter}
-          placeholder="Все приоритеты"
-          options={[
-            { value: 'all', label: 'Все приоритеты' },
-            { value: 'low', label: 'Низкий' },
-            { value: 'medium', label: 'Средний' },
-            { value: 'high', label: 'Высокий' },
-            { value: 'critical', label: 'Критический' },
-          ]}
-          className="w-[180px]"
-        />
-        <Select
-          value={statusFilter}
-          onValueChange={setStatusFilter}
-          placeholder="Все статусы"
-          options={[
-            { value: 'all', label: 'Все статусы' },
-            { value: 'new', label: 'Новый' },
-            { value: 'in_progress', label: 'В работе' },
-            { value: 'waiting_parts', label: 'Ожидание запчастей' },
-            { value: 'ready', label: 'Готово' },
-            { value: 'closed', label: 'Закрыто' },
-          ]}
-          className="w-[200px]"
-        />
+        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Все приоритеты" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все приоритеты</SelectItem>
+            <SelectItem value="low">Низкий</SelectItem>
+            <SelectItem value="medium">Средний</SelectItem>
+            <SelectItem value="high">Высокий</SelectItem>
+            <SelectItem value="critical">Критический</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder="Все статусы" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все статусы</SelectItem>
+            <SelectItem value="new">Новый</SelectItem>
+            <SelectItem value="in_progress">В работе</SelectItem>
+            <SelectItem value="waiting_parts">Ожидание запчастей</SelectItem>
+            <SelectItem value="ready">Готово</SelectItem>
+            <SelectItem value="closed">Закрыто</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Mobile: card list */}
       <div className="sm:hidden space-y-3">
         {filteredTickets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 bg-white">
-            <Search className="h-8 w-8 text-gray-400 mb-3" />
-            <h3 className="text-base font-medium text-gray-900">Заявки не найдены</h3>
+          <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            <Search className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-3" />
+            <h3 className="text-base font-medium text-gray-900 dark:text-white">Заявки не найдены</h3>
           </div>
         ) : filteredTickets.map((ticket) => (
-          <Link key={ticket.id} to={`/service/${ticket.id}`} className="block rounded-lg border border-gray-200 bg-white p-4 hover:border-blue-400 transition-colors">
+          <Link
+            key={ticket.id}
+            to={`/service/${ticket.id}`}
+            className="block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+          >
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -111,21 +119,21 @@ export default function Service() {
                   {getServiceStatusBadge(ticket.status)}
                   {getServicePriorityBadge(ticket.priority)}
                 </div>
-                <p className="text-sm text-gray-700 mt-1 font-medium truncate">{ticket.equipment}</p>
-                <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{ticket.reason}</p>
+                <p className="text-sm text-gray-700 dark:text-gray-200 mt-1 font-medium truncate">{ticket.equipment}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">{ticket.reason}</p>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500">
-              <div><span className="font-medium text-gray-700">SLA:</span> {ticket.sla}</div>
-              {ticket.assignedTo && <div><span className="font-medium text-gray-700">Назначен:</span> {ticket.assignedTo}</div>}
-              <div><span className="font-medium text-gray-700">Создана:</span> {formatDate(ticket.createdAt)}</div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">SLA:</span> {ticket.sla}</div>
+              {ticket.assignedTo && <div><span className="font-medium text-gray-700 dark:text-gray-300">Назначен:</span> {ticket.assignedTo}</div>}
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Создана:</span> {formatDate(ticket.createdAt)}</div>
             </div>
           </Link>
         ))}
       </div>
 
       {/* Desktop: Table */}
-      <div className="hidden sm:block rounded-lg border border-gray-200 bg-white">
+      <div className="hidden sm:block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <Table>
           <TableHeader>
             <TableRow>
@@ -143,7 +151,7 @@ export default function Service() {
             {filteredTickets.map((ticket) => (
               <TableRow key={ticket.id}>
                 <TableCell>
-                  <Link 
+                  <Link
                     to={`/service/${ticket.id}`}
                     className="font-medium text-[--color-primary] hover:underline"
                   >
@@ -155,7 +163,7 @@ export default function Service() {
                 </TableCell>
                 <TableCell>
                   <p className="text-sm">{ticket.reason}</p>
-                  <p className="text-xs text-gray-500 line-clamp-1">{ticket.description}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{ticket.description}</p>
                 </TableCell>
                 <TableCell>
                   {getServicePriorityBadge(ticket.priority)}
@@ -167,7 +175,7 @@ export default function Service() {
                   {ticket.assignedTo ? (
                     <p className="text-sm">{ticket.assignedTo}</p>
                   ) : (
-                    <span className="text-sm text-gray-400">Не назначен</span>
+                    <span className="text-sm text-gray-400 dark:text-gray-500">Не назначен</span>
                   )}
                 </TableCell>
                 <TableCell>
@@ -183,20 +191,20 @@ export default function Service() {
 
         {filteredTickets.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
-              <Search className="h-8 w-8 text-gray-400" />
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+              <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
             </div>
-            <h3 className="text-lg font-medium text-gray-900">Заявки не найдены</h3>
-            <p className="mt-1 text-sm text-gray-500">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Заявки не найдены</h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               Попробуйте изменить параметры поиска или фильтры
             </p>
           </div>
         )}
-      </div>{/* end desktop table */}
+      </div>
 
       {/* Results info */}
       {filteredTickets.length > 0 && (
-        <div className="flex items-center justify-between text-sm text-gray-500">
+        <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
           <p>Показано {filteredTickets.length} из {ticketList.length} заявок</p>
         </div>
       )}

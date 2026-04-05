@@ -1,7 +1,13 @@
 import React from 'react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Select } from '../components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getDocumentStatusBadge } from '../components/ui/badge';
 import { Search, Download, Eye } from 'lucide-react';
@@ -24,10 +30,10 @@ export default function Documents() {
   }, []);
 
   const filteredDocuments = documentList.filter(doc => {
-    const matchesSearch = search === '' || 
+    const matchesSearch = search === '' ||
       doc.number.toLowerCase().includes(search.toLowerCase()) ||
       doc.client.toLowerCase().includes(search.toLowerCase());
-    
+
     const matchesType = typeFilter === 'all' || doc.type === typeFilter;
     const matchesStatus = statusFilter === 'all' || doc.status === statusFilter;
 
@@ -48,8 +54,8 @@ export default function Documents() {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold sm:text-3xl text-gray-900">Документы</h1>
-          <p className="mt-1 text-sm text-gray-500">Договоры, акты и счета</p>
+          <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">Документы</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Договоры, акты и счета</p>
         </div>
         <Button>
           <Download className="h-4 w-4" />
@@ -58,10 +64,10 @@ export default function Documents() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4">
+      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 sm:gap-4 sm:p-4">
         <div className="flex-1 min-w-[200px]">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
             <Input
               placeholder="Поиск по номеру, клиенту..."
               value={search}
@@ -70,34 +76,32 @@ export default function Documents() {
             />
           </div>
         </div>
-        <Select
-          value={typeFilter}
-          onValueChange={setTypeFilter}
-          placeholder="Все типы"
-          options={[
-            { value: 'all', label: 'Все типы' },
-            { value: 'contract', label: 'Договоры' },
-            { value: 'act', label: 'Акты' },
-            { value: 'invoice', label: 'Счета' },
-          ]}
-          className="w-[160px]"
-        />
-        <Select
-          value={statusFilter}
-          onValueChange={setStatusFilter}
-          placeholder="Все статусы"
-          options={[
-            { value: 'all', label: 'Все статусы' },
-            { value: 'draft', label: 'Черновик' },
-            { value: 'signed', label: 'Подписан' },
-            { value: 'sent', label: 'Отправлен' },
-          ]}
-          className="w-[160px]"
-        />
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Все типы" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все типы</SelectItem>
+            <SelectItem value="contract">Договоры</SelectItem>
+            <SelectItem value="act">Акты</SelectItem>
+            <SelectItem value="invoice">Счета</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Все статусы" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все статусы</SelectItem>
+            <SelectItem value="draft">Черновик</SelectItem>
+            <SelectItem value="signed">Подписан</SelectItem>
+            <SelectItem value="sent">Отправлен</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border border-gray-200 bg-white">
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <Table>
           <TableHeader>
             <TableRow>
@@ -117,7 +121,7 @@ export default function Documents() {
                   <p className="text-sm font-medium">{getDocumentTypeLabel(doc.type)}</p>
                 </TableCell>
                 <TableCell>
-                  <p className="font-medium text-gray-900">{doc.number}</p>
+                  <p className="font-medium text-gray-900 dark:text-white">{doc.number}</p>
                 </TableCell>
                 <TableCell>
                   <p className="text-sm">{doc.client}</p>
@@ -129,7 +133,7 @@ export default function Documents() {
                   {doc.amount ? (
                     <p className="text-sm font-medium">{formatCurrency(doc.amount)}</p>
                   ) : (
-                    <span className="text-sm text-gray-400">—</span>
+                    <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
                   )}
                 </TableCell>
                 <TableCell>
@@ -137,11 +141,17 @@ export default function Documents() {
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-2">
-                    <button className="rounded p-1 hover:bg-gray-100" title="Просмотр">
-                      <Eye className="h-4 w-4 text-gray-500" />
+                    <button
+                      className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      title="Просмотр"
+                    >
+                      <Eye className="h-4 w-4 text-gray-500 dark:text-gray-400" />
                     </button>
-                    <button className="rounded p-1 hover:bg-gray-100" title="Скачать">
-                      <Download className="h-4 w-4 text-gray-500" />
+                    <button
+                      className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      title="Скачать"
+                    >
+                      <Download className="h-4 w-4 text-gray-500 dark:text-gray-400" />
                     </button>
                   </div>
                 </TableCell>
@@ -152,11 +162,11 @@ export default function Documents() {
 
         {filteredDocuments.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
-              <Search className="h-8 w-8 text-gray-400" />
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+              <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
             </div>
-            <h3 className="text-lg font-medium text-gray-900">Документы не найдены</h3>
-            <p className="mt-1 text-sm text-gray-500">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Документы не найдены</h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               Попробуйте изменить параметры поиска или фильтры
             </p>
           </div>
@@ -165,7 +175,7 @@ export default function Documents() {
 
       {/* Results info */}
       {filteredDocuments.length > 0 && (
-        <div className="flex items-center justify-between text-sm text-gray-500">
+        <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
           <p>Показано {filteredDocuments.length} из {documentList.length} документов</p>
         </div>
       )}

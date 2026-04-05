@@ -8,14 +8,17 @@ import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
   DollarSign, TrendingUp, Clock, Plus, Bot, User, Calendar,
   CheckCircle, AlertTriangle, MapPin, ChevronRight, MessageSquare,
+  Upload, Trash2, X,
 } from 'lucide-react';
 import {
-  mockRepairRecords, mockShippingPhotos,
+  mockRepairRecords,
   loadEquipment, saveEquipment, EQUIPMENT_STORAGE_KEY,
   loadGanttRentals, GANTT_RENTALS_STORAGE_KEY,
   loadServiceTickets, SERVICE_STORAGE_KEY,
   loadPayments, PAYMENTS_STORAGE_KEY,
+  loadShippingPhotos, saveShippingPhotos, SHIPPING_PHOTOS_KEY,
 } from '../mock-data';
+import type { ShippingPhoto } from '../types';
 import { formatDate, formatCurrency, getDaysUntil } from '../lib/utils';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -136,9 +139,90 @@ export default function EquipmentDetail() {
     .filter(r => r.equipmentId === id)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const shippingPhotos = [...mockShippingPhotos]
-    .filter(p => p.equipmentId === id)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const [allShippingPhotos, setAllShippingPhotos] = useState<ShippingPhoto[]>(() => loadShippingPhotos());
+  const shippingPhotos = useMemo(
+    () => allShippingPhotos
+      .filter(p => p.equipmentId === id)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [allShippingPhotos, id],
+  );
+
+  // ── Photo upload state ──
+  const [showUploadPhotoForm, setShowUploadPhotoForm] = useState(false);
+  const [uploadEventType, setUploadEventType] = useState<'shipping' | 'receiving'>('shipping');
+  const [uploadComment, setUploadComment] = useState('');
+  const [uploadPending, setUploadPending] = useState<string[]>([]);  // base64 previews
+  const mainPhotoInputRef = React.useRef<HTMLInputElement>(null);
+  const shippingPhotoInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Compress image to base64 (max 800px, 70% quality)
+  const compressToBase64 = (file: File): Promise<string> =>
+    new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 800;
+          const ratio = Math.min(MAX / img.width, MAX / img.height, 1);
+          const canvas = document.createElement('canvas');
+          canvas.width  = Math.round(img.width  * ratio);
+          canvas.height = Math.round(img.height * ratio);
+          canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.72));
+        };
+        img.src = e.target!.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const handleMainPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !equipment) return;
+    const base64 = await compressToBase64(file);
+    const updated = loadEquipment().map(eq =>
+      eq.id === equipment.id ? { ...eq, photo: base64 } : eq,
+    );
+    saveEquipment(updated);
+    setEquipmentList(updated);
+    e.target.value = '';
+  };
+
+  const handleMainPhotoDelete = () => {
+    if (!equipment) return;
+    const updated = loadEquipment().map(eq =>
+      eq.id === equipment.id ? { ...eq, photo: undefined } : eq,
+    );
+    saveEquipment(updated);
+    setEquipmentList(updated);
+  };
+
+  const handleShippingPhotoFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const results = await Promise.all(files.map(f => compressToBase64(f)));
+    setUploadPending(prev => [...prev, ...results]);
+    e.target.value = '';
+  };
+
+  const handleShippingPhotoSave = () => {
+    if (!uploadPending.length || !equipment) return;
+    const newEvent: ShippingPhoto = {
+      id: `sp-${Date.now()}`,
+      equipmentId: equipment.id,
+      date: new Date().toISOString().split('T')[0],
+      type: uploadEventType,
+      uploadedBy: 'Менеджер',
+      photos: uploadPending,
+      comment: uploadComment || undefined,
+      source: 'manual',
+    };
+    const updated = [...allShippingPhotos, newEvent];
+    saveShippingPhotos(updated);
+    setAllShippingPhotos(updated);
+    setUploadPending([]);
+    setUploadComment('');
+    setShowUploadPhotoForm(false);
+  };
 
   // ── Modal state ──
   const [showRepairModal, setShowRepairModal] = useState(false);
@@ -434,13 +518,47 @@ export default function EquipmentDetail() {
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <Card>
           <CardContent className="p-0">
-            {equipment.photo ? (
-              <img src={equipment.photo} alt={equipment.model} className="h-64 w-full rounded-lg object-cover" />
-            ) : (
-              <div className="flex h-64 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
-                <ImageIcon className="h-16 w-16 text-gray-400" />
+            {/* Hidden file input for main photo */}
+            <input
+              ref={mainPhotoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleMainPhotoUpload}
+            />
+            <div className="group relative">
+              {equipment.photo ? (
+                <img src={equipment.photo} alt={equipment.model} className="h-64 w-full rounded-lg object-cover" />
+              ) : (
+                <div className="flex h-64 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
+                  <ImageIcon className="h-16 w-16 text-gray-400" />
+                </div>
+              )}
+              {/* Photo action overlay */}
+              <div className="absolute inset-0 flex items-end justify-center rounded-lg bg-black/0 pb-3 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => mainPhotoInputRef.current?.click()}
+                    className="flex items-center gap-1.5 rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-800 shadow hover:bg-white"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    {equipment.photo ? 'Заменить' : 'Загрузить'}
+                  </button>
+                  {equipment.photo && (
+                    <button
+                      onClick={handleMainPhotoDelete}
+                      className="flex items-center gap-1.5 rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-red-600 shadow hover:bg-white"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Удалить
+                    </button>
+                  )}
+                </div>
               </div>
-            )}
+            </div>
+            <p className="px-3 py-2 text-center text-xs text-gray-400 dark:text-gray-500">
+              {equipment.photo ? 'Наведите для изменения фото' : 'Наведите для загрузки фото'}
+            </p>
           </CardContent>
         </Card>
 
@@ -1064,6 +1182,15 @@ export default function EquipmentDetail() {
 
         {/* ══ PHOTOS TAB ══ */}
         <Tabs.Content value="photos">
+          {/* Hidden file input for shipping photos */}
+          <input
+            ref={shippingPhotoInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handleShippingPhotoFilePick}
+          />
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1071,41 +1198,151 @@ export default function EquipmentDetail() {
                   <CardTitle>Фото отгрузок и приёмки</CardTitle>
                   <CardDescription>{shippingPhotos.length} событий</CardDescription>
                 </div>
-                <Button size="sm" variant="secondary">
+                <Button size="sm" variant="secondary" onClick={() => setShowUploadPhotoForm(v => !v)}>
                   <Plus className="h-4 w-4" />
                   Загрузить фото
                 </Button>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+
+              {/* Upload form */}
+              {showUploadPhotoForm && (
+                <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-blue-900 dark:text-blue-200">Новое фотособытие</span>
+                    <button
+                      onClick={() => { setShowUploadPhotoForm(false); setUploadPending([]); setUploadComment(''); }}
+                      className="rounded p-1 text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-800"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {/* Event type */}
+                  <div className="flex gap-2">
+                    {(['shipping', 'receiving'] as const).map(t => (
+                      <button
+                        key={t}
+                        onClick={() => setUploadEventType(t)}
+                        className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                          uploadEventType === t
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                        }`}
+                      >
+                        {t === 'shipping' ? 'Отгрузка' : 'Приёмка'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Comment */}
+                  <input
+                    type="text"
+                    placeholder="Комментарий (необязательно)"
+                    value={uploadComment}
+                    onChange={e => setUploadComment(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+
+                  {/* File picker */}
+                  <div>
+                    <button
+                      onClick={() => shippingPhotoInputRef.current?.click()}
+                      className="flex items-center gap-2 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-3 text-sm text-gray-500 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:border-blue-500 dark:hover:text-blue-400 transition-colors w-full justify-center"
+                    >
+                      <Camera className="h-4 w-4" />
+                      Выбрать фотографии (можно несколько)
+                    </button>
+                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                      Фото сжимаются до 800px и хранятся в браузере. Рекомендуется &lt;5 фото за раз.
+                    </p>
+                  </div>
+
+                  {/* Pending previews */}
+                  {uploadPending.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">Выбрано: {uploadPending.length} фото</span>
+                        <button onClick={() => setUploadPending([])} className="text-xs text-red-500 hover:underline">Очистить</button>
+                      </div>
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        {uploadPending.map((src, i) => (
+                          <div key={i} className="relative shrink-0">
+                            <img src={src} alt={`Preview ${i + 1}`} className="h-20 w-28 rounded-md border border-gray-200 dark:border-gray-700 object-cover" />
+                            <button
+                              onClick={() => setUploadPending(prev => prev.filter((_, idx) => idx !== i))}
+                              className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button size="sm" onClick={handleShippingPhotoSave} disabled={!uploadPending.length}>
+                    <Upload className="h-4 w-4" />
+                    Сохранить событие
+                  </Button>
+                </div>
+              )}
+
+              {/* Photo events list */}
               {shippingPhotos.length > 0 ? (
                 <div className="space-y-6">
                   {shippingPhotos.map(event => (
-                    <div key={event.id} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                    <div key={event.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <Badge variant={event.type === 'shipping' ? 'info' : 'success'}>
-                            {event.type === 'shipping' ? 'Отгрузка' : 'Приёмка'}
+                            {event.type === 'shipping' ? 'Отгрузка' : 'Приёмка (возврат)'}
                           </Badge>
                           <span className="text-sm text-gray-500 dark:text-gray-400">{formatDate(event.date)}</span>
                           {event.source === 'bot' && (
                             <span className="flex items-center gap-1 text-xs text-gray-400"><Bot className="h-3 w-3" /> Из бота</span>
                           )}
                         </div>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">Загрузил: {event.uploadedBy}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500 dark:text-gray-400">Загрузил: {event.uploadedBy}</span>
+                          <button
+                            onClick={() => {
+                              const updated = allShippingPhotos.filter(p => p.id !== event.id);
+                              saveShippingPhotos(updated);
+                              setAllShippingPhotos(updated);
+                            }}
+                            className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-red-500"
+                            title="Удалить событие"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
                       {event.comment && <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">{event.comment}</p>}
-                      <div className="mt-3 flex gap-3 overflow-x-auto">
+                      <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
                         {event.photos.map((photo, idx) => (
                           <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
-                            className="h-32 w-48 rounded-lg border border-gray-200 object-cover dark:border-gray-700" />
+                            className="h-32 w-48 shrink-0 rounded-lg border border-gray-200 dark:border-gray-700 object-cover cursor-pointer hover:opacity-90"
+                            onClick={() => window.open(photo, '_blank')}
+                          />
                         ))}
                       </div>
+                      <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">{event.photos.length} фото · нажмите для просмотра</p>
                     </div>
                   ))}
                 </div>
               ) : (
-                <EmptyState icon={<Camera className="h-12 w-12" />} text="Фотографий пока нет" />
+                !showUploadPhotoForm && (
+                  <EmptyState icon={<Camera className="h-12 w-12" />} text="Фотографий пока нет">
+                    <button
+                      onClick={() => setShowUploadPhotoForm(true)}
+                      className="mt-3 text-sm text-[--color-primary] hover:underline"
+                    >
+                      Загрузить первое фото
+                    </button>
+                  </EmptyState>
+                )
               )}
             </CardContent>
           </Card>

@@ -10,21 +10,28 @@ import { Link } from 'react-router';
 import { formatCurrency, formatDate } from '../lib/utils';
 import {
   loadEquipment,
+  saveEquipment,
   loadRentals,
   loadServiceTickets,
   loadClients,
   loadPayments,
+  loadGanttRentals,
+  saveGanttRentals,
   EQUIPMENT_STORAGE_KEY,
   RENTALS_STORAGE_KEY,
   SERVICE_STORAGE_KEY,
   CLIENTS_STORAGE_KEY,
   PAYMENTS_STORAGE_KEY,
+  GANTT_RENTALS_STORAGE_KEY,
 } from '../mock-data';
 import { KPIDetailModal } from '../components/modals/KPIDetailModal';
 import { ServiceRequestModal } from '../components/modals/ServiceRequestModal';
 import { NewClientModal } from '../components/modals/NewClientModal';
+import { NewRentalModal } from '../components/gantt/GanttModals';
 import { useAuth } from '../contexts/AuthContext';
 import type { Equipment, Rental, ServiceTicket, Client, Payment } from '../types';
+import type { GanttRentalData } from '../mock-data';
+import type { EquipmentStatus } from '../types';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -80,7 +87,10 @@ export default function Dashboard() {
   >(null);
   const [showServiceModal, setShowServiceModal] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
+  const [showRentalModal, setShowRentalModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>(() => loadGanttRentals());
+  const [equipmentList, setEquipmentList] = useState<Equipment[]>(() => loadEquipment());
 
   const refresh = useCallback(() => {
     setRefreshing(true);
@@ -90,13 +100,22 @@ export default function Dashboard() {
 
   // Auto-refresh on focus and when localStorage changes
   useEffect(() => {
-    const onFocus = () => setData(loadAll());
+    const onFocus = () => {
+      setData(loadAll());
+      setGanttRentals(loadGanttRentals());
+      setEquipmentList(loadEquipment());
+    };
     const watchKeys = [
       EQUIPMENT_STORAGE_KEY, RENTALS_STORAGE_KEY,
       SERVICE_STORAGE_KEY, CLIENTS_STORAGE_KEY, PAYMENTS_STORAGE_KEY,
+      GANTT_RENTALS_STORAGE_KEY,
     ];
     const onStorage = (e: StorageEvent) => {
-      if (e.key && watchKeys.includes(e.key)) setData(loadAll());
+      if (e.key && watchKeys.includes(e.key)) {
+        setData(loadAll());
+        setGanttRentals(loadGanttRentals());
+        setEquipmentList(loadEquipment());
+      }
     };
     window.addEventListener('focus', onFocus);
     window.addEventListener('storage', onStorage);
@@ -255,13 +274,11 @@ export default function Dashboard() {
             <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Обновить</span>
           </Button>
-          <Link to="/rentals/new">
-            <Button size="sm">
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Новая аренда</span>
-              <span className="sm:hidden">Аренда</span>
-            </Button>
-          </Link>
+          <Button size="sm" onClick={() => setShowRentalModal(true)}>
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">Новая аренда</span>
+            <span className="sm:hidden">Аренда</span>
+          </Button>
           <Button size="sm" variant="secondary" onClick={() => setShowServiceModal(true)}>
             <Plus className="h-4 w-4" />
             <span className="hidden sm:inline">Заявка в сервис</span>
@@ -661,12 +678,10 @@ export default function Dashboard() {
                 </div>
                 <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Пока нет аренд</p>
                 <p className="text-xs text-gray-400 mt-0.5 mb-3">Создайте первую аренду</p>
-                <Link to="/rentals/new">
-                  <Button size="sm" variant="secondary">
-                    <Plus className="h-4 w-4" />
-                    Создать аренду
-                  </Button>
-                </Link>
+                <Button size="sm" variant="secondary" onClick={() => setShowRentalModal(true)}>
+                  <Plus className="h-4 w-4" />
+                  Создать аренду
+                </Button>
               </div>
             ) : (
               <div className="space-y-3">
@@ -711,6 +726,59 @@ export default function Dashboard() {
       />
       <ServiceRequestModal open={showServiceModal} onOpenChange={setShowServiceModal} />
       <NewClientModal open={showClientModal} onOpenChange={setShowClientModal} />
+      <NewRentalModal
+        open={showRentalModal}
+        ganttRentals={ganttRentals}
+        equipmentList={equipmentList}
+        onClose={() => setShowRentalModal(false)}
+        onConfirm={(formData) => {
+          const todayStr = new Date().toISOString().split('T')[0];
+          const initialStatus: GanttRentalData['status'] =
+            (formData.startDate || '') <= todayStr ? 'active' : 'created';
+
+          const newRental: GanttRentalData = {
+            id: `GR-${Date.now()}`,
+            client: formData.client || '',
+            clientShort: (formData.client || '').substring(0, 20),
+            equipmentInv: formData.equipmentInv || '',
+            startDate: formData.startDate || '',
+            endDate: formData.endDate || '',
+            manager: formData.manager || '',
+            managerInitials: (formData.manager || '')
+              .split(' ')
+              .map((w: string) => w[0] ?? '')
+              .join('')
+              .toUpperCase(),
+            status: initialStatus,
+            paymentStatus: 'unpaid',
+            updSigned: false,
+            amount: Number(formData.amount) || 0,
+            comments: [],
+          };
+
+          const updatedRentals = [...ganttRentals, newRental];
+          setGanttRentals(updatedRentals);
+          saveGanttRentals(updatedRentals);
+
+          if (formData.equipmentInv) {
+            const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
+            const updatedEq = equipmentList.map(e => {
+              if (e.inventoryNumber !== formData.equipmentInv) return e;
+              return {
+                ...e,
+                status: eqStatus,
+                currentClient: initialStatus === 'active' ? newRental.client : e.currentClient,
+                returnDate: initialStatus === 'active' ? newRental.endDate : e.returnDate,
+              };
+            });
+            setEquipmentList(updatedEq);
+            saveEquipment(updatedEq);
+          }
+
+          setData(loadAll());
+          setShowRentalModal(false);
+        }}
+      />
     </div>
   );
 }

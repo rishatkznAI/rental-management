@@ -103,6 +103,16 @@ export const mockDowntimes: DowntimePeriod[] = [];
 
 export const mockServicePeriods: ServicePeriod[] = [];
 
+// ── localStorage для фото отгрузок/приёмки ────────────────────────────────────
+export const SHIPPING_PHOTOS_KEY = 'app_shipping_photos';
+export function loadShippingPhotos(): ShippingPhoto[] {
+  try { const r = localStorage.getItem(SHIPPING_PHOTOS_KEY); if (r) return JSON.parse(r); } catch {}
+  return [];
+}
+export function saveShippingPhotos(list: ShippingPhoto[]): void {
+  localStorage.setItem(SHIPPING_PHOTOS_KEY, JSON.stringify(list));
+}
+
 export const mockClients: Client[] = [];
 
 // ── localStorage для клиентов ─────────────────────────────────────────────────

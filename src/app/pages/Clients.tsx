@@ -22,7 +22,7 @@ export default function Clients() {
   }, []);
 
   const filteredClients = clientList.filter(client => {
-    const matchesSearch = search === '' || 
+    const matchesSearch = search === '' ||
       client.company.toLowerCase().includes(search.toLowerCase()) ||
       client.inn.includes(search) ||
       client.contact.toLowerCase().includes(search.toLowerCase());
@@ -35,8 +35,8 @@ export default function Clients() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Клиенты</h1>
-          <p className="mt-1 text-sm text-gray-500">База клиентов и контрагентов</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Клиенты</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">База клиентов и контрагентов</p>
         </div>
         <Link to="/clients/new">
           <Button size="sm">
@@ -48,9 +48,9 @@ export default function Clients() {
       </div>
 
       {/* Search */}
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <Input
             placeholder="Поиск по названию, ИНН, контакту..."
             value={search}
@@ -63,33 +63,37 @@ export default function Clients() {
       {/* Mobile: card list */}
       <div className="sm:hidden space-y-3">
         {filteredClients.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 bg-white">
-            <Search className="h-8 w-8 text-gray-400 mb-3" />
-            <h3 className="text-base font-medium text-gray-900">Клиенты не найдены</h3>
+          <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            <Search className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-3" />
+            <h3 className="text-base font-medium text-gray-900 dark:text-white">Клиенты не найдены</h3>
           </div>
         ) : filteredClients.map((client) => (
-          <Link key={client.id} to={`/clients/${client.id}`} className="block rounded-lg border border-gray-200 bg-white p-4 hover:border-blue-400 transition-colors">
+          <Link
+            key={client.id}
+            to={`/clients/${client.id}`}
+            className="block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+          >
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-900 text-sm truncate">{client.company}</p>
-                <p className="text-xs text-gray-500 font-mono mt-0.5">{client.inn}</p>
+                <p className="font-semibold text-gray-900 dark:text-white text-sm truncate">{client.company}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">{client.inn}</p>
               </div>
               {client.debt > 0 && (
                 <Badge variant="error" className="shrink-0 text-xs">{formatCurrency(client.debt)}</Badge>
               )}
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500">
-              <div><span className="font-medium text-gray-700">Контакт:</span> {client.contact}</div>
-              <div><span className="font-medium text-gray-700">Телефон:</span> {client.phone}</div>
-              <div><span className="font-medium text-gray-700">Оплата:</span> {client.paymentTerms}</div>
-              <div><span className="font-medium text-gray-700">Аренд:</span> {client.totalRentals}</div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Контакт:</span> {client.contact}</div>
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Телефон:</span> {client.phone}</div>
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Оплата:</span> {client.paymentTerms}</div>
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Аренд:</span> {client.totalRentals}</div>
             </div>
           </Link>
         ))}
       </div>
 
       {/* Desktop: Table */}
-      <div className="hidden sm:block rounded-lg border border-gray-200 bg-white">
+      <div className="hidden sm:block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <Table>
           <TableHeader>
             <TableRow>
@@ -106,7 +110,7 @@ export default function Clients() {
             {filteredClients.map((client) => (
               <TableRow key={client.id}>
                 <TableCell>
-                  <Link 
+                  <Link
                     to={`/clients/${client.id}`}
                     className="font-medium text-[--color-primary] hover:underline"
                   >
@@ -118,7 +122,7 @@ export default function Clients() {
                 </TableCell>
                 <TableCell>
                   <p className="text-sm">{client.contact}</p>
-                  <p className="text-xs text-gray-500">{client.phone}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{client.phone}</p>
                 </TableCell>
                 <TableCell>
                   <p className="text-sm">{client.paymentTerms}</p>
@@ -129,14 +133,14 @@ export default function Clients() {
                       <Badge variant="error">{formatCurrency(client.debt)}</Badge>
                     </div>
                   ) : (
-                    <span className="text-sm text-gray-400">—</span>
+                    <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
                   )}
                 </TableCell>
                 <TableCell>
                   {client.lastRentalDate ? (
                     <p className="text-sm">{formatDate(client.lastRentalDate)}</p>
                   ) : (
-                    <span className="text-sm text-gray-400">—</span>
+                    <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
                   )}
                 </TableCell>
                 <TableCell>
@@ -149,20 +153,20 @@ export default function Clients() {
 
         {filteredClients.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
-              <Search className="h-8 w-8 text-gray-400" />
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+              <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
             </div>
-            <h3 className="text-lg font-medium text-gray-900">Клиенты не найдены</h3>
-            <p className="mt-1 text-sm text-gray-500">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Клиенты не найдены</h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               Попробуйте изменить параметры поиска
             </p>
           </div>
         )}
-      </div>{/* end desktop table */}
+      </div>
 
       {/* Results info */}
       {filteredClients.length > 0 && (
-        <div className="flex items-center justify-between text-sm text-gray-500">
+        <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
           <p>Показано {filteredClients.length} из {clientList.length} клиентов</p>
         </div>
       )}

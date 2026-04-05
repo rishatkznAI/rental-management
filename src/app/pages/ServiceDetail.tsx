@@ -8,6 +8,7 @@ import { Select } from '../components/ui/select';
 import {
   ArrowLeft, Wrench, User, Clock, MapPin, Tag, FileText,
   CheckCircle, XCircle, AlertTriangle, Play, Package, History,
+  Camera, Upload, Trash2, X, Plus,
 } from 'lucide-react';
 import { formatDate } from '../lib/utils';
 import { loadServiceTickets, saveServiceTickets } from '../mock-data';
@@ -90,6 +91,56 @@ export default function ServiceDetail() {
   const [newResult, setNewResult] = useState('');
   const [newPlannedDate, setNewPlannedDate] = useState('');
   const [showResultInput, setShowResultInput] = useState(false);
+
+  // ── Photo upload state ──
+  const [photoPending, setPhotoPending] = useState<string[]>([]);
+  const photoInputRef = React.useRef<HTMLInputElement>(null);
+
+  const compressToBase64 = (file: File): Promise<string> =>
+    new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 800;
+          const ratio = Math.min(MAX / img.width, MAX / img.height, 1);
+          const canvas = document.createElement('canvas');
+          canvas.width  = Math.round(img.width  * ratio);
+          canvas.height = Math.round(img.height * ratio);
+          canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.72));
+        };
+        img.src = e.target!.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const handlePhotoFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const results = await Promise.all(files.map(f => compressToBase64(f)));
+    setPhotoPending(prev => [...prev, ...results]);
+    e.target.value = '';
+  };
+
+  const savePhotos = () => {
+    if (!ticket || !photoPending.length) return;
+    const updated: ServiceTicket = {
+      ...ticket,
+      photos: [...(ticket.photos ?? []), ...photoPending],
+    };
+    persist(updated);
+    setPhotoPending([]);
+  };
+
+  const deletePhoto = (idx: number) => {
+    if (!ticket) return;
+    const updated: ServiceTicket = {
+      ...ticket,
+      photos: (ticket.photos ?? []).filter((_, i) => i !== idx),
+    };
+    persist(updated);
+  };
 
   // Persist changes
   const persist = useCallback((updated: ServiceTicket) => {
@@ -417,6 +468,95 @@ export default function ServiceDetail() {
                   </div>
                 </>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Photos card */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Camera className="h-4 w-4" />
+                  Фото заявки
+                </CardTitle>
+                <Button size="sm" variant="secondary" onClick={() => photoInputRef.current?.click()}>
+                  <Plus className="h-4 w-4" />
+                  Добавить фото
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handlePhotoFilePick}
+              />
+
+              {/* Pending previews */}
+              {photoPending.length > 0 && (
+                <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-blue-700 dark:text-blue-300 font-medium">Выбрано {photoPending.length} фото</span>
+                    <button onClick={() => setPhotoPending([])} className="text-xs text-gray-500 hover:text-red-500">Очистить</button>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {photoPending.map((src, i) => (
+                      <div key={i} className="relative shrink-0">
+                        <img src={src} alt="" className="h-16 w-24 rounded-md object-cover border border-gray-200 dark:border-gray-700" />
+                        <button
+                          onClick={() => setPhotoPending(prev => prev.filter((_, idx) => idx !== i))}
+                          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <Button size="sm" onClick={savePhotos}>
+                    <Upload className="h-3.5 w-3.5" />
+                    Сохранить
+                  </Button>
+                </div>
+              )}
+
+              {/* Saved photos grid */}
+              {(ticket.photos ?? []).length > 0 ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {(ticket.photos ?? []).map((src, i) => (
+                    <div key={i} className="group relative aspect-square rounded-md overflow-hidden border border-gray-200 dark:border-gray-700">
+                      <img
+                        src={src}
+                        alt={`Фото ${i + 1}`}
+                        className="h-full w-full object-cover cursor-pointer hover:opacity-90"
+                        onClick={() => window.open(src, '_blank')}
+                      />
+                      <button
+                        onClick={() => deletePhoto(i)}
+                        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : photoPending.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <Camera className="h-8 w-8 text-gray-300 dark:text-gray-600 mb-2" />
+                  <p className="text-sm text-gray-400 dark:text-gray-500">Фото не добавлены</p>
+                  <button
+                    onClick={() => photoInputRef.current?.click()}
+                    className="mt-2 text-sm text-[--color-primary] hover:underline"
+                  >
+                    Загрузить фото
+                  </button>
+                </div>
+              )}
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                Фото сжимаются до 800px и хранятся в браузере
+              </p>
             </CardContent>
           </Card>
         </div>

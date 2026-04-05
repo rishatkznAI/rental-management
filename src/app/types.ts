@@ -91,13 +91,22 @@ export interface ServiceTicket {
   id: string;
   equipmentId: string;
   equipment: string;
+  inventoryNumber?: string;
+  serialNumber?: string;
+  equipmentType?: string;
+  location?: string;
   reason: string;
   description: string;
   priority: ServicePriority;
   sla: string;
   assignedTo?: string;
+  createdBy?: string;
+  source?: 'manual' | 'bot' | 'manager' | 'system';
   status: ServiceStatus;
-  workLog: { date: string; text: string; author: string }[];
+  plannedDate?: string;
+  closedAt?: string;
+  result?: string;
+  workLog: { date: string; text: string; author: string; type?: 'comment' | 'status_change' | 'assign' }[];
   parts: { name: string; qty: number; cost: number }[];
   createdAt: string;
 }

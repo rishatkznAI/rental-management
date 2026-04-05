@@ -223,7 +223,7 @@ export default function Rentals() {
       );
       if (!stillActive && e.status !== 'inactive' && e.status !== 'in_service') {
         eqChanged = true;
-        return { ...e, status: 'available' as EquipmentStatus };
+        return { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined };
       }
       return e;
     });
@@ -659,15 +659,17 @@ export default function Rentals() {
               setGanttRentals(updated);
               saveGanttRentals(updated);
 
-              // При активации аренды — техника "В аренде"
+              // При активации аренды — техника "В аренде" + заполняем клиента и дату возврата
               if (nextStatus === 'active') {
                 const newEqList = equipmentList.map(e =>
-                  e.inventoryNumber === rental.equipmentInv ? { ...e, status: 'rented' as EquipmentStatus } : e,
+                  e.inventoryNumber === rental.equipmentInv
+                    ? { ...e, status: 'rented' as EquipmentStatus, currentClient: rental.client, returnDate: rental.endDate }
+                    : e,
                 );
                 setEquipmentList(newEqList);
                 saveEquipment(newEqList);
               }
-              // При закрытии — если нет других активных аренд, техника "Свободна"
+              // При закрытии — если нет других активных аренд, техника "Свободна" + очищаем клиента и дату
               if (nextStatus === 'closed') {
                 const hasOtherActive = ganttRentals.some(
                   r => r.equipmentInv === rental.equipmentInv
@@ -676,7 +678,9 @@ export default function Rentals() {
                 );
                 if (!hasOtherActive) {
                   const newEqList = equipmentList.map(e =>
-                    e.inventoryNumber === rental.equipmentInv ? { ...e, status: 'available' as EquipmentStatus } : e,
+                    e.inventoryNumber === rental.equipmentInv
+                      ? { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
+                      : e,
                   );
                   setEquipmentList(newEqList);
                   saveEquipment(newEqList);
@@ -689,14 +693,16 @@ export default function Rentals() {
             const updated = ganttRentals.filter(r => r.id !== rental.id);
             setGanttRentals(updated);
             saveGanttRentals(updated);
-            // Если после удаления нет других активных аренд — техника снова свободна
+            // Если после удаления нет других активных аренд — техника снова свободна, очищаем клиента и дату
             const hasOtherActive = updated.some(
               r => r.equipmentInv === rental.equipmentInv
                 && r.status !== 'returned' && r.status !== 'closed',
             );
             if (!hasOtherActive) {
               const newEqList = equipmentList.map(e =>
-                e.inventoryNumber === rental.equipmentInv ? { ...e, status: 'available' as EquipmentStatus } : e,
+                e.inventoryNumber === rental.equipmentInv
+                  ? { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
+                  : e,
               );
               setEquipmentList(newEqList);
               saveEquipment(newEqList);
@@ -731,7 +737,9 @@ export default function Rentals() {
             if (!hasOtherActive) {
               const newStatus: EquipmentStatus = data.result === 'service' ? 'in_service' : 'available';
               const newEqList = equipmentList.map(e =>
-                e.inventoryNumber === rental.equipmentInv ? { ...e, status: newStatus } : e,
+                e.inventoryNumber === rental.equipmentInv
+                  ? { ...e, status: newStatus, currentClient: undefined, returnDate: undefined }
+                  : e,
               );
               setEquipmentList(newEqList);
               saveEquipment(newEqList);
@@ -783,12 +791,18 @@ export default function Rentals() {
           setGanttRentals(updated);
           saveGanttRentals(updated);
 
-          // Синхронизируем статус техники на основе initialStatus аренды
+          // Синхронизируем статус техники + клиента и дату возврата на основе initialStatus аренды
           if (data.equipmentInv) {
             const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
-            const newEqList = equipmentList.map(e =>
-              e.inventoryNumber === data.equipmentInv ? { ...e, status: eqStatus } : e,
-            );
+            const newEqList = equipmentList.map(e => {
+              if (e.inventoryNumber !== data.equipmentInv) return e;
+              return {
+                ...e,
+                status: eqStatus,
+                currentClient: initialStatus === 'active' ? newRental.client : e.currentClient,
+                returnDate: initialStatus === 'active' ? newRental.endDate : e.returnDate,
+              };
+            });
             setEquipmentList(newEqList);
             saveEquipment(newEqList);
           }

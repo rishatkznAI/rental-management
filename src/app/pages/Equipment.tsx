@@ -6,13 +6,39 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { getEquipmentStatusBadge } from '../components/ui/badge';
 import { Search, Filter, Download, MoreVertical, Plus } from 'lucide-react';
 import { Link } from 'react-router';
-import { loadEquipment, EQUIPMENT_STORAGE_KEY } from '../mock-data';
+import { loadEquipment, loadGanttRentals, EQUIPMENT_STORAGE_KEY, GANTT_RENTALS_STORAGE_KEY } from '../mock-data';
 import { formatDate } from '../lib/utils';
 import type { EquipmentStatus, EquipmentType, EquipmentDrive, Equipment as EquipmentType_ } from '../types';
+import type { GanttRentalData } from '../mock-data';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+
+// Для каждой единицы техники подтягивает currentClient и returnDate из активной аренды
+// если эти поля не заполнены в самой записи техники (backward-compatibility)
+function enrichEquipment(eqList: EquipmentType_[], ganttRentals: GanttRentalData[]): EquipmentType_[] {
+  const activeByInv = new Map<string, GanttRentalData>();
+  for (const r of ganttRentals) {
+    if (r.status === 'active' || r.status === 'created') {
+      // Предпочитаем 'active' над 'created'
+      const existing = activeByInv.get(r.equipmentInv);
+      if (!existing || r.status === 'active') {
+        activeByInv.set(r.equipmentInv, r);
+      }
+    }
+  }
+  return eqList.map(eq => {
+    const active = activeByInv.get(eq.inventoryNumber);
+    if (!active) return eq;
+    return {
+      ...eq,
+      currentClient: eq.currentClient || active.client || eq.currentClient,
+      returnDate: eq.returnDate || active.endDate || eq.returnDate,
+    };
+  });
+}
 
 export default function Equipment() {
   const [equipmentList, setEquipmentList] = React.useState<EquipmentType_[]>(() => loadEquipment());
+  const [ganttRentals, setGanttRentals] = React.useState<GanttRentalData[]>(() => loadGanttRentals());
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
@@ -20,20 +46,29 @@ export default function Equipment() {
 
   // Обновляем список при изменении localStorage из другой вкладки или после добавления
   React.useEffect(() => {
+    const reload = () => {
+      setEquipmentList(loadEquipment());
+      setGanttRentals(loadGanttRentals());
+    };
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === EQUIPMENT_STORAGE_KEY) setEquipmentList(loadEquipment());
+      if (e.key === EQUIPMENT_STORAGE_KEY || e.key === GANTT_RENTALS_STORAGE_KEY) reload();
     };
     window.addEventListener('storage', handleStorage);
-    // Также обновляем при фокусе на вкладке (после возврата с /equipment/new)
-    const handleFocus = () => setEquipmentList(loadEquipment());
-    window.addEventListener('focus', handleFocus);
+    // Также обновляем при фокусе на вкладке (после возврата с /equipment/new или /rentals)
+    window.addEventListener('focus', reload);
     return () => {
       window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('focus', reload);
     };
   }, []);
 
-  const filteredEquipment = equipmentList.filter(eq => {
+  // Список техники, обогащённый данными из активных аренд (fallback для устаревших записей)
+  const enrichedEquipmentList = React.useMemo(
+    () => enrichEquipment(equipmentList, ganttRentals),
+    [equipmentList, ganttRentals],
+  );
+
+  const filteredEquipment = enrichedEquipmentList.filter(eq => {
     const matchesSearch = search === '' ||
       eq.inventoryNumber.toLowerCase().includes(search.toLowerCase()) ||
       eq.model.toLowerCase().includes(search.toLowerCase()) ||

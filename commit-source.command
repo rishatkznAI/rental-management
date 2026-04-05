@@ -11,7 +11,28 @@ git add src/ index.html
 
 echo ""
 echo "💾 Создаём коммит..."
-git commit -m "fix(equipment): full dark mode for Equipment list page
+git commit -m "fix(equipment,rentals): sync currentClient+returnDate between Equipment and Rentals tabs
+
+- Rentals.tsx — 6 write-time fixes to saveEquipment calls:
+  1. Activate rental (created→active): set currentClient=rental.client, returnDate=rental.endDate
+  2. Close rental (returned→closed): clear currentClient/returnDate when no other active rental
+  3. Delete rental: clear currentClient/returnDate when no other active rental
+  4. Return modal confirm: clear currentClient/returnDate on successful return
+  5. New rental creation: set currentClient+returnDate when initialStatus='active'
+  6. Auto-cleanup on mount (expired active/created→returned/closed): clear currentClient/returnDate
+
+- Equipment.tsx — read-time fallback via enrichEquipment():
+  Derives currentClient and returnDate from active GanttRentals when the
+  equipment record itself has these fields empty (backward-compatibility for
+  data created before this fix). Uses useMemo so it's computed efficiently.
+  Also watches GANTT_RENTALS_STORAGE_KEY in storage/focus events.
+
+Result: Техника tab now always shows current client and return date for
+rented equipment, matching Аренды tab. Clearing is automatic on return/close.
+
+---
+
+fix(equipment): full dark mode for Equipment list page
 
 - Filter bar: bg-white → dark:bg-gray-800, border-gray-200 → dark:border-gray-700
 - Table wrapper: bg-white → dark:bg-gray-800, border → dark:border-gray-700

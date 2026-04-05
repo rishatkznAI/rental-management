@@ -11,7 +11,47 @@ git add src/ index.html
 
 echo ""
 echo "💾 Создаём коммит..."
-git commit -m "fix(equipment,rentals): sync currentClient+returnDate between Equipment and Rentals tabs
+git commit -m "feat(reports): full real-data overhaul of Reports tab
+
+- Removed all hardcoded mock data (utilizationData, revenueByClient, downtimeData)
+- Now loads from localStorage via loadEquipment/loadGanttRentals/loadServiceTickets
+- Auto-refresh: window.focus + storage events for 3 keys (equipment, gantt, service)
+- Manual 'Обновить данные' button with animate-spin spinner and disabled state
+- Timestamp: 'Обновлено: DD.MM.YYYY HH:MM · X мин. назад · реальные данные системы'
+
+KPI cards (all real):
+  - Всего техники: loadEquipment().length, breakdown free/rented
+  - Активные аренды: ganttRentals.filter(active).length
+  - Сервисных заявок: open (non-closed) tickets, in_progress breakdown
+  - Текущая утилизация: rented/activeEquipment*100, null when no equipment
+
+Utilization chart (last 6 months):
+  - Per-month calculation using equipment-days formula
+  - (rentedDays / totalEquipment*daysInMonth) * 100 per month
+  - Empty state when no rental data
+
+Revenue by clients:
+  - Grouped from GanttRentals by client, sum amount
+  - Top-5 sorted by revenue descending
+  - formatCurrency tooltip, shortened labels
+  - Empty state when no rental amounts
+
+Downtime / pie chart:
+  - Active service tickets grouped by status (excluding closed)
+  - Labels: Новые заявки / В ремонте / Ожидание запчастей / Готово к выдаче
+  - Empty state when no open tickets
+
+Fleet structure bars:
+  - Real counts from loadEquipment() grouped by type
+  - % labels next to count
+  - Footer: Active / Rented / In-service / Inactive breakdown
+  - Empty state when totalEquipment=0 (no fake bars)
+
+Dark mode: tooltips use CSS vars (--card, --border, --foreground)
+
+---
+
+fix(equipment,rentals): sync currentClient+returnDate between Equipment and Rentals tabs
 
 - Rentals.tsx — 6 write-time fixes to saveEquipment calls:
   1. Activate rental (created→active): set currentClient=rental.client, returnDate=rental.endDate

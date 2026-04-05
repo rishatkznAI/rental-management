@@ -65,29 +65,30 @@ export default function Equipment() {
   };
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Техника</h1>
+          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Техника</h1>
           <p className="mt-1 text-sm text-gray-500">Управление парком подъёмных платформ</p>
         </div>
-        <div className="flex gap-3">
-          <Button variant="secondary">
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" className="hidden sm:flex">
             <Download className="h-4 w-4" />
             Экспорт
           </Button>
           <Link to="/equipment/new">
-            <Button>
+            <Button size="sm">
               <Plus className="h-4 w-4" />
-              Добавить технику
+              <span className="hidden sm:inline">Добавить технику</span>
+              <span className="sm:hidden">Добавить</span>
             </Button>
           </Link>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-4 rounded-lg border border-gray-200 bg-white p-4">
+      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4">
         <div className="flex-1 min-w-[200px]">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -142,8 +143,38 @@ export default function Equipment() {
         </Button>
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border border-gray-200 bg-white">
+      {/* Mobile: card list */}
+      <div className="sm:hidden space-y-3">
+        {filteredEquipment.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 bg-white">
+            <Search className="h-8 w-8 text-gray-400 mb-3" />
+            <h3 className="text-base font-medium text-gray-900">Техника не найдена</h3>
+            <p className="mt-1 text-sm text-gray-500">Попробуйте изменить фильтры</p>
+          </div>
+        ) : filteredEquipment.map((eq) => (
+          <Link key={eq.id} to={`/equipment/${eq.id}`} className="block rounded-lg border border-gray-200 bg-white p-4 hover:border-blue-400 transition-colors">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-[--color-primary] text-sm">{eq.inventoryNumber}</span>
+                  {getEquipmentStatusBadge(eq.status)}
+                </div>
+                <p className="text-sm font-medium text-gray-900 mt-1 truncate">{eq.manufacturer} {eq.model}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{getEquipmentTypeLabel(eq.type)} · {getEquipmentDriveLabel(eq.drive)}</p>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500">
+              <div><span className="font-medium text-gray-700">Локация:</span> {eq.location}</div>
+              {eq.currentClient && <div><span className="font-medium text-gray-700">Клиент:</span> {eq.currentClient}</div>}
+              <div><span className="font-medium text-gray-700">След. ТО:</span> {formatDate(eq.nextMaintenance)}</div>
+              {eq.returnDate && <div><span className="font-medium text-gray-700">Возврат:</span> {formatDate(eq.returnDate)}</div>}
+            </div>
+          </Link>
+        ))}
+      </div>
+
+      {/* Desktop: Table */}
+      <div className="hidden sm:block rounded-lg border border-gray-200 bg-white">
         <Table>
           <TableHeader>
             <TableRow>
@@ -238,7 +269,7 @@ export default function Equipment() {
             </p>
           </div>
         )}
-      </div>
+      </div>{/* end desktop table */}
 
       {/* Results info */}
       {filteredEquipment.length > 0 && (

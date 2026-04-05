@@ -71,33 +71,36 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Дашборд</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Дашборд</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Обзор ключевых показателей системы</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-2">
           <Link to="/rentals/new">
-            <Button>
+            <Button size="sm">
               <Plus className="h-4 w-4" />
-              Новая аренда
+              <span className="hidden sm:inline">Новая аренда</span>
+              <span className="sm:hidden">Аренда</span>
             </Button>
           </Link>
-          <Button variant="secondary" onClick={() => setShowServiceModal(true)}>
+          <Button size="sm" variant="secondary" onClick={() => setShowServiceModal(true)}>
             <Plus className="h-4 w-4" />
-            Заявка в сервис
+            <span className="hidden sm:inline">Заявка в сервис</span>
+            <span className="sm:hidden">Сервис</span>
           </Button>
-          <Button variant="secondary" onClick={() => setShowClientModal(true)}>
+          <Button size="sm" variant="secondary" onClick={() => setShowClientModal(true)}>
             <Plus className="h-4 w-4" />
-            Новый клиент
+            <span className="hidden sm:inline">Новый клиент</span>
+            <span className="sm:hidden">Клиент</span>
           </Button>
         </div>
       </div>
 
       {/* KPI Cards — row 1 (5 основных) */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-5">
         <Card 
           className="cursor-pointer hover:shadow-lg transition-shadow"
           onClick={() => setSelectedKPI('utilization')}
@@ -177,7 +180,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI Cards — row 2 (дебиторка) */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-5">
         <Card
           className="cursor-pointer hover:shadow-lg transition-shadow"
           onClick={() => setSelectedKPI('totalDebt')}
@@ -225,7 +228,7 @@ export default function Dashboard() {
           <CardDescription>{managerStats.name} · март 2026</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-6">
             <div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
               <p className="text-xs text-gray-500 dark:text-gray-400">Активные аренды</p>
               <p className="mt-1 text-2xl text-blue-700 dark:text-blue-300">{managerStats.activeRentals}</p>
@@ -264,7 +267,7 @@ export default function Dashboard() {
       </Card>
 
       {/* Alerts & Quick Info */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
         {/* Alerts Panel */}
         <Card>
           <CardHeader>

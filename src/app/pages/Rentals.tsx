@@ -379,7 +379,7 @@ export default function Rentals() {
   }, [today, viewStart, totalDays, dayWidth]);
 
   return (
-    <div className="flex h-[calc(100vh)] flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-[calc(100vh-56px-64px)] sm:h-[calc(100vh)] flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
       {/* ===== Toolbar ===== */}
       <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-5 py-3 dark:border-gray-700 dark:bg-gray-800">
         <h1 className="mr-2 text-xl text-gray-900 dark:text-white">Планировщик аренды</h1>

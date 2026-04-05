@@ -32,17 +32,17 @@ export default function Payments() {
   });
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Платежи</h1>
+          <h1 className="text-2xl font-bold sm:text-3xl text-gray-900">Платежи</h1>
           <p className="mt-1 text-sm text-gray-500">Управление платежами и задолженностями</p>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-4 rounded-lg border border-gray-200 bg-white p-4">
+      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4">
         <div className="flex-1 min-w-[200px]">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />

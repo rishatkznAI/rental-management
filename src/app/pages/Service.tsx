@@ -37,23 +37,24 @@ export default function Service() {
   });
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Сервис</h1>
+          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Сервис</h1>
           <p className="mt-1 text-sm text-gray-500">Управление сервисными заявками</p>
         </div>
         <Link to="/service/new">
-          <Button>
+          <Button size="sm">
             <Plus className="h-4 w-4" />
-            Новая заявка
+            <span className="hidden sm:inline">Новая заявка</span>
+            <span className="sm:hidden">Создать</span>
           </Button>
         </Link>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-4 rounded-lg border border-gray-200 bg-white p-4">
+      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4">
         <div className="flex-1 min-w-[200px]">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -94,8 +95,37 @@ export default function Service() {
         />
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border border-gray-200 bg-white">
+      {/* Mobile: card list */}
+      <div className="sm:hidden space-y-3">
+        {filteredTickets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 bg-white">
+            <Search className="h-8 w-8 text-gray-400 mb-3" />
+            <h3 className="text-base font-medium text-gray-900">Заявки не найдены</h3>
+          </div>
+        ) : filteredTickets.map((ticket) => (
+          <Link key={ticket.id} to={`/service/${ticket.id}`} className="block rounded-lg border border-gray-200 bg-white p-4 hover:border-blue-400 transition-colors">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-[--color-primary] text-sm">{ticket.id}</span>
+                  {getServiceStatusBadge(ticket.status)}
+                  {getServicePriorityBadge(ticket.priority)}
+                </div>
+                <p className="text-sm text-gray-700 mt-1 font-medium truncate">{ticket.equipment}</p>
+                <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{ticket.reason}</p>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500">
+              <div><span className="font-medium text-gray-700">SLA:</span> {ticket.sla}</div>
+              {ticket.assignedTo && <div><span className="font-medium text-gray-700">Назначен:</span> {ticket.assignedTo}</div>}
+              <div><span className="font-medium text-gray-700">Создана:</span> {formatDate(ticket.createdAt)}</div>
+            </div>
+          </Link>
+        ))}
+      </div>
+
+      {/* Desktop: Table */}
+      <div className="hidden sm:block rounded-lg border border-gray-200 bg-white">
         <Table>
           <TableHeader>
             <TableRow>
@@ -162,7 +192,7 @@ export default function Service() {
             </p>
           </div>
         )}
-      </div>
+      </div>{/* end desktop table */}
 
       {/* Results info */}
       {filteredTickets.length > 0 && (

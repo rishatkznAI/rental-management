@@ -84,7 +84,7 @@ export default function RentalDetail() {
 
   if (!rental) {
     return (
-      <div className="space-y-6 p-8">
+      <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
         <div className="text-center py-12">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Аренда не найдена</h2>
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Договор с ID «{id}» не существует</p>
@@ -111,16 +111,16 @@ export default function RentalDetail() {
   const remainingBalance = rental.price - rental.discount - extended.paidAmount;
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Button variant="secondary" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{rental.id}</h1>
+              <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">{rental.id}</h1>
               {getRentalStatusBadge(rental.status)}
             </div>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{rental.client}</p>
@@ -148,7 +148,7 @@ export default function RentalDetail() {
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         {/* Main Info */}
         <div className="space-y-6 lg:col-span-2">
           {/* Client & Contact */}

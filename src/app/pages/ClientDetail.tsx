@@ -143,7 +143,7 @@ export default function ClientDetail() {
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-4">

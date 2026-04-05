@@ -143,9 +143,9 @@ export default function Settings() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Настройки</h1>
+        <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">Настройки</h1>
         <p className="mt-1 text-sm text-gray-500">Конфигурация системы и справочники</p>
       </div>
 

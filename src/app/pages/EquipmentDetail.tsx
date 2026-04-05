@@ -123,17 +123,17 @@ export default function EquipmentDetail() {
   const tabTriggerClass = "border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:hover:text-gray-200";
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
       <div>
         <Link to="/equipment" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
           <ArrowLeft className="h-4 w-4" />
           Вернуться к списку
         </Link>
-        <div className="mt-4 flex items-start justify-between">
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{equipment.inventoryNumber}</h1>
+              <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">{equipment.inventoryNumber}</h1>
               {getEquipmentStatusBadge(equipment.status)}
               <Badge variant={equipment.owner === 'own' ? 'success' : equipment.owner === 'investor' ? 'info' : 'warning'}>
                 {ownerLabels[equipment.owner]}
@@ -150,7 +150,7 @@ export default function EquipmentDetail() {
       </div>
 
       {/* Photo and Key Info */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <Card>
           <CardContent className="p-0">
             {equipment.photo ? (

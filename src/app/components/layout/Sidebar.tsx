@@ -13,6 +13,7 @@ import {
   Moon,
   Sun,
   LogOut,
+  X,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -30,7 +31,6 @@ const navigation = [
   { name: 'Настройки', href: '/settings', icon: Settings },
 ];
 
-/** Derive initials from a name string */
 function getInitials(name: string): string {
   return name
     .split(' ')
@@ -39,7 +39,12 @@ function getInitials(name: string): string {
     .join('');
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
@@ -50,8 +55,24 @@ export function Sidebar() {
     navigate('/login', { replace: true });
   };
 
+  const handleNavClick = () => {
+    // Close mobile sidebar on navigation
+    onClose();
+  };
+
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+    <aside
+      className={cn(
+        // Base styles
+        'fixed left-0 top-0 z-40 h-screen w-64',
+        'border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800',
+        'transition-transform duration-300 ease-in-out',
+        // Desktop: always visible
+        'sm:translate-x-0',
+        // Mobile: slide in/out
+        isOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0',
+      )}
+    >
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center justify-between border-b border-gray-200 dark:border-gray-700 px-6">
@@ -59,17 +80,27 @@ export function Sidebar() {
             <Truck className="h-8 w-8 text-[--color-primary]" />
             <span className="ml-2 text-lg font-bold text-gray-900 dark:text-white">Подъёмники</span>
           </div>
-          <button
-            onClick={toggleTheme}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            aria-label="Переключить тему"
-          >
-            {theme === 'light' ? (
-              <Moon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-            ) : (
-              <Sun className="h-5 w-5 text-gray-400" />
-            )}
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              aria-label="Переключить тему"
+            >
+              {theme === 'light' ? (
+                <Moon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+              ) : (
+                <Sun className="h-5 w-5 text-gray-400" />
+              )}
+            </button>
+            {/* Close button — mobile only */}
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors sm:hidden"
+              aria-label="Закрыть меню"
+            >
+              <X className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+            </button>
+          </div>
         </div>
 
         {/* Navigation */}
@@ -84,14 +115,15 @@ export function Sidebar() {
               <Link
                 key={item.name}
                 to={item.href}
+                onClick={handleNavClick}
                 className={cn(
-                  'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  'relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
                   isActive
                     ? 'text-[--color-primary] bg-blue-50 dark:bg-blue-900/20'
                     : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                 )}
               >
-                <Icon className="h-5 w-5" />
+                <Icon className="h-5 w-5 shrink-0" />
                 {item.name}
                 {isActive && (
                   <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-[--color-primary] rounded-full" />

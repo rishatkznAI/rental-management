@@ -198,7 +198,7 @@ export default function EquipmentNew() {
   const isSublease  = selectedOwnerName.includes('субар');
 
   return (
-    <div className="space-y-6 p-8 max-w-3xl mx-auto">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8 max-w-3xl mx-auto">
       {/* Шапка */}
       <div>
         <Link
@@ -208,7 +208,7 @@ export default function EquipmentNew() {
           <ArrowLeft className="h-4 w-4" />
           Вернуться к списку
         </Link>
-        <h1 className="mt-4 text-3xl font-bold text-gray-900 dark:text-white">
+        <h1 className="mt-4 text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">
           Добавить технику
         </h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">

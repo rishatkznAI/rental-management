@@ -42,11 +42,11 @@ export default function Reports() {
   };
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Отчёты</h1>
+          <h1 className="text-2xl font-bold sm:text-3xl text-gray-900">Отчёты</h1>
           <p className="mt-1 text-sm text-gray-500">Аналитика и статистика работы системы</p>
         </div>
         <Select

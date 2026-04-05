@@ -7,18 +7,34 @@ rm -f .git/index.lock .git/HEAD.lock
 
 echo ""
 echo "📦 Добавляем изменения..."
-git add src/ index.html open-fresh.command open-site.command public/clear.html public/reset.html
+git add src/ index.html
 
 echo ""
 echo "💾 Создаём коммит..."
-git commit -m "fix(rental): overhaul Gantt visuals, status logic, toast notifications
+git commit -m "feat(mobile): full mobile adaptation + fix detail pages
 
-- Gantt bars: larger, bolder, show client + status + dates
-- Grid lines more visible; empty rows show 'нет аренд'
-- Manager filter: dynamic from users DB
-- Toast on rental create and return
-- ReturnModal: dropdown to select active rental
-- index.html: bump cache-bust key"
+Mobile adaptation:
+- Layout.tsx: mobile top bar with hamburger, slide-in sidebar overlay,
+  fixed bottom navigation (5 tabs: Dashboard / Equipment / Rentals /
+  Service / Clients). Main content padded for top/bottom bars on mobile.
+- Sidebar.tsx: accepts isOpen/onClose props, slide-in on mobile
+  (translate-x), auto-close on navigation, X button on mobile.
+- Dashboard: responsive KPI grid (2 cols mobile → 5 cols desktop),
+  button labels truncated on mobile, spacing reduced.
+- Equipment / Clients / Service: mobile card list view replaces table
+  on small screens. Desktop table hidden with sm:hidden / hidden sm:block.
+- All pages: p-8 → p-4 sm:p-6 md:p-8, text-3xl → text-2xl sm:text-3xl,
+  page headers wrap flex-col on mobile with sm:flex-row.
+- Rentals Gantt: height calc accounts for mobile top/bottom bars.
+- RentalDetail, EquipmentDetail: action button rows wrap on mobile.
+
+Fix detail pages (Service + Clients modules):
+- ServiceDetail.tsx: was searching empty mockServiceRequests[] — fixed
+  to use loadServiceTickets(). Full card with status actions, history.
+- ClientDetail.tsx: was searching empty mockClients[] — fixed to use
+  loadClients(). Full card with inline edit mode, rental history.
+- ServiceNew.tsx, ClientNew.tsx: expanded forms, redirect to new record.
+- types.ts: extended ServiceTicket and Client with optional fields."
 
 echo ""
 echo "🚀 Пушим в main..."

@@ -13,6 +13,7 @@ import {
   loadEquipment, saveEquipment, EQUIPMENT_STORAGE_KEY,
   loadGanttRentals, saveGanttRentals, GANTT_RENTALS_STORAGE_KEY,
 } from '../mock-data';
+import { loadUsers } from './Settings';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
 import type { Equipment, EquipmentType, EquipmentStatus } from '../types';
 import {
@@ -31,7 +32,7 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; totalDays: number; label: 
 };
 
 const LEFT_PANEL_WIDTH = 280;
-const ROW_HEIGHT = 72;
+const ROW_HEIGHT = 80;
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
   scissor: 'Ножничный',
@@ -48,10 +49,17 @@ const EQ_STATUS_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 const RENTAL_BAR_COLORS: Record<GanttRentalData['status'], string> = {
-  active: 'bg-blue-600 dark:bg-blue-500',
-  created: 'bg-slate-500 dark:bg-slate-400',
-  returned: 'bg-green-600 dark:bg-green-500',
-  closed: 'bg-gray-400 dark:bg-gray-500',
+  active: 'bg-blue-600 dark:bg-blue-500 border-l-4 border-l-blue-800',
+  created: 'bg-slate-500 dark:bg-slate-400 border-l-4 border-l-slate-700',
+  returned: 'bg-emerald-600 dark:bg-emerald-500 border-l-4 border-l-emerald-800',
+  closed: 'bg-gray-400 dark:bg-gray-500 border-l-4 border-l-gray-600',
+};
+
+const RENTAL_STATUS_LABEL: Record<GanttRentalData['status'], string> = {
+  active: 'Аренда',
+  created: 'Бронь',
+  returned: 'Возвр.',
+  closed: 'Закр.',
 };
 
 const PAYMENT_STATUS_FILTERS = [
@@ -153,14 +161,86 @@ export default function Rentals() {
   const [equipmentList, setEquipmentList] = useState(() => loadEquipment());
 
   React.useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === GANTT_RENTALS_STORAGE_KEY) setGanttRentals(loadGanttRentals());
-      if (e.key === EQUIPMENT_STORAGE_KEY) setEquipmentList(loadEquipment());
+    const reload = () => {
+      setGanttRentals(loadGanttRentals());
+      setEquipmentList(loadEquipment());
     };
-    const onFocus = () => { setGanttRentals(loadGanttRentals()); setEquipmentList(loadEquipment()); };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === GANTT_RENTALS_STORAGE_KEY || e.key === EQUIPMENT_STORAGE_KEY) reload();
+    };
+    // Перезагружаем данные при возврате на вкладку (focus / visibilitychange)
+    const onVisible = () => { if (document.visibilityState === 'visible') reload(); };
     window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', onFocus);
-    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('focus', onFocus); };
+    window.addEventListener('focus', reload);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', reload);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  // Очистка «призрачных» аренд при загрузке страницы:
+  // - 'created' с прошедшей endDate → 'closed'  (не активированные черновики)
+  // - 'active'  с прошедшей endDate → 'returned' (техника вернулась, но возврат не оформили вручную)
+  React.useEffect(() => {
+    const todayStr = format(today, 'yyyy-MM-dd');
+    const current = loadGanttRentals();
+
+    const needsCleanup = current.some(r =>
+      (r.status === 'created' && r.endDate < todayStr) ||
+      (r.status === 'active'  && r.endDate < todayStr),
+    );
+
+    if (!needsCleanup) return;
+
+    const cleaned = current.map(r => {
+      if (r.status === 'created' && r.endDate < todayStr)
+        return { ...r, status: 'closed' as const };
+      if (r.status === 'active' && r.endDate < todayStr)
+        return { ...r, status: 'returned' as const };
+      return r;
+    });
+    saveGanttRentals(cleaned);
+    setGanttRentals(cleaned);
+
+    // Для закрытых/возвращённых аренд: если у техники больше нет активных аренд —
+    // обновляем статус техники на 'available'.
+    const eqList = loadEquipment();
+    const affectedInvs = new Set(
+      current
+        .filter(r =>
+          (r.status === 'created' || r.status === 'active') && r.endDate < todayStr,
+        )
+        .map(r => r.equipmentInv),
+    );
+    let eqChanged = false;
+    const updatedEq = eqList.map(e => {
+      if (!affectedInvs.has(e.inventoryNumber)) return e;
+      const stillActive = cleaned.some(
+        r => r.equipmentInv === e.inventoryNumber
+          && r.status !== 'returned' && r.status !== 'closed',
+      );
+      if (!stillActive && e.status !== 'inactive' && e.status !== 'in_service') {
+        eqChanged = true;
+        return { ...e, status: 'available' as EquipmentStatus };
+      }
+      return e;
+    });
+    if (eqChanged) {
+      saveEquipment(updatedEq);
+      setEquipmentList(updatedEq);
+    }
+  }, [today]);
+
+  // Менеджеры для фильтра (динамически из базы пользователей)
+  const managersList = useMemo(() => loadUsers().filter(u => u.status === 'Активен'), []);
+
+  // Toast-уведомление
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
   }, []);
 
   const [scale, setScale] = useState<Scale>('week');
@@ -375,8 +455,9 @@ export default function Rentals() {
           className="h-8 rounded-lg border border-gray-200 bg-gray-50 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
         >
           <option value="">Менеджер</option>
-          <option value="Смирнова А.П.">Смирнова А.П.</option>
-          <option value="Козлов Д.В.">Козлов Д.В.</option>
+          {managersList.map(u => (
+            <option key={u.id} value={u.name}>{u.name}</option>
+          ))}
         </select>
 
         <div className="relative">
@@ -502,12 +583,33 @@ export default function Rentals() {
 
           {/* ===== Equipment Rows ===== */}
           {filteredEquipment.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20">
-              <div className="text-gray-400 dark:text-gray-500">Нет данных по фильтрам</div>
-              <Button size="sm" variant="ghost" onClick={resetFilters} className="mt-2">
-                Сброс фильтров
-              </Button>
-            </div>
+            equipmentList.length === 0 ? (
+              /* Техники нет вообще — приглашаем добавить */
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="mb-1 text-2xl">🏗️</div>
+                <div className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                  В реестре нет техники
+                </div>
+                <div className="mt-1 max-w-xs text-xs text-gray-400 dark:text-gray-500">
+                  Добавьте технику в разделе «Техника», и она появится здесь для планирования аренды.
+                </div>
+                <Button
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => window.location.href = '/rental-management/equipment/new'}
+                >
+                  + Добавить технику
+                </Button>
+              </div>
+            ) : (
+              /* Техника есть, но фильтр дал пустой результат */
+              <div className="flex flex-col items-center justify-center py-20">
+                <div className="text-gray-400 dark:text-gray-500">Нет техники по заданным фильтрам</div>
+                <Button size="sm" variant="ghost" onClick={resetFilters} className="mt-2">
+                  Сбросить фильтры
+                </Button>
+              </div>
+            )
           ) : (
             filteredEquipment.map(eq => (
               <EquipmentRow
@@ -608,6 +710,7 @@ export default function Rentals() {
       <ReturnModal
         open={showReturnModal}
         rental={returnRental}
+        ganttRentals={ganttRentals}
         onClose={() => { setShowReturnModal(false); setReturnRental(null); }}
         onConfirm={(data) => {
           // Обновляем статус аренды на 'returned'
@@ -634,6 +737,7 @@ export default function Rentals() {
               saveEquipment(newEqList);
             }
           }
+          showToast(`Возврат оформлен: ${rental?.equipmentInv ?? data.rentalId}`);
           setShowReturnModal(false);
           setReturnRental(null);
         }}
@@ -650,8 +754,16 @@ export default function Rentals() {
       <NewRentalModal
         open={showNewRentalModal}
         preselectedEquipment={preselectedEquipment}
+        ganttRentals={ganttRentals}
+        equipmentList={equipmentList}
         onClose={() => setShowNewRentalModal(false)}
         onConfirm={(data) => {
+          // Если аренда начинается сегодня или в прошлом — сразу 'active',
+          // иначе 'created' (будущая аренда / бронь)
+          const todayStr = format(today, 'yyyy-MM-dd');
+          const initialStatus: GanttRentalData['status'] =
+            (data.startDate || '') <= todayStr ? 'active' : 'created';
+
           const newRental: GanttRentalData = {
             id: `GR-${Date.now()}`,
             client: data.client || '',
@@ -661,7 +773,7 @@ export default function Rentals() {
             endDate: data.endDate || '',
             manager: data.manager || '',
             managerInitials: (data.manager || '').split(' ').map((w: string) => w[0]).join('').toUpperCase(),
-            status: 'created',
+            status: initialStatus,
             paymentStatus: 'unpaid',
             updSigned: false,
             amount: Number(data.amount) || 0,
@@ -671,19 +783,27 @@ export default function Rentals() {
           setGanttRentals(updated);
           saveGanttRentals(updated);
 
-          // Синхронизируем статус техники: 'reserved' если аренда будущая, 'rented' если уже началась
+          // Синхронизируем статус техники на основе initialStatus аренды
           if (data.equipmentInv) {
-            const todayStr = format(today, 'yyyy-MM-dd');
-            const newStatus: EquipmentStatus = data.startDate <= todayStr ? 'rented' : 'reserved';
+            const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
             const newEqList = equipmentList.map(e =>
-              e.inventoryNumber === data.equipmentInv ? { ...e, status: newStatus } : e,
+              e.inventoryNumber === data.equipmentInv ? { ...e, status: eqStatus } : e,
             );
             setEquipmentList(newEqList);
             saveEquipment(newEqList);
           }
+          showToast(`Аренда создана: ${newRental.id} — ${data.client} (${data.equipmentInv})`);
           setShowNewRentalModal(false);
         }}
       />
+      {/* ===== Toast notification ===== */}
+      {toast && (
+        <div className={`fixed bottom-6 left-1/2 z-[100] -translate-x-1/2 transform rounded-xl px-5 py-3 shadow-lg text-sm font-medium text-white transition-all ${
+          toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+        }`}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }
@@ -782,21 +902,30 @@ function EquipmentRow({
           return (
             <div
               key={idx}
-              className={`absolute top-0 h-full border-r border-gray-50 dark:border-gray-800/50 ${
-                weekend ? 'bg-gray-50/50 dark:bg-gray-800/30' : ''
-              } ${isToday ? 'bg-blue-50/40 dark:bg-blue-900/10' : ''}`}
+              className={`absolute top-0 h-full border-r border-gray-200/60 dark:border-gray-700/50 ${
+                weekend ? 'bg-gray-100/60 dark:bg-gray-800/40' : ''
+              } ${isToday ? 'bg-blue-50/70 dark:bg-blue-900/20' : ''}`}
               style={{ left: idx * dayWidth, width: dayWidth }}
             />
           );
         })}
 
+        {/* Empty row placeholder */}
+        {rentals.length === 0 && downtimes.length === 0 && servicePeriods.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <span className="text-[11px] text-gray-300 dark:text-gray-600 italic">
+              нет аренд
+            </span>
+          </div>
+        )}
+
         {/* Today line */}
         {todayOffset !== null && (
           <div
-            className="absolute top-0 z-10 h-full w-px bg-red-400 dark:bg-red-500"
+            className="absolute top-0 z-10 h-full w-0.5 bg-red-500 dark:bg-red-400"
             style={{ left: todayOffset }}
           >
-            <div className="absolute -left-[3px] -top-0.5 h-2 w-2 rounded-full bg-red-400 dark:bg-red-500" />
+            <div className="absolute -left-1 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500 dark:bg-red-400 ring-2 ring-red-200 dark:ring-red-800" />
           </div>
         )}
 
@@ -854,6 +983,7 @@ function EquipmentRow({
           if (!pos) return null;
           const isConflict = conflictIds.has(rental.id);
           const barColor = RENTAL_BAR_COLORS[rental.status];
+          const statusLabel = RENTAL_STATUS_LABEL[rental.status];
 
           // Stack bars vertically if there are overlaps (simple: use index-based offset)
           const overlapping = rentals.filter((r2, j) => {
@@ -863,14 +993,14 @@ function EquipmentRow({
             return s1 < e2 && s2 < e1;
           });
           const stackIndex = overlapping.length;
-          const barHeight = 28;
-          const topOffset = 6 + stackIndex * (barHeight + 4);
+          const barHeight = 34;
+          const topOffset = 4 + stackIndex * (barHeight + 3);
 
           return (
             <div
               key={rental.id}
               onClick={() => onBarClick(rental)}
-              className={`absolute z-[6] flex cursor-pointer items-center rounded shadow-sm transition-shadow hover:shadow-md ${barColor} ${
+              className={`absolute z-[6] flex cursor-pointer items-center rounded-md shadow transition-all hover:shadow-lg hover:brightness-110 ${barColor} ${
                 isConflict ? 'ring-2 ring-red-500 ring-offset-1 dark:ring-red-400' : ''
               }`}
               style={{
@@ -879,37 +1009,47 @@ function EquipmentRow({
                 top: topOffset,
                 height: barHeight,
               }}
-              title={`${rental.client} (${rental.id})`}
+              title={`${rental.client} · ${rental.startDate} — ${rental.endDate} (${statusLabel})`}
             >
-              {/* Bar content */}
-              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden px-1.5">
-                {isConflict && (
-                  <AlertTriangle className="h-3 w-3 shrink-0 text-red-200" />
-                )}
-                {pos.width > 50 && (
-                  <span className="truncate text-[10px] text-white/90">
-                    {rental.clientShort}
-                  </span>
-                )}
-                {pos.width > 100 && (
-                  <span className="shrink-0 text-[9px] text-white/60">{rental.managerInitials}</span>
+              {/* Bar content — two rows for better readability */}
+              <div className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden px-2 leading-tight">
+                <div className="flex items-center gap-1">
+                  {isConflict && (
+                    <AlertTriangle className="h-3 w-3 shrink-0 text-red-200" />
+                  )}
+                  {pos.width > 40 && (
+                    <span className="truncate text-[11px] font-medium text-white">
+                      {rental.clientShort || rental.client}
+                    </span>
+                  )}
+                </div>
+                {pos.width > 80 && (
+                  <div className="flex items-center gap-1 text-[9px] text-white/70">
+                    <span>{statusLabel}</span>
+                    {pos.width > 140 && (
+                      <span>· {rental.startDate.slice(5)} → {rental.endDate.slice(5)}</span>
+                    )}
+                    {pos.width > 200 && rental.managerInitials && (
+                      <span>· {rental.managerInitials}</span>
+                    )}
+                  </div>
                 )}
               </div>
               {/* Right icons */}
-              <div className="mr-1 flex shrink-0 items-center gap-0.5">
+              <div className="mr-1.5 flex shrink-0 items-center gap-0.5">
                 {pos.width > 70 && (
                   <>
                     {rental.updSigned ? (
-                      <CircleCheck className="h-3 w-3 text-green-300" title="УПД подписан" />
+                      <CircleCheck className="h-3.5 w-3.5 text-green-300" title="УПД подписан" />
                     ) : (
-                      <CircleAlert className="h-3 w-3 text-red-300" title="УПД не подписан" />
+                      <CircleAlert className="h-3.5 w-3.5 text-red-300" title="УПД не подписан" />
                     )}
                     {rental.paymentStatus === 'paid' ? (
-                      <CreditCard className="h-3 w-3 text-green-300" title="Оплачено" />
+                      <CreditCard className="h-3.5 w-3.5 text-green-300" title="Оплачено" />
                     ) : rental.paymentStatus === 'partial' ? (
-                      <CreditCard className="h-3 w-3 text-yellow-300" title="Частично оплачено" />
+                      <CreditCard className="h-3.5 w-3.5 text-yellow-300" title="Частично оплачено" />
                     ) : (
-                      <CreditCard className="h-3 w-3 text-red-300" title="Не оплачено" />
+                      <CreditCard className="h-3.5 w-3.5 text-red-300" title="Не оплачено" />
                     )}
                   </>
                 )}

@@ -86,14 +86,41 @@ function LabeledInput({
 // ========== Return Modal =====================================================
 interface ReturnModalProps {
   open: boolean;
+  /** Заранее выбранная аренда (при открытии из строки техники).
+   *  Если не передана — пользователь выбирает сам из списка активных аренд. */
   rental?: GanttRentalData | null;
+  /** Список всех аренд из React-состояния родителя (единый источник истины). */
+  ganttRentals?: GanttRentalData[];
   onClose: () => void;
   onConfirm: (data: { rentalId: string; returnDate: string; result: string }) => void;
 }
 
-export function ReturnModal({ open, rental, onClose, onConfirm }: ReturnModalProps) {
+export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRentalsProp, onClose, onConfirm }: ReturnModalProps) {
   const [returnDate, setReturnDate] = useState(new Date().toISOString().split('T')[0]);
   const [result, setResult] = useState<'available' | 'service' | 'downtime'>('available');
+  const [selectedRentalId, setSelectedRentalId] = useState('');
+
+  // Сброс при открытии модалки
+  React.useEffect(() => {
+    if (open) {
+      setReturnDate(new Date().toISOString().split('T')[0]);
+      setResult('available');
+      setSelectedRentalId(rentalProp?.id ?? '');
+    }
+  }, [open, rentalProp]);
+
+  // Список аренд для выбора: только активные и созданные (не возвращённые/закрытые)
+  const activeRentals = useMemo(() => {
+    const all = ganttRentalsProp ?? loadGanttRentals();
+    return all.filter(r => r.status === 'active' || r.status === 'created');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ganttRentalsProp, open]);
+
+  // Определяем рабочую аренду: переданная через props ИЛИ выбранная в дропдауне
+  const rental = rentalProp ?? activeRentals.find(r => r.id === selectedRentalId) ?? null;
+
+  // Показываем дропдаун выбора только если аренда не передана через props
+  const showPicker = !rentalProp;
 
   if (!open) return null;
 
@@ -111,47 +138,98 @@ export function ReturnModal({ open, rental, onClose, onConfirm }: ReturnModalPro
           </button>
         </div>
 
-        {rental && (
-          <div className="mb-4 rounded-lg bg-gray-50 p-3 text-sm dark:bg-gray-900/50">
-            <div className="text-gray-500">Аренда</div>
-            <div className="text-gray-900 dark:text-white">{rental.id} — {rental.client}</div>
-            <div className="text-gray-500">{rental.equipmentInv}</div>
-          </div>
-        )}
-
         <div className="space-y-4">
-          <LabeledInput
-            label="Дата возврата"
-            type="date"
-            value={returnDate}
-            onChange={(e) => setReturnDate(e.target.value)}
-          />
 
-          <div>
-            <label className="mb-1.5 block text-sm text-gray-700 dark:text-gray-300">Результат возврата</label>
-            <div className="space-y-2">
-              {[
-                { value: 'available', label: 'Техника свободна' },
-                { value: 'service',   label: 'Отправить в сервис' },
-                { value: 'downtime',  label: 'Простой' },
-              ].map((opt) => (
-                <label key={opt.value} className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 p-2.5 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900/50">
-                  <input
-                    type="radio"
-                    name="result"
-                    value={opt.value}
-                    checked={result === opt.value}
-                    onChange={() => setResult(opt.value as typeof result)}
-                    className="h-4 w-4 text-[--color-primary]"
-                  />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">{opt.label}</span>
-                </label>
-              ))}
+          {/* Выбор аренды — только когда аренда не передана заранее */}
+          {showPicker && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Активная аренда
+              </label>
+              {activeRentals.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-400 dark:border-gray-600">
+                  Нет активных аренд для возврата
+                </p>
+              ) : (
+                <select
+                  value={selectedRentalId}
+                  onChange={e => setSelectedRentalId(e.target.value)}
+                  className={selectClass}
+                >
+                  <option value="">Выберите аренду</option>
+                  {activeRentals.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {r.id} — {r.client} — {r.equipmentInv} ({r.startDate} → {r.endDate})
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
-          </div>
+          )}
+
+          {/* Карточка выбранной аренды */}
+          {rental && (
+            <div className="rounded-lg bg-gray-50 p-3 text-sm dark:bg-gray-900/50">
+              <div className="mb-1 text-xs text-gray-500">Аренда</div>
+              <div className="font-medium text-gray-900 dark:text-white">
+                {rental.id} — {rental.client}
+              </div>
+              <div className="text-gray-600 dark:text-gray-400">
+                {rental.equipmentInv} · {rental.startDate} — {rental.endDate}
+              </div>
+              <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                rental.status === 'active'
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+              }`}>
+                {rental.status === 'active' ? 'Активна' : 'Создана'}
+              </span>
+            </div>
+          )}
+
+          {/* Дата и результат — только когда выбрана аренда или есть активные */}
+          {(rental !== null || activeRentals.length > 0) && (
+            <>
+              <LabeledInput
+                label="Дата возврата"
+                type="date"
+                value={returnDate}
+                onChange={(e) => setReturnDate(e.target.value)}
+              />
+
+              <div>
+                <label className="mb-1.5 block text-sm text-gray-700 dark:text-gray-300">Результат возврата</label>
+                <div className="space-y-2">
+                  {[
+                    { value: 'available', label: 'Техника свободна' },
+                    { value: 'service',   label: 'Отправить в сервис' },
+                    { value: 'downtime',  label: 'Простой' },
+                  ].map((opt) => (
+                    <label key={opt.value} className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 p-2.5 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900/50">
+                      <input
+                        type="radio"
+                        name="result"
+                        value={opt.value}
+                        checked={result === opt.value}
+                        onChange={() => setResult(opt.value as typeof result)}
+                        className="h-4 w-4 text-[--color-primary]"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="flex gap-3 pt-2">
-            <Button onClick={() => onConfirm({ rentalId: rental?.id || '', returnDate, result })}>
+            <Button
+              onClick={() => {
+                if (!rental) return;
+                onConfirm({ rentalId: rental.id, returnDate, result });
+              }}
+              disabled={!rental}
+            >
               Подтвердить возврат
             </Button>
             <Button variant="secondary" onClick={onClose}>Отмена</Button>
@@ -252,6 +330,12 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
 interface NewRentalModalProps {
   open: boolean;
   preselectedEquipment?: string;
+  /** Текущий список аренд из React-состояния родителя.
+   *  Передаётся, чтобы модалка и значок статуса техники
+   *  использовали один и тот же источник данных. */
+  ganttRentals?: GanttRentalData[];
+  /** Текущий список техники из React-состояния родителя. */
+  equipmentList?: Equipment[];
   onClose: () => void;
   onConfirm: (data: {
     client: string;
@@ -263,7 +347,7 @@ interface NewRentalModalProps {
   }) => void;
 }
 
-export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm }: NewRentalModalProps) {
+export function NewRentalModal({ open, preselectedEquipment, ganttRentals: ganttRentalsProp, equipmentList: equipmentListProp, onClose, onConfirm }: NewRentalModalProps) {
   const today = new Date().toISOString().split('T')[0];
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
@@ -286,16 +370,23 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
     loadUsers().filter(u => u.status === 'Активен'),
   []);
 
-  // Перезагружаем аренды каждый раз при открытии модального окна
-  const existingRentals = useMemo(() => loadGanttRentals(), [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Единый источник данных: сначала берём из пропса (React-состояние родителя),
+  // иначе читаем из localStorage. Это гарантирует согласованность с бейджем статуса.
+  const existingRentals = useMemo(
+    () => ganttRentalsProp ?? loadGanttRentals(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ganttRentalsProp, open],
+  );
 
   /**
    * Фильтрация техники:
    * - исключаем списанную (inactive) и в сервисе (in_service)
    * - проверяем конфликт по датам аренды
+   * Используем список техники из пропса (React-состояние родителя),
+   * чтобы данные были согласованы с бейджем статуса.
    */
   const { availableEquipment, busyEquipment } = useMemo(() => {
-    const all = loadEquipment().filter(e =>
+    const all = (equipmentListProp ?? loadEquipment()).filter(e =>
       e.status !== 'inactive' && e.status !== 'in_service',
     );
     if (!startDate || !endDate) {
@@ -311,7 +402,7 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
       }
     });
     return { availableEquipment: available, busyEquipment: busy };
-  }, [startDate, endDate, existingRentals]);
+  }, [startDate, endDate, existingRentals, equipmentListProp]);
 
   // Проверяем конфликт при выборе техники
   const handleEquipmentChange = (inv: string) => {
@@ -402,12 +493,14 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
               <p className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-400 dark:border-gray-600">
                 Сначала добавьте технику в реестр (раздел «Техника»)
               </p>
-            ) : availableEquipment.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-orange-300 bg-orange-50 px-3 py-2 text-sm text-orange-600 dark:border-orange-700 dark:bg-orange-900/20 dark:text-orange-400">
-                Нет доступной техники на выбранный период
-              </p>
             ) : (
               <>
+                {/* Предупреждение когда вся техника занята */}
+                {availableEquipment.length === 0 && (
+                  <p className="mb-2 rounded-lg border border-dashed border-orange-300 bg-orange-50 px-3 py-2 text-sm text-orange-600 dark:border-orange-700 dark:bg-orange-900/20 dark:text-orange-400">
+                    Нет свободной техники на выбранный период — выберите единицу ниже, чтобы узнать какая аренда блокирует
+                  </p>
+                )}
                 <select
                   value={equipmentInv}
                   onChange={e => handleEquipmentChange(e.target.value)}
@@ -424,7 +517,7 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
                       ))}
                     </optgroup>
                   )}
-                  {/* Занятая (предупреждение) */}
+                  {/* Занятая техника — всегда показываем, чтобы видеть причину блокировки */}
                   {busyEquipment.length > 0 && (
                     <optgroup label="⚠ Занята на выбранный период">
                       {busyEquipment.map(eq => (
@@ -441,14 +534,26 @@ export function NewRentalModal({ open, preselectedEquipment, onClose, onConfirm 
             {/* Предупреждение о конфликте с деталями */}
             {conflictWarn && (
               <div className="mt-1.5 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700 dark:border-orange-700 dark:bg-orange-900/20 dark:text-orange-400">
-                <p className="font-medium">⚠ Техника уже занята на выбранный период</p>
-                {conflictingRental && (
-                  <p className="mt-0.5 text-orange-600 dark:text-orange-300">
-                    Аренда {conflictingRental.id} · {conflictingRental.client} ·{' '}
-                    {conflictingRental.startDate} — {conflictingRental.endDate}
-                  </p>
+                <p className="font-medium">⚠ Техника занята на выбранный период</p>
+                {conflictingRental ? (
+                  <>
+                    <p className="mt-1 font-mono text-[11px] text-orange-800 dark:text-orange-200">
+                      {conflictingRental.id} · {conflictingRental.client} · {conflictingRental.startDate} — {conflictingRental.endDate} · {conflictingRental.status}
+                    </p>
+                    {conflictingRental.status === 'created' && (
+                      <p className="mt-1 text-orange-600 dark:text-orange-300">
+                        💡 Это аренда со статусом «создана» — если она тестовая, найдите её в планировщике (кликните на полосу аренды) и удалите через меню.
+                      </p>
+                    )}
+                    {conflictingRental.status === 'active' && (
+                      <p className="mt-1 text-orange-600 dark:text-orange-300">
+                        Техника в активной аренде. Выберите другие даты или другую технику.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="mt-0.5">Выберите другие даты или другую технику.</p>
                 )}
-                <p className="mt-0.5">Аренды будут пересекаться. Проверьте даты или выберите другую технику.</p>
               </div>
             )}
           </div>

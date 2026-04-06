@@ -15,6 +15,7 @@ import {
   loadPayments, savePayments, PAYMENTS_STORAGE_KEY,
 } from '../mock-data';
 import { loadUsers } from './Settings';
+import { usePermissions } from '../lib/permissions';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
 import type { Equipment, EquipmentType, EquipmentStatus, Payment } from '../types';
 import {
@@ -157,6 +158,7 @@ function computeEffectiveStatus(
 
 // ========== Main Component ==========
 export default function Rentals() {
+  const { can } = usePermissions();
   const today = useMemo(() => startOfDay(new Date()), []);
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>(() => loadGanttRentals());
   const [equipmentList, setEquipmentList] = useState(() => loadEquipment());
@@ -543,10 +545,12 @@ export default function Rentals() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" onClick={() => handleOpenNewRental()}>
-            <Plus className="h-3.5 w-3.5" />
-            Новая аренда
-          </Button>
+          {can('create', 'rentals') && (
+            <Button size="sm" onClick={() => handleOpenNewRental()}>
+              <Plus className="h-3.5 w-3.5" />
+              Новая аренда
+            </Button>
+          )}
           <Button size="sm" variant="secondary" onClick={() => handleOpenReturn()}>
             <RotateCcw className="h-3.5 w-3.5" />
             Возврат техники
@@ -716,13 +720,15 @@ export default function Rentals() {
                 <div className="mt-1 max-w-xs text-xs text-gray-400 dark:text-gray-500">
                   Добавьте технику в разделе «Техника», и она появится здесь для планирования аренды.
                 </div>
-                <Button
-                  size="sm"
-                  className="mt-4"
-                  onClick={() => window.location.href = '/rental-management/equipment/new'}
-                >
-                  + Добавить технику
-                </Button>
+                {can('create', 'equipment') && (
+                  <Button
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => window.location.href = '/rental-management/equipment/new'}
+                  >
+                    + Добавить технику
+                  </Button>
+                )}
               </div>
             ) : (
               /* Техника есть, но фильтр дал пустой результат */
@@ -976,6 +982,7 @@ function EquipmentRow({
   viewStart, totalDays, dayWidth, todayOffset, scale, days, today,
   onBarClick, onNewRental, onReturn, onDowntime
 }: EquipmentRowProps) {
+  const { can: canDo } = usePermissions();
   // Статус вычисляется динамически из аренд, а не из equipment.status
   const effectiveStatus = computeEffectiveStatus(equipment, rentals, today);
   const eqStatus = EQ_STATUS_LABELS[effectiveStatus] || EQ_STATUS_LABELS.available;
@@ -1007,13 +1014,15 @@ function EquipmentRow({
         </div>
         {/* Quick actions */}
         <div className="ml-1 flex shrink-0 flex-col gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-          <button
-            onClick={onNewRental}
-            className="rounded p-1 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
-            title="Создать аренду"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
+          {canDo('create', 'rentals') && (
+            <button
+              onClick={onNewRental}
+              className="rounded p-1 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
+              title="Создать аренду"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
           {hasActiveRental && (
             <button
               onClick={() => {

@@ -6,10 +6,12 @@ import { Badge } from '../components/ui/badge';
 import { Search, Plus } from 'lucide-react';
 import { Link } from 'react-router';
 import { loadClients, CLIENTS_STORAGE_KEY } from '../mock-data';
+import { usePermissions } from '../lib/permissions';
 import { formatCurrency, formatDate } from '../lib/utils';
 import type { Client } from '../types';
 
 export default function Clients() {
+  const { can } = usePermissions();
   const [clientList, setClientList] = React.useState<Client[]>(() => loadClients());
   const [search, setSearch] = React.useState('');
 
@@ -38,13 +40,15 @@ export default function Clients() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Клиенты</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">База клиентов и контрагентов</p>
         </div>
-        <Link to="/clients/new">
-          <Button size="sm">
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Новый клиент</span>
-            <span className="sm:hidden">Добавить</span>
-          </Button>
-        </Link>
+        {can('create', 'clients') && (
+          <Link to="/clients/new">
+            <Button size="sm">
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Новый клиент</span>
+              <span className="sm:hidden">Добавить</span>
+            </Button>
+          </Link>
+        )}
       </div>
 
       {/* Search */}

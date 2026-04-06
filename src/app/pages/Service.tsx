@@ -13,10 +13,12 @@ import { getServiceStatusBadge, getServicePriorityBadge } from '../components/ui
 import { Search, Plus } from 'lucide-react';
 import { Link } from 'react-router';
 import { loadServiceTickets, SERVICE_STORAGE_KEY } from '../mock-data';
+import { usePermissions } from '../lib/permissions';
 import { formatDate } from '../lib/utils';
 import type { ServiceTicket } from '../types';
 
 export default function Service() {
+  const { can } = usePermissions();
   const [ticketList, setTicketList] = React.useState<ServiceTicket[]>(() => loadServiceTickets());
   const [search, setSearch] = React.useState('');
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
@@ -50,13 +52,15 @@ export default function Service() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Сервис</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Управление сервисными заявками</p>
         </div>
-        <Link to="/service/new">
-          <Button size="sm">
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Новая заявка</span>
-            <span className="sm:hidden">Создать</span>
-          </Button>
-        </Link>
+        {can('create', 'service') && (
+          <Link to="/service/new">
+            <Button size="sm">
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Новая заявка</span>
+              <span className="sm:hidden">Создать</span>
+            </Button>
+          </Link>
+        )}
       </div>
 
       {/* Filters */}

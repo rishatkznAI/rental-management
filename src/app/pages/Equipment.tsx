@@ -11,6 +11,7 @@ import { formatDate } from '../lib/utils';
 import type { EquipmentStatus, EquipmentType, EquipmentDrive, Equipment as EquipmentType_ } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { usePermissions } from '../lib/permissions';
 
 // Для каждой единицы техники подтягивает currentClient и returnDate из активной аренды
 // если эти поля не заполнены в самой записи техники (backward-compatibility)
@@ -37,6 +38,7 @@ function enrichEquipment(eqList: EquipmentType_[], ganttRentals: GanttRentalData
 }
 
 export default function Equipment() {
+  const { can } = usePermissions();
   const [equipmentList, setEquipmentList] = React.useState<EquipmentType_[]>(() => loadEquipment());
   const [ganttRentals, setGanttRentals] = React.useState<GanttRentalData[]>(() => loadGanttRentals());
   const [search, setSearch] = React.useState('');
@@ -112,13 +114,15 @@ export default function Equipment() {
             <Download className="h-4 w-4" />
             Экспорт
           </Button>
-          <Link to="/equipment/new">
-            <Button size="sm">
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Добавить технику</span>
-              <span className="sm:hidden">Добавить</span>
-            </Button>
-          </Link>
+          {can('create', 'equipment') && (
+            <Link to="/equipment/new">
+              <Button size="sm">
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Добавить технику</span>
+                <span className="sm:hidden">Добавить</span>
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 

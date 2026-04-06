@@ -29,6 +29,7 @@ import { ServiceRequestModal } from '../components/modals/ServiceRequestModal';
 import { NewClientModal } from '../components/modals/NewClientModal';
 import { NewRentalModal } from '../components/gantt/GanttModals';
 import { useAuth } from '../contexts/AuthContext';
+import { usePermissions } from '../lib/permissions';
 import type { Equipment, Rental, ServiceTicket, Client, Payment, EquipmentStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
@@ -78,6 +79,7 @@ function loadAll(): DashData {
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { can } = usePermissions();
 
   const [data, setData] = useState<DashData>(loadAll);
   const [selectedKPI, setSelectedKPI] = useState<
@@ -131,6 +133,13 @@ export default function Dashboard() {
   const weekAgo = daysAgo(7);
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 
+  // Менеджер по аренде видит только свои аренды в KPI
+  const isManagerRole = user?.role === 'Менеджер по аренде';
+  const currentUserName = user?.name ?? '';
+  const viewRentals = isManagerRole && currentUserName
+    ? rentals.filter(r => r.manager === currentUserName)
+    : rentals;
+
   // Utilization
   const totalEquipment = equipment.length;
   const activeEquipment = equipment.filter(e => e.status !== 'inactive').length;
@@ -140,13 +149,13 @@ export default function Dashboard() {
     ? 0
     : Math.round(safeDiv(rentedEquipment, activeEquipment > 0 ? activeEquipment : totalEquipment) * 100);
 
-  // Active rentals
-  const activeRentalsList = rentals.filter(r =>
+  // Active rentals (фильтруются по ролям: менеджер видит только свои)
+  const activeRentalsList = viewRentals.filter(r =>
     r.status === 'active' || r.status === 'delivery' || r.status === 'confirmed'
   );
 
   // Overdue returns: active/delivery rentals with plannedReturnDate in the past
-  const overdueRentalsList = rentals.filter(r =>
+  const overdueRentalsList = viewRentals.filter(r =>
     (r.status === 'active' || r.status === 'delivery') && isOverdue(r.plannedReturnDate)
   );
 
@@ -154,7 +163,7 @@ export default function Dashboard() {
   const equipmentInServiceList = equipment.filter(e => e.status === 'in_service');
 
   // Week revenue: sum of prices of rentals that started in the last 7 days, OR active rentals
-  const weekStartedRentals = rentals.filter(r => {
+  const weekStartedRentals = viewRentals.filter(r => {
     const start = new Date(r.startDate);
     return start >= weekAgo && (r.status === 'active' || r.status === 'closed' || r.status === 'confirmed');
   });
@@ -186,7 +195,7 @@ export default function Dashboard() {
   // Upcoming returns (next 3 days, not overdue)
   const soon3 = new Date(today);
   soon3.setDate(soon3.getDate() + 3);
-  const upcomingReturns = rentals.filter(r => {
+  const upcomingReturns = viewRentals.filter(r => {
     if (r.status !== 'active') return false;
     const ret = new Date(r.plannedReturnDate);
     return ret >= today && ret <= soon3;
@@ -198,12 +207,12 @@ export default function Dashboard() {
   );
 
   // Recent rentals (last 10, sorted newest first)
-  const recentRentals = [...rentals]
+  const recentRentals = [...viewRentals]
     .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())
     .slice(0, 5);
 
   // ── Manager stats for current user ─────────────────────────────────────────
-  const currentUserName = user?.name ?? '';
+  // (currentUserName уже объявлен выше)
   const myRentals = currentUserName
     ? rentals.filter(r => r.manager === currentUserName)
     : [];
@@ -273,21 +282,27 @@ export default function Dashboard() {
             <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Обновить</span>
           </Button>
-          <Button size="sm" onClick={() => setShowRentalModal(true)}>
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Новая аренда</span>
-            <span className="sm:hidden">Аренда</span>
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => setShowServiceModal(true)}>
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Заявка в сервис</span>
-            <span className="sm:hidden">Сервис</span>
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => setShowClientModal(true)}>
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Новый клиент</span>
-            <span className="sm:hidden">Клиент</span>
-          </Button>
+          {can('create', 'rentals') && (
+            <Button size="sm" onClick={() => setShowRentalModal(true)}>
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Новая аренда</span>
+              <span className="sm:hidden">Аренда</span>
+            </Button>
+          )}
+          {can('create', 'service') && (
+            <Button size="sm" variant="secondary" onClick={() => setShowServiceModal(true)}>
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Заявка в сервис</span>
+              <span className="sm:hidden">Сервис</span>
+            </Button>
+          )}
+          {can('create', 'clients') && (
+            <Button size="sm" variant="secondary" onClick={() => setShowClientModal(true)}>
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Новый клиент</span>
+              <span className="sm:hidden">Клиент</span>
+            </Button>
+          )}
         </div>
       </div>
 

@@ -1,0 +1,134 @@
+/**
+ * Ролевая модель доступа (RBAC)
+ *
+ * Роли:
+ *  Администратор    — полный доступ ко всему
+ *  Менеджер по аренде — личный дашборд (только свои данные), просмотр основных
+ *                      разделов, создание сервисных заявок; без Отчётов и Настроек
+ *  Офис-менеджер   — полный операционный доступ (без Дашборда, Отчётов, Настроек)
+ *  Механик          — только Техника (просмотр) + Сервис (полный CRUD)
+ */
+
+import { useAuth } from '../contexts/AuthContext';
+
+// ── Типы ─────────────────────────────────────────────────────────────────────
+
+export type Section =
+  | 'dashboard'
+  | 'equipment'
+  | 'rentals'
+  | 'service'
+  | 'clients'
+  | 'documents'
+  | 'payments'
+  | 'reports'
+  | 'settings';
+
+export type Action = 'view' | 'create' | 'edit' | 'delete';
+
+type RolePermissions = Partial<Record<Section, Action[]>>;
+
+// ── Матрица прав ──────────────────────────────────────────────────────────────
+
+const ALL: Action[] = ['view', 'create', 'edit', 'delete'];
+const VIEW: Action[] = ['view'];
+const VIEW_CREATE: Action[] = ['view', 'create'];
+
+const PERMISSIONS: Record<string, RolePermissions> = {
+  'Администратор': {
+    dashboard: ALL,
+    equipment: ALL,
+    rentals:   ALL,
+    service:   ALL,
+    clients:   ALL,
+    documents: ALL,
+    payments:  ALL,
+    reports:   ALL,
+    settings:  ALL,
+  },
+  'Менеджер по аренде': {
+    dashboard: VIEW,         // только своё
+    equipment: VIEW,
+    rentals:   VIEW,
+    service:   VIEW_CREATE,  // может создавать заявки
+    clients:   VIEW,
+    documents: VIEW,
+    payments:  VIEW,
+    // reports:  нет
+    // settings: нет
+  },
+  'Офис-менеджер': {
+    // dashboard: нет
+    equipment: ALL,
+    rentals:   ALL,
+    service:   ALL,
+    clients:   ALL,
+    documents: ALL,
+    payments:  ALL,
+    // reports:  нет
+    // settings: нет
+  },
+  'Механик': {
+    // dashboard: нет
+    equipment: VIEW,
+    service:   ALL,
+    // остальное: нет
+  },
+};
+
+// ── Маппинг URL → Section ─────────────────────────────────────────────────────
+
+export function pathToSection(pathname: string): Section | null {
+  if (pathname === '/')                       return 'dashboard';
+  if (pathname.startsWith('/equipment'))      return 'equipment';
+  if (pathname.startsWith('/rentals'))        return 'rentals';
+  if (pathname.startsWith('/service'))        return 'service';
+  if (pathname.startsWith('/clients'))        return 'clients';
+  if (pathname.startsWith('/documents'))      return 'documents';
+  if (pathname.startsWith('/payments'))       return 'payments';
+  if (pathname.startsWith('/reports'))        return 'reports';
+  if (pathname.startsWith('/settings'))       return 'settings';
+  return null;
+}
+
+// ── Первый доступный раздел для редиректа ─────────────────────────────────────
+
+const SECTION_PATHS: Array<[Section, string]> = [
+  ['dashboard',  '/'],
+  ['equipment',  '/equipment'],
+  ['rentals',    '/rentals'],
+  ['service',    '/service'],
+  ['clients',    '/clients'],
+  ['documents',  '/documents'],
+  ['payments',   '/payments'],
+  ['reports',    '/reports'],
+  ['settings',   '/settings'],
+];
+
+// ── Хук ──────────────────────────────────────────────────────────────────────
+
+export function usePermissions() {
+  const { user } = useAuth();
+  const role = user?.role ?? '';
+  const perms: RolePermissions = PERMISSIONS[role] ?? {};
+
+  /** Проверяет, разрешено ли конкретное действие в разделе */
+  function can(action: Action, section: Section): boolean {
+    return perms[section]?.includes(action) ?? false;
+  }
+
+  /** Shorthand — может ли пользователь видеть раздел */
+  function canView(section: Section): boolean {
+    return can('view', section);
+  }
+
+  /** Первый разрешённый URL для редиректа (если текущий запрещён) */
+  function defaultPath(): string {
+    for (const [section, path] of SECTION_PATHS) {
+      if (canView(section)) return path;
+    }
+    return '/login';
+  }
+
+  return { can, canView, defaultPath };
+}

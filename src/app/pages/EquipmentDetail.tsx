@@ -28,6 +28,7 @@ import {
 import type { Equipment, EquipmentOwnerType, RepairEventType } from '../types';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { usePermissions } from '../lib/permissions';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -72,6 +73,7 @@ const SERVICE_STATUS_LABELS: Record<string, string> = {
 };
 
 export default function EquipmentDetail() {
+  const { can } = usePermissions();
   const { id } = useParams();
 
   // ── Reactive data loading from localStorage ──
@@ -359,9 +361,11 @@ export default function EquipmentDetail() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setShowEditModal(true)}>
-              Редактировать
-            </Button>
+            {can('edit', 'equipment') && (
+              <Button variant="secondary" size="sm" onClick={() => setShowEditModal(true)}>
+                Редактировать
+              </Button>
+            )}
             <Link to="/rentals">
               <Button variant="secondary" size="sm">
                 <Calendar className="h-3.5 w-3.5" />

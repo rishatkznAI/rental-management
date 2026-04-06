@@ -18,17 +18,18 @@ import {
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { usePermissions, type Section } from '../../lib/permissions';
 
-const navigation = [
-  { name: 'Дашборд', href: '/', icon: LayoutDashboard },
-  { name: 'Техника', href: '/equipment', icon: Truck },
-  { name: 'Аренды', href: '/rentals', icon: FileText },
-  { name: 'Сервис', href: '/service', icon: Wrench },
-  { name: 'Клиенты', href: '/clients', icon: Users },
-  { name: 'Документы', href: '/documents', icon: FileCheck },
-  { name: 'Платежи', href: '/payments', icon: CreditCard },
-  { name: 'Отчёты', href: '/reports', icon: BarChart3 },
-  { name: 'Настройки', href: '/settings', icon: Settings },
+const navigation: { name: string; href: string; icon: React.ElementType; section: Section }[] = [
+  { name: 'Дашборд',   href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
+  { name: 'Техника',   href: '/equipment', icon: Truck,           section: 'equipment'  },
+  { name: 'Аренды',    href: '/rentals',   icon: FileText,        section: 'rentals'    },
+  { name: 'Сервис',    href: '/service',   icon: Wrench,          section: 'service'    },
+  { name: 'Клиенты',   href: '/clients',   icon: Users,           section: 'clients'    },
+  { name: 'Документы', href: '/documents', icon: FileCheck,       section: 'documents'  },
+  { name: 'Платежи',   href: '/payments',  icon: CreditCard,      section: 'payments'   },
+  { name: 'Отчёты',    href: '/reports',   icon: BarChart3,       section: 'reports'    },
+  { name: 'Настройки', href: '/settings',  icon: Settings,        section: 'settings'   },
 ];
 
 function getInitials(name: string): string {
@@ -49,6 +50,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
+  const { canView } = usePermissions();
 
   const handleLogout = () => {
     logout();
@@ -59,6 +61,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     // Close mobile sidebar on navigation
     onClose();
   };
+
+  // Показываем только те разделы, к которым у пользователя есть доступ
+  const visibleNav = navigation.filter(item => canView(item.section));
 
   return (
     <aside
@@ -105,7 +110,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-          {navigation.map((item) => {
+          {visibleNav.map((item) => {
             const Icon = item.icon;
             const isActive =
               location.pathname === item.href ||
@@ -144,7 +149,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 {user?.name ?? '—'}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                {user?.role === 'admin' ? 'Администратор' : user?.role ?? 'Пользователь'}
+                {user?.role ?? 'Пользователь'}
               </p>
             </div>
             <button

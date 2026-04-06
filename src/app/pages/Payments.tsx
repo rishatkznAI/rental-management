@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { getPaymentStatusBadge } from '../components/ui/badge';
 import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
 import { loadPayments, savePayments, loadGanttRentals, PAYMENTS_STORAGE_KEY } from '../mock-data';
+import { usePermissions } from '../lib/permissions';
 import { formatDate, formatCurrency } from '../lib/utils';
 import type { Payment, PaymentStatus } from '../types';
 
@@ -211,6 +212,7 @@ function AddPaymentModal({ onClose, onSave, existing }: AddPaymentModalProps) {
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Payments() {
+  const { can } = usePermissions();
   const [paymentList, setPaymentList] = React.useState<Payment[]>(() => loadPayments());
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
@@ -264,10 +266,12 @@ export default function Payments() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Платежи</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Управление платежами и задолженностями</p>
         </div>
-        <Button size="sm" onClick={() => setShowAddModal(true)}>
-          <Plus className="h-4 w-4" />
-          Добавить платёж
-        </Button>
+        {can('create', 'payments') && (
+          <Button size="sm" onClick={() => setShowAddModal(true)}>
+            <Plus className="h-4 w-4" />
+            Добавить платёж
+          </Button>
+        )}
       </div>
 
       {/* KPI summary */}
@@ -426,7 +430,7 @@ export default function Payments() {
                 ? 'Добавьте первый платёж по аренде'
                 : 'Попробуйте изменить параметры поиска или фильтры'}
             </p>
-            {paymentList.length === 0 && (
+            {paymentList.length === 0 && can('create', 'payments') && (
               <Button size="sm" className="mt-4" onClick={() => setShowAddModal(true)}>
                 <Plus className="h-4 w-4" />
                 Добавить платёж

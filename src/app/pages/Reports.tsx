@@ -6,6 +6,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
 import { RefreshCw, Truck, BarChart2, Wrench, TrendingUp } from 'lucide-react';
+import * as Tabs from '@radix-ui/react-tabs';
 import {
   loadEquipment, loadGanttRentals, loadServiceTickets,
   EQUIPMENT_STORAGE_KEY, GANTT_RENTALS_STORAGE_KEY, SERVICE_STORAGE_KEY,
@@ -13,6 +14,7 @@ import {
 import { formatCurrency } from '../lib/utils';
 import type { Equipment, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
+import ManagerReport from './ManagerReport';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -215,10 +217,36 @@ export default function Reports() {
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
 
+      {/* ── Page header ─────────────────────────────────────────────────────── */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Отчёты</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          Аналитика и управленческие отчёты
+        </p>
+      </div>
+
+      <Tabs.Root defaultValue="analytics" className="space-y-6">
+        <Tabs.List className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
+          {[
+            { value: 'analytics', label: 'Аналитика' },
+            { value: 'managers',  label: 'По менеджерам' },
+          ].map(tab => (
+            <Tabs.Trigger
+              key={tab.value}
+              value={tab.value}
+              className="border-b-2 border-transparent px-5 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] transition-colors"
+            >
+              {tab.label}
+            </Tabs.Trigger>
+          ))}
+        </Tabs.List>
+
+        {/* ── Analytics tab ───────────────────────────────────────────────── */}
+        <Tabs.Content value="analytics" className="space-y-4 sm:space-y-6">
+
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Отчёты</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Аналитика и статистика работы системы
           </p>
@@ -496,6 +524,15 @@ export default function Reports() {
           </CardContent>
         </Card>
       </div>
+
+        </Tabs.Content>
+
+        {/* ── Managers report tab ─────────────────────────────────────────── */}
+        <Tabs.Content value="managers">
+          <ManagerReport />
+        </Tabs.Content>
+
+      </Tabs.Root>
     </div>
   );
 }

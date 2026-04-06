@@ -183,7 +183,7 @@ export default function EquipmentDetail() {
       eq.id === equipment.id ? { ...eq, photo: base64 } : eq,
     );
     saveEquipment(updated);
-    setEquipmentList(updated);
+    setAllEquipment(updated);
     e.target.value = '';
   };
 
@@ -193,7 +193,7 @@ export default function EquipmentDetail() {
       eq.id === equipment.id ? { ...eq, photo: undefined } : eq,
     );
     saveEquipment(updated);
-    setEquipmentList(updated);
+    setAllEquipment(updated);
   };
 
   const handleShippingPhotoFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {

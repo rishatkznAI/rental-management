@@ -29,9 +29,8 @@ import { ServiceRequestModal } from '../components/modals/ServiceRequestModal';
 import { NewClientModal } from '../components/modals/NewClientModal';
 import { NewRentalModal } from '../components/gantt/GanttModals';
 import { useAuth } from '../contexts/AuthContext';
-import type { Equipment, Rental, ServiceTicket, Client, Payment } from '../types';
+import type { Equipment, Rental, ServiceTicket, Client, Payment, EquipmentStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
-import type { EquipmentStatus } from '../types';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 

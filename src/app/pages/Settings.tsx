@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import * as Tabs from '@radix-ui/react-tabs';
-import { Plus, Trash2, Edit, Eye, EyeOff } from 'lucide-react';
+import { Plus, Trash2, Edit, Eye, EyeOff, AlertTriangle, CheckCircle2, RefreshCw, ShieldAlert } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,17 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { Input } from '../components/ui/input';
-import { loadOwners, saveOwners, type Owner } from '../mock-data';
+import {
+  loadOwners, saveOwners, type Owner,
+  loadEquipment, saveEquipment,
+  loadGanttRentals, saveGanttRentals,
+  loadServiceTickets, saveServiceTickets,
+  loadClients, saveClients,
+  loadPayments, savePayments,
+  loadDocuments, saveDocuments,
+  loadShippingPhotos, saveShippingPhotos,
+  RENTALS_STORAGE_KEY,
+} from '../mock-data';
 
 // ── Типы ─────────────────────────────────────────────────────────────────────
 
@@ -155,6 +165,7 @@ export default function Settings() {
             { value: 'users',         label: 'Пользователи и роли' },
             { value: 'reference',     label: 'Справочники' },
             { value: 'notifications', label: 'Уведомления' },
+            { value: 'data',          label: 'Данные системы' },
           ].map(tab => (
             <Tabs.Trigger
               key={tab.value}
@@ -289,6 +300,11 @@ export default function Settings() {
               </div>
             </CardContent>
           </Card>
+        </Tabs.Content>
+
+        {/* ── Данные системы ────────────────────────────────────────────────── */}
+        <Tabs.Content value="data">
+          <DataResetSection />
         </Tabs.Content>
       </Tabs.Root>
 
@@ -493,6 +509,255 @@ function StatusList() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ── Сброс тестовых данных ─────────────────────────────────────────────────────
+
+interface DataCounts {
+  ganttRentals: number;
+  classicRentals: number;
+  serviceTickets: number;
+  clients: number;
+  payments: number;
+  documents: number;
+  shippingPhotos: number;
+  equipment: number;
+}
+
+function getDataCounts(): DataCounts {
+  const classicRaw = localStorage.getItem(RENTALS_STORAGE_KEY);
+  const classicList = classicRaw ? (() => { try { return JSON.parse(classicRaw); } catch { return []; } })() : [];
+  return {
+    ganttRentals:  loadGanttRentals().length,
+    classicRentals: classicList.length,
+    serviceTickets: loadServiceTickets().length,
+    clients:        loadClients().length,
+    payments:       loadPayments().length,
+    documents:      loadDocuments().length,
+    shippingPhotos: loadShippingPhotos().length,
+    equipment:      loadEquipment().length,
+  };
+}
+
+function DataResetSection() {
+  const [counts, setCounts]           = React.useState<DataCounts>(getDataCounts);
+  const [dialogOpen, setDialogOpen]   = React.useState(false);
+  const [confirmText, setConfirmText] = React.useState('');
+  const [done, setDone]               = React.useState(false);
+  const [resetting, setResetting]     = React.useState(false);
+
+  const totalToDelete =
+    counts.ganttRentals + counts.classicRentals + counts.serviceTickets +
+    counts.clients + counts.payments + counts.documents + counts.shippingPhotos;
+
+  const canConfirm = confirmText.trim().toLowerCase() === 'сброс';
+
+  const handleOpenDialog = () => {
+    setCounts(getDataCounts()); // refresh counts
+    setConfirmText('');
+    setDone(false);
+    setDialogOpen(true);
+  };
+
+  const handleReset = () => {
+    setResetting(true);
+    try {
+      // Удаляем все транзакционные данные
+      saveGanttRentals([]);
+      saveServiceTickets([]);
+      saveClients([]);
+      savePayments([]);
+      saveDocuments([]);
+      saveShippingPhotos([]);
+      localStorage.removeItem(RENTALS_STORAGE_KEY);
+
+      // Сбрасываем статус техники → свободна, убираем арендатора и дату возврата
+      const equipment = loadEquipment();
+      const resetEquipment = equipment.map(eq => {
+        const { currentClient: _cc, returnDate: _rd, ...rest } = eq;
+        return { ...rest, status: 'available' as const };
+      });
+      saveEquipment(resetEquipment);
+
+      setCounts(getDataCounts());
+      setDone(true);
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const deletableRows: { label: string; count: number; key: string }[] = [
+    { key: 'ganttRentals',  label: 'Аренды (планировщик)',     count: counts.ganttRentals },
+    { key: 'classicRentals',label: 'Аренды (классические)',    count: counts.classicRentals },
+    { key: 'serviceTickets',label: 'Сервисные заявки',         count: counts.serviceTickets },
+    { key: 'clients',       label: 'Клиенты',                  count: counts.clients },
+    { key: 'payments',      label: 'Платежи',                  count: counts.payments },
+    { key: 'documents',     label: 'Документы',                count: counts.documents },
+    { key: 'shippingPhotos',label: 'Фото отгрузки/приёмки',   count: counts.shippingPhotos },
+  ];
+
+  const keptRows = [
+    { label: 'Пользователи и роли',     desc: 'Учётные записи и права доступа' },
+    { label: 'Собственники техники',    desc: 'Справочник владельцев' },
+    { label: `Техника (${counts.equipment} ед.)`, desc: 'Карточки сохраняются, статус → Свободна, арендатор и дата возврата очищаются' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Информационный баннер */}
+      <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-900/20 p-4">
+        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+        <div className="text-sm text-amber-800 dark:text-amber-300">
+          <p className="font-semibold mb-1">Зона администрирования</p>
+          <p>Эта вкладка предназначена для очистки тестовых данных перед началом реальной работы с системой. Действие необратимо — данные восстановить невозможно.</p>
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Что будет удалено */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
+              <Trash2 className="h-5 w-5" />
+              Будет удалено
+            </CardTitle>
+            <CardDescription>Транзакционные данные, накопленные в процессе тестирования</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {deletableRows.map(row => (
+                <div key={row.key} className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">{row.label}</span>
+                  <span className={`min-w-[2rem] text-right text-sm font-bold tabular-nums ${row.count > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
+                    {row.count}
+                  </span>
+                </div>
+              ))}
+              <div className="mt-3 flex items-center justify-between rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700/50 px-3 py-2">
+                <span className="text-sm font-semibold text-red-700 dark:text-red-300">Итого записей к удалению</span>
+                <span className="text-sm font-bold text-red-700 dark:text-red-300 tabular-nums">{totalToDelete}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Что останется */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-green-600 dark:text-green-400">
+              <CheckCircle2 className="h-5 w-5" />
+              Будет сохранено
+            </CardTitle>
+            <CardDescription>Справочники и системные настройки останутся нетронутыми</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {keptRows.map(row => (
+                <div key={row.label} className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
+                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{row.label}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{row.desc}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Кнопка сброса / результат */}
+      <Card>
+        <CardContent className="pt-6">
+          {done ? (
+            <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 dark:border-green-700/50 dark:bg-green-900/20 p-4">
+              <CheckCircle2 className="h-6 w-6 shrink-0 text-green-600 dark:text-green-400" />
+              <div>
+                <p className="font-semibold text-green-800 dark:text-green-300">Данные успешно сброшены</p>
+                <p className="text-sm text-green-700 dark:text-green-400 mt-0.5">
+                  Система готова к реальной эксплуатации. Вся техника переведена в статус «Свободна».
+                </p>
+              </div>
+              <button
+                onClick={() => { setCounts(getDataCounts()); setDone(false); }}
+                className="ml-auto rounded p-1 text-green-600 hover:bg-green-100 dark:hover:bg-green-900/40"
+                title="Обновить"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <p className="font-medium text-gray-900 dark:text-white">Сброс тестовых данных</p>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {totalToDelete > 0
+                    ? `Будет удалено ${totalToDelete} записей. Это действие нельзя отменить.`
+                    : 'Транзакционных данных нет — система уже чистая.'}
+                </p>
+              </div>
+              <button
+                onClick={handleOpenDialog}
+                className="flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 transition-colors"
+              >
+                <AlertTriangle className="h-4 w-4" />
+                Сбросить тестовые данные
+              </button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Диалог подтверждения */}
+      <Dialog open={dialogOpen} onOpenChange={open => { if (!open) setDialogOpen(false); }}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
+              <AlertTriangle className="h-5 w-5" />
+              Подтверждение сброса данных
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-700/50 dark:bg-red-900/20 p-4 text-sm text-red-800 dark:text-red-300">
+              <p className="font-semibold mb-2">Внимание! Это действие необратимо.</p>
+              <p>Будет удалено <strong>{totalToDelete} записей</strong>:</p>
+              <ul className="mt-2 space-y-1 list-disc list-inside">
+                {deletableRows.filter(r => r.count > 0).map(r => (
+                  <li key={r.key}>{r.label}: <strong>{r.count}</strong></li>
+                ))}
+              </ul>
+              <p className="mt-3">Вся техника ({counts.equipment} ед.) будет переведена в статус <strong>«Свободна»</strong>.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Введите слово <strong>СБРОС</strong> для подтверждения:
+              </label>
+              <input
+                type="text"
+                value={confirmText}
+                onChange={e => setConfirmText(e.target.value)}
+                placeholder="СБРОС"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="secondary">Отмена</Button>
+            </DialogClose>
+            <button
+              onClick={() => { handleReset(); setDialogOpen(false); }}
+              disabled={!canConfirm || resetting}
+              className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            >
+              {resetting && <RefreshCw className="h-4 w-4 animate-spin" />}
+              Подтвердить сброс
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 

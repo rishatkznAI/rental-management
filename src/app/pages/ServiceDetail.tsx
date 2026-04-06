@@ -584,8 +584,8 @@ export default function ServiceDetail() {
                   <Divider />
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
+                      <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Назначить</label>
                       <Input
-                        label="Назначить"
                         placeholder="Имя механика"
                         value={newAssignee}
                         onChange={e => setNewAssignee(e.target.value)}
@@ -616,8 +616,8 @@ export default function ServiceDetail() {
                     <Divider />
                     <div className="flex gap-2 items-end">
                       <div className="flex-1">
-                        <Input
-                          label="Плановая дата"
+                        <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Плановая дата</label>
+                      <Input
                           type="date"
                           value={newPlannedDate}
                           onChange={e => setNewPlannedDate(e.target.value)}

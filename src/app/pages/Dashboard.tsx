@@ -5,6 +5,8 @@ import { Badge } from '../components/ui/badge';
 import {
   Plus, TrendingUp, AlertTriangle, Wrench, DollarSign, Calendar,
   User, Target, FileText, CreditCard, RefreshCw, CheckCircle, Truck,
+  ShieldAlert, Clock, Ban, ArrowRight, ChevronDown, ChevronUp,
+  PackageX, ClipboardX, Zap,
 } from 'lucide-react';
 import { Link } from 'react-router';
 import { formatCurrency, formatDate } from '../lib/utils';
@@ -15,6 +17,7 @@ import {
   loadServiceTickets,
   loadClients,
   loadPayments,
+  loadDocuments,
   loadGanttRentals,
   saveGanttRentals,
   EQUIPMENT_STORAGE_KEY,
@@ -22,6 +25,7 @@ import {
   SERVICE_STORAGE_KEY,
   CLIENTS_STORAGE_KEY,
   PAYMENTS_STORAGE_KEY,
+  DOCUMENTS_STORAGE_KEY,
   GANTT_RENTALS_STORAGE_KEY,
 } from '../mock-data';
 import { KPIDetailModal } from '../components/modals/KPIDetailModal';
@@ -30,7 +34,7 @@ import { NewClientModal } from '../components/modals/NewClientModal';
 import { NewRentalModal } from '../components/gantt/GanttModals';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
-import type { Equipment, Rental, ServiceTicket, Client, Payment, EquipmentStatus } from '../types';
+import type { Equipment, Rental, ServiceTicket, Client, Payment, Document, EquipmentStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
@@ -61,6 +65,7 @@ interface DashData {
   tickets: ServiceTicket[];
   clients: Client[];
   payments: Payment[];
+  documents: Document[];
   loadedAt: number;
 }
 
@@ -71,6 +76,7 @@ function loadAll(): DashData {
     tickets: loadServiceTickets(),
     clients: loadClients(),
     payments: loadPayments(),
+    documents: loadDocuments(),
     loadedAt: Date.now(),
   };
 }
@@ -87,6 +93,7 @@ export default function Dashboard() {
     'weekRevenue' | 'totalDebt' | 'monthDebt' | null
   >(null);
   const [showServiceModal, setShowServiceModal] = useState(false);
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
   const [showRentalModal, setShowRentalModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -109,7 +116,7 @@ export default function Dashboard() {
     const watchKeys = [
       EQUIPMENT_STORAGE_KEY, RENTALS_STORAGE_KEY,
       SERVICE_STORAGE_KEY, CLIENTS_STORAGE_KEY, PAYMENTS_STORAGE_KEY,
-      GANTT_RENTALS_STORAGE_KEY,
+      DOCUMENTS_STORAGE_KEY, GANTT_RENTALS_STORAGE_KEY,
     ];
     const onStorage = (e: StorageEvent) => {
       if (e.key && watchKeys.includes(e.key)) {
@@ -127,7 +134,7 @@ export default function Dashboard() {
   }, []);
 
   // ── derived KPIs ─────────────────────────────────────────────────────────────
-  const { equipment, rentals, tickets, clients, payments } = data;
+  const { equipment, rentals, tickets, clients, payments, documents } = data;
 
   const today = startOfDay(new Date());
   const weekAgo = daysAgo(7);
@@ -283,6 +290,201 @@ export default function Dashboard() {
   // Overdue debt clients
   const overdueDebtClients = clients.filter(c => (c.debt ?? 0) > 0);
   const overdueDebtCount = overdueDebtClients.length + overduePayments.length;
+
+  // ── Alert items ─────────────────────────────────────────────────────────────
+  type AlertPriority = 'critical' | 'high' | 'medium';
+  interface AlertItem {
+    id: string;
+    priority: AlertPriority;
+    icon: React.ElementType;
+    category: string;
+    title: string;
+    entity: string;
+    detail: string;
+    link: string;
+    linkLabel: string;
+  }
+
+  const alertItems: AlertItem[] = [];
+
+  // 1. Просроченные возвраты (критично)
+  overdueRentalsList.forEach(r => {
+    const days = Math.max(1, Math.ceil((today.getTime() - new Date(r.plannedReturnDate).getTime()) / 86400000));
+    alertItems.push({
+      id: `overdue-return-${r.id}`,
+      priority: 'critical',
+      icon: Calendar,
+      category: 'Просроченный возврат',
+      title: r.client,
+      entity: r.equipment?.slice(0, 2).join(', ') || r.id,
+      detail: `Просрочка ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'}`,
+      link: `/rentals/${r.id}`,
+      linkLabel: 'Открыть аренду',
+    });
+  });
+
+  // 2. Просроченные платежи (критично если > 7 дней, иначе высокий)
+  overduePayments.forEach(p => {
+    const days = Math.max(0, Math.ceil((today.getTime() - new Date(p.dueDate).getTime()) / 86400000));
+    alertItems.push({
+      id: `overdue-pay-${p.id}`,
+      priority: days > 7 ? 'critical' : 'high',
+      icon: DollarSign,
+      category: 'Неоплаченный счёт',
+      title: p.client,
+      entity: p.invoiceNumber ? `Счёт ${p.invoiceNumber}` : (p.rentalId ? `Аренда ${p.rentalId}` : 'Платёж'),
+      detail: `${formatCurrency(p.amount)} · ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'} просрочки`,
+      link: '/payments',
+      linkLabel: 'К платежам',
+    });
+  });
+
+  // 3. Критические сервисные заявки
+  criticalTickets.forEach(t => {
+    alertItems.push({
+      id: `ticket-${t.id}`,
+      priority: t.priority === 'critical' ? 'critical' : 'high',
+      icon: Wrench,
+      category: 'Сервисная заявка',
+      title: t.equipment,
+      entity: `${t.id} · ${t.reason}`,
+      detail: t.status === 'waiting_parts' ? 'Ожидание запчастей' : t.priority === 'critical' ? 'Критический приоритет' : 'Высокий приоритет',
+      link: `/service/${t.id}`,
+      linkLabel: 'Открыть заявку',
+    });
+  });
+
+  // 4. Техника не готова к выдаче (аренды стартующие сегодня/завтра, но техника в сервисе)
+  const soon2 = new Date(today);
+  soon2.setDate(soon2.getDate() + 2);
+  const startingSoonRentals = viewRentals.filter(r => {
+    const s = new Date(r.startDate);
+    return (r.status === 'confirmed' || r.status === 'new') && s >= today && s <= soon2;
+  });
+  startingSoonRentals.forEach(r => {
+    const blockedEq = (r.equipment || []).filter(eqName =>
+      equipment.some(e => (e.inventoryNumber === eqName || e.model === eqName) && e.status === 'in_service')
+    );
+    if (blockedEq.length > 0) {
+      const isToday = new Date(r.startDate) < tomorrowStart;
+      alertItems.push({
+        id: `not-ready-${r.id}`,
+        priority: isToday ? 'critical' : 'high',
+        icon: PackageX,
+        category: 'Техника не готова',
+        title: r.client,
+        entity: blockedEq.slice(0, 2).join(', '),
+        detail: isToday ? 'Старт аренды сегодня' : 'Старт аренды завтра',
+        link: `/rentals/${r.id}`,
+        linkLabel: 'Открыть аренду',
+      });
+    }
+  });
+
+  // 5. Неподписанные документы (договоры без статуса signed)
+  const unsignedDocs = documents.filter(d =>
+    (d.type === 'contract' || d.type === 'act') && d.status !== 'signed'
+  );
+  unsignedDocs.slice(0, 5).forEach(d => {
+    const typeLabel = d.type === 'contract' ? 'Договор' : d.type === 'act' ? 'УПД/Акт' : 'Документ';
+    alertItems.push({
+      id: `doc-${d.id}`,
+      priority: 'medium',
+      icon: ClipboardX,
+      category: `Не подписан: ${typeLabel}`,
+      title: d.client,
+      entity: d.number ? `№${d.number}` : (d.rental ? `Аренда ${d.rental}` : ''),
+      detail: d.date ? `от ${formatDate(d.date)}` : 'Требует подписи',
+      link: '/documents',
+      linkLabel: 'К документам',
+    });
+  });
+
+  // 6. Просроченное ТО (nextMaintenance / maintenanceCHTO / maintenancePTO в прошлом)
+  equipment.forEach(e => {
+    const checks: { label: string; date: string | undefined }[] = [
+      { label: 'Плановое ТО', date: e.nextMaintenance },
+      { label: 'ЧТО', date: e.maintenanceCHTO },
+      { label: 'ПТО', date: e.maintenancePTO },
+    ];
+    checks.forEach(({ label, date }) => {
+      if (!date) return;
+      const d = new Date(date);
+      if (d < today) {
+        const days = Math.ceil((today.getTime() - d.getTime()) / 86400000);
+        alertItems.push({
+          id: `maint-${e.id}-${label}`,
+          priority: days > 30 ? 'high' : 'medium',
+          icon: Zap,
+          category: `Просрочено ${label}`,
+          title: `${e.manufacturer} ${e.model}`,
+          entity: e.inventoryNumber,
+          detail: `${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'} просрочки`,
+          link: `/equipment/${e.id}`,
+          linkLabel: 'Карточка техники',
+        });
+      }
+    });
+  });
+
+  // 7. Клиенты со статусом blocked + активными арендами
+  const blockedClientsWithRentals = clients.filter(c => c.status === 'blocked');
+  blockedClientsWithRentals.forEach(c => {
+    const hasActive = activeRentalsList.some(r => r.client === c.company);
+    if (hasActive) {
+      alertItems.push({
+        id: `blocked-client-${c.id}`,
+        priority: 'critical',
+        icon: Ban,
+        category: 'Заблокированный клиент',
+        title: c.company,
+        entity: 'Есть активные аренды',
+        detail: c.debt > 0 ? `Долг: ${formatCurrency(c.debt)}` : 'Риск срыва выдачи',
+        link: `/clients/${c.id}`,
+        linkLabel: 'Карточка клиента',
+      });
+    }
+  });
+
+  // 8. Долг превышает кредитный лимит
+  clients.filter(c => c.creditLimit > 0 && c.debt > c.creditLimit).forEach(c => {
+    alertItems.push({
+      id: `credit-limit-${c.id}`,
+      priority: 'high',
+      icon: ShieldAlert,
+      category: 'Превышен кредитный лимит',
+      title: c.company,
+      entity: `Лимит: ${formatCurrency(c.creditLimit)}`,
+      detail: `Долг: ${formatCurrency(c.debt)}`,
+      link: `/clients/${c.id}`,
+      linkLabel: 'К клиенту',
+    });
+  });
+
+  // 9. Аренды с флагом риска
+  viewRentals.filter(r => r.risk && (r.status === 'active' || r.status === 'confirmed')).forEach(r => {
+    alertItems.push({
+      id: `risk-rental-${r.id}`,
+      priority: 'medium',
+      icon: ShieldAlert,
+      category: 'Риск по аренде',
+      title: r.client,
+      entity: r.id,
+      detail: r.risk!.slice(0, 60),
+      link: `/rentals/${r.id}`,
+      linkLabel: 'Открыть аренду',
+    });
+  });
+
+  // Sort: critical → high → medium
+  const priorityOrder: Record<AlertPriority, number> = { critical: 0, high: 1, medium: 2 };
+  alertItems.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+  const ALERTS_PREVIEW = 7;
+  const visibleAlerts = showAllAlerts ? alertItems : alertItems.slice(0, ALERTS_PREVIEW);
+  const criticalCount = alertItems.filter(a => a.priority === 'critical').length;
+  const highCount = alertItems.filter(a => a.priority === 'high').length;
+  const mediumCount = alertItems.filter(a => a.priority === 'medium').length;
 
   // ── KPI data objects for modal ──────────────────────────────────────────────
   const kpiData = {
@@ -727,142 +929,180 @@ export default function Dashboard() {
       {/* ── Alerts + Recent rentals ───────────────────────────────────────────── */}
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
 
-        {/* Alerts Panel */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-orange-600" />
-              Требует внимания
-            </CardTitle>
-            <CardDescription>Критические события и задачи</CardDescription>
+        {/* ── Alerts Panel (redesigned) ─────────────────────────────────── */}
+        <Card className={alertItems.length > 0 && criticalCount > 0
+          ? 'border-red-200 dark:border-red-800'
+          : alertItems.length > 0 && highCount > 0
+          ? 'border-orange-200 dark:border-orange-800'
+          : ''
+        }>
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-2">
+              <CardTitle className="flex items-center gap-2">
+                {alertItems.length === 0 ? (
+                  <CheckCircle className="h-5 w-5 text-green-500" />
+                ) : criticalCount > 0 ? (
+                  <AlertTriangle className="h-5 w-5 text-red-600" />
+                ) : (
+                  <AlertTriangle className="h-5 w-5 text-orange-500" />
+                )}
+                Требует внимания
+                {alertItems.length > 0 && (
+                  <span className={`ml-1 rounded-full px-2 py-0.5 text-xs font-bold ${
+                    criticalCount > 0
+                      ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                      : 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300'
+                  }`}>
+                    {alertItems.length}
+                  </span>
+                )}
+              </CardTitle>
+
+              {/* Priority counters */}
+              {alertItems.length > 0 && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {criticalCount > 0 && (
+                    <span className="flex items-center gap-1 rounded-md bg-red-100 dark:bg-red-900/30 px-2 py-0.5 text-xs font-semibold text-red-700 dark:text-red-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-600 inline-block" />
+                      {criticalCount}
+                    </span>
+                  )}
+                  {highCount > 0 && (
+                    <span className="flex items-center gap-1 rounded-md bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs font-semibold text-orange-700 dark:text-orange-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-orange-500 inline-block" />
+                      {highCount}
+                    </span>
+                  )}
+                  {mediumCount > 0 && (
+                    <span className="flex items-center gap-1 rounded-md bg-yellow-100 dark:bg-yellow-900/30 px-2 py-0.5 text-xs font-semibold text-yellow-700 dark:text-yellow-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-yellow-500 inline-block" />
+                      {mediumCount}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <CardDescription>
+              {alertItems.length === 0
+                ? 'Все операции в штатном режиме'
+                : `${criticalCount > 0 ? `${criticalCount} критичных · ` : ''}${highCount > 0 ? `${highCount} важных · ` : ''}${mediumCount > 0 ? `${mediumCount} обычных` : ''}`.replace(/ · $/, '')}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
 
-            {/* Overdue returns */}
-            {overdueRentalsList.length > 0 && (
-              <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4">
-                <div className="flex items-start gap-3">
-                  <Calendar className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-red-900 dark:text-red-200">
-                      Просроченные возвраты ({overdueRentalsList.length})
-                    </p>
-                    <div className="mt-1 space-y-0.5">
-                      {overdueRentalsList.slice(0, 3).map(r => (
-                        <p key={r.id} className="text-sm text-red-700 dark:text-red-300 truncate">
-                          {r.client} — просрочен до {formatDate(r.plannedReturnDate)}
-                        </p>
-                      ))}
-                    </div>
-                    <Link to="/rentals" className="mt-2 inline-block text-sm font-medium text-red-800 dark:text-red-200 hover:underline">
-                      Смотреть все →
-                    </Link>
-                  </div>
+          <CardContent className="space-y-0 p-0 pb-0">
+            {alertItems.length === 0 ? (
+              /* ── Empty state ── */
+              <div className="flex flex-col items-center justify-center py-10 text-center px-6">
+                <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
+                  <CheckCircle className="h-7 w-7 text-green-600" />
                 </div>
+                <p className="font-semibold text-gray-800 dark:text-gray-200">Всё под контролем</p>
+                <p className="mt-1 text-sm text-gray-400">Критических задач и рисков нет.</p>
               </div>
-            )}
+            ) : (
+              <>
+                {/* ── Alert list ── */}
+                <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {visibleAlerts.map(alert => {
+                    const Icon = alert.icon;
+                    const isCritical = alert.priority === 'critical';
+                    const isHigh = alert.priority === 'high';
+                    return (
+                      <div
+                        key={alert.id}
+                        className={`flex items-start gap-3 px-6 py-3.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
+                          isCritical ? 'border-l-2 border-red-500' :
+                          isHigh ? 'border-l-2 border-orange-400' :
+                          'border-l-2 border-yellow-400'
+                        }`}
+                      >
+                        {/* Icon */}
+                        <div className={`mt-0.5 shrink-0 rounded-md p-1.5 ${
+                          isCritical ? 'bg-red-100 dark:bg-red-900/30' :
+                          isHigh ? 'bg-orange-100 dark:bg-orange-900/30' :
+                          'bg-yellow-100 dark:bg-yellow-900/20'
+                        }`}>
+                          <Icon className={`h-3.5 w-3.5 ${
+                            isCritical ? 'text-red-600 dark:text-red-400' :
+                            isHigh ? 'text-orange-600 dark:text-orange-400' :
+                            'text-yellow-600 dark:text-yellow-400'
+                          }`} />
+                        </div>
 
-            {/* Overdue payments */}
-            {overduePayments.length > 0 && (
-              <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4">
-                <div className="flex items-start gap-3">
-                  <DollarSign className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-red-900 dark:text-red-200">
-                      Просроченные платежи ({overduePayments.length})
-                    </p>
-                    <p className="mt-1 text-sm text-red-700 dark:text-red-300">
-                      Общая сумма: {formatCurrency(overduePaymentsTotal)}
-                    </p>
-                    <Link to="/payments" className="mt-2 inline-block text-sm font-medium text-red-800 dark:text-red-200 hover:underline">
-                      Перейти к платежам →
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            )}
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-[10px] font-semibold uppercase tracking-wide ${
+                              isCritical ? 'text-red-600 dark:text-red-400' :
+                              isHigh ? 'text-orange-600 dark:text-orange-400' :
+                              'text-yellow-600 dark:text-yellow-400'
+                            }`}>
+                              {alert.category}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-sm font-medium text-gray-900 dark:text-white truncate">
+                            {alert.title}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            {alert.entity && (
+                              <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                {alert.entity}
+                              </span>
+                            )}
+                            {alert.entity && alert.detail && (
+                              <span className="text-gray-300 dark:text-gray-600 text-xs">·</span>
+                            )}
+                            {alert.detail && (
+                              <span className={`text-xs font-medium ${
+                                isCritical ? 'text-red-600 dark:text-red-400' :
+                                isHigh ? 'text-orange-600 dark:text-orange-400' :
+                                'text-yellow-700 dark:text-yellow-400'
+                              }`}>
+                                {alert.detail}
+                              </span>
+                            )}
+                          </div>
+                        </div>
 
-            {/* Upcoming returns */}
-            {upcomingReturns.length > 0 && (
-              <div className="rounded-lg border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 p-4">
-                <div className="flex items-start gap-3">
-                  <Calendar className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-yellow-900 dark:text-yellow-200">
-                      Возвраты в ближайшие 3 дня ({upcomingReturns.length})
-                    </p>
-                    <div className="mt-1 space-y-0.5">
-                      {upcomingReturns.slice(0, 3).map(r => (
-                        <p key={r.id} className="text-sm text-yellow-700 dark:text-yellow-300 truncate">
-                          {r.client} — {formatDate(r.plannedReturnDate)}
-                        </p>
-                      ))}
-                    </div>
-                    <Link to="/rentals" className="mt-2 inline-block text-sm font-medium text-yellow-800 dark:text-yellow-200 hover:underline">
-                      Смотреть все →
-                    </Link>
-                  </div>
+                        {/* Action link */}
+                        <Link
+                          to={alert.link}
+                          className={`shrink-0 flex items-center gap-1 text-xs font-medium transition-colors hover:underline mt-0.5 ${
+                            isCritical ? 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200' :
+                            isHigh ? 'text-orange-600 dark:text-orange-400 hover:text-orange-800 dark:hover:text-orange-200' :
+                            'text-yellow-700 dark:text-yellow-400 hover:text-yellow-900 dark:hover:text-yellow-200'
+                          }`}
+                        >
+                          {alert.linkLabel}
+                          <ArrowRight className="h-3 w-3" />
+                        </Link>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            )}
 
-            {/* Critical tickets */}
-            {criticalTickets.length > 0 && (
-              <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 p-4">
-                <div className="flex items-start gap-3">
-                  <Wrench className="h-5 w-5 text-orange-600 shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-orange-900 dark:text-orange-200">
-                      Критические заявки сервиса ({criticalTickets.length})
-                    </p>
-                    <div className="mt-1 space-y-0.5">
-                      {criticalTickets.slice(0, 2).map(t => (
-                        <p key={t.id} className="text-sm text-orange-700 dark:text-orange-300 truncate">
-                          {t.id} · {t.equipment}
-                        </p>
-                      ))}
-                    </div>
-                    <Link to="/service" className="mt-2 inline-block text-sm font-medium text-orange-800 dark:text-orange-200 hover:underline">
-                      Открыть сервис →
-                    </Link>
+                {/* ── Show more / collapse ── */}
+                {alertItems.length > ALERTS_PREVIEW && (
+                  <div className="border-t border-gray-100 dark:border-gray-800 px-6 py-3">
+                    <button
+                      onClick={() => setShowAllAlerts(v => !v)}
+                      className="flex w-full items-center justify-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                    >
+                      {showAllAlerts ? (
+                        <>
+                          <ChevronUp className="h-4 w-4" />
+                          Свернуть
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="h-4 w-4" />
+                          Показать ещё {alertItems.length - ALERTS_PREVIEW}
+                        </>
+                      )}
+                    </button>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* Equipment in service alert */}
-            {equipmentInServiceList.length > 0 && criticalTickets.length === 0 && (
-              <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 p-4">
-                <div className="flex items-start gap-3">
-                  <Wrench className="h-5 w-5 text-orange-500 shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-orange-900 dark:text-orange-200">
-                      Техника в сервисе: {equipmentInServiceList.length} ед.
-                    </p>
-                    <p className="text-sm text-orange-700 dark:text-orange-300 mt-0.5">
-                      {equipmentInServiceList.slice(0, 2).map(e => e.inventoryNumber).join(', ')}
-                      {equipmentInServiceList.length > 2 ? ` +${equipmentInServiceList.length - 2}` : ''}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* All clear */}
-            {overdueRentalsList.length === 0 &&
-              overduePayments.length === 0 &&
-              upcomingReturns.length === 0 &&
-              criticalTickets.length === 0 &&
-              equipmentInServiceList.length === 0 && (
-              <div className="flex items-center justify-center py-8 text-center">
-                <div>
-                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
-                    <CheckCircle className="h-6 w-6 text-green-600" />
-                  </div>
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Всё в порядке!</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Критических задач нет.</p>
-                </div>
-              </div>
+                )}
+              </>
             )}
           </CardContent>
         </Card>

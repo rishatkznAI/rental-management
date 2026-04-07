@@ -17,6 +17,7 @@ import {
   loadDocuments,
 } from '../mock-data';
 import type { Client, ClientStatus } from '../types';
+import { usePermissions } from '../lib/permissions';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,8 @@ const RENTAL_STATUS_LABELS: Record<string, { label: string; variant: BadgeVarian
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { can } = usePermissions();
+  const canEdit = can('edit', 'clients');
 
   // Load from localStorage (NOT from static mock array)
   const [client, setClient] = useState<Client | null>(() => {
@@ -108,7 +111,7 @@ export default function ClientDetail() {
   }, []);
 
   const startEdit = () => {
-    if (!client) return;
+    if (!client || !canEdit) return;
     setEditData({ ...client });
     setEditing(true);
   };
@@ -119,7 +122,7 @@ export default function ClientDetail() {
   };
 
   const saveEdit = () => {
-    if (!client) return;
+    if (!client || !canEdit) return;
     persist({ ...client, ...editData });
     setEditing(false);
     setEditData({});
@@ -165,10 +168,12 @@ export default function ClientDetail() {
         <div className="flex gap-2 flex-wrap">
           {!editing ? (
             <>
-              <Button variant="secondary" onClick={startEdit}>
-                <Edit className="h-4 w-4" />
-                Редактировать
-              </Button>
+              {canEdit && (
+                <Button variant="secondary" onClick={startEdit}>
+                  <Edit className="h-4 w-4" />
+                  Редактировать
+                </Button>
+              )}
               <Link to={`/rentals/new?client=${encodeURIComponent(client.company)}`}>
                 <Button>
                   <Plus className="h-4 w-4" />

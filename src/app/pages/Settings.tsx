@@ -93,7 +93,7 @@ export default function Settings() {
     setUsers(prev => prev.filter(u => u.id !== id));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name.trim())  { setFormError('Введите имя'); return; }
     if (!form.email.trim()) { setFormError('Введите email'); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) { setFormError('Некорректный email'); return; }
@@ -103,14 +103,16 @@ export default function Settings() {
     if (duplicate) { setFormError('Пользователь с таким email уже существует'); return; }
 
     if (editingId) {
-      // При редактировании: пустой пароль = не меняем
+      // При редактировании: пустой пароль = не меняем; непустой — хешируем
+      const hashedPwd = form.password ? await hashPassword(form.password) : undefined;
       setUsers(prev => prev.map(u => {
         if (u.id !== editingId) return u;
-        return { ...u, name: form.name, email: form.email, role: form.role, status: form.status, ...(form.password ? { password: form.password } : {}) };
+        return { ...u, name: form.name, email: form.email, role: form.role, status: form.status, ...(hashedPwd ? { password: hashedPwd } : {}) };
       }));
     } else {
       if (!form.password.trim()) { setFormError('Задайте пароль для нового пользователя'); return; }
-      const newUser: SystemUser = { id: Date.now().toString(), ...form };
+      const hashedPwd = await hashPassword(form.password);
+      const newUser: SystemUser = { id: Date.now().toString(), name: form.name, email: form.email, role: form.role, status: form.status, password: hashedPwd };
       setUsers(prev => [...prev, newUser]);
     }
     setDialogOpen(false);

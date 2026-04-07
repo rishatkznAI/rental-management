@@ -24,6 +24,27 @@ const cors     = require('cors');
 const fs       = require('fs');
 const path     = require('path');
 const fetch    = require('node-fetch');
+const crypto   = require('crypto');
+
+// ── Проверка паролей (совместима с frontend userStorage.ts) ───────────────────
+// Frontend хранит пароли как 'h1:<sha256hex(plain + ":rental-mgmt-v1")>'
+// При legacy plain-text паролях проверяем прямое сравнение для обратной совместимости
+
+const HASH_PREFIX = 'h1:';
+const HASH_SALT   = 'rental-mgmt-v1';
+
+function hashPassword(plain) {
+  const hex = crypto.createHash('sha256').update(plain + ':' + HASH_SALT).digest('hex');
+  return HASH_PREFIX + hex;
+}
+
+function verifyPassword(plain, stored) {
+  if (stored.startsWith(HASH_PREFIX)) {
+    return hashPassword(plain) === stored;
+  }
+  // Обратная совместимость: legacy plain-text пароль
+  return plain === stored;
+}
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -134,7 +155,7 @@ function authorizeUser(phone, email, password) {
   const users = readData('users') || [];
   const found = users.find(
     u => u.email.toLowerCase() === email.toLowerCase() &&
-         u.password === password &&
+         verifyPassword(password, u.password) &&
          u.status === 'Активен'
   );
   if (!found) return null;

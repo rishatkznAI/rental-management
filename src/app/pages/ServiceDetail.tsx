@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -79,6 +80,8 @@ const EQUIPMENT_TYPE_LABELS: Record<string, string> = {
 export default function ServiceDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { can } = usePermissions();
+  const canEdit = can('edit', 'service');
 
   // Load from localStorage (NOT from static mock array)
   const [ticket, setTicket] = useState<ServiceTicket | null>(() => {
@@ -152,7 +155,7 @@ export default function ServiceDetail() {
   // ── actions ────────────────────────────────────────────────────────────────
 
   const changeStatus = (newStatus: ServiceStatus, logText: string, author = 'Оператор') => {
-    if (!ticket) return;
+    if (!ticket || !canEdit) return;
     const now = new Date().toISOString();
     const updated: ServiceTicket = {
       ...ticket,
@@ -167,7 +170,7 @@ export default function ServiceDetail() {
   };
 
   const addComment = () => {
-    if (!ticket || !newComment.trim()) return;
+    if (!ticket || !canEdit || !newComment.trim()) return;
     const now = new Date().toISOString();
     persist({
       ...ticket,
@@ -177,7 +180,7 @@ export default function ServiceDetail() {
   };
 
   const saveAssignee = () => {
-    if (!ticket || !newAssignee.trim()) return;
+    if (!ticket || !canEdit || !newAssignee.trim()) return;
     const now = new Date().toISOString();
     persist({
       ...ticket,
@@ -193,14 +196,14 @@ export default function ServiceDetail() {
   };
 
   const saveResult = () => {
-    if (!ticket || !newResult.trim()) return;
+    if (!ticket || !canEdit || !newResult.trim()) return;
     persist({ ...ticket, result: newResult.trim() });
     setNewResult('');
     setShowResultInput(false);
   };
 
   const savePlannedDate = () => {
-    if (!ticket || !newPlannedDate) return;
+    if (!ticket || !canEdit || !newPlannedDate) return;
     persist({ ...ticket, plannedDate: newPlannedDate });
     setNewPlannedDate('');
   };
@@ -220,11 +223,11 @@ export default function ServiceDetail() {
     );
   }
 
-  // ── action buttons based on status ────────────────────────────────────────
+  // ── action buttons based on status (only for users with edit permission) ──
 
   const actions: React.ReactNode[] = [];
 
-  if (ticket.status === 'new') {
+  if (canEdit && ticket.status === 'new') {
     actions.push(
       <Button key="start" onClick={() => changeStatus('in_progress', 'Заявка взята в работу')}>
         <Play className="h-4 w-4" />
@@ -232,7 +235,7 @@ export default function ServiceDetail() {
       </Button>
     );
   }
-  if (ticket.status === 'in_progress') {
+  if (canEdit && ticket.status === 'in_progress') {
     actions.push(
       <Button key="parts" variant="secondary" onClick={() => changeStatus('waiting_parts', 'Заявка переведена в статус «Ожидание запчастей»')}>
         <Package className="h-4 w-4" />
@@ -246,7 +249,7 @@ export default function ServiceDetail() {
       </Button>
     );
   }
-  if (ticket.status === 'waiting_parts') {
+  if (canEdit && ticket.status === 'waiting_parts') {
     actions.push(
       <Button key="resume" variant="secondary" onClick={() => changeStatus('in_progress', 'Запчасти получены, возобновлена работа')}>
         <Play className="h-4 w-4" />
@@ -254,7 +257,7 @@ export default function ServiceDetail() {
       </Button>
     );
   }
-  if (ticket.status === 'ready') {
+  if (canEdit && ticket.status === 'ready') {
     actions.push(
       <Button key="close" onClick={() => changeStatus('closed', 'Заявка закрыта')}>
         <CheckCircle className="h-4 w-4" />
@@ -262,7 +265,7 @@ export default function ServiceDetail() {
       </Button>
     );
   }
-  if (ticket.status !== 'closed') {
+  if (canEdit && ticket.status !== 'closed') {
     actions.push(
       <Button key="cancel" variant="secondary" className="border-red-200 text-red-600 hover:bg-red-50"
         onClick={() => changeStatus('closed', 'Заявка отменена / закрыта без выполнения')}>

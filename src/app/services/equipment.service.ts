@@ -1,49 +1,53 @@
 import {
-  mockEquipment,
-  mockRepairRecords,
-  mockShippingPhotos,
+  loadEquipment,
+  saveEquipment,
+  loadShippingPhotos,
+  saveShippingPhotos,
 } from '../mock-data';
 import type { Equipment, RepairRecord, ShippingPhoto } from '../types';
 
 // ---------------------------------------------------------------------------
-// EquipmentService — абстракция над источником данных.
-// Сейчас работает с mock-data; для перехода на реальный API достаточно
-// заменить тела методов на fetch-вызовы — интерфейс остаётся прежним.
+// EquipmentService — абстракция над localStorage.
+// Интерфейс прежний; тела методов теперь используют те же load/save что и UI,
+// чтобы не было рассинхронизации между service-слоем и страницами.
 // ---------------------------------------------------------------------------
 
 export const equipmentService = {
   getAll: async (): Promise<Equipment[]> => {
-    return [...mockEquipment];
+    return loadEquipment();
   },
 
   getById: async (id: string): Promise<Equipment | undefined> => {
-    return mockEquipment.find((e) => e.id === id);
+    return loadEquipment().find((e) => e.id === id);
   },
 
-  getRepairRecords: async (equipmentId: string): Promise<RepairRecord[]> => {
-    return mockRepairRecords.filter((r) => r.equipmentId === equipmentId);
+  // RepairRecords не имеют отдельного localStorage-хранилища в текущей архитектуре
+  getRepairRecords: async (_equipmentId: string): Promise<RepairRecord[]> => {
+    return [];
   },
 
   getShippingPhotos: async (equipmentId: string): Promise<ShippingPhoto[]> => {
-    return mockShippingPhotos.filter((p) => p.equipmentId === equipmentId);
+    return loadShippingPhotos().filter((p) => p.equipmentId === equipmentId);
   },
 
-  // Заглушки для мутаций — заменить на API-вызовы при подключении бэкенда
   create: async (data: Omit<Equipment, 'id'>): Promise<Equipment> => {
-    const newItem: Equipment = { ...data, id: Date.now().toString() };
-    mockEquipment.push(newItem);
+    const newItem: Equipment = { ...data, id: `eq-${Date.now()}` };
+    const list = loadEquipment();
+    saveEquipment([...list, newItem]);
     return newItem;
   },
 
   update: async (id: string, data: Partial<Equipment>): Promise<Equipment> => {
-    const idx = mockEquipment.findIndex((e) => e.id === id);
+    const list = loadEquipment();
+    const idx = list.findIndex((e) => e.id === id);
     if (idx === -1) throw new Error(`Equipment ${id} not found`);
-    mockEquipment[idx] = { ...mockEquipment[idx], ...data };
-    return mockEquipment[idx];
+    list[idx] = { ...list[idx], ...data };
+    saveEquipment(list);
+    return list[idx];
   },
 
   delete: async (id: string): Promise<void> => {
-    const idx = mockEquipment.findIndex((e) => e.id === id);
-    if (idx !== -1) mockEquipment.splice(idx, 1);
+    const list = loadEquipment();
+    saveEquipment(list.filter((e) => e.id !== id));
   },
 };

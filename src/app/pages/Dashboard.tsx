@@ -233,6 +233,57 @@ export default function Dashboard() {
 
   const hasManagerData = myRentals.length > 0;
 
+  // ── Extended KPIs ───────────────────────────────────────────────────────────
+  const UTILIZATION_TARGET = 85;
+  const utilizationDeviation = utilization - UTILIZATION_TARGET;
+
+  // Equipment in active use (rented + reserved)
+  const rentedOrReservedEquipment = equipment.filter(e => e.status === 'rented' || e.status === 'reserved').length;
+  const reservedEquipment = equipment.filter(e => e.status === 'reserved').length;
+  const inactiveEquipment = equipment.filter(e => e.status === 'inactive').length;
+
+  // Rentals ending today
+  const tomorrowStart = new Date(today);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const rentalsEndingToday = viewRentals.filter(r => {
+    const ret = new Date(r.plannedReturnDate);
+    return (r.status === 'active' || r.status === 'delivery') && ret >= today && ret < tomorrowStart;
+  });
+
+  // Max overdue days
+  const maxOverdueDays = overdueRentalsList.length > 0
+    ? Math.max(...overdueRentalsList.map(r => {
+        const diffMs = today.getTime() - new Date(r.plannedReturnDate).getTime();
+        return Math.max(1, Math.ceil(diffMs / 86400000));
+      }))
+    : 0;
+
+  // Service tickets waiting for parts
+  const ticketsWaitingParts = tickets.filter(t => t.status === 'waiting_parts');
+
+  // Equipment in service with critical tickets (blocking rentals)
+  const criticalInService = equipmentInServiceList.filter(e =>
+    tickets.some(t =>
+      t.equipment === e.inventoryNumber &&
+      (t.priority === 'critical' || t.priority === 'high') &&
+      t.status !== 'closed'
+    )
+  ).length;
+
+  // Month revenue (role-aware)
+  const monthRentals = viewRentals.filter(r => {
+    const start = new Date(r.startDate);
+    return start >= monthStart && (r.status === 'active' || r.status === 'closed' || r.status === 'confirmed');
+  });
+  const dashMonthRevenue = monthRentals.reduce((sum, r) => sum + (r.price || 0), 0);
+
+  // Monthly plan (0 = not configured, shows no target bar)
+  const MONTHLY_PLAN = 0;
+
+  // Overdue debt clients
+  const overdueDebtClients = clients.filter(c => (c.debt ?? 0) > 0);
+  const overdueDebtCount = overdueDebtClients.length + overduePayments.length;
+
   // ── KPI data objects for modal ──────────────────────────────────────────────
   const kpiData = {
     utilization: { totalEquipment, rentedEquipment, availableEquipment, utilization },
@@ -306,65 +357,131 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── KPI Row 1 ─────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-5">
+      {/* ── KPI Row 1 — Операционные показатели ──────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
 
-        {/* Utilization */}
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => setSelectedKPI('utilization')}>
+        {/* 1. Утилизация парка */}
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-lg ${
+            totalEquipment > 0 && utilization < 50
+              ? 'border-orange-200 dark:border-orange-800'
+              : ''
+          }`}
+          onClick={() => setSelectedKPI('utilization')}
+        >
           <CardHeader className="pb-2">
-            <CardDescription>Утилизация парка <span className="text-xs text-gray-400">· сейчас</span></CardDescription>
-            <CardTitle className="text-3xl">
+            <CardDescription className="flex items-center justify-between">
+              <span>Утилизация парка</span>
+              <TrendingUp className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${
+              totalEquipment === 0 ? 'text-gray-400' :
+              utilization >= UTILIZATION_TARGET ? 'text-green-600 dark:text-green-400' :
+              utilization >= UTILIZATION_TARGET - 15 ? 'text-yellow-600 dark:text-yellow-400' :
+              'text-orange-600 dark:text-orange-400'
+            }`}>
               {totalEquipment === 0 ? '—' : `${utilization}%`}
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <TrendingUp className="h-4 w-4 text-green-600 shrink-0" />
-              {totalEquipment === 0
-                ? <span>Техника не добавлена</span>
-                : <span>{rentedEquipment} из {activeEquipment} ед.</span>
-              }
-            </div>
-            {totalEquipment > 0 && (
-              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
-                <div className="h-full rounded-full bg-[--color-primary]" style={{ width: `${utilization}%` }} />
-              </div>
+          <CardContent className="space-y-2">
+            {totalEquipment === 0 ? (
+              <p className="text-sm text-gray-400">Техника не добавлена</p>
+            ) : (
+              <>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {rentedEquipment} из {activeEquipment} ед. в работе
+                </p>
+                <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                  <div
+                    className="h-full rounded-full bg-[--color-primary] transition-all"
+                    style={{ width: `${utilization}%` }}
+                  />
+                  <div
+                    className="absolute top-0 h-full w-0.5 bg-gray-400 dark:bg-gray-500"
+                    style={{ left: `${UTILIZATION_TARGET}%` }}
+                    title={`Цель: ${UTILIZATION_TARGET}%`}
+                  />
+                </div>
+                <p className={`text-xs font-medium ${
+                  utilizationDeviation >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'
+                }`}>
+                  {utilizationDeviation >= 0 ? `+${utilizationDeviation}%` : `${utilizationDeviation}%`} к цели {UTILIZATION_TARGET}%
+                </p>
+              </>
             )}
           </CardContent>
         </Card>
 
-        {/* Active rentals */}
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => setSelectedKPI('activeRentals')}>
+        {/* 2. Активные аренды */}
+        <Card
+          className="cursor-pointer transition-all hover:shadow-lg"
+          onClick={() => setSelectedKPI('activeRentals')}
+        >
           <CardHeader className="pb-2">
-            <CardDescription>Активные аренды</CardDescription>
-            <CardTitle className="text-3xl">{activeRentalsList.length}</CardTitle>
+            <CardDescription className="flex items-center justify-between">
+              <span>Активные аренды</span>
+              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${activeRentalsList.length === 0 ? 'text-gray-400' : ''}`}>
+              {activeRentalsList.length === 0 ? '0' : activeRentalsList.length}
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {activeRentalsList.length === 0 ? 'Нет активных аренд' : `из ${rentals.length} всего`}
-            </p>
+          <CardContent className="space-y-1">
+            {activeRentalsList.length === 0 ? (
+              <p className="text-sm text-gray-400">Нет активных аренд</p>
+            ) : (
+              <>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {rentedOrReservedEquipment} ед. техники задействовано
+                </p>
+                {rentalsEndingToday.length > 0 ? (
+                  <p className="text-xs font-medium text-orange-600 dark:text-orange-400">
+                    ⚠ {rentalsEndingToday.length} возврат{rentalsEndingToday.length === 1 ? '' : 'а'} сегодня
+                  </p>
+                ) : upcomingReturns.length > 0 ? (
+                  <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                    {upcomingReturns.length} завершений за 3 дня
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-400">Возвратов сегодня нет</p>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
 
-        {/* Overdue returns */}
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => setSelectedKPI('overdueReturns')}>
+        {/* 3. Просроченные возвраты — КРИТИЧНАЯ */}
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-lg ${
+            overdueRentalsList.length > 0
+              ? 'border-red-300 dark:border-red-700 bg-red-50/40 dark:bg-red-950/20'
+              : ''
+          }`}
+          onClick={() => setSelectedKPI('overdueReturns')}
+        >
           <CardHeader className="pb-2">
-            <CardDescription>Просроченные возвраты</CardDescription>
-            <CardTitle className={`text-3xl ${overdueRentalsList.length > 0 ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
+            <CardDescription className={`flex items-center justify-between ${
+              overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : ''
+            }`}>
+              <span>Просроченные возвраты</span>
+              <AlertTriangle className={`h-3.5 w-3.5 ${overdueRentalsList.length > 0 ? 'text-red-500' : 'text-gray-400'}`} />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${
+              overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'
+            }`}>
               {overdueRentalsList.length}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {overdueRentalsList.length > 0 ? (
-              <div className="flex items-center gap-2 text-sm text-red-600">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                <span>Требует внимания</span>
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                  Макс. просрочка: {maxOverdueDays}&nbsp;{maxOverdueDays === 1 ? 'день' : maxOverdueDays < 5 ? 'дня' : 'дней'}
+                </p>
+                <p className="text-xs text-red-500 dark:text-red-400">Требует немедленного внимания</p>
               </div>
             ) : (
-              <div className="flex items-center gap-2 text-sm text-green-600">
+              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
                 <CheckCircle className="h-4 w-4 shrink-0" />
                 <span>Нет просрочек</span>
               </div>
@@ -372,95 +489,170 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* In service */}
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => setSelectedKPI('inService')}>
+        {/* 4. Техника в сервисе */}
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-lg ${
+            equipmentInServiceList.length > 0 ? 'border-orange-200 dark:border-orange-800' : ''
+          }`}
+          onClick={() => setSelectedKPI('inService')}
+        >
           <CardHeader className="pb-2">
-            <CardDescription>Техника в сервисе</CardDescription>
-            <CardTitle className={`text-3xl ${equipmentInServiceList.length > 0 ? 'text-orange-500' : 'text-gray-900 dark:text-white'}`}>
+            <CardDescription className="flex items-center justify-between">
+              <span>Техника в сервисе</span>
+              <Wrench className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${
+              equipmentInServiceList.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white'
+            }`}>
               {equipmentInServiceList.length}
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <Wrench className="h-4 w-4 shrink-0" />
-              <span>{equipmentInServiceList.length === 0 ? 'Всё исправно' : 'На обслуживании'}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Week revenue */}
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => setSelectedKPI('weekRevenue')}>
-          <CardHeader className="pb-2">
-            <CardDescription>Выручка за 7 дней</CardDescription>
-            <CardTitle className="text-2xl">
-              {weekRevenue > 0 ? formatCurrency(Math.round(weekRevenue)) : '0 ₽'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <DollarSign className="h-4 w-4 shrink-0" />
-              <span>{weekStartedRentals.length > 0
-                ? `${weekStartedRentals.length} аренд начато`
-                : activeRentalsList.length > 0 ? 'оценка по активным' : 'нет данных'}</span>
-            </div>
+          <CardContent className="space-y-1">
+            {equipmentInServiceList.length === 0 ? (
+              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                <span>Всё исправно</span>
+              </div>
+            ) : (
+              <>
+                {criticalInService > 0 && (
+                  <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                    {criticalInService} крит. · блокируют аренду
+                  </p>
+                )}
+                {ticketsWaitingParts.length > 0 && (
+                  <p className="text-xs text-orange-600 dark:text-orange-400">
+                    {ticketsWaitingParts.length} ждут запчасти
+                  </p>
+                )}
+                {criticalInService === 0 && ticketsWaitingParts.length === 0 && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">На обслуживании</p>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* ── KPI Row 2 — Debt ──────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-5">
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => setSelectedKPI('totalDebt')}>
+      {/* ── KPI Row 2 — Финансы + Парк ───────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-3">
+
+        {/* 5. Выручка за месяц */}
+        <Card
+          className="cursor-pointer transition-all hover:shadow-lg"
+          onClick={() => setSelectedKPI('weekRevenue')}
+        >
           <CardHeader className="pb-2">
-            <CardDescription>Общая дебиторка</CardDescription>
-            <CardTitle className={`text-2xl ${totalDebt > 0 ? 'text-orange-600' : ''}`}>
-              {formatCurrency(totalDebt)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <CreditCard className="h-4 w-4 text-orange-500 shrink-0" />
+            <CardDescription className="flex items-center justify-between">
               <span>
-                {clients.filter(c => (c.debt ?? 0) > 0).length + overduePayments.length > 0
-                  ? `${clients.filter(c => (c.debt ?? 0) > 0).length + overduePayments.length} позиций`
-                  : 'Нет задолженностей'}
+                Выручка за {new Date().toLocaleDateString('ru-RU', { month: 'long' })}
               </span>
-            </div>
+              <DollarSign className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-2xl font-bold ${dashMonthRevenue === 0 ? 'text-gray-400' : ''}`}>
+              {dashMonthRevenue > 0 ? formatCurrency(Math.round(dashMonthRevenue)) : 'Нет данных'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {MONTHLY_PLAN > 0 ? (
+              <>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                  <div
+                    className="h-full rounded-full bg-green-500 transition-all"
+                    style={{ width: `${Math.min(100, Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100))}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  план {formatCurrency(MONTHLY_PLAN)} · {Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100)}%
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {monthRentals.length > 0
+                  ? `${monthRentals.length} аренд в этом месяце`
+                  : 'Нет аренд в этом месяце'}
+              </p>
+            )}
           </CardContent>
         </Card>
 
-        <Card className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => setSelectedKPI('monthDebt')}>
+        {/* 6. Просроченная дебиторка */}
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-lg ${
+            totalDebt > 0 ? 'border-orange-200 dark:border-orange-800' : ''
+          }`}
+          onClick={() => setSelectedKPI('totalDebt')}
+        >
           <CardHeader className="pb-2">
-            <CardDescription>Дебиторка за месяц</CardDescription>
-            <CardTitle className={`text-2xl ${monthDebt > 0 ? 'text-red-600' : ''}`}>
-              {formatCurrency(monthDebt)}
+            <CardDescription className={`flex items-center justify-between ${
+              totalDebt > 0 ? 'text-orange-600 dark:text-orange-400' : ''
+            }`}>
+              <span>Просроченная дебиторка</span>
+              <CreditCard className={`h-3.5 w-3.5 ${totalDebt > 0 ? 'text-orange-500' : 'text-gray-400'}`} />
+            </CardDescription>
+            <CardTitle className={`text-2xl font-bold ${
+              totalDebt > 100_000 ? 'text-red-600 dark:text-red-400' :
+              totalDebt > 0 ? 'text-orange-600 dark:text-orange-400' : ''
+            }`}>
+              {totalDebt > 0 ? formatCurrency(totalDebt) : 'Нет'}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <AlertTriangle className={`h-4 w-4 shrink-0 ${monthDebt > 0 ? 'text-red-500' : 'text-gray-400'}`} />
-              <span>{monthOverduePayments.length > 0
-                ? `${monthOverduePayments.length} просроч. платежей`
-                : 'Нет просрочек'}
-              </span>
-            </div>
+            {totalDebt === 0 ? (
+              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                <span>Нет задолженности</span>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {overdueDebtCount}&nbsp;{overdueDebtCount === 1 ? 'клиент' : overdueDebtCount < 5 ? 'клиента' : 'клиентов'} с задолженностью
+              </p>
+            )}
           </CardContent>
         </Card>
 
-        {/* Equipment summary — bonus card */}
+        {/* 7. Статус парка */}
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Парк техники</CardDescription>
-            <CardTitle className="text-3xl">{totalEquipment}</CardTitle>
+            <CardDescription className="flex items-center justify-between">
+              <span>Статус парка</span>
+              <Truck className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className="text-3xl font-bold">{totalEquipment}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <Truck className="h-4 w-4 shrink-0" />
-              <span>{totalEquipment === 0 ? 'Не добавлена' : `${availableEquipment} свободно`}</span>
-            </div>
+            {totalEquipment === 0 ? (
+              <p className="text-sm text-gray-400">Техника не добавлена</p>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-500 dark:text-gray-400">Свободно</span>
+                  <span className="font-semibold text-green-600 dark:text-green-400">{availableEquipment}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-500 dark:text-gray-400">В аренде</span>
+                  <span className="font-semibold text-blue-600 dark:text-blue-400">{rentedEquipment}</span>
+                </div>
+                {reservedEquipment > 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-500 dark:text-gray-400">Резерв</span>
+                    <span className="font-semibold text-yellow-600 dark:text-yellow-400">{reservedEquipment}</span>
+                  </div>
+                )}
+                {equipmentInServiceList.length > 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-500 dark:text-gray-400">В сервисе</span>
+                    <span className="font-semibold text-orange-600 dark:text-orange-400">{equipmentInServiceList.length}</span>
+                  </div>
+                )}
+                {inactiveEquipment > 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-500 dark:text-gray-400">Простой</span>
+                    <span className="font-semibold text-gray-500">{inactiveEquipment}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

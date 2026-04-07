@@ -1,5 +1,10 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { loadUsers, USERS_STORAGE_KEY } from '../pages/Settings';
+import {
+  loadUsers,
+  USERS_STORAGE_KEY,
+  verifyPassword,
+  migratePasswordsToHash,
+} from '../lib/userStorage';
 
 export interface AuthUser {
   id: string;
@@ -40,7 +45,8 @@ async function authenticateUser(email: string, password: string): Promise<AuthUs
     throw new Error('Ваш аккаунт деактивирован. Обратитесь к администратору.');
   }
 
-  if (found.password !== password) {
+  const passwordOk = await verifyPassword(password, found.password);
+  if (!passwordOk) {
     throw new Error('Неверный пароль');
   }
 
@@ -68,6 +74,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch { /* ignore */ }
     return { user: null, isAuthenticated: false };
   });
+
+  // Хешируем plain-text пароли при первом запуске (идемпотентно)
+  useEffect(() => { migratePasswordsToHash(); }, []);
 
   // Синхронизация сессии с localStorage
   useEffect(() => {

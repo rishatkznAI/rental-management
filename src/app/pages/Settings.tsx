@@ -32,48 +32,13 @@ import {
   loadShippingPhotos, saveShippingPhotos,
   RENTALS_STORAGE_KEY,
 } from '../mock-data';
-
-// ── Типы ─────────────────────────────────────────────────────────────────────
-
-export type UserRole = 'Администратор' | 'Менеджер по аренде' | 'Механик' | 'Офис-менеджер';
-export type UserStatus = 'Активен' | 'Неактивен';
-
-export interface SystemUser {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  status: UserStatus;
-  password: string; // хранится в открытом виде (нет бэкенда)
-}
-
-const ROLES: UserRole[] = ['Администратор', 'Менеджер по аренде', 'Механик', 'Офис-менеджер'];
-
-// ── localStorage ──────────────────────────────────────────────────────────────
-
-export const USERS_STORAGE_KEY = 'app_system_users';
-
-export function loadUsers(): SystemUser[] {
-  try {
-    const raw = localStorage.getItem(USERS_STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as SystemUser[];
-  } catch { /* ignore */ }
-  return getDefaultUsers();
-}
-
-function saveUsers(users: SystemUser[]) {
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-}
-
-function getDefaultUsers(): SystemUser[] {
-  return [
-    { id: '0', name: 'Администратор',                email: 'hrrkzn@yandex.ru',    role: 'Администратор',      status: 'Активен',   password: 'kazan2013' },
-    { id: '5', name: 'mp2',                          email: 'mp2@mantall.ru',       role: 'Менеджер по аренде', status: 'Активен',   password: '1234' },
-    { id: '1', name: 'Смирнова Анна Петровна',      email: 'smirnova@company.ru', role: 'Менеджер по аренде', status: 'Активен',   password: '1234' },
-    { id: '2', name: 'Козлов Дмитрий Владимирович',  email: 'kozlov@company.ru',   role: 'Менеджер по аренде', status: 'Активен',   password: '1234' },
-    { id: '3', name: 'Петров Иван Сергеевич',        email: 'petrov@company.ru',   role: 'Механик',            status: 'Активен',   password: '1234' },
-  ];
-}
+// Пользовательское хранилище вынесено в отдельный модуль
+import {
+  type UserRole, type UserStatus, type SystemUser,
+  ROLES, USERS_STORAGE_KEY,
+  loadUsers, saveUsers,
+  hashPassword, isHashed,
+} from '../lib/userStorage';
 
 // ── Вспомогательные ───────────────────────────────────────────────────────────
 

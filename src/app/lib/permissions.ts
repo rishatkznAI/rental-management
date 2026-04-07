@@ -78,6 +78,18 @@ const PERMISSIONS: Record<string, RolePermissions> = {
 
 // ── Маппинг URL → Section ─────────────────────────────────────────────────────
 
+/**
+ * Возвращает требуемое действие для «create»-маршрутов.
+ * Используется в PrivateRoute для блокировки по действию (не только по разделу).
+ */
+export function pathToRequiredAction(pathname: string): { section: Section; action: Action } | null {
+  if (pathname === '/equipment/new') return { section: 'equipment', action: 'create' };
+  if (pathname === '/rentals/new')   return { section: 'rentals',   action: 'create' };
+  if (pathname === '/clients/new')   return { section: 'clients',   action: 'create' };
+  if (pathname === '/service/new')   return { section: 'service',   action: 'create' };
+  return null;
+}
+
 export function pathToSection(pathname: string): Section | null {
   if (pathname === '/')                       return 'dashboard';
   if (pathname.startsWith('/equipment'))      return 'equipment';

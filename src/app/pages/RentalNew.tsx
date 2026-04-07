@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
+import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -36,6 +37,11 @@ function isEquipmentBusy(invNumber: string, startDate: string, endDate: string, 
 
 export default function RentalNew() {
   const navigate = useNavigate();
+  const { can } = usePermissions();
+
+  useEffect(() => {
+    if (!can('create', 'rentals')) navigate('/rentals', { replace: true });
+  }, []);
 
   const clients   = useMemo(() => loadClients(), []);
   const allEq     = useMemo(() => loadEquipment().filter(e => e.status !== 'inactive' && e.status !== 'in_service'), []);

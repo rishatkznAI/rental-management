@@ -8,7 +8,7 @@ import {
   loadClients,
   loadGanttRentals,
 } from '../../mock-data';
-import { loadUsers } from '../../pages/Settings';
+import { loadUsers } from '../../lib/userStorage';
 import type { Equipment } from '../../types';
 
 // ─── Локальные хелперы ──────────────────────────────────────────────────────

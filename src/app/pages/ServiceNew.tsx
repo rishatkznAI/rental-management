@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -11,6 +12,12 @@ import type { ServiceTicket } from '../types';
 
 export default function ServiceNew() {
   const navigate = useNavigate();
+  const { can } = usePermissions();
+
+  useEffect(() => {
+    if (!can('create', 'service')) navigate('/service', { replace: true });
+  }, []);
+
   const equipmentList = loadEquipment();
 
   const [formData, setFormData] = useState({

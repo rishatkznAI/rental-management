@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -12,7 +13,7 @@ import {
 } from '../components/ui/select';
 import { ArrowLeft, Info } from 'lucide-react';
 import { loadClients, saveClients } from '../mock-data';
-import { loadUsers } from './Settings';
+import { loadUsers } from '../lib/userStorage';
 import type { Client } from '../types';
 
 const PAYMENT_TERMS_OPTIONS = [
@@ -57,6 +58,11 @@ function FieldWrapper({
 
 export default function ClientNew() {
   const navigate = useNavigate();
+  const { can } = usePermissions();
+
+  useEffect(() => {
+    if (!can('create', 'clients')) navigate('/clients', { replace: true });
+  }, []);
 
   // Менеджеры из системы — только активные
   const managers = React.useMemo(

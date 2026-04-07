@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router';
+import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import {
@@ -129,6 +130,12 @@ const eventTypeBadge: Record<string, string> = {
 
 export default function EquipmentNew() {
   const navigate = useNavigate();
+  const { can } = usePermissions();
+
+  // Защита от прямого перехода без прав
+  useEffect(() => {
+    if (!can('create', 'equipment')) navigate('/equipment', { replace: true });
+  }, []);
 
   // Собственники из справочника (localStorage → defaults)
   const owners = loadOwners();

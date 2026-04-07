@@ -14,7 +14,7 @@ import {
   loadGanttRentals, saveGanttRentals, GANTT_RENTALS_STORAGE_KEY,
   loadPayments, savePayments, PAYMENTS_STORAGE_KEY,
 } from '../mock-data';
-import { loadUsers } from './Settings';
+import { loadUsers } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
 import type { Equipment, EquipmentType, EquipmentStatus, Payment } from '../types';

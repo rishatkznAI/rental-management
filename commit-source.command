@@ -7,86 +7,61 @@ rm -f .git/index.lock .git/HEAD.lock
 
 echo ""
 echo "📦 Добавляем изменения..."
-git add src/ index.html
+git add src/ index.html server/server.js vite.config.ts
 
 echo ""
 echo "💾 Создаём коммит..."
-git commit -m "feat(reports): full real-data overhaul of Reports tab
+git commit -m "feat(sync): server as source of truth — cross-device sync via REST API
 
-- Removed all hardcoded mock data (utilizationData, revenueByClient, downtimeData)
-- Now loads from localStorage via loadEquipment/loadGanttRentals/loadServiceTickets
-- Auto-refresh: window.focus + storage events for 3 keys (equipment, gantt, service)
-- Manual 'Обновить данные' button with animate-spin spinner and disabled state
-- Timestamp: 'Обновлено: DD.MM.YYYY HH:MM · X мин. назад · реальные данные системы'
+Architecture migration: localStorage bridge → server-backed data layer
 
-KPI cards (all real):
-  - Всего техники: loadEquipment().length, breakdown free/rented
-  - Активные аренды: ganttRentals.filter(active).length
-  - Сервисных заявок: open (non-closed) tickets, in_progress breakdown
-  - Текущая утилизация: rented/activeEquipment*100, null when no equipment
+server/server.js:
+  - Full Express REST API with generic CRUD factory (registerCRUD)
+  - 10 collections: equipment, rentals, gantt_rentals, service, clients,
+    documents, payments, shipping_photos, owners, users
+  - Server-side sessions (Bearer token, 24h TTL, crypto.randomBytes)
+  - Auth endpoints: POST /api/auth/login, GET /api/auth/me, POST /api/auth/logout
+  - Server-side RBAC: WRITE_PERMISSIONS per collection per role
+  - SHA-256 + salt password hashing (same algorithm as client)
+  - seedDefaultUsers() on startup
 
-Utilization chart (last 6 months):
-  - Per-month calculation using equipment-days formula
-  - (rentedDays / totalEquipment*daysInMonth) * 100 per month
-  - Empty state when no rental data
+vite.config.ts:
+  - Dev proxy: /api → http://localhost:3000
 
-Revenue by clients:
-  - Grouped from GanttRentals by client, sum amount
-  - Top-5 sorted by revenue descending
-  - formatCurrency tooltip, shortened labels
-  - Empty state when no rental amounts
+src/app/lib/api.ts (new):
+  - Typed fetch wrapper with Bearer auth
+  - api.get / post / patch / put / del
+  - AUTH_TOKEN_KEY, setToken(), clearToken()
 
-Downtime / pie chart:
-  - Active service tickets grouped by status (excluding closed)
-  - Labels: Новые заявки / В ремонте / Ожидание запчастей / Готово к выдаче
-  - Empty state when no open tickets
+src/app/contexts/AuthContext.tsx:
+  - Server-side auth via /api/auth/login + /api/auth/me
+  - isLoading guard prevents flash redirect before token validation
 
-Fleet structure bars:
-  - Real counts from loadEquipment() grouped by type
-  - % labels next to count
-  - Footer: Active / Rented / In-service / Inactive breakdown
-  - Empty state when totalEquipment=0 (no fake bars)
+src/app/components/auth/PrivateRoute.tsx:
+  - Added isLoading guard
 
-Dark mode: tooltips use CSS vars (--card, --border, --foreground)
+src/app/lib/userStorage.ts:
+  - saveUsers() now fire-and-forget syncs to server
 
----
+src/app/mock-data.ts:
+  - All saveX() functions fire-and-forget to server (bridge pattern)
 
-fix(equipment,rentals): sync currentClient+returnDate between Equipment and Rentals tabs
+src/app/hooks/useSyncData.ts (new):
+  - On login: fetches all 10 collections from server → localStorage
+  - Enables cross-device sync for pages not yet fully migrated to react-query
 
-- Rentals.tsx — 6 write-time fixes to saveEquipment calls:
-  1. Activate rental (created→active): set currentClient=rental.client, returnDate=rental.endDate
-  2. Close rental (returned→closed): clear currentClient/returnDate when no other active rental
-  3. Delete rental: clear currentClient/returnDate when no other active rental
-  4. Return modal confirm: clear currentClient/returnDate on successful return
-  5. New rental creation: set currentClient+returnDate when initialStatus='active'
-  6. Auto-cleanup on mount (expired active/created→returned/closed): clear currentClient/returnDate
+src/app/App.tsx:
+  - SyncEffect component runs useSyncData inside AuthProvider
+  - refetchOnWindowFocus: true for automatic cross-tab refresh
 
-- Equipment.tsx — read-time fallback via enrichEquipment():
-  Derives currentClient and returnDate from active GanttRentals when the
-  equipment record itself has these fields empty (backward-compatibility for
-  data created before this fix). Uses useMemo so it's computed efficiently.
-  Also watches GANTT_RENTALS_STORAGE_KEY in storage/focus events.
+Pages migrated to react-query + service layer:
+  - Dashboard.tsx, Equipment.tsx, Payments.tsx, RentalNew.tsx
+  - ServiceDetail.tsx, ServiceNew.tsx, ClientDetail.tsx
+  - ClientNew.tsx, EquipmentNew.tsx
 
-Result: Техника tab now always shows current client and return date for
-rented equipment, matching Аренды tab. Clearing is automatic on return/close.
-
----
-
-fix(equipment): full dark mode for Equipment list page
-
-- Filter bar: bg-white → dark:bg-gray-800, border-gray-200 → dark:border-gray-700
-- Table wrapper: bg-white → dark:bg-gray-800, border → dark:border-gray-700
-- Page header: text-gray-900 → dark:text-white, text-gray-500 → dark:text-gray-400
-- Table cells: added dark:text-gray-300 for content, dark:text-gray-400 for secondary
-- Mobile cards: bg-white → dark:bg-gray-800, border and hover adapted for dark
-- Mobile card labels: text-gray-700 → dark:text-gray-300, text-gray-500 → dark:text-gray-400
-- Dropdown menu (⋮): bg-white → dark:bg-gray-800, items → dark:text-gray-200 dark:hover:bg-gray-700
-- MoreVertical button: dark:text-gray-400 dark:hover:bg-gray-700
-- Empty state: bg-gray-100 → dark:bg-gray-700, text fixed for dark
-- Results counter: text-gray-500 → dark:text-gray-400
-- Search icon: dark:text-gray-500
-- All 9 spec points addressed: text contrast, table, search, badges, buttons,
-  columns, unified dark design, all states"
+Services (all migrated to API):
+  - equipment.service.ts, clients.service.ts, rentals.service.ts
+  - service.service.ts, payments.service.ts, documents.service.ts"
 
 echo ""
 echo "🚀 Пушим в main..."

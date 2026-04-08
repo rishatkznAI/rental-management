@@ -1,16 +1,40 @@
 #!/bin/bash
-# deploy.command — публикация приложения на Vercel
-# -----------------------------------------------------------------------------
+# deploy.command — сборка и публикация на GitHub Pages
 cd "$(dirname "$0")"
 
-echo ""
-echo "╔══════════════════════════════════════════════════════╗"
-echo "║         Публикация приложения в интернет             ║"
-echo "╚══════════════════════════════════════════════════════╝"
+rm -f .git/index.lock .git/HEAD.lock .git/refs/heads/main.lock
 
-# ── Шаг 1: Сборка ────────────────────────────────────────────────────────────
+# ── Определяем VITE_API_URL ───────────────────────────────────────────────────
+API_URL=""
+
+# 1. Приоритет: RAILWAY_URL в server/.env (постоянный, не меняется)
+if [ -f "server/.env" ]; then
+  API_URL=$(grep -E '^RAILWAY_URL=' server/.env | cut -d'=' -f2- | tr -d '[:space:]')
+fi
+
+# 2. Fallback: WEBHOOK_URL (cloudflared туннель, меняется при каждом запуске)
+if [ -z "$API_URL" ] && [ -f "server/.env" ]; then
+  API_URL=$(grep -E '^WEBHOOK_URL=' server/.env | cut -d'=' -f2- | tr -d '[:space:]')
+fi
+
+# 3. Fallback: cloudflared metrics напрямую
+if [ -z "$API_URL" ]; then
+  API_URL=$(curl -s http://127.0.0.1:20241/metrics 2>/dev/null | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | head -1)
+fi
+
 echo ""
-echo "🔨 Шаг 1/3: Собираем production-версию..."
+if [ -n "$API_URL" ]; then
+  echo "🌐 API URL для production: $API_URL"
+  export VITE_API_URL="$API_URL"
+else
+  echo "⚠️  API URL не найден. Сборка без VITE_API_URL."
+  echo "   Добавьте в server/.env строку: RAILWAY_URL=https://ваш-сервис.up.railway.app"
+  echo ""
+  read -p "Продолжить всё равно? (Enter = да, Ctrl+C = отмена): "
+fi
+
+echo ""
+echo "🔨 Собираем production-версию..."
 npm run build
 
 if [ $? -ne 0 ]; then
@@ -19,30 +43,11 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# ── Шаг 2: Авторизация ────────────────────────────────────────────────────────
 echo ""
-echo "🔑 Шаг 2/3: Вход в Vercel..."
-echo "   → Используйте стрелки ↑↓ и Enter чтобы выбрать способ входа"
-echo "   → Рекомендуется: «Continue with GitHub» или «Continue with Email»"
-echo "   → После выбора откроется браузер — подтвердите там"
-echo ""
-
-vercel login
-
-if [ $? -ne 0 ]; then
-  echo "❌ Не удалось войти в Vercel."
-  read -p "Нажмите Enter для выхода..."
-  exit 1
-fi
-
-# ── Шаг 3: Деплой ─────────────────────────────────────────────────────────────
-echo ""
-echo "🚀 Шаг 3/3: Публикуем приложение..."
-vercel --prod --yes
+echo "🚀 Публикуем на GitHub Pages..."
+npx -y gh-pages -d dist
 
 echo ""
-echo "✅ Готово!"
-echo "   Скопируйте ссылку выше (вида https://xxxx.vercel.app)"
-echo "   и отправьте сотрудникам."
+echo "✅ Готово! Сайт: https://rishatkznai.github.io/rental-management/"
 echo ""
 read -p "Нажмите Enter для выхода..."

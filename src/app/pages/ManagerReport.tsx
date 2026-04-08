@@ -1,4 +1,5 @@
-import React, { useMemo, useState, useCallback, useEffect } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -10,13 +11,15 @@ import {
   Users, BarChart2, CreditCard, FileCheck, FileX,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, X,
 } from 'lucide-react';
-import {
-  loadGanttRentals, loadEquipment, loadPayments,
-  GANTT_RENTALS_STORAGE_KEY, PAYMENTS_STORAGE_KEY, EQUIPMENT_STORAGE_KEY,
-  type GanttRentalData,
-} from '../mock-data';
+import { type GanttRentalData } from '../mock-data';
 import type { Equipment, Payment } from '../types';
 import { formatCurrency } from '../lib/utils';
+import { rentalsService } from '../services/rentals.service';
+import { equipmentService } from '../services/equipment.service';
+import { paymentsService } from '../services/payments.service';
+import { RENTAL_KEYS } from '../hooks/useRentals';
+import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
+import { PAYMENT_KEYS } from '../hooks/usePayments';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -722,32 +725,34 @@ function sel(
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function ManagerReport() {
+  const queryClient = useQueryClient();
   // ── Data state ─────────────────────────────────────────────────────────────
-  const [rentals,   setRentals]   = useState<GanttRentalData[]>(loadGanttRentals);
-  const [equipment, setEquipment] = useState<Equipment[]>(loadEquipment);
-  const [payments,  setPayments]  = useState<Payment[]>(loadPayments);
   const [isRefreshing, setRefreshing] = useState(false);
   const [loadedAt, setLoadedAt] = useState(Date.now);
+  const { data: rentals = [] } = useQuery<GanttRentalData[]>({
+    queryKey: RENTAL_KEYS.gantt,
+    queryFn: rentalsService.getGanttData,
+  });
+  const { data: equipment = [] } = useQuery<Equipment[]>({
+    queryKey: EQUIPMENT_KEYS.all,
+    queryFn: equipmentService.getAll,
+  });
+  const { data: payments = [] } = useQuery<Payment[]>({
+    queryKey: PAYMENT_KEYS.all,
+    queryFn: paymentsService.getAll,
+  });
 
   const refresh = useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRentals(loadGanttRentals());
-      setEquipment(loadEquipment());
-      setPayments(loadPayments());
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+      queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+      queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+    ]).finally(() => {
       setLoadedAt(Date.now());
       setRefreshing(false);
-    }, 350);
-  }, []);
-
-  useEffect(() => {
-    const keys = [GANTT_RENTALS_STORAGE_KEY, EQUIPMENT_STORAGE_KEY, PAYMENTS_STORAGE_KEY];
-    const onStorage = (e: StorageEvent) => { if (e.key && keys.includes(e.key)) refresh(); };
-    const onFocus   = () => refresh();
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', onFocus);
-    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('focus', onFocus); };
-  }, [refresh]);
+    });
+  }, [queryClient]);
 
   // ── Filters ────────────────────────────────────────────────────────────────
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);

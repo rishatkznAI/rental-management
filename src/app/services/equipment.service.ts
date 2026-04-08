@@ -16,6 +16,9 @@ export const equipmentService = {
       .then(photos => photos.filter(p => p.equipmentId === equipmentId))
       .catch(() => []),
 
+  getAllShippingPhotos: (): Promise<ShippingPhoto[]> =>
+    api.get<ShippingPhoto[]>('/api/shipping_photos').catch(() => []),
+
   create: (data: Omit<Equipment, 'id'>): Promise<Equipment> =>
     api.post<Equipment>('/api/equipment', data),
 
@@ -37,4 +40,7 @@ export const equipmentService = {
 
   deleteShippingPhoto: (id: string): Promise<void> =>
     api.del(`/api/shipping_photos/${id}`),
+
+  bulkReplaceShippingPhotos: (list: ShippingPhoto[]): Promise<void> =>
+    api.put('/api/shipping_photos', list),
 };

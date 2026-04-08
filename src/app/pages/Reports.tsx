@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import {
@@ -7,14 +8,16 @@ import {
 } from 'recharts';
 import { RefreshCw, Truck, BarChart2, Wrench, TrendingUp } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
-import {
-  loadEquipment, loadGanttRentals, loadServiceTickets,
-  EQUIPMENT_STORAGE_KEY, GANTT_RENTALS_STORAGE_KEY, SERVICE_STORAGE_KEY,
-} from '../mock-data';
 import { formatCurrency } from '../lib/utils';
 import type { Equipment, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
+import { equipmentService } from '../services/equipment.service';
+import { rentalsService } from '../services/rentals.service';
+import { serviceTicketsService } from '../services/service-tickets.service';
+import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
+import { RENTAL_KEYS } from '../hooks/useRentals';
+import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -52,22 +55,6 @@ function daysOverlap(start: string, end: string, mStart: Date, mEnd: Date): numb
 
 // ─── data types ─────────────────────────────────────────────────────────────
 
-interface ReportData {
-  equipment: Equipment[];
-  ganttRentals: GanttRentalData[];
-  tickets: ServiceTicket[];
-  loadedAt: number;
-}
-
-function loadAll(): ReportData {
-  return {
-    equipment: loadEquipment(),
-    ganttRentals: loadGanttRentals(),
-    tickets: loadServiceTickets(),
-    loadedAt: Date.now(),
-  };
-}
-
 // ─── constants ───────────────────────────────────────────────────────────────
 
 const TICKET_STATUS_LABELS: Record<string, string> = {
@@ -102,33 +89,33 @@ function EmptyChart({ message }: { message: string }) {
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Reports() {
-  const [data, setData] = useState<ReportData>(loadAll);
+  const queryClient = useQueryClient();
+  const [loadedAt, setLoadedAt] = useState(Date.now());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const { data: equipment = [] } = useQuery<Equipment[]>({
+    queryKey: EQUIPMENT_KEYS.all,
+    queryFn: equipmentService.getAll,
+  });
+  const { data: ganttRentals = [] } = useQuery<GanttRentalData[]>({
+    queryKey: RENTAL_KEYS.gantt,
+    queryFn: rentalsService.getGanttData,
+  });
+  const { data: tickets = [] } = useQuery<ServiceTicket[]>({
+    queryKey: SERVICE_TICKET_KEYS.all,
+    queryFn: serviceTicketsService.getAll,
+  });
 
   const refresh = useCallback(() => {
     setIsRefreshing(true);
-    setTimeout(() => {
-      setData(loadAll());
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+      queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+      queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
+    ]).finally(() => {
+      setLoadedAt(Date.now());
       setIsRefreshing(false);
-    }, 450);
-  }, []);
-
-  // Auto-refresh on focus and cross-tab storage changes
-  useEffect(() => {
-    const watchKeys = [EQUIPMENT_STORAGE_KEY, GANTT_RENTALS_STORAGE_KEY, SERVICE_STORAGE_KEY];
-    const onStorage = (e: StorageEvent) => {
-      if (e.key && watchKeys.includes(e.key)) setData(loadAll());
-    };
-    const onFocus = () => setData(loadAll());
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', onFocus);
-    return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, []);
-
-  const { equipment, ganttRentals, tickets, loadedAt } = data;
+    });
+  }, [queryClient]);
 
   // ─── KPI ──────────────────────────────────────────────────────────────────
   const totalEquipment = equipment.length;

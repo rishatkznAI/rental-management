@@ -1,15 +1,17 @@
 import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { X, RotateCcw, CirclePause as PauseCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import type { GanttRentalData } from '../../mock-data';
-import {
-  loadEquipment,
-  loadClients,
-  loadGanttRentals,
-} from '../../mock-data';
-import { loadUsers } from '../../lib/userStorage';
-import type { Equipment } from '../../types';
+import type { SystemUser } from '../../lib/userStorage';
+import type { Client, Equipment } from '../../types';
+import { equipmentService } from '../../services/equipment.service';
+import { clientsService } from '../../services/clients.service';
+import { rentalsService } from '../../services/rentals.service';
+import { usersService } from '../../services/users.service';
+import { EQUIPMENT_KEYS } from '../../hooks/useEquipment';
+import { RENTAL_KEYS } from '../../hooks/useRentals';
 
 // ─── Локальные хелперы ──────────────────────────────────────────────────────
 
@@ -109,12 +111,17 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
     }
   }, [open, rentalProp]);
 
+  const { data: fetchedGanttRentals = [] } = useQuery({
+    queryKey: RENTAL_KEYS.gantt,
+    queryFn: rentalsService.getGanttData,
+    enabled: !ganttRentalsProp,
+  });
+
   // Список аренд для выбора: только активные и созданные (не возвращённые/закрытые)
   const activeRentals = useMemo(() => {
-    const all = ganttRentalsProp ?? loadGanttRentals();
+    const all = ganttRentalsProp ?? fetchedGanttRentals;
     return all.filter(r => r.status === 'active' || r.status === 'created');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ganttRentalsProp, open]);
+  }, [fetchedGanttRentals, ganttRentalsProp]);
 
   // Определяем рабочую аренду: переданная через props ИЛИ выбранная в дропдауне
   const rental = rentalProp ?? activeRentals.find(r => r.id === selectedRentalId) ?? null;
@@ -254,10 +261,15 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
   const [endDate,   setEndDate]   = useState('');
   const [reason, setReason]       = useState('');
 
+  const { data: equipmentData = [] } = useQuery({
+    queryKey: EQUIPMENT_KEYS.all,
+    queryFn: equipmentService.getAll,
+  });
+
   // Подгружаем реестр техники (всё, кроме списанного)
   const allEquipment = useMemo(() =>
-    loadEquipment().filter(e => e.status !== 'inactive'),
-  []);
+    equipmentData.filter(e => e.status !== 'inactive'),
+  [equipmentData]);
 
   React.useEffect(() => {
     if (preselectedEquipment) setEquipmentInv(preselectedEquipment);
@@ -336,6 +348,8 @@ interface NewRentalModalProps {
   ganttRentals?: GanttRentalData[];
   /** Текущий список техники из React-состояния родителя. */
   equipmentList?: Equipment[];
+  clients?: Client[];
+  managers?: SystemUser[];
   onClose: () => void;
   onConfirm: (data: {
     client: string;
@@ -347,7 +361,16 @@ interface NewRentalModalProps {
   }) => void;
 }
 
-export function NewRentalModal({ open, preselectedEquipment, ganttRentals: ganttRentalsProp, equipmentList: equipmentListProp, onClose, onConfirm }: NewRentalModalProps) {
+export function NewRentalModal({
+  open,
+  preselectedEquipment,
+  ganttRentals: ganttRentalsProp,
+  equipmentList: equipmentListProp,
+  clients: clientsProp,
+  managers: managersProp,
+  onClose,
+  onConfirm,
+}: NewRentalModalProps) {
   const today = new Date().toISOString().split('T')[0];
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
@@ -363,19 +386,39 @@ export function NewRentalModal({ open, preselectedEquipment, ganttRentals: gantt
     if (preselectedEquipment) setEquipmentInv(preselectedEquipment);
   }, [preselectedEquipment]);
 
+  const { data: clientsData = [] } = useQuery({
+    queryKey: ['clients'],
+    queryFn: clientsService.getAll,
+    enabled: !clientsProp,
+  });
+  const { data: usersData = [] } = useQuery<SystemUser[]>({
+    queryKey: ['users'],
+    queryFn: usersService.getAll,
+    enabled: !managersProp,
+  });
+  const { data: fetchedGanttRentals = [] } = useQuery({
+    queryKey: RENTAL_KEYS.gantt,
+    queryFn: rentalsService.getGanttData,
+    enabled: !ganttRentalsProp,
+  });
+  const { data: fetchedEquipment = [] } = useQuery({
+    queryKey: EQUIPMENT_KEYS.all,
+    queryFn: equipmentService.getAll,
+    enabled: !equipmentListProp,
+  });
+
   // ─── Данные из справочников ────────────────────────────────────────────────
-  const allClients = useMemo(() => loadClients(), []);
+  const allClients = useMemo(() => clientsProp ?? clientsData, [clientsData, clientsProp]);
 
   const managers = useMemo(() =>
-    loadUsers().filter(u => u.status === 'Активен'),
-  []);
+    (managersProp ?? usersData).filter(u => u.status === 'Активен'),
+  [managersProp, usersData]);
 
   // Единый источник данных: сначала берём из пропса (React-состояние родителя),
-  // иначе читаем из localStorage. Это гарантирует согласованность с бейджем статуса.
+  // иначе читаем из API.
   const existingRentals = useMemo(
-    () => ganttRentalsProp ?? loadGanttRentals(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ganttRentalsProp, open],
+    () => ganttRentalsProp ?? fetchedGanttRentals,
+    [fetchedGanttRentals, ganttRentalsProp],
   );
 
   /**
@@ -383,10 +426,10 @@ export function NewRentalModal({ open, preselectedEquipment, ganttRentals: gantt
    * - исключаем списанную (inactive) и в сервисе (in_service)
    * - проверяем конфликт по датам аренды
    * Используем список техники из пропса (React-состояние родителя),
-   * чтобы данные были согласованы с бейджем статуса.
+   * либо подгружаем его из API.
    */
   const { availableEquipment, busyEquipment } = useMemo(() => {
-    const all = (equipmentListProp ?? loadEquipment()).filter(e =>
+    const all = (equipmentListProp ?? fetchedEquipment).filter(e =>
       e.status !== 'inactive' && e.status !== 'in_service',
     );
     if (!startDate || !endDate) {
@@ -402,7 +445,7 @@ export function NewRentalModal({ open, preselectedEquipment, ganttRentals: gantt
       }
     });
     return { availableEquipment: available, busyEquipment: busy };
-  }, [startDate, endDate, existingRentals, equipmentListProp]);
+  }, [startDate, endDate, existingRentals, equipmentListProp, fetchedEquipment]);
 
   // Проверяем конфликт при выборе техники
   const handleEquipmentChange = (inv: string) => {

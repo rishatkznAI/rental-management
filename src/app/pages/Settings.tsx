@@ -1,4 +1,5 @@
 import React from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -22,23 +23,27 @@ import {
 } from '../components/ui/select';
 import { Input } from '../components/ui/input';
 import {
-  loadOwners, saveOwners, type Owner,
-  loadEquipment, saveEquipment,
-  loadGanttRentals, saveGanttRentals,
-  loadServiceTickets, saveServiceTickets,
-  loadClients, saveClients,
-  loadPayments, savePayments,
-  loadDocuments, saveDocuments,
-  loadShippingPhotos, saveShippingPhotos,
+  type Owner,
   RENTALS_STORAGE_KEY,
 } from '../mock-data';
 // Пользовательское хранилище вынесено в отдельный модуль
 import {
   type UserRole, type UserStatus, type SystemUser,
   ROLES, USERS_STORAGE_KEY,
-  loadUsers, saveUsers,
-  hashPassword, isHashed,
+  hashPassword,
 } from '../lib/userStorage';
+import { usersService } from '../services/users.service';
+import { ownersService } from '../services/owners.service';
+import { equipmentService } from '../services/equipment.service';
+import { rentalsService } from '../services/rentals.service';
+import { serviceTicketsService } from '../services/service-tickets.service';
+import { clientsService } from '../services/clients.service';
+import { paymentsService } from '../services/payments.service';
+import { documentsService } from '../services/documents.service';
+import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
+import { RENTAL_KEYS } from '../hooks/useRentals';
+import { PAYMENT_KEYS } from '../hooks/usePayments';
+import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 
 // ── Вспомогательные ───────────────────────────────────────────────────────────
 
@@ -55,16 +60,25 @@ const EMPTY_FORM = { name: '', email: '', role: 'Менеджер по арен�
 // ── Основной компонент ────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const [users, setUsersState] = React.useState<SystemUser[]>(loadUsers);
+  const queryClient = useQueryClient();
+  const [users, setUsersState] = React.useState<SystemUser[]>([]);
+  const { data: usersData = [] } = useQuery<SystemUser[]>({
+    queryKey: ['users'],
+    queryFn: usersService.getAll,
+  });
 
-  // Синхронизируем с localStorage при каждом изменении
-  const setUsers = React.useCallback((updater: (prev: SystemUser[]) => SystemUser[]) => {
-    setUsersState(prev => {
-      const next = updater(prev);
-      saveUsers(next);
-      return next;
-    });
-  }, []);
+  React.useEffect(() => {
+    setUsersState(usersData);
+  }, [usersData]);
+
+  // Синхронизируем с сервером
+  const setUsers = React.useCallback(async (updater: (prev: SystemUser[]) => SystemUser[]) => {
+    const next = updater(users);
+    setUsersState(next);
+    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(next));
+    await usersService.bulkReplace(next);
+    await queryClient.invalidateQueries({ queryKey: ['users'] });
+  }, [queryClient, users]);
 
   // ── Диалог ──────────────────────────────────────────────────────────────────
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -90,7 +104,7 @@ export default function Settings() {
   };
 
   const handleDelete = (id: string) => {
-    setUsers(prev => prev.filter(u => u.id !== id));
+    void setUsers(prev => prev.filter(u => u.id !== id));
   };
 
   const handleSave = async () => {
@@ -105,7 +119,7 @@ export default function Settings() {
     if (editingId) {
       // При редактировании: пустой пароль = не меняем; непустой — хешируем
       const hashedPwd = form.password ? await hashPassword(form.password) : undefined;
-      setUsers(prev => prev.map(u => {
+      await setUsers(prev => prev.map(u => {
         if (u.id !== editingId) return u;
         return { ...u, name: form.name, email: form.email, role: form.role, status: form.status, ...(hashedPwd ? { password: hashedPwd } : {}) };
       }));
@@ -113,7 +127,7 @@ export default function Settings() {
       if (!form.password.trim()) { setFormError('Задайте пароль для нового пользователя'); return; }
       const hashedPwd = await hashPassword(form.password);
       const newUser: SystemUser = { id: Date.now().toString(), name: form.name, email: form.email, role: form.role, status: form.status, password: hashedPwd };
-      setUsers(prev => [...prev, newUser]);
+      await setUsers(prev => [...prev, newUser]);
     }
     setDialogOpen(false);
   };
@@ -496,23 +510,45 @@ function getDataCounts(): DataCounts {
   const classicRaw = localStorage.getItem(RENTALS_STORAGE_KEY);
   const classicList = classicRaw ? (() => { try { return JSON.parse(classicRaw); } catch { return []; } })() : [];
   return {
-    ganttRentals:  loadGanttRentals().length,
+    ganttRentals:  0,
     classicRentals: classicList.length,
-    serviceTickets: loadServiceTickets().length,
-    clients:        loadClients().length,
-    payments:       loadPayments().length,
-    documents:      loadDocuments().length,
-    shippingPhotos: loadShippingPhotos().length,
-    equipment:      loadEquipment().length,
+    serviceTickets: 0,
+    clients:        0,
+    payments:       0,
+    documents:      0,
+    shippingPhotos: 0,
+    equipment:      0,
   };
 }
 
 function DataResetSection() {
-  const [counts, setCounts]           = React.useState<DataCounts>(getDataCounts);
+  const queryClient = useQueryClient();
+  const { data: ganttRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.gantt, queryFn: rentalsService.getGanttData });
+  const { data: serviceTickets = [] } = useQuery({ queryKey: SERVICE_TICKET_KEYS.all, queryFn: serviceTicketsService.getAll });
+  const { data: clients = [] } = useQuery({ queryKey: ['clients'], queryFn: clientsService.getAll });
+  const { data: payments = [] } = useQuery({ queryKey: PAYMENT_KEYS.all, queryFn: paymentsService.getAll });
+  const { data: documents = [] } = useQuery({ queryKey: ['documents'], queryFn: documentsService.getAll });
+  const { data: shippingPhotos = [] } = useQuery({ queryKey: ['shippingPhotos', 'all'], queryFn: equipmentService.getAllShippingPhotos });
+  const { data: equipment = [] } = useQuery({ queryKey: EQUIPMENT_KEYS.all, queryFn: equipmentService.getAll });
   const [dialogOpen, setDialogOpen]   = React.useState(false);
   const [confirmText, setConfirmText] = React.useState('');
   const [done, setDone]               = React.useState(false);
   const [resetting, setResetting]     = React.useState(false);
+
+  const counts = React.useMemo<DataCounts>(() => {
+    const classicRaw = localStorage.getItem(RENTALS_STORAGE_KEY);
+    const classicList = classicRaw ? (() => { try { return JSON.parse(classicRaw); } catch { return []; } })() : [];
+    return {
+      ganttRentals: ganttRentals.length,
+      classicRentals: classicList.length,
+      serviceTickets: serviceTickets.length,
+      clients: clients.length,
+      payments: payments.length,
+      documents: documents.length,
+      shippingPhotos: shippingPhotos.length,
+      equipment: equipment.length,
+    };
+  }, [ganttRentals, serviceTickets, clients, payments, documents, shippingPhotos, equipment]);
 
   const totalToDelete =
     counts.ganttRentals + counts.classicRentals + counts.serviceTickets +
@@ -521,33 +557,47 @@ function DataResetSection() {
   const canConfirm = confirmText.trim().toLowerCase() === 'сброс';
 
   const handleOpenDialog = () => {
-    setCounts(getDataCounts()); // refresh counts
     setConfirmText('');
     setDone(false);
     setDialogOpen(true);
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setResetting(true);
     try {
-      // Удаляем все транзакционные данные
-      saveGanttRentals([]);
-      saveServiceTickets([]);
-      saveClients([]);
-      savePayments([]);
-      saveDocuments([]);
-      saveShippingPhotos([]);
+      await Promise.all([
+        rentalsService.bulkReplaceGantt([]),
+        serviceTicketsService.bulkReplace([]),
+        clientsService.bulkReplace([]),
+        paymentsService.bulkReplace([]),
+        documentsService.bulkReplace([]),
+        equipmentService.bulkReplaceShippingPhotos([]),
+      ]);
       localStorage.removeItem(RENTALS_STORAGE_KEY);
 
-      // Сбрасываем статус техники → свободна, убираем арендатора и дату возврата
-      const equipment = loadEquipment();
       const resetEquipment = equipment.map(eq => {
         const { currentClient: _cc, returnDate: _rd, ...rest } = eq;
         return { ...rest, status: 'available' as const };
       });
-      saveEquipment(resetEquipment);
+      await equipmentService.bulkReplace(resetEquipment);
+      localStorage.setItem(RENTALS_STORAGE_KEY, JSON.stringify([]));
+      localStorage.setItem('app_shipping_photos', JSON.stringify([]));
+      localStorage.setItem('app_gantt_rentals', JSON.stringify([]));
+      localStorage.setItem('app_service_tickets', JSON.stringify([]));
+      localStorage.setItem('app_clients', JSON.stringify([]));
+      localStorage.setItem('app_payments', JSON.stringify([]));
+      localStorage.setItem('app_documents', JSON.stringify([]));
+      localStorage.setItem('app_equipment', JSON.stringify(resetEquipment));
 
-      setCounts(getDataCounts());
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: ['clients'] }),
+        queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: ['documents'] }),
+        queryClient.invalidateQueries({ queryKey: ['shippingPhotos'] }),
+        queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+      ]);
       setDone(true);
     } finally {
       setResetting(false);
@@ -644,7 +694,7 @@ function DataResetSection() {
                 </p>
               </div>
               <button
-                onClick={() => { setCounts(getDataCounts()); setDone(false); }}
+                onClick={() => { setDone(false); }}
                 className="ml-auto rounded p-1 text-green-600 hover:bg-green-100 dark:hover:bg-green-900/40"
                 title="Обновить"
               >
@@ -714,7 +764,7 @@ function DataResetSection() {
               <Button variant="secondary">Отмена</Button>
             </DialogClose>
             <button
-              onClick={() => { handleReset(); setDialogOpen(false); }}
+              onClick={() => { void handleReset(); setDialogOpen(false); }}
               disabled={!canConfirm || resetting}
               className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
             >
@@ -731,32 +781,43 @@ function DataResetSection() {
 // ── Справочник собственников (с персистентностью в localStorage) ──────────────
 
 function OwnersReferenceList() {
-  const [owners, setOwnersState] = React.useState<Owner[]>(loadOwners);
+  const queryClient = useQueryClient();
+  const { data: ownersData = [] } = useQuery<Owner[]>({
+    queryKey: ['owners'],
+    queryFn: ownersService.getAll,
+  });
+  const [owners, setOwnersState] = React.useState<Owner[]>([]);
   const [adding,     setAdding]    = React.useState(false);
   const [newValue,   setNewValue]  = React.useState('');
   const [editId,     setEditId]    = React.useState<string | null>(null);
   const [editValue,  setEditValue] = React.useState('');
 
-  const persist = (next: Owner[]) => {
+  React.useEffect(() => {
+    setOwnersState(ownersData);
+  }, [ownersData]);
+
+  const persist = async (next: Owner[]) => {
     setOwnersState(next);
-    saveOwners(next);
+    localStorage.setItem('app_owners', JSON.stringify(next));
+    await ownersService.bulkReplace(next);
+    await queryClient.invalidateQueries({ queryKey: ['owners'] });
   };
 
   const handleAdd = () => {
     if (!newValue.trim()) return;
-    persist([...owners, { id: `own-${Date.now()}`, name: newValue.trim() }]);
+    void persist([...owners, { id: `own-${Date.now()}`, name: newValue.trim() }]);
     setNewValue('');
     setAdding(false);
   };
 
   const handleEditSave = (id: string) => {
     if (!editValue.trim()) return;
-    persist(owners.map(o => o.id === id ? { ...o, name: editValue.trim() } : o));
+    void persist(owners.map(o => o.id === id ? { ...o, name: editValue.trim() } : o));
     setEditId(null);
   };
 
   const handleDelete = (id: string) => {
-    persist(owners.filter(o => o.id !== id));
+    void persist(owners.filter(o => o.id !== id));
   };
 
   return (

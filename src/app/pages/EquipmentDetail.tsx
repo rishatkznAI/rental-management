@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -12,13 +13,10 @@ import {
 } from 'lucide-react';
 import {
   mockRepairRecords,
-  loadEquipment, saveEquipment, EQUIPMENT_STORAGE_KEY,
-  loadGanttRentals, GANTT_RENTALS_STORAGE_KEY,
-  loadServiceTickets, SERVICE_STORAGE_KEY,
-  loadPayments, PAYMENTS_STORAGE_KEY,
-  loadShippingPhotos, saveShippingPhotos, SHIPPING_PHOTOS_KEY,
+  EQUIPMENT_STORAGE_KEY,
+  SHIPPING_PHOTOS_KEY,
 } from '../mock-data';
-import type { ShippingPhoto } from '../types';
+import type { ShippingPhoto, ServiceTicket, Payment } from '../types';
 import { formatDate, formatCurrency, getDaysUntil } from '../lib/utils';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -26,9 +24,18 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../components/ui/select';
 import type { Equipment, EquipmentOwnerType, RepairEventType } from '../types';
+import type { GanttRentalData } from '../mock-data';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { usePermissions } from '../lib/permissions';
+import { equipmentService } from '../services/equipment.service';
+import { rentalsService } from '../services/rentals.service';
+import { paymentsService } from '../services/payments.service';
+import { serviceTicketsService } from '../services/service-tickets.service';
+import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
+import { RENTAL_KEYS } from '../hooks/useRentals';
+import { PAYMENT_KEYS } from '../hooks/usePayments';
+import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -74,37 +81,52 @@ const SERVICE_STATUS_LABELS: Record<string, string> = {
 
 export default function EquipmentDetail() {
   const { can } = usePermissions();
+  const queryClient = useQueryClient();
   const canEditEquipment = can('edit', 'equipment');
   const { id } = useParams();
 
-  // ── Reactive data loading from localStorage ──
-  const [allEquipment, setAllEquipment] = useState(() => loadEquipment());
-  const [allGanttRentals, setAllGanttRentals] = useState(() => loadGanttRentals());
-  const [allServiceTickets, setAllServiceTickets] = useState(() => loadServiceTickets());
-  const [allPayments, setAllPayments] = useState(() => loadPayments());
+  const [allEquipment, setAllEquipment] = useState<Equipment[]>([]);
+  const [allGanttRentals, setAllGanttRentals] = useState<GanttRentalData[]>([]);
+  const [allServiceTickets, setAllServiceTickets] = useState<ServiceTicket[]>([]);
+  const [allPayments, setAllPayments] = useState<Payment[]>([]);
+
+  const { data: equipmentData = [] } = useQuery({
+    queryKey: EQUIPMENT_KEYS.all,
+    queryFn: equipmentService.getAll,
+  });
+  const { data: ganttData = [] } = useQuery({
+    queryKey: RENTAL_KEYS.gantt,
+    queryFn: rentalsService.getGanttData,
+  });
+  const { data: serviceData = [] } = useQuery({
+    queryKey: SERVICE_TICKET_KEYS.all,
+    queryFn: serviceTicketsService.getAll,
+  });
+  const { data: paymentData = [] } = useQuery({
+    queryKey: PAYMENT_KEYS.all,
+    queryFn: paymentsService.getAll,
+  });
+  const { data: shippingPhotoData = [] } = useQuery({
+    queryKey: ['shippingPhotos', id],
+    queryFn: () => equipmentService.getShippingPhotos(String(id ?? '')),
+    enabled: !!id,
+  });
 
   useEffect(() => {
-    const reload = () => {
-      setAllEquipment(loadEquipment());
-      setAllGanttRentals(loadGanttRentals());
-      setAllServiceTickets(loadServiceTickets());
-      setAllPayments(loadPayments());
-    };
-    const onStorage = (e: StorageEvent) => {
-      if ([EQUIPMENT_STORAGE_KEY, GANTT_RENTALS_STORAGE_KEY, SERVICE_STORAGE_KEY, PAYMENTS_STORAGE_KEY].includes(e.key || '')) {
-        reload();
-      }
-    };
-    const onVisible = () => { if (document.visibilityState === 'visible') reload(); };
-    window.addEventListener('focus', reload);
-    window.addEventListener('storage', onStorage);
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      window.removeEventListener('focus', reload);
-      window.removeEventListener('storage', onStorage);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, []);
+    setAllEquipment(equipmentData);
+  }, [equipmentData]);
+
+  useEffect(() => {
+    setAllGanttRentals(ganttData);
+  }, [ganttData]);
+
+  useEffect(() => {
+    setAllServiceTickets(serviceData);
+  }, [serviceData]);
+
+  useEffect(() => {
+    setAllPayments(paymentData);
+  }, [paymentData]);
 
   // ── Find equipment (from localStorage, not empty mock) ──
   const rawEquipment = allEquipment.find(e => e.id === id);
@@ -142,13 +164,30 @@ export default function EquipmentDetail() {
     .filter(r => r.equipmentId === id)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const [allShippingPhotos, setAllShippingPhotos] = useState<ShippingPhoto[]>(() => loadShippingPhotos());
+  const [allShippingPhotos, setAllShippingPhotos] = useState<ShippingPhoto[]>([]);
+  useEffect(() => {
+    setAllShippingPhotos(shippingPhotoData);
+  }, [shippingPhotoData]);
   const shippingPhotos = useMemo(
     () => allShippingPhotos
       .filter(p => p.equipmentId === id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     [allShippingPhotos, id],
   );
+
+  const persistEquipment = React.useCallback(async (list: Equipment[]) => {
+    setAllEquipment(list);
+    localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(list));
+    await equipmentService.bulkReplace(list);
+    await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
+  }, [queryClient]);
+
+  const persistShippingPhotos = React.useCallback(async (list: ShippingPhoto[]) => {
+    setAllShippingPhotos(list);
+    localStorage.setItem(SHIPPING_PHOTOS_KEY, JSON.stringify(list));
+    await equipmentService.bulkReplaceShippingPhotos(list);
+    await queryClient.invalidateQueries({ queryKey: ['shippingPhotos', id] });
+  }, [id, queryClient]);
 
   // ── Photo upload state ──
   const [showUploadPhotoForm, setShowUploadPhotoForm] = useState(false);
@@ -186,21 +225,19 @@ export default function EquipmentDetail() {
     const file = e.target.files?.[0];
     if (!file || !equipment) return;
     const base64 = await compressToBase64(file);
-    const updated = loadEquipment().map(eq =>
+    const updated = allEquipment.map(eq =>
       eq.id === equipment.id ? { ...eq, photo: base64 } : eq,
     );
-    saveEquipment(updated);
-    setAllEquipment(updated);
+    await persistEquipment(updated);
     e.target.value = '';
   };
 
   const handleMainPhotoDelete = () => {
     if (!equipment || !canEditEquipment) return;
-    const updated = loadEquipment().map(eq =>
+    const updated = allEquipment.map(eq =>
       eq.id === equipment.id ? { ...eq, photo: undefined } : eq,
     );
-    saveEquipment(updated);
-    setAllEquipment(updated);
+    void persistEquipment(updated);
   };
 
   const handleShippingPhotoFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -228,8 +265,7 @@ export default function EquipmentDetail() {
       source: 'manual',
     };
     const updated = [...allShippingPhotos, newEvent];
-    saveShippingPhotos(updated);
-    setAllShippingPhotos(updated);
+    void persistShippingPhotos(updated);
     setUploadPending([]);
     setUploadComment('');
     setShowUploadPhotoForm(false);
@@ -1329,8 +1365,7 @@ export default function EquipmentDetail() {
                             <button
                               onClick={() => {
                                 const updated = allShippingPhotos.filter(p => p.id !== event.id);
-                                saveShippingPhotos(updated);
-                                setAllShippingPhotos(updated);
+                                void persistShippingPhotos(updated);
                               }}
                               className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-red-500"
                               title="Удалить событие"
@@ -1393,9 +1428,8 @@ export default function EquipmentDetail() {
         equipment={equipment}
         onOpenChange={setShowEditModal}
         onSave={(updated) => {
-          const list = loadEquipment().map(e => e.id === updated.id ? updated : e);
-          saveEquipment(list);
-          setAllEquipment(list);
+          const list = allEquipment.map(e => e.id === updated.id ? updated : e);
+          void persistEquipment(list);
           setShowEditModal(false);
         }}
       />

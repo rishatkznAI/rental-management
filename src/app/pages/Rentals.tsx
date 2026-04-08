@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, ChevronLeft, ChevronRight, RotateCcw, CirclePause as PauseCircle,
   Search, CircleCheck, CircleAlert, CreditCard,
@@ -10,14 +11,21 @@ import { ReturnModal, DowntimeModal, NewRentalModal } from '../components/gantt/
 import {
   mockDowntimes,
   mockServicePeriods,
-  loadEquipment, saveEquipment, EQUIPMENT_STORAGE_KEY,
-  loadGanttRentals, saveGanttRentals, GANTT_RENTALS_STORAGE_KEY,
-  loadPayments, savePayments, PAYMENTS_STORAGE_KEY,
+  EQUIPMENT_STORAGE_KEY,
+  GANTT_RENTALS_STORAGE_KEY,
+  PAYMENTS_STORAGE_KEY,
 } from '../mock-data';
-import { loadUsers } from '../lib/userStorage';
+import type { SystemUser } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
 import type { Equipment, EquipmentType, EquipmentStatus, Payment } from '../types';
+import { equipmentService } from '../services/equipment.service';
+import { rentalsService } from '../services/rentals.service';
+import { paymentsService } from '../services/payments.service';
+import { usersService } from '../services/users.service';
+import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
+import { PAYMENT_KEYS } from '../hooks/usePayments';
+import { RENTAL_KEYS } from '../hooks/useRentals';
 import {
   addDays, differenceInDays, format, startOfDay,
   isSameDay, isWeekend, max as dateMax, min as dateMin
@@ -159,41 +167,50 @@ function computeEffectiveStatus(
 // ========== Main Component ==========
 export default function Rentals() {
   const { can } = usePermissions();
+  const queryClient = useQueryClient();
   const canEditRentals = can('edit', 'rentals');
   const canDeleteRentals = can('delete', 'rentals');
   const canCreatePayments = can('create', 'payments');
   const today = useMemo(() => startOfDay(new Date()), []);
-  const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>(() => loadGanttRentals());
-  const [equipmentList, setEquipmentList] = useState(() => loadEquipment());
-  const [payments, setPayments] = useState<Payment[]>(() => loadPayments());
+  const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>([]);
+  const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
 
-  React.useEffect(() => {
-    const reload = () => {
-      setGanttRentals(loadGanttRentals());
-      setEquipmentList(loadEquipment());
-      setPayments(loadPayments());
-    };
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === GANTT_RENTALS_STORAGE_KEY || e.key === EQUIPMENT_STORAGE_KEY || e.key === PAYMENTS_STORAGE_KEY) reload();
-    };
-    // Перезагружаем данные при возврате на вкладку (focus / visibilitychange)
-    const onVisible = () => { if (document.visibilityState === 'visible') reload(); };
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', reload);
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('focus', reload);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, []);
+  const { data: ganttData = [] } = useQuery({
+    queryKey: RENTAL_KEYS.gantt,
+    queryFn: rentalsService.getGanttData,
+  });
+  const { data: equipmentData = [] } = useQuery({
+    queryKey: EQUIPMENT_KEYS.all,
+    queryFn: equipmentService.getAll,
+  });
+  const { data: paymentData = [] } = useQuery({
+    queryKey: PAYMENT_KEYS.all,
+    queryFn: paymentsService.getAll,
+  });
+  const { data: usersData = [] } = useQuery<SystemUser[]>({
+    queryKey: ['users'],
+    queryFn: usersService.getAll,
+  });
+
+  useEffect(() => {
+    setGanttRentals(ganttData);
+  }, [ganttData]);
+
+  useEffect(() => {
+    setEquipmentList(equipmentData);
+  }, [equipmentData]);
+
+  useEffect(() => {
+    setPayments(paymentData);
+  }, [paymentData]);
 
   // Очистка «призрачных» аренд при загрузке страницы:
   // - 'created' с прошедшей endDate → 'closed'  (не активированные черновики)
   // - 'active'  с прошедшей endDate → 'returned' (техника вернулась, но возврат не оформили вручную)
   React.useEffect(() => {
     const todayStr = format(today, 'yyyy-MM-dd');
-    const current = loadGanttRentals();
+    const current = ganttRentals;
 
     const needsCleanup = current.some(r =>
       (r.status === 'created' && r.endDate < todayStr) ||
@@ -209,12 +226,11 @@ export default function Rentals() {
         return { ...r, status: 'returned' as const };
       return r;
     });
-    saveGanttRentals(cleaned);
-    setGanttRentals(cleaned);
+    void persistGanttRentals(cleaned);
 
     // Для закрытых/возвращённых аренд: если у техники больше нет активных аренд —
     // обновляем статус техники на 'available'.
-    const eqList = loadEquipment();
+    const eqList = equipmentList;
     const affectedInvs = new Set(
       current
         .filter(r =>
@@ -236,13 +252,12 @@ export default function Rentals() {
       return e;
     });
     if (eqChanged) {
-      saveEquipment(updatedEq);
-      setEquipmentList(updatedEq);
+      void persistEquipment(updatedEq);
     }
-  }, [today]);
+  }, [today, ganttRentals, equipmentList, persistEquipment, persistGanttRentals]);
 
   // Менеджеры для фильтра (динамически из базы пользователей)
-  const managersList = useMemo(() => loadUsers().filter(u => u.status === 'Активен'), []);
+  const managersList = useMemo(() => usersData.filter(u => u.status === 'Активен'), [usersData]);
 
   // Toast-уведомление
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -250,6 +265,39 @@ export default function Rentals() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
   }, []);
+
+  const persistGanttRentals = useCallback(async (list: GanttRentalData[]) => {
+    setGanttRentals(list);
+    localStorage.setItem(GANTT_RENTALS_STORAGE_KEY, JSON.stringify(list));
+    try {
+      await rentalsService.bulkReplaceGantt(list);
+      await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+    } catch {
+      showToast('Не удалось сохранить аренды', 'error');
+    }
+  }, [queryClient, showToast]);
+
+  const persistEquipment = useCallback(async (list: Equipment[]) => {
+    setEquipmentList(list);
+    localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(list));
+    try {
+      await equipmentService.bulkReplace(list);
+      await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
+    } catch {
+      showToast('Не удалось сохранить технику', 'error');
+    }
+  }, [queryClient, showToast]);
+
+  const persistPayments = useCallback(async (list: Payment[]) => {
+    setPayments(list);
+    localStorage.setItem(PAYMENTS_STORAGE_KEY, JSON.stringify(list));
+    try {
+      await paymentsService.bulkReplace(list);
+      await queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
+    } catch {
+      showToast('Не удалось сохранить платежи', 'error');
+    }
+  }, [queryClient, showToast]);
 
   const [scale, setScale] = useState<Scale>('week');
   const [baseDate, setBaseDate] = useState(today);
@@ -412,8 +460,7 @@ export default function Rentals() {
     };
 
     const allPayments = [...payments, newPayment];
-    setPayments(allPayments);
-    savePayments(allPayments);
+    void persistPayments(allPayments);
 
     // Recalculate paymentStatus for this rental
     const rentalPayments = allPayments.filter(p => p.rentalId === rentalId);
@@ -425,8 +472,7 @@ export default function Rentals() {
     const updatedRentals = ganttRentals.map(r =>
       r.id === rentalId ? { ...r, paymentStatus: newPaymentStatus } : r
     );
-    setGanttRentals(updatedRentals);
-    saveGanttRentals(updatedRentals);
+    void persistGanttRentals(updatedRentals);
 
     // Also update selectedRental to reflect new state
     if (selectedRental?.id === rentalId) {
@@ -440,8 +486,7 @@ export default function Rentals() {
     const updatedRentals = ganttRentals.map(r =>
       r.id === rental.id ? { ...r, endDate: newEndDate } : r
     );
-    setGanttRentals(updatedRentals);
-    saveGanttRentals(updatedRentals);
+    void persistGanttRentals(updatedRentals);
 
     // Update returnDate on equipment
     const updatedEq = equipmentList.map(e =>
@@ -449,8 +494,7 @@ export default function Rentals() {
         ? { ...e, returnDate: newEndDate }
         : e
     );
-    setEquipmentList(updatedEq);
-    saveEquipment(updatedEq);
+    void persistEquipment(updatedEq);
 
     // Refresh drawer
     if (selectedRental?.id === rental.id) {
@@ -466,8 +510,7 @@ export default function Rentals() {
         ? { ...r, updSigned, updDate: updSigned ? (updDate || r.updDate) : undefined }
         : r
     );
-    setGanttRentals(updatedRentals);
-    saveGanttRentals(updatedRentals);
+    void persistGanttRentals(updatedRentals);
     if (selectedRental?.id === rental.id) {
       setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
     }
@@ -481,8 +524,7 @@ export default function Rentals() {
         ? { ...r, endDate: actualReturnDate, status: 'returned' as const }
         : r
     );
-    setGanttRentals(updatedRentals);
-    saveGanttRentals(updatedRentals);
+    void persistGanttRentals(updatedRentals);
 
     // Clear currentClient/returnDate from equipment if no other active rentals
     const hasOtherActive = updatedRentals.some(
@@ -496,8 +538,7 @@ export default function Rentals() {
           ? { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
           : e
       );
-      setEquipmentList(updatedEq);
-      saveEquipment(updatedEq);
+      void persistEquipment(updatedEq);
     }
 
     setSelectedRental(null);
@@ -804,8 +845,7 @@ export default function Rentals() {
               const updated = ganttRentals.map(r =>
                 r.id === rental.id ? { ...r, status: nextStatus! } : r,
               );
-              setGanttRentals(updated);
-              saveGanttRentals(updated);
+              void persistGanttRentals(updated);
 
               // При активации аренды — техника "В аренде" + заполняем клиента и дату возврата
               if (nextStatus === 'active') {
@@ -814,8 +854,7 @@ export default function Rentals() {
                     ? { ...e, status: 'rented' as EquipmentStatus, currentClient: rental.client, returnDate: rental.endDate }
                     : e,
                 );
-                setEquipmentList(newEqList);
-                saveEquipment(newEqList);
+                void persistEquipment(newEqList);
               }
               // При закрытии — если нет других активных аренд, техника "Свободна" + очищаем клиента и дату
               if (nextStatus === 'closed') {
@@ -830,8 +869,7 @@ export default function Rentals() {
                       ? { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
                       : e,
                   );
-                  setEquipmentList(newEqList);
-                  saveEquipment(newEqList);
+                  void persistEquipment(newEqList);
                 }
               }
             }
@@ -840,8 +878,7 @@ export default function Rentals() {
           onDelete={(rental) => {
             if (!canDeleteRentals) return;
             const updated = ganttRentals.filter(r => r.id !== rental.id);
-            setGanttRentals(updated);
-            saveGanttRentals(updated);
+            void persistGanttRentals(updated);
             // Если после удаления нет других активных аренд — техника снова свободна, очищаем клиента и дату
             const hasOtherActive = updated.some(
               r => r.equipmentInv === rental.equipmentInv
@@ -853,8 +890,7 @@ export default function Rentals() {
                   ? { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
                   : e,
               );
-              setEquipmentList(newEqList);
-              saveEquipment(newEqList);
+              void persistEquipment(newEqList);
             }
             setSelectedRental(null);
           }}
@@ -873,8 +909,7 @@ export default function Rentals() {
           const updated = ganttRentals.map(r =>
             r.id === data.rentalId ? { ...r, status: 'returned' as const } : r,
           );
-          setGanttRentals(updated);
-          saveGanttRentals(updated);
+          void persistGanttRentals(updated);
 
           // Обновляем статус техники, если нет других активных аренд
           const rental = ganttRentals.find(r => r.id === data.rentalId);
@@ -891,8 +926,7 @@ export default function Rentals() {
                   ? { ...e, status: newStatus, currentClient: undefined, returnDate: undefined }
                   : e,
               );
-              setEquipmentList(newEqList);
-              saveEquipment(newEqList);
+              void persistEquipment(newEqList);
             }
           }
           showToast(`Возврат оформлен: ${rental?.equipmentInv ?? data.rentalId}`);
@@ -938,8 +972,7 @@ export default function Rentals() {
             comments: [],
           };
           const updated = [...ganttRentals, newRental];
-          setGanttRentals(updated);
-          saveGanttRentals(updated);
+          void persistGanttRentals(updated);
 
           // Синхронизируем статус техники + клиента и дату возврата на основе initialStatus аренды
           if (data.equipmentInv) {
@@ -953,8 +986,7 @@ export default function Rentals() {
                 returnDate: initialStatus === 'active' ? newRental.endDate : e.returnDate,
               };
             });
-            setEquipmentList(newEqList);
-            saveEquipment(newEqList);
+            void persistEquipment(newEqList);
           }
           showToast(`Аренда создана: ${newRental.id} — ${data.client} (${data.equipmentInv})`);
           setShowNewRentalModal(false);

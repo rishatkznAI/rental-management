@@ -8,3 +8,5 @@ export { clientsService } from './clients.service';
 export { serviceTicketsService } from './service-tickets.service';
 export { paymentsService } from './payments.service';
 export { documentsService } from './documents.service';
+export { usersService } from './users.service';
+export { ownersService } from './owners.service';

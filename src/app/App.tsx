@@ -4,7 +4,6 @@ import { router } from './routes';
 import { Toaster } from 'sonner';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
-import { useSyncData } from './hooks/useSyncData';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,17 +17,10 @@ const queryClient = new QueryClient({
   },
 });
 
-/** Runs useSyncData inside the AuthProvider so it has access to auth state. */
-function SyncEffect() {
-  useSyncData();
-  return null;
-}
-
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <SyncEffect />
         <ThemeProvider>
           <RouterProvider router={router} />
           <Toaster position="top-right" />

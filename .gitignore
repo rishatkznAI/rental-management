@@ -29,3 +29,11 @@ Thumbs.db
 # Temp
 *.tmp
 *.temp
+
+# Local helper scripts
+*.command
+
+# Local server state
+server/.env
+server/data/*.json
+!server/data/.gitkeep

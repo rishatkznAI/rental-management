@@ -5,7 +5,7 @@
  * ╚══════════════════════════════════════════════════════════════════╝
  *
  * Что умеет:
- *  1. Хранит данные в JSON-файлах (аренды, техника, сервис, клиенты)
+ *  1. Хранит данные в SQLite (аренды, техника, сервис, клиенты)
  *  2. REST CRUD API для всех сущностей
  *  3. Сессионная аутентификация (Bearer-токен, 24ч TTL)
  *  4. Серверная RBAC (права по роли на запись)
@@ -24,10 +24,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
-const fs      = require('fs');
-const path    = require('path');
 const fetch   = require('node-fetch');
 const crypto  = require('crypto');
+const { DB_PATH, getData, setData, migrateJsonFilesToDb } = require('./db');
 
 // ── Пароли (совместимо с frontend userStorage.ts) ─────────────────────────────
 
@@ -75,26 +74,13 @@ app.use(cors({
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const MAX_API   = 'https://botapi.max.ru';
-const DATA_DIR  = path.join(__dirname, 'data');
-
-// ── JSON-файлы ────────────────────────────────────────────────────────────────
-
-function filePath(name) {
-  return path.join(DATA_DIR, `${name}.json`);
-}
 
 function readData(name) {
-  try {
-    const raw = fs.readFileSync(filePath(name), 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  return getData(name);
 }
 
 function writeData(name, data) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(filePath(name), JSON.stringify(data, null, 2), 'utf8');
+  setData(name, data);
 }
 
 function getBotUsers()    { return readData('bot_users') || {}; }
@@ -705,6 +691,7 @@ app.get('/api/status', (req, res) => {
 // ── Запуск ─────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, async () => {
+  migrateJsonFilesToDb();
   seedDefaultUsers();
 
   console.log('');
@@ -726,6 +713,8 @@ app.listen(PORT, async () => {
   console.log('║  GET  /api/status      — статус сервера              ║');
   console.log('║  POST /bot/webhook     — MAX бот webhook             ║');
   console.log('╚══════════════════════════════════════════════════════╝');
+  console.log('');
+  console.log(`[DB] SQLite: ${DB_PATH}`);
   console.log('');
 
   if (!BOT_TOKEN) {

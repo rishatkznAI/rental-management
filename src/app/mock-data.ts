@@ -1,11 +1,21 @@
 import { Equipment, Rental, ServiceTicket, Client, Document, Payment, RepairRecord, ShippingPhoto } from './types';
+import { api } from './lib/api';
 
 // ========== Пустая база данных ==========
 // Добавляйте свои данные через интерфейс приложения
 
 export const mockEquipment: Equipment[] = [];
 
-// ── localStorage для техники ──────────────────────────────────────────────────
+// ─── Внутренний helper: bulk-replace коллекции на сервере ────────────────────
+// Fire-and-forget: не блокирует UI, ошибки логируются молча.
+
+function serverSync(collection: string, list: unknown[]): void {
+  api.put(`/api/${collection}`, list).catch(() => {
+    // Не показываем ошибку пользователю — данные уже в localStorage
+  });
+}
+
+// ── localStorage + server для техники ────────────────────────────────────────
 export const EQUIPMENT_STORAGE_KEY = 'app_equipment';
 
 export function loadEquipment(): Equipment[] {
@@ -18,6 +28,7 @@ export function loadEquipment(): Equipment[] {
 
 export function saveEquipment(list: Equipment[]): void {
   localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(list));
+  serverSync('equipment', list);
 }
 
 export const mockRepairRecords: RepairRecord[] = [];
@@ -26,7 +37,7 @@ export const mockShippingPhotos: ShippingPhoto[] = [];
 
 export const mockRentals: Rental[] = [];
 
-// ── localStorage для аренд ────────────────────────────────────────────────────
+// ── localStorage + server для аренд ──────────────────────────────────────────
 export const RENTALS_STORAGE_KEY = 'app_rentals';
 export function loadRentals(): Rental[] {
   try { const r = localStorage.getItem(RENTALS_STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
@@ -34,11 +45,12 @@ export function loadRentals(): Rental[] {
 }
 export function saveRentals(list: Rental[]): void {
   localStorage.setItem(RENTALS_STORAGE_KEY, JSON.stringify(list));
+  serverSync('rentals', list);
 }
 
 export const mockServiceTickets: ServiceTicket[] = [];
 
-// ── localStorage для сервисных заявок ─────────────────────────────────────────
+// ── localStorage + server для сервисных заявок ───────────────────────────────
 export const SERVICE_STORAGE_KEY = 'app_service_tickets';
 export function loadServiceTickets(): ServiceTicket[] {
   try { const r = localStorage.getItem(SERVICE_STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
@@ -46,6 +58,7 @@ export function loadServiceTickets(): ServiceTicket[] {
 }
 export function saveServiceTickets(list: ServiceTicket[]): void {
   localStorage.setItem(SERVICE_STORAGE_KEY, JSON.stringify(list));
+  serverSync('service', list);
 }
 
 // Экспорт для обратной совместимости
@@ -89,7 +102,7 @@ export interface ServicePeriod {
 
 export const mockGanttRentals: GanttRentalData[] = [];
 
-// ── localStorage для Gantt-аренд ──────────────────────────────────────────────
+// ── localStorage + server для Gantt-аренд ────────────────────────────────────
 export const GANTT_RENTALS_STORAGE_KEY = 'app_gantt_rentals';
 export function loadGanttRentals(): GanttRentalData[] {
   try { const r = localStorage.getItem(GANTT_RENTALS_STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
@@ -97,13 +110,14 @@ export function loadGanttRentals(): GanttRentalData[] {
 }
 export function saveGanttRentals(list: GanttRentalData[]): void {
   localStorage.setItem(GANTT_RENTALS_STORAGE_KEY, JSON.stringify(list));
+  serverSync('gantt_rentals', list);
 }
 
 export const mockDowntimes: DowntimePeriod[] = [];
 
 export const mockServicePeriods: ServicePeriod[] = [];
 
-// ── localStorage для фото отгрузок/приёмки ────────────────────────────────────
+// ── localStorage + server для фото отгрузок/приёмки ──────────────────────────
 export const SHIPPING_PHOTOS_KEY = 'app_shipping_photos';
 export function loadShippingPhotos(): ShippingPhoto[] {
   try { const r = localStorage.getItem(SHIPPING_PHOTOS_KEY); if (r) return JSON.parse(r); } catch {}
@@ -111,11 +125,12 @@ export function loadShippingPhotos(): ShippingPhoto[] {
 }
 export function saveShippingPhotos(list: ShippingPhoto[]): void {
   localStorage.setItem(SHIPPING_PHOTOS_KEY, JSON.stringify(list));
+  serverSync('shipping_photos', list);
 }
 
 export const mockClients: Client[] = [];
 
-// ── localStorage для клиентов ─────────────────────────────────────────────────
+// ── localStorage + server для клиентов ───────────────────────────────────────
 export const CLIENTS_STORAGE_KEY = 'app_clients';
 export function loadClients(): Client[] {
   try { const r = localStorage.getItem(CLIENTS_STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
@@ -123,11 +138,12 @@ export function loadClients(): Client[] {
 }
 export function saveClients(list: Client[]): void {
   localStorage.setItem(CLIENTS_STORAGE_KEY, JSON.stringify(list));
+  serverSync('clients', list);
 }
 
 export const mockDocuments: Document[] = [];
 
-// ── localStorage для документов ───────────────────────────────────────────────
+// ── localStorage + server для документов ─────────────────────────────────────
 export const DOCUMENTS_STORAGE_KEY = 'app_documents';
 export function loadDocuments(): Document[] {
   try { const r = localStorage.getItem(DOCUMENTS_STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
@@ -135,11 +151,12 @@ export function loadDocuments(): Document[] {
 }
 export function saveDocuments(list: Document[]): void {
   localStorage.setItem(DOCUMENTS_STORAGE_KEY, JSON.stringify(list));
+  serverSync('documents', list);
 }
 
 export const mockPayments: Payment[] = [];
 
-// ── localStorage для платежей ─────────────────────────────────────────────────
+// ── localStorage + server для платежей ───────────────────────────────────────
 export const PAYMENTS_STORAGE_KEY = 'app_payments';
 export function loadPayments(): Payment[] {
   try { const r = localStorage.getItem(PAYMENTS_STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
@@ -147,9 +164,10 @@ export function loadPayments(): Payment[] {
 }
 export function savePayments(list: Payment[]): void {
   localStorage.setItem(PAYMENTS_STORAGE_KEY, JSON.stringify(list));
+  serverSync('payments', list);
 }
 
-// ── localStorage для собственников техники ────────────────────────────────────
+// ── localStorage + server для собственников техники ──────────────────────────
 
 export interface Owner {
   id: string;
@@ -175,4 +193,5 @@ export function loadOwners(): Owner[] {
 
 export function saveOwners(list: Owner[]): void {
   localStorage.setItem(OWNERS_STORAGE_KEY, JSON.stringify(list));
+  serverSync('owners', list);
 }

@@ -12,7 +12,7 @@ import {
   Camera, Upload, Trash2, X, Plus,
 } from 'lucide-react';
 import { formatDate } from '../lib/utils';
-import { loadServiceTickets, saveServiceTickets } from '../mock-data';
+import { useServiceTicketById, useUpdateServiceTicket } from '../hooks/useServiceTickets';
 import type { ServiceTicket, ServiceStatus } from '../types';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -83,11 +83,14 @@ export default function ServiceDetail() {
   const { can } = usePermissions();
   const canEdit = can('edit', 'service');
 
-  // Load from localStorage (NOT from static mock array)
-  const [ticket, setTicket] = useState<ServiceTicket | null>(() => {
-    const all = loadServiceTickets();
-    return all.find(t => t.id === id) ?? null;
-  });
+  const { data: fetchedTicket } = useServiceTicketById(id ?? '');
+  const updateTicket = useUpdateServiceTicket();
+
+  // Local optimistic state — seeded from server, updated immediately on user actions
+  const [ticket, setTicket] = useState<ServiceTicket | null>(null);
+  React.useEffect(() => {
+    if (fetchedTicket) setTicket(fetchedTicket as ServiceTicket);
+  }, [fetchedTicket]);
 
   const [newComment, setNewComment] = useState('');
   const [newAssignee, setNewAssignee] = useState('');
@@ -119,6 +122,10 @@ export default function ServiceDetail() {
     });
 
   const handlePhotoFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) {
+      e.target.value = '';
+      return;
+    }
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
     const results = await Promise.all(files.map(f => compressToBase64(f)));
@@ -127,7 +134,7 @@ export default function ServiceDetail() {
   };
 
   const savePhotos = () => {
-    if (!ticket || !photoPending.length) return;
+    if (!ticket || !canEdit || !photoPending.length) return;
     const updated: ServiceTicket = {
       ...ticket,
       photos: [...(ticket.photos ?? []), ...photoPending],
@@ -137,7 +144,7 @@ export default function ServiceDetail() {
   };
 
   const deletePhoto = (idx: number) => {
-    if (!ticket) return;
+    if (!ticket || !canEdit) return;
     const updated: ServiceTicket = {
       ...ticket,
       photos: (ticket.photos ?? []).filter((_, i) => i !== idx),
@@ -145,12 +152,11 @@ export default function ServiceDetail() {
     persist(updated);
   };
 
-  // Persist changes
+  // Persist changes — optimistic local update + server PATCH
   const persist = useCallback((updated: ServiceTicket) => {
     setTicket(updated);
-    const all = loadServiceTickets();
-    saveServiceTickets(all.map(t => (t.id === updated.id ? updated : t)));
-  }, []);
+    updateTicket.mutate({ id: updated.id, data: updated });
+  }, [updateTicket]);
 
   // ── actions ────────────────────────────────────────────────────────────────
 
@@ -482,10 +488,12 @@ export default function ServiceDetail() {
                   <Camera className="h-4 w-4" />
                   Фото заявки
                 </CardTitle>
-                <Button size="sm" variant="secondary" onClick={() => photoInputRef.current?.click()}>
-                  <Plus className="h-4 w-4" />
-                  Добавить фото
-                </Button>
+                {canEdit && (
+                  <Button size="sm" variant="secondary" onClick={() => photoInputRef.current?.click()}>
+                    <Plus className="h-4 w-4" />
+                    Добавить фото
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -499,7 +507,7 @@ export default function ServiceDetail() {
               />
 
               {/* Pending previews */}
-              {photoPending.length > 0 && (
+              {canEdit && photoPending.length > 0 && (
                 <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-blue-700 dark:text-blue-300 font-medium">Выбрано {photoPending.length} фото</span>
@@ -536,12 +544,14 @@ export default function ServiceDetail() {
                         className="h-full w-full object-cover cursor-pointer hover:opacity-90"
                         onClick={() => window.open(src, '_blank')}
                       />
-                      <button
-                        onClick={() => deletePhoto(i)}
-                        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={() => deletePhoto(i)}
+                          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -549,12 +559,14 @@ export default function ServiceDetail() {
                 <div className="flex flex-col items-center justify-center py-6 text-center">
                   <Camera className="h-8 w-8 text-gray-300 dark:text-gray-600 mb-2" />
                   <p className="text-sm text-gray-400 dark:text-gray-500">Фото не добавлены</p>
-                  <button
-                    onClick={() => photoInputRef.current?.click()}
-                    className="mt-2 text-sm text-[--color-primary] hover:underline"
-                  >
-                    Загрузить фото
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => photoInputRef.current?.click()}
+                      className="mt-2 text-sm text-[--color-primary] hover:underline"
+                    >
+                      Загрузить фото
+                    </button>
+                  )}
                 </div>
               )}
               <p className="text-xs text-gray-400 dark:text-gray-500">

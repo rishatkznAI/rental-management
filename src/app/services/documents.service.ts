@@ -1,31 +1,24 @@
-import { loadDocuments, saveDocuments } from '../mock-data';
+import { api } from '../lib/api';
 import type { Document } from '../types';
 
 export const documentsService = {
-  getAll: async (): Promise<Document[]> => {
-    return loadDocuments();
-  },
+  getAll: (): Promise<Document[]> =>
+    api.get<Document[]>('/api/documents'),
 
-  getById: async (id: string): Promise<Document | undefined> => {
-    return loadDocuments().find((d) => d.id === id);
-  },
+  getById: (id: string): Promise<Document | undefined> =>
+    api.get<Document>(`/api/documents/${id}`).catch(() => undefined),
 
   getByRentalId: async (rentalId: string): Promise<Document[]> => {
-    return loadDocuments().filter((d) => d.rental === rentalId);
+    const all = await api.get<Document[]>('/api/documents');
+    return all.filter(d => d.rental === rentalId);
   },
 
-  create: async (data: Omit<Document, 'id'>): Promise<Document> => {
-    const newItem: Document = { ...data, id: `D-${Date.now()}` };
-    saveDocuments([...loadDocuments(), newItem]);
-    return newItem;
-  },
+  create: (data: Omit<Document, 'id'>): Promise<Document> =>
+    api.post<Document>('/api/documents', data),
 
-  update: async (id: string, data: Partial<Document>): Promise<Document> => {
-    const list = loadDocuments();
-    const idx = list.findIndex((d) => d.id === id);
-    if (idx === -1) throw new Error(`Document ${id} not found`);
-    list[idx] = { ...list[idx], ...data };
-    saveDocuments(list);
-    return list[idx];
-  },
+  update: (id: string, data: Partial<Document>): Promise<Document> =>
+    api.patch<Document>(`/api/documents/${id}`, data),
+
+  bulkReplace: (list: Document[]): Promise<void> =>
+    api.put('/api/documents', list),
 };

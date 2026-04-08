@@ -6,9 +6,12 @@
  *
  * Что умеет:
  *  1. Хранит данные в JSON-файлах (аренды, техника, сервис, клиенты)
- *  2. Принимает синхронизацию из браузера (localStorage → сервер)
- *  3. Обрабатывает webhook от MAX бота
- *  4. Отправляет уведомления в MAX при новых арендах/просрочках/заявках
+ *  2. REST CRUD API для всех сущностей
+ *  3. Сессионная аутентификация (Bearer-токен, 24ч TTL)
+ *  4. Серверная RBAC (права по роли на запись)
+ *  5. Принимает bulk-replace синхронизацию из браузера
+ *  6. Обрабатывает webhook от MAX бота
+ *  7. Отправляет уведомления в MAX при новых арендах/просрочках/заявках
  *
  * Команды бота:
  *  /start <email> <пароль>  — авторизация
@@ -19,16 +22,14 @@
  */
 
 require('dotenv').config();
-const express  = require('express');
-const cors     = require('cors');
-const fs       = require('fs');
-const path     = require('path');
-const fetch    = require('node-fetch');
-const crypto   = require('crypto');
+const express = require('express');
+const cors    = require('cors');
+const fs      = require('fs');
+const path    = require('path');
+const fetch   = require('node-fetch');
+const crypto  = require('crypto');
 
-// ── Проверка паролей (совместима с frontend userStorage.ts) ───────────────────
-// Frontend хранит пароли как 'h1:<sha256hex(plain + ":rental-mgmt-v1")>'
-// При legacy plain-text паролях проверяем прямое сравнение для обратной совместимости
+// ── Пароли (совместимо с frontend userStorage.ts) ─────────────────────────────
 
 const HASH_PREFIX = 'h1:';
 const HASH_SALT   = 'rental-mgmt-v1';
@@ -39,17 +40,19 @@ function hashPassword(plain) {
 }
 
 function verifyPassword(plain, stored) {
-  if (stored.startsWith(HASH_PREFIX)) {
+  if (stored && stored.startsWith(HASH_PREFIX)) {
     return hashPassword(plain) === stored;
   }
-  // Обратная совместимость: legacy plain-text пароль
-  return plain === stored;
+  return plain === stored; // legacy plain-text
 }
+
+// ── Express ───────────────────────────────────────────────────────────────────
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '20mb' }));
+
 const ALLOWED_ORIGINS = [
   'https://rishatknai.github.io',
   'http://localhost:5173',
@@ -57,20 +60,20 @@ const ALLOWED_ORIGINS = [
 ];
 app.use(cors({
   origin: (origin, callback) => {
-    // allow requests with no origin (curl, mobile apps)
     if (!origin) return callback(null, true);
     if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
     callback(new Error(`CORS: origin ${origin} not allowed`));
   },
+  credentials: true,
 }));
 
 // ── Конфигурация ───────────────────────────────────────────────────────────────
 
-const BOT_TOKEN  = process.env.BOT_TOKEN  || '';
-const MAX_API    = 'https://botapi.max.ru';
-const DATA_DIR   = path.join(__dirname, 'data');
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const MAX_API   = 'https://botapi.max.ru';
+const DATA_DIR  = path.join(__dirname, 'data');
 
-// ── Хелперы для работы с JSON-файлами ──────────────────────────────────────────
+// ── JSON-файлы ────────────────────────────────────────────────────────────────
 
 function filePath(name) {
   return path.join(DATA_DIR, `${name}.json`);
@@ -90,13 +93,273 @@ function writeData(name, data) {
   fs.writeFileSync(filePath(name), JSON.stringify(data, null, 2), 'utf8');
 }
 
-// Таблица маппинга: phone → { userId, userName, userRole }
-function getBotUsers() { return readData('bot_users') || {}; }
-function saveBotUsers(u) { writeData('bot_users', u); }
+function getBotUsers()    { return readData('bot_users') || {}; }
+function saveBotUsers(u)  { writeData('bot_users', u); }
+function getSnapshot()    { return readData('snapshot') || {}; }
+function saveSnapshot(s)  { writeData('snapshot', s); }
 
-// Хранилище "последнего снимка" для определения изменений
-function getSnapshot() { return readData('snapshot') || {}; }
-function saveSnapshot(s) { writeData('snapshot', s); }
+// ── Сессии (in-memory, Bearer-токен) ──────────────────────────────────────────
+
+const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 часа
+
+/** Map<token, { userId, userName, userRole, email, createdAt }> */
+const sessions = new Map();
+
+function createSession(user) {
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, {
+    userId:    user.id,
+    userName:  user.name,
+    userRole:  user.role,
+    email:     user.email,
+    createdAt: Date.now(),
+  });
+  return token;
+}
+
+function getSession(token) {
+  const session = sessions.get(token);
+  if (!session) return null;
+  if (Date.now() - session.createdAt > SESSION_TTL) {
+    sessions.delete(token);
+    return null;
+  }
+  return session;
+}
+
+function destroySession(token) {
+  sessions.delete(token);
+}
+
+// Чистим протухшие сессии каждый час
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, session] of sessions.entries()) {
+    if (now - session.createdAt > SESSION_TTL) sessions.delete(token);
+  }
+}, 3600_000);
+
+// ── RBAC ──────────────────────────────────────────────────────────────────────
+
+// Права на запись по коллекциям
+const WRITE_PERMISSIONS = {
+  equipment:      ['Администратор'],
+  rentals:        ['Администратор', 'Менеджер по аренде'],
+  gantt_rentals:  ['Администратор', 'Менеджер по аренде'],
+  service:        ['Администратор', 'Механик'],
+  clients:        ['Администратор', 'Менеджер по аренде'],
+  documents:      ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  payments:       ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  users:          ['Администратор'],
+  shipping_photos:['Администратор', 'Механик', 'Менеджер по аренде'],
+  owners:         ['Администратор'],
+};
+
+// ── Middleware ─────────────────────────────────────────────────────────────────
+
+function requireAuth(req, res, next) {
+  const auth = req.headers['authorization'];
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  const token = auth.slice(7);
+  const session = getSession(token);
+  if (!session) {
+    return res.status(401).json({ ok: false, error: 'Session expired or invalid' });
+  }
+  req.user = session;
+  next();
+}
+
+function requireWrite(collection) {
+  return (req, res, next) => {
+    const allowed = WRITE_PERMISSIONS[collection] || ['Администратор'];
+    if (!allowed.includes(req.user.userRole)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden: insufficient role' });
+    }
+    next();
+  };
+}
+
+// ── Auth endpoints ────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/auth/login
+ * Body: { email, password }
+ * Returns: { ok, token, user }
+ */
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ ok: false, error: 'email and password required' });
+    }
+
+    const users = readData('users') || [];
+    const user = users.find(
+      u => u.email.toLowerCase() === email.toLowerCase() &&
+           verifyPassword(password, u.password) &&
+           u.status === 'Активен'
+    );
+
+    if (!user) {
+      return res.status(401).json({ ok: false, error: 'Неверный email или пароль' });
+    }
+
+    const token = createSession(user);
+    console.log(`[AUTH] Вход: ${user.name} (${user.role})`);
+
+    res.json({
+      ok: true,
+      token,
+      user: {
+        id:    user.id,
+        name:  user.name,
+        email: user.email,
+        role:  user.role,
+      },
+    });
+  } catch (err) {
+    console.error('[AUTH] login error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/auth/me
+ * Returns current session user
+ */
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ ok: true, user: req.user });
+});
+
+/**
+ * POST /api/auth/logout
+ * Invalidates the current session
+ */
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  const token = req.headers['authorization'].slice(7);
+  destroySession(token);
+  res.json({ ok: true });
+});
+
+// ── Generic CRUD factory ──────────────────────────────────────────────────────
+
+function generateId(prefix) {
+  return `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+}
+
+const ID_PREFIXES = {
+  equipment:      'eq',
+  rentals:        'R',
+  gantt_rentals:  'GR',
+  service:        'S',
+  clients:        'C',
+  documents:      'D',
+  payments:       'P',
+  users:          'U',
+  shipping_photos:'SP',
+  owners:         'OW',
+};
+
+function registerCRUD(router, collection) {
+  const prefix = ID_PREFIXES[collection] || collection;
+
+  // GET /api/:collection — список
+  router.get(`/${collection}`, requireAuth, (req, res) => {
+    const data = readData(collection) || [];
+    res.json(data);
+  });
+
+  // GET /api/:collection/:id — один элемент
+  router.get(`/${collection}/:id`, requireAuth, (req, res) => {
+    const data = readData(collection) || [];
+    const item = data.find(i => i.id === req.params.id);
+    if (!item) return res.status(404).json({ ok: false, error: 'Not found' });
+    res.json(item);
+  });
+
+  // POST /api/:collection — создать
+  router.post(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+    const data = readData(collection) || [];
+    const newItem = { ...req.body, id: req.body.id || generateId(prefix) };
+    data.push(newItem);
+    writeData(collection, data);
+    res.status(201).json(newItem);
+  });
+
+  // PATCH /api/:collection/:id — обновить
+  router.patch(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+    const data = readData(collection) || [];
+    const idx = data.findIndex(i => i.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+    data[idx] = { ...data[idx], ...req.body, id: data[idx].id };
+    writeData(collection, data);
+    res.json(data[idx]);
+  });
+
+  // DELETE /api/:collection/:id — удалить
+  router.delete(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+    const data = readData(collection) || [];
+    const idx = data.findIndex(i => i.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+    data.splice(idx, 1);
+    writeData(collection, data);
+    res.json({ ok: true });
+  });
+
+  // PUT /api/:collection — bulk replace (для синхронизации)
+  router.put(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+    const body = req.body;
+    const list = Array.isArray(body) ? body : body.data;
+    if (!Array.isArray(list)) {
+      return res.status(400).json({ ok: false, error: 'Expected array' });
+    }
+    writeData(collection, list);
+    res.json({ ok: true, count: list.length });
+  });
+}
+
+const apiRouter = express.Router();
+
+const COLLECTIONS = [
+  'equipment',
+  'rentals',
+  'gantt_rentals',
+  'service',
+  'clients',
+  'documents',
+  'payments',
+  'users',
+  'shipping_photos',
+  'owners',
+];
+
+for (const col of COLLECTIONS) {
+  registerCRUD(apiRouter, col);
+}
+
+app.use('/api', apiRouter);
+
+// ── Seed default admin ────────────────────────────────────────────────────────
+
+function seedDefaultUsers() {
+  const existing = readData('users');
+  if (existing && existing.length > 0) return; // уже есть данные
+
+  const defaultAdmin = {
+    id:       'U-default-admin',
+    name:     'Администратор',
+    email:    'admin@rental.local',
+    role:     'Администратор',
+    status:   'Активен',
+    password: hashPassword('admin123'),
+  };
+
+  writeData('users', [defaultAdmin]);
+  console.log('[INIT] Создан дефолтный пользователь: admin@rental.local / admin123');
+  console.log('[INIT] ⚠️  Обязательно смените пароль в настройках!');
+}
 
 // ── MAX Bot API ────────────────────────────────────────────────────────────────
 
@@ -128,18 +391,15 @@ async function sendMessage(userId, text) {
   });
 }
 
-// ── Регистрация webhook в MAX ──────────────────────────────────────────────────
-
 async function registerWebhook() {
   if (!BOT_TOKEN) return;
   const webhookUrl = process.env.WEBHOOK_URL;
   if (!webhookUrl) {
     console.log('[BOT] WEBHOOK_URL не задан — пропускаем регистрацию.');
-    console.log('[BOT] Укажите WEBHOOK_URL=https://xxx.ngrok.io в .env и перезапустите.');
     return;
   }
   const res = await maxRequest('POST', '/subscriptions', {
-    url:    `${webhookUrl}/bot/webhook`,
+    url:          `${webhookUrl}/bot/webhook`,
     update_types: ['message_created'],
   });
   if (res && !res.error) {
@@ -172,14 +432,12 @@ function authorizeUser(phone, email, password) {
 }
 
 function getAuthorizedUser(phone) {
-  const botUsers = getBotUsers();
-  return botUsers[phone] || null;
+  return getBotUsers()[phone] || null;
 }
 
 // ── Обработчики команд бота ────────────────────────────────────────────────────
 
 function formatRentals(rentals, managerName, role) {
-  // Администратор и Офис-менеджер видят все аренды, менеджер — только свои
   const filtered = (role === 'Менеджер по аренде')
     ? rentals.filter(r => r.manager === managerName && (r.status === 'active' || r.status === 'created'))
     : rentals.filter(r => r.status === 'active' || r.status === 'created');
@@ -211,11 +469,8 @@ function formatEquipment(equipment) {
     free.length > 10 ? `... и ещё ${free.length - 10}` : ''].filter(Boolean).join('\n');
 }
 
-function formatService(tickets, role) {
-  const open = (role === 'Механик')
-    ? tickets.filter(t => t.status !== 'closed')
-    : tickets.filter(t => t.status !== 'closed');
-
+function formatService(tickets) {
+  const open = tickets.filter(t => t.status !== 'closed');
   if (!open.length) return '✅ Открытых заявок нет.';
 
   const priorityIcon = { critical: '🔴', high: '🟠', medium: '🟡', low: '⚪' };
@@ -229,11 +484,22 @@ function formatService(tickets, role) {
     open.length > 10 ? `... и ещё ${open.length - 10}` : ''].filter(Boolean).join('\n');
 }
 
+function getHelpText(role) {
+  return [
+    '',
+    '📱 Доступные команды:',
+    '',
+    `  /аренды    — активные аренды${role === 'Менеджер по аренде' ? ' (только ваши)' : ''}`,
+    '  /техника   — свободная техника',
+    '  /сервис    — открытые сервисные заявки',
+    '  /помощь    — этот список',
+  ].join('\n');
+}
+
 async function handleCommand(senderId, phone, text) {
   const lower = text.trim().toLowerCase();
-  const parts = text.trim().split(/\s+/);
+  const parts  = text.trim().split(/\s+/);
 
-  // ── /start email пароль ──
   if (lower.startsWith('/start')) {
     if (parts.length < 3) {
       return sendMessage(senderId,
@@ -248,11 +514,10 @@ async function handleCommand(senderId, phone, text) {
       );
     }
     return sendMessage(senderId,
-      `✅ Вы вошли как ${user.name} (${user.role})\n\n${getHelpText(user.role)}`
+      `✅ Вы вошли как ${user.name} (${user.role})\n${getHelpText(user.role)}`
     );
   }
 
-  // Проверяем авторизацию для остальных команд
   const authUser = getAuthorizedUser(String(phone));
   if (!authUser) {
     return sendMessage(senderId,
@@ -262,54 +527,32 @@ async function handleCommand(senderId, phone, text) {
 
   const { userName, userRole } = authUser;
 
-  // ── /аренды ──
   if (lower === '/аренды' || lower === '/rentals' || lower === '/мои' || lower === 'аренды') {
     const rentals = readData('rentals') || [];
     return sendMessage(senderId, formatRentals(rentals, userName, userRole));
   }
 
-  // ── /техника ──
-  if (lower === '/техника' || lower === '/equipment' || lower === 'техника' || lower === 'свободная техника') {
+  if (lower === '/техника' || lower === '/equipment' || lower === 'техника') {
     const equipment = readData('equipment') || [];
     return sendMessage(senderId, formatEquipment(equipment));
   }
 
-  // ── /сервис ──
   if (lower === '/сервис' || lower === '/service' || lower === 'сервис' || lower === 'заявки') {
     const tickets = readData('service') || [];
-    return sendMessage(senderId, formatService(tickets, userRole));
+    return sendMessage(senderId, formatService(tickets));
   }
 
-  // ── /помощь ──
   if (lower === '/помощь' || lower === '/help' || lower === 'помощь') {
     return sendMessage(senderId, getHelpText(userRole));
   }
 
-  // ── Неизвестная команда ──
-  return sendMessage(senderId,
-    `❓ Неизвестная команда. Напишите /помощь для списка команд.`
-  );
-}
-
-function getHelpText(role) {
-  const cmds = [
-    '',
-    '📱 Доступные команды:',
-    '',
-    '  /аренды    — активные аренды' + (role === 'Менеджер по аренде' ? ' (только ваши)' : ''),
-    '  /техника   — свободная техника',
-    role !== 'Механик' ? null : null,
-    '  /сервис    — открытые сервисные заявки',
-    '  /помощь    — этот список',
-  ].filter(l => l !== null);
-
-  return cmds.join('\n');
+  return sendMessage(senderId, `❓ Неизвестная команда. Напишите /помощь для списка команд.`);
 }
 
 // ── Webhook endpoint ───────────────────────────────────────────────────────────
 
 app.post('/bot/webhook', async (req, res) => {
-  res.sendStatus(200); // отвечаем MAX сразу
+  res.sendStatus(200);
 
   try {
     const updates = req.body?.updates || [req.body];
@@ -322,7 +565,7 @@ app.post('/bot/webhook', async (req, res) => {
       if (!sender) continue;
 
       const senderId = sender.user_id;
-      const phone    = sender.user_id; // MAX не всегда даёт номер, используем user_id как ключ
+      const phone    = sender.user_id;
       const text     = msg?.body?.text || '';
 
       if (!text.trim()) continue;
@@ -335,36 +578,29 @@ app.post('/bot/webhook', async (req, res) => {
   }
 });
 
-// ── API синхронизации данных из браузера ───────────────────────────────────────
+// ── Bulk sync (legacy endpoint, сохраняем совместимость) ─────────────────────
 
-/**
- * POST /api/sync
- * Body: { equipment, rentals, service, clients, payments, users }
- * Браузер отправляет все данные из localStorage — сервер сохраняет их в файлы
- * и проверяет: нет ли новых аренд или просроченных возвратов для уведомлений.
- */
 app.post('/api/sync', async (req, res) => {
   try {
-    const { equipment, rentals, service, clients, payments, users } = req.body;
+    const { equipment, rentals, gantt_rentals, service, clients, payments, users, documents, shipping_photos } = req.body;
     const prev = getSnapshot();
     const now  = Date.now();
 
-    // Сохраняем данные
-    if (equipment) writeData('equipment', equipment);
-    if (rentals)   writeData('rentals',   rentals);
-    if (service)   writeData('service',   service);
-    if (clients)   writeData('clients',   clients);
-    if (payments)  writeData('payments',  payments);
-    if (users)     writeData('users',     users);
-
-    // ── Проверяем изменения для уведомлений ──────────────────────────────────
+    if (equipment)       writeData('equipment',       equipment);
+    if (rentals)         writeData('rentals',         rentals);
+    if (gantt_rentals)   writeData('gantt_rentals',   gantt_rentals);
+    if (service)         writeData('service',         service);
+    if (clients)         writeData('clients',         clients);
+    if (payments)        writeData('payments',        payments);
+    if (users)           writeData('users',           users);
+    if (documents)       writeData('documents',       documents);
+    if (shipping_photos) writeData('shipping_photos', shipping_photos);
 
     const notifications = [];
 
     if (rentals && prev.rentals) {
       const prevIds = new Set((prev.rentals || []).map(r => r.id));
 
-      // Новые аренды
       const newRentals = rentals.filter(r => !prevIds.has(r.id));
       for (const r of newRentals) {
         notifications.push({
@@ -374,7 +610,6 @@ app.post('/api/sync', async (req, res) => {
         });
       }
 
-      // Новые сервисные заявки
       if (service && prev.service) {
         const prevServiceIds = new Set((prev.service || []).map(t => t.id));
         const newTickets = service.filter(t => !prevServiceIds.has(t.id));
@@ -386,12 +621,11 @@ app.post('/api/sync', async (req, res) => {
         }
       }
 
-      // Просроченные возвраты (проверяем раз в час)
       const lastOverdueCheck = prev.lastOverdueCheck || 0;
       if (now - lastOverdueCheck > 3600_000) {
         const today = new Date().toISOString().slice(0, 10);
         const overdue = rentals.filter(r =>
-          (r.status === 'active') && r.endDate && r.endDate < today
+          r.status === 'active' && r.endDate && r.endDate < today
         );
         for (const r of overdue) {
           notifications.push({
@@ -404,13 +638,10 @@ app.post('/api/sync', async (req, res) => {
       }
     }
 
-    // Обновляем снимок
     saveSnapshot({ ...req.body, lastOverdueCheck: prev.lastOverdueCheck || 0 });
 
-    // ── Отправляем уведомления авторизованным пользователям ──────────────────
-
     if (notifications.length && BOT_TOKEN) {
-      const botUsers   = getBotUsers();
+      const botUsers    = getBotUsers();
       const systemUsers = users || readData('users') || [];
 
       for (const notif of notifications) {
@@ -418,8 +649,7 @@ app.post('/api/sync', async (req, res) => {
           const shouldNotify =
             notif.role === 'all' ||
             (notif.role === 'mechanic' && bu.userRole === 'Механик') ||
-            (notif.role === 'manager' && bu.userName === notif.managerName) ||
-            (notif.managerName === bu.userName);
+            (notif.role === 'manager' && bu.userName === notif.managerName);
 
           if (shouldNotify) {
             await sendMessage(Number(phone), notif.text);
@@ -445,30 +675,43 @@ app.get('/api/status', (req, res) => {
 
   res.json({
     ok: true,
-    uptime:    Math.round(process.uptime()),
+    uptime:   Math.round(process.uptime()),
+    sessions: sessions.size,
     data: {
       equipment: equipment.length,
       rentals:   rentals.length,
       service:   service.length,
     },
-    botToken:  BOT_TOKEN ? '✅ задан' : '❌ не задан',
-    botUsers:  Object.keys(botUsers).length,
-    webhook:   process.env.WEBHOOK_URL || '(не задан)',
+    botToken: BOT_TOKEN ? '✅ задан' : '❌ не задан',
+    botUsers: Object.keys(botUsers).length,
+    webhook:  process.env.WEBHOOK_URL || '(не задан)',
   });
 });
 
 // ── Запуск ─────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, async () => {
+  seedDefaultUsers();
+
   console.log('');
-  console.log('╔══════════════════════════════════════════════╗');
-  console.log('║  Rental Management Server — запущен!         ║');
-  console.log(`║  http://localhost:${PORT}                        ║`);
-  console.log('╠══════════════════════════════════════════════╣');
-  console.log(`║  POST /api/sync    — синхронизация данных    ║`);
-  console.log(`║  GET  /api/status  — статус сервера          ║`);
-  console.log(`║  POST /bot/webhook — MAX бот webhook         ║`);
-  console.log('╚══════════════════════════════════════════════╝');
+  console.log('╔══════════════════════════════════════════════════════╗');
+  console.log('║  Rental Management Server — запущен!                 ║');
+  console.log(`║  http://localhost:${PORT}                                ║`);
+  console.log('╠══════════════════════════════════════════════════════╣');
+  console.log('║  POST /api/auth/login  — вход, получить токен        ║');
+  console.log('║  GET  /api/auth/me     — текущий пользователь        ║');
+  console.log('║  POST /api/auth/logout — выход                       ║');
+  console.log('║  GET  /api/equipment   — список техники               ║');
+  console.log('║  GET  /api/clients     — клиенты                     ║');
+  console.log('║  GET  /api/service     — сервисные заявки            ║');
+  console.log('║  GET  /api/rentals     — аренды                      ║');
+  console.log('║  GET  /api/payments    — платежи                     ║');
+  console.log('║  ... и ещё 5 коллекций (PATCH/POST/DELETE/PUT)       ║');
+  console.log('╠══════════════════════════════════════════════════════╣');
+  console.log('║  POST /api/sync        — bulk sync (legacy)          ║');
+  console.log('║  GET  /api/status      — статус сервера              ║');
+  console.log('║  POST /bot/webhook     — MAX бот webhook             ║');
+  console.log('╚══════════════════════════════════════════════════════╝');
   console.log('');
 
   if (!BOT_TOKEN) {

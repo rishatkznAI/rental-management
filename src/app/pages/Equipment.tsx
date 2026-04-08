@@ -6,12 +6,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { getEquipmentStatusBadge } from '../components/ui/badge';
 import { Search, Filter, Download, MoreVertical, Plus } from 'lucide-react';
 import { Link } from 'react-router';
-import { loadEquipment, loadGanttRentals, EQUIPMENT_STORAGE_KEY, GANTT_RENTALS_STORAGE_KEY } from '../mock-data';
 import { formatDate } from '../lib/utils';
 import type { EquipmentStatus, EquipmentType, EquipmentDrive, Equipment as EquipmentType_ } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { usePermissions } from '../lib/permissions';
+import { useEquipmentList } from '../hooks/useEquipment';
+import { useGanttData } from '../hooks/useRentals';
 
 // Для каждой единицы техники подтягивает currentClient и returnDate из активной аренды
 // если эти поля не заполнены в самой записи техники (backward-compatibility)
@@ -39,30 +40,12 @@ function enrichEquipment(eqList: EquipmentType_[], ganttRentals: GanttRentalData
 
 export default function Equipment() {
   const { can } = usePermissions();
-  const [equipmentList, setEquipmentList] = React.useState<EquipmentType_[]>(() => loadEquipment());
-  const [ganttRentals, setGanttRentals] = React.useState<GanttRentalData[]>(() => loadGanttRentals());
+  const { data: equipmentList = [] } = useEquipmentList();
+  const { data: ganttRentals = [] } = useGanttData();
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [driveFilter, setDriveFilter] = React.useState<string>('all');
-
-  // Обновляем список при изменении localStorage из другой вкладки или после добавления
-  React.useEffect(() => {
-    const reload = () => {
-      setEquipmentList(loadEquipment());
-      setGanttRentals(loadGanttRentals());
-    };
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === EQUIPMENT_STORAGE_KEY || e.key === GANTT_RENTALS_STORAGE_KEY) reload();
-    };
-    window.addEventListener('storage', handleStorage);
-    // Также обновляем при фокусе на вкладке (после возврата с /equipment/new или /rentals)
-    window.addEventListener('focus', reload);
-    return () => {
-      window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('focus', reload);
-    };
-  }, []);
 
   // Список техники, обогащённый данными из активных аренд (fallback для устаревших записей)
   const enrichedEquipmentList = React.useMemo(
@@ -317,7 +300,7 @@ export default function Equipment() {
       {/* Results info */}
       {filteredEquipment.length > 0 && (
         <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-          <p>Показано {filteredEquipment.length} из {equipmentList.length} единиц техники</p>
+          <p>Показано {filteredEquipment.length} из {(equipmentList as EquipmentType_[]).length} единиц техники</p>
         </div>
       )}
     </div>

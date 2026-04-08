@@ -1,10 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import {
-  loadUsers,
-  USERS_STORAGE_KEY,
-  verifyPassword,
-  migratePasswordsToHash,
-} from '../lib/userStorage';
+import { api, setToken, clearToken, AUTH_TOKEN_KEY } from '../lib/api';
 
 export interface AuthUser {
   id: string;
@@ -16,6 +11,8 @@ export interface AuthUser {
 interface AuthState {
   user: AuthUser | null;
   isAuthenticated: boolean;
+  /** true while the initial /api/auth/me check is running */
+  isLoading: boolean;
 }
 
 interface AuthContextValue extends AuthState {
@@ -25,87 +22,65 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const SESSION_KEY = 'app_auth_user';
-
-// ── Валидация против списка пользователей в localStorage ──────────────────────
-
-async function authenticateUser(email: string, password: string): Promise<AuthUser> {
-  // Небольшая задержка для UX (имитация сетевого запроса)
-  await new Promise(resolve => setTimeout(resolve, 300));
-
-  const users = loadUsers();
-
-  const found = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
-
-  if (!found) {
-    throw new Error('Пользователь с таким email не найден');
-  }
-
-  if (found.status === 'Неактивен') {
-    throw new Error('Ваш аккаунт деактивирован. Обратитесь к администратору.');
-  }
-
-  const passwordOk = await verifyPassword(password, found.password);
-  if (!passwordOk) {
-    throw new Error('Неверный пароль');
-  }
-
-  return {
-    id:    found.id,
-    name:  found.name,
-    role:  found.role,
-    email: found.email,
-  };
-}
-
 // ── Провайдер ─────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AuthState>(() => {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) {
-        // Проверяем что сохранённый пользователь всё ещё существует и активен
-        const user: AuthUser = JSON.parse(raw);
-        const users = loadUsers();
-        const stillValid = users.find(u => u.id === user.id && u.status === 'Активен');
-        if (stillValid) return { user, isAuthenticated: true };
-      }
-    } catch { /* ignore */ }
-    return { user: null, isAuthenticated: false };
+  const [state, setState] = useState<AuthState>({
+    user: null,
+    isAuthenticated: false,
+    isLoading: true,
   });
 
-  // Хешируем plain-text пароли при первом запуске (идемпотентно)
-  useEffect(() => { migratePasswordsToHash(); }, []);
-
-  // Синхронизация сессии с localStorage
+  // При монтировании проверяем, есть ли сохранённый токен, и если да — подтверждаем сессию
   useEffect(() => {
-    if (state.user) {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(state.user));
-    } else {
-      localStorage.removeItem(SESSION_KEY);
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (!token) {
+      setState({ user: null, isAuthenticated: false, isLoading: false });
+      return;
     }
-  }, [state.user]);
 
-  // Если администратор деактивировал пользователя — выкидываем из сессии
-  useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key !== USERS_STORAGE_KEY || !state.user) return;
-      const users = loadUsers();
-      const stillValid = users.find(u => u.id === state.user!.id && u.status === 'Активен');
-      if (!stillValid) setState({ user: null, isAuthenticated: false });
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [state.user]);
+    api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; email: string } }>('/api/auth/me')
+      .then(({ user: session }) => {
+        const user: AuthUser = {
+          id:    session.userId,
+          name:  session.userName,
+          role:  session.userRole,
+          email: session.email,
+        };
+        setState({ user, isAuthenticated: true, isLoading: false });
+      })
+      .catch(() => {
+        // Token invalid / expired
+        clearToken();
+        setState({ user: null, isAuthenticated: false, isLoading: false });
+      });
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const user = await authenticateUser(email, password);
-    setState({ user, isAuthenticated: true });
+    const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; email: string } }>(
+      '/api/auth/login',
+      { email, password }
+    );
+
+    setToken(result.token);
+
+    const user: AuthUser = {
+      id:    result.user.id,
+      name:  result.user.name,
+      role:  result.user.role,
+      email: result.user.email,
+    };
+    setState({ user, isAuthenticated: true, isLoading: false });
   }, []);
 
   const logout = useCallback(() => {
-    setState({ user: null, isAuthenticated: false });
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    // Fire-and-forget — don't block UI
+    if (token) {
+      api.post('/api/auth/logout', {}).catch(() => {});
+    }
+    clearToken();
+    setState({ user: null, isAuthenticated: false, isLoading: false });
   }, []);
 
   return (

@@ -12,12 +12,11 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { ArrowLeft } from 'lucide-react';
-import {
-  loadRentals, saveRentals,
-  loadClients,
-  loadEquipment, saveEquipment,
-  loadGanttRentals, saveGanttRentals,
-} from '../mock-data';
+import { useClientsList } from '../hooks/useClients';
+import { useEquipmentList, useUpdateEquipment } from '../hooks/useEquipment';
+import { useGanttData } from '../hooks/useRentals';
+import { rentalsService } from '../services/rentals.service';
+import { useQueryClient } from '@tanstack/react-query';
 import type { GanttRentalData } from '../mock-data';
 import type { EquipmentStatus } from '../types';
 
@@ -38,14 +37,18 @@ function isEquipmentBusy(invNumber: string, startDate: string, endDate: string, 
 export default function RentalNew() {
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const qc = useQueryClient();
+  const updateEquipment = useUpdateEquipment();
+  const { data: clients = [] } = useClientsList();
+  const { data: rawEq = [] } = useEquipmentList();
+  const { data: ganttRentals = [] } = useGanttData();
+
+  const allEq = useMemo(() => rawEq.filter(e => e.status !== 'inactive' && e.status !== 'in_service'), [rawEq]);
+  const ganttRents = useMemo(() => ganttRentals, [ganttRentals]);
 
   useEffect(() => {
     if (!can('create', 'rentals')) navigate('/rentals', { replace: true });
   }, []);
-
-  const clients   = useMemo(() => loadClients(), []);
-  const allEq     = useMemo(() => loadEquipment().filter(e => e.status !== 'inactive' && e.status !== 'in_service'), []);
-  const ganttRents = useMemo(() => loadGanttRentals(), []);
 
   const today    = new Date().toISOString().split('T')[0];
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
@@ -73,14 +76,13 @@ export default function RentalNew() {
     ? busyEq.some(e => e.inventoryNumber === equipmentInv)
     : false;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const todayStr = new Date().toISOString().split('T')[0];
     const initialStatus: GanttRentalData['status'] = startDate <= todayStr ? 'active' : 'created';
 
-    // Save to GanttRentals (Rentals planner)
-    const newGantt: GanttRentalData = {
-      id: `GR-${Date.now()}`,
+    // Gantt entry
+    await rentalsService.createGanttEntry({
       client,
       clientShort: client.substring(0, 20),
       equipmentInv,
@@ -93,13 +95,10 @@ export default function RentalNew() {
       updSigned: false,
       amount: Number(price) || 0,
       comments: [],
-    };
-    saveGanttRentals([...ganttRents, newGantt]);
+    });
 
-    // Save to classic Rentals list
-    const existing = loadRentals();
-    saveRentals([...existing, {
-      id: `r-${Date.now()}`,
+    // Classic rental
+    await rentalsService.create({
       client,
       contact: '',
       startDate,
@@ -112,23 +111,22 @@ export default function RentalNew() {
       manager: '',
       status: 'new' as const,
       comments: notes,
-    }]);
+    });
 
     // Update equipment status
     if (equipmentInv) {
       const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
-      const updated = loadEquipment().map(e => {
-        if (e.inventoryNumber !== equipmentInv) return e;
-        return {
-          ...e,
+      const eq = rawEq.find(e => e.inventoryNumber === equipmentInv);
+      if (eq) {
+        updateEquipment.mutate({ id: eq.id, data: {
           status: eqStatus,
-          currentClient: initialStatus === 'active' ? client : e.currentClient,
-          returnDate: initialStatus === 'active' ? endDate : e.returnDate,
-        };
-      });
-      saveEquipment(updated);
+          currentClient: initialStatus === 'active' ? client : eq.currentClient,
+          returnDate: initialStatus === 'active' ? endDate : eq.returnDate,
+        } });
+      }
     }
 
+    qc.invalidateQueries();
     navigate('/rentals');
   };
 

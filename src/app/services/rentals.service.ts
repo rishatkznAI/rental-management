@@ -1,41 +1,39 @@
-import {
-  loadGanttRentals,
-  saveGanttRentals,
-  loadRentals,
-  saveRentals,
-} from '../mock-data';
+import { api } from '../lib/api';
 import type { Rental } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
 export const rentalsService = {
-  getAll: async (): Promise<Rental[]> => {
-    return loadRentals();
-  },
+  getAll: (): Promise<Rental[]> =>
+    api.get<Rental[]>('/api/rentals'),
 
-  getById: async (id: string): Promise<Rental | undefined> => {
-    return loadRentals().find((r) => r.id === id);
-  },
+  getById: (id: string): Promise<Rental | undefined> =>
+    api.get<Rental>(`/api/rentals/${id}`).catch(() => undefined),
 
-  getGanttData: async (): Promise<GanttRentalData[]> => {
-    return loadGanttRentals();
-  },
+  getGanttData: (): Promise<GanttRentalData[]> =>
+    api.get<GanttRentalData[]>('/api/gantt_rentals'),
 
-  create: async (data: Omit<Rental, 'id'>): Promise<Rental> => {
-    const newItem: Rental = { ...data, id: `R-${Date.now()}` };
-    saveRentals([...loadRentals(), newItem]);
-    return newItem;
-  },
+  create: (data: Omit<Rental, 'id'>): Promise<Rental> =>
+    api.post<Rental>('/api/rentals', data),
 
-  update: async (id: string, data: Partial<Rental>): Promise<Rental> => {
-    const list = loadRentals();
-    const idx = list.findIndex((r) => r.id === id);
-    if (idx === -1) throw new Error(`Rental ${id} not found`);
-    list[idx] = { ...list[idx], ...data };
-    saveRentals(list);
-    return list[idx];
-  },
+  update: (id: string, data: Partial<Rental>): Promise<Rental> =>
+    api.patch<Rental>(`/api/rentals/${id}`, data),
 
-  delete: async (id: string): Promise<void> => {
-    saveRentals(loadRentals().filter((r) => r.id !== id));
-  },
+  delete: (id: string): Promise<void> =>
+    api.del(`/api/rentals/${id}`),
+
+  bulkReplace: (list: Rental[]): Promise<void> =>
+    api.put('/api/rentals', list),
+
+  // Gantt-specific
+  createGanttEntry: (data: Omit<GanttRentalData, 'id'>): Promise<GanttRentalData> =>
+    api.post<GanttRentalData>('/api/gantt_rentals', data),
+
+  updateGanttEntry: (id: string, data: Partial<GanttRentalData>): Promise<GanttRentalData> =>
+    api.patch<GanttRentalData>(`/api/gantt_rentals/${id}`, data),
+
+  deleteGanttEntry: (id: string): Promise<void> =>
+    api.del(`/api/gantt_rentals/${id}`),
+
+  bulkReplaceGantt: (list: GanttRentalData[]): Promise<void> =>
+    api.put('/api/gantt_rentals', list),
 };

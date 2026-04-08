@@ -1,35 +1,27 @@
-import { loadServiceTickets, saveServiceTickets } from '../mock-data';
+import { api } from '../lib/api';
 import type { ServiceTicket } from '../types';
 
 export const serviceTicketsService = {
-  getAll: async (): Promise<ServiceTicket[]> => {
-    return loadServiceTickets();
-  },
+  getAll: (): Promise<ServiceTicket[]> =>
+    api.get<ServiceTicket[]>('/api/service'),
 
-  getById: async (id: string): Promise<ServiceTicket | undefined> => {
-    return loadServiceTickets().find((t) => t.id === id);
-  },
+  getById: (id: string): Promise<ServiceTicket | undefined> =>
+    api.get<ServiceTicket>(`/api/service/${id}`).catch(() => undefined),
 
   getByEquipmentId: async (equipmentId: string): Promise<ServiceTicket[]> => {
-    return loadServiceTickets().filter((t) => t.equipmentId === equipmentId);
+    const all = await api.get<ServiceTicket[]>('/api/service');
+    return all.filter(t => t.equipmentId === equipmentId);
   },
 
-  create: async (data: Omit<ServiceTicket, 'id'>): Promise<ServiceTicket> => {
-    const newItem: ServiceTicket = { ...data, id: `S-${Date.now()}` };
-    saveServiceTickets([...loadServiceTickets(), newItem]);
-    return newItem;
-  },
+  create: (data: Omit<ServiceTicket, 'id'>): Promise<ServiceTicket> =>
+    api.post<ServiceTicket>('/api/service', data),
 
-  update: async (id: string, data: Partial<ServiceTicket>): Promise<ServiceTicket> => {
-    const list = loadServiceTickets();
-    const idx = list.findIndex((t) => t.id === id);
-    if (idx === -1) throw new Error(`ServiceTicket ${id} not found`);
-    list[idx] = { ...list[idx], ...data };
-    saveServiceTickets(list);
-    return list[idx];
-  },
+  update: (id: string, data: Partial<ServiceTicket>): Promise<ServiceTicket> =>
+    api.patch<ServiceTicket>(`/api/service/${id}`, data),
 
-  delete: async (id: string): Promise<void> => {
-    saveServiceTickets(loadServiceTickets().filter((t) => t.id !== id));
-  },
+  delete: (id: string): Promise<void> =>
+    api.del(`/api/service/${id}`),
+
+  bulkReplace: (list: ServiceTicket[]): Promise<void> =>
+    api.put('/api/service', list),
 };

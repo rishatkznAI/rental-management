@@ -6,19 +6,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Input } from '../components/ui/input';
 import { Select } from '../components/ui/select';
 import { ArrowLeft } from 'lucide-react';
-import { loadServiceTickets, saveServiceTickets } from '../mock-data';
-import { loadEquipment } from '../mock-data';
+import { useCreateServiceTicket } from '../hooks/useServiceTickets';
+import { useEquipmentList } from '../hooks/useEquipment';
 import type { ServiceTicket } from '../types';
 
 export default function ServiceNew() {
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const createTicket = useCreateServiceTicket();
+  const { data: equipmentList = [] } = useEquipmentList();
 
   useEffect(() => {
     if (!can('create', 'service')) navigate('/service', { replace: true });
   }, []);
-
-  const equipmentList = loadEquipment();
 
   const [formData, setFormData] = useState({
     equipmentId: '',
@@ -49,7 +49,6 @@ export default function ServiceNew() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const existing = loadServiceTickets();
     const eq = equipmentList.find(e => e.id === formData.equipmentId);
     const equipmentLabel = eq
       ? `${eq.manufacturer} ${eq.model} (INV: ${eq.inventoryNumber})`
@@ -58,8 +57,7 @@ export default function ServiceNew() {
       : 'Не указана';
 
     const now = new Date().toISOString();
-    const newTicket: ServiceTicket = {
-      id: `SRV-${Date.now()}`,
+    const newTicket: Omit<ServiceTicket, 'id'> = {
       equipmentId: formData.equipmentId || '',
       equipment: equipmentLabel,
       inventoryNumber: eq ? eq.inventoryNumber : formData.inventoryNumber,
@@ -86,8 +84,7 @@ export default function ServiceNew() {
       parts: [],
       createdAt: now,
     };
-    saveServiceTickets([...existing, newTicket]);
-    navigate(`/service/${newTicket.id}`);
+    createTicket.mutate(newTicket, { onSuccess: (t) => navigate(`/service/${t.id}`) });
   };
 
   return (

@@ -15,7 +15,8 @@ import {
   ArrowLeft, Save, Tag, Wrench, MapPin, TrendingUp,
   ClipboardList, Calendar, Info, Bot, MessageSquare,
 } from 'lucide-react';
-import { loadEquipment, saveEquipment, loadOwners } from '../mock-data';
+import { useCreateEquipment } from '../hooks/useEquipment';
+import { api } from '../lib/api';
 
 // ─── Вспомогательные компоненты ────────────────────────────────────────────
 
@@ -128,17 +129,30 @@ const eventTypeBadge: Record<string, string> = {
 
 // ───────────────────────────────────────────────────────────────────────────
 
+const DEFAULT_OWNERS = [
+  { id: 'own-1', name: 'ООО «Скайтех компани»' },
+  { id: 'own-2', name: 'Частный инвестор 1' },
+  { id: 'own-3', name: 'Субаренда' },
+];
+
 export default function EquipmentNew() {
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const createEquipment = useCreateEquipment();
+  const [owners, setOwners] = React.useState(DEFAULT_OWNERS);
 
   // Защита от прямого перехода без прав
   useEffect(() => {
     if (!can('create', 'equipment')) navigate('/equipment', { replace: true });
   }, []);
 
-  // Собственники из справочника (localStorage → defaults)
-  const owners = loadOwners();
+  // Загружаем собственников из API (с fallback на defaults)
+  useEffect(() => {
+    api.get<typeof DEFAULT_OWNERS>('/api/owners').then(list => {
+      if (list && list.length > 0) setOwners(list);
+    }).catch(() => {});
+  }, []);
+
   const defaultOwnerId = owners.length > 0 ? owners[0].id : '';
 
   const [form, setForm] = useState({
@@ -166,7 +180,6 @@ export default function EquipmentNew() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const existing = loadEquipment();
 
     const selectedOwner = owners.find(o => o.id === form.ownerId);
     const ownerName = selectedOwner?.name ?? '';
@@ -174,8 +187,7 @@ export default function EquipmentNew() {
       : ownerName.toLowerCase().includes('инвест') ? 'investor'
       : 'own';
 
-    saveEquipment([...existing, {
-      id: `eq-${Date.now()}`,
+    createEquipment.mutate({
       inventoryNumber:       form.inventoryNumber,
       manufacturer:          form.manufacturer,
       model:                 form.model,
@@ -194,9 +206,7 @@ export default function EquipmentNew() {
       maintenanceCHTO:       form.maintenanceCHTO || undefined,
       maintenancePTO:        form.maintenancePTO || undefined,
       notes:                 form.notes || undefined,
-      ownerName:             ownerName || undefined,
-    }]);
-    navigate('/equipment');
+    }, { onSuccess: () => navigate('/equipment') });
   };
 
   // Текущий собственник (для условных подсказок)

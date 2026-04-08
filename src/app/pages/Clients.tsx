@@ -5,23 +5,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../components/ui/badge';
 import { Search, Plus } from 'lucide-react';
 import { Link } from 'react-router';
-import { loadClients, CLIENTS_STORAGE_KEY } from '../mock-data';
 import { usePermissions } from '../lib/permissions';
+import { useClientsList } from '../hooks/useClients';
 import { formatCurrency, formatDate } from '../lib/utils';
 import type { Client } from '../types';
 
 export default function Clients() {
   const { can } = usePermissions();
-  const [clientList, setClientList] = React.useState<Client[]>(() => loadClients());
+  const { data: clientList = [] } = useClientsList();
   const [search, setSearch] = React.useState('');
-
-  React.useEffect(() => {
-    const onStorage = (e: StorageEvent) => { if (e.key === CLIENTS_STORAGE_KEY) setClientList(loadClients()); };
-    const onFocus = () => setClientList(loadClients());
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', onFocus);
-    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('focus', onFocus); };
-  }, []);
 
   const filteredClients = clientList.filter(client => {
     const matchesSearch = search === '' ||

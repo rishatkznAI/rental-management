@@ -12,8 +12,8 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { ArrowLeft, Info } from 'lucide-react';
-import { loadClients, saveClients } from '../mock-data';
-import { loadUsers } from '../lib/userStorage';
+import { useCreateClient } from '../hooks/useClients';
+import { api } from '../lib/api';
 import type { Client } from '../types';
 
 const PAYMENT_TERMS_OPTIONS = [
@@ -59,16 +59,19 @@ function FieldWrapper({
 export default function ClientNew() {
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const createClient = useCreateClient();
+  const [managers, setManagers] = React.useState<{ id: string; name: string; role: string; status: string }[]>([]);
 
   useEffect(() => {
     if (!can('create', 'clients')) navigate('/clients', { replace: true });
   }, []);
 
-  // Менеджеры из системы — только активные
-  const managers = React.useMemo(
-    () => loadUsers().filter(u => u.status === 'Активен'),
-    [],
-  );
+  // Загружаем активных менеджеров из API
+  useEffect(() => {
+    api.get<{ id: string; name: string; role: string; status: string }[]>('/api/users')
+      .then(users => setManagers(users.filter(u => u.status === 'Активен')))
+      .catch(() => {});
+  }, []);
 
   const [formData, setFormData] = useState({
     companyName:  '',
@@ -85,10 +88,8 @@ export default function ClientNew() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const existing = loadClients();
     const now = new Date().toISOString();
-    const newClient: Client = {
-      id:           `c-${Date.now()}`,
+    createClient.mutate({
       company:      formData.companyName,
       inn:          formData.inn,
       contact:      formData.contactName,
@@ -104,9 +105,7 @@ export default function ClientNew() {
       status:       'active',
       createdAt:    now,
       createdBy:    'Оператор',
-    };
-    saveClients([...existing, newClient]);
-    navigate(`/clients/${newClient.id}`);
+    }, { onSuccess: (newClient) => navigate(`/clients/${newClient.id}`) });
   };
 
   const fieldClass =

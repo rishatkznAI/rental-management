@@ -1,27 +1,19 @@
-import { loadPayments, savePayments } from '../mock-data';
+import { api } from '../lib/api';
 import type { Payment } from '../types';
 
 export const paymentsService = {
-  getAll: async (): Promise<Payment[]> => {
-    return loadPayments();
-  },
+  getAll: (): Promise<Payment[]> =>
+    api.get<Payment[]>('/api/payments'),
 
-  getById: async (id: string): Promise<Payment | undefined> => {
-    return loadPayments().find((p) => p.id === id);
-  },
+  getById: (id: string): Promise<Payment | undefined> =>
+    api.get<Payment>(`/api/payments/${id}`).catch(() => undefined),
 
-  create: async (data: Omit<Payment, 'id'>): Promise<Payment> => {
-    const newItem: Payment = { ...data, id: `P-${Date.now()}` };
-    savePayments([...loadPayments(), newItem]);
-    return newItem;
-  },
+  create: (data: Omit<Payment, 'id'>): Promise<Payment> =>
+    api.post<Payment>('/api/payments', data),
 
-  update: async (id: string, data: Partial<Payment>): Promise<Payment> => {
-    const list = loadPayments();
-    const idx = list.findIndex((p) => p.id === id);
-    if (idx === -1) throw new Error(`Payment ${id} not found`);
-    list[idx] = { ...list[idx], ...data };
-    savePayments(list);
-    return list[idx];
-  },
+  update: (id: string, data: Partial<Payment>): Promise<Payment> =>
+    api.patch<Payment>(`/api/payments/${id}`, data),
+
+  bulkReplace: (list: Payment[]): Promise<void> =>
+    api.put('/api/payments', list),
 };

@@ -132,6 +132,10 @@ export function loadUsers(): SystemUser[] {
 
 export function saveUsers(users: SystemUser[]): void {
   localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+  // Fire-and-forget sync to server (users collection)
+  import('../lib/api').then(({ api }) => {
+    api.put('/api/users', users).catch(() => {});
+  }).catch(() => {});
 }
 
 /**

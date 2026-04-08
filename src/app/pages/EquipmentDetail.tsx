@@ -74,6 +74,7 @@ const SERVICE_STATUS_LABELS: Record<string, string> = {
 
 export default function EquipmentDetail() {
   const { can } = usePermissions();
+  const canEditEquipment = can('edit', 'equipment');
   const { id } = useParams();
 
   // ── Reactive data loading from localStorage ──
@@ -178,6 +179,10 @@ export default function EquipmentDetail() {
     });
 
   const handleMainPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEditEquipment) {
+      e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file || !equipment) return;
     const base64 = await compressToBase64(file);
@@ -190,7 +195,7 @@ export default function EquipmentDetail() {
   };
 
   const handleMainPhotoDelete = () => {
-    if (!equipment) return;
+    if (!equipment || !canEditEquipment) return;
     const updated = loadEquipment().map(eq =>
       eq.id === equipment.id ? { ...eq, photo: undefined } : eq,
     );
@@ -199,6 +204,10 @@ export default function EquipmentDetail() {
   };
 
   const handleShippingPhotoFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEditEquipment) {
+      e.target.value = '';
+      return;
+    }
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
     const results = await Promise.all(files.map(f => compressToBase64(f)));
@@ -207,7 +216,7 @@ export default function EquipmentDetail() {
   };
 
   const handleShippingPhotoSave = () => {
-    if (!uploadPending.length || !equipment) return;
+    if (!canEditEquipment || !uploadPending.length || !equipment) return;
     const newEvent: ShippingPhoto = {
       id: `sp-${Date.now()}`,
       equipmentId: equipment.id,
@@ -540,28 +549,32 @@ export default function EquipmentDetail() {
               )}
               {/* Photo action overlay */}
               <div className="absolute inset-0 flex items-end justify-center rounded-lg bg-black/0 pb-3 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100">
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => mainPhotoInputRef.current?.click()}
-                    className="flex items-center gap-1.5 rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-800 shadow hover:bg-white"
-                  >
-                    <Upload className="h-3.5 w-3.5" />
-                    {equipment.photo ? 'Заменить' : 'Загрузить'}
-                  </button>
-                  {equipment.photo && (
+                {canEditEquipment && (
+                  <div className="flex gap-2">
                     <button
-                      onClick={handleMainPhotoDelete}
-                      className="flex items-center gap-1.5 rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-red-600 shadow hover:bg-white"
+                      onClick={() => mainPhotoInputRef.current?.click()}
+                      className="flex items-center gap-1.5 rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-800 shadow hover:bg-white"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Удалить
+                      <Upload className="h-3.5 w-3.5" />
+                      {equipment.photo ? 'Заменить' : 'Загрузить'}
                     </button>
-                  )}
-                </div>
+                    {equipment.photo && (
+                      <button
+                        onClick={handleMainPhotoDelete}
+                        className="flex items-center gap-1.5 rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-red-600 shadow hover:bg-white"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Удалить
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <p className="px-3 py-2 text-center text-xs text-gray-400 dark:text-gray-500">
-              {equipment.photo ? 'Наведите для изменения фото' : 'Наведите для загрузки фото'}
+              {canEditEquipment
+                ? equipment.photo ? 'Наведите для изменения фото' : 'Наведите для загрузки фото'
+                : 'Фото доступно только для просмотра'}
             </p>
           </CardContent>
         </Card>
@@ -1202,16 +1215,18 @@ export default function EquipmentDetail() {
                   <CardTitle>Фото отгрузок и приёмки</CardTitle>
                   <CardDescription>{shippingPhotos.length} событий</CardDescription>
                 </div>
-                <Button size="sm" variant="secondary" onClick={() => setShowUploadPhotoForm(v => !v)}>
-                  <Plus className="h-4 w-4" />
-                  Загрузить фото
-                </Button>
+                {canEditEquipment && (
+                  <Button size="sm" variant="secondary" onClick={() => setShowUploadPhotoForm(v => !v)}>
+                    <Plus className="h-4 w-4" />
+                    Загрузить фото
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
 
               {/* Upload form */}
-              {showUploadPhotoForm && (
+              {canEditEquipment && showUploadPhotoForm && (
                 <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-blue-900 dark:text-blue-200">Новое фотособытие</span>
@@ -1310,17 +1325,19 @@ export default function EquipmentDetail() {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-gray-500 dark:text-gray-400">Загрузил: {event.uploadedBy}</span>
-                          <button
-                            onClick={() => {
-                              const updated = allShippingPhotos.filter(p => p.id !== event.id);
-                              saveShippingPhotos(updated);
-                              setAllShippingPhotos(updated);
-                            }}
-                            className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-red-500"
-                            title="Удалить событие"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          {canEditEquipment && (
+                            <button
+                              onClick={() => {
+                                const updated = allShippingPhotos.filter(p => p.id !== event.id);
+                                saveShippingPhotos(updated);
+                                setAllShippingPhotos(updated);
+                              }}
+                              className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-red-500"
+                              title="Удалить событие"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                       {event.comment && <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">{event.comment}</p>}
@@ -1339,12 +1356,14 @@ export default function EquipmentDetail() {
               ) : (
                 !showUploadPhotoForm && (
                   <EmptyState icon={<Camera className="h-12 w-12" />} text="Фотографий пока нет">
-                    <button
-                      onClick={() => setShowUploadPhotoForm(true)}
-                      className="mt-3 text-sm text-[--color-primary] hover:underline"
-                    >
-                      Загрузить первое фото
-                    </button>
+                    {canEditEquipment && (
+                      <button
+                        onClick={() => setShowUploadPhotoForm(true)}
+                        className="mt-3 text-sm text-[--color-primary] hover:underline"
+                      >
+                        Загрузить первое фото
+                      </button>
+                    )}
                   </EmptyState>
                 )
               )}

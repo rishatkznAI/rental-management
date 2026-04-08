@@ -1,31 +1,22 @@
-import { loadClients, saveClients } from '../mock-data';
+import { api } from '../lib/api';
 import type { Client } from '../types';
 
 export const clientsService = {
-  getAll: async (): Promise<Client[]> => {
-    return loadClients();
-  },
+  getAll: (): Promise<Client[]> =>
+    api.get<Client[]>('/api/clients'),
 
-  getById: async (id: string): Promise<Client | undefined> => {
-    return loadClients().find((c) => c.id === id);
-  },
+  getById: (id: string): Promise<Client | undefined> =>
+    api.get<Client>(`/api/clients/${id}`).catch(() => undefined),
 
-  create: async (data: Omit<Client, 'id'>): Promise<Client> => {
-    const newItem: Client = { ...data, id: `C-${Date.now()}` };
-    saveClients([...loadClients(), newItem]);
-    return newItem;
-  },
+  create: (data: Omit<Client, 'id'>): Promise<Client> =>
+    api.post<Client>('/api/clients', data),
 
-  update: async (id: string, data: Partial<Client>): Promise<Client> => {
-    const list = loadClients();
-    const idx = list.findIndex((c) => c.id === id);
-    if (idx === -1) throw new Error(`Client ${id} not found`);
-    list[idx] = { ...list[idx], ...data };
-    saveClients(list);
-    return list[idx];
-  },
+  update: (id: string, data: Partial<Client>): Promise<Client> =>
+    api.patch<Client>(`/api/clients/${id}`, data),
 
-  delete: async (id: string): Promise<void> => {
-    saveClients(loadClients().filter((c) => c.id !== id));
-  },
+  delete: (id: string): Promise<void> =>
+    api.del(`/api/clients/${id}`),
+
+  bulkReplace: (list: Client[]): Promise<void> =>
+    api.put('/api/clients', list),
 };

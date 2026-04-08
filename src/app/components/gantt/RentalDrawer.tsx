@@ -16,6 +16,9 @@ interface RentalDrawerProps {
   equipment: Equipment | undefined;
   allRentals: GanttRentalData[];
   payments: Payment[];
+  canEditRentals: boolean;
+  canDeleteRentals: boolean;
+  canCreatePayments: boolean;
   onClose: () => void;
   onReturn: (rental: GanttRentalData) => void;
   onStatusChange: (rental: GanttRentalData) => void;
@@ -54,6 +57,7 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
 
 export function RentalDrawer({
   rental, equipment, allRentals, payments,
+  canEditRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
   onAddPayment, onExtend, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
@@ -91,6 +95,7 @@ export function RentalDrawer({
 
   // Handle add payment submit
   const handlePaySubmit = () => {
+    if (!canCreatePayments) return;
     const amt = parseFloat(payAmount);
     if (!payAmount || isNaN(amt) || amt <= 0) {
       setPayError('Введите корректную сумму');
@@ -110,6 +115,7 @@ export function RentalDrawer({
 
   // Handle extend submit
   const handleExtendSubmit = () => {
+    if (!canEditRentals) return;
     if (!extendDate) {
       setExtendError('Укажите новую дату возврата');
       return;
@@ -134,6 +140,7 @@ export function RentalDrawer({
   };
 
   const handleExtendConfirm = () => {
+    if (!canEditRentals) return;
     onExtend(rental, extendDate);
     setShowExtend(false);
     setExtendDate('');
@@ -142,11 +149,13 @@ export function RentalDrawer({
 
   // Handle early return submit
   const handleEarlyReturnSubmit = () => {
+    if (!canEditRentals) return;
     if (!earlyReturnDate) return;
     setEarlyReturnConfirm(true);
   };
 
   const handleEarlyReturnConfirm = () => {
+    if (!canEditRentals) return;
     onEarlyReturn(rental, earlyReturnDate);
     setShowEarlyReturn(false);
     setEarlyReturnConfirm(false);
@@ -216,7 +225,7 @@ export function RentalDrawer({
                 <CreditCard className="h-4 w-4" />
                 <span>Оплата</span>
               </div>
-              {(rental.status === 'active' || rental.status === 'created') && (
+              {canCreatePayments && (rental.status === 'active' || rental.status === 'created') && (
                 <button
                   onClick={() => setShowAddPayment(v => !v)}
                   className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
@@ -264,7 +273,7 @@ export function RentalDrawer({
             </div>
 
             {/* Add payment form */}
-            {showAddPayment && (
+            {canCreatePayments && showAddPayment && (
               <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
                 <div className="mb-2 text-xs font-medium text-blue-700 dark:text-blue-400">Внести оплату</div>
                 <div className="grid grid-cols-2 gap-2">
@@ -328,7 +337,7 @@ export function RentalDrawer({
           </section>
 
           {/* Extend Rental — only for active/created */}
-          {(rental.status === 'active' || rental.status === 'created') && (
+          {canEditRentals && (rental.status === 'active' || rental.status === 'created') && (
             <section>
               <button
                 onClick={() => setShowExtend(v => !v)}
@@ -378,7 +387,7 @@ export function RentalDrawer({
           )}
 
           {/* Early Return — only for active */}
-          {rental.status === 'active' && (
+          {canEditRentals && rental.status === 'active' && (
             <section>
               <button
                 onClick={() => setShowEarlyReturn(v => !v)}
@@ -464,7 +473,7 @@ export function RentalDrawer({
               </div>
 
               {/* UPD action buttons */}
-              {!updEditMode && !updUnsignConfirm && (
+              {canEditRentals && !updEditMode && !updUnsignConfirm && (
                 <div className="mt-2 flex gap-2">
                   {!rental.updSigned ? (
                     <button
@@ -487,7 +496,7 @@ export function RentalDrawer({
               )}
 
               {/* Sign UPD form */}
-              {updEditMode && (
+              {canEditRentals && updEditMode && (
                 <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-2.5 dark:border-green-800 dark:bg-green-900/20">
                   <p className="mb-2 text-xs font-medium text-green-700 dark:text-green-400">Дата подписания</p>
                   <div className="flex items-center gap-2">
@@ -517,7 +526,7 @@ export function RentalDrawer({
               )}
 
               {/* Unsign confirm */}
-              {updUnsignConfirm && (
+              {canEditRentals && updUnsignConfirm && (
                 <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-800 dark:bg-amber-900/20">
                   <p className="mb-2 text-xs text-amber-700 dark:text-amber-400">Снять отметку о подписании УПД?</p>
                   <div className="flex gap-2">
@@ -586,19 +595,19 @@ export function RentalDrawer({
 
         {/* Footer Actions */}
         <div className="flex flex-wrap gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-          {rental.status === 'created' && (
+          {canEditRentals && rental.status === 'created' && (
             <Button size="sm" onClick={() => onStatusChange(rental)}>
               <ArrowRight className="h-3.5 w-3.5" />
               Активировать аренду
             </Button>
           )}
-          {rental.status === 'active' && (
+          {canEditRentals && rental.status === 'active' && (
             <Button size="sm" onClick={() => onReturn(rental)}>
               <RotateCcw className="h-3.5 w-3.5" />
               Возврат техники
             </Button>
           )}
-          {rental.status === 'returned' && (
+          {canEditRentals && rental.status === 'returned' && (
             <Button size="sm" onClick={() => onStatusChange(rental)}>
               <CircleCheck className="h-3.5 w-3.5" />
               Закрыть аренду
@@ -609,7 +618,7 @@ export function RentalDrawer({
             Создать простой
           </Button>
 
-          {rental.status === 'created' && (
+          {canDeleteRentals && rental.status === 'created' && (
             <div className="ml-auto flex items-center gap-2">
               {confirmDelete ? (
                 <>

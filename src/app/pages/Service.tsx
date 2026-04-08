@@ -12,25 +12,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { getServiceStatusBadge, getServicePriorityBadge } from '../components/ui/badge';
 import { Search, Plus } from 'lucide-react';
 import { Link } from 'react-router';
-import { loadServiceTickets, SERVICE_STORAGE_KEY } from '../mock-data';
 import { usePermissions } from '../lib/permissions';
+import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
 import type { ServiceTicket } from '../types';
 
 export default function Service() {
   const { can } = usePermissions();
-  const [ticketList, setTicketList] = React.useState<ServiceTicket[]>(() => loadServiceTickets());
+  const { data: ticketList = [] } = useServiceTicketsList();
   const [search, setSearch] = React.useState('');
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
-
-  React.useEffect(() => {
-    const onStorage = (e: StorageEvent) => { if (e.key === SERVICE_STORAGE_KEY) setTicketList(loadServiceTickets()); };
-    const onFocus = () => setTicketList(loadServiceTickets());
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', onFocus);
-    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('focus', onFocus); };
-  }, []);
 
   const filteredTickets = ticketList.filter(ticket => {
     const matchesSearch = search === '' ||

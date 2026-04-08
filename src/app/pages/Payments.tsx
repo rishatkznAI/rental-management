@@ -5,8 +5,10 @@ import { Select } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getPaymentStatusBadge } from '../components/ui/badge';
 import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
-import { loadPayments, savePayments, loadGanttRentals, PAYMENTS_STORAGE_KEY } from '../mock-data';
 import { usePermissions } from '../lib/permissions';
+import { usePaymentsList, useCreatePayment } from '../hooks/usePayments';
+import { useGanttData } from '../hooks/useRentals';
+import type { GanttRentalData } from '../mock-data';
 import { formatDate, formatCurrency } from '../lib/utils';
 import type { Payment, PaymentStatus } from '../types';
 
@@ -25,10 +27,10 @@ interface AddPaymentModalProps {
   onClose: () => void;
   onSave: (p: Payment) => void;
   existing: Payment[];
+  rentals: GanttRentalData[];
 }
 
-function AddPaymentModal({ onClose, onSave, existing }: AddPaymentModalProps) {
-  const rentals = loadGanttRentals();
+function AddPaymentModal({ onClose, onSave, existing, rentals }: AddPaymentModalProps) {
   const [form, setForm] = useState({
     rentalId: '',
     client: '',
@@ -213,18 +215,12 @@ function AddPaymentModal({ onClose, onSave, existing }: AddPaymentModalProps) {
 
 export default function Payments() {
   const { can } = usePermissions();
-  const [paymentList, setPaymentList] = React.useState<Payment[]>(() => loadPayments());
+  const { data: paymentList = [] } = usePaymentsList();
+  const { data: ganttRentals = [] } = useGanttData();
+  const createPayment = useCreatePayment();
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
-
-  React.useEffect(() => {
-    const reload = () => setPaymentList(loadPayments());
-    const onStorage = (e: StorageEvent) => { if (e.key === PAYMENTS_STORAGE_KEY) reload(); };
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', reload);
-    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('focus', reload); };
-  }, []);
 
   const filteredPayments = useMemo(() => paymentList.filter(p => {
     const q = search.toLowerCase();
@@ -238,10 +234,12 @@ export default function Payments() {
   }), [paymentList, search, statusFilter]);
 
   const handleAddPayment = (p: Payment) => {
-    const updated = [...paymentList, p];
-    savePayments(updated);
-    setPaymentList(updated);
-    setShowAddModal(false);
+    // id is already pre-generated in the modal; pass it through
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id: _id, ...data } = p;
+    createPayment.mutate(data as Omit<Payment, 'id'>, {
+      onSuccess: () => setShowAddModal(false),
+    });
   };
 
   // KPI sums
@@ -257,6 +255,7 @@ export default function Payments() {
           onClose={() => setShowAddModal(false)}
           onSave={handleAddPayment}
           existing={paymentList}
+          rentals={ganttRentals as GanttRentalData[]}
         />
       )}
 

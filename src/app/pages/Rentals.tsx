@@ -159,6 +159,9 @@ function computeEffectiveStatus(
 // ========== Main Component ==========
 export default function Rentals() {
   const { can } = usePermissions();
+  const canEditRentals = can('edit', 'rentals');
+  const canDeleteRentals = can('delete', 'rentals');
+  const canCreatePayments = can('create', 'payments');
   const today = useMemo(() => startOfDay(new Date()), []);
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>(() => loadGanttRentals());
   const [equipmentList, setEquipmentList] = useState(() => loadEquipment());
@@ -372,6 +375,7 @@ export default function Rentals() {
   };
 
   const handleOpenReturn = (rental?: GanttRentalData) => {
+    if (!canEditRentals) return;
     setReturnRental(rental || null);
     setShowReturnModal(true);
   };
@@ -390,6 +394,7 @@ export default function Rentals() {
 
   // Add payment: creates a Payment record, updates ganttRental.paymentStatus
   const handleAddPayment = useCallback((rentalId: string, amount: number, paidDate: string, comment: string) => {
+    if (!canCreatePayments) return;
     const rental = ganttRentals.find(r => r.id === rentalId);
     if (!rental) return;
 
@@ -427,10 +432,11 @@ export default function Rentals() {
     if (selectedRental?.id === rentalId) {
       setSelectedRental(updatedRentals.find(r => r.id === rentalId) || null);
     }
-  }, [ganttRentals, payments, selectedRental]);
+  }, [canCreatePayments, ganttRentals, payments, selectedRental]);
 
   // Extend rental: update endDate, update equipment returnDate
   const handleExtend = useCallback((rental: GanttRentalData, newEndDate: string) => {
+    if (!canEditRentals) return;
     const updatedRentals = ganttRentals.map(r =>
       r.id === rental.id ? { ...r, endDate: newEndDate } : r
     );
@@ -450,10 +456,11 @@ export default function Rentals() {
     if (selectedRental?.id === rental.id) {
       setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
     }
-  }, [ganttRentals, equipmentList, selectedRental]);
+  }, [canEditRentals, ganttRentals, equipmentList, selectedRental]);
 
   // Update UPD signed status + optional date
   const handleUpdChange = useCallback((rental: GanttRentalData, updSigned: boolean, updDate?: string) => {
+    if (!canEditRentals) return;
     const updatedRentals = ganttRentals.map(r =>
       r.id === rental.id
         ? { ...r, updSigned, updDate: updSigned ? (updDate || r.updDate) : undefined }
@@ -464,10 +471,11 @@ export default function Rentals() {
     if (selectedRental?.id === rental.id) {
       setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
     }
-  }, [ganttRentals, selectedRental]);
+  }, [canEditRentals, ganttRentals, selectedRental]);
 
   // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
   const handleEarlyReturn = useCallback((rental: GanttRentalData, actualReturnDate: string) => {
+    if (!canEditRentals) return;
     const updatedRentals = ganttRentals.map(r =>
       r.id === rental.id
         ? { ...r, endDate: actualReturnDate, status: 'returned' as const }
@@ -493,7 +501,7 @@ export default function Rentals() {
     }
 
     setSelectedRental(null);
-  }, [ganttRentals, equipmentList]);
+  }, [canEditRentals, ganttRentals, equipmentList]);
 
   // ===== Today line position =====
   const todayOffset = useMemo(() => {
@@ -772,16 +780,21 @@ export default function Rentals() {
           equipment={equipmentList.find(e => e.inventoryNumber === selectedRental.equipmentInv)}
           allRentals={ganttRentals}
           payments={payments}
+          canEditRentals={canEditRentals}
+          canDeleteRentals={canDeleteRentals}
+          canCreatePayments={canCreatePayments}
           onClose={() => setSelectedRental(null)}
           onAddPayment={handleAddPayment}
           onExtend={handleExtend}
           onEarlyReturn={handleEarlyReturn}
           onUpdChange={handleUpdChange}
           onReturn={(r) => {
+            if (!canEditRentals) return;
             setSelectedRental(null);
             handleOpenReturn(r);
           }}
           onStatusChange={(rental) => {
+            if (!canEditRentals) return;
             // created → active, returned → closed
             let nextStatus: GanttRentalData['status'] | null = null;
             if (rental.status === 'created') nextStatus = 'active';
@@ -825,6 +838,7 @@ export default function Rentals() {
             setSelectedRental(null);
           }}
           onDelete={(rental) => {
+            if (!canDeleteRentals) return;
             const updated = ganttRentals.filter(r => r.id !== rental.id);
             setGanttRentals(updated);
             saveGanttRentals(updated);
@@ -848,12 +862,13 @@ export default function Rentals() {
       )}
 
       {/* ===== Modals ===== */}
-      <ReturnModal
-        open={showReturnModal}
-        rental={returnRental}
-        ganttRentals={ganttRentals}
-        onClose={() => { setShowReturnModal(false); setReturnRental(null); }}
-        onConfirm={(data) => {
+        <ReturnModal
+          open={showReturnModal}
+          rental={returnRental}
+          ganttRentals={ganttRentals}
+          onClose={() => { setShowReturnModal(false); setReturnRental(null); }}
+          onConfirm={(data) => {
+          if (!canEditRentals) return;
           // Обновляем статус аренды на 'returned'
           const updated = ganttRentals.map(r =>
             r.id === data.rentalId ? { ...r, status: 'returned' as const } : r,

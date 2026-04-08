@@ -11,11 +11,9 @@ import {
   AlertTriangle, Plus, Save, X,
 } from 'lucide-react';
 import { formatDate, formatCurrency } from '../lib/utils';
-import {
-  loadClients, saveClients,
-  loadRentals,
-  loadDocuments,
-} from '../mock-data';
+import { useClientById, useUpdateClient } from '../hooks/useClients';
+import { useRentalsList } from '../hooks/useRentals';
+import { useDocumentsList } from '../hooks/useDocuments';
 import type { Client, ClientStatus } from '../types';
 import { usePermissions } from '../lib/permissions';
 
@@ -86,29 +84,31 @@ export default function ClientDetail() {
   const { can } = usePermissions();
   const canEdit = can('edit', 'clients');
 
-  // Load from localStorage (NOT from static mock array)
-  const [client, setClient] = useState<Client | null>(() => {
-    const all = loadClients();
-    return all.find(c => c.id === id) ?? null;
-  });
+  const { data: fetchedClient } = useClientById(id ?? '');
+  const updateClient = useUpdateClient();
+
+  // Local optimistic state
+  const [client, setClient] = useState<Client | null>(null);
+  React.useEffect(() => {
+    if (fetchedClient) setClient(fetchedClient as Client);
+  }, [fetchedClient]);
 
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Client>>({});
 
-  // Related data (also from localStorage)
-  const allRentals = loadRentals();
+  // Related data via react-query
+  const { data: allRentals = [] } = useRentalsList();
   const clientRentals = allRentals.filter(r => client && r.client === client.company);
   const activeRentals = clientRentals.filter(r => r.status === 'active');
 
-  const allDocs = loadDocuments();
+  const { data: allDocs = [] } = useDocumentsList();
   const clientDocs = allDocs.filter(d => client && d.client === client.company);
 
-  // Persist changes
+  // Persist changes — optimistic + server PATCH
   const persist = useCallback((updated: Client) => {
     setClient(updated);
-    const all = loadClients();
-    saveClients(all.map(c => (c.id === updated.id ? updated : c)));
-  }, []);
+    updateClient.mutate({ id: updated.id, data: updated });
+  }, [updateClient]);
 
   const startEdit = () => {
     if (!client || !canEdit) return;

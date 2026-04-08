@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -10,24 +10,15 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router';
 import { formatCurrency, formatDate } from '../lib/utils';
-import {
-  loadEquipment,
-  saveEquipment,
-  loadRentals,
-  loadServiceTickets,
-  loadClients,
-  loadPayments,
-  loadDocuments,
-  loadGanttRentals,
-  saveGanttRentals,
-  EQUIPMENT_STORAGE_KEY,
-  RENTALS_STORAGE_KEY,
-  SERVICE_STORAGE_KEY,
-  CLIENTS_STORAGE_KEY,
-  PAYMENTS_STORAGE_KEY,
-  DOCUMENTS_STORAGE_KEY,
-  GANTT_RENTALS_STORAGE_KEY,
-} from '../mock-data';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEquipmentList } from '../hooks/useEquipment';
+import { useRentalsList, useGanttData } from '../hooks/useRentals';
+import { rentalsService } from '../services/rentals.service';
+import { equipmentService } from '../services/equipment.service';
+import { useServiceTicketsList } from '../hooks/useServiceTickets';
+import { useClientsList } from '../hooks/useClients';
+import { usePaymentsList } from '../hooks/usePayments';
+import { useDocumentsList } from '../hooks/useDocuments';
 import { KPIDetailModal } from '../components/modals/KPIDetailModal';
 import { ServiceRequestModal } from '../components/modals/ServiceRequestModal';
 import { NewClientModal } from '../components/modals/NewClientModal';
@@ -57,37 +48,25 @@ function daysAgo(n: number): Date {
   return startOfDay(d);
 }
 
-// ─── live data hook ────────────────────────────────────────────────────────────
-
-interface DashData {
-  equipment: Equipment[];
-  rentals: Rental[];
-  tickets: ServiceTicket[];
-  clients: Client[];
-  payments: Payment[];
-  documents: Document[];
-  loadedAt: number;
-}
-
-function loadAll(): DashData {
-  return {
-    equipment: loadEquipment(),
-    rentals: loadRentals(),
-    tickets: loadServiceTickets(),
-    clients: loadClients(),
-    payments: loadPayments(),
-    documents: loadDocuments(),
-    loadedAt: Date.now(),
-  };
-}
-
 // ─── main component ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { user } = useAuth();
   const { can } = usePermissions();
+  const qc = useQueryClient();
 
-  const [data, setData] = useState<DashData>(loadAll);
+  // All data via react-query (auto-refetches on window focus by default)
+  const { data: equipment = [] }  = useEquipmentList();
+  const { data: rentals = [] }    = useRentalsList();
+  const { data: tickets = [] }    = useServiceTicketsList();
+  const { data: clients = [] }    = useClientsList();
+  const { data: payments = [] }   = usePaymentsList();
+  const { data: documents = [] }  = useDocumentsList();
+  const { data: ganttRentals = [] } = useGanttData();
+
+  // For modal props that expect Equipment[]
+  const equipmentList = equipment as Equipment[];
+
   const [selectedKPI, setSelectedKPI] = useState<
     'utilization' | 'activeRentals' | 'overdueReturns' | 'inService' |
     'weekRevenue' | 'totalDebt' | 'monthDebt' | null
@@ -97,44 +76,12 @@ export default function Dashboard() {
   const [showClientModal, setShowClientModal] = useState(false);
   const [showRentalModal, setShowRentalModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>(() => loadGanttRentals());
-  const [equipmentList, setEquipmentList] = useState<Equipment[]>(() => loadEquipment());
 
   const refresh = useCallback(() => {
     setRefreshing(true);
-    setData(loadAll());
-    setTimeout(() => setRefreshing(false), 400);
-  }, []);
-
-  // Auto-refresh on focus and when localStorage changes
-  useEffect(() => {
-    const onFocus = () => {
-      setData(loadAll());
-      setGanttRentals(loadGanttRentals());
-      setEquipmentList(loadEquipment());
-    };
-    const watchKeys = [
-      EQUIPMENT_STORAGE_KEY, RENTALS_STORAGE_KEY,
-      SERVICE_STORAGE_KEY, CLIENTS_STORAGE_KEY, PAYMENTS_STORAGE_KEY,
-      DOCUMENTS_STORAGE_KEY, GANTT_RENTALS_STORAGE_KEY,
-    ];
-    const onStorage = (e: StorageEvent) => {
-      if (e.key && watchKeys.includes(e.key)) {
-        setData(loadAll());
-        setGanttRentals(loadGanttRentals());
-        setEquipmentList(loadEquipment());
-      }
-    };
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('storage', onStorage);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('storage', onStorage);
-    };
-  }, []);
-
-  // ── derived KPIs ─────────────────────────────────────────────────────────────
-  const { equipment, rentals, tickets, clients, payments, documents } = data;
+    qc.invalidateQueries();
+    setTimeout(() => setRefreshing(false), 600);
+  }, [qc]);
 
   const today = startOfDay(new Date());
   const weekAgo = daysAgo(7);
@@ -527,7 +474,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Дашборд</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Обновлено: {new Date(data.loadedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+            Обновлено: {new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1202,26 +1149,22 @@ export default function Dashboard() {
             comments: [],
           };
 
-          const updatedRentals = [...ganttRentals, newRental];
-          setGanttRentals(updatedRentals);
-          saveGanttRentals(updatedRentals);
+          // Persist via API then invalidate queries to refresh all panels
+          rentalsService.createGanttEntry(newRental).then(() => {
+            if (formData.equipmentInv) {
+              const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
+              const eq = equipmentList.find(e => e.inventoryNumber === formData.equipmentInv);
+              if (eq) {
+                equipmentService.update(eq.id, {
+                  status: eqStatus,
+                  currentClient: initialStatus === 'active' ? newRental.client : eq.currentClient,
+                  returnDate: initialStatus === 'active' ? newRental.endDate : eq.returnDate,
+                });
+              }
+            }
+            qc.invalidateQueries();
+          }).catch(console.error);
 
-          if (formData.equipmentInv) {
-            const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
-            const updatedEq = equipmentList.map(e => {
-              if (e.inventoryNumber !== formData.equipmentInv) return e;
-              return {
-                ...e,
-                status: eqStatus,
-                currentClient: initialStatus === 'active' ? newRental.client : e.currentClient,
-                returnDate: initialStatus === 'active' ? newRental.endDate : e.returnDate,
-              };
-            });
-            setEquipmentList(updatedEq);
-            saveEquipment(updatedEq);
-          }
-
-          setData(loadAll());
           setShowRentalModal(false);
         }}
       />

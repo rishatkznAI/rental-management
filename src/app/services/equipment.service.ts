@@ -1,53 +1,40 @@
-import {
-  loadEquipment,
-  saveEquipment,
-  loadShippingPhotos,
-  saveShippingPhotos,
-} from '../mock-data';
+import { api } from '../lib/api';
 import type { Equipment, RepairRecord, ShippingPhoto } from '../types';
 
-// ---------------------------------------------------------------------------
-// EquipmentService — абстракция над localStorage.
-// Интерфейс прежний; тела методов теперь используют те же load/save что и UI,
-// чтобы не было рассинхронизации между service-слоем и страницами.
-// ---------------------------------------------------------------------------
-
 export const equipmentService = {
-  getAll: async (): Promise<Equipment[]> => {
-    return loadEquipment();
-  },
+  getAll: (): Promise<Equipment[]> =>
+    api.get<Equipment[]>('/api/equipment'),
 
-  getById: async (id: string): Promise<Equipment | undefined> => {
-    return loadEquipment().find((e) => e.id === id);
-  },
+  getById: (id: string): Promise<Equipment | undefined> =>
+    api.get<Equipment>(`/api/equipment/${id}`).catch(() => undefined),
 
-  // RepairRecords не имеют отдельного localStorage-хранилища в текущей архитектуре
-  getRepairRecords: async (_equipmentId: string): Promise<RepairRecord[]> => {
-    return [];
-  },
+  // RepairRecords не реализованы в текущей архитектуре
+  getRepairRecords: async (_equipmentId: string): Promise<RepairRecord[]> => [],
 
-  getShippingPhotos: async (equipmentId: string): Promise<ShippingPhoto[]> => {
-    return loadShippingPhotos().filter((p) => p.equipmentId === equipmentId);
-  },
+  getShippingPhotos: (equipmentId: string): Promise<ShippingPhoto[]> =>
+    api.get<ShippingPhoto[]>(`/api/shipping_photos?equipmentId=${equipmentId}`)
+      .then(photos => photos.filter(p => p.equipmentId === equipmentId))
+      .catch(() => []),
 
-  create: async (data: Omit<Equipment, 'id'>): Promise<Equipment> => {
-    const newItem: Equipment = { ...data, id: `eq-${Date.now()}` };
-    const list = loadEquipment();
-    saveEquipment([...list, newItem]);
-    return newItem;
-  },
+  create: (data: Omit<Equipment, 'id'>): Promise<Equipment> =>
+    api.post<Equipment>('/api/equipment', data),
 
-  update: async (id: string, data: Partial<Equipment>): Promise<Equipment> => {
-    const list = loadEquipment();
-    const idx = list.findIndex((e) => e.id === id);
-    if (idx === -1) throw new Error(`Equipment ${id} not found`);
-    list[idx] = { ...list[idx], ...data };
-    saveEquipment(list);
-    return list[idx];
-  },
+  update: (id: string, data: Partial<Equipment>): Promise<Equipment> =>
+    api.patch<Equipment>(`/api/equipment/${id}`, data),
 
-  delete: async (id: string): Promise<void> => {
-    const list = loadEquipment();
-    saveEquipment(list.filter((e) => e.id !== id));
-  },
+  delete: (id: string): Promise<void> =>
+    api.del(`/api/equipment/${id}`),
+
+  bulkReplace: (list: Equipment[]): Promise<void> =>
+    api.put('/api/equipment', list),
+
+  // Shipping photos
+  createShippingPhoto: (data: Omit<ShippingPhoto, 'id'>): Promise<ShippingPhoto> =>
+    api.post<ShippingPhoto>('/api/shipping_photos', data),
+
+  updateShippingPhoto: (id: string, data: Partial<ShippingPhoto>): Promise<ShippingPhoto> =>
+    api.patch<ShippingPhoto>(`/api/shipping_photos/${id}`, data),
+
+  deleteShippingPhoto: (id: string): Promise<void> =>
+    api.del(`/api/shipping_photos/${id}`),
 };

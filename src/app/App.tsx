@@ -4,21 +4,31 @@ import { router } from './routes';
 import { Toaster } from 'sonner';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
+import { useSyncData } from './hooks/useSyncData';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
-      refetchOnWindowFocus: false,
+      // react-query re-fetches on window focus by default (refetchOnWindowFocus: true)
+      // enabling this so migrated pages stay fresh across tabs
+      refetchOnWindowFocus: true,
       staleTime: 1000 * 60 * 2, // 2 мин по умолчанию
     },
   },
 });
 
+/** Runs useSyncData inside the AuthProvider so it has access to auth state. */
+function SyncEffect() {
+  useSyncData();
+  return null;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <SyncEffect />
         <ThemeProvider>
           <RouterProvider router={router} />
           <Toaster position="top-right" />

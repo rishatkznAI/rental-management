@@ -11,23 +11,15 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getDocumentStatusBadge } from '../components/ui/badge';
 import { Search, Download, Eye } from 'lucide-react';
-import { loadDocuments, DOCUMENTS_STORAGE_KEY } from '../mock-data';
+import { useDocumentsList } from '../hooks/useDocuments';
 import { formatDate, formatCurrency } from '../lib/utils';
 import type { DocumentType, Document as Doc } from '../types';
 
 export default function Documents() {
-  const [documentList, setDocumentList] = React.useState<Doc[]>(() => loadDocuments());
+  const { data: documentList = [] } = useDocumentsList();
   const [search, setSearch] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
-
-  React.useEffect(() => {
-    const onStorage = (e: StorageEvent) => { if (e.key === DOCUMENTS_STORAGE_KEY) setDocumentList(loadDocuments()); };
-    const onFocus = () => setDocumentList(loadDocuments());
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', onFocus);
-    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('focus', onFocus); };
-  }, []);
 
   const filteredDocuments = documentList.filter(doc => {
     const matchesSearch = search === '' ||

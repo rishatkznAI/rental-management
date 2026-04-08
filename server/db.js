@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
+const Database = require('better-sqlite3');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'app.sqlite');
@@ -26,7 +26,8 @@ function ensureDb() {
   if (dbInstance) return dbInstance;
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const db = new DatabaseSync(DB_PATH);
+  const db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL');
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_data (
       name TEXT PRIMARY KEY,

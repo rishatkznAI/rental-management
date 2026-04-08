@@ -2,7 +2,7 @@
  * API client — fetch wrapper for all server communication.
  *
  * Base URL resolution:
- *  - Production (GitHub Pages):  VITE_API_URL env var must be set to the cloudflared tunnel URL
+ *  - Production: VITE_API_URL env var must be set to the deployed backend URL
  *  - Development (vite dev server): empty string, vite proxy forwards /api → localhost:3000
  *
  * Auth:
@@ -12,7 +12,7 @@
 
 export const AUTH_TOKEN_KEY = 'app_auth_token';
 
-const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
+const BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
 function getToken(): string | null {
   return localStorage.getItem(AUTH_TOKEN_KEY);

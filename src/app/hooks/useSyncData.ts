@@ -54,7 +54,7 @@ export function useSyncData(): void {
       for (const [storageKey, collection] of Object.entries(COLLECTION_MAP)) {
         try {
           const data = await api.get<unknown[]>(`/api/${collection}`);
-          if (Array.isArray(data) && data.length > 0) {
+          if (Array.isArray(data)) {
             localStorage.setItem(storageKey, JSON.stringify(data));
           }
         } catch {

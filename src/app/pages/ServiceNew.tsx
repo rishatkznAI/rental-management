@@ -5,6 +5,7 @@ import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
+import { Select } from '../components/ui/select';
 import { ArrowLeft } from 'lucide-react';
 import { SERVICE_TICKET_KEYS, useCreateServiceTicket } from '../hooks/useServiceTickets';
 import { EQUIPMENT_KEYS, useEquipmentList } from '../hooks/useEquipment';

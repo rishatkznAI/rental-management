@@ -49,11 +49,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setState({ user, isAuthenticated: true, isLoading: false });
       })
-      .catch(() => {
-        // Token invalid / expired
-        clearToken();
+      .catch((err: unknown) => {
+        // Удаляем токен ТОЛЬКО если сервер явно ответил 401 (сессия истекла / невалидна).
+        // Сетевые ошибки, 502/503 и другие временные сбои (например, Railway redeploy)
+        // НЕ должны уничтожать токен — при следующем открытии страницы сессия
+        // восстановится автоматически, как только бэкенд снова поднимется.
+        const status = (err as { status?: number })?.status;
+        if (status === 401) {
+          clearToken(); // api.ts уже вызвал clearToken(), но на всякий случай повторяем
+        }
         setState({ user: null, isAuthenticated: false, isLoading: false });
       });
+  }, []);
+
+  // Слушаем событие из api.ts: любой запрос получил 401 в рантайме (не только bootstrap).
+  // Это обеспечивает немедленный редирект на /login при истечении сессии в любом месте.
+  useEffect(() => {
+    function handleUnauthorized() {
+      setState({ user: null, isAuthenticated: false, isLoading: false });
+    }
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {

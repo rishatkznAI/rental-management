@@ -758,9 +758,22 @@ app.listen(PORT, async () => {
   console.log('║  POST /bot/webhook     — MAX бот webhook             ║');
   console.log('╚══════════════════════════════════════════════════════╝');
   console.log('');
-  console.log(`[DB] SQLite: ${DB_PATH}`);
-  if (!process.env.DB_PATH) {
-    console.log('[DB] ⚠️  DB_PATH не задан. Для Railway лучше вынести SQLite на persistent volume.');
+  if (process.env.DB_PATH) {
+    console.log(`[DB] ✅  SQLite (persistent): ${DB_PATH}`);
+  } else {
+    console.log(`[DB] SQLite: ${DB_PATH}`);
+    console.log('');
+    console.log('╔══════════════════════════════════════════════════════════════════╗');
+    console.log('║  ⚠️  ВНИМАНИЕ: DB_PATH не задан!                                ║');
+    console.log('║  База данных хранится внутри контейнера.                        ║');
+    console.log('║  При каждом деплое на Railway ВСЕ данные (включая сессии)       ║');
+    console.log('║  будут УНИЧТОЖЕНЫ — пользователи будут разлогинены.             ║');
+    console.log('║                                                                  ║');
+    console.log('║  Для постоянного хранения:                                      ║');
+    console.log('║    1. Создайте Volume в Railway (Settings → Volumes)            ║');
+    console.log('║    2. Mount path: /data                                         ║');
+    console.log('║    3. Добавьте env: DB_PATH=/data/app.sqlite                    ║');
+    console.log('╚══════════════════════════════════════════════════════════════════╝');
   }
   console.log('');
 

@@ -55,8 +55,10 @@ async function request<T>(
   });
 
   if (res.status === 401) {
-    // Session expired — clear local token so AuthContext can redirect to login
+    // Session expired / invalid — clear token and notify AuthContext via event
+    // so the UI redirects to login even if this request wasn't the bootstrap check.
     clearToken();
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
     throw new ApiError('Unauthorized', 401);
   }
 

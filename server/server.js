@@ -171,6 +171,27 @@ function requireWrite(collection) {
   };
 }
 
+function sanitizeUser(user) {
+  if (!user) return user;
+  const { password, ...safeUser } = user;
+  return safeUser;
+}
+
+function publicUserView(user) {
+  const safeUser = sanitizeUser(user);
+  if (!safeUser) return safeUser;
+  return {
+    id: safeUser.id,
+    name: safeUser.name,
+    role: safeUser.role,
+    status: safeUser.status,
+  };
+}
+
+function canReadFullUsers(req) {
+  return req.user?.userRole === 'Администратор';
+}
+
 // ── Auth endpoints ────────────────────────────────────────────────────────────
 
 /**
@@ -258,6 +279,12 @@ function registerCRUD(router, collection) {
   // GET /api/:collection — список
   router.get(`/${collection}`, requireAuth, (req, res) => {
     const data = readData(collection) || [];
+    if (collection === 'users') {
+      if (canReadFullUsers(req)) {
+        return res.json(data.map(sanitizeUser));
+      }
+      return res.json(data.filter(u => u.status === 'Активен').map(publicUserView));
+    }
     res.json(data);
   });
 
@@ -266,6 +293,12 @@ function registerCRUD(router, collection) {
     const data = readData(collection) || [];
     const item = data.find(i => i.id === req.params.id);
     if (!item) return res.status(404).json({ ok: false, error: 'Not found' });
+    if (collection === 'users') {
+      if (canReadFullUsers(req) || item.id === req.user.userId) {
+        return res.json(sanitizeUser(item));
+      }
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
     res.json(item);
   });
 
@@ -275,6 +308,9 @@ function registerCRUD(router, collection) {
     const newItem = { ...req.body, id: req.body.id || generateId(prefix) };
     data.push(newItem);
     writeData(collection, data);
+    if (collection === 'users') {
+      return res.status(201).json(sanitizeUser(newItem));
+    }
     res.status(201).json(newItem);
   });
 
@@ -285,6 +321,9 @@ function registerCRUD(router, collection) {
     if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
     data[idx] = { ...data[idx], ...req.body, id: data[idx].id };
     writeData(collection, data);
+    if (collection === 'users') {
+      return res.json(sanitizeUser(data[idx]));
+    }
     res.json(data[idx]);
   });
 

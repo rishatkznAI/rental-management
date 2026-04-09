@@ -4,10 +4,10 @@ import { Input } from '../components/ui/input';
 import { Select } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getEquipmentStatusBadge } from '../components/ui/badge';
-import { Search, Filter, Download, MoreVertical, Plus } from 'lucide-react';
+import { Search, Filter, MoreVertical, Plus } from 'lucide-react';
 import { Link } from 'react-router';
 import { formatDate } from '../lib/utils';
-import type { EquipmentStatus, EquipmentType, EquipmentDrive, Equipment as EquipmentType_ } from '../types';
+import type { EquipmentType, EquipmentDrive, Equipment as EquipmentType_ } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { usePermissions } from '../lib/permissions';
@@ -93,10 +93,6 @@ export default function Equipment() {
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Управление парком подъёмных платформ</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" size="sm" className="hidden sm:flex">
-            <Download className="h-4 w-4" />
-            Экспорт
-          </Button>
           {can('create', 'equipment') && (
             <Link to="/equipment/new">
               <Button size="sm">

@@ -5,7 +5,7 @@ import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import * as Tabs from '@radix-ui/react-tabs';
-import { Plus, Trash2, Edit, Eye, EyeOff, AlertTriangle, CheckCircle2, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Plus, Trash2, Edit, Eye, EyeOff, AlertTriangle, CheckCircle2, RefreshCw, ShieldAlert, Download, Upload } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -44,6 +44,8 @@ import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
+import { usePermissions } from '../lib/permissions';
+import type { Equipment, EquipmentStatus, EquipmentType, EquipmentDrive, EquipmentOwnerType } from '../types';
 
 // ── Вспомогательные ───────────────────────────────────────────────────────────
 
@@ -60,6 +62,7 @@ const EMPTY_FORM = { name: '', email: '', role: 'Менеджер по арен�
 // ── Основной компонент ────────────────────────────────────────────────────────
 
 export default function Settings() {
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
   const [users, setUsersState] = React.useState<SystemUser[]>([]);
   const { data: usersData = [] } = useQuery<SystemUser[]>({
@@ -285,7 +288,10 @@ export default function Settings() {
 
         {/* ── Данные системы ────────────────────────────────────────────────── */}
         <Tabs.Content value="data">
-          <DataResetSection />
+          <div className="space-y-6">
+            <DataManagementSection canManageData={can('edit', 'settings')} />
+            <DataResetSection />
+          </div>
         </Tabs.Content>
       </Tabs.Root>
 
@@ -487,6 +493,299 @@ function StatusList() {
               <span className="text-sm font-medium">{s.label}</span>
             </div>
           ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function downloadCSV(content: string, filename: string) {
+  const blob = new Blob(['\ufeff', content], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function parseCSVRow(line: string) {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const next = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current);
+  return result.map(value => value.trim());
+}
+
+function csvToRows(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(parseCSVRow);
+}
+
+const TYPE_IMPORT_MAP: Record<string, EquipmentType> = {
+  scissor: 'scissor',
+  articulated: 'articulated',
+  telescopic: 'telescopic',
+  'ножничный': 'scissor',
+  'коленчатый': 'articulated',
+  'телескопический': 'telescopic',
+};
+
+const DRIVE_IMPORT_MAP: Record<string, EquipmentDrive> = {
+  diesel: 'diesel',
+  electric: 'electric',
+  'дизель': 'diesel',
+  'электро': 'electric',
+  'электрический': 'electric',
+};
+
+const STATUS_IMPORT_MAP: Record<string, EquipmentStatus> = {
+  available: 'available',
+  rented: 'rented',
+  reserved: 'reserved',
+  in_service: 'in_service',
+  inactive: 'inactive',
+  'свободен': 'available',
+  'свободна': 'available',
+  'в аренде': 'rented',
+  'бронь': 'reserved',
+  'забронирована': 'reserved',
+  'в сервисе': 'in_service',
+  'списан': 'inactive',
+  'списана': 'inactive',
+};
+
+const OWNER_IMPORT_MAP: Record<string, EquipmentOwnerType> = {
+  own: 'own',
+  investor: 'investor',
+  sublease: 'sublease',
+  'собственная': 'own',
+  'инвестор': 'investor',
+  'субаренда': 'sublease',
+};
+
+function DataManagementSection({ canManageData }: { canManageData: boolean }) {
+  const queryClient = useQueryClient();
+  const { data: equipment = [] } = useQuery({ queryKey: EQUIPMENT_KEYS.all, queryFn: equipmentService.getAll });
+  const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isImporting, setIsImporting] = React.useState(false);
+  const equipmentFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleEquipmentExport = React.useCallback(() => {
+    const escapeCSV = (value: string | number | null | undefined) =>
+      `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+    const rows = equipment.map(eq => [
+      eq.inventoryNumber,
+      eq.manufacturer,
+      eq.model,
+      eq.type,
+      eq.drive,
+      eq.serialNumber,
+      eq.year,
+      eq.hours,
+      eq.liftHeight,
+      eq.status,
+      eq.location,
+      eq.owner,
+      eq.subleasePrice ?? '',
+      eq.plannedMonthlyRevenue,
+      eq.nextMaintenance,
+      eq.maintenanceCHTO ?? '',
+      eq.maintenancePTO ?? '',
+      eq.currentClient ?? '',
+      eq.returnDate ?? '',
+      eq.notes ?? '',
+    ]);
+
+    const csv = [
+      [
+        'Инв. номер', 'Производитель', 'Модель', 'Тип', 'Привод', 'Серийный номер',
+        'Год выпуска', 'Наработка', 'Рабочая высота', 'Статус', 'Локация', 'Собственность',
+        'Стоимость субаренды', 'План. доход', 'След. ТО', 'ЧТО', 'ПТО',
+        'Текущий клиент', 'Дата возврата', 'Примечание',
+      ].map(escapeCSV).join(','),
+      ...rows.map(row => row.map(escapeCSV).join(',')),
+    ].join('\n');
+
+    downloadCSV(csv, `equipment-${new Date().toISOString().slice(0, 10)}.csv`);
+    setMessage({ type: 'success', text: `Экспортировано ${equipment.length} записей техники` });
+  }, [equipment]);
+
+  const handleEquipmentImportClick = React.useCallback(() => {
+    equipmentFileInputRef.current?.click();
+  }, []);
+
+  const handleEquipmentImport = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setMessage(null);
+    setIsImporting(true);
+
+    try {
+      const text = await file.text();
+      const rows = csvToRows(text);
+      if (rows.length < 2) throw new Error('Файл пустой или не содержит строк для импорта');
+
+      const importedItems = rows.slice(1).map((columns, index) => {
+        const [
+          inventoryNumber,
+          manufacturer,
+          model,
+          typeRaw,
+          driveRaw,
+          serialNumber,
+          yearRaw,
+          hoursRaw,
+          liftHeightRaw,
+          statusRaw,
+          location,
+          ownerRaw,
+          subleasePriceRaw,
+          plannedMonthlyRevenueRaw,
+          nextMaintenance,
+          maintenanceCHTO,
+          maintenancePTO,
+          currentClient,
+          returnDate,
+          notes,
+        ] = columns;
+
+        const type = TYPE_IMPORT_MAP[(typeRaw || '').toLowerCase()];
+        const drive = DRIVE_IMPORT_MAP[(driveRaw || '').toLowerCase()];
+        const status = STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'available';
+        const owner = OWNER_IMPORT_MAP[(ownerRaw || '').toLowerCase()] ?? 'own';
+
+        if (!inventoryNumber || !manufacturer || !model || !serialNumber || !type || !drive || !location) {
+          throw new Error(`Строка ${index + 2}: не заполнены обязательные поля или неизвестный тип/привод`);
+        }
+
+        return {
+          id: `eq-import-${Date.now()}-${index}`,
+          inventoryNumber,
+          manufacturer,
+          model,
+          type,
+          drive,
+          serialNumber,
+          year: Number(yearRaw) || new Date().getFullYear(),
+          hours: Number(hoursRaw) || 0,
+          liftHeight: Number(liftHeightRaw) || 0,
+          location,
+          status,
+          owner,
+          subleasePrice: subleasePriceRaw ? Number(subleasePriceRaw) : undefined,
+          plannedMonthlyRevenue: Number(plannedMonthlyRevenueRaw) || 0,
+          nextMaintenance: nextMaintenance || new Date().toISOString().slice(0, 10),
+          maintenanceCHTO: maintenanceCHTO || undefined,
+          maintenancePTO: maintenancePTO || undefined,
+          currentClient: currentClient || undefined,
+          returnDate: returnDate || undefined,
+          notes: notes || undefined,
+        } satisfies Equipment;
+      });
+
+      const existingByInv = new Map(equipment.map(item => [item.inventoryNumber, item]));
+      const merged = [...equipment];
+      let created = 0;
+      let updated = 0;
+
+      for (const imported of importedItems) {
+        const existing = existingByInv.get(imported.inventoryNumber);
+        if (existing) {
+          const next = { ...existing, ...imported, id: existing.id };
+          const idx = merged.findIndex(item => item.id === existing.id);
+          if (idx >= 0) merged[idx] = next;
+          updated++;
+        } else {
+          merged.push(imported);
+          created++;
+        }
+      }
+
+      await equipmentService.bulkReplace(merged);
+      await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
+      setMessage({ type: 'success', text: `Импорт завершён: добавлено ${created}, обновлено ${updated}` });
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : 'Не удалось импортировать CSV';
+      setMessage({ type: 'error', text: messageText });
+    } finally {
+      setIsImporting(false);
+    }
+  }, [equipment, queryClient]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Управление данными</CardTitle>
+        <CardDescription>Импорт и экспорт справочников и рабочих данных. Доступно только администратору.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {message && (
+          <div className={`rounded-lg border px-4 py-3 text-sm ${
+            message.type === 'success'
+              ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300'
+              : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'
+          }`}>
+            {message.text}
+          </div>
+        )}
+
+        <input
+          ref={equipmentFileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={handleEquipmentImport}
+          disabled={!canManageData || isImporting}
+        />
+
+        <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-gray-900 dark:text-white">Техника</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Экспорт и импорт карточек техники. Сейчас в системе {equipment.length} записей.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={handleEquipmentExport} disabled={!canManageData}>
+                <Download className="h-4 w-4" />
+                Экспорт
+              </Button>
+              <Button variant="secondary" size="sm" onClick={handleEquipmentImportClick} disabled={!canManageData || isImporting}>
+                <Upload className="h-4 w-4" />
+                {isImporting ? 'Импорт...' : 'Импорт'}
+              </Button>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>

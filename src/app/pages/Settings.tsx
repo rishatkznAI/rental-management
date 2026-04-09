@@ -45,7 +45,17 @@ import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { usePermissions } from '../lib/permissions';
-import type { Equipment, EquipmentStatus, EquipmentType, EquipmentDrive, EquipmentOwnerType } from '../types';
+import type {
+  Equipment,
+  EquipmentStatus,
+  EquipmentType,
+  EquipmentDrive,
+  EquipmentOwnerType,
+  Client,
+  ClientStatus,
+  ServiceTicket,
+  ServiceStatus,
+} from '../types';
 
 // ── Вспомогательные ───────────────────────────────────────────────────────────
 
@@ -589,12 +599,33 @@ const OWNER_IMPORT_MAP: Record<string, EquipmentOwnerType> = {
   'субаренда': 'sublease',
 };
 
+const CLIENT_STATUS_IMPORT_MAP: Record<string, ClientStatus> = {
+  active: 'active',
+  inactive: 'inactive',
+  blocked: 'blocked',
+  'активен': 'active',
+  'неактивен': 'inactive',
+  'заблокирован': 'blocked',
+};
+
+const SERVICE_STATUS_IMPORT_MAP: Record<string, ServiceStatus> = {
+  new: 'new',
+  in_progress: 'in_progress',
+  waiting_parts: 'waiting_parts',
+  ready: 'ready',
+  closed: 'closed',
+};
+
 function DataManagementSection({ canManageData }: { canManageData: boolean }) {
   const queryClient = useQueryClient();
   const { data: equipment = [] } = useQuery({ queryKey: EQUIPMENT_KEYS.all, queryFn: equipmentService.getAll });
+  const { data: clients = [] } = useQuery({ queryKey: ['clients'], queryFn: clientsService.getAll });
+  const { data: serviceTickets = [] } = useQuery({ queryKey: SERVICE_TICKET_KEYS.all, queryFn: serviceTicketsService.getAll });
   const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
   const equipmentFileInputRef = React.useRef<HTMLInputElement>(null);
+  const clientsFileInputRef = React.useRef<HTMLInputElement>(null);
+  const serviceFileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleEquipmentExport = React.useCallback(() => {
     const escapeCSV = (value: string | number | null | undefined) =>
@@ -639,6 +670,14 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
 
   const handleEquipmentImportClick = React.useCallback(() => {
     equipmentFileInputRef.current?.click();
+  }, []);
+
+  const handleClientsImportClick = React.useCallback(() => {
+    clientsFileInputRef.current?.click();
+  }, []);
+
+  const handleServiceImportClick = React.useCallback(() => {
+    serviceFileInputRef.current?.click();
   }, []);
 
   const handleEquipmentImport = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -741,6 +780,268 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
     }
   }, [equipment, queryClient]);
 
+  const handleClientsExport = React.useCallback(() => {
+    const escapeCSV = (value: string | number | null | undefined) =>
+      `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+    const rows = clients.map(client => [
+      client.company,
+      client.inn,
+      client.contact,
+      client.phone,
+      client.email,
+      client.address ?? '',
+      client.paymentTerms,
+      client.creditLimit,
+      client.debt,
+      client.totalRentals,
+      client.manager ?? '',
+      client.status ?? 'active',
+      client.notes ?? '',
+      client.createdAt ?? '',
+      client.createdBy ?? '',
+    ]);
+
+    const csv = [
+      ['Компания', 'ИНН', 'Контакт', 'Телефон', 'Email', 'Адрес', 'Условия оплаты', 'Кредитный лимит', 'Долг', 'Кол-во аренд', 'Менеджер', 'Статус', 'Примечание', 'Создан', 'Создал']
+        .map(escapeCSV).join(','),
+      ...rows.map(row => row.map(escapeCSV).join(',')),
+    ].join('\n');
+
+    downloadCSV(csv, `clients-${new Date().toISOString().slice(0, 10)}.csv`);
+    setMessage({ type: 'success', text: `Экспортировано ${clients.length} клиентов` });
+  }, [clients]);
+
+  const handleClientsImport = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setMessage(null);
+    setIsImporting(true);
+
+    try {
+      const text = await file.text();
+      const rows = csvToRows(text);
+      if (rows.length < 2) throw new Error('Файл пустой или не содержит строк для импорта');
+
+      const importedItems = rows.slice(1).map((columns, index) => {
+        const [
+          company,
+          inn,
+          contact,
+          phone,
+          email,
+          address,
+          paymentTerms,
+          creditLimitRaw,
+          debtRaw,
+          totalRentalsRaw,
+          manager,
+          statusRaw,
+          notes,
+          createdAt,
+          createdBy,
+        ] = columns;
+
+        if (!company || !inn || !contact || !phone || !email || !paymentTerms) {
+          throw new Error(`Строка ${index + 2}: не заполнены обязательные поля клиента`);
+        }
+
+        return {
+          id: `client-import-${Date.now()}-${index}`,
+          company,
+          inn,
+          contact,
+          phone,
+          email,
+          address: address || undefined,
+          paymentTerms,
+          creditLimit: Number(creditLimitRaw) || 0,
+          debt: Number(debtRaw) || 0,
+          totalRentals: Number(totalRentalsRaw) || 0,
+          manager: manager || undefined,
+          status: CLIENT_STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'active',
+          notes: notes || undefined,
+          createdAt: createdAt || undefined,
+          createdBy: createdBy || undefined,
+        } satisfies Client;
+      });
+
+      const existingByInn = new Map(clients.map(item => [item.inn, item]));
+      const merged = [...clients];
+      let created = 0;
+      let updated = 0;
+
+      for (const imported of importedItems) {
+        const existing = existingByInn.get(imported.inn);
+        if (existing) {
+          const next = { ...existing, ...imported, id: existing.id };
+          const idx = merged.findIndex(item => item.id === existing.id);
+          if (idx >= 0) merged[idx] = next;
+          updated++;
+        } else {
+          merged.push(imported);
+          created++;
+        }
+      }
+
+      await clientsService.bulkReplace(merged);
+      await queryClient.invalidateQueries({ queryKey: ['clients'] });
+      setMessage({ type: 'success', text: `Импорт клиентов завершён: добавлено ${created}, обновлено ${updated}` });
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : 'Не удалось импортировать клиентов';
+      setMessage({ type: 'error', text: messageText });
+    } finally {
+      setIsImporting(false);
+    }
+  }, [clients, queryClient]);
+
+  const handleServiceExport = React.useCallback(() => {
+    const escapeCSV = (value: string | number | null | undefined) =>
+      `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+    const rows = serviceTickets.map(ticket => [
+      ticket.equipmentId,
+      ticket.equipment,
+      ticket.inventoryNumber ?? '',
+      ticket.serialNumber ?? '',
+      ticket.location ?? '',
+      ticket.reason,
+      ticket.description,
+      ticket.priority,
+      ticket.sla,
+      ticket.assignedTo ?? '',
+      ticket.createdBy ?? '',
+      ticket.source ?? '',
+      ticket.status,
+      ticket.plannedDate ?? '',
+      ticket.closedAt ?? '',
+      ticket.result ?? '',
+      JSON.stringify(ticket.workLog ?? []),
+      JSON.stringify(ticket.parts ?? []),
+      ticket.createdAt,
+      JSON.stringify(ticket.photos ?? []),
+    ]);
+
+    const csv = [
+      ['ID техники', 'Техника', 'Инв. номер', 'Серийный номер', 'Локация', 'Причина', 'Описание', 'Приоритет', 'SLA', 'Назначен', 'Создал', 'Источник', 'Статус', 'Плановая дата', 'Дата закрытия', 'Результат', 'Журнал работ JSON', 'Запчасти JSON', 'Создано', 'Фото JSON']
+        .map(escapeCSV).join(','),
+      ...rows.map(row => row.map(escapeCSV).join(',')),
+    ].join('\n');
+
+    downloadCSV(csv, `service-${new Date().toISOString().slice(0, 10)}.csv`);
+    setMessage({ type: 'success', text: `Экспортировано ${serviceTickets.length} сервисных заявок` });
+  }, [serviceTickets]);
+
+  const handleServiceImport = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setMessage(null);
+    setIsImporting(true);
+
+    try {
+      const text = await file.text();
+      const rows = csvToRows(text);
+      if (rows.length < 2) throw new Error('Файл пустой или не содержит строк для импорта');
+
+      const importedItems = rows.slice(1).map((columns, index) => {
+        const [
+          equipmentId,
+          equipmentName,
+          inventoryNumber,
+          serialNumber,
+          location,
+          reason,
+          description,
+          priority,
+          sla,
+          assignedTo,
+          createdBy,
+          source,
+          statusRaw,
+          plannedDate,
+          closedAt,
+          result,
+          workLogRaw,
+          partsRaw,
+          createdAt,
+          photosRaw,
+        ] = columns;
+
+        if (!equipmentId || !equipmentName || !reason || !description || !priority || !sla) {
+          throw new Error(`Строка ${index + 2}: не заполнены обязательные поля сервисной заявки`);
+        }
+
+        const parseJsonArray = <T,>(raw: string, fallback: T[]): T[] => {
+          if (!raw) return fallback;
+          try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed as T[] : fallback;
+          } catch {
+            return fallback;
+          }
+        };
+
+        return {
+          id: `service-import-${Date.now()}-${index}`,
+          equipmentId,
+          equipment: equipmentName,
+          inventoryNumber: inventoryNumber || undefined,
+          serialNumber: serialNumber || undefined,
+          location: location || undefined,
+          reason,
+          description,
+          priority: priority as ServiceTicket['priority'],
+          sla,
+          assignedTo: assignedTo || undefined,
+          createdBy: createdBy || undefined,
+          source: (source || undefined) as ServiceTicket['source'],
+          status: SERVICE_STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'new',
+          plannedDate: plannedDate || undefined,
+          closedAt: closedAt || undefined,
+          result: result || undefined,
+          workLog: parseJsonArray(workLogRaw, []),
+          parts: parseJsonArray(partsRaw, []),
+          createdAt: createdAt || new Date().toISOString(),
+          photos: parseJsonArray(photosRaw, []),
+        } satisfies ServiceTicket;
+      });
+
+      const existingByCompositeKey = new Map(
+        serviceTickets.map(item => [`${item.equipmentId}::${item.reason}::${item.createdAt}`, item]),
+      );
+      const merged = [...serviceTickets];
+      let created = 0;
+      let updated = 0;
+
+      for (const imported of importedItems) {
+        const key = `${imported.equipmentId}::${imported.reason}::${imported.createdAt}`;
+        const existing = existingByCompositeKey.get(key);
+        if (existing) {
+          const next = { ...existing, ...imported, id: existing.id };
+          const idx = merged.findIndex(item => item.id === existing.id);
+          if (idx >= 0) merged[idx] = next;
+          updated++;
+        } else {
+          merged.push(imported);
+          created++;
+        }
+      }
+
+      await serviceTicketsService.bulkReplace(merged);
+      await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all });
+      setMessage({ type: 'success', text: `Импорт сервиса завершён: добавлено ${created}, обновлено ${updated}` });
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : 'Не удалось импортировать сервисные заявки';
+      setMessage({ type: 'error', text: messageText });
+    } finally {
+      setIsImporting(false);
+    }
+  }, [queryClient, serviceTickets]);
+
   return (
     <Card>
       <CardHeader>
@@ -766,6 +1067,22 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           onChange={handleEquipmentImport}
           disabled={!canManageData || isImporting}
         />
+        <input
+          ref={clientsFileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={handleClientsImport}
+          disabled={!canManageData || isImporting}
+        />
+        <input
+          ref={serviceFileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={handleServiceImport}
+          disabled={!canManageData || isImporting}
+        />
 
         <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -781,6 +1098,48 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
                 Экспорт
               </Button>
               <Button variant="secondary" size="sm" onClick={handleEquipmentImportClick} disabled={!canManageData || isImporting}>
+                <Upload className="h-4 w-4" />
+                {isImporting ? 'Импорт...' : 'Импорт'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-gray-900 dark:text-white">Клиенты</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Экспорт и импорт клиентской базы. Сейчас в системе {clients.length} записей.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={handleClientsExport} disabled={!canManageData}>
+                <Download className="h-4 w-4" />
+                Экспорт
+              </Button>
+              <Button variant="secondary" size="sm" onClick={handleClientsImportClick} disabled={!canManageData || isImporting}>
+                <Upload className="h-4 w-4" />
+                {isImporting ? 'Импорт...' : 'Импорт'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-gray-900 dark:text-white">Сервис</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Экспорт и импорт сервисных заявок. Сейчас в системе {serviceTickets.length} записей.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={handleServiceExport} disabled={!canManageData}>
+                <Download className="h-4 w-4" />
+                Экспорт
+              </Button>
+              <Button variant="secondary" size="sm" onClick={handleServiceImportClick} disabled={!canManageData || isImporting}>
                 <Upload className="h-4 w-4" />
                 {isImporting ? 'Импорт...' : 'Импорт'}
               </Button>

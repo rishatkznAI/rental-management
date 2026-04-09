@@ -274,6 +274,7 @@ export default function EquipmentDetail() {
   // ── Modal state ──
   const [showRepairModal, setShowRepairModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // ── Not found screen ──
   if (!equipment) {
@@ -575,14 +576,21 @@ export default function EquipmentDetail() {
               className="hidden"
               onChange={handleMainPhotoUpload}
             />
-            <div className="group relative">
-              {equipment.photo ? (
-                <img src={equipment.photo} alt={equipment.model} className="h-64 w-full rounded-lg object-cover" />
-              ) : (
-                <div className="flex h-64 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
-                  <ImageIcon className="h-16 w-16 text-gray-400" />
-                </div>
-              )}
+	            <div className="group relative">
+	              {equipment.photo ? (
+	                <div className="flex h-64 items-center justify-center overflow-hidden rounded-lg bg-gray-100 p-2 dark:bg-gray-800">
+	                  <img
+	                    src={equipment.photo}
+	                    alt={equipment.model}
+	                    className="h-full w-full cursor-zoom-in rounded-md object-contain"
+	                    onClick={() => setPreviewImage(equipment.photo ?? null)}
+	                  />
+	                </div>
+	              ) : (
+	                <div className="flex h-64 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
+	                  <ImageIcon className="h-16 w-16 text-gray-400" />
+	                </div>
+	              )}
               {/* Photo action overlay */}
               <div className="absolute inset-0 flex items-end justify-center rounded-lg bg-black/0 pb-3 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100">
                 {canEditEquipment && (
@@ -1377,13 +1385,13 @@ export default function EquipmentDetail() {
                       </div>
                       {event.comment && <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">{event.comment}</p>}
                       <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
-                        {event.photos.map((photo, idx) => (
-                          <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
-                            className="h-32 w-48 shrink-0 rounded-lg border border-gray-200 dark:border-gray-700 object-cover cursor-pointer hover:opacity-90"
-                            onClick={() => window.open(photo, '_blank')}
-                          />
-                        ))}
-                      </div>
+	                        {event.photos.map((photo, idx) => (
+	                          <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
+	                            className="h-32 w-48 shrink-0 rounded-lg border border-gray-200 dark:border-gray-700 object-cover cursor-zoom-in hover:opacity-90"
+	                            onClick={() => setPreviewImage(photo)}
+	                          />
+	                        ))}
+	                      </div>
                       <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">{event.photos.length} фото · нажмите для просмотра</p>
                     </div>
                   ))}
@@ -1433,6 +1441,30 @@ export default function EquipmentDetail() {
           setShowEditModal(false);
         }}
       />
+      <Dialog.Root open={!!previewImage} onOpenChange={(open) => { if (!open) setPreviewImage(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[min(96vw,1200px)] -translate-x-1/2 -translate-y-1/2 items-center justify-center outline-none">
+            {previewImage && (
+              <div className="relative w-full">
+                <button
+                  type="button"
+                  onClick={() => setPreviewImage(null)}
+                  className="absolute right-3 top-3 z-10 rounded-full bg-black/60 p-2 text-white transition hover:bg-black/80"
+                  aria-label="Закрыть просмотр"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+                <img
+                  src={previewImage}
+                  alt="Просмотр фото"
+                  className="max-h-[92vh] w-full rounded-xl bg-black object-contain"
+                />
+              </div>
+            )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
 }

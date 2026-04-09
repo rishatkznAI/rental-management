@@ -209,6 +209,11 @@ export default function EquipmentNew() {
     }, { onSuccess: () => navigate('/equipment') });
   };
 
+  const createError =
+    createEquipment.error instanceof Error
+      ? createEquipment.error.message
+      : '';
+
   // Текущий собственник (для условных подсказок)
   const selectedOwnerName = (owners.find(o => o.id === form.ownerId)?.name ?? '').toLowerCase();
   const isInvestor  = selectedOwnerName.includes('инвест');
@@ -626,13 +631,18 @@ export default function EquipmentNew() {
         </Card>
 
         {/* Кнопки */}
+        {createError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+            {createError}
+          </div>
+        )}
         <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-6 dark:border-gray-700">
           <Button variant="secondary" type="button" onClick={() => navigate('/equipment')}>
             Отмена
           </Button>
-          <Button type="submit">
+          <Button type="submit" disabled={createEquipment.isPending}>
             <Save className="h-4 w-4" />
-            Сохранить технику
+            {createEquipment.isPending ? 'Сохранение...' : 'Сохранить технику'}
           </Button>
         </div>
       </form>

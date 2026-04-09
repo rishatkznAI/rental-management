@@ -18,27 +18,32 @@ import {
 import type { SystemUser } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
-import type { Equipment, EquipmentType, EquipmentStatus, Payment } from '../types';
+import type { Equipment, EquipmentType, EquipmentStatus, Payment, ServiceTicket, ServiceStatus } from '../types';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
+import { serviceTicketsService } from '../services/service-tickets.service';
 import { usersService } from '../services/users.service';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
+import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import {
-  addDays, differenceInDays, format, startOfDay,
-  isSameDay, isWeekend, max as dateMax, min as dateMin
+  addDays, addMonths, addYears, differenceInDays, endOfMonth, endOfQuarter,
+  endOfYear, format, isSameDay, isWeekend, max as dateMax, min as dateMin,
+  startOfDay, startOfMonth, startOfQuarter, startOfWeek, startOfYear
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
 // ========== Constants & Types ==========
-type Scale = 'day' | 'week' | 'month';
+type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
 
-const SCALE_CONFIG: Record<Scale, { dayWidth: number; totalDays: number; label: string }> = {
-  day: { dayWidth: 80, totalDays: 14, label: 'День' },
-  week: { dayWidth: 40, totalDays: 28, label: 'Неделя' },
-  month: { dayWidth: 14, totalDays: 90, label: 'Месяц' },
+const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
+  week: { dayWidth: 120, label: 'Неделя' },
+  month: { dayWidth: 40, label: 'Месяц' },
+  quarter: { dayWidth: 16, label: 'Квартал' },
+  year: { dayWidth: 6, label: 'Год' },
+  custom: { dayWidth: 28, label: 'Период' },
 };
 
 const LEFT_PANEL_WIDTH = 280;
@@ -88,12 +93,35 @@ const RENTAL_STATUS_FILTERS = [
 ];
 
 // ========== Helpers ==========
-function getVisibleRange(baseDate: Date, scale: Scale) {
-  const cfg = SCALE_CONFIG[scale];
-  const offset = Math.floor(cfg.totalDays / 3);
-  const viewStart = startOfDay(addDays(baseDate, -offset));
-  const viewEnd = startOfDay(addDays(viewStart, cfg.totalDays));
-  return { viewStart, viewEnd, totalDays: cfg.totalDays };
+function getVisibleRange(baseDate: Date, scale: Scale, customRange?: { start: Date; end: Date }) {
+  if (scale === 'custom' && customRange) {
+    const viewStart = startOfDay(customRange.start);
+    const normalizedEnd = startOfDay(customRange.end);
+    const viewEnd = addDays(normalizedEnd, 1);
+    return { viewStart, viewEnd, totalDays: Math.max(differenceInDays(viewEnd, viewStart), 1) };
+  }
+
+  if (scale === 'week') {
+    const viewStart = startOfWeek(baseDate, { weekStartsOn: 1 });
+    const viewEnd = addDays(viewStart, 7);
+    return { viewStart, viewEnd, totalDays: 7 };
+  }
+
+  if (scale === 'month') {
+    const viewStart = startOfMonth(baseDate);
+    const viewEnd = addDays(endOfMonth(baseDate), 1);
+    return { viewStart, viewEnd, totalDays: differenceInDays(viewEnd, viewStart) };
+  }
+
+  if (scale === 'quarter') {
+    const viewStart = startOfQuarter(baseDate);
+    const viewEnd = addDays(endOfQuarter(baseDate), 1);
+    return { viewStart, viewEnd, totalDays: differenceInDays(viewEnd, viewStart) };
+  }
+
+  const viewStart = startOfYear(baseDate);
+  const viewEnd = addDays(endOfYear(baseDate), 1);
+  return { viewStart, viewEnd, totalDays: differenceInDays(viewEnd, viewStart) };
 }
 
 function barPosition(
@@ -164,6 +192,18 @@ function computeEffectiveStatus(
   return 'available';
 }
 
+const OPEN_SERVICE_STATUSES: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'ready'];
+
+function hasOpenServiceTicketForEquipment(serviceTickets: ServiceTicket[], equipment: Equipment) {
+  return serviceTickets.some(ticket =>
+    OPEN_SERVICE_STATUSES.includes(ticket.status)
+    && (
+      ticket.equipmentId === equipment.id
+      || (!!ticket.inventoryNumber && ticket.inventoryNumber === equipment.inventoryNumber)
+    ),
+  );
+}
+
 // ========== Main Component ==========
 export default function Rentals() {
   const { can } = usePermissions();
@@ -187,6 +227,10 @@ export default function Rentals() {
   const { data: paymentData = [] } = useQuery({
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
+  });
+  const { data: serviceTickets = [] } = useQuery<ServiceTicket[]>({
+    queryKey: SERVICE_TICKET_KEYS.all,
+    queryFn: serviceTicketsService.getAll,
   });
   const { data: usersData = [] } = useQuery<SystemUser[]>({
     queryKey: ['users'],
@@ -290,17 +334,24 @@ export default function Rentals() {
       );
       if (!stillActive && e.status !== 'inactive' && e.status !== 'in_service') {
         eqChanged = true;
-        return { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined };
+        return {
+          ...e,
+          status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
+          currentClient: undefined,
+          returnDate: undefined,
+        };
       }
       return e;
     });
     if (eqChanged) {
       void persistEquipment(updatedEq);
     }
-  }, [today, ganttRentals, equipmentList, persistEquipment, persistGanttRentals]);
+  }, [today, ganttRentals, equipmentList, persistEquipment, persistGanttRentals, serviceTickets]);
 
   const [scale, setScale] = useState<Scale>('week');
   const [baseDate, setBaseDate] = useState(today);
+  const [customRangeStart, setCustomRangeStart] = useState(format(today, 'yyyy-MM-dd'));
+  const [customRangeEnd, setCustomRangeEnd] = useState(format(addDays(today, 29), 'yyyy-MM-dd'));
   const [selectedRental, setSelectedRental] = useState<GanttRentalData | null>(null);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showDowntimeModal, setShowDowntimeModal] = useState(false);
@@ -323,9 +374,18 @@ export default function Rentals() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // ===== Computed =====
+  const customRange = useMemo(() => {
+    const parsedStart = startOfDay(new Date(customRangeStart));
+    const parsedEnd = startOfDay(new Date(customRangeEnd));
+    if (Number.isNaN(parsedStart.getTime()) || Number.isNaN(parsedEnd.getTime())) return null;
+    const start = parsedStart <= parsedEnd ? parsedStart : parsedEnd;
+    const end = parsedStart <= parsedEnd ? parsedEnd : parsedStart;
+    return { start, end };
+  }, [customRangeStart, customRangeEnd]);
+
   const { viewStart, viewEnd, totalDays } = useMemo(
-    () => getVisibleRange(baseDate, scale),
-    [baseDate, scale]
+    () => getVisibleRange(baseDate, scale, customRange ?? undefined),
+    [baseDate, scale, customRange]
   );
   const dayWidth = SCALE_CONFIG[scale].dayWidth;
   const timelineWidth = totalDays * dayWidth;
@@ -353,6 +413,24 @@ export default function Rentals() {
     });
     return groups;
   }, [days]);
+
+  const servicePeriods = useMemo<ServicePeriod[]>(() => {
+    return serviceTickets
+      .filter(ticket => OPEN_SERVICE_STATUSES.includes(ticket.status))
+      .map(ticket => ({
+        id: ticket.id,
+        equipmentInv:
+          ticket.inventoryNumber
+          || equipmentList.find(item => item.id === ticket.equipmentId)?.inventoryNumber
+          || '',
+        startDate: (ticket.createdAt || new Date().toISOString()).slice(0, 10),
+        endDate: ticket.closedAt
+          ? ticket.closedAt.slice(0, 10)
+          : addDays(today, 1).toISOString().slice(0, 10),
+        description: ticket.reason || 'Ремонт',
+      }))
+      .filter(period => !!period.equipmentInv);
+  }, [equipmentList, serviceTickets, today]);
 
   // ── Filter rentals (always live, no gate) ────────────────────────────────────
   const filteredRentals = useMemo(() => {
@@ -406,12 +484,48 @@ export default function Rentals() {
   const navigateTime = useCallback((direction: 'prev' | 'next' | 'today') => {
     if (direction === 'today') {
       setBaseDate(today);
+      if (scale === 'custom') {
+        const start = format(today, 'yyyy-MM-dd');
+        const end = format(addDays(today, 29), 'yyyy-MM-dd');
+        setCustomRangeStart(start);
+        setCustomRangeEnd(end);
+      }
       return;
     }
-    const offsets: Record<Scale, number> = { day: 7, week: 14, month: 30 };
-    const offset = offsets[scale] * (direction === 'prev' ? -1 : 1);
-    setBaseDate(prev => addDays(prev, offset));
-  }, [scale, today]);
+    const step = direction === 'prev' ? -1 : 1;
+    if (scale === 'week') {
+      setBaseDate(prev => addDays(prev, step * 7));
+      return;
+    }
+    if (scale === 'month') {
+      setBaseDate(prev => addMonths(prev, step));
+      return;
+    }
+    if (scale === 'quarter') {
+      setBaseDate(prev => addMonths(prev, step * 3));
+      return;
+    }
+    if (scale === 'year') {
+      setBaseDate(prev => addYears(prev, step));
+      return;
+    }
+    const spanDays = customRange ? Math.max(differenceInDays(addDays(customRange.end, 1), customRange.start), 1) : 30;
+    const shiftedStart = addDays(customRange?.start ?? today, step * spanDays);
+    const shiftedEnd = addDays(customRange?.end ?? addDays(today, spanDays - 1), step * spanDays);
+    setCustomRangeStart(format(shiftedStart, 'yyyy-MM-dd'));
+    setCustomRangeEnd(format(shiftedEnd, 'yyyy-MM-dd'));
+    setBaseDate(shiftedStart);
+  }, [customRange, scale, today]);
+
+  const applyCustomRange = useCallback(() => {
+    if (!customRange) return;
+    setScale('custom');
+    setBaseDate(customRange.start);
+  }, [customRange]);
+
+  const rangeLabel = useMemo(() => {
+    return `${format(viewStart, 'd MMM', { locale: ru })} — ${format(addDays(viewEnd, -1), 'd MMM yyyy', { locale: ru })}`;
+  }, [viewEnd, viewStart]);
 
   const resetFilters = () => {
     setFilterModel('');
@@ -535,14 +649,19 @@ export default function Rentals() {
     if (!hasOtherActive) {
       const updatedEq = equipmentList.map(e =>
         e.inventoryNumber === rental.equipmentInv
-          ? { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
+          ? {
+              ...e,
+              status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
+              currentClient: undefined,
+              returnDate: undefined,
+            }
           : e
       );
       void persistEquipment(updatedEq);
     }
 
     setSelectedRental(null);
-  }, [canEditRentals, ganttRentals, equipmentList]);
+  }, [canEditRentals, ganttRentals, equipmentList, persistEquipment, persistGanttRentals, serviceTickets]);
 
   // ===== Today line position =====
   const todayOffset = useMemo(() => {
@@ -559,7 +678,7 @@ export default function Rentals() {
 
         {/* Scale Switcher */}
         <div className="flex rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700">
-          {(['day', 'week', 'month'] as Scale[]).map(s => (
+          {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
             <button
               key={s}
               onClick={() => setScale(s)}
@@ -567,11 +686,34 @@ export default function Rentals() {
                 scale === s
                   ? 'bg-[--color-primary] text-white'
                   : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600'
-              } ${s === 'day' ? 'rounded-l-lg' : s === 'month' ? 'rounded-r-lg' : ''}`}
+              } ${s === 'week' ? 'rounded-l-lg' : s === 'year' ? 'rounded-r-lg' : ''}`}
             >
               {SCALE_CONFIG[s].label}
             </button>
           ))}
+        </div>
+
+        <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 dark:border-gray-600 dark:bg-gray-700">
+          <input
+            type="date"
+            value={customRangeStart}
+            onChange={e => setCustomRangeStart(e.target.value)}
+            className="h-7 rounded border border-gray-200 bg-white px-2 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+          />
+          <span className="text-xs text-gray-400">—</span>
+          <input
+            type="date"
+            value={customRangeEnd}
+            onChange={e => setCustomRangeEnd(e.target.value)}
+            className="h-7 rounded border border-gray-200 bg-white px-2 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+          />
+          <button
+            onClick={applyCustomRange}
+            disabled={!customRange}
+            className="rounded-md bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-600 dark:text-gray-100 dark:hover:bg-gray-500"
+          >
+            Период
+          </button>
         </div>
 
         {/* Nav */}
@@ -589,7 +731,7 @@ export default function Rentals() {
             <ChevronRight className="h-4 w-4" />
           </button>
           <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
-            {format(viewStart, 'd MMM', { locale: ru })} — {format(addDays(viewStart, totalDays - 1), 'd MMM yyyy', { locale: ru })}
+            {rangeLabel}
           </span>
         </div>
 
@@ -736,7 +878,7 @@ export default function Rentals() {
                       }`}
                       style={{ width: dayWidth }}
                     >
-                      {scale !== 'month' ? (
+                      {scale === 'week' || (scale === 'custom' && totalDays <= 31) ? (
                         <>
                           <span className={`text-[10px] ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'}`}>
                             {format(day, 'EEEEEE', { locale: ru })}
@@ -795,7 +937,7 @@ export default function Rentals() {
                 equipment={eq}
                 rentals={filteredRentals.filter(r => r.equipmentInv === eq.inventoryNumber)}
                 downtimes={mockDowntimes.filter(d => d.equipmentInv === eq.inventoryNumber)}
-                servicePeriods={mockServicePeriods.filter(s => s.equipmentInv === eq.inventoryNumber)}
+                servicePeriods={servicePeriods.filter(s => s.equipmentInv === eq.inventoryNumber)}
                 conflictIds={conflictSets.get(eq.inventoryNumber) || new Set()}
                 viewStart={viewStart}
                 totalDays={totalDays}
@@ -866,7 +1008,12 @@ export default function Rentals() {
                 if (!hasOtherActive) {
                   const newEqList = equipmentList.map(e =>
                     e.inventoryNumber === rental.equipmentInv
-                      ? { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
+                      ? {
+                          ...e,
+                          status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
+                          currentClient: undefined,
+                          returnDate: undefined,
+                        }
                       : e,
                   );
                   void persistEquipment(newEqList);
@@ -887,7 +1034,12 @@ export default function Rentals() {
             if (!hasOtherActive) {
               const newEqList = equipmentList.map(e =>
                 e.inventoryNumber === rental.equipmentInv
-                  ? { ...e, status: 'available' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
+                  ? {
+                      ...e,
+                      status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
+                      currentClient: undefined,
+                      returnDate: undefined,
+                    }
                   : e,
               );
               void persistEquipment(newEqList);
@@ -914,13 +1066,17 @@ export default function Rentals() {
           // Обновляем статус техники, если нет других активных аренд
           const rental = ganttRentals.find(r => r.id === data.rentalId);
           if (rental) {
+            const currentEquipment = equipmentList.find(e => e.inventoryNumber === rental.equipmentInv);
             const hasOtherActive = updated.some(
               r => r.equipmentInv === rental.equipmentInv
                 && r.status !== 'returned' && r.status !== 'closed'
                 && r.id !== data.rentalId,
             );
             if (!hasOtherActive) {
-              const newStatus: EquipmentStatus = data.result === 'service' ? 'in_service' : 'available';
+              const newStatus: EquipmentStatus =
+                data.result === 'service'
+                  ? 'in_service'
+                  : (currentEquipment && hasOpenServiceTicketForEquipment(serviceTickets, currentEquipment) ? 'in_service' : 'available');
               const newEqList = equipmentList.map(e =>
                 e.inventoryNumber === rental.equipmentInv
                   ? { ...e, status: newStatus, currentClient: undefined, returnDate: undefined }
@@ -1135,16 +1291,16 @@ function EquipmentRow({
           return (
             <div
               key={sp.id}
-              className="absolute z-[5] flex items-center rounded px-1.5 text-[10px] text-orange-700 dark:text-orange-300"
+              className="absolute z-[5] flex items-center rounded px-1.5 text-[10px] text-red-700 dark:text-red-300"
               style={{
                 left: pos.left,
                 width: pos.width,
                 top: 4,
                 height: ROW_HEIGHT - 8,
-                background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(234,88,12,0.15) 4px, rgba(234,88,12,0.15) 8px)',
-                border: '1px solid rgba(234,88,12,0.4)',
+                background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(220,38,38,0.16) 4px, rgba(220,38,38,0.16) 8px)',
+                border: '1px solid rgba(220,38,38,0.45)',
               }}
-              title={`Сервис: ${sp.description}`}
+              title={`Ремонт / сервис: ${sp.description}`}
             >
               <Wrench className="mr-1 h-3 w-3 shrink-0" />
               {pos.width > 60 && <span className="truncate">{sp.description}</span>}

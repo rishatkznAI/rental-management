@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router';
 import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
@@ -12,8 +13,13 @@ import {
   Camera, Upload, Trash2, X, Plus,
 } from 'lucide-react';
 import { formatDate } from '../lib/utils';
-import { useServiceTicketById, useUpdateServiceTicket } from '../hooks/useServiceTickets';
-import type { ServiceTicket, ServiceStatus } from '../types';
+import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
+import { RENTAL_KEYS } from '../hooks/useRentals';
+import { SERVICE_TICKET_KEYS, useServiceTicketById, useUpdateServiceTicket } from '../hooks/useServiceTickets';
+import type { EquipmentStatus, ServiceTicket, ServiceStatus } from '../types';
+import { equipmentService } from '../services/equipment.service';
+import { rentalsService } from '../services/rentals.service';
+import { serviceTicketsService } from '../services/service-tickets.service';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -81,6 +87,7 @@ export default function ServiceDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const queryClient = useQueryClient();
   const canEdit = can('edit', 'service');
 
   const { data: fetchedTicket } = useServiceTicketById(id ?? '');
@@ -160,7 +167,7 @@ export default function ServiceDetail() {
 
   // ── actions ────────────────────────────────────────────────────────────────
 
-  const changeStatus = (newStatus: ServiceStatus, logText: string, author = 'Оператор') => {
+  const changeStatus = async (newStatus: ServiceStatus, logText: string, author = 'Оператор') => {
     if (!ticket || !canEdit) return;
     const now = new Date().toISOString();
     const updated: ServiceTicket = {
@@ -173,6 +180,58 @@ export default function ServiceDetail() {
       ],
     };
     persist(updated);
+
+    if (!ticket.equipmentId && !ticket.inventoryNumber) return;
+
+    try {
+      const [allTickets, allEquipment, allGanttRentals] = await Promise.all([
+        serviceTicketsService.getAll?.() ?? Promise.resolve([]),
+        equipmentService.getAll(),
+        rentalsService.getGanttData(),
+      ]);
+
+      const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'ready'];
+      const remainingOpen = allTickets.some(existing =>
+        existing.id !== ticket.id
+        && openStatuses.includes(existing.status)
+        && (
+          (ticket.equipmentId && existing.equipmentId === ticket.equipmentId)
+          || (ticket.inventoryNumber && existing.inventoryNumber === ticket.inventoryNumber)
+        ),
+      );
+
+      const hasActiveRental = allGanttRentals.some(rental =>
+        rental.equipmentInv === ticket.inventoryNumber
+        && rental.status !== 'returned'
+        && rental.status !== 'closed',
+      );
+
+      const updatedEquipment = allEquipment.map(item => {
+        const matches =
+          (ticket.equipmentId && item.id === ticket.equipmentId)
+          || (ticket.inventoryNumber && item.inventoryNumber === ticket.inventoryNumber);
+        if (!matches) return item;
+
+        let nextStatus = item.status;
+        if (openStatuses.includes(newStatus)) {
+          nextStatus = 'in_service';
+        } else if (!remainingOpen) {
+          nextStatus = hasActiveRental ? 'rented' : 'available';
+        }
+
+        return { ...item, status: nextStatus as EquipmentStatus };
+      });
+
+      await equipmentService.bulkReplace(updatedEquipment);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.detail(ticket.id) }),
+        queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+      ]);
+    } catch {
+      // Тихо оставляем optimistic update, даже если связанная синхронизация сорвалась
+    }
   };
 
   const addComment = () => {

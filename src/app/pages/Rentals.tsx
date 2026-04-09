@@ -205,6 +205,49 @@ export default function Rentals() {
     setPayments(paymentData);
   }, [paymentData]);
 
+  // Менеджеры для фильтра (динамически из базы пользователей)
+  const managersList = useMemo(() => usersData.filter(u => u.status === 'Активен'), [usersData]);
+
+  // Toast-уведомление
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  const persistGanttRentals = useCallback(async (list: GanttRentalData[]) => {
+    setGanttRentals(list);
+    localStorage.setItem(GANTT_RENTALS_STORAGE_KEY, JSON.stringify(list));
+    try {
+      await rentalsService.bulkReplaceGantt(list);
+      await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+    } catch {
+      showToast('Не удалось сохранить аренды', 'error');
+    }
+  }, [queryClient, showToast]);
+
+  const persistEquipment = useCallback(async (list: Equipment[]) => {
+    setEquipmentList(list);
+    localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(list));
+    try {
+      await equipmentService.bulkReplace(list);
+      await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
+    } catch {
+      showToast('Не удалось сохранить технику', 'error');
+    }
+  }, [queryClient, showToast]);
+
+  const persistPayments = useCallback(async (list: Payment[]) => {
+    setPayments(list);
+    localStorage.setItem(PAYMENTS_STORAGE_KEY, JSON.stringify(list));
+    try {
+      await paymentsService.bulkReplace(list);
+      await queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
+    } catch {
+      showToast('Не удалось сохранить платежи', 'error');
+    }
+  }, [queryClient, showToast]);
+
   // Очистка «призрачных» аренд при загрузке страницы:
   // - 'created' с прошедшей endDate → 'closed'  (не активированные черновики)
   // - 'active'  с прошедшей endDate → 'returned' (техника вернулась, но возврат не оформили вручную)
@@ -255,49 +298,6 @@ export default function Rentals() {
       void persistEquipment(updatedEq);
     }
   }, [today, ganttRentals, equipmentList, persistEquipment, persistGanttRentals]);
-
-  // Менеджеры для фильтра (динамически из базы пользователей)
-  const managersList = useMemo(() => usersData.filter(u => u.status === 'Активен'), [usersData]);
-
-  // Toast-уведомление
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
-  }, []);
-
-  const persistGanttRentals = useCallback(async (list: GanttRentalData[]) => {
-    setGanttRentals(list);
-    localStorage.setItem(GANTT_RENTALS_STORAGE_KEY, JSON.stringify(list));
-    try {
-      await rentalsService.bulkReplaceGantt(list);
-      await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
-    } catch {
-      showToast('Не удалось сохранить аренды', 'error');
-    }
-  }, [queryClient, showToast]);
-
-  const persistEquipment = useCallback(async (list: Equipment[]) => {
-    setEquipmentList(list);
-    localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(list));
-    try {
-      await equipmentService.bulkReplace(list);
-      await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
-    } catch {
-      showToast('Не удалось сохранить технику', 'error');
-    }
-  }, [queryClient, showToast]);
-
-  const persistPayments = useCallback(async (list: Payment[]) => {
-    setPayments(list);
-    localStorage.setItem(PAYMENTS_STORAGE_KEY, JSON.stringify(list));
-    try {
-      await paymentsService.bulkReplace(list);
-      await queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
-    } catch {
-      showToast('Не удалось сохранить платежи', 'error');
-    }
-  }, [queryClient, showToast]);
 
   const [scale, setScale] = useState<Scale>('week');
   const [baseDate, setBaseDate] = useState(today);

@@ -2,8 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 
-const DATA_DIR = path.join(__dirname, 'data');
-const DB_PATH = path.join(DATA_DIR, 'app.sqlite');
+const DEFAULT_DATA_DIR = path.join(__dirname, 'data');
+const DB_PATH = process.env.DB_PATH
+  ? path.resolve(process.env.DB_PATH)
+  : path.join(DEFAULT_DATA_DIR, 'app.sqlite');
+const DATA_DIR = path.dirname(DB_PATH);
 
 const JSON_COLLECTIONS = [
   'equipment',
@@ -33,6 +36,13 @@ function ensureDb() {
       name TEXT PRIMARY KEY,
       json TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS app_sessions (
+      token TEXT PRIMARY KEY,
+      json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
     );
   `);
   dbInstance = db;
@@ -87,9 +97,58 @@ function migrateJsonFilesToDb() {
   }
 }
 
+function saveSession(token, value, expiresAt) {
+  const db = ensureDb();
+  db.prepare(`
+    INSERT INTO app_sessions (token, json, created_at, expires_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(token) DO UPDATE SET
+      json = excluded.json,
+      created_at = excluded.created_at,
+      expires_at = excluded.expires_at
+  `).run(token, JSON.stringify(value), Date.now(), expiresAt);
+}
+
+function getSession(token) {
+  const db = ensureDb();
+  const row = db.prepare('SELECT json, expires_at FROM app_sessions WHERE token = ?').get(token);
+  if (!row) return null;
+  if (Date.now() > row.expires_at) {
+    deleteSession(token);
+    return null;
+  }
+  try {
+    return JSON.parse(row.json);
+  } catch {
+    deleteSession(token);
+    return null;
+  }
+}
+
+function deleteSession(token) {
+  const db = ensureDb();
+  db.prepare('DELETE FROM app_sessions WHERE token = ?').run(token);
+}
+
+function cleanupExpiredSessions(now = Date.now()) {
+  const db = ensureDb();
+  db.prepare('DELETE FROM app_sessions WHERE expires_at <= ?').run(now);
+}
+
+function countActiveSessions(now = Date.now()) {
+  const db = ensureDb();
+  const row = db.prepare('SELECT COUNT(*) AS count FROM app_sessions WHERE expires_at > ?').get(now);
+  return row?.count || 0;
+}
+
 module.exports = {
   DB_PATH,
+  countActiveSessions,
+  cleanupExpiredSessions,
+  deleteSession,
   getData,
+  getSession,
   setData,
   migrateJsonFilesToDb,
+  saveSession,
 };

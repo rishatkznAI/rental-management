@@ -26,7 +26,17 @@ const express = require('express');
 const cors    = require('cors');
 const fetch   = require('node-fetch');
 const crypto  = require('crypto');
-const { DB_PATH, getData, setData, migrateJsonFilesToDb } = require('./db');
+const {
+  DB_PATH,
+  countActiveSessions,
+  cleanupExpiredSessions,
+  deleteSession,
+  getData,
+  getSession: getStoredSession,
+  migrateJsonFilesToDb,
+  saveSession,
+  setData,
+} = require('./db');
 
 // ── Пароли (совместимо с frontend userStorage.ts) ─────────────────────────────
 
@@ -88,45 +98,34 @@ function saveBotUsers(u)  { writeData('bot_users', u); }
 function getSnapshot()    { return readData('snapshot') || {}; }
 function saveSnapshot(s)  { writeData('snapshot', s); }
 
-// ── Сессии (in-memory, Bearer-токен) ──────────────────────────────────────────
+// ── Сессии (SQLite-backed, Bearer-токен) ──────────────────────────────────────
 
 const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 часа
 
-/** Map<token, { userId, userName, userRole, email, createdAt }> */
-const sessions = new Map();
-
 function createSession(user) {
   const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, {
+  const session = {
     userId:    user.id,
     userName:  user.name,
     userRole:  user.role,
     email:     user.email,
     createdAt: Date.now(),
-  });
+  };
+  saveSession(token, session, session.createdAt + SESSION_TTL);
   return token;
 }
 
 function getSession(token) {
-  const session = sessions.get(token);
-  if (!session) return null;
-  if (Date.now() - session.createdAt > SESSION_TTL) {
-    sessions.delete(token);
-    return null;
-  }
-  return session;
+  return getStoredSession(token);
 }
 
 function destroySession(token) {
-  sessions.delete(token);
+  deleteSession(token);
 }
 
 // Чистим протухшие сессии каждый час
 setInterval(() => {
-  const now = Date.now();
-  for (const [token, session] of sessions.entries()) {
-    if (now - session.createdAt > SESSION_TTL) sessions.delete(token);
-  }
+  cleanupExpiredSessions();
 }, 3600_000);
 
 // ── RBAC ──────────────────────────────────────────────────────────────────────
@@ -715,7 +714,12 @@ app.get('/api/status', (req, res) => {
   res.json({
     ok: true,
     uptime:   Math.round(process.uptime()),
-    sessions: sessions.size,
+    sessions: countActiveSessions(),
+    storage: {
+      driver: 'sqlite',
+      path: DB_PATH,
+      persistent: Boolean(process.env.DB_PATH),
+    },
     data: {
       equipment: equipment.length,
       rentals:   rentals.length,
@@ -731,6 +735,7 @@ app.get('/api/status', (req, res) => {
 
 app.listen(PORT, async () => {
   migrateJsonFilesToDb();
+  cleanupExpiredSessions();
   seedDefaultUsers();
 
   console.log('');
@@ -754,6 +759,9 @@ app.listen(PORT, async () => {
   console.log('╚══════════════════════════════════════════════════════╝');
   console.log('');
   console.log(`[DB] SQLite: ${DB_PATH}`);
+  if (!process.env.DB_PATH) {
+    console.log('[DB] ⚠️  DB_PATH не задан. Для Railway лучше вынести SQLite на persistent volume.');
+  }
   console.log('');
 
   if (!BOT_TOKEN) {

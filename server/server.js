@@ -389,6 +389,40 @@ function seedDefaultUsers() {
   console.log('[INIT] ⚠️  Обязательно смените пароль в настройках!');
 }
 
+function applyAdminResetFromEnv() {
+  const resetPassword = process.env.ADMIN_RESET_PASSWORD;
+  if (!resetPassword) return;
+
+  const resetEmail = (process.env.ADMIN_RESET_EMAIL || 'admin@rental.local').trim().toLowerCase();
+  const users = readData('users') || [];
+  const existingIndex = users.findIndex(u => String(u.email || '').toLowerCase() === resetEmail);
+
+  if (existingIndex >= 0) {
+    const current = users[existingIndex];
+    users[existingIndex] = {
+      ...current,
+      role: current.role || 'Администратор',
+      status: 'Активен',
+      password: hashPassword(resetPassword),
+    };
+    writeData('users', users);
+    console.log(`[AUTH] Пароль пользователя ${resetEmail} обновлён через ADMIN_RESET_PASSWORD`);
+  } else {
+    const restoredAdmin = {
+      id:       'U-reset-admin',
+      name:     'Администратор',
+      email:    resetEmail,
+      role:     'Администратор',
+      status:   'Активен',
+      password: hashPassword(resetPassword),
+    };
+    writeData('users', [...users, restoredAdmin]);
+    console.log(`[AUTH] Администратор ${resetEmail} создан через ADMIN_RESET_PASSWORD`);
+  }
+
+  console.log('[AUTH] ⚠️  После входа удалите ADMIN_RESET_PASSWORD из env Railway');
+}
+
 // ── MAX Bot API ────────────────────────────────────────────────────────────────
 
 async function maxRequest(method, endpoint, body = null) {
@@ -737,6 +771,7 @@ app.listen(PORT, async () => {
   migrateJsonFilesToDb();
   cleanupExpiredSessions();
   seedDefaultUsers();
+  applyAdminResetFromEnv();
 
   console.log('');
   console.log('╔══════════════════════════════════════════════════════╗');

@@ -5,7 +5,6 @@ import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
-import { Select } from '../components/ui/select';
 import { ArrowLeft } from 'lucide-react';
 import { SERVICE_TICKET_KEYS, useCreateServiceTicket } from '../hooks/useServiceTickets';
 import { EQUIPMENT_KEYS, useEquipmentList } from '../hooks/useEquipment';
@@ -36,7 +35,6 @@ export default function ServiceNew() {
     description: '',
     notes: '',
     assignedTo: '',
-    plannedDate: '',
   });
 
   const selectedEquipment = equipmentList.find(e => e.id === formData.equipmentId);
@@ -78,7 +76,6 @@ export default function ServiceNew() {
       createdBy: formData.contact || 'Оператор',
       source: 'manual',
       status: 'new',
-      plannedDate: formData.plannedDate || undefined,
       workLog: [
         {
           date: now,
@@ -199,7 +196,7 @@ export default function ServiceNew() {
                   <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.serialNumber || 'Не указан'}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Локация</p>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Системная локация</p>
                   <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.location || 'Не указана'}</p>
                 </div>
               </div>
@@ -208,6 +205,21 @@ export default function ServiceNew() {
                 Сначала выберите технику из списка, после этого ниже автоматически подтянутся её данные.
               </div>
             )}
+
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Местоположение техники сейчас
+              </label>
+              <Input
+                placeholder="Например: объект клиента, склад, адрес площадки"
+                value={formData.location}
+                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                required
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Укажите, где техника находится фактически в момент поломки, если это важно для выезда сервиса.
+              </p>
+            </div>
           </CardContent>
         </Card>
 
@@ -215,21 +227,27 @@ export default function ServiceNew() {
         <Card>
           <CardHeader>
             <CardTitle>Проблема</CardTitle>
-            <CardDescription>Опишите неисправность</CardDescription>
+            <CardDescription>Укажите срочность и опишите неисправность</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Select
-              label="Приоритет"
-              placeholder="Выберите приоритет"
-              value={formData.priority}
-              onValueChange={(value) => setFormData({ ...formData, priority: value })}
-              options={[
-                { value: 'low', label: 'Низкий' },
-                { value: 'medium', label: 'Средний' },
-                { value: 'high', label: 'Высокий' },
-                { value: 'critical', label: 'Критический' },
-              ]}
-            />
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Приоритет заявки
+              </label>
+              <select
+                value={formData.priority}
+                onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-[--color-primary] focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              >
+                <option value="low">Низкий</option>
+                <option value="medium">Средний</option>
+                <option value="high">Высокий</option>
+                <option value="critical">Критический</option>
+              </select>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Укажите, насколько срочно сервису нужно отреагировать на эту проблему.
+              </p>
+            </div>
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Что не работает
@@ -293,19 +311,6 @@ export default function ServiceNew() {
               />
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Укажите механика или сотрудника сервиса, который будет заниматься заявкой.
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Планируемая дата выполнения
-              </label>
-              <Input
-                type="date"
-                value={formData.plannedDate}
-                onChange={(e) => setFormData({ ...formData, plannedDate: e.target.value })}
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Когда планируется выезд, диагностика или завершение работ.
               </p>
             </div>
           </CardContent>

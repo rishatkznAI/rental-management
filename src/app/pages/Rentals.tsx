@@ -47,8 +47,8 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
   custom: { dayWidth: 28, label: 'Период' },
 };
 
-const LEFT_PANEL_WIDTH = 280;
-const ROW_HEIGHT = 80;
+const LEFT_PANEL_WIDTH = 260;
+const ROW_HEIGHT = 56;
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
   scissor: 'Ножничный',
@@ -675,7 +675,7 @@ export default function Rentals() {
   return (
     <div className="flex h-[calc(100vh-56px-64px)] sm:h-[calc(100vh)] flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
       {/* ===== Toolbar ===== */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-5 py-3 dark:border-gray-700 dark:bg-gray-800">
+      <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800">
         <h1 className="mr-2 text-xl text-gray-900 dark:text-white">Планировщик аренды</h1>
 
         {/* Scale Switcher */}
@@ -756,7 +756,7 @@ export default function Rentals() {
       </div>
 
       {/* ===== Filters ===== */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-5 py-2 dark:border-gray-700 dark:bg-gray-800">
+      <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-1.5 dark:border-gray-700 dark:bg-gray-800">
         <div className="relative">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
           <input
@@ -1206,15 +1206,11 @@ function EquipmentRow({
             <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{equipment.inventoryNumber}</span>
             <span className="truncate text-sm text-gray-900 dark:text-white">{equipment.model}</span>
           </div>
-          <div className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
-            <span>{TYPE_LABELS[equipment.type]}</span>
-            <span>·</span>
-            <span className="truncate">{equipment.location}</span>
-          </div>
-          <div className="mt-1 flex items-center gap-1.5">
-            <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] ${eqStatus.color}`}>
+          <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span className={`inline-flex rounded px-1 py-0 text-[9px] leading-4 ${eqStatus.color}`}>
               {eqStatus.label}
             </span>
+            <span className="text-[9px] text-gray-400 dark:text-gray-500">{TYPE_LABELS[equipment.type]}</span>
           </div>
         </div>
         {/* Quick actions */}
@@ -1350,8 +1346,8 @@ function EquipmentRow({
             return s1 < e2 && s2 < e1;
           });
           const stackIndex = overlapping.length;
-          const barHeight = 34;
-          const topOffset = 4 + stackIndex * (barHeight + 3);
+          const barHeight = 22;
+          const topOffset = 3 + stackIndex * (barHeight + 2);
 
           return (
             <div

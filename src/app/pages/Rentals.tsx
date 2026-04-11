@@ -47,8 +47,8 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
   custom: { dayWidth: 28, label: 'Период' },
 };
 
-const LEFT_PANEL_WIDTH = 260;
-const ROW_HEIGHT = 56;
+const LEFT_PANEL_WIDTH = 212;
+const ROW_HEIGHT = 44;
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
   scissor: 'Ножничный',
@@ -1198,30 +1198,32 @@ function EquipmentRow({
     <div className="group flex border-b border-gray-100 dark:border-gray-800" style={{ minHeight: ROW_HEIGHT }}>
       {/* Left panel */}
       <div
-        className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200 bg-white px-3 dark:border-gray-700 dark:bg-gray-800"
+        className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200 bg-white px-2 dark:border-gray-700 dark:bg-gray-800"
         style={{ width: LEFT_PANEL_WIDTH }}
       >
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{equipment.inventoryNumber}</span>
-            <span className="truncate text-sm text-gray-900 dark:text-white">{equipment.model}</span>
+          <div className="flex items-baseline gap-1">
+            <span className="font-mono text-[10px] text-gray-500 dark:text-gray-400">{equipment.inventoryNumber}</span>
+            <span className="truncate text-[11px] font-medium text-gray-900 dark:text-white">{equipment.model}</span>
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
-            <span className={`inline-flex rounded px-1 py-0 text-[9px] leading-4 ${eqStatus.color}`}>
+          <div className="mt-0.5 flex items-center gap-1 flex-wrap">
+            <span className={`inline-flex rounded px-1 py-0 text-[8px] leading-4 ${eqStatus.color}`}>
               {eqStatus.label}
             </span>
-            <span className="text-[9px] text-gray-400 dark:text-gray-500">{TYPE_LABELS[equipment.type]}</span>
+            <span className="truncate text-[8px] uppercase tracking-[0.04em] text-gray-400 dark:text-gray-500">
+              {TYPE_LABELS[equipment.type]}
+            </span>
           </div>
         </div>
         {/* Quick actions */}
-        <div className="ml-1 flex shrink-0 flex-col gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           {canDo('create', 'rentals') && (
             <button
               onClick={onNewRental}
-              className="rounded p-1 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
+              className="rounded p-0.5 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
               title="Создать аренду"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-3 w-3" />
             </button>
           )}
           {hasActiveRental && (
@@ -1230,18 +1232,18 @@ function EquipmentRow({
                 const active = rentals.find(r => r.status === 'active');
                 if (active) onReturn(active);
               }}
-              className="rounded p-1 text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/30 dark:hover:text-green-400"
+              className="rounded p-0.5 text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/30 dark:hover:text-green-400"
               title="Возврат техники"
             >
-              <RotateCcw className="h-3.5 w-3.5" />
+              <RotateCcw className="h-3 w-3" />
             </button>
           )}
           <button
             onClick={onDowntime}
-            className="rounded p-1 text-gray-400 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/30 dark:hover:text-amber-400"
+            className="rounded p-0.5 text-gray-400 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/30 dark:hover:text-amber-400"
             title="Отметить простой"
           >
-            <PauseCircle className="h-3.5 w-3.5" />
+            <PauseCircle className="h-3 w-3" />
           </button>
         </div>
       </div>
@@ -1293,8 +1295,8 @@ function EquipmentRow({
               style={{
                 left: pos.left,
                 width: pos.width,
-                top: 4,
-                height: ROW_HEIGHT - 8,
+                top: 3,
+                height: ROW_HEIGHT - 6,
                 background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(220,38,38,0.16) 4px, rgba(220,38,38,0.16) 8px)',
                 border: '1px solid rgba(220,38,38,0.45)',
               }}
@@ -1317,8 +1319,8 @@ function EquipmentRow({
               style={{
                 left: pos.left,
                 width: pos.width,
-                top: 4,
-                height: ROW_HEIGHT - 8,
+                top: 3,
+                height: ROW_HEIGHT - 6,
                 background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(217,175,37,0.15) 4px, rgba(217,175,37,0.15) 8px)',
                 border: '1px dashed rgba(217,175,37,0.6)',
               }}
@@ -1346,7 +1348,7 @@ function EquipmentRow({
             return s1 < e2 && s2 < e1;
           });
           const stackIndex = overlapping.length;
-          const barHeight = 22;
+          const barHeight = 18;
           const topOffset = 3 + stackIndex * (barHeight + 2);
 
           return (
@@ -1364,25 +1366,25 @@ function EquipmentRow({
               }}
               title={`${rental.client} · ${rental.startDate} — ${rental.endDate} (${statusLabel})`}
             >
-              {/* Bar content — two rows for better readability */}
+              {/* Bar content */}
               <div className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden px-2 leading-tight">
                 <div className="flex items-center gap-1">
                   {isConflict && (
                     <AlertTriangle className="h-3 w-3 shrink-0 text-red-200" />
                   )}
                   {pos.width > 40 && (
-                    <span className="truncate text-[11px] font-medium text-white">
+                    <span className="truncate text-[10px] font-medium text-white">
                       {rental.clientShort || rental.client}
                     </span>
                   )}
                 </div>
-                {pos.width > 80 && (
-                  <div className="flex items-center gap-1 text-[9px] text-white/70">
+                {pos.width > 110 && (
+                  <div className="flex items-center gap-1 text-[8px] text-white/70">
                     <span>{statusLabel}</span>
-                    {pos.width > 140 && (
+                    {pos.width > 165 && (
                       <span>· {rental.startDate.slice(5)} → {rental.endDate.slice(5)}</span>
                     )}
-                    {pos.width > 200 && rental.managerInitials && (
+                    {pos.width > 220 && rental.managerInitials && (
                       <span>· {rental.managerInitials}</span>
                     )}
                   </div>

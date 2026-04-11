@@ -181,6 +181,9 @@ export default function Equipment() {
                   <span className="font-semibold text-[--color-primary] text-sm">{eq.inventoryNumber}</span>
                   {getEquipmentStatusBadge(eq.status)}
                 </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  SN: {eq.serialNumber || 'не указан'}
+                </p>
                 <p className="text-sm font-medium text-gray-900 dark:text-white mt-1 truncate">{eq.manufacturer} {eq.model}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{getEquipmentTypeLabel(eq.type)} · {getEquipmentDriveLabel(eq.drive)}</p>
               </div>
@@ -200,7 +203,7 @@ export default function Equipment() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Инв.№ / Модель</TableHead>
+              <TableHead>Инв.№ / Серийный № / Модель</TableHead>
               <TableHead>Тип</TableHead>
               <TableHead>Привод</TableHead>
               <TableHead>Статус</TableHead>
@@ -221,6 +224,9 @@ export default function Equipment() {
                   >
                     {equipment.inventoryNumber}
                   </Link>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    SN: {equipment.serialNumber || 'не указан'}
+                  </p>
                   <p className="text-sm text-gray-500 dark:text-gray-400">{equipment.model}</p>
                 </TableCell>
                 <TableCell className="text-gray-700 dark:text-gray-300">{getEquipmentTypeLabel(equipment.type)}</TableCell>

@@ -37,3 +37,48 @@ export function getDaysUntil(date: string): number {
   const diff = target.getTime() - now.getTime();
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
+
+function parseDateOnly(date: string): Date {
+  return new Date(`${date}T00:00:00`);
+}
+
+function toDateOnlyString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function getRentalDays(startDate: string, endDate: string): number {
+  if (!startDate || !endDate) return 0;
+  const start = parseDateOnly(startDate);
+  const end = parseDateOnly(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 0;
+  const diffMs = end.getTime() - start.getTime();
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+}
+
+export function calculateRentalAmount(dailyRate: number, startDate: string, endDate: string): number {
+  return Math.max(0, dailyRate) * getRentalDays(startDate, endDate);
+}
+
+export function getRentalOverlapDays(
+  startDate: string,
+  endDate: string,
+  periodStart: string,
+  periodEnd: string,
+): number {
+  if (!startDate || !endDate || !periodStart || !periodEnd) return 0;
+  const overlapStart = parseDateOnly(startDate) > parseDateOnly(periodStart)
+    ? parseDateOnly(startDate)
+    : parseDateOnly(periodStart);
+  const overlapEnd = parseDateOnly(endDate) < parseDateOnly(periodEnd)
+    ? parseDateOnly(endDate)
+    : parseDateOnly(periodEnd);
+
+  if (overlapEnd < overlapStart) return 0;
+  return getRentalDays(
+    toDateOnlyString(overlapStart),
+    toDateOnlyString(overlapEnd),
+  );
+}

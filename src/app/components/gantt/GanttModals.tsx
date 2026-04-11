@@ -13,6 +13,7 @@ import { usersService } from '../../services/users.service';
 import { EQUIPMENT_KEYS } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
 import { canEquipmentParticipateInRentals } from '../../lib/equipmentClassification';
+import { calculateRentalAmount, formatCurrency, getRentalDays } from '../../lib/utils';
 
 // ─── Локальные хелперы ──────────────────────────────────────────────────────
 
@@ -358,7 +359,7 @@ interface NewRentalModalProps {
     startDate: string;
     endDate: string;
     manager: string;
-    amount: string;
+    amount: number;
   }) => void;
 }
 
@@ -380,12 +381,17 @@ export function NewRentalModal({
   const [startDate,    setStartDate]    = useState(today);
   const [endDate,      setEndDate]      = useState(nextWeek);
   const [manager,      setManager]      = useState('');
-  const [amount,       setAmount]       = useState('');
+  const [dailyRate,    setDailyRate]    = useState('');
   const [conflictWarn, setConflictWarn] = useState(false);
 
   React.useEffect(() => {
     if (preselectedEquipment) setEquipmentInv(preselectedEquipment);
   }, [preselectedEquipment]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setDailyRate('');
+  }, [open]);
 
   const { data: clientsData = [] } = useQuery({
     queryKey: ['clients'],
@@ -472,6 +478,12 @@ export function NewRentalModal({
       return s <= new Date(r.endDate).getTime() && e >= new Date(r.startDate).getTime();
     }) ?? null;
   }, [conflictWarn, equipmentInv, startDate, endDate, existingRentals]);
+
+  const rentalDays = useMemo(() => getRentalDays(startDate, endDate), [startDate, endDate]);
+  const totalAmount = useMemo(
+    () => calculateRentalAmount(Number(dailyRate) || 0, startDate, endDate),
+    [dailyRate, startDate, endDate],
+  );
 
   if (!open) return null;
 
@@ -602,7 +614,7 @@ export function NewRentalModal({
             )}
           </div>
 
-          {/* Менеджер + Сумма */}
+          {/* Менеджер + Дневная ставка */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -616,18 +628,27 @@ export function NewRentalModal({
               </select>
             </div>
             <LabeledInput
-              label="Сумма (₽)"
+              label="Ставка в день (₽)"
               type="number"
               placeholder="0"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
+              value={dailyRate}
+              onChange={e => setDailyRate(e.target.value)}
             />
+          </div>
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900/50">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-gray-500 dark:text-gray-400">
+                {rentalDays > 0 ? `Итого за ${rentalDays} дн.` : 'Итого'}
+              </span>
+              <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(totalAmount)}</span>
+            </div>
           </div>
 
           <div className="flex gap-3 pt-2">
             <Button
               onClick={() => {
-                onConfirm({ client, equipmentInv, startDate, endDate, manager, amount });
+                onConfirm({ client, equipmentInv, startDate, endDate, manager, amount: totalAmount });
                 onClose();
               }}
               disabled={!client || !equipmentInv || !startDate || !endDate}

@@ -17,7 +17,7 @@ import {
   SHIPPING_PHOTOS_KEY,
 } from '../mock-data';
 import type { ShippingPhoto, ServiceTicket, Payment } from '../types';
-import { formatDate, formatCurrency, getDaysUntil } from '../lib/utils';
+import { formatDate, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
@@ -312,27 +312,17 @@ export default function EquipmentDetail() {
   });
 
   const daysRentedThisMonth = monthRentals.reduce((sum, r) => {
-    const start = r.startDate < monthStartStr ? monthStartStr : r.startDate;
-    const end = r.endDate > monthEndStr ? monthEndStr : r.endDate;
-    const diff = Math.max(0, Math.ceil(
-      (new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24)
-    ));
-    return sum + diff;
+    return sum + getRentalOverlapDays(r.startDate, r.endDate, monthStartStr, monthEndStr);
   }, 0);
 
   const freeDaysThisMonth = daysInCurrentMonth - Math.min(daysRentedThisMonth, daysInCurrentMonth);
   const utilizationMonth = Math.round((Math.min(daysRentedThisMonth, daysInCurrentMonth) / daysInCurrentMonth) * 100);
 
   const actualMonthRevenue = monthRentals.reduce((sum, r) => {
-    const rentalDays = Math.max(1, Math.ceil(
-      (new Date(r.endDate).getTime() - new Date(r.startDate).getTime()) / (1000 * 60 * 60 * 24)
-    ));
+    const rentalDays = getRentalDays(r.startDate, r.endDate);
+    if (rentalDays <= 0) return sum;
     const dailyRate = r.amount / rentalDays;
-    const start = r.startDate < monthStartStr ? monthStartStr : r.startDate;
-    const end = r.endDate > monthEndStr ? monthEndStr : r.endDate;
-    const daysInPeriod = Math.max(0, Math.ceil(
-      (new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24)
-    ));
+    const daysInPeriod = getRentalOverlapDays(r.startDate, r.endDate, monthStartStr, monthEndStr);
     return sum + dailyRate * daysInPeriod;
   }, 0);
 

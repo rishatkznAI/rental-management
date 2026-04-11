@@ -20,6 +20,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { GanttRentalData } from '../mock-data';
 import type { EquipmentStatus } from '../types';
 import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
+import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/utils';
 
 // Helper: check date overlap
 function isEquipmentBusy(invNumber: string, startDate: string, endDate: string, rentals: GanttRentalData[]): boolean {
@@ -61,9 +62,15 @@ export default function RentalNew() {
   const [equipmentInv, setEquipmentInv] = useState('');
   const [startDate,    setStartDate]    = useState(today);
   const [endDate,      setEndDate]      = useState(nextWeek);
-  const [price,        setPrice]        = useState('');
+  const [dailyRate,    setDailyRate]    = useState('');
   const [deposit,      setDeposit]      = useState('');
   const [notes,        setNotes]        = useState('');
+
+  const rentalDays = useMemo(() => getRentalDays(startDate, endDate), [startDate, endDate]);
+  const totalPrice = useMemo(
+    () => calculateRentalAmount(Number(dailyRate) || 0, startDate, endDate),
+    [dailyRate, startDate, endDate],
+  );
 
   const { availableEq, busyEq } = useMemo(() => {
     if (!startDate || !endDate) return { availableEq: allEq, busyEq: [] };
@@ -97,7 +104,7 @@ export default function RentalNew() {
       status: initialStatus,
       paymentStatus: 'unpaid',
       updSigned: false,
-      amount: Number(price) || 0,
+      amount: totalPrice,
       comments: [],
     });
 
@@ -108,8 +115,8 @@ export default function RentalNew() {
       startDate,
       plannedReturnDate: endDate,
       equipment: equipmentInv ? [equipmentInv] : [],
-      rate: `${price} ₽/день`,
-      price: Number(price) || 0,
+      rate: `${dailyRate} ₽/день`,
+      price: totalPrice,
       discount: 0,
       deliveryAddress: '',
       manager: '',
@@ -239,15 +246,15 @@ export default function RentalNew() {
               )}
             </div>
 
-            {/* Price + Deposit */}
+            {/* Daily Rate + Deposit */}
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Сумма (₽)</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Ставка в день (₽)</label>
                 <Input
                   type="number"
                   placeholder="0"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
+                  value={dailyRate}
+                  onChange={(e) => setDailyRate(e.target.value)}
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -258,6 +265,15 @@ export default function RentalNew() {
                   value={deposit}
                   onChange={(e) => setDeposit(e.target.value)}
                 />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900/50">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-500 dark:text-gray-400">
+                  {rentalDays > 0 ? `Итого за ${rentalDays} дн.` : 'Итого'}
+                </span>
+                <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(totalPrice)}</span>
               </div>
             </div>
 

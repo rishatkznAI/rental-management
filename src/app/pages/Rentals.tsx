@@ -446,7 +446,7 @@ export default function Rentals() {
   }, [ganttRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
 
   // ── Filter equipment (always live) ───────────────────────────────────────────
-  // Step 1: filter by model/INV text
+  // Step 1: filter by model/INV/SN text
   // Step 2 (cross-link): when rental-level filters are active, only show equipment
   //         that has at least one rental in filteredRentals — hides empty rows.
   const filteredEquipment = useMemo(() => {
@@ -455,7 +455,8 @@ export default function Rentals() {
       const q = filterModel.toLowerCase();
       eq = eq.filter(e =>
         e.model.toLowerCase().includes(q) ||
-        e.inventoryNumber.toLowerCase().includes(q)
+        e.inventoryNumber.toLowerCase().includes(q) ||
+        e.serialNumber.toLowerCase().includes(q)
       );
     }
     const hasRentalFilter = !!(filterManager || filterClient || filterUpd || filterPayment || filterStatus);
@@ -760,7 +761,7 @@ export default function Rentals() {
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="Модель / INV"
+            placeholder="Модель / INV / SN"
             value={filterModel}
             onChange={e => setFilterModel(e.target.value)}
             className="h-8 w-36 rounded-lg border border-gray-200 bg-gray-50 pl-7 pr-2 text-xs focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
@@ -1125,7 +1126,7 @@ export default function Rentals() {
             status: initialStatus,
             paymentStatus: 'unpaid',
             updSigned: false,
-            amount: Number(data.amount) || 0,
+            amount: data.amount || 0,
             comments: [],
           };
           const updated = [...ganttRentals, newRental];

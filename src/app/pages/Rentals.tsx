@@ -28,6 +28,7 @@ import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
+import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
 import {
   addDays, addMonths, addYears, differenceInDays, endOfMonth, endOfQuarter,
   endOfYear, format, isSameDay, isWeekend, max as dateMax, min as dateMin,
@@ -449,7 +450,7 @@ export default function Rentals() {
   // Step 2 (cross-link): when rental-level filters are active, only show equipment
   //         that has at least one rental in filteredRentals — hides empty rows.
   const filteredEquipment = useMemo(() => {
-    let eq = [...equipmentList];
+    let eq = equipmentList.filter(canEquipmentParticipateInRentals);
     if (filterModel) {
       const q = filterModel.toLowerCase();
       eq = eq.filter(e =>

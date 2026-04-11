@@ -4,6 +4,7 @@ export type EquipmentStatus = 'available' | 'rented' | 'reserved' | 'in_service'
 export type EquipmentType = 'scissor' | 'articulated' | 'telescopic';
 export type EquipmentDrive = 'diesel' | 'electric';
 export type EquipmentOwnerType = 'own' | 'investor' | 'sublease';
+export type EquipmentCategory = 'own' | 'sold' | 'client' | 'partner';
 export type RepairEventType = 'repair' | 'maintenance' | 'diagnostics' | 'breakdown';
 export type RepairSource = 'manual' | 'bot';
 export type ShippingEventType = 'shipping' | 'receiving';
@@ -26,6 +27,8 @@ export interface Equipment {
   location: string;
   status: EquipmentStatus;
   owner: EquipmentOwnerType;
+  category: EquipmentCategory;
+  activeInFleet: boolean;
   subleasePrice?: number;
   plannedMonthlyRevenue: number;
   nextMaintenance: string;

@@ -272,6 +272,49 @@ const ID_PREFIXES = {
   owners:         'OW',
 };
 
+function normalizeEquipmentRecord(equipment) {
+  if (!equipment) return equipment;
+  return {
+    ...equipment,
+    category: equipment.category || 'own',
+    activeInFleet: equipment.activeInFleet !== false,
+  };
+}
+
+function canEquipmentParticipateInRentals(equipment) {
+  const normalized = normalizeEquipmentRecord(equipment);
+  return normalized.activeInFleet && (normalized.category === 'own' || normalized.category === 'partner');
+}
+
+function findEquipmentForRentalPayload(payload) {
+  const inventoryNumber =
+    payload?.equipmentInv
+    || payload?.inventoryNumber
+    || (Array.isArray(payload?.equipment) ? payload.equipment[0] : null);
+
+  if (!inventoryNumber) return null;
+
+  const equipment = (readData('equipment') || []).map(normalizeEquipmentRecord);
+  return equipment.find(item => item.inventoryNumber === inventoryNumber) || null;
+}
+
+function validateRentalEquipmentPayload(payload) {
+  const equipment = findEquipmentForRentalPayload(payload);
+  if (!equipment) {
+    return { ok: false, status: 400, error: 'Техника для аренды не найдена' };
+  }
+
+  if (!canEquipmentParticipateInRentals(equipment)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Эта техника не может участвовать в аренде: проверьте категорию и признак активного парка',
+    };
+  }
+
+  return { ok: true };
+}
+
 function registerCRUD(router, collection) {
   const prefix = ID_PREFIXES[collection] || collection;
 
@@ -303,6 +346,13 @@ function registerCRUD(router, collection) {
 
   // POST /api/:collection — создать
   router.post(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+    if (collection === 'rentals' || collection === 'gantt_rentals') {
+      const validation = validateRentalEquipmentPayload(req.body);
+      if (!validation.ok) {
+        return res.status(validation.status).json({ ok: false, error: validation.error });
+      }
+    }
+
     const data = readData(collection) || [];
     const newItem = { ...req.body, id: req.body.id || generateId(prefix) };
     data.push(newItem);
@@ -318,6 +368,14 @@ function registerCRUD(router, collection) {
     const data = readData(collection) || [];
     const idx = data.findIndex(i => i.id === req.params.id);
     if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+
+    if (collection === 'rentals' || collection === 'gantt_rentals') {
+      const validation = validateRentalEquipmentPayload({ ...data[idx], ...req.body });
+      if (!validation.ok) {
+        return res.status(validation.status).json({ ok: false, error: validation.error });
+      }
+    }
+
     data[idx] = { ...data[idx], ...req.body, id: data[idx].id };
     writeData(collection, data);
     if (collection === 'users') {
@@ -343,6 +401,16 @@ function registerCRUD(router, collection) {
     if (!Array.isArray(list)) {
       return res.status(400).json({ ok: false, error: 'Expected array' });
     }
+
+    if (collection === 'rentals' || collection === 'gantt_rentals') {
+      for (const item of list) {
+        const validation = validateRentalEquipmentPayload(item);
+        if (!validation.ok) {
+          return res.status(validation.status).json({ ok: false, error: validation.error });
+        }
+      }
+    }
+
     writeData(collection, list);
     res.json({ ok: true, count: list.length });
   });

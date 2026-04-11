@@ -47,6 +47,7 @@ import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { usePermissions } from '../lib/permissions';
 import type {
   Equipment,
+  EquipmentCategory,
   EquipmentStatus,
   EquipmentType,
   EquipmentDrive,
@@ -599,6 +600,17 @@ const OWNER_IMPORT_MAP: Record<string, EquipmentOwnerType> = {
   'субаренда': 'sublease',
 };
 
+const CATEGORY_IMPORT_MAP: Record<string, EquipmentCategory> = {
+  own: 'own',
+  sold: 'sold',
+  client: 'client',
+  partner: 'partner',
+  'собственная': 'own',
+  'проданная': 'sold',
+  'клиентская': 'client',
+  'партнёрская': 'partner',
+};
+
 const CLIENT_STATUS_IMPORT_MAP: Record<string, ClientStatus> = {
   active: 'active',
   inactive: 'inactive',
@@ -635,6 +647,8 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
       eq.inventoryNumber,
       eq.manufacturer,
       eq.model,
+      eq.category,
+      eq.activeInFleet ? 'Да' : 'Нет',
       eq.type,
       eq.drive,
       eq.serialNumber,
@@ -656,7 +670,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
 
     const csv = [
       [
-        'Инв. номер', 'Производитель', 'Модель', 'Тип', 'Привод', 'Серийный номер',
+        'Инв. номер', 'Производитель', 'Модель', 'Категория', 'Активный парк', 'Тип', 'Привод', 'Серийный номер',
         'Год выпуска', 'Наработка', 'Рабочая высота', 'Статус', 'Локация', 'Собственность',
         'Стоимость субаренды', 'План. доход', 'След. ТО', 'ЧТО', 'ПТО',
         'Текущий клиент', 'Дата возврата', 'Примечание',
@@ -698,6 +712,8 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           inventoryNumber,
           manufacturer,
           model,
+          categoryRaw,
+          activeInFleetRaw,
           typeRaw,
           driveRaw,
           serialNumber,
@@ -721,6 +737,10 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
         const drive = DRIVE_IMPORT_MAP[(driveRaw || '').toLowerCase()];
         const status = STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'available';
         const owner = OWNER_IMPORT_MAP[(ownerRaw || '').toLowerCase()] ?? 'own';
+        const category = CATEGORY_IMPORT_MAP[(categoryRaw || '').toLowerCase()] ?? 'own';
+        const activeInFleet = activeInFleetRaw
+          ? ['да', 'yes', 'true', '1'].includes(activeInFleetRaw.toLowerCase())
+          : true;
 
         if (!inventoryNumber || !manufacturer || !model || !serialNumber || !type || !drive || !location) {
           throw new Error(`Строка ${index + 2}: не заполнены обязательные поля или неизвестный тип/привод`);
@@ -734,6 +754,8 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           type,
           drive,
           serialNumber,
+          category,
+          activeInFleet,
           year: Number(yearRaw) || new Date().getFullYear(),
           hours: Number(hoursRaw) || 0,
           liftHeight: Number(liftHeightRaw) || 0,

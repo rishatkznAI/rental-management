@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useCreateEquipment } from '../hooks/useEquipment';
 import { api } from '../lib/api';
+import { EQUIPMENT_CATEGORY_LABELS } from '../lib/equipmentClassification';
 
 // ─── Вспомогательные компоненты ────────────────────────────────────────────
 
@@ -168,6 +169,8 @@ export default function EquipmentNew() {
     maintenanceCHTO: '',
     maintenancePTO: '',
     ownerId: defaultOwnerId,
+    category: 'own',
+    activeInFleet: 'yes',
     subleasePrice: '',
     location: '',
     status: 'available',
@@ -200,6 +203,8 @@ export default function EquipmentNew() {
       location:              form.location,
       status:                form.status as 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive',
       owner:                 ownerType as 'own' | 'investor' | 'sublease',
+      category:              form.category as 'own' | 'sold' | 'client' | 'partner',
+      activeInFleet:         form.activeInFleet === 'yes',
       subleasePrice:         form.subleasePrice ? Number(form.subleasePrice) : undefined,
       plannedMonthlyRevenue: Number(form.plannedMonthlyRevenue) || 0,
       nextMaintenance:       new Date().toISOString().split('T')[0],
@@ -463,6 +468,34 @@ export default function EquipmentNew() {
                   { value: 'inactive',   label: 'Списана' },
                 ]}
                 hint="Текущий статус на момент добавления"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <SelectField
+                label="Категория техники"
+                value={form.category}
+                onValueChange={v => update('category', v)}
+                options={[
+                  { value: 'own', label: EQUIPMENT_CATEGORY_LABELS.own },
+                  { value: 'sold', label: EQUIPMENT_CATEGORY_LABELS.sold },
+                  { value: 'client', label: EQUIPMENT_CATEGORY_LABELS.client },
+                  { value: 'partner', label: EQUIPMENT_CATEGORY_LABELS.partner },
+                ]}
+                hint="Используется для разделения списка техники и допуска в аренду"
+                required
+              />
+
+              <SelectField
+                label="Участвует в активном парке"
+                value={form.activeInFleet}
+                onValueChange={v => update('activeInFleet', v)}
+                options={[
+                  { value: 'yes', label: 'Да' },
+                  { value: 'no', label: 'Нет' },
+                ]}
+                hint="В аренде может участвовать только техника из активного парка"
+                required
               />
             </div>
 

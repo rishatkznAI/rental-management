@@ -19,6 +19,7 @@ import { rentalsService } from '../services/rentals.service';
 import { useQueryClient } from '@tanstack/react-query';
 import type { GanttRentalData } from '../mock-data';
 import type { EquipmentStatus } from '../types';
+import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
 
 // Helper: check date overlap
 function isEquipmentBusy(invNumber: string, startDate: string, endDate: string, rentals: GanttRentalData[]): boolean {
@@ -43,7 +44,10 @@ export default function RentalNew() {
   const { data: rawEq = [] } = useEquipmentList();
   const { data: ganttRentals = [] } = useGanttData();
 
-  const allEq = useMemo(() => rawEq.filter(e => e.status !== 'inactive' && e.status !== 'in_service'), [rawEq]);
+  const allEq = useMemo(
+    () => rawEq.filter(e => canEquipmentParticipateInRentals(e) && e.status !== 'inactive' && e.status !== 'in_service'),
+    [rawEq],
+  );
   const ganttRents = useMemo(() => ganttRentals, [ganttRentals]);
 
   useEffect(() => {

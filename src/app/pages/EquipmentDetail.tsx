@@ -24,6 +24,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../components/ui/select';
 import type { Equipment, EquipmentOwnerType, RepairEventType } from '../types';
+import { EQUIPMENT_CATEGORY_LABELS } from '../lib/equipmentClassification';
 import type { GanttRentalData } from '../mock-data';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -578,11 +579,11 @@ export default function EquipmentDetail() {
             />
 	            <div className="group relative">
 	              {equipment.photo ? (
-	                <div className="flex h-64 items-center justify-center overflow-hidden rounded-lg bg-gray-100 p-2 dark:bg-gray-800">
+	                <div className="flex min-h-[18rem] items-center justify-center overflow-hidden rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
 	                  <img
 	                    src={equipment.photo}
 	                    alt={equipment.model}
-	                    className="h-full w-full cursor-zoom-in rounded-md object-contain"
+	                    className="max-h-[32rem] w-full cursor-zoom-in rounded-md object-contain"
 	                    onClick={() => setPreviewImage(equipment.photo ?? null)}
 	                  />
 	                </div>
@@ -1689,7 +1690,7 @@ function EditEquipmentModal({
     if (open) setForm(equipment);
   }, [open, equipment]);
 
-  const set = (field: keyof Equipment, value: string | number | undefined) =>
+  const set = (field: keyof Equipment, value: string | number | boolean | undefined) =>
     setForm(prev => ({ ...prev, [field]: value }));
 
   const setStr = (field: keyof Equipment) => (v: string) => set(field, v);
@@ -1894,6 +1895,30 @@ function EditEquipmentModal({
                       { value: 'own',      label: '🏢 Собственная (компания)' },
                       { value: 'investor', label: '👤 Техника инвестора' },
                       { value: 'sublease', label: '🔄 Субаренда' },
+                    ]}
+                  />
+                </FormField>
+
+                <FormField label="Категория техники" hint="Логическая группа техники в реестре">
+                  <FieldSelect
+                    value={form.category}
+                    onValueChange={setStr('category')}
+                    options={[
+                      { value: 'own', label: EQUIPMENT_CATEGORY_LABELS.own },
+                      { value: 'sold', label: EQUIPMENT_CATEGORY_LABELS.sold },
+                      { value: 'client', label: EQUIPMENT_CATEGORY_LABELS.client },
+                      { value: 'partner', label: EQUIPMENT_CATEGORY_LABELS.partner },
+                    ]}
+                  />
+                </FormField>
+
+                <FormField label="Участвует в активном парке" hint="Определяет, можно ли использовать технику в аренде">
+                  <FieldSelect
+                    value={form.activeInFleet ? 'yes' : 'no'}
+                    onValueChange={v => set('activeInFleet', v === 'yes')}
+                    options={[
+                      { value: 'yes', label: 'Да' },
+                      { value: 'no', label: 'Нет' },
                     ]}
                   />
                 </FormField>

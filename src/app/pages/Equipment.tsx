@@ -7,12 +7,13 @@ import { getEquipmentStatusBadge } from '../components/ui/badge';
 import { Search, Filter, MoreVertical, Plus } from 'lucide-react';
 import { Link } from 'react-router';
 import { formatDate } from '../lib/utils';
-import type { EquipmentType, EquipmentDrive, Equipment as EquipmentType_ } from '../types';
+import type { EquipmentType, EquipmentDrive, EquipmentOwnerType, Equipment as EquipmentType_ } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { usePermissions } from '../lib/permissions';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData } from '../hooks/useRentals';
+import { ACTIVE_FLEET_LABELS, EQUIPMENT_CATEGORY_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
 
 // Для каждой единицы техники подтягивает currentClient и returnDate из активной аренды
 // если эти поля не заполнены в самой записи техники (backward-compatibility)
@@ -43,15 +44,41 @@ export default function Equipment() {
   const { data: equipmentList = [] } = useEquipmentList();
   const { data: ganttRentals = [] } = useGanttData();
   const [search, setSearch] = React.useState('');
+  const [activeTab, setActiveTab] = React.useState<'active' | 'sold' | 'service' | 'all'>('active');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [driveFilter, setDriveFilter] = React.useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = React.useState<string>('all');
+  const [fleetFilter, setFleetFilter] = React.useState<string>('all');
+  const [ownerFilter, setOwnerFilter] = React.useState<string>('all');
+  const [locationFilter, setLocationFilter] = React.useState<string>('all');
 
   // Список техники, обогащённый данными из активных аренд (fallback для устаревших записей)
   const enrichedEquipmentList = React.useMemo(
-    () => enrichEquipment(equipmentList, ganttRentals),
+    () => normalizeEquipmentList(enrichEquipment(equipmentList, ganttRentals)),
     [equipmentList, ganttRentals],
   );
+
+  const getOwnerLabel = (owner: EquipmentOwnerType): string => {
+    const labels: Record<EquipmentOwnerType, string> = {
+      own: 'Собственная',
+      investor: 'Инвестор',
+      sublease: 'Субаренда',
+    };
+    return labels[owner];
+  };
+
+  const locationOptions = React.useMemo(
+    () => Array.from(new Set(enrichedEquipmentList.map(eq => eq.location).filter(Boolean))).sort(),
+    [enrichedEquipmentList],
+  );
+
+  const matchesTab = React.useCallback((eq: EquipmentType_) => {
+    if (activeTab === 'active') return eq.activeInFleet && (eq.category === 'own' || eq.category === 'partner');
+    if (activeTab === 'sold') return eq.category === 'sold';
+    if (activeTab === 'service') return eq.category === 'client' || (!eq.activeInFleet && eq.category !== 'sold');
+    return true;
+  }, [activeTab]);
 
   const filteredEquipment = enrichedEquipmentList.filter(eq => {
     const matchesSearch = search === '' ||
@@ -63,8 +90,12 @@ export default function Equipment() {
     const matchesStatus = statusFilter === 'all' || eq.status === statusFilter;
     const matchesType = typeFilter === 'all' || eq.type === typeFilter;
     const matchesDrive = driveFilter === 'all' || eq.drive === driveFilter;
+    const matchesCategory = categoryFilter === 'all' || eq.category === categoryFilter;
+    const matchesFleet = fleetFilter === 'all' || String(eq.activeInFleet) === fleetFilter;
+    const matchesOwner = ownerFilter === 'all' || eq.owner === ownerFilter;
+    const matchesLocation = locationFilter === 'all' || eq.location === locationFilter;
 
-    return matchesSearch && matchesStatus && matchesType && matchesDrive;
+    return matchesSearch && matchesStatus && matchesType && matchesDrive && matchesCategory && matchesFleet && matchesOwner && matchesLocation && matchesTab(eq);
   });
 
   const getEquipmentTypeLabel = (type: EquipmentType): string => {
@@ -105,6 +136,27 @@ export default function Equipment() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        {[
+          { key: 'active', label: 'Активный парк' },
+          { key: 'sold', label: 'Проданная техника' },
+          { key: 'service', label: 'Сервисная / клиентская техника' },
+          { key: 'all', label: 'Вся техника' },
+        ].map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key as typeof activeTab)}
+            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              activeTab === tab.key
+                ? 'bg-[--color-primary] text-white'
+                : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 sm:gap-4 sm:p-4">
         <div className="flex-1 min-w-[200px]">
@@ -118,6 +170,30 @@ export default function Equipment() {
             />
           </div>
         </div>
+        <Select
+          value={categoryFilter}
+          onValueChange={setCategoryFilter}
+          placeholder="Все категории"
+          options={[
+            { value: 'all', label: 'Все категории' },
+            { value: 'own', label: EQUIPMENT_CATEGORY_LABELS.own },
+            { value: 'sold', label: EQUIPMENT_CATEGORY_LABELS.sold },
+            { value: 'client', label: EQUIPMENT_CATEGORY_LABELS.client },
+            { value: 'partner', label: EQUIPMENT_CATEGORY_LABELS.partner },
+          ]}
+          className="w-[180px]"
+        />
+        <Select
+          value={fleetFilter}
+          onValueChange={setFleetFilter}
+          placeholder="Активный парк"
+          options={[
+            { value: 'all', label: 'Любое участие в парке' },
+            { value: 'true', label: `Активный парк — ${ACTIVE_FLEET_LABELS.yes}` },
+            { value: 'false', label: `Активный парк — ${ACTIVE_FLEET_LABELS.no}` },
+          ]}
+          className="w-[220px]"
+        />
         <Select
           value={statusFilter}
           onValueChange={setStatusFilter}
@@ -145,6 +221,18 @@ export default function Equipment() {
           className="w-[180px]"
         />
         <Select
+          value={ownerFilter}
+          onValueChange={setOwnerFilter}
+          placeholder="Все собственники"
+          options={[
+            { value: 'all', label: 'Все собственники' },
+            { value: 'own', label: 'Собственная' },
+            { value: 'investor', label: 'Инвестор' },
+            { value: 'sublease', label: 'Субаренда' },
+          ]}
+          className="w-[180px]"
+        />
+        <Select
           value={driveFilter}
           onValueChange={setDriveFilter}
           placeholder="Все приводы"
@@ -155,9 +243,32 @@ export default function Equipment() {
           ]}
           className="w-[160px]"
         />
-        <Button variant="ghost" size="sm">
+        <Select
+          value={locationFilter}
+          onValueChange={setLocationFilter}
+          placeholder="Все локации"
+          options={[
+            { value: 'all', label: 'Все локации' },
+            ...locationOptions.map(location => ({ value: location, label: location })),
+          ]}
+          className="w-[220px]"
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setSearch('');
+            setCategoryFilter('all');
+            setFleetFilter('all');
+            setStatusFilter('all');
+            setTypeFilter('all');
+            setDriveFilter('all');
+            setOwnerFilter('all');
+            setLocationFilter('all');
+          }}
+        >
           <Filter className="h-4 w-4" />
-          Фильтры
+          Сбросить
         </Button>
       </div>
 
@@ -186,6 +297,9 @@ export default function Equipment() {
                 </p>
                 <p className="text-sm font-medium text-gray-900 dark:text-white mt-1 truncate">{eq.manufacturer} {eq.model}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{getEquipmentTypeLabel(eq.type)} · {getEquipmentDriveLabel(eq.drive)}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {EQUIPMENT_CATEGORY_LABELS[eq.category]} · {getOwnerLabel(eq.owner)} · Активный парк: {eq.activeInFleet ? 'Да' : 'Нет'}
+                </p>
               </div>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
@@ -228,6 +342,9 @@ export default function Equipment() {
                     SN: {equipment.serialNumber || 'не указан'}
                   </p>
                   <p className="text-sm text-gray-500 dark:text-gray-400">{equipment.model}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {EQUIPMENT_CATEGORY_LABELS[equipment.category]} · {getOwnerLabel(equipment.owner)} · Активный парк: {equipment.activeInFleet ? 'Да' : 'Нет'}
+                  </p>
                 </TableCell>
                 <TableCell className="text-gray-700 dark:text-gray-300">{getEquipmentTypeLabel(equipment.type)}</TableCell>
                 <TableCell className="text-gray-700 dark:text-gray-300">{getEquipmentDriveLabel(equipment.drive)}</TableCell>

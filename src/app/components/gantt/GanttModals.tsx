@@ -12,6 +12,7 @@ import { rentalsService } from '../../services/rentals.service';
 import { usersService } from '../../services/users.service';
 import { EQUIPMENT_KEYS } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
+import { canEquipmentParticipateInRentals } from '../../lib/equipmentClassification';
 
 // ─── Локальные хелперы ──────────────────────────────────────────────────────
 
@@ -430,7 +431,7 @@ export function NewRentalModal({
    */
   const { availableEquipment, busyEquipment } = useMemo(() => {
     const all = (equipmentListProp ?? fetchedEquipment).filter(e =>
-      e.status !== 'inactive' && e.status !== 'in_service',
+      canEquipmentParticipateInRentals(e) && e.status !== 'inactive' && e.status !== 'in_service',
     );
     if (!startDate || !endDate) {
       return { availableEquipment: all, busyEquipment: [] };

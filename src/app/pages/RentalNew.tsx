@@ -227,12 +227,12 @@ export default function RentalNew() {
                     <SelectContent>
                       {availableEq.length > 0 && availableEq.map(eq => (
                         <SelectItem key={eq.inventoryNumber} value={eq.inventoryNumber}>
-                          ✓ {eq.inventoryNumber} {eq.model}
+                          ✓ {eq.manufacturer} {eq.model} · INV {eq.inventoryNumber} · SN {eq.serialNumber || 'не указан'}
                         </SelectItem>
                       ))}
                       {busyEq.length > 0 && busyEq.map(eq => (
                         <SelectItem key={eq.inventoryNumber} value={eq.inventoryNumber}>
-                          ⚠ {eq.inventoryNumber} {eq.model} — занята
+                          ⚠ {eq.manufacturer} {eq.model} · INV {eq.inventoryNumber} · SN {eq.serialNumber || 'не указан'} — занята
                         </SelectItem>
                       ))}
                     </SelectContent>

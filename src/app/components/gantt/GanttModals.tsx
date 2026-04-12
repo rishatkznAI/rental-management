@@ -65,7 +65,8 @@ function equipmentOptionLabel(eq: Equipment): string {
   const type = TYPE_LABELS[eq.type] ?? eq.type;
   const loc  = LOCATION_LABELS[eq.location] ?? eq.location ?? '—';
   const stat = STATUS_LABELS[eq.status] ?? eq.status;
-  return `${eq.inventoryNumber} ${eq.model} — ${type} — ${loc} — ${stat}`;
+  const sn   = eq.serialNumber ? `SN ${eq.serialNumber}` : 'SN не указан';
+  return `${eq.manufacturer} ${eq.model} · INV ${eq.inventoryNumber} · ${sn} — ${type} — ${loc} — ${stat}`;
 }
 
 // ─── selectClass — единый стиль для нативных <select> ──────────────────────

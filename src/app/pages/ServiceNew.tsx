@@ -239,7 +239,7 @@ export default function ServiceNew() {
                 <option value="">Выберите технику</option>
                 {equipmentList.map(e => (
                   <option key={e.id} value={e.id}>
-                    {e.manufacturer} {e.model} · INV {e.inventoryNumber}
+                    {e.manufacturer} {e.model} · INV {e.inventoryNumber} · SN {e.serialNumber || 'не указан'}
                   </option>
                 ))}
               </select>

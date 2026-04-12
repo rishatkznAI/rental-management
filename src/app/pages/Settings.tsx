@@ -35,9 +35,10 @@ import {
 import { usersService } from '../services/users.service';
 import { ownersService } from '../services/owners.service';
 import { mechanicsService } from '../services/mechanics.service';
-import { serviceWorkCatalogService } from '../services/service-work-catalog.service';
-import { sparePartsCatalogService } from '../services/spare-parts-catalog.service';
+import { serviceWorksService } from '../services/service-works.service';
+import { sparePartsService } from '../services/spare-parts.service';
 import { equipmentService } from '../services/equipment.service';
+import { reportsService } from '../services/reports.service';
 import { rentalsService } from '../services/rentals.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
 import { clientsService } from '../services/clients.service';
@@ -61,8 +62,8 @@ import type {
   ServiceStatus,
   Mechanic,
   ReferenceStatus,
-  ServiceWorkCatalogItem,
-  SparePartCatalogItem,
+  ServiceWork,
+  SparePart,
 } from '../types';
 
 // ── Вспомогательные ───────────────────────────────────────────────────────────
@@ -645,6 +646,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
   const { data: serviceTickets = [] } = useQuery({ queryKey: SERVICE_TICKET_KEYS.all, queryFn: serviceTicketsService.getAll });
   const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
+  const [isMigratingRepairFacts, setIsMigratingRepairFacts] = React.useState(false);
   const equipmentFileInputRef = React.useRef<HTMLInputElement>(null);
   const clientsFileInputRef = React.useRef<HTMLInputElement>(null);
   const serviceFileInputRef = React.useRef<HTMLInputElement>(null);
@@ -1100,6 +1102,27 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
     }
   }, [queryClient, serviceTickets]);
 
+  const handleRepairFactsMigration = React.useCallback(async () => {
+    setMessage(null);
+    setIsMigratingRepairFacts(true);
+    try {
+      const result = await reportsService.migrateRepairFacts();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] }),
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
+      ]);
+      setMessage({
+        type: 'success',
+        text: `Миграция завершена: проверено заявок ${result.ticketsScanned}, перенесено работ ${result.migratedWorkItems}, запчастей ${result.migratedPartItems}, создано справочных работ ${result.createdWorkRefs}, запчастей ${result.createdPartRefs}`,
+      });
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : 'Не удалось запустить миграцию';
+      setMessage({ type: 'error', text: messageText });
+    } finally {
+      setIsMigratingRepairFacts(false);
+    }
+  }, [queryClient]);
+
   return (
     <Card>
       <CardHeader>
@@ -1200,6 +1223,23 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
               <Button variant="secondary" size="sm" onClick={handleServiceImportClick} disabled={!canManageData || isImporting}>
                 <Upload className="h-4 w-4" />
                 {isImporting ? 'Импорт...' : 'Импорт'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-gray-900 dark:text-white">Миграция истории ремонтов</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Ручной перенос legacy-работ и запчастей из старых заявок в отдельные fact-коллекции для аналитики сервиса.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => void handleRepairFactsMigration()} disabled={!canManageData || isMigratingRepairFacts}>
+                <RefreshCw className={`h-4 w-4 ${isMigratingRepairFacts ? 'animate-spin' : ''}`} />
+                {isMigratingRepairFacts ? 'Миграция...' : 'Запустить миграцию'}
               </Button>
             </div>
           </div>
@@ -1716,45 +1756,115 @@ function MechanicsReferenceList() {
 
 function ServiceWorkCatalogReferenceList() {
   const queryClient = useQueryClient();
-  const { data: catalogData = [] } = useQuery<ServiceWorkCatalogItem[]>({
-    queryKey: ['serviceWorkCatalog'],
-    queryFn: serviceWorkCatalogService.getAll,
+  const { data: worksData = [] } = useQuery<ServiceWork[]>({
+    queryKey: ['serviceWorks'],
+    queryFn: serviceWorksService.getAll,
   });
-  const [items, setItems] = React.useState<ServiceWorkCatalogItem[]>([]);
-  const [draft, setDraft] = React.useState({ name: '', normHours: '', category: '' });
+  const [search, setSearch] = React.useState('');
+  const [draft, setDraft] = React.useState({ name: '', category: '', description: '', normHours: '', sortOrder: '0' });
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [editing, setEditing] = React.useState({ name: '', category: '', description: '', normHours: '', sortOrder: '0' });
 
-  React.useEffect(() => setItems(catalogData), [catalogData]);
+  const filtered = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return worksData.filter(item => !query || [item.name, item.category, item.description].filter(Boolean).join(' ').toLowerCase().includes(query));
+  }, [search, worksData]);
 
-  const persist = async (next: ServiceWorkCatalogItem[]) => {
-    setItems(next);
-    await serviceWorkCatalogService.bulkReplace(next);
-    await queryClient.invalidateQueries({ queryKey: ['serviceWorkCatalog'] });
+  const reload = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['serviceWorks'] });
+    await queryClient.invalidateQueries({ queryKey: ['serviceWorks', 'active'] });
+  };
+
+  const createWork = async () => {
+    if (!draft.name.trim()) return;
+    const normHours = Number(draft.normHours);
+    const sortOrder = Number(draft.sortOrder);
+    if (!Number.isFinite(normHours) || normHours < 0) return;
+    await serviceWorksService.create({
+      name: draft.name.trim(),
+      category: draft.category.trim() || undefined,
+      description: draft.description.trim() || undefined,
+      normHours,
+      isActive: true,
+      sortOrder: Number.isFinite(sortOrder) ? sortOrder : 0,
+    });
+    setDraft({ name: '', category: '', description: '', normHours: '', sortOrder: '0' });
+    await reload();
+  };
+
+  const saveEdit = async (id: string) => {
+    const normHours = Number(editing.normHours);
+    const sortOrder = Number(editing.sortOrder);
+    if (!editing.name.trim() || !Number.isFinite(normHours) || normHours < 0) return;
+    await serviceWorksService.update(id, {
+      name: editing.name.trim(),
+      category: editing.category.trim() || undefined,
+      description: editing.description.trim() || undefined,
+      normHours,
+      sortOrder: Number.isFinite(sortOrder) ? sortOrder : 0,
+    });
+    setEditingId(null);
+    await reload();
   };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Работы сервиса</CardTitle>
-        <CardDescription>Справочник работ с нормо-часами для аналитики механиков</CardDescription>
+        <CardTitle>Работы</CardTitle>
+        <CardDescription>Справочник работ с нормо-часами для ремонтов и аналитики механиков</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {items.map(item => (
+        <Input placeholder="Поиск по работам" value={search} onChange={e => setSearch(e.target.value)} />
+
+        {filtered.map(item => (
           <div key={item.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">{item.name}</p>
-                <p className="text-xs text-gray-500">{item.category || 'Без категории'} · {item.normHours} н/ч</p>
+            {editingId === item.id ? (
+              <div className="space-y-2">
+                <Input value={editing.name} onChange={e => setEditing(prev => ({ ...prev, name: e.target.value }))} placeholder="Название работы" />
+                <Input value={editing.category} onChange={e => setEditing(prev => ({ ...prev, category: e.target.value }))} placeholder="Категория" />
+                <Input value={editing.description} onChange={e => setEditing(prev => ({ ...prev, description: e.target.value }))} placeholder="Описание" />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input type="number" min="0" step="0.1" value={editing.normHours} onChange={e => setEditing(prev => ({ ...prev, normHours: e.target.value }))} placeholder="Нормо-часы" />
+                  <Input type="number" min="0" step="1" value={editing.sortOrder} onChange={e => setEditing(prev => ({ ...prev, sortOrder: e.target.value }))} placeholder="Порядок сортировки" />
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => void saveEdit(item.id)}>Сохранить</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditingId(null)}>Отмена</Button>
+                </div>
               </div>
-              <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
-            </div>
-            <div className="mt-3 flex gap-2">
-              <Button size="sm" variant="secondary" onClick={() => void persist(items.map(current => current.id === item.id ? { ...current, status: current.status === 'active' ? 'inactive' : 'active' } : current))}>
-                {item.status === 'active' ? 'Отключить' : 'Включить'}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => void persist(items.filter(current => current.id !== item.id))}>
-                Удалить
-              </Button>
-            </div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">{item.name}</p>
+                    <p className="text-xs text-gray-500">{item.category || 'Без категории'} · {item.normHours} н/ч · сортировка {item.sortOrder}</p>
+                    {item.description && <p className="mt-1 text-xs text-gray-500">{item.description}</p>}
+                  </div>
+                  <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>{statusLabel(item.isActive ? 'active' : 'inactive')}</Badge>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setEditingId(item.id);
+                      setEditing({
+                        name: item.name,
+                        category: item.category || '',
+                        description: item.description || '',
+                        normHours: String(item.normHours),
+                        sortOrder: String(item.sortOrder),
+                      });
+                    }}
+                  >
+                    Редактировать
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => void serviceWorksService.update(item.id, { isActive: !item.isActive }).then(reload)}>
+                    {item.isActive ? 'Деактивировать' : 'Активировать'}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         ))}
 
@@ -1763,24 +1873,12 @@ function ServiceWorkCatalogReferenceList() {
           <div className="space-y-2">
             <Input placeholder="Название работы" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
             <Input placeholder="Категория" value={draft.category} onChange={e => setDraft(prev => ({ ...prev, category: e.target.value }))} />
-            <Input type="number" min="0" step="0.1" placeholder="Нормо-часы" value={draft.normHours} onChange={e => setDraft(prev => ({ ...prev, normHours: e.target.value }))} />
-            <Button
-              size="sm"
-              onClick={() => {
-                if (!draft.name.trim()) return;
-                void persist([
-                  ...items,
-                  {
-                    id: `work-${Date.now()}`,
-                    name: draft.name.trim(),
-                    category: draft.category.trim() || undefined,
-                    normHours: Number(draft.normHours) || 0,
-                    status: 'active',
-                  },
-                ]);
-                setDraft({ name: '', normHours: '', category: '' });
-              }}
-            >
+            <Input placeholder="Описание" value={draft.description} onChange={e => setDraft(prev => ({ ...prev, description: e.target.value }))} />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input type="number" min="0" step="0.1" placeholder="Нормо-часы" value={draft.normHours} onChange={e => setDraft(prev => ({ ...prev, normHours: e.target.value }))} />
+              <Input type="number" min="0" step="1" placeholder="Порядок сортировки" value={draft.sortOrder} onChange={e => setDraft(prev => ({ ...prev, sortOrder: e.target.value }))} />
+            </div>
+            <Button size="sm" onClick={() => void createWork()}>
               Добавить
             </Button>
           </div>
@@ -1792,45 +1890,125 @@ function ServiceWorkCatalogReferenceList() {
 
 function SparePartsReferenceList() {
   const queryClient = useQueryClient();
-  const { data: partsData = [] } = useQuery<SparePartCatalogItem[]>({
-    queryKey: ['sparePartsCatalog'],
-    queryFn: sparePartsCatalogService.getAll,
+  const { data: partsData = [] } = useQuery<SparePart[]>({
+    queryKey: ['spareParts'],
+    queryFn: sparePartsService.getAll,
   });
-  const [items, setItems] = React.useState<SparePartCatalogItem[]>([]);
-  const [draft, setDraft] = React.useState({ name: '', sku: '', unitCost: '' });
+  const [search, setSearch] = React.useState('');
+  const [draft, setDraft] = React.useState({ name: '', article: '', unit: 'шт', defaultPrice: '', category: '', manufacturer: '' });
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [editing, setEditing] = React.useState({ name: '', article: '', unit: 'шт', defaultPrice: '', category: '', manufacturer: '' });
 
-  React.useEffect(() => setItems(partsData), [partsData]);
+  const filtered = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return partsData.filter(item => !query || [item.name, item.article, item.category, item.manufacturer].filter(Boolean).join(' ').toLowerCase().includes(query));
+  }, [partsData, search]);
 
-  const persist = async (next: SparePartCatalogItem[]) => {
-    setItems(next);
-    await sparePartsCatalogService.bulkReplace(next);
-    await queryClient.invalidateQueries({ queryKey: ['sparePartsCatalog'] });
+  const reload = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['spareParts'] });
+    await queryClient.invalidateQueries({ queryKey: ['spareParts', 'active'] });
+  };
+
+  const createPart = async () => {
+    if (!draft.name.trim() || !draft.unit.trim()) return;
+    const defaultPrice = Number(draft.defaultPrice);
+    if (!Number.isFinite(defaultPrice) || defaultPrice < 0) return;
+    await sparePartsService.create({
+      name: draft.name.trim(),
+      article: draft.article.trim() || undefined,
+      sku: draft.article.trim() || undefined,
+      unit: draft.unit.trim(),
+      defaultPrice,
+      category: draft.category.trim() || undefined,
+      manufacturer: draft.manufacturer.trim() || undefined,
+      isActive: true,
+    });
+    setDraft({ name: '', article: '', unit: 'шт', defaultPrice: '', category: '', manufacturer: '' });
+    await reload();
+  };
+
+  const saveEdit = async (id: string) => {
+    const defaultPrice = Number(editing.defaultPrice);
+    if (!editing.name.trim() || !editing.unit.trim() || !Number.isFinite(defaultPrice) || defaultPrice < 0) return;
+    await sparePartsService.update(id, {
+      name: editing.name.trim(),
+      article: editing.article.trim() || undefined,
+      sku: editing.article.trim() || undefined,
+      unit: editing.unit.trim(),
+      defaultPrice,
+      category: editing.category.trim() || undefined,
+      manufacturer: editing.manufacturer.trim() || undefined,
+    });
+    setEditingId(null);
+    await reload();
   };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Запчасти сервиса</CardTitle>
-        <CardDescription>Каталог для выбора использованных запчастей в заявках</CardDescription>
+        <CardTitle>Запчасти</CardTitle>
+        <CardDescription>Справочник запчастей для ремонтов с хранением артикула, единицы и базовой цены</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {items.map(item => (
+        <Input placeholder="Поиск по запчастям" value={search} onChange={e => setSearch(e.target.value)} />
+
+        {filtered.map(item => (
           <div key={item.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">{item.name}</p>
-                <p className="text-xs text-gray-500">{item.sku || 'Без артикула'} · {(item.unitCost ?? 0).toLocaleString('ru-RU')} ₽</p>
+            {editingId === item.id ? (
+              <div className="space-y-2">
+                <Input value={editing.name} onChange={e => setEditing(prev => ({ ...prev, name: e.target.value }))} placeholder="Название запчасти" />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input value={editing.article} onChange={e => setEditing(prev => ({ ...prev, article: e.target.value }))} placeholder="Артикул" />
+                  <Input value={editing.unit} onChange={e => setEditing(prev => ({ ...prev, unit: e.target.value }))} placeholder="Ед. измерения" />
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Input type="number" min="0" value={editing.defaultPrice} onChange={e => setEditing(prev => ({ ...prev, defaultPrice: e.target.value }))} placeholder="Базовая цена" />
+                  <Input value={editing.category} onChange={e => setEditing(prev => ({ ...prev, category: e.target.value }))} placeholder="Категория" />
+                  <Input value={editing.manufacturer} onChange={e => setEditing(prev => ({ ...prev, manufacturer: e.target.value }))} placeholder="Производитель" />
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => void saveEdit(item.id)}>Сохранить</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditingId(null)}>Отмена</Button>
+                </div>
               </div>
-              <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
-            </div>
-            <div className="mt-3 flex gap-2">
-              <Button size="sm" variant="secondary" onClick={() => void persist(items.map(current => current.id === item.id ? { ...current, status: current.status === 'active' ? 'inactive' : 'active' } : current))}>
-                {item.status === 'active' ? 'Отключить' : 'Включить'}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => void persist(items.filter(current => current.id !== item.id))}>
-                Удалить
-              </Button>
-            </div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">{item.name}</p>
+                    <p className="text-xs text-gray-500">
+                      {item.article || 'Без артикула'} · {item.defaultPrice.toLocaleString('ru-RU')} ₽/{item.unit}
+                    </p>
+                    {(item.category || item.manufacturer) && (
+                      <p className="mt-1 text-xs text-gray-500">{[item.category, item.manufacturer].filter(Boolean).join(' · ')}</p>
+                    )}
+                  </div>
+                  <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>{statusLabel(item.isActive ? 'active' : 'inactive')}</Badge>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setEditingId(item.id);
+                      setEditing({
+                        name: item.name,
+                        article: item.article || '',
+                        unit: item.unit,
+                        defaultPrice: String(item.defaultPrice),
+                        category: item.category || '',
+                        manufacturer: item.manufacturer || '',
+                      });
+                    }}
+                  >
+                    Редактировать
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => void sparePartsService.update(item.id, { isActive: !item.isActive }).then(reload)}>
+                    {item.isActive ? 'Деактивировать' : 'Активировать'}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         ))}
 
@@ -1838,25 +2016,16 @@ function SparePartsReferenceList() {
           <p className="mb-2 text-sm font-medium">Добавить запчасть</p>
           <div className="space-y-2">
             <Input placeholder="Название запчасти" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
-            <Input placeholder="Артикул" value={draft.sku} onChange={e => setDraft(prev => ({ ...prev, sku: e.target.value }))} />
-            <Input type="number" min="0" placeholder="Цена по умолчанию" value={draft.unitCost} onChange={e => setDraft(prev => ({ ...prev, unitCost: e.target.value }))} />
-            <Button
-              size="sm"
-              onClick={() => {
-                if (!draft.name.trim()) return;
-                void persist([
-                  ...items,
-                  {
-                    id: `part-${Date.now()}`,
-                    name: draft.name.trim(),
-                    sku: draft.sku.trim() || undefined,
-                    unitCost: Number(draft.unitCost) || 0,
-                    status: 'active',
-                  },
-                ]);
-                setDraft({ name: '', sku: '', unitCost: '' });
-              }}
-            >
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input placeholder="Артикул" value={draft.article} onChange={e => setDraft(prev => ({ ...prev, article: e.target.value }))} />
+              <Input placeholder="Ед. измерения" value={draft.unit} onChange={e => setDraft(prev => ({ ...prev, unit: e.target.value }))} />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <Input type="number" min="0" placeholder="Базовая цена" value={draft.defaultPrice} onChange={e => setDraft(prev => ({ ...prev, defaultPrice: e.target.value }))} />
+              <Input placeholder="Категория" value={draft.category} onChange={e => setDraft(prev => ({ ...prev, category: e.target.value }))} />
+              <Input placeholder="Производитель" value={draft.manufacturer} onChange={e => setDraft(prev => ({ ...prev, manufacturer: e.target.value }))} />
+            </div>
+            <Button size="sm" onClick={() => void createPart()}>
               Добавить
             </Button>
           </div>

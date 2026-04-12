@@ -20,6 +20,10 @@ const JSON_COLLECTIONS = [
   'shipping_photos',
   'owners',
   'mechanics',
+  'service_works',
+  'spare_parts',
+  'repair_work_items',
+  'repair_part_items',
   'service_work_catalog',
   'spare_parts_catalog',
   'bot_users',
@@ -100,6 +104,16 @@ function migrateJsonFilesToDb() {
   }
 }
 
+function cloneCollectionIfMissing(targetName, sourceName, mapItem = value => value) {
+  const target = getData(targetName);
+  if (Array.isArray(target) && target.length > 0) return;
+
+  const source = getData(sourceName);
+  if (!Array.isArray(source) || source.length === 0) return;
+
+  setData(targetName, source.map(mapItem));
+}
+
 function saveSession(token, value, expiresAt) {
   const db = ensureDb();
   db.prepare(`
@@ -146,6 +160,7 @@ function countActiveSessions(now = Date.now()) {
 
 module.exports = {
   DB_PATH,
+  cloneCollectionIfMissing,
   countActiveSessions,
   cleanupExpiredSessions,
   deleteSession,

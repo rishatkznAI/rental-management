@@ -28,6 +28,7 @@ const fetch   = require('node-fetch');
 const crypto  = require('crypto');
 const {
   DB_PATH,
+  cloneCollectionIfMissing,
   countActiveSessions,
   cleanupExpiredSessions,
   deleteSession,
@@ -143,6 +144,10 @@ const WRITE_PERMISSIONS = {
   shipping_photos:['Администратор', 'Механик', 'Менеджер по аренде'],
   owners:         ['Администратор'],
   mechanics:      ['Администратор'],
+  service_works:  ['Администратор'],
+  spare_parts:    ['Администратор'],
+  repair_work_items: ['Администратор', 'Механик'],
+  repair_part_items: ['Администратор', 'Механик'],
   service_work_catalog: ['Администратор'],
   spare_parts_catalog: ['Администратор'],
 };
@@ -273,7 +278,220 @@ const ID_PREFIXES = {
   users:          'U',
   shipping_photos:'SP',
   owners:         'OW',
+  service_works:  'SW',
+  spare_parts:    'PT',
+  repair_work_items: 'RWI',
+  repair_part_items: 'RPI',
 };
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function normalizeServiceWorkRecord(record) {
+  const timestamp = nowIso();
+  return {
+    id: record.id || generateId(ID_PREFIXES.service_works),
+    name: String(record.name || '').trim(),
+    category: record.category ? String(record.category).trim() : undefined,
+    description: record.description ? String(record.description).trim() : undefined,
+    normHours: Math.max(0, Number(record.normHours) || 0),
+    isActive: record.isActive !== false,
+    sortOrder: Number.isFinite(Number(record.sortOrder)) ? Number(record.sortOrder) : 0,
+    createdAt: record.createdAt || timestamp,
+    updatedAt: record.updatedAt || timestamp,
+  };
+}
+
+function normalizeSparePartRecord(record) {
+  const timestamp = nowIso();
+  const article = record.article ?? record.sku;
+  return {
+    id: record.id || generateId(ID_PREFIXES.spare_parts),
+    name: String(record.name || '').trim(),
+    article: article ? String(article).trim() : undefined,
+    sku: article ? String(article).trim() : undefined,
+    unit: String(record.unit || 'шт').trim() || 'шт',
+    defaultPrice: Math.max(0, Number(record.defaultPrice) || 0),
+    category: record.category ? String(record.category).trim() : undefined,
+    manufacturer: record.manufacturer ? String(record.manufacturer).trim() : undefined,
+    isActive: record.isActive !== false,
+    createdAt: record.createdAt || timestamp,
+    updatedAt: record.updatedAt || timestamp,
+  };
+}
+
+function migrateReferenceCollections() {
+  cloneCollectionIfMissing('service_works', 'service_work_catalog', item => normalizeServiceWorkRecord({
+    ...item,
+    isActive: item.status !== 'inactive',
+    sortOrder: 0,
+  }));
+  cloneCollectionIfMissing('spare_parts', 'spare_parts_catalog', item => normalizeSparePartRecord({
+    ...item,
+    article: item.article ?? item.sku,
+    defaultPrice: item.defaultPrice ?? item.unitCost,
+  }));
+  if (!Array.isArray(readData('repair_work_items'))) {
+    writeData('repair_work_items', []);
+  }
+  if (!Array.isArray(readData('repair_part_items'))) {
+    writeData('repair_part_items', []);
+  }
+}
+
+function ensureMigratedWorkReference(legacyWork, serviceWorks) {
+  const byId = legacyWork.catalogId
+    ? serviceWorks.find(item => item.id === legacyWork.catalogId)
+    : null;
+  if (byId) return byId;
+
+  const byName = serviceWorks.find(item =>
+    item.name === legacyWork.name
+    && Math.abs((Number(item.normHours) || 0) - (Number(legacyWork.normHours) || 0)) < 0.0001,
+  );
+  if (byName) return byName;
+
+  const created = normalizeServiceWorkRecord({
+    id: legacyWork.catalogId || generateId(ID_PREFIXES.service_works),
+    name: legacyWork.name || 'Работа из истории',
+    category: legacyWork.categorySnapshot,
+    description: 'Автоматически создано при миграции истории ремонта',
+    normHours: Number(legacyWork.normHours) || 0,
+    isActive: false,
+    sortOrder: 9999,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  });
+  serviceWorks.push(created);
+  return created;
+}
+
+function ensureMigratedPartReference(legacyPart, spareParts) {
+  const legacyArticle = legacyPart.articleSnapshot || legacyPart.sku;
+  const byId = legacyPart.catalogId
+    ? spareParts.find(item => item.id === legacyPart.catalogId)
+    : null;
+  if (byId) return byId;
+
+  const byName = spareParts.find(item =>
+    item.name === legacyPart.name
+    && (item.article || item.sku || '') === (legacyArticle || ''),
+  );
+  if (byName) return byName;
+
+  const created = normalizeSparePartRecord({
+    id: legacyPart.catalogId || generateId(ID_PREFIXES.spare_parts),
+    name: legacyPart.name || 'Запчасть из истории',
+    article: legacyArticle,
+    sku: legacyArticle,
+    unit: legacyPart.unitSnapshot || 'шт',
+    defaultPrice: Number(legacyPart.cost) || Number(legacyPart.priceSnapshot) || 0,
+    category: undefined,
+    manufacturer: undefined,
+    isActive: false,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  });
+  spareParts.push(created);
+  return created;
+}
+
+function migrateLegacyRepairFacts() {
+  const tickets = readData('service') || [];
+  const existingServiceWorks = readData('service_works') || [];
+  const existingSpareParts = readData('spare_parts') || [];
+  const serviceWorks = existingServiceWorks.map(normalizeServiceWorkRecord);
+  const spareParts = existingSpareParts.map(normalizeSparePartRecord);
+  const repairWorkItems = readData('repair_work_items') || [];
+  const repairPartItems = readData('repair_part_items') || [];
+
+  let worksChanged = false;
+  let partsChanged = false;
+  let workRefsChanged = false;
+  let partRefsChanged = false;
+  let createdWorkRefs = 0;
+  let createdPartRefs = 0;
+  let migratedWorkItems = 0;
+  let migratedPartItems = 0;
+  const originalWorkIds = new Set(existingServiceWorks.map(item => item.id));
+  const originalPartIds = new Set(existingSpareParts.map(item => item.id));
+
+  for (const ticket of tickets) {
+    const legacyTicketWorks = Array.isArray(ticket.resultData?.worksPerformed) ? ticket.resultData.worksPerformed : [];
+    const legacyTicketParts = Array.isArray(ticket.resultData?.partsUsed)
+      ? ticket.resultData.partsUsed
+      : (Array.isArray(ticket.parts) ? ticket.parts : []);
+
+    const hasNewWorks = repairWorkItems.some(item => item.repairId === ticket.id);
+    const hasNewParts = repairPartItems.some(item => item.repairId === ticket.id);
+
+    if (!hasNewWorks && legacyTicketWorks.length > 0) {
+      for (const work of legacyTicketWorks) {
+        const reference = ensureMigratedWorkReference(work, serviceWorks);
+        if (!originalWorkIds.has(reference.id)) {
+          createdWorkRefs += 1;
+          originalWorkIds.add(reference.id);
+        }
+        const quantity = Math.max(1, Number(work.qty) || 1);
+        repairWorkItems.push({
+          id: generateId(ID_PREFIXES.repair_work_items),
+          repairId: ticket.id,
+          workId: reference.id,
+          quantity,
+          normHoursSnapshot: Math.max(0, Number(work.normHours) || 0),
+          nameSnapshot: work.name || reference.name,
+          categorySnapshot: reference.category,
+          createdAt: ticket.createdAt || nowIso(),
+        });
+        migratedWorkItems += 1;
+      }
+      worksChanged = true;
+    }
+
+    if (!hasNewParts && legacyTicketParts.length > 0) {
+      for (const part of legacyTicketParts) {
+        const reference = ensureMigratedPartReference(part, spareParts);
+        if (!originalPartIds.has(reference.id)) {
+          createdPartRefs += 1;
+          originalPartIds.add(reference.id);
+        }
+        const quantity = Math.max(1, Number(part.qty) || 1);
+        repairPartItems.push({
+          id: generateId(ID_PREFIXES.repair_part_items),
+          repairId: ticket.id,
+          partId: reference.id,
+          quantity,
+          priceSnapshot: Math.max(0, Number(part.cost) || Number(part.priceSnapshot) || 0),
+          nameSnapshot: part.name || reference.name,
+          articleSnapshot: part.sku || part.articleSnapshot || reference.article || reference.sku,
+          unitSnapshot: part.unitSnapshot || reference.unit || 'шт',
+          createdAt: ticket.createdAt || nowIso(),
+        });
+        migratedPartItems += 1;
+      }
+      partsChanged = true;
+    }
+  }
+
+  const originalWorksCount = (readData('service_works') || []).length;
+  const originalPartsCount = (readData('spare_parts') || []).length;
+  workRefsChanged = serviceWorks.length !== originalWorksCount;
+  partRefsChanged = spareParts.length !== originalPartsCount;
+
+  if (workRefsChanged) writeData('service_works', serviceWorks);
+  if (partRefsChanged) writeData('spare_parts', spareParts);
+  if (worksChanged) writeData('repair_work_items', repairWorkItems);
+  if (partsChanged) writeData('repair_part_items', repairPartItems);
+
+  return {
+    createdWorkRefs,
+    createdPartRefs,
+    migratedWorkItems,
+    migratedPartItems,
+    ticketsScanned: tickets.length,
+  };
+}
 
 function normalizeEquipmentRecord(equipment) {
   if (!equipment) return equipment;
@@ -323,7 +541,19 @@ function registerCRUD(router, collection) {
 
   // GET /api/:collection — список
   router.get(`/${collection}`, requireAuth, (req, res) => {
-    const data = readData(collection) || [];
+    let data = readData(collection) || [];
+    if (collection === 'service_works') {
+      data = data.map(normalizeServiceWorkRecord).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ru'));
+      if (req.query.active === '1') {
+        data = data.filter(item => item.isActive);
+      }
+    }
+    if (collection === 'spare_parts') {
+      data = data.map(normalizeSparePartRecord).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+      if (req.query.active === '1') {
+        data = data.filter(item => item.isActive);
+      }
+    }
     if (collection === 'users') {
       if (canReadFullUsers(req)) {
         return res.json(data.map(sanitizeUser));
@@ -336,8 +566,10 @@ function registerCRUD(router, collection) {
   // GET /api/:collection/:id — один элемент
   router.get(`/${collection}/:id`, requireAuth, (req, res) => {
     const data = readData(collection) || [];
-    const item = data.find(i => i.id === req.params.id);
+    let item = data.find(i => i.id === req.params.id);
     if (!item) return res.status(404).json({ ok: false, error: 'Not found' });
+    if (collection === 'service_works') item = normalizeServiceWorkRecord(item);
+    if (collection === 'spare_parts') item = normalizeSparePartRecord(item);
     if (collection === 'users') {
       if (canReadFullUsers(req) || item.id === req.user.userId) {
         return res.json(sanitizeUser(item));
@@ -349,21 +581,39 @@ function registerCRUD(router, collection) {
 
   // POST /api/:collection — создать
   router.post(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
-    if (collection === 'rentals' || collection === 'gantt_rentals') {
-      const validation = validateRentalEquipmentPayload(req.body);
-      if (!validation.ok) {
-        return res.status(validation.status).json({ ok: false, error: validation.error });
+    try {
+      if (collection === 'rentals' || collection === 'gantt_rentals') {
+        const validation = validateRentalEquipmentPayload(req.body);
+        if (!validation.ok) {
+          return res.status(validation.status).json({ ok: false, error: validation.error });
+        }
       }
-    }
 
-    const data = readData(collection) || [];
-    const newItem = { ...req.body, id: req.body.id || generateId(prefix) };
-    data.push(newItem);
-    writeData(collection, data);
-    if (collection === 'users') {
-      return res.status(201).json(sanitizeUser(newItem));
+      if (collection === 'service_works') {
+        requireNonEmptyString(req.body?.name, 'Название работы');
+      }
+      if (collection === 'spare_parts') {
+        requireNonEmptyString(req.body?.name, 'Название запчасти');
+        requireNonEmptyString(req.body?.unit, 'Единица измерения');
+      }
+
+      const data = readData(collection) || [];
+      let newItem = { ...req.body, id: req.body.id || generateId(prefix) };
+      if (collection === 'service_works') {
+        newItem = normalizeServiceWorkRecord({ ...newItem, updatedAt: nowIso() });
+      }
+      if (collection === 'spare_parts') {
+        newItem = normalizeSparePartRecord({ ...newItem, updatedAt: nowIso() });
+      }
+      data.push(newItem);
+      writeData(collection, data);
+      if (collection === 'users') {
+        return res.status(201).json(sanitizeUser(newItem));
+      }
+      res.status(201).json(newItem);
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
     }
-    res.status(201).json(newItem);
   });
 
   // PATCH /api/:collection/:id — обновить
@@ -372,19 +622,32 @@ function registerCRUD(router, collection) {
     const idx = data.findIndex(i => i.id === req.params.id);
     if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
 
-    if (collection === 'rentals' || collection === 'gantt_rentals') {
-      const validation = validateRentalEquipmentPayload({ ...data[idx], ...req.body });
-      if (!validation.ok) {
-        return res.status(validation.status).json({ ok: false, error: validation.error });
+    try {
+      if (collection === 'rentals' || collection === 'gantt_rentals') {
+        const validation = validateRentalEquipmentPayload({ ...data[idx], ...req.body });
+        if (!validation.ok) {
+          return res.status(validation.status).json({ ok: false, error: validation.error });
+        }
       }
-    }
 
-    data[idx] = { ...data[idx], ...req.body, id: data[idx].id };
-    writeData(collection, data);
-    if (collection === 'users') {
-      return res.json(sanitizeUser(data[idx]));
+      if (collection === 'service_works') {
+        requireNonEmptyString(req.body?.name ?? data[idx].name, 'Название работы');
+        data[idx] = normalizeServiceWorkRecord({ ...data[idx], ...req.body, id: data[idx].id, createdAt: data[idx].createdAt, updatedAt: nowIso() });
+      } else if (collection === 'spare_parts') {
+        requireNonEmptyString(req.body?.name ?? data[idx].name, 'Название запчасти');
+        requireNonEmptyString(req.body?.unit ?? data[idx].unit, 'Единица измерения');
+        data[idx] = normalizeSparePartRecord({ ...data[idx], ...req.body, id: data[idx].id, createdAt: data[idx].createdAt, updatedAt: nowIso() });
+      } else {
+        data[idx] = { ...data[idx], ...req.body, id: data[idx].id };
+      }
+      writeData(collection, data);
+      if (collection === 'users') {
+        return res.json(sanitizeUser(data[idx]));
+      }
+      res.json(data[idx]);
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
     }
-    res.json(data[idx]);
   });
 
   // DELETE /api/:collection/:id — удалить
@@ -392,6 +655,11 @@ function registerCRUD(router, collection) {
     const data = readData(collection) || [];
     const idx = data.findIndex(i => i.id === req.params.id);
     if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+    if (collection === 'service') {
+      const repairId = data[idx].id;
+      writeData('repair_work_items', (readData('repair_work_items') || []).filter(item => item.repairId !== repairId));
+      writeData('repair_part_items', (readData('repair_part_items') || []).filter(item => item.repairId !== repairId));
+    }
     data.splice(idx, 1);
     writeData(collection, data);
     res.json({ ok: true });
@@ -414,6 +682,16 @@ function registerCRUD(router, collection) {
       }
     }
 
+    if (collection === 'service_works') {
+      writeData(collection, list.map(item => normalizeServiceWorkRecord({ ...item, updatedAt: nowIso() })));
+      return res.json({ ok: true, count: list.length });
+    }
+
+    if (collection === 'spare_parts') {
+      writeData(collection, list.map(item => normalizeSparePartRecord({ ...item, updatedAt: nowIso() })));
+      return res.json({ ok: true, count: list.length });
+    }
+
     writeData(collection, list);
     res.json({ ok: true, count: list.length });
   });
@@ -433,6 +711,10 @@ const COLLECTIONS = [
   'shipping_photos',
   'owners',
   'mechanics',
+  'service_works',
+  'spare_parts',
+  'repair_work_items',
+  'repair_part_items',
   'service_work_catalog',
   'spare_parts_catalog',
 ];
@@ -440,6 +722,258 @@ const COLLECTIONS = [
 for (const col of COLLECTIONS) {
   registerCRUD(apiRouter, col);
 }
+
+function requireNonEmptyString(value, fieldName) {
+  if (!String(value || '').trim()) {
+    throw new Error(`Поле «${fieldName}» обязательно`);
+  }
+}
+
+function findServiceTicketOr404(repairId, res) {
+  const tickets = readData('service') || [];
+  const ticket = tickets.find(item => item.id === repairId);
+  if (!ticket) {
+    res.status(404).json({ ok: false, error: 'Заявка на ремонт не найдена' });
+    return null;
+  }
+  return ticket;
+}
+
+apiRouter.get('/service_works/active', requireAuth, (req, res) => {
+  const list = (readData('service_works') || [])
+    .map(normalizeServiceWorkRecord)
+    .filter(item => item.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ru'));
+  res.json(list);
+});
+
+apiRouter.post('/service_works/:id/deactivate', requireAuth, requireWrite('service_works'), (req, res) => {
+  const list = readData('service_works') || [];
+  const index = list.findIndex(item => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, error: 'Работа не найдена' });
+  }
+  list[index] = normalizeServiceWorkRecord({ ...list[index], isActive: false, id: list[index].id, createdAt: list[index].createdAt, updatedAt: nowIso() });
+  writeData('service_works', list);
+  res.json(list[index]);
+});
+
+apiRouter.get('/spare_parts/active', requireAuth, (req, res) => {
+  const list = (readData('spare_parts') || [])
+    .map(normalizeSparePartRecord)
+    .filter(item => item.isActive)
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  res.json(list);
+});
+
+apiRouter.post('/spare_parts/:id/deactivate', requireAuth, requireWrite('spare_parts'), (req, res) => {
+  const list = readData('spare_parts') || [];
+  const index = list.findIndex(item => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, error: 'Запчасть не найдена' });
+  }
+  list[index] = normalizeSparePartRecord({ ...list[index], isActive: false, id: list[index].id, createdAt: list[index].createdAt, updatedAt: nowIso() });
+  writeData('spare_parts', list);
+  res.json(list[index]);
+});
+
+apiRouter.get('/repair_work_items', requireAuth, (req, res) => {
+  const repairId = String(req.query.repair_id || '').trim();
+  const list = readData('repair_work_items') || [];
+  res.json(repairId ? list.filter(item => item.repairId === repairId) : list);
+});
+
+apiRouter.post('/repair_work_items', requireAuth, requireWrite('repair_work_items'), (req, res) => {
+  try {
+    const { repairId, workId } = req.body || {};
+    const quantity = Number(req.body?.quantity);
+    requireNonEmptyString(repairId, 'Заявка');
+    requireNonEmptyString(workId, 'Работа');
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error('Количество работы должно быть больше 0');
+    }
+    if (!findServiceTicketOr404(repairId, res)) return;
+
+    const work = (readData('service_works') || []).find(item => item.id === workId && item.isActive !== false);
+    if (!work) {
+      return res.status(404).json({ ok: false, error: 'Работа из справочника не найдена или отключена' });
+    }
+
+    const list = readData('repair_work_items') || [];
+    const item = {
+      id: generateId(ID_PREFIXES.repair_work_items),
+      repairId,
+      workId,
+      quantity,
+      normHoursSnapshot: Math.max(0, Number(work.normHours) || 0),
+      nameSnapshot: String(work.name || '').trim(),
+      categorySnapshot: work.category ? String(work.category).trim() : undefined,
+      createdAt: nowIso(),
+    };
+    list.push(item);
+    writeData('repair_work_items', list);
+    res.status(201).json(item);
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+apiRouter.delete('/repair_work_items/:id', requireAuth, requireWrite('repair_work_items'), (req, res) => {
+  const list = readData('repair_work_items') || [];
+  const index = list.findIndex(item => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, error: 'Строка работы не найдена' });
+  }
+  list.splice(index, 1);
+  writeData('repair_work_items', list);
+  res.json({ ok: true });
+});
+
+apiRouter.get('/repair_part_items', requireAuth, (req, res) => {
+  const repairId = String(req.query.repair_id || '').trim();
+  const list = readData('repair_part_items') || [];
+  res.json(repairId ? list.filter(item => item.repairId === repairId) : list);
+});
+
+apiRouter.post('/repair_part_items', requireAuth, requireWrite('repair_part_items'), (req, res) => {
+  try {
+    const { repairId, partId } = req.body || {};
+    const quantity = Number(req.body?.quantity);
+    const priceSnapshot = Number(req.body?.priceSnapshot);
+    requireNonEmptyString(repairId, 'Заявка');
+    requireNonEmptyString(partId, 'Запчасть');
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error('Количество запчастей должно быть больше 0');
+    }
+    if (!findServiceTicketOr404(repairId, res)) return;
+
+    const part = (readData('spare_parts') || []).find(item => item.id === partId && item.isActive !== false);
+    if (!part) {
+      return res.status(404).json({ ok: false, error: 'Запчасть из справочника не найдена или отключена' });
+    }
+
+    const safePrice = Number.isFinite(priceSnapshot)
+      ? Math.max(0, priceSnapshot)
+      : Math.max(0, Number(part.defaultPrice) || 0);
+
+    const list = readData('repair_part_items') || [];
+    const item = {
+      id: generateId(ID_PREFIXES.repair_part_items),
+      repairId,
+      partId,
+      quantity,
+      priceSnapshot: safePrice,
+      nameSnapshot: String(part.name || '').trim(),
+      articleSnapshot: part.article ? String(part.article).trim() : (part.sku ? String(part.sku).trim() : undefined),
+      unitSnapshot: String(part.unit || 'шт').trim() || 'шт',
+      createdAt: nowIso(),
+    };
+    list.push(item);
+    writeData('repair_part_items', list);
+    res.status(201).json(item);
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+apiRouter.delete('/repair_part_items/:id', requireAuth, requireWrite('repair_part_items'), (req, res) => {
+  const list = readData('repair_part_items') || [];
+  const index = list.findIndex(item => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, error: 'Строка запчасти не найдена' });
+  }
+  list.splice(index, 1);
+  writeData('repair_part_items', list);
+  res.json({ ok: true });
+});
+
+apiRouter.get('/reports/mechanics-workload', requireAuth, (req, res) => {
+  const mechanics = readData('mechanics') || [];
+  const tickets = readData('service') || [];
+  const equipment = readData('equipment') || [];
+  const workItems = readData('repair_work_items') || [];
+  const partItems = readData('repair_part_items') || [];
+
+  const ticketMap = new Map(tickets.map(item => [item.id, item]));
+  const equipmentMap = new Map(equipment.map(item => [item.id, item]));
+  const partsByRepair = new Map();
+  for (const part of partItems) {
+    const list = partsByRepair.get(part.repairId) || [];
+    list.push(part);
+    partsByRepair.set(part.repairId, list);
+  }
+
+  const rows = workItems.map(item => {
+    const ticket = ticketMap.get(item.repairId);
+    const eq = ticket?.equipmentId ? equipmentMap.get(ticket.equipmentId) : null;
+    const mechanic = ticket?.assignedMechanicId
+      ? mechanics.find(entry => entry.id === ticket.assignedMechanicId)
+      : null;
+    const repairParts = partsByRepair.get(item.repairId) || [];
+    const partsCost = repairParts.reduce((sum, part) => sum + (Number(part.priceSnapshot) || 0) * (Number(part.quantity) || 0), 0);
+    const partNames = Array.from(new Set(repairParts.map(part => part.nameSnapshot).filter(Boolean)));
+    return {
+      mechanicId: ticket?.assignedMechanicId || '',
+      mechanicName: mechanic?.name || ticket?.assignedMechanicName || ticket?.assignedTo || 'Не назначен',
+      repairId: item.repairId,
+      repairStatus: ticket?.status || '',
+      createdAt: item.createdAt || ticket?.createdAt || '',
+      equipmentId: ticket?.equipmentId || '',
+      equipmentLabel: ticket?.equipment || [eq?.manufacturer, eq?.model].filter(Boolean).join(' ') || '—',
+      equipmentType: eq?.type || ticket?.equipmentType || '',
+      equipmentTypeLabel: ticket?.equipmentTypeLabel || ticket?.equipmentType || eq?.type || '',
+      inventoryNumber: ticket?.inventoryNumber || eq?.inventoryNumber || '—',
+      serialNumber: ticket?.serialNumber || eq?.serialNumber || '—',
+      workName: item.nameSnapshot,
+      workCategory: item.categorySnapshot || '',
+      partNames,
+      partNamesLabel: partNames.join(', '),
+      quantity: Number(item.quantity) || 0,
+      normHours: Number(item.normHoursSnapshot) || 0,
+      totalNormHours: (Number(item.quantity) || 0) * (Number(item.normHoursSnapshot) || 0),
+      partsCost,
+    };
+  });
+
+  const summaryMap = new Map();
+  for (const row of rows) {
+    const key = row.mechanicId || row.mechanicName;
+    if (!summaryMap.has(key)) {
+      summaryMap.set(key, {
+        mechanicId: row.mechanicId,
+        mechanicName: row.mechanicName,
+        repairsCount: 0,
+        worksCount: 0,
+        totalNormHours: 0,
+        partsCost: 0,
+        equipmentIds: new Set(),
+      });
+    }
+    const summary = summaryMap.get(key);
+    summary.repairsCount += 1;
+    summary.worksCount += row.quantity;
+    summary.totalNormHours += row.totalNormHours;
+    summary.partsCost += row.partsCost;
+    if (row.equipmentId) summary.equipmentIds.add(row.equipmentId);
+  }
+
+  const summary = [...summaryMap.values()].map(item => ({
+    mechanicId: item.mechanicId,
+    mechanicName: item.mechanicName,
+    repairsCount: item.repairsCount,
+    worksCount: item.worksCount,
+    totalNormHours: Number(item.totalNormHours.toFixed(2)),
+    partsCost: Number(item.partsCost.toFixed(2)),
+    equipmentCount: item.equipmentIds.size,
+  })).sort((a, b) => b.totalNormHours - a.totalNormHours);
+
+  res.json({ summary, rows });
+});
+
+apiRouter.post('/admin/migrate-repair-facts', requireAuth, requireWrite('service_works'), (req, res) => {
+  const result = migrateLegacyRepairFacts();
+  res.json({ ok: true, ...result });
+});
 
 app.use('/api', apiRouter);
 
@@ -845,6 +1379,8 @@ app.listen(PORT, async () => {
   migrateJsonFilesToDb();
   cleanupExpiredSessions();
   seedDefaultUsers();
+  migrateReferenceCollections();
+  migrateLegacyRepairFacts();
   applyAdminResetFromEnv();
 
   console.log('');

@@ -10,11 +10,14 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router';
 import { formatCurrency, formatDate } from '../lib/utils';
+import { assessServiceRisk } from '../lib/serviceRisk';
 import { useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useRentalsList, useGanttData } from '../hooks/useRentals';
 import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
+import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useClientsList } from '../hooks/useClients';
 import { usePaymentsList } from '../hooks/usePayments';
@@ -63,6 +66,10 @@ export default function Dashboard() {
   const { data: payments = [] }   = usePaymentsList();
   const { data: documents = [] }  = useDocumentsList();
   const { data: ganttRentals = [] } = useGanttData();
+  const { data: mechanicWorkload } = useQuery<MechanicsWorkloadReport>({
+    queryKey: ['reports', 'mechanicsWorkload'],
+    queryFn: reportsService.getMechanicsWorkload,
+  });
 
   // For modal props that expect Equipment[]
   const equipmentList = equipment as Equipment[];
@@ -453,6 +460,106 @@ export default function Dashboard() {
     },
     monthDebt: { monthDebt, overduePayments: monthOverduePayments },
   };
+
+  const dashboardEquipmentRisk = React.useMemo(() => {
+    const rows = mechanicWorkload?.rows ?? [];
+    const map = new Map<string, {
+      equipmentId: string;
+      equipmentLabel: string;
+      inventoryNumber: string;
+      serialNumber: string;
+      repairs: Set<string>;
+      totalNormHours: number;
+      partsCost: number;
+    }>();
+
+    for (const row of rows) {
+      const key = row.equipmentId || `${row.inventoryNumber}-${row.serialNumber}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          equipmentId: row.equipmentId,
+          equipmentLabel: row.equipmentLabel,
+          inventoryNumber: row.inventoryNumber,
+          serialNumber: row.serialNumber,
+          repairs: new Set(),
+          totalNormHours: 0,
+          partsCost: 0,
+        });
+      }
+      const item = map.get(key)!;
+      item.repairs.add(row.repairId);
+      item.totalNormHours += row.totalNormHours;
+      item.partsCost += row.partsCost;
+    }
+
+    return [...map.values()]
+      .map(item => ({
+        ...item,
+        repairsCount: item.repairs.size,
+        totalNormHours: Number(item.totalNormHours.toFixed(2)),
+        partsCost: Number(item.partsCost.toFixed(2)),
+        risk: assessServiceRisk({
+          repairsCount: item.repairs.size,
+          totalNormHours: Number(item.totalNormHours.toFixed(2)),
+          partsCost: Number(item.partsCost.toFixed(2)),
+        }),
+      }))
+      .filter(item => item.risk.level !== 'low')
+      .sort((a, b) => {
+        const score = { high: 2, medium: 1, low: 0 };
+        return score[b.risk.level] - score[a.risk.level] || b.totalNormHours - a.totalNormHours;
+      })
+      .slice(0, 4);
+  }, [mechanicWorkload]);
+
+  const dashboardModelRisk = React.useMemo(() => {
+    const rows = mechanicWorkload?.rows ?? [];
+    const map = new Map<string, {
+      label: string;
+      units: Set<string>;
+      repairs: Set<string>;
+      totalNormHours: number;
+      partsCost: number;
+    }>();
+
+    for (const row of rows) {
+      const key = `${row.equipmentTypeLabel || row.equipmentType}__${row.equipmentLabel}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          label: row.equipmentLabel,
+          units: new Set(),
+          repairs: new Set(),
+          totalNormHours: 0,
+          partsCost: 0,
+        });
+      }
+      const item = map.get(key)!;
+      item.units.add(row.equipmentId || `${row.inventoryNumber}-${row.serialNumber}`);
+      item.repairs.add(row.repairId);
+      item.totalNormHours += row.totalNormHours;
+      item.partsCost += row.partsCost;
+    }
+
+    return [...map.values()]
+      .map(item => ({
+        label: item.label,
+        unitsCount: item.units.size,
+        repairsCount: item.repairs.size,
+        totalNormHours: Number(item.totalNormHours.toFixed(2)),
+        partsCost: Number(item.partsCost.toFixed(2)),
+        risk: assessServiceRisk({
+          repairsCount: item.repairs.size,
+          totalNormHours: Number(item.totalNormHours.toFixed(2)),
+          partsCost: Number(item.partsCost.toFixed(2)),
+        }),
+      }))
+      .filter(item => item.risk.level !== 'low')
+      .sort((a, b) => {
+        const score = { high: 2, medium: 1, low: 0 };
+        return score[b.risk.level] - score[a.risk.level] || b.repairsCount - a.repairsCount;
+      })
+      .slice(0, 4);
+  }, [mechanicWorkload]);
 
   // ── rental status badge ─────────────────────────────────────────────────────
   const RENTAL_STATUS: Record<string, { label: string; color: string }> = {
@@ -872,6 +979,88 @@ export default function Dashboard() {
           )}
         </CardContent>
       </Card>
+
+      {(dashboardEquipmentRisk.length > 0 || dashboardModelRisk.length > 0) && (
+        <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
+          <Card className="border-amber-200 dark:border-amber-800">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldAlert className="h-5 w-5 text-amber-600" />
+                Риск по технике
+              </CardTitle>
+              <CardDescription>Единицы техники, которые чаще других попадают в сервис</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {dashboardEquipmentRisk.map(item => (
+                <div key={`${item.inventoryNumber}-${item.serialNumber}`} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      {item.equipmentId ? (
+                        <Link to={`/equipment/${item.equipmentId}`} className="font-medium text-[--color-primary] hover:underline">
+                          {item.equipmentLabel}
+                        </Link>
+                      ) : (
+                        <p className="font-medium text-gray-900 dark:text-white">{item.equipmentLabel}</p>
+                      )}
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        INV {item.inventoryNumber} · SN {item.serialNumber}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${item.risk.badgeClass}`}>
+                        {item.risk.label}
+                      </span>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {item.repairsCount} ремонтов · {item.totalNormHours.toFixed(1)} н/ч
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <Link to="/reports" className="inline-flex items-center text-sm text-[--color-primary] hover:underline">
+                Открыть сервисную аналитику
+                <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
+            </CardContent>
+          </Card>
+
+          <Card className="border-red-200 dark:border-red-800">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+                Проблемные модели
+              </CardTitle>
+              <CardDescription>Модели с повышенной частотой ремонтов и трудозатратами</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {dashboardModelRisk.map(item => (
+                <div key={item.label} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">{item.label}</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {item.unitsCount} ед. · {item.repairsCount} ремонтов
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${item.risk.badgeClass}`}>
+                        {item.risk.label}
+                      </span>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {item.totalNormHours.toFixed(1)} н/ч · {formatCurrency(item.partsCost)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <Link to="/reports" className="inline-flex items-center text-sm text-[--color-primary] hover:underline">
+                Перейти к рейтингу моделей
+                <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* ── Alerts + Recent rentals ───────────────────────────────────────────── */}
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">

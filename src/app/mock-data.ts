@@ -204,9 +204,9 @@ export function saveMechanics(list: Mechanic[]): void {
 export const SERVICE_WORK_CATALOG_KEY = 'app_service_work_catalog';
 
 const DEFAULT_SERVICE_WORKS: ServiceWorkCatalogItem[] = [
-  { id: 'wrk-1', name: 'Диагностика электрооборудования', normHours: 1.5, category: 'Диагностика', status: 'active' },
-  { id: 'wrk-2', name: 'Замена гидравлического шланга', normHours: 2, category: 'Гидравлика', status: 'active' },
-  { id: 'wrk-3', name: 'Регулировка концевиков', normHours: 1, category: 'Электрика', status: 'active' },
+  { id: 'wrk-1', name: 'Диагностика электрооборудования', normHours: 1.5, category: 'Диагностика', description: '', isActive: true, sortOrder: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+  { id: 'wrk-2', name: 'Замена гидравлического шланга', normHours: 2, category: 'Гидравлика', description: '', isActive: true, sortOrder: 2, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+  { id: 'wrk-3', name: 'Регулировка концевиков', normHours: 1, category: 'Электрика', description: '', isActive: true, sortOrder: 3, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
 ];
 
 export function loadServiceWorkCatalog(): ServiceWorkCatalogItem[] {
@@ -219,16 +219,16 @@ export function loadServiceWorkCatalog(): ServiceWorkCatalogItem[] {
 
 export function saveServiceWorkCatalog(list: ServiceWorkCatalogItem[]): void {
   localStorage.setItem(SERVICE_WORK_CATALOG_KEY, JSON.stringify(list));
-  serverSync('service_work_catalog', list);
+  serverSync('service_works', list);
 }
 
 // ── localStorage + server для справочника запчастей ─────────────────────────
 export const SPARE_PARTS_CATALOG_KEY = 'app_spare_parts_catalog';
 
 const DEFAULT_SPARE_PARTS: SparePartCatalogItem[] = [
-  { id: 'part-1', name: 'Гидравлический шланг 1/4"', sku: 'HS-14', unitCost: 2800, status: 'active' },
-  { id: 'part-2', name: 'Концевой выключатель', sku: 'LIM-SW', unitCost: 1900, status: 'active' },
-  { id: 'part-3', name: 'Предохранитель 24V', sku: 'FUSE-24', unitCost: 250, status: 'active' },
+  { id: 'part-1', name: 'Гидравлический шланг 1/4"', article: 'HS-14', sku: 'HS-14', unit: 'шт', defaultPrice: 2800, category: 'Гидравлика', manufacturer: '', isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+  { id: 'part-2', name: 'Концевой выключатель', article: 'LIM-SW', sku: 'LIM-SW', unit: 'шт', defaultPrice: 1900, category: 'Электрика', manufacturer: '', isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+  { id: 'part-3', name: 'Предохранитель 24V', article: 'FUSE-24', sku: 'FUSE-24', unit: 'шт', defaultPrice: 250, category: 'Электрика', manufacturer: '', isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
 ];
 
 export function loadSparePartsCatalog(): SparePartCatalogItem[] {
@@ -241,7 +241,7 @@ export function loadSparePartsCatalog(): SparePartCatalogItem[] {
 
 export function saveSparePartsCatalog(list: SparePartCatalogItem[]): void {
   localStorage.setItem(SPARE_PARTS_CATALOG_KEY, JSON.stringify(list));
-  serverSync('spare_parts_catalog', list);
+  serverSync('spare_parts', list);
 }
 
 // ── localStorage + server для собственников техники ──────────────────────────

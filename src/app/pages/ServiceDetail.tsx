@@ -7,6 +7,7 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
+import { SearchableSelect } from '../components/ui/SearchableSelect';
 import {
   ArrowLeft, Wrench, User, Clock, MapPin, Tag, FileText,
   CheckCircle, XCircle, AlertTriangle, Play, Package, History,
@@ -20,20 +21,24 @@ import type {
   Equipment,
   EquipmentStatus,
   Mechanic,
+  RepairPartItem,
+  RepairWorkItem,
   ServicePartUsage,
   ServiceRepairResult,
+  ServiceWork,
   ServiceTicket,
   ServiceStatus,
-  ServiceWorkCatalogItem,
   ServiceWorkPerformed,
-  SparePartCatalogItem,
+  SparePart,
 } from '../types';
 import { equipmentService } from '../services/equipment.service';
 import { mechanicsService } from '../services/mechanics.service';
+import { repairPartItemsService } from '../services/repair-part-items.service';
+import { repairWorkItemsService } from '../services/repair-work-items.service';
 import { rentalsService } from '../services/rentals.service';
-import { serviceWorkCatalogService } from '../services/service-work-catalog.service';
+import { serviceWorksService } from '../services/service-works.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
-import { sparePartsCatalogService } from '../services/spare-parts-catalog.service';
+import { sparePartsService } from '../services/spare-parts.service';
 import { getEquipmentTypeLabel } from '../lib/equipmentClassification';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -90,24 +95,53 @@ function Divider() {
   return <hr className="border-gray-100 dark:border-gray-800" />;
 }
 
-function normalizeRepairResult(ticket: ServiceTicket): ServiceRepairResult {
+function getRepairSummary(ticket: ServiceTicket): string {
+  return ticket.resultData?.summary ?? ticket.result ?? '';
+}
+
+function legacyWorks(ticket: ServiceTicket): ServiceWorkPerformed[] {
+  return ticket.resultData?.worksPerformed ?? [];
+}
+
+function legacyParts(ticket: ServiceTicket): ServicePartUsage[] {
+  return ticket.resultData?.partsUsed ?? ticket.parts ?? [];
+}
+
+function workItemsToResult(items: RepairWorkItem[]): ServiceWorkPerformed[] {
+  return items.map(item => ({
+    catalogId: item.workId,
+    name: item.nameSnapshot,
+    normHours: item.normHoursSnapshot,
+    qty: item.quantity,
+    totalNormHours: Number((item.normHoursSnapshot * item.quantity).toFixed(2)),
+  }));
+}
+
+function partItemsToResult(items: RepairPartItem[]): ServicePartUsage[] {
+  return items.map(item => ({
+    catalogId: item.partId,
+    name: item.nameSnapshot,
+    sku: item.articleSnapshot,
+    qty: item.quantity,
+    cost: item.priceSnapshot,
+  }));
+}
+
+function buildRepairResult(ticket: ServiceTicket, workItems: RepairWorkItem[], partItems: RepairPartItem[]): ServiceRepairResult {
   return {
-    summary: ticket.resultData?.summary ?? ticket.result ?? '',
-    partsUsed: ticket.resultData?.partsUsed ?? ticket.parts ?? [],
-    worksPerformed: ticket.resultData?.worksPerformed ?? [],
+    summary: getRepairSummary(ticket),
+    worksPerformed: workItems.length > 0 ? workItemsToResult(workItems) : legacyWorks(ticket),
+    partsUsed: partItems.length > 0 ? partItemsToResult(partItems) : legacyParts(ticket),
   };
 }
 
 function normalizeTicket(ticket: ServiceTicket): ServiceTicket {
-  const resultData = normalizeRepairResult(ticket);
   return {
     ...ticket,
     assignedMechanicName: ticket.assignedMechanicName ?? ticket.assignedTo,
     createdByUserName: ticket.createdByUserName ?? ticket.createdBy,
     createdBy: ticket.createdByUserName ?? ticket.createdBy,
-    parts: resultData.partsUsed,
-    result: resultData.summary,
-    resultData,
+    result: getRepairSummary(ticket),
   };
 }
 
@@ -130,13 +164,23 @@ export default function ServiceDetail() {
     queryKey: ['mechanics'],
     queryFn: mechanicsService.getAll,
   });
-  const { data: workCatalog = [] } = useQuery<ServiceWorkCatalogItem[]>({
-    queryKey: ['serviceWorkCatalog'],
-    queryFn: serviceWorkCatalogService.getAll,
+  const { data: workCatalog = [] } = useQuery<ServiceWork[]>({
+    queryKey: ['serviceWorks', 'active'],
+    queryFn: serviceWorksService.getActive,
   });
-  const { data: sparePartsCatalog = [] } = useQuery<SparePartCatalogItem[]>({
-    queryKey: ['sparePartsCatalog'],
-    queryFn: sparePartsCatalogService.getAll,
+  const { data: sparePartsCatalog = [] } = useQuery<SparePart[]>({
+    queryKey: ['spareParts', 'active'],
+    queryFn: sparePartsService.getActive,
+  });
+  const { data: repairWorkItems = [] } = useQuery<RepairWorkItem[]>({
+    queryKey: ['repairWorkItems', id],
+    queryFn: () => repairWorkItemsService.getByRepairId(id ?? ''),
+    enabled: Boolean(id),
+  });
+  const { data: repairPartItems = [] } = useQuery<RepairPartItem[]>({
+    queryKey: ['repairPartItems', id],
+    queryFn: () => repairPartItemsService.getByRepairId(id ?? ''),
+    enabled: Boolean(id),
   });
   const updateTicket = useUpdateServiceTicket();
 
@@ -155,6 +199,7 @@ export default function ServiceDetail() {
   const [selectedPartId, setSelectedPartId] = useState('');
   const [selectedPartQty, setSelectedPartQty] = useState('1');
   const [selectedPartCost, setSelectedPartCost] = useState('');
+  const [repairFormError, setRepairFormError] = useState<string | null>(null);
 
   // ── Photo upload state ──
   const [photoPending, setPhotoPending] = useState<string[]>([]);
@@ -162,7 +207,7 @@ export default function ServiceDetail() {
 
   React.useEffect(() => {
     if (!ticket) return;
-    setResultSummary(normalizeRepairResult(ticket).summary ?? '');
+    setResultSummary(getRepairSummary(ticket));
     setNewAssigneeId(ticket.assignedMechanicId ?? '');
   }, [ticket]);
 
@@ -223,14 +268,18 @@ export default function ServiceDetail() {
     updateTicket.mutate({ id: normalized.id, data: normalized });
   }, [updateTicket]);
 
-  const currentEquipment = equipmentList.find(item =>
-    item.id === ticket?.equipmentId || item.inventoryNumber === ticket?.inventoryNumber,
-  );
+  const currentEquipment = ticket
+    ? (
+        equipmentList.find(item => item.id === ticket.equipmentId)
+        ?? equipmentList.find(item => ticket.serialNumber && item.serialNumber === ticket.serialNumber)
+        ?? equipmentList.find(item => ticket.inventoryNumber && item.inventoryNumber === ticket.inventoryNumber)
+      )
+    : undefined;
   const equipmentTypeDisplay = ticket
     ? (currentEquipment ? getEquipmentTypeLabel(currentEquipment) : (ticket.equipmentTypeLabel || ticket.equipmentType || ''))
     : '';
   const activeMechanics = mechanics.filter(item => item.status === 'active');
-  const repairResult = ticket ? normalizeRepairResult(ticket) : null;
+  const repairResult = ticket ? buildRepairResult(ticket, repairWorkItems, repairPartItems) : null;
 
   // ── actions ────────────────────────────────────────────────────────────────
 
@@ -333,15 +382,15 @@ export default function ServiceDetail() {
 
   const saveResultSummary = () => {
     if (!ticket || !canEdit) return;
-    const nextResult: ServiceRepairResult = {
-      ...normalizeRepairResult(ticket),
-      summary: resultSummary.trim(),
-    };
     persist({
       ...ticket,
-      result: nextResult.summary,
-      resultData: nextResult,
-      parts: nextResult.partsUsed,
+      result: resultSummary.trim(),
+      resultData: {
+        ...ticket.resultData,
+        summary: resultSummary.trim(),
+        worksPerformed: legacyWorks(ticket),
+        partsUsed: legacyParts(ticket),
+      },
     });
   };
 
@@ -351,30 +400,18 @@ export default function ServiceDetail() {
     setNewPlannedDate('');
   };
 
-  const addWorkPerformed = () => {
+  const addWorkPerformed = async () => {
     if (!ticket || !canEdit || !selectedWorkId) return;
     const work = workCatalog.find(item => item.id === selectedWorkId);
-    const qty = Math.max(1, Number(selectedWorkQty) || 1);
-    if (!work) return;
-    const worksPerformed: ServiceWorkPerformed[] = [
-      ...normalizeRepairResult(ticket).worksPerformed,
-      {
-        catalogId: work.id,
-        name: work.name,
-        normHours: work.normHours,
-        qty,
-        totalNormHours: Number((work.normHours * qty).toFixed(2)),
-      },
-    ];
-    const nextResult: ServiceRepairResult = {
-      ...normalizeRepairResult(ticket),
-      worksPerformed,
-    };
+    const qty = Number(selectedWorkQty);
+    if (!work || !Number.isFinite(qty) || qty <= 0) {
+      setRepairFormError('Для работы укажите количество больше 0');
+      return;
+    }
+
+    await repairWorkItemsService.add({ repairId: ticket.id, workId: work.id, quantity: qty });
     persist({
       ...ticket,
-      result: nextResult.summary,
-      resultData: nextResult,
-      parts: nextResult.partsUsed,
       workLog: [...ticket.workLog, {
         date: new Date().toISOString(),
         text: `Добавлена работа: ${work.name} × ${qty}`,
@@ -382,45 +419,46 @@ export default function ServiceDetail() {
         type: 'repair_result',
       }],
     });
+    await queryClient.invalidateQueries({ queryKey: ['repairWorkItems', ticket.id] });
+    await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
     setSelectedWorkId('');
     setSelectedWorkQty('1');
+    setRepairFormError(null);
   };
 
-  const removeWorkPerformed = (index: number) => {
+  const removeWorkPerformed = async (item: RepairWorkItem, name: string) => {
     if (!ticket || !canEdit) return;
-    const current = normalizeRepairResult(ticket);
-    const nextResult: ServiceRepairResult = {
-      ...current,
-      worksPerformed: current.worksPerformed.filter((_, itemIndex) => itemIndex !== index),
-    };
-    persist({ ...ticket, result: nextResult.summary, resultData: nextResult, parts: nextResult.partsUsed });
-  };
-
-  const addPartUsage = () => {
-    if (!ticket || !canEdit || !selectedPartId) return;
-    const part = sparePartsCatalog.find(item => item.id === selectedPartId);
-    const qty = Math.max(1, Number(selectedPartQty) || 1);
-    const cost = Math.max(0, Number(selectedPartCost) || part?.unitCost || 0);
-    if (!part) return;
-    const partsUsed: ServicePartUsage[] = [
-      ...normalizeRepairResult(ticket).partsUsed,
-      {
-        catalogId: part.id,
-        name: part.name,
-        sku: part.sku,
-        qty,
-        cost,
-      },
-    ];
-    const nextResult: ServiceRepairResult = {
-      ...normalizeRepairResult(ticket),
-      partsUsed,
-    };
+    await repairWorkItemsService.remove(item.id);
     persist({
       ...ticket,
-      result: nextResult.summary,
-      resultData: nextResult,
-      parts: nextResult.partsUsed,
+      workLog: [...ticket.workLog, {
+        date: new Date().toISOString(),
+        text: `Удалена работа: ${name}`,
+        author: user?.name || 'Оператор',
+        type: 'repair_result',
+      }],
+    });
+    await queryClient.invalidateQueries({ queryKey: ['repairWorkItems', ticket.id] });
+    await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
+  };
+
+  const addPartUsage = async () => {
+    if (!ticket || !canEdit || !selectedPartId) return;
+    const part = sparePartsCatalog.find(item => item.id === selectedPartId);
+    const qty = Number(selectedPartQty);
+    const cost = Number(selectedPartCost);
+    if (!part || !Number.isFinite(qty) || qty <= 0) {
+      setRepairFormError('Для запчасти укажите количество больше 0');
+      return;
+    }
+    if (!Number.isFinite(cost) || cost < 0) {
+      setRepairFormError('Цена запчасти должна быть числом не меньше 0');
+      return;
+    }
+
+    await repairPartItemsService.add({ repairId: ticket.id, partId: part.id, quantity: qty, priceSnapshot: cost });
+    persist({
+      ...ticket,
       workLog: [...ticket.workLog, {
         date: new Date().toISOString(),
         text: `Добавлена запчасть: ${part.name} × ${qty}`,
@@ -428,19 +466,28 @@ export default function ServiceDetail() {
         type: 'repair_result',
       }],
     });
+    await queryClient.invalidateQueries({ queryKey: ['repairPartItems', ticket.id] });
+    await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
     setSelectedPartId('');
     setSelectedPartQty('1');
     setSelectedPartCost('');
+    setRepairFormError(null);
   };
 
-  const removePartUsage = (index: number) => {
+  const removePartUsage = async (item: RepairPartItem, name: string) => {
     if (!ticket || !canEdit) return;
-    const current = normalizeRepairResult(ticket);
-    const nextResult: ServiceRepairResult = {
-      ...current,
-      partsUsed: current.partsUsed.filter((_, itemIndex) => itemIndex !== index),
-    };
-    persist({ ...ticket, result: nextResult.summary, resultData: nextResult, parts: nextResult.partsUsed });
+    await repairPartItemsService.remove(item.id);
+    persist({
+      ...ticket,
+      workLog: [...ticket.workLog, {
+        date: new Date().toISOString(),
+        text: `Удалена запчасть: ${name}`,
+        author: user?.name || 'Оператор',
+        type: 'repair_result',
+      }],
+    });
+    await queryClient.invalidateQueries({ queryKey: ['repairPartItems', ticket.id] });
+    await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
   };
 
   // ── "not found" screen ─────────────────────────────────────────────────────
@@ -638,21 +685,23 @@ export default function ServiceDetail() {
                       <div>
                         <p className="mb-2 text-xs text-gray-500 uppercase tracking-wide">Выполненные работы</p>
                         <div className="space-y-2">
-                          {repairResult.worksPerformed.map((work, index) => (
-                            <div key={`${work.catalogId}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                          {repairResult.worksPerformed.map((work, index) => {
+                            const item = repairWorkItems[index];
+                            return (
+                            <div key={item?.id ?? `${work.catalogId}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
                               <div>
                                 <p className="font-medium text-gray-900 dark:text-white">{work.name}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
                                   {work.normHours} н/ч × {work.qty} = {work.totalNormHours} н/ч
                                 </p>
                               </div>
-                              {canEdit && ticket.status !== 'closed' && (
-                                <button onClick={() => removeWorkPerformed(index)} className="text-xs text-red-500 hover:underline">
+                              {canEdit && ticket.status !== 'closed' && item && (
+                                <button onClick={() => void removeWorkPerformed(item, work.name)} className="text-xs text-red-500 hover:underline">
                                   Удалить
                                 </button>
                               )}
                             </div>
-                          ))}
+                          );})}
                         </div>
                       </div>
                     )}
@@ -660,21 +709,23 @@ export default function ServiceDetail() {
                       <div>
                         <p className="mb-2 text-xs text-gray-500 uppercase tracking-wide">Использованные запчасти</p>
                         <div className="space-y-2">
-                          {repairResult.partsUsed.map((part, index) => (
-                            <div key={`${part.catalogId ?? part.name}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                          {repairResult.partsUsed.map((part, index) => {
+                            const item = repairPartItems[index];
+                            return (
+                            <div key={item?.id ?? `${part.catalogId ?? part.name}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
                               <div>
                                 <p className="font-medium text-gray-900 dark:text-white">{part.name}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                                  {part.sku ? `${part.sku} · ` : ''}{part.qty} шт. × {part.cost.toLocaleString('ru-RU')} ₽
+                                  {part.sku ? `${part.sku} · ` : ''}{part.qty} {item?.unitSnapshot || 'шт'} × {part.cost.toLocaleString('ru-RU')} ₽
                                 </p>
                               </div>
-                              {canEdit && ticket.status !== 'closed' && (
-                                <button onClick={() => removePartUsage(index)} className="text-xs text-red-500 hover:underline">
+                              {canEdit && ticket.status !== 'closed' && item && (
+                                <button onClick={() => void removePartUsage(item, part.name)} className="text-xs text-red-500 hover:underline">
                                   Удалить
                                 </button>
                               )}
                             </div>
-                          ))}
+                          );})}
                         </div>
                       </div>
                     )}
@@ -700,28 +751,30 @@ export default function ServiceDetail() {
                         <Button size="sm" onClick={saveResultSummary}>Сохранить</Button>
                       </div>
                     </div>
+                    {repairFormError && (
+                      <p className="text-sm text-red-500">{repairFormError}</p>
+                    )}
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_auto]">
                       <div>
                         <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить работу</label>
-                        <select
+                        <SearchableSelect
+                          options={workCatalog.map(work => ({
+                            value: work.id,
+                            label: work.name,
+                            meta: `${work.category || 'Без категории'} · ${work.normHours} н/ч`,
+                            keywords: [work.category || '', work.description || ''],
+                          }))}
                           value={selectedWorkId}
-                          onChange={e => setSelectedWorkId(e.target.value)}
-                          className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                        >
-                          <option value="">Выберите работу из справочника</option>
-                          {workCatalog.filter(item => item.status === 'active').map(work => (
-                            <option key={work.id} value={work.id}>
-                              {work.name} · {work.normHours} н/ч
-                            </option>
-                          ))}
-                        </select>
+                          onChange={setSelectedWorkId}
+                          placeholder="Выберите работу из справочника"
+                        />
                       </div>
                       <div>
                         <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Кол-во</label>
                         <Input type="number" min="1" value={selectedWorkQty} onChange={e => setSelectedWorkQty(e.target.value)} />
                       </div>
                       <div className="flex items-end">
-                        <Button size="sm" variant="secondary" onClick={addWorkPerformed} disabled={!selectedWorkId}>
+                        <Button size="sm" variant="secondary" onClick={() => void addWorkPerformed()} disabled={!selectedWorkId}>
                           Добавить работу
                         </Button>
                       </div>
@@ -729,23 +782,21 @@ export default function ServiceDetail() {
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_120px_auto]">
                       <div>
                         <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить запчасть</label>
-                        <select
+                        <SearchableSelect
+                          options={sparePartsCatalog.map(part => ({
+                            value: part.id,
+                            label: part.name,
+                            meta: `${part.article || part.sku || 'Без артикула'} · ${part.defaultPrice.toLocaleString('ru-RU')} ₽/${part.unit}`,
+                            keywords: [part.article || '', part.sku || '', part.category || '', part.manufacturer || ''],
+                          }))}
                           value={selectedPartId}
-                          onChange={e => {
-                            const nextId = e.target.value;
+                          onChange={nextId => {
                             const part = sparePartsCatalog.find(item => item.id === nextId);
                             setSelectedPartId(nextId);
-                            setSelectedPartCost(part?.unitCost ? String(part.unitCost) : '');
+                            setSelectedPartCost(String(part?.defaultPrice ?? 0));
                           }}
-                          className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                        >
-                          <option value="">Выберите запчасть</option>
-                          {sparePartsCatalog.filter(item => item.status === 'active').map(part => (
-                            <option key={part.id} value={part.id}>
-                              {part.name}{part.sku ? ` · ${part.sku}` : ''}
-                            </option>
-                          ))}
-                        </select>
+                          placeholder="Выберите запчасть"
+                        />
                       </div>
                       <div>
                         <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Кол-во</label>
@@ -756,7 +807,7 @@ export default function ServiceDetail() {
                         <Input type="number" min="0" value={selectedPartCost} onChange={e => setSelectedPartCost(e.target.value)} />
                       </div>
                       <div className="flex items-end">
-                        <Button size="sm" variant="secondary" onClick={addPartUsage} disabled={!selectedPartId}>
+                        <Button size="sm" variant="secondary" onClick={() => void addPartUsage()} disabled={!selectedPartId}>
                           Добавить запчасть
                         </Button>
                       </div>

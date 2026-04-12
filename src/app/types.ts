@@ -99,22 +99,53 @@ export interface Mechanic {
   status: ReferenceStatus;
 }
 
-export interface ServiceWorkCatalogItem {
+export interface ServiceWork {
   id: string;
   name: string;
-  normHours: number;
   category?: string;
-  notes?: string;
-  status: ReferenceStatus;
+  description?: string;
+  normHours: number;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export interface SparePartCatalogItem {
+export interface SparePart {
   id: string;
   name: string;
+  article?: string;
   sku?: string;
-  unitCost?: number;
-  notes?: string;
-  status: ReferenceStatus;
+  unit: string;
+  defaultPrice: number;
+  category?: string;
+  manufacturer?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RepairWorkItem {
+  id: string;
+  repairId: string;
+  workId: string;
+  quantity: number;
+  normHoursSnapshot: number;
+  nameSnapshot: string;
+  categorySnapshot?: string;
+  createdAt: string;
+}
+
+export interface RepairPartItem {
+  id: string;
+  repairId: string;
+  partId: string;
+  quantity: number;
+  priceSnapshot: number;
+  nameSnapshot: string;
+  articleSnapshot?: string;
+  unitSnapshot: string;
+  createdAt: string;
 }
 
 export interface ServiceWorkLogEntry {
@@ -145,6 +176,9 @@ export interface ServiceRepairResult {
   partsUsed: ServicePartUsage[];
   worksPerformed: ServiceWorkPerformed[];
 }
+
+export type ServiceWorkCatalogItem = ServiceWork;
+export type SparePartCatalogItem = SparePart;
 
 export interface ServiceTicket {
   id: string;

@@ -14,6 +14,7 @@ import { EQUIPMENT_KEYS } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
 import { canEquipmentParticipateInRentals } from '../../lib/equipmentClassification';
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../../lib/utils';
+import { EquipmentCombobox } from '../ui/EquipmentCombobox';
 
 // ─── Локальные хелперы ──────────────────────────────────────────────────────
 
@@ -302,14 +303,12 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
                 Нет техники в реестре
               </p>
             ) : (
-              <select value={equipmentInv} onChange={(e) => setEquipmentInv(e.target.value)} className={selectClass}>
-                <option value="">Выберите технику</option>
-                {allEquipment.map((eq) => (
-                  <option key={eq.inventoryNumber} value={eq.inventoryNumber}>
-                    {equipmentOptionLabel(eq)}
-                  </option>
-                ))}
-              </select>
+              <EquipmentCombobox
+                equipment={allEquipment}
+                value={equipmentInv}
+                valueKey="inventoryNumber"
+                onChange={setEquipmentInv}
+              />
             )}
           </div>
 
@@ -558,33 +557,20 @@ export function NewRentalModal({
                     Нет свободной техники на выбранный период — выберите единицу ниже, чтобы узнать какая аренда блокирует
                   </p>
                 )}
-                <select
+                <EquipmentCombobox
+                  equipment={[...availableEquipment, ...busyEquipment]}
                   value={equipmentInv}
-                  onChange={e => handleEquipmentChange(e.target.value)}
-                  className={selectClass}
-                >
-                  <option value="">Выберите технику</option>
-                  {/* Свободная техника */}
-                  {availableEquipment.length > 0 && (
-                    <optgroup label="✓ Доступна на выбранный период">
-                      {availableEquipment.map(eq => (
-                        <option key={eq.inventoryNumber} value={eq.inventoryNumber}>
-                          {equipmentOptionLabel(eq)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {/* Занятая техника — всегда показываем, чтобы видеть причину блокировки */}
-                  {busyEquipment.length > 0 && (
-                    <optgroup label="⚠ Занята на выбранный период">
-                      {busyEquipment.map(eq => (
-                        <option key={eq.inventoryNumber} value={eq.inventoryNumber}>
-                          {equipmentOptionLabel(eq)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
+                  valueKey="inventoryNumber"
+                  onChange={handleEquipmentChange}
+                  groups={[
+                    ...(availableEquipment.length > 0
+                      ? [{ label: '✓ Доступна на выбранный период', items: availableEquipment }]
+                      : []),
+                    ...(busyEquipment.length > 0
+                      ? [{ label: '⚠ Занята на выбранный период', items: busyEquipment }]
+                      : []),
+                  ]}
+                />
               </>
             )}
 

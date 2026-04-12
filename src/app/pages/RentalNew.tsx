@@ -21,6 +21,7 @@ import type { GanttRentalData } from '../mock-data';
 import type { EquipmentStatus } from '../types';
 import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/utils';
+import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
 
 // Helper: check date overlap
 function isEquipmentBusy(invNumber: string, startDate: string, endDate: string, rentals: GanttRentalData[]): boolean {
@@ -220,23 +221,20 @@ export default function RentalNew() {
                       Нет свободной техники на выбранный период
                     </p>
                   )}
-                  <Select value={equipmentInv} onValueChange={setEquipmentInv}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите технику" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableEq.length > 0 && availableEq.map(eq => (
-                        <SelectItem key={eq.inventoryNumber} value={eq.inventoryNumber}>
-                          ✓ {eq.manufacturer} {eq.model} · INV {eq.inventoryNumber} · SN {eq.serialNumber || 'не указан'}
-                        </SelectItem>
-                      ))}
-                      {busyEq.length > 0 && busyEq.map(eq => (
-                        <SelectItem key={eq.inventoryNumber} value={eq.inventoryNumber}>
-                          ⚠ {eq.manufacturer} {eq.model} · INV {eq.inventoryNumber} · SN {eq.serialNumber || 'не указан'} — занята
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <EquipmentCombobox
+                    equipment={[...availableEq, ...busyEq]}
+                    value={equipmentInv}
+                    valueKey="inventoryNumber"
+                    onChange={setEquipmentInv}
+                    groups={[
+                      ...(availableEq.length > 0
+                        ? [{ label: '✓ Доступна на выбранный период', items: availableEq }]
+                        : []),
+                      ...(busyEq.length > 0
+                        ? [{ label: '⚠ Занята на выбранный период', items: busyEq }]
+                        : []),
+                    ]}
+                  />
                   {conflictWarn && (
                     <p className="rounded-md border border-orange-200 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-3 py-2 text-xs text-orange-700 dark:text-orange-400">
                       ⚠ Техника занята на выбранный период — выберите другую технику или даты

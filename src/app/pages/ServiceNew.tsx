@@ -6,6 +6,7 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { ArrowLeft, Camera, X, ImagePlus } from 'lucide-react';
+import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
 import { SERVICE_TICKET_KEYS, useCreateServiceTicket } from '../hooks/useServiceTickets';
 import { EQUIPMENT_KEYS, useEquipmentList } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
@@ -230,19 +231,12 @@ export default function ServiceNew() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Техника из системы
               </label>
-              <select
+              <EquipmentCombobox
+                equipment={equipmentList}
                 value={formData.equipmentId}
-                onChange={(e) => handleEquipmentChange(e.target.value)}
-                required
-                className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-[--color-primary] focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-              >
-                <option value="">Выберите технику</option>
-                {equipmentList.map(e => (
-                  <option key={e.id} value={e.id}>
-                    {e.manufacturer} {e.model} · INV {e.inventoryNumber} · SN {e.serialNumber || 'не указан'}
-                  </option>
-                ))}
-              </select>
+                valueKey="id"
+                onChange={handleEquipmentChange}
+              />
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 В заявке можно выбрать только ту технику, которая уже заведена в системе.
               </p>

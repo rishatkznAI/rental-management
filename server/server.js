@@ -142,6 +142,9 @@ const WRITE_PERMISSIONS = {
   users:          ['Администратор'],
   shipping_photos:['Администратор', 'Механик', 'Менеджер по аренде'],
   owners:         ['Администратор'],
+  mechanics:      ['Администратор'],
+  service_work_catalog: ['Администратор'],
+  spare_parts_catalog: ['Администратор'],
 };
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
@@ -429,6 +432,9 @@ const COLLECTIONS = [
   'users',
   'shipping_photos',
   'owners',
+  'mechanics',
+  'service_work_catalog',
+  'spare_parts_catalog',
 ];
 
 for (const col of COLLECTIONS) {

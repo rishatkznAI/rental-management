@@ -10,3 +10,6 @@ export { paymentsService } from './payments.service';
 export { documentsService } from './documents.service';
 export { usersService } from './users.service';
 export { ownersService } from './owners.service';
+export { mechanicsService } from './mechanics.service';
+export { serviceWorkCatalogService } from './service-work-catalog.service';
+export { sparePartsCatalogService } from './spare-parts-catalog.service';

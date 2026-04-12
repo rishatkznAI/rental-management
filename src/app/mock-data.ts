@@ -1,4 +1,16 @@
-import { Equipment, Rental, ServiceTicket, Client, Document, Payment, RepairRecord, ShippingPhoto } from './types';
+import {
+  Equipment,
+  Rental,
+  ServiceTicket,
+  Client,
+  Document,
+  Payment,
+  RepairRecord,
+  ShippingPhoto,
+  Mechanic,
+  ServiceWorkCatalogItem,
+  SparePartCatalogItem,
+} from './types';
 import { api } from './lib/api';
 
 // ========== Пустая база данных ==========
@@ -165,6 +177,71 @@ export function loadPayments(): Payment[] {
 export function savePayments(list: Payment[]): void {
   localStorage.setItem(PAYMENTS_STORAGE_KEY, JSON.stringify(list));
   serverSync('payments', list);
+}
+
+// ── localStorage + server для механиков ──────────────────────────────────────
+export const MECHANICS_STORAGE_KEY = 'app_mechanics';
+
+const DEFAULT_MECHANICS: Mechanic[] = [
+  { id: 'mech-1', name: 'Петров Иван Сергеевич', phone: '+7 900 000-00-01', status: 'active' },
+  { id: 'mech-2', name: 'Орлов Михаил Андреевич', phone: '+7 900 000-00-02', status: 'active' },
+];
+
+export function loadMechanics(): Mechanic[] {
+  try {
+    const raw = localStorage.getItem(MECHANICS_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as Mechanic[];
+  } catch { /* ignore */ }
+  return DEFAULT_MECHANICS;
+}
+
+export function saveMechanics(list: Mechanic[]): void {
+  localStorage.setItem(MECHANICS_STORAGE_KEY, JSON.stringify(list));
+  serverSync('mechanics', list);
+}
+
+// ── localStorage + server для справочника работ сервиса ─────────────────────
+export const SERVICE_WORK_CATALOG_KEY = 'app_service_work_catalog';
+
+const DEFAULT_SERVICE_WORKS: ServiceWorkCatalogItem[] = [
+  { id: 'wrk-1', name: 'Диагностика электрооборудования', normHours: 1.5, category: 'Диагностика', status: 'active' },
+  { id: 'wrk-2', name: 'Замена гидравлического шланга', normHours: 2, category: 'Гидравлика', status: 'active' },
+  { id: 'wrk-3', name: 'Регулировка концевиков', normHours: 1, category: 'Электрика', status: 'active' },
+];
+
+export function loadServiceWorkCatalog(): ServiceWorkCatalogItem[] {
+  try {
+    const raw = localStorage.getItem(SERVICE_WORK_CATALOG_KEY);
+    if (raw) return JSON.parse(raw) as ServiceWorkCatalogItem[];
+  } catch { /* ignore */ }
+  return DEFAULT_SERVICE_WORKS;
+}
+
+export function saveServiceWorkCatalog(list: ServiceWorkCatalogItem[]): void {
+  localStorage.setItem(SERVICE_WORK_CATALOG_KEY, JSON.stringify(list));
+  serverSync('service_work_catalog', list);
+}
+
+// ── localStorage + server для справочника запчастей ─────────────────────────
+export const SPARE_PARTS_CATALOG_KEY = 'app_spare_parts_catalog';
+
+const DEFAULT_SPARE_PARTS: SparePartCatalogItem[] = [
+  { id: 'part-1', name: 'Гидравлический шланг 1/4"', sku: 'HS-14', unitCost: 2800, status: 'active' },
+  { id: 'part-2', name: 'Концевой выключатель', sku: 'LIM-SW', unitCost: 1900, status: 'active' },
+  { id: 'part-3', name: 'Предохранитель 24V', sku: 'FUSE-24', unitCost: 250, status: 'active' },
+];
+
+export function loadSparePartsCatalog(): SparePartCatalogItem[] {
+  try {
+    const raw = localStorage.getItem(SPARE_PARTS_CATALOG_KEY);
+    if (raw) return JSON.parse(raw) as SparePartCatalogItem[];
+  } catch { /* ignore */ }
+  return DEFAULT_SPARE_PARTS;
+}
+
+export function saveSparePartsCatalog(list: SparePartCatalogItem[]): void {
+  localStorage.setItem(SPARE_PARTS_CATALOG_KEY, JSON.stringify(list));
+  serverSync('spare_parts_catalog', list);
 }
 
 // ── localStorage + server для собственников техники ──────────────────────────

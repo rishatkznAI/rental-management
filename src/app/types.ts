@@ -89,6 +89,62 @@ export interface Rental {
 
 export type ServicePriority = 'low' | 'medium' | 'high' | 'critical';
 export type ServiceStatus = 'new' | 'in_progress' | 'waiting_parts' | 'ready' | 'closed';
+export type ReferenceStatus = 'active' | 'inactive';
+
+export interface Mechanic {
+  id: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  status: ReferenceStatus;
+}
+
+export interface ServiceWorkCatalogItem {
+  id: string;
+  name: string;
+  normHours: number;
+  category?: string;
+  notes?: string;
+  status: ReferenceStatus;
+}
+
+export interface SparePartCatalogItem {
+  id: string;
+  name: string;
+  sku?: string;
+  unitCost?: number;
+  notes?: string;
+  status: ReferenceStatus;
+}
+
+export interface ServiceWorkLogEntry {
+  date: string;
+  text: string;
+  author: string;
+  type?: 'comment' | 'status_change' | 'assign' | 'repair_result';
+}
+
+export interface ServicePartUsage {
+  catalogId?: string;
+  name: string;
+  sku?: string;
+  qty: number;
+  cost: number;
+}
+
+export interface ServiceWorkPerformed {
+  catalogId: string;
+  name: string;
+  normHours: number;
+  qty: number;
+  totalNormHours: number;
+}
+
+export interface ServiceRepairResult {
+  summary?: string;
+  partsUsed: ServicePartUsage[];
+  worksPerformed: ServiceWorkPerformed[];
+}
 
 export interface ServiceTicket {
   id: string;
@@ -97,20 +153,27 @@ export interface ServiceTicket {
   inventoryNumber?: string;
   serialNumber?: string;
   equipmentType?: string;
+  equipmentTypeLabel?: string;
   location?: string;
   reason: string;
   description: string;
   priority: ServicePriority;
   sla: string;
   assignedTo?: string;
+  assignedMechanicId?: string;
+  assignedMechanicName?: string;
   createdBy?: string;
+  createdByUserId?: string;
+  createdByUserName?: string;
+  reporterContact?: string;
   source?: 'manual' | 'bot' | 'manager' | 'system';
   status: ServiceStatus;
   plannedDate?: string;
   closedAt?: string;
   result?: string;
-  workLog: { date: string; text: string; author: string; type?: 'comment' | 'status_change' | 'assign' }[];
-  parts: { name: string; qty: number; cost: number }[];
+  resultData?: ServiceRepairResult;
+  workLog: ServiceWorkLogEntry[];
+  parts: ServicePartUsage[];
   createdAt: string;
   photos?: string[];
 }

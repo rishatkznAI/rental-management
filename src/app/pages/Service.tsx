@@ -121,7 +121,8 @@ export default function Service() {
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
               <div><span className="font-medium text-gray-700 dark:text-gray-300">SLA:</span> {ticket.sla}</div>
-              {ticket.assignedTo && <div><span className="font-medium text-gray-700 dark:text-gray-300">Назначен:</span> {ticket.assignedTo}</div>}
+              {(ticket.assignedMechanicName || ticket.assignedTo) && <div><span className="font-medium text-gray-700 dark:text-gray-300">Назначен:</span> {ticket.assignedMechanicName || ticket.assignedTo}</div>}
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Автор:</span> {ticket.createdByUserName || ticket.createdBy || '—'}</div>
               <div><span className="font-medium text-gray-700 dark:text-gray-300">Создана:</span> {formatDate(ticket.createdAt)}</div>
             </div>
           </Link>
@@ -139,6 +140,7 @@ export default function Service() {
               <TableHead>Приоритет</TableHead>
               <TableHead>SLA</TableHead>
               <TableHead>Назначен</TableHead>
+              <TableHead>Автор</TableHead>
               <TableHead>Дата создания</TableHead>
               <TableHead>Статус</TableHead>
             </TableRow>
@@ -168,10 +170,16 @@ export default function Service() {
                   <p className="text-sm">{ticket.sla}</p>
                 </TableCell>
                 <TableCell>
-                  {ticket.assignedTo ? (
-                    <p className="text-sm">{ticket.assignedTo}</p>
+                  {ticket.assignedMechanicName || ticket.assignedTo ? (
+                    <p className="text-sm">{ticket.assignedMechanicName || ticket.assignedTo}</p>
                   ) : (
                     <span className="text-sm text-gray-400 dark:text-gray-500">Не назначен</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <p className="text-sm">{ticket.createdByUserName || ticket.createdBy || '—'}</p>
+                  {ticket.reporterContact && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{ticket.reporterContact}</p>
                   )}
                 </TableCell>
                 <TableCell>

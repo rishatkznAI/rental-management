@@ -34,6 +34,9 @@ import {
 } from '../lib/userStorage';
 import { usersService } from '../services/users.service';
 import { ownersService } from '../services/owners.service';
+import { mechanicsService } from '../services/mechanics.service';
+import { serviceWorkCatalogService } from '../services/service-work-catalog.service';
+import { sparePartsCatalogService } from '../services/spare-parts-catalog.service';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
@@ -56,6 +59,10 @@ import type {
   ClientStatus,
   ServiceTicket,
   ServiceStatus,
+  Mechanic,
+  ReferenceStatus,
+  ServiceWorkCatalogItem,
+  SparePartCatalogItem,
 } from '../types';
 
 // ── Вспомогательные ───────────────────────────────────────────────────────────
@@ -256,6 +263,9 @@ export default function Settings() {
             <StatusList />
             <ReferenceList title="Причины простоя" items={['Плановое ТО', 'Ремонт', 'Ожидание запчастей', 'Калибровка']} />
             <OwnersReferenceList />
+            <MechanicsReferenceList />
+            <ServiceWorkCatalogReferenceList />
+            <SparePartsReferenceList />
           </div>
         </Tabs.Content>
 
@@ -928,18 +938,26 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
       ticket.equipment,
       ticket.inventoryNumber ?? '',
       ticket.serialNumber ?? '',
+      ticket.equipmentType ?? '',
+      ticket.equipmentTypeLabel ?? '',
       ticket.location ?? '',
       ticket.reason,
       ticket.description,
       ticket.priority,
       ticket.sla,
       ticket.assignedTo ?? '',
+      ticket.assignedMechanicId ?? '',
+      ticket.assignedMechanicName ?? '',
       ticket.createdBy ?? '',
+      ticket.createdByUserId ?? '',
+      ticket.createdByUserName ?? '',
+      ticket.reporterContact ?? '',
       ticket.source ?? '',
       ticket.status,
       ticket.plannedDate ?? '',
       ticket.closedAt ?? '',
       ticket.result ?? '',
+      JSON.stringify(ticket.resultData ?? null),
       JSON.stringify(ticket.workLog ?? []),
       JSON.stringify(ticket.parts ?? []),
       ticket.createdAt,
@@ -947,7 +965,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
     ]);
 
     const csv = [
-      ['ID техники', 'Техника', 'Инв. номер', 'Серийный номер', 'Локация', 'Причина', 'Описание', 'Приоритет', 'SLA', 'Назначен', 'Создал', 'Источник', 'Статус', 'Плановая дата', 'Дата закрытия', 'Результат', 'Журнал работ JSON', 'Запчасти JSON', 'Создано', 'Фото JSON']
+      ['ID техники', 'Техника', 'Инв. номер', 'Серийный номер', 'Код типа техники', 'Тип техники', 'Локация', 'Причина', 'Описание', 'Приоритет', 'SLA', 'Назначен', 'ID механика', 'Имя механика', 'Создал', 'ID автора', 'Имя автора', 'Контактное лицо', 'Источник', 'Статус', 'Плановая дата', 'Дата закрытия', 'Результат', 'Результат JSON', 'Журнал работ JSON', 'Запчасти JSON', 'Создано', 'Фото JSON']
         .map(escapeCSV).join(','),
       ...rows.map(row => row.map(escapeCSV).join(',')),
     ].join('\n');
@@ -975,18 +993,26 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           equipmentName,
           inventoryNumber,
           serialNumber,
+          equipmentType,
+          equipmentTypeLabel,
           location,
           reason,
           description,
           priority,
           sla,
           assignedTo,
+          assignedMechanicId,
+          assignedMechanicName,
           createdBy,
+          createdByUserId,
+          createdByUserName,
+          reporterContact,
           source,
           statusRaw,
           plannedDate,
           closedAt,
           result,
+          resultDataRaw,
           workLogRaw,
           partsRaw,
           createdAt,
@@ -1013,18 +1039,28 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           equipment: equipmentName,
           inventoryNumber: inventoryNumber || undefined,
           serialNumber: serialNumber || undefined,
+          equipmentType: equipmentType || undefined,
+          equipmentTypeLabel: equipmentTypeLabel || undefined,
           location: location || undefined,
           reason,
           description,
           priority: priority as ServiceTicket['priority'],
           sla,
           assignedTo: assignedTo || undefined,
+          assignedMechanicId: assignedMechanicId || undefined,
+          assignedMechanicName: assignedMechanicName || undefined,
           createdBy: createdBy || undefined,
+          createdByUserId: createdByUserId || undefined,
+          createdByUserName: createdByUserName || undefined,
+          reporterContact: reporterContact || undefined,
           source: (source || undefined) as ServiceTicket['source'],
           status: SERVICE_STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'new',
           plannedDate: plannedDate || undefined,
           closedAt: closedAt || undefined,
           result: result || undefined,
+          resultData: resultDataRaw ? (() => {
+            try { return JSON.parse(resultDataRaw); } catch { return undefined; }
+          })() : undefined,
           workLog: parseJsonArray(workLogRaw, []),
           parts: parseJsonArray(partsRaw, []),
           createdAt: createdAt || new Date().toISOString(),
@@ -1593,6 +1629,237 @@ function OwnersReferenceList() {
               <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>✕</Button>
             </div>
           )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function statusLabel(status: ReferenceStatus) {
+  return status === 'active' ? 'Активен' : 'Отключен';
+}
+
+function statusVariant(status: ReferenceStatus): 'success' | 'secondary' {
+  return status === 'active' ? 'success' : 'secondary';
+}
+
+function MechanicsReferenceList() {
+  const queryClient = useQueryClient();
+  const { data: mechanicsData = [] } = useQuery<Mechanic[]>({
+    queryKey: ['mechanics'],
+    queryFn: mechanicsService.getAll,
+  });
+  const [mechanics, setMechanics] = React.useState<Mechanic[]>([]);
+  const [draft, setDraft] = React.useState({ name: '', phone: '', notes: '' });
+
+  React.useEffect(() => setMechanics(mechanicsData), [mechanicsData]);
+
+  const persist = async (next: Mechanic[]) => {
+    setMechanics(next);
+    await mechanicsService.bulkReplace(next);
+    await queryClient.invalidateQueries({ queryKey: ['mechanics'] });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Механики</CardTitle>
+        <CardDescription>Справочник исполнителей для сервисных заявок</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {mechanics.map(mechanic => (
+          <div key={mechanic.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">{mechanic.name}</p>
+                {mechanic.phone && <p className="text-xs text-gray-500">{mechanic.phone}</p>}
+                {mechanic.notes && <p className="mt-1 text-xs text-gray-500">{mechanic.notes}</p>}
+              </div>
+              <Badge variant={statusVariant(mechanic.status)}>{statusLabel(mechanic.status)}</Badge>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => void persist(mechanics.map(item => item.id === mechanic.id ? { ...item, status: item.status === 'active' ? 'inactive' : 'active' } : item))}>
+                {mechanic.status === 'active' ? 'Отключить' : 'Включить'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void persist(mechanics.filter(item => item.id !== mechanic.id))}>
+                Удалить
+              </Button>
+            </div>
+          </div>
+        ))}
+
+        <div className="rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-700">
+          <p className="mb-2 text-sm font-medium">Добавить механика</p>
+          <div className="space-y-2">
+            <Input placeholder="ФИО" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
+            <Input placeholder="Телефон" value={draft.phone} onChange={e => setDraft(prev => ({ ...prev, phone: e.target.value }))} />
+            <Input placeholder="Примечание" value={draft.notes} onChange={e => setDraft(prev => ({ ...prev, notes: e.target.value }))} />
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!draft.name.trim()) return;
+                void persist([
+                  ...mechanics,
+                  { id: `mech-${Date.now()}`, name: draft.name.trim(), phone: draft.phone.trim() || undefined, notes: draft.notes.trim() || undefined, status: 'active' },
+                ]);
+                setDraft({ name: '', phone: '', notes: '' });
+              }}
+            >
+              Добавить
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ServiceWorkCatalogReferenceList() {
+  const queryClient = useQueryClient();
+  const { data: catalogData = [] } = useQuery<ServiceWorkCatalogItem[]>({
+    queryKey: ['serviceWorkCatalog'],
+    queryFn: serviceWorkCatalogService.getAll,
+  });
+  const [items, setItems] = React.useState<ServiceWorkCatalogItem[]>([]);
+  const [draft, setDraft] = React.useState({ name: '', normHours: '', category: '' });
+
+  React.useEffect(() => setItems(catalogData), [catalogData]);
+
+  const persist = async (next: ServiceWorkCatalogItem[]) => {
+    setItems(next);
+    await serviceWorkCatalogService.bulkReplace(next);
+    await queryClient.invalidateQueries({ queryKey: ['serviceWorkCatalog'] });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Работы сервиса</CardTitle>
+        <CardDescription>Справочник работ с нормо-часами для аналитики механиков</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {items.map(item => (
+          <div key={item.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">{item.name}</p>
+                <p className="text-xs text-gray-500">{item.category || 'Без категории'} · {item.normHours} н/ч</p>
+              </div>
+              <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => void persist(items.map(current => current.id === item.id ? { ...current, status: current.status === 'active' ? 'inactive' : 'active' } : current))}>
+                {item.status === 'active' ? 'Отключить' : 'Включить'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void persist(items.filter(current => current.id !== item.id))}>
+                Удалить
+              </Button>
+            </div>
+          </div>
+        ))}
+
+        <div className="rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-700">
+          <p className="mb-2 text-sm font-medium">Добавить работу</p>
+          <div className="space-y-2">
+            <Input placeholder="Название работы" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
+            <Input placeholder="Категория" value={draft.category} onChange={e => setDraft(prev => ({ ...prev, category: e.target.value }))} />
+            <Input type="number" min="0" step="0.1" placeholder="Нормо-часы" value={draft.normHours} onChange={e => setDraft(prev => ({ ...prev, normHours: e.target.value }))} />
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!draft.name.trim()) return;
+                void persist([
+                  ...items,
+                  {
+                    id: `work-${Date.now()}`,
+                    name: draft.name.trim(),
+                    category: draft.category.trim() || undefined,
+                    normHours: Number(draft.normHours) || 0,
+                    status: 'active',
+                  },
+                ]);
+                setDraft({ name: '', normHours: '', category: '' });
+              }}
+            >
+              Добавить
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SparePartsReferenceList() {
+  const queryClient = useQueryClient();
+  const { data: partsData = [] } = useQuery<SparePartCatalogItem[]>({
+    queryKey: ['sparePartsCatalog'],
+    queryFn: sparePartsCatalogService.getAll,
+  });
+  const [items, setItems] = React.useState<SparePartCatalogItem[]>([]);
+  const [draft, setDraft] = React.useState({ name: '', sku: '', unitCost: '' });
+
+  React.useEffect(() => setItems(partsData), [partsData]);
+
+  const persist = async (next: SparePartCatalogItem[]) => {
+    setItems(next);
+    await sparePartsCatalogService.bulkReplace(next);
+    await queryClient.invalidateQueries({ queryKey: ['sparePartsCatalog'] });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Запчасти сервиса</CardTitle>
+        <CardDescription>Каталог для выбора использованных запчастей в заявках</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {items.map(item => (
+          <div key={item.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">{item.name}</p>
+                <p className="text-xs text-gray-500">{item.sku || 'Без артикула'} · {(item.unitCost ?? 0).toLocaleString('ru-RU')} ₽</p>
+              </div>
+              <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => void persist(items.map(current => current.id === item.id ? { ...current, status: current.status === 'active' ? 'inactive' : 'active' } : current))}>
+                {item.status === 'active' ? 'Отключить' : 'Включить'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void persist(items.filter(current => current.id !== item.id))}>
+                Удалить
+              </Button>
+            </div>
+          </div>
+        ))}
+
+        <div className="rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-700">
+          <p className="mb-2 text-sm font-medium">Добавить запчасть</p>
+          <div className="space-y-2">
+            <Input placeholder="Название запчасти" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
+            <Input placeholder="Артикул" value={draft.sku} onChange={e => setDraft(prev => ({ ...prev, sku: e.target.value }))} />
+            <Input type="number" min="0" placeholder="Цена по умолчанию" value={draft.unitCost} onChange={e => setDraft(prev => ({ ...prev, unitCost: e.target.value }))} />
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!draft.name.trim()) return;
+                void persist([
+                  ...items,
+                  {
+                    id: `part-${Date.now()}`,
+                    name: draft.name.trim(),
+                    sku: draft.sku.trim() || undefined,
+                    unitCost: Number(draft.unitCost) || 0,
+                    status: 'active',
+                  },
+                ]);
+                setDraft({ name: '', sku: '', unitCost: '' });
+              }}
+            >
+              Добавить
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

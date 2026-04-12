@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { usePermissions } from '../lib/permissions';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -11,15 +12,19 @@ import { SERVICE_TICKET_KEYS, useCreateServiceTicket } from '../hooks/useService
 import { EQUIPMENT_KEYS, useEquipmentList } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import type { EquipmentStatus, ServiceTicket } from '../types';
+import { getEquipmentTypeLabel } from '../lib/equipmentClassification';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 
 export default function ServiceNew() {
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const createTicket = useCreateServiceTicket();
   const { data: equipmentList = [] } = useEquipmentList();
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!can('create', 'service')) navigate('/service', { replace: true });
@@ -31,11 +36,10 @@ export default function ServiceNew() {
     serialNumber: '',
     location: '',
     priority: 'medium',
-    contact: '',
+    reporterContact: '',
     reason: '',
     description: '',
     notes: '',
-    assignedTo: '',
   });
 
   const selectedEquipment = equipmentList.find(e => e.id === formData.equipmentId);
@@ -115,12 +119,28 @@ export default function ServiceNew() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.equipmentId) return;
+    setSubmitError(null);
+
+    if (!formData.equipmentId) {
+      setSubmitError('Выберите технику из списка');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     const eq = equipmentList.find(e => e.id === formData.equipmentId);
-    if (!eq) return;
+    if (!eq) {
+      setSubmitError('Выбранная техника не найдена — обновите страницу');
+      return;
+    }
+    if (!formData.description && !formData.reason) {
+      setSubmitError('Заполните описание проблемы');
+      return;
+    }
+
+    setIsSubmitting(true);
     const equipmentLabel = eq
       ? `${eq.manufacturer} ${eq.model} (INV: ${eq.inventoryNumber})`
       : 'Не указана';
+    const authorName = user?.name || 'Оператор';
 
     const now = new Date().toISOString();
     const todayStr = now.slice(0, 10);
@@ -130,20 +150,32 @@ export default function ServiceNew() {
       inventoryNumber: eq.inventoryNumber,
       serialNumber: eq.serialNumber,
       equipmentType: eq.type,
+      equipmentTypeLabel: getEquipmentTypeLabel(eq),
       location: eq.location,
       reason: formData.reason || formData.description,
       description: formData.description,
       priority: (formData.priority || 'medium') as ServiceTicket['priority'],
       sla: formData.priority === 'critical' ? '4 ч' : formData.priority === 'high' ? '8 ч' : '24 ч',
-      assignedTo: formData.assignedTo || undefined,
-      createdBy: formData.contact || 'Оператор',
+      assignedTo: undefined,
+      assignedMechanicId: undefined,
+      assignedMechanicName: undefined,
+      createdBy: authorName,
+      createdByUserId: user?.id,
+      createdByUserName: authorName,
+      reporterContact: formData.reporterContact || undefined,
       source: 'manual',
       status: 'new',
+      result: undefined,
+      resultData: {
+        summary: '',
+        partsUsed: [],
+        worksPerformed: [],
+      },
       workLog: [
         {
           date: now,
           text: 'Заявка создана',
-          author: formData.contact || 'Оператор',
+          author: authorName,
           type: 'status_change',
         },
       ],
@@ -181,7 +213,7 @@ export default function ServiceNew() {
               {
                 date: now,
                 text: `Аренда остановлена из-за сервисной заявки ${createdTicket.id}`,
-                author: formData.contact || 'Оператор',
+                author: authorName,
               },
             ],
           };
@@ -201,8 +233,10 @@ export default function ServiceNew() {
       ]);
 
       navigate(`/service/${createdTicket.id}`);
-    } catch {
-      // Ошибку мутации покажет стандартный flow страницы/хука
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Неизвестная ошибка';
+      setSubmitError(`Не удалось создать заявку: ${msg}`);
+      setIsSubmitting(false);
     }
   };
 
@@ -220,6 +254,15 @@ export default function ServiceNew() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Global error banner */}
+        {submitError && (
+          <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400">
+            <span className="mt-0.5 shrink-0">⚠</span>
+            <span>{submitError}</span>
+            <button type="button" className="ml-auto shrink-0 opacity-60 hover:opacity-100" onClick={() => setSubmitError(null)}>✕</button>
+          </div>
+        )}
+
         {/* Equipment block */}
         <Card>
           <CardHeader>
@@ -436,42 +479,41 @@ export default function ServiceNew() {
         {/* Assignment block */}
         <Card>
           <CardHeader>
-            <CardTitle>Исполнение</CardTitle>
-            <CardDescription>Ответственный и сроки</CardDescription>
+            <CardTitle>Заявитель</CardTitle>
+            <CardDescription>Автор заявки и контактное лицо по проблеме</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Контакт заявителя
+                Автор заявки
               </label>
               <Input
-                placeholder="Например: Сергей, +7 939 365-32-09"
-                value={formData.contact}
-                onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
+                value={user?.name || 'Оператор'}
+                readOnly
               />
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Кто сообщил о проблеме и как с ним связаться для уточнений.
+                Это пользователь системы, который фактически создаёт заявку.
               </p>
             </div>
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Ответственный исполнитель
+                Контактное лицо
               </label>
               <Input
-                placeholder="Например: Иванов Механик"
-                value={formData.assignedTo}
-                onChange={(e) => setFormData({ ...formData, assignedTo: e.target.value })}
+                placeholder="Например: Сергей, +7 939 365-32-09"
+                value={formData.reporterContact}
+                onChange={(e) => setFormData({ ...formData, reporterContact: e.target.value })}
               />
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Укажите механика или сотрудника сервиса, который будет заниматься заявкой.
+                Кто сообщил о проблеме и как с ним связаться для уточнений.
               </p>
             </div>
           </CardContent>
         </Card>
 
         <div className="flex gap-3">
-          <Button type="submit" disabled={!formData.equipmentId}>
-            Создать заявку
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Создаём заявку…' : 'Создать заявку'}
           </Button>
           <Button type="button" variant="secondary" onClick={() => navigate('/service')}>
             Отмена

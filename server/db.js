@@ -19,6 +19,9 @@ const JSON_COLLECTIONS = [
   'users',
   'shipping_photos',
   'owners',
+  'mechanics',
+  'service_work_catalog',
+  'spare_parts_catalog',
   'bot_users',
   'snapshot',
 ];

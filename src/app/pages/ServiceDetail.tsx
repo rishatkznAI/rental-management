@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router';
 import { usePermissions } from '../lib/permissions';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
-import { Select } from '../components/ui/select';
 import {
   ArrowLeft, Wrench, User, Clock, MapPin, Tag, FileText,
   CheckCircle, XCircle, AlertTriangle, Play, Package, History,
@@ -16,10 +16,25 @@ import { formatDate } from '../lib/utils';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS, useServiceTicketById, useUpdateServiceTicket } from '../hooks/useServiceTickets';
-import type { EquipmentStatus, ServiceTicket, ServiceStatus } from '../types';
+import type {
+  Equipment,
+  EquipmentStatus,
+  Mechanic,
+  ServicePartUsage,
+  ServiceRepairResult,
+  ServiceTicket,
+  ServiceStatus,
+  ServiceWorkCatalogItem,
+  ServiceWorkPerformed,
+  SparePartCatalogItem,
+} from '../types';
 import { equipmentService } from '../services/equipment.service';
+import { mechanicsService } from '../services/mechanics.service';
 import { rentalsService } from '../services/rentals.service';
+import { serviceWorkCatalogService } from '../services/service-work-catalog.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
+import { sparePartsCatalogService } from '../services/spare-parts-catalog.service';
+import { getEquipmentTypeLabel } from '../lib/equipmentClassification';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -75,11 +90,26 @@ function Divider() {
   return <hr className="border-gray-100 dark:border-gray-800" />;
 }
 
-const EQUIPMENT_TYPE_LABELS: Record<string, string> = {
-  scissor: 'Ножничный',
-  articulated: 'Шарнирно-сочленённый',
-  telescopic: 'Телескопический',
-};
+function normalizeRepairResult(ticket: ServiceTicket): ServiceRepairResult {
+  return {
+    summary: ticket.resultData?.summary ?? ticket.result ?? '',
+    partsUsed: ticket.resultData?.partsUsed ?? ticket.parts ?? [],
+    worksPerformed: ticket.resultData?.worksPerformed ?? [],
+  };
+}
+
+function normalizeTicket(ticket: ServiceTicket): ServiceTicket {
+  const resultData = normalizeRepairResult(ticket);
+  return {
+    ...ticket,
+    assignedMechanicName: ticket.assignedMechanicName ?? ticket.assignedTo,
+    createdByUserName: ticket.createdByUserName ?? ticket.createdBy,
+    createdBy: ticket.createdByUserName ?? ticket.createdBy,
+    parts: resultData.partsUsed,
+    result: resultData.summary,
+    resultData,
+  };
+}
 
 // ─── main component ────────────────────────────────────────────────────────────
 
@@ -87,27 +117,54 @@ export default function ServiceDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const canEdit = can('edit', 'service');
 
   const { data: fetchedTicket } = useServiceTicketById(id ?? '');
+  const { data: equipmentList = [] } = useQuery<Equipment[]>({
+    queryKey: EQUIPMENT_KEYS.all,
+    queryFn: equipmentService.getAll,
+  });
+  const { data: mechanics = [] } = useQuery<Mechanic[]>({
+    queryKey: ['mechanics'],
+    queryFn: mechanicsService.getAll,
+  });
+  const { data: workCatalog = [] } = useQuery<ServiceWorkCatalogItem[]>({
+    queryKey: ['serviceWorkCatalog'],
+    queryFn: serviceWorkCatalogService.getAll,
+  });
+  const { data: sparePartsCatalog = [] } = useQuery<SparePartCatalogItem[]>({
+    queryKey: ['sparePartsCatalog'],
+    queryFn: sparePartsCatalogService.getAll,
+  });
   const updateTicket = useUpdateServiceTicket();
 
   // Local optimistic state — seeded from server, updated immediately on user actions
   const [ticket, setTicket] = useState<ServiceTicket | null>(null);
   React.useEffect(() => {
-    if (fetchedTicket) setTicket(fetchedTicket as ServiceTicket);
+    if (fetchedTicket) setTicket(normalizeTicket(fetchedTicket as ServiceTicket));
   }, [fetchedTicket]);
 
   const [newComment, setNewComment] = useState('');
-  const [newAssignee, setNewAssignee] = useState('');
-  const [newResult, setNewResult] = useState('');
+  const [newAssigneeId, setNewAssigneeId] = useState('');
+  const [resultSummary, setResultSummary] = useState('');
   const [newPlannedDate, setNewPlannedDate] = useState('');
-  const [showResultInput, setShowResultInput] = useState(false);
+  const [selectedWorkId, setSelectedWorkId] = useState('');
+  const [selectedWorkQty, setSelectedWorkQty] = useState('1');
+  const [selectedPartId, setSelectedPartId] = useState('');
+  const [selectedPartQty, setSelectedPartQty] = useState('1');
+  const [selectedPartCost, setSelectedPartCost] = useState('');
 
   // ── Photo upload state ──
   const [photoPending, setPhotoPending] = useState<string[]>([]);
   const photoInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (!ticket) return;
+    setResultSummary(normalizeRepairResult(ticket).summary ?? '');
+    setNewAssigneeId(ticket.assignedMechanicId ?? '');
+  }, [ticket]);
 
   const compressToBase64 = (file: File): Promise<string> =>
     new Promise(resolve => {
@@ -161,13 +218,23 @@ export default function ServiceDetail() {
 
   // Persist changes — optimistic local update + server PATCH
   const persist = useCallback((updated: ServiceTicket) => {
-    setTicket(updated);
-    updateTicket.mutate({ id: updated.id, data: updated });
+    const normalized = normalizeTicket(updated);
+    setTicket(normalized);
+    updateTicket.mutate({ id: normalized.id, data: normalized });
   }, [updateTicket]);
+
+  const currentEquipment = equipmentList.find(item =>
+    item.id === ticket?.equipmentId || item.inventoryNumber === ticket?.inventoryNumber,
+  );
+  const equipmentTypeDisplay = ticket
+    ? (currentEquipment ? getEquipmentTypeLabel(currentEquipment) : (ticket.equipmentTypeLabel || ticket.equipmentType || ''))
+    : '';
+  const activeMechanics = mechanics.filter(item => item.status === 'active');
+  const repairResult = ticket ? normalizeRepairResult(ticket) : null;
 
   // ── actions ────────────────────────────────────────────────────────────────
 
-  const changeStatus = async (newStatus: ServiceStatus, logText: string, author = 'Оператор') => {
+  const changeStatus = async (newStatus: ServiceStatus, logText: string, author = user?.name || 'Оператор') => {
     if (!ticket || !canEdit) return;
     const now = new Date().toISOString();
     const updated: ServiceTicket = {
@@ -239,38 +306,141 @@ export default function ServiceDetail() {
     const now = new Date().toISOString();
     persist({
       ...ticket,
-      workLog: [...ticket.workLog, { date: now, text: newComment.trim(), author: 'Оператор', type: 'comment' }],
+      workLog: [...ticket.workLog, { date: now, text: newComment.trim(), author: user?.name || 'Оператор', type: 'comment' }],
     });
     setNewComment('');
   };
 
   const saveAssignee = () => {
-    if (!ticket || !canEdit || !newAssignee.trim()) return;
+    if (!ticket || !canEdit || !newAssigneeId) return;
+    const mechanic = mechanics.find(item => item.id === newAssigneeId);
+    if (!mechanic) return;
     const now = new Date().toISOString();
     persist({
       ...ticket,
-      assignedTo: newAssignee.trim(),
+      assignedTo: mechanic.name,
+      assignedMechanicId: mechanic.id,
+      assignedMechanicName: mechanic.name,
       workLog: [...ticket.workLog, {
         date: now,
-        text: `Назначен ответственный: ${newAssignee.trim()}`,
-        author: 'Оператор',
+        text: `Назначен механик: ${mechanic.name}`,
+        author: user?.name || 'Оператор',
         type: 'assign',
       }],
     });
-    setNewAssignee('');
+    setNewAssigneeId('');
   };
 
-  const saveResult = () => {
-    if (!ticket || !canEdit || !newResult.trim()) return;
-    persist({ ...ticket, result: newResult.trim() });
-    setNewResult('');
-    setShowResultInput(false);
+  const saveResultSummary = () => {
+    if (!ticket || !canEdit) return;
+    const nextResult: ServiceRepairResult = {
+      ...normalizeRepairResult(ticket),
+      summary: resultSummary.trim(),
+    };
+    persist({
+      ...ticket,
+      result: nextResult.summary,
+      resultData: nextResult,
+      parts: nextResult.partsUsed,
+    });
   };
 
   const savePlannedDate = () => {
     if (!ticket || !canEdit || !newPlannedDate) return;
     persist({ ...ticket, plannedDate: newPlannedDate });
     setNewPlannedDate('');
+  };
+
+  const addWorkPerformed = () => {
+    if (!ticket || !canEdit || !selectedWorkId) return;
+    const work = workCatalog.find(item => item.id === selectedWorkId);
+    const qty = Math.max(1, Number(selectedWorkQty) || 1);
+    if (!work) return;
+    const worksPerformed: ServiceWorkPerformed[] = [
+      ...normalizeRepairResult(ticket).worksPerformed,
+      {
+        catalogId: work.id,
+        name: work.name,
+        normHours: work.normHours,
+        qty,
+        totalNormHours: Number((work.normHours * qty).toFixed(2)),
+      },
+    ];
+    const nextResult: ServiceRepairResult = {
+      ...normalizeRepairResult(ticket),
+      worksPerformed,
+    };
+    persist({
+      ...ticket,
+      result: nextResult.summary,
+      resultData: nextResult,
+      parts: nextResult.partsUsed,
+      workLog: [...ticket.workLog, {
+        date: new Date().toISOString(),
+        text: `Добавлена работа: ${work.name} × ${qty}`,
+        author: user?.name || 'Оператор',
+        type: 'repair_result',
+      }],
+    });
+    setSelectedWorkId('');
+    setSelectedWorkQty('1');
+  };
+
+  const removeWorkPerformed = (index: number) => {
+    if (!ticket || !canEdit) return;
+    const current = normalizeRepairResult(ticket);
+    const nextResult: ServiceRepairResult = {
+      ...current,
+      worksPerformed: current.worksPerformed.filter((_, itemIndex) => itemIndex !== index),
+    };
+    persist({ ...ticket, result: nextResult.summary, resultData: nextResult, parts: nextResult.partsUsed });
+  };
+
+  const addPartUsage = () => {
+    if (!ticket || !canEdit || !selectedPartId) return;
+    const part = sparePartsCatalog.find(item => item.id === selectedPartId);
+    const qty = Math.max(1, Number(selectedPartQty) || 1);
+    const cost = Math.max(0, Number(selectedPartCost) || part?.unitCost || 0);
+    if (!part) return;
+    const partsUsed: ServicePartUsage[] = [
+      ...normalizeRepairResult(ticket).partsUsed,
+      {
+        catalogId: part.id,
+        name: part.name,
+        sku: part.sku,
+        qty,
+        cost,
+      },
+    ];
+    const nextResult: ServiceRepairResult = {
+      ...normalizeRepairResult(ticket),
+      partsUsed,
+    };
+    persist({
+      ...ticket,
+      result: nextResult.summary,
+      resultData: nextResult,
+      parts: nextResult.partsUsed,
+      workLog: [...ticket.workLog, {
+        date: new Date().toISOString(),
+        text: `Добавлена запчасть: ${part.name} × ${qty}`,
+        author: user?.name || 'Оператор',
+        type: 'repair_result',
+      }],
+    });
+    setSelectedPartId('');
+    setSelectedPartQty('1');
+    setSelectedPartCost('');
+  };
+
+  const removePartUsage = (index: number) => {
+    if (!ticket || !canEdit) return;
+    const current = normalizeRepairResult(ticket);
+    const nextResult: ServiceRepairResult = {
+      ...current,
+      partsUsed: current.partsUsed.filter((_, itemIndex) => itemIndex !== index),
+    };
+    persist({ ...ticket, result: nextResult.summary, resultData: nextResult, parts: nextResult.partsUsed });
   };
 
   // ── "not found" screen ─────────────────────────────────────────────────────
@@ -397,7 +567,8 @@ export default function ServiceDetail() {
                 {ticket.plannedDate && <Field label="Плановая дата" value={formatDate(ticket.plannedDate)} />}
                 {ticket.closedAt && <Field label="Фактическое закрытие" value={formatDate(ticket.closedAt)} />}
                 <Field label="Источник" value={ticket.source ? SOURCE_LABELS[ticket.source] : undefined} />
-                <Field label="Кто создал" value={ticket.createdBy} />
+                <Field label="Кто создал" value={ticket.createdByUserName ?? ticket.createdBy} />
+                <Field label="Контактное лицо" value={ticket.reporterContact} />
               </div>
             </CardContent>
           </Card>
@@ -415,8 +586,8 @@ export default function ServiceDetail() {
                 <Field label="Наименование" value={ticket.equipment} />
                 {ticket.inventoryNumber && <Field label="Инв. номер" value={ticket.inventoryNumber} mono />}
                 {ticket.serialNumber && <Field label="Серийный номер" value={ticket.serialNumber} mono />}
-                {ticket.equipmentType && (
-                  <Field label="Тип техники" value={EQUIPMENT_TYPE_LABELS[ticket.equipmentType] ?? ticket.equipmentType} />
+                {equipmentTypeDisplay && (
+                  <Field label="Тип техники" value={equipmentTypeDisplay} />
                 )}
                 {ticket.location && (
                   <div className="flex items-start gap-1.5 col-span-2">
@@ -453,40 +624,144 @@ export default function ServiceDetail() {
                   </div>
                 </>
               )}
-              {ticket.result && (
+              {repairResult && (repairResult.summary || repairResult.worksPerformed.length > 0 || repairResult.partsUsed.length > 0) && (
                 <>
                   <Divider />
-                  <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Результат работ</p>
-                    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{ticket.result}</p>
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Результат работ</p>
+                      <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                        {repairResult.summary || 'Результат в текстовом виде не указан'}
+                      </p>
+                    </div>
+                    {repairResult.worksPerformed.length > 0 && (
+                      <div>
+                        <p className="mb-2 text-xs text-gray-500 uppercase tracking-wide">Выполненные работы</p>
+                        <div className="space-y-2">
+                          {repairResult.worksPerformed.map((work, index) => (
+                            <div key={`${work.catalogId}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                              <div>
+                                <p className="font-medium text-gray-900 dark:text-white">{work.name}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {work.normHours} н/ч × {work.qty} = {work.totalNormHours} н/ч
+                                </p>
+                              </div>
+                              {canEdit && ticket.status !== 'closed' && (
+                                <button onClick={() => removeWorkPerformed(index)} className="text-xs text-red-500 hover:underline">
+                                  Удалить
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {repairResult.partsUsed.length > 0 && (
+                      <div>
+                        <p className="mb-2 text-xs text-gray-500 uppercase tracking-wide">Использованные запчасти</p>
+                        <div className="space-y-2">
+                          {repairResult.partsUsed.map((part, index) => (
+                            <div key={`${part.catalogId ?? part.name}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                              <div>
+                                <p className="font-medium text-gray-900 dark:text-white">{part.name}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {part.sku ? `${part.sku} · ` : ''}{part.qty} шт. × {part.cost.toLocaleString('ru-RU')} ₽
+                                </p>
+                              </div>
+                              {canEdit && ticket.status !== 'closed' && (
+                                <button onClick={() => removePartUsage(index)} className="text-xs text-red-500 hover:underline">
+                                  Удалить
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
-              {ticket.status !== 'closed' && (
+              {canEdit && ticket.status !== 'closed' && (
                 <>
                   <Divider />
-                  {showResultInput ? (
+                  <div className="space-y-4">
                     <div className="flex gap-2 items-end">
                       <div className="flex-1">
-                        <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Результат работ</label>
+                        <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Итог ремонта</label>
                         <textarea
                           className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-[--color-primary] focus:outline-none focus:ring-1 focus:ring-[--color-primary]"
                           rows={2}
-                          value={newResult}
-                          onChange={e => setNewResult(e.target.value)}
-                          placeholder="Опишите результат..."
+                          value={resultSummary}
+                          onChange={e => setResultSummary(e.target.value)}
+                          placeholder="Краткий итог работ и состояние техники после ремонта"
                         />
                       </div>
                       <div className="flex gap-1.5">
-                        <Button size="sm" onClick={saveResult} disabled={!newResult.trim()}>Сохранить</Button>
-                        <Button size="sm" variant="secondary" onClick={() => setShowResultInput(false)}>Отмена</Button>
+                        <Button size="sm" onClick={saveResultSummary}>Сохранить</Button>
                       </div>
                     </div>
-                  ) : (
-                    <Button size="sm" variant="secondary" onClick={() => setShowResultInput(true)}>
-                      {ticket.result ? 'Изменить результат' : '+ Добавить результат работ'}
-                    </Button>
-                  )}
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_auto]">
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить работу</label>
+                        <select
+                          value={selectedWorkId}
+                          onChange={e => setSelectedWorkId(e.target.value)}
+                          className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                        >
+                          <option value="">Выберите работу из справочника</option>
+                          {workCatalog.filter(item => item.status === 'active').map(work => (
+                            <option key={work.id} value={work.id}>
+                              {work.name} · {work.normHours} н/ч
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Кол-во</label>
+                        <Input type="number" min="1" value={selectedWorkQty} onChange={e => setSelectedWorkQty(e.target.value)} />
+                      </div>
+                      <div className="flex items-end">
+                        <Button size="sm" variant="secondary" onClick={addWorkPerformed} disabled={!selectedWorkId}>
+                          Добавить работу
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_120px_auto]">
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить запчасть</label>
+                        <select
+                          value={selectedPartId}
+                          onChange={e => {
+                            const nextId = e.target.value;
+                            const part = sparePartsCatalog.find(item => item.id === nextId);
+                            setSelectedPartId(nextId);
+                            setSelectedPartCost(part?.unitCost ? String(part.unitCost) : '');
+                          }}
+                          className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                        >
+                          <option value="">Выберите запчасть</option>
+                          {sparePartsCatalog.filter(item => item.status === 'active').map(part => (
+                            <option key={part.id} value={part.id}>
+                              {part.name}{part.sku ? ` · ${part.sku}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Кол-во</label>
+                        <Input type="number" min="1" value={selectedPartQty} onChange={e => setSelectedPartQty(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Цена</label>
+                        <Input type="number" min="0" value={selectedPartCost} onChange={e => setSelectedPartCost(e.target.value)} />
+                      </div>
+                      <div className="flex items-end">
+                        <Button size="sm" variant="secondary" onClick={addPartUsage} disabled={!selectedPartId}>
+                          Добавить запчасть
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
                 </>
               )}
             </CardContent>
@@ -516,7 +791,7 @@ export default function ServiceDetail() {
                 </div>
               ))}
 
-              {ticket.status !== 'closed' && (
+              {canEdit && ticket.status !== 'closed' && (
                 <>
                   <Divider />
                   <div className="flex gap-2 items-end pt-1">
@@ -650,22 +925,30 @@ export default function ServiceDetail() {
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Назначен</p>
                 <p className="text-sm font-medium text-gray-900 dark:text-white">
-                  {ticket.assignedTo || <span className="text-gray-400 font-normal italic">Не назначен</span>}
+                  {ticket.assignedMechanicName || ticket.assignedTo || <span className="text-gray-400 font-normal italic">Не назначен</span>}
                 </p>
               </div>
-              {ticket.status !== 'closed' && (
+              {canEdit && ticket.status !== 'closed' && (
                 <>
                   <Divider />
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
-                      <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Назначить</label>
-                      <Input
-                        placeholder="Имя механика"
-                        value={newAssignee}
-                        onChange={e => setNewAssignee(e.target.value)}
-                      />
+                      <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Назначить механика</label>
+                      <select
+                        value={newAssigneeId}
+                        onChange={e => setNewAssigneeId(e.target.value)}
+                        className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                      >
+                        <option value="">Выберите механика из справочника</option>
+                        {activeMechanics.map(mechanic => (
+                          <option key={mechanic.id} value={mechanic.id}>{mechanic.name}</option>
+                        ))}
+                        {ticket.assignedMechanicId && !activeMechanics.some(item => item.id === ticket.assignedMechanicId) && ticket.assignedMechanicName && (
+                          <option value={ticket.assignedMechanicId}>{ticket.assignedMechanicName} (неактивен)</option>
+                        )}
+                      </select>
                     </div>
-                    <Button size="sm" onClick={saveAssignee} disabled={!newAssignee.trim()}>OK</Button>
+                    <Button size="sm" onClick={saveAssignee} disabled={!newAssigneeId}>OK</Button>
                   </div>
                 </>
               )}
@@ -685,7 +968,7 @@ export default function ServiceDetail() {
               <Field label="Дата создания" value={formatDate(ticket.createdAt)} />
               {ticket.plannedDate
                 ? <Field label="Плановая дата" value={formatDate(ticket.plannedDate)} />
-                : ticket.status !== 'closed' && (
+                : canEdit && ticket.status !== 'closed' && (
                   <>
                     <Divider />
                     <div className="flex gap-2 items-end">
@@ -724,7 +1007,7 @@ export default function ServiceDetail() {
           )}
 
           {/* Parts */}
-          {ticket.parts.length > 0 && (
+          {repairResult && repairResult.partsUsed.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -734,7 +1017,7 @@ export default function ServiceDetail() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {ticket.parts.map((p, i) => (
+                  {repairResult.partsUsed.map((p, i) => (
                     <div key={i} className="flex justify-between text-sm">
                       <span className="text-gray-700 dark:text-gray-300">{p.name} × {p.qty}</span>
                       <span className="text-gray-500">{p.cost.toLocaleString('ru-RU')} ₽</span>
@@ -743,7 +1026,7 @@ export default function ServiceDetail() {
                   <Divider />
                   <div className="flex justify-between text-sm font-semibold">
                     <span>Итого</span>
-                    <span>{ticket.parts.reduce((s, p) => s + p.cost * p.qty, 0).toLocaleString('ru-RU')} ₽</span>
+                    <span>{repairResult.partsUsed.reduce((s, p) => s + p.cost * p.qty, 0).toLocaleString('ru-RU')} ₽</span>
                   </div>
                 </div>
               </CardContent>

@@ -214,14 +214,21 @@ app.post('/api/auth/login', (req, res) => {
     }
 
     const users = readData('users') || [];
+    const normalizedEmail = String(email).trim().toLowerCase();
     const user = users.find(
-      u => u.email.toLowerCase() === email.toLowerCase() &&
-           verifyPassword(password, u.password) &&
-           u.status === 'Активен'
+      u => String(u.email || '').trim().toLowerCase() === normalizedEmail
     );
 
     if (!user) {
-      return res.status(401).json({ ok: false, error: 'Неверный email или пароль' });
+      return res.status(401).json({ ok: false, error: 'Пользователь с таким email не найден' });
+    }
+
+    if (user.status !== 'Активен') {
+      return res.status(403).json({ ok: false, error: 'Аккаунт деактивирован. Обратитесь к администратору' });
+    }
+
+    if (!verifyPassword(password, user.password)) {
+      return res.status(401).json({ ok: false, error: 'Неверный пароль' });
     }
 
     const token = createSession(user);
@@ -996,22 +1003,87 @@ app.use('/api', apiRouter);
 
 // ── Seed default admin ────────────────────────────────────────────────────────
 
+function getDefaultUsers() {
+  return [
+    {
+      id:       'U-default-admin',
+      name:     'Администратор',
+      email:    'admin@rental.local',
+      role:     'Администратор',
+      status:   'Активен',
+      password: hashPassword('admin123'),
+    },
+    {
+      id:       'U-default-mp2',
+      name:     'mp2',
+      email:    'mp2@mantall.ru',
+      role:     'Менеджер по аренде',
+      status:   'Активен',
+      password: hashPassword('1234'),
+    },
+    {
+      id:       'U-default-smirnova',
+      name:     'Смирнова Анна Петровна',
+      email:    'smirnova@company.ru',
+      role:     'Менеджер по аренде',
+      status:   'Активен',
+      password: hashPassword('1234'),
+    },
+    {
+      id:       'U-default-kozlov',
+      name:     'Козлов Дмитрий Владимирович',
+      email:    'kozlov@company.ru',
+      role:     'Менеджер по аренде',
+      status:   'Активен',
+      password: hashPassword('1234'),
+    },
+    {
+      id:       'U-default-petrov',
+      name:     'Петров Иван Сергеевич',
+      email:    'petrov@company.ru',
+      role:     'Механик',
+      status:   'Активен',
+      password: hashPassword('1234'),
+    },
+    {
+      id:       'U-default-hrrkzn',
+      name:     'Администратор',
+      email:    'hrrkzn@yandex.ru',
+      role:     'Администратор',
+      status:   'Активен',
+      password: hashPassword('kazan2013'),
+    },
+  ];
+}
+
 function seedDefaultUsers() {
   const existing = readData('users');
   if (existing && existing.length > 0) return; // уже есть данные
 
-  const defaultAdmin = {
-    id:       'U-default-admin',
-    name:     'Администратор',
-    email:    'admin@rental.local',
-    role:     'Администратор',
-    status:   'Активен',
-    password: hashPassword('admin123'),
-  };
+  const defaults = getDefaultUsers();
+  writeData('users', defaults);
+  console.log('[INIT] Созданы стандартные пользователи для первого входа');
+  console.log('[INIT] Администратор по умолчанию: admin@rental.local / admin123');
+  console.log('[INIT] ⚠️  Обязательно смените пароли в настройках!');
+}
 
-  writeData('users', [defaultAdmin]);
-  console.log('[INIT] Создан дефолтный пользователь: admin@rental.local / admin123');
-  console.log('[INIT] ⚠️  Обязательно смените пароль в настройках!');
+function ensureLegacyDefaultUsers() {
+  const users = readData('users') || [];
+  const isSingleDefaultAdmin =
+    users.length === 1 &&
+    String(users[0]?.email || '').trim().toLowerCase() === 'admin@rental.local';
+
+  if (!isSingleDefaultAdmin) return;
+
+  const existingEmails = new Set(users.map(u => String(u.email || '').trim().toLowerCase()));
+  const missingDefaults = getDefaultUsers().filter(
+    user => !existingEmails.has(String(user.email || '').trim().toLowerCase())
+  );
+
+  if (missingDefaults.length === 0) return;
+
+  writeData('users', [...users, ...missingDefaults]);
+  console.log(`[AUTH] Восстановлены стандартные пользователи: ${missingDefaults.map(u => u.email).join(', ')}`);
 }
 
 function applyAdminResetFromEnv() {
@@ -1396,6 +1468,7 @@ app.listen(PORT, async () => {
   migrateJsonFilesToDb();
   cleanupExpiredSessions();
   seedDefaultUsers();
+  ensureLegacyDefaultUsers();
   migrateReferenceCollections();
   migrateLegacyRepairFacts();
   applyAdminResetFromEnv();

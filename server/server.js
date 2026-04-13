@@ -26,6 +26,8 @@ const express = require('express');
 const cors    = require('cors');
 const fetch   = require('node-fetch');
 const crypto  = require('crypto');
+const fs      = require('fs');
+const path    = require('path');
 const {
   DB_PATH,
   cloneCollectionIfMissing,
@@ -1464,6 +1466,23 @@ app.get('/api/status', (req, res) => {
 
 // ── Запуск ─────────────────────────────────────────────────────────────────────
 
+/** Загружает виды работ из seeds/service_works.json, если справочник пуст */
+function seedServiceWorks() {
+  try {
+    const existing = readData('service_works') || [];
+    if (existing.length > 0) return; // уже заполнен — не трогаем
+    const seedPath = path.join(__dirname, 'seeds', 'service_works.json');
+    if (!fs.existsSync(seedPath)) return;
+    const works = JSON.parse(fs.readFileSync(seedPath, 'utf-8'));
+    if (!Array.isArray(works) || works.length === 0) return;
+    const normalized = works.map(w => normalizeServiceWorkRecord(w));
+    writeData('service_works', normalized);
+    console.log(`✓ Справочник работ загружен из seed: ${normalized.length} записей`);
+  } catch (e) {
+    console.warn('seedServiceWorks error:', e.message);
+  }
+}
+
 app.listen(PORT, async () => {
   migrateJsonFilesToDb();
   cleanupExpiredSessions();
@@ -1471,6 +1490,7 @@ app.listen(PORT, async () => {
   ensureLegacyDefaultUsers();
   migrateReferenceCollections();
   migrateLegacyRepairFacts();
+  seedServiceWorks();
   applyAdminResetFromEnv();
 
   console.log('');

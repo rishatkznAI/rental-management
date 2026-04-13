@@ -1,0 +1,2482 @@
+[
+  {
+    "id": "SW-dc6182a9ec0b",
+    "name": "Демонтаж / Монтаж гидравлического шестеренного насоса",
+    "category": "Гидравлика",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 0,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-6d6bc553e20f",
+    "name": "Демонтаж РВД в раме шт",
+    "category": "Гидравлика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 1,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-1d39b4345556",
+    "name": "Демонтаж РВД по стреле шт",
+    "category": "Гидравлика",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 2,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-54342e1c9d0f",
+    "name": "Демонтаж бортового редуктора / редуктор поворота башни",
+    "category": "Гидравлика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 3,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3a054d8cb20d",
+    "name": "Демонтаж гидрораспределителя-гидроблока",
+    "category": "Гидравлика",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 4,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-233e3b23ed68",
+    "name": "Демонтаж гидроцилиндра",
+    "category": "Гидравлика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 5,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d53931a9b742",
+    "name": "Демонтаж насосной станции подъёмник серии XE",
+    "category": "Гидравлика",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 6,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b1395510b4fe",
+    "name": "Демонтаж цилиндра штука / монтаж цилиндра",
+    "category": "Гидравлика",
+    "normHours": 1.2,
+    "isActive": true,
+    "sortOrder": 7,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-bb9ce0aada19",
+    "name": "Демонтаж/ монтаж гидромотора хода /",
+    "category": "Гидравлика",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 8,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-48f48fccf399",
+    "name": "Диагностика течи гидравлического масла",
+    "category": "Гидравлика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 9,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e502bbb7425d",
+    "name": "Замена гидравлического бака",
+    "category": "Гидравлика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 10,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-6dc547ed6c97",
+    "name": "Замена гидравлического масла и фильтра",
+    "category": "Гидравлика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 11,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-4df999374e37",
+    "name": "Замена датчика давления",
+    "category": "Гидравлика",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 12,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a351af0093f4",
+    "name": "Замена жиклёра клапана",
+    "category": "Гидравлика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 13,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-731468adef94",
+    "name": "Замена масла в редукторе хода /демонтаж/монтаж крышки редуктора (за ед. усл)",
+    "category": "Гидравлика",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 14,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d65bdbc26cd6",
+    "name": "Монтаж РВД в раме шт",
+    "category": "Гидравлика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 15,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0ccb0810b261",
+    "name": "Монтаж РВД по стреле шт",
+    "category": "Гидравлика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 16,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e3cea54c8336",
+    "name": "Монтаж бортового редуктора / редуктор поворота башни",
+    "category": "Гидравлика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 17,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-dd948c824c34",
+    "name": "Монтаж гидрораспределителя-гидроблока",
+    "category": "Гидравлика",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 18,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-67185d178c64",
+    "name": "Монтаж насосной станции подъёмник серии XE",
+    "category": "Гидравлика",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 19,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-758770e9a5f5",
+    "name": "Разборка/сборка гидрораспределителя с очисткой",
+    "category": "Гидравлика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 20,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-afbe4df19606",
+    "name": "Регулировка гидравлического клапана / протяжка гидравлического блока",
+    "category": "Гидравлика",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 21,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-fd4a1e8fa188",
+    "name": "Ремонт клапана",
+    "category": "Гидравлика",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 22,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ca19b6203a66",
+    "name": "Установка гидравлического цилиндра",
+    "category": "Гидравлика",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 23,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a90ce713840c",
+    "name": "Замена датчика давления — диагностика",
+    "category": "Гидравлика / Диагностика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 24,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b16d7c22945f",
+    "name": "Монтаж гидрораспределителя-гидроблока — диагностика",
+    "category": "Гидравлика / Диагностика",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 25,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-af8c748817b7",
+    "name": "Демонтаж ГБЦ ДВС без ремня/цепи ГРМ",
+    "category": "Двигатель",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 26,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ee9e46677781",
+    "name": "Демонтаж турбины",
+    "category": "Двигатель",
+    "normHours": 4.0,
+    "isActive": true,
+    "sortOrder": 27,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a6d798d6625b",
+    "name": "Диагностика генератора на ДВС",
+    "category": "Двигатель",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 28,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-74eef2dd109b",
+    "name": "Диагностика люфта турбины со снетием патрубка.",
+    "category": "Двигатель",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 29,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-29bbabc3f0bb",
+    "name": "Диагностика свечей накаливания",
+    "category": "Двигатель",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 30,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-cf7f95fc717c",
+    "name": "Диагностика топливных форсунок дизельного ДВС на мех. стенде",
+    "category": "Двигатель",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 31,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3ac4d43d4efe",
+    "name": "Диагностика топливопровода",
+    "category": "Двигатель",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 32,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-5a83b115ecea",
+    "name": "Замена антифриза",
+    "category": "Двигатель",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 33,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-73d9369cce29",
+    "name": "Замена вентилятора охлаждения ДВС",
+    "category": "Двигатель",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 34,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-6f034814f72a",
+    "name": "Замена масла и фильтров ДВС",
+    "category": "Двигатель",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 35,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b5203260e890",
+    "name": "Замена насоса подкачки топлива",
+    "category": "Двигатель",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 36,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-644cf61f04d0",
+    "name": "Замена переднего сальник коленчатого вала с подготовительнми работами",
+    "category": "Двигатель",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 37,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0a7be5190723",
+    "name": "Замена топливного фильтра токой очистки",
+    "category": "Двигатель",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 38,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-00de246ee541",
+    "name": "Замер компрессии бензиновый ДВС",
+    "category": "Двигатель",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 39,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-564dc0477a20",
+    "name": "Замер компрессии дизельный ДВС",
+    "category": "Двигатель",
+    "normHours": 2.5,
+    "isActive": true,
+    "sortOrder": 40,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-f5824ef532cd",
+    "name": "Монтаж ГБЦ ДВС без ремня/цепи ГРМ",
+    "category": "Двигатель",
+    "normHours": 4.0,
+    "isActive": true,
+    "sortOrder": 41,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-8b20010b46a7",
+    "name": "Монтаж ДВС",
+    "category": "Двигатель",
+    "normHours": 3.5,
+    "isActive": true,
+    "sortOrder": 42,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0478804397a5",
+    "name": "Монтаж стартера",
+    "category": "Двигатель",
+    "normHours": 0.7,
+    "isActive": true,
+    "sortOrder": 43,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d00ebf0f7f88",
+    "name": "Монтаж турбины",
+    "category": "Двигатель",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 44,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-2a1a55c66db9",
+    "name": "Монтаж/демонтаж форсунок дизельного ДВС",
+    "category": "Двигатель",
+    "normHours": 2.5,
+    "isActive": true,
+    "sortOrder": 45,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-9e45ff47ddb3",
+    "name": "Установка ПЖД",
+    "category": "Двигатель",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 46,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-2b9d0b3be7b0",
+    "name": "Долив моторного масла до нормы/долив гидравлического масла до нормы/ долив антифриза до нормы",
+    "category": "Общие работы",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 47,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-050d1e8a3a65",
+    "name": "Монтаж фиксаторв ограждения платформы / Изготовление и монтаж шпилек (штифтов) / Установка шпилек / Монтаж ролика механизма выдвижения платформы эл. ножничного подъемника",
+    "category": "Общие работы",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 48,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-36b60bae5068",
+    "name": "Установка GPS / Монтаж системы слежения",
+    "category": "Общие работы",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 49,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-2ce771641001",
+    "name": "Восстановление патрубка подачи воздуха",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 50,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-5217fb07636f",
+    "name": "Восстановление подвижности пальцевого соединения",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 51,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-475e790185f5",
+    "name": "Выгрузка дизельного ножничного подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 0.4,
+    "isActive": true,
+    "sortOrder": 52,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-def85cd05c61",
+    "name": "Выгрузка телескопического подъёмника",
+    "category": "Покраска / корпус",
+    "normHours": 0.6,
+    "isActive": true,
+    "sortOrder": 53,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3cc80ea2e5a3",
+    "name": "Выгрузка электрического ножничного подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 54,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-7892b2754cd2",
+    "name": "Демонтаж / установка поворотного кулака",
+    "category": "Покраска / корпус",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 55,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b05d5a9c579b",
+    "name": "Демонтаж болтов поворотного круга, демонтаж защитных кожухов",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 56,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-de5964d26019",
+    "name": "Демонтаж двигателя",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 57,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a0be8d3fb093",
+    "name": "Демонтаж кабелеукладчика",
+    "category": "Покраска / корпус",
+    "normHours": 12.0,
+    "isActive": true,
+    "sortOrder": 58,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ac3409009e93",
+    "name": "Демонтаж кронштейна люльки",
+    "category": "Покраска / корпус",
+    "normHours": 1.2,
+    "isActive": true,
+    "sortOrder": 59,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-7a947c32e6f6",
+    "name": "Демонтаж люльки",
+    "category": "Покраска / корпус",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 60,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-f81c14ba39c5",
+    "name": "Демонтаж переходной плиты насоса",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 61,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-12466072294c",
+    "name": "Демонтаж пульта для отогрева /демонтаж / монтаж крышки",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 62,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-95654ed99d61",
+    "name": "Демонтаж стартера",
+    "category": "Покраска / корпус",
+    "normHours": 0.7,
+    "isActive": true,
+    "sortOrder": 63,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-6adbf2f20c1c",
+    "name": "Демонтаж тормозного устройства",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 64,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a56397e21f94",
+    "name": "Демонтаж/монтаж глушителя",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 65,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-2bffb61a1f52",
+    "name": "Демонтаж/монтаж капота",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 66,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-8bb0f8044370",
+    "name": "Демонтаж/монтаж противовеса/башни подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 67,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-8faa3744c196",
+    "name": "Демонтаж/монтаж слайдеров телескопа",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 68,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-daae55b1c372",
+    "name": "Диагностика АКБ",
+    "category": "Покраска / корпус",
+    "normHours": 0.7,
+    "isActive": true,
+    "sortOrder": 69,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ce526ed55dfc",
+    "name": "Диагностика зарядного устройства",
+    "category": "Покраска / корпус",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 70,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-22223c8fce81",
+    "name": "Диагностика неисправности",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 71,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ba79c4125fba",
+    "name": "Диагностика неисправности кабеля",
+    "category": "Покраска / корпус",
+    "normHours": 4.0,
+    "isActive": true,
+    "sortOrder": 72,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-4249afc7e31f",
+    "name": "Диагностика переключателя ножничного подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 0.25,
+    "isActive": true,
+    "sortOrder": 73,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-00da0afd35fd",
+    "name": "Диагностика системы взвешивания",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 74,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-11a29c45c675",
+    "name": "Диагностика состояния подъёмника",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 75,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0bd34201aaea",
+    "name": "Диагностика течи гидравлического масла / Замер давления на клапанах выдвижения и втягивания",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 76,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-63ba0ae2e5e2",
+    "name": "Диагностика электропроводки",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 77,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-bd2359dd4ab9",
+    "name": "Замена РВД уровень сложности",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 78,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d1dbd581c3ca",
+    "name": "Замена амортизатора капота",
+    "category": "Покраска / корпус",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 79,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d01c486afd37",
+    "name": "Замена антифриза",
+    "category": "Покраска / корпус",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 80,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-79102d8126cc",
+    "name": "Замена воздушного фильтра",
+    "category": "Покраска / корпус",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 81,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-7708bbfd7259",
+    "name": "Замена датчика угла поворота колёс / Установка датчика угла на паз",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 82,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-7590e245b761",
+    "name": "Замена замка капота",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 83,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-918b7a10c8e7",
+    "name": "Замена клемм АКБ",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 84,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-bf6c19f3a141",
+    "name": "Замена кнопки аварийно остановки на нижнем пульте управления",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 85,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-79b483de20b4",
+    "name": "Замена контактора",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 86,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-aaafc509a4f9",
+    "name": "Замена масла в бортовом редукторе",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 87,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-afd9ea518e52",
+    "name": "Замена натяжного ролика и ремня ГРМ",
+    "category": "Покраска / корпус",
+    "normHours": 6.0,
+    "isActive": true,
+    "sortOrder": 88,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d6752d4fc86a",
+    "name": "Замена нижнего блока управления",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 89,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-f733c62a5473",
+    "name": "Замена пальцев и втулок рулевого цилиндра (сторона)",
+    "category": "Покраска / корпус",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 90,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0a4b8bc19951",
+    "name": "Замена переднего правого привода",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 91,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-eb7d878d816a",
+    "name": "Замена переднего сальник коленчатого вала с подготовительнми работами",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 92,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ade2c3ac53b1",
+    "name": "Замена предохранителя / Замена автомата на легкоплавкие предохранители номиналом 15 и 20 ампер",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 93,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-5775e9f2c262",
+    "name": "Замена проблеского маячка",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 94,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-23fc6e24ae47",
+    "name": "Замена расширительного бачка охлаждающей жидкости",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 95,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-81cc124be527",
+    "name": "Замена реле / проверка контактора / проверка главного реле",
+    "category": "Покраска / корпус",
+    "normHours": 0.25,
+    "isActive": true,
+    "sortOrder": 96,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-81cc124be527",
+    "name": "Замена реле / проверка контактора / проверка главного реле",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 97,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-7535abad958c",
+    "name": "Замена ремня генератора ДВС",
+    "category": "Покраска / корпус",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 98,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0471d0f5bdfc",
+    "name": "Замена стартера / Монтаж стартера / Демонтаж стартера",
+    "category": "Покраска / корпус",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 99,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-45fcaad1bb80",
+    "name": "Замена счётчика моточасов / Замена замка зажигания",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 100,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e6ed4d952248",
+    "name": "Замена тензодатчика",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 101,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-9a6fb02935e0",
+    "name": "Замена топлива на зимнее",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 102,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b7548f02d43e",
+    "name": "Замена топливного шланга 1пог.",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 103,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ec8e409a6d35",
+    "name": "Замена трехпозиционного переключателя",
+    "category": "Покраска / корпус",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 104,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d3035137d0a2",
+    "name": "Замена тумблера",
+    "category": "Покраска / корпус",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 105,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-713c33c607c0",
+    "name": "Замена уплотнительного кольца клапана / Замена разъема катушки клапана / Замена уплотнительного кольца клапана / Регулировка гидравлического клапана / протяжка гидравлического блока",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 106,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-9dd0cf310231",
+    "name": "Замена фиксатора правого капота",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 107,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-f83e3e55a71b",
+    "name": "Замена хомутов на патрубках (1 шт.)",
+    "category": "Покраска / корпус",
+    "normHours": 0.25,
+    "isActive": true,
+    "sortOrder": 108,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0264e827bfdd",
+    "name": "Замена шильдика",
+    "category": "Покраска / корпус",
+    "normHours": 1.2,
+    "isActive": true,
+    "sortOrder": 109,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-2d6555ebe9c5",
+    "name": "Заправка топливом",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 110,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-cede067f503a",
+    "name": "Запуск (при затруднённом запуске)",
+    "category": "Покраска / корпус",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 111,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0bb783434c55",
+    "name": "Изготовление кронштейна (н/ч факт)",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 112,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-80b4dd8187f3",
+    "name": "Изготовление перемычек",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 113,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-8b0e26018a62",
+    "name": "Калибровка грузоподъёмности коленчатого подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 114,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e4bfc83d1208",
+    "name": "Калибровка системы взвешивания",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 115,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-8439a7e65601",
+    "name": "Колесо (1): снять и установить / Дефектовка передних приводов и демонтаж передних щитов",
+    "category": "Покраска / корпус",
+    "normHours": 0.75,
+    "isActive": true,
+    "sortOrder": 116,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e560979304a1",
+    "name": "Модернизация гидавлического бака",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 117,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-5b5cc99f98aa",
+    "name": "Мойка коленчатого или дизельного подъёмника",
+    "category": "Покраска / корпус",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 118,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d360e141902a",
+    "name": "Мойка мачтового подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 119,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-82524f3ee52e",
+    "name": "Мойка подъёмника от глины или иных сильных загрязнений",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 120,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-82524f3ee52e",
+    "name": "Мойка подъёмника от глины или иных сильных загрязнений",
+    "category": "Покраска / корпус",
+    "normHours": 0.65,
+    "isActive": true,
+    "sortOrder": 121,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b21ad2a3a693",
+    "name": "Мойка радиатора внешняя",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 122,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3f9fe6988cb9",
+    "name": "Мойка/очистка от мусора электрического ножничного подъёмника",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 123,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-6f8999a17ca1",
+    "name": "Монтаж / Демонтаж гидравлических шлангов на стреле",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 124,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-5b8e1edc205a",
+    "name": "Монтаж / демонтаж корпуса",
+    "category": "Покраска / корпус",
+    "normHours": 1.2,
+    "isActive": true,
+    "sortOrder": 125,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a0db5fe606f0",
+    "name": "Монтаж ГБЦ ДВС без ремня/цепи ГРМ",
+    "category": "Покраска / корпус",
+    "normHours": 4.0,
+    "isActive": true,
+    "sortOrder": 126,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-9ad8e624655b",
+    "name": "Монтаж дополнительного света на ножничный подъемник (4 точки)",
+    "category": "Покраска / корпус",
+    "normHours": 5.0,
+    "isActive": true,
+    "sortOrder": 127,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a746e9e90c0b",
+    "name": "Монтаж зарядного устройства",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 128,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e9ab696bd6fb",
+    "name": "Монтаж кабелеукладчика",
+    "category": "Покраска / корпус",
+    "normHours": 12.0,
+    "isActive": true,
+    "sortOrder": 129,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a84a9e64b695",
+    "name": "Монтаж кабелеукладчика/ демонтаж кабелеукладчика",
+    "category": "Покраска / корпус",
+    "normHours": 12.0,
+    "isActive": true,
+    "sortOrder": 130,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-4630965ac745",
+    "name": "Монтаж кронштейна люльки",
+    "category": "Покраска / корпус",
+    "normHours": 1.45,
+    "isActive": true,
+    "sortOrder": 131,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-daa87eb3df05",
+    "name": "Монтаж опоры аутригера / демонтаж опоры аутригера",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 132,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c9b428a59c5a",
+    "name": "Монтаж отвода",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 133,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-5d14a33ef9aa",
+    "name": "Монтаж проблескового маяка",
+    "category": "Покраска / корпус",
+    "normHours": 0.7,
+    "isActive": true,
+    "sortOrder": 134,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e35dcd208023",
+    "name": "Монтаж ремня генератора и вентелятора",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 135,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-fb7664c910e4",
+    "name": "Наклейка номеров",
+    "category": "Покраска / корпус",
+    "normHours": 0.25,
+    "isActive": true,
+    "sortOrder": 136,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3a2b4beb18f6",
+    "name": "Настройка выравниваания и степени точности",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 137,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-515d004782cb",
+    "name": "Настройка выравнивания и степени точности",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 138,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-5cb40cc335a2",
+    "name": "Настройка нижнего положения ножничного механизма",
+    "category": "Покраска / корпус",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 139,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e8ca6073bbad",
+    "name": "Настройка плавности",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 140,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-64781f326e4e",
+    "name": "Настройка через систему Ezcal",
+    "category": "Покраска / корпус",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 141,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c6764b8595a0",
+    "name": "Оклейка ножничного подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 142,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3b07f8582011",
+    "name": "Отгрузка, возврат телескопического подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 143,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-8838147d7193",
+    "name": "Отгрузка, возврат эл. ножничного подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 0.55,
+    "isActive": true,
+    "sortOrder": 144,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ee7a1ecb04af",
+    "name": "Очистка клапана аварийного спуска / Прочистка клапана гидрозомка",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 145,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-15f2a872bc25",
+    "name": "Очистка подъемника после аренды",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 146,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-7a5ab3b12f9c",
+    "name": "Очистка системы охлаждения от пыли",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 147,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0c561fa9c33b",
+    "name": "Очистка фильтра",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 148,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b7fb77f46aa0",
+    "name": "Переборка привода",
+    "category": "Покраска / корпус",
+    "normHours": 4.0,
+    "isActive": true,
+    "sortOrder": 149,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d3b4a8ba1e6c",
+    "name": "Перепиновка разъёма на новый",
+    "category": "Покраска / корпус",
+    "normHours": 1.4,
+    "isActive": true,
+    "sortOrder": 150,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-2129ec6dc999",
+    "name": "Подготовительные работы к покраске металлической поверхности элемента / пластикового элемента",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 151,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-af7bbe7e522e",
+    "name": "Подготовка и покраска противовеса",
+    "category": "Покраска / корпус",
+    "normHours": 5.0,
+    "isActive": true,
+    "sortOrder": 152,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-af7bbe7e522e",
+    "name": "Подготовка и покраска противовеса",
+    "category": "Покраска / корпус",
+    "normHours": 0.4,
+    "isActive": true,
+    "sortOrder": 153,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-f1293cf3c69f",
+    "name": "Подготовка к полной покраске подъёмника коленчатого",
+    "category": "Покраска / корпус",
+    "normHours": 12.0,
+    "isActive": true,
+    "sortOrder": 154,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a21406080baa",
+    "name": "Покраска боковых поверхностей основания ножничного подъёмника",
+    "category": "Покраска / корпус",
+    "normHours": 6.0,
+    "isActive": true,
+    "sortOrder": 155,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-46a8e5baf6c5",
+    "name": "Покраска боковых поверхностей платформы ножничного подъёмника",
+    "category": "Покраска / корпус",
+    "normHours": 5.0,
+    "isActive": true,
+    "sortOrder": 156,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-468963bb00d1",
+    "name": "Покраска ножничного механизма без материалов до 12м",
+    "category": "Покраска / корпус",
+    "normHours": 16.0,
+    "isActive": true,
+    "sortOrder": 157,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-98cee95655d7",
+    "name": "Покраска ножничного механизма без материалов от 12м",
+    "category": "Покраска / корпус",
+    "normHours": 20.0,
+    "isActive": true,
+    "sortOrder": 158,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-31f086688e46",
+    "name": "Покраска ограждений платформы / сигмента стрелы подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 159,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-6685ed79fd09",
+    "name": "Покраска ограждений платформы/ сегмента стрелы подъемника",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 160,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-f506d0cdc77b",
+    "name": "Покраска пластиковго капота / Покраска крышки ВПУ",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 161,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-8dc1b095cf3f",
+    "name": "Полная покраска4,5",
+    "category": "Покраска / корпус",
+    "normHours": 12.0,
+    "isActive": true,
+    "sortOrder": 162,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0d19ea713ef2",
+    "name": "Проверка оборудования с системой аналайзер",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 163,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c04304065030",
+    "name": "Проверка работоспособности",
+    "category": "Покраска / корпус",
+    "normHours": 0.7,
+    "isActive": true,
+    "sortOrder": 164,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-619e0f016705",
+    "name": "Промывка и замена уплотнителя",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 165,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e810ac578772",
+    "name": "Протяжка болтов керпления выхлопной системы",
+    "category": "Покраска / корпус",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 166,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-9a82cb808bd2",
+    "name": "Протяжка и монтаж на фиксатор болта крепления мотора хода",
+    "category": "Покраска / корпус",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 167,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3dc813e4343c",
+    "name": "Протяжка соединении эл. цепи",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 168,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-af46dbf3bec1",
+    "name": "Протяжка фланца шестеренного насоса / протяжка крепления провода массы к раме",
+    "category": "Покраска / корпус",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 169,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e55cce26a2aa",
+    "name": "Профилактические работы с электродвигателем / стартером",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 170,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c448890dd6d1",
+    "name": "Разборка/сборка гидрораспределителя с очисткой",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 171,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d8046a77d62d",
+    "name": "Регулировка концевика",
+    "category": "Покраска / корпус",
+    "normHours": 0.35,
+    "isActive": true,
+    "sortOrder": 172,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-30960c0534c9",
+    "name": "Регулировка стойки двери",
+    "category": "Покраска / корпус",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 173,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-46caa36a4cc8",
+    "name": "Регулировка тяги соленоида газа (настройка срабатывания)",
+    "category": "Покраска / корпус",
+    "normHours": 0.6,
+    "isActive": true,
+    "sortOrder": 174,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ea4404a2452b",
+    "name": "Ремонт глушителя",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 175,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-d08456e5411c",
+    "name": "Ремонт контактов разъема",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 176,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c9d1048bede3",
+    "name": "Ремонт креплнения платы в пульте",
+    "category": "Покраска / корпус",
+    "normHours": 0.6,
+    "isActive": true,
+    "sortOrder": 177,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-91baac9ef897",
+    "name": "Ремонт порезов покрышки",
+    "category": "Покраска / корпус",
+    "normHours": 0.75,
+    "isActive": true,
+    "sortOrder": 178,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-f98f1f990ae1",
+    "name": "Ремонт рулевой трапеции",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 179,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-63959c9f0ea5",
+    "name": "Рихтовка корпуса (металлические элементы)",
+    "category": "Покраска / корпус",
+    "normHours": 5.0,
+    "isActive": true,
+    "sortOrder": 180,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-7f7c40893029",
+    "name": "Смазывание клемм / шприцовка",
+    "category": "Покраска / корпус",
+    "normHours": 0.6,
+    "isActive": true,
+    "sortOrder": 181,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e5899ac22322",
+    "name": "Смазывание шарнирно-пальцевых соединений коленчатого эл. подъёника",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 182,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b4398ff5a4fd",
+    "name": "Смазывание шарнирно-пальцевых соединений коленчатого/ телескопического подъёмника",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 183,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-80af81da5d2d",
+    "name": "Смазывание шарнирно-пальцевых соединений электрического мачтового подъёмника",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 184,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a282c4c9e01c",
+    "name": "Снятие и установка гидробака в сборе",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 185,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-debbc9822b47",
+    "name": "Снятие навесного оборудования",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 186,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-537fde636720",
+    "name": "Требуется замена жиклёра поворота колёс",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 187,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-674fc9777298",
+    "name": "Удаление потёков масла",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 188,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-56b1708e827a",
+    "name": "Установка вилки / Установка розетки / Демонтаж вилки/ Демонтаж розетки",
+    "category": "Покраска / корпус",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 189,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-5ef620f4e4c2",
+    "name": "Установка замка на капот",
+    "category": "Покраска / корпус",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 190,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-2e141d2ac7ee",
+    "name": "Установка катушек клапана",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 191,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-79b198c5545d",
+    "name": "Установка лестницы и сборка перил",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 192,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-64e23bf92dcf",
+    "name": "Установка микросхемы",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 193,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-7d006763e69d",
+    "name": "Установка трубки",
+    "category": "Покраска / корпус",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 194,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-415755be2aba",
+    "name": "Установка уплотнительного кольца",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 195,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a672b2cf02ce",
+    "name": "Установка фиксаторов перил",
+    "category": "Покраска / корпус",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 196,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-974c077a3588",
+    "name": "Чистка платформы и извлечение саморезов с колес",
+    "category": "Покраска / корпус",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 197,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-9e32bed5970d",
+    "name": "Чистка поверхности насоса и двигателя от масляных отложений",
+    "category": "Покраска / корпус",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 198,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3ae63db9d88e",
+    "name": "Шпатлёвка элемента штука",
+    "category": "Покраска / корпус",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 199,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3ae63db9d88e",
+    "name": "Шпатлёвка элемента штука",
+    "category": "Покраска / корпус",
+    "normHours": 4.0,
+    "isActive": true,
+    "sortOrder": 200,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-3ae63db9d88e",
+    "name": "Шпатлёвка элемента штука",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 201,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-f27915ddd514",
+    "name": "демонтаж фильтра влагоотделителя",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 202,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c4870527125a",
+    "name": "лайде",
+    "category": "Покраска / корпус",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 203,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-25121725937b",
+    "name": "монтаж рулевой тяги",
+    "category": "Покраска / корпус",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 204,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c8f4ed60c06b",
+    "name": "Демонтаж/монтаж противовеса/башни подъемника — диагностика",
+    "category": "Покраска / корпус / Диагностика",
+    "normHours": 0.75,
+    "isActive": true,
+    "sortOrder": 205,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-6e5b9eab425b",
+    "name": "Демонтаж/монтаж слайдеров телескопа — диагностика",
+    "category": "Покраска / корпус / Диагностика",
+    "normHours": 0.35,
+    "isActive": true,
+    "sortOrder": 206,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-6d4c2a46fb9a",
+    "name": "Замена трехпозиционного переключателя — диагностика",
+    "category": "Покраска / корпус / Диагностика",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 207,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-4ff318936d5a",
+    "name": "Монтаж кабелеукладчика/ демонтаж кабелеукладчика — диагностика",
+    "category": "Покраска / корпус / Диагностика",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 208,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a5d2737165d7",
+    "name": "Переборка привода — диагностика",
+    "category": "Покраска / корпус / Диагностика",
+    "normHours": 0.75,
+    "isActive": true,
+    "sortOrder": 209,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a041cdd02207",
+    "name": "Промывка и замена уплотнителя — диагностика",
+    "category": "Покраска / корпус / Диагностика",
+    "normHours": 1.2,
+    "isActive": true,
+    "sortOrder": 210,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-4513fa04cf0e",
+    "name": "Шпатлёвка элемента штука — диагностика",
+    "category": "Покраска / корпус / Диагностика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 211,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b3e85dd4df47",
+    "name": "Демонтаж АКБ-штука",
+    "category": "Электрика",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 212,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ac8ad335126e",
+    "name": "Диагностика вариатора ножничного подъемника",
+    "category": "Электрика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 213,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-4d9465a7b5aa",
+    "name": "Замена вариатора штука",
+    "category": "Электрика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 214,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a712373a285e",
+    "name": "Замена датчика выдвижения стрелы",
+    "category": "Электрика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 215,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-cb324342de64",
+    "name": "Замена джойстика ВПУ",
+    "category": "Электрика",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 216,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-123f6e1cfecc",
+    "name": "Замена зарядного устройства на новое",
+    "category": "Электрика",
+    "normHours": 1.3,
+    "isActive": true,
+    "sortOrder": 217,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-04e594357cd1",
+    "name": "Замена клаксона/звукового сигнала",
+    "category": "Электрика",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 218,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e5755bbf8028",
+    "name": "Замена кнопки аварийно остановки на верхнем пульте управления",
+    "category": "Электрика",
+    "normHours": 0.4,
+    "isActive": true,
+    "sortOrder": 219,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-e7ddfaaae7d1",
+    "name": "Замена колёс подъёмника 4шт",
+    "category": "Электрика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 220,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-19621418ae76",
+    "name": "Замена перемычек между АКБ",
+    "category": "Электрика",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 221,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-590b1eac0602",
+    "name": "Замена питающего кабеля эл. Привода 1 шт",
+    "category": "Электрика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 222,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a4e4350e3fbc",
+    "name": "Замена реле / проверка контактора / проверка главного реле",
+    "category": "Электрика",
+    "normHours": 0.25,
+    "isActive": true,
+    "sortOrder": 223,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-840da62a3de1",
+    "name": "Замена тумблера",
+    "category": "Электрика",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 224,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-531bb8479fc0",
+    "name": "Калибровка грузоподъёмности ножничного подъемника",
+    "category": "Электрика",
+    "normHours": 0.8,
+    "isActive": true,
+    "sortOrder": 225,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-5bf656de94c6",
+    "name": "Калибровка датчика наклона",
+    "category": "Электрика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 226,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-04c5638f12dc",
+    "name": "Монтаж АКБ- штука",
+    "category": "Электрика",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 227,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-31f61014e1e9",
+    "name": "Монтаж проблескового маяка",
+    "category": "Электрика",
+    "normHours": 0.7,
+    "isActive": true,
+    "sortOrder": 228,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-4d214172cfb6",
+    "name": "Настройка параметров подьёмника час факт мин 1.",
+    "category": "Электрика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 229,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c9bce647f45a",
+    "name": "Обслуживание АКБ штука / Протяжка и очистка клеммы АКБ",
+    "category": "Электрика",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 230,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c33528e46de6",
+    "name": "Переборка разъёма впу",
+    "category": "Электрика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 231,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-db857a0ff8c0",
+    "name": "Ремонт Эл. проводки пульта",
+    "category": "Электрика",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 232,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-60e2632040bd",
+    "name": "Ремонт главного реле",
+    "category": "Электрика",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 233,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-8d9644f09c33",
+    "name": "Ремонт джойстика ВПУ",
+    "category": "Электрика",
+    "normHours": 1.5,
+    "isActive": true,
+    "sortOrder": 234,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-be020633fec0",
+    "name": "Ремонт эл. Проводки (час факт) / Запайка проводов ВПУ",
+    "category": "Электрика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 235,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-b0ac477e17ab",
+    "name": "Смазывание шарнирно-пальцевых соединений коленчатого/ телескопического подъёмника",
+    "category": "Электрика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 236,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-0c3b96ef57d1",
+    "name": "Смазывание шарнирно-пальцевых соединений ножничного эл. подъёмника / Смазывание погрузчика",
+    "category": "Электрика",
+    "normHours": 0.5,
+    "isActive": true,
+    "sortOrder": 237,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-f7b00cc38db6",
+    "name": "Установка вилки / Установка розетки / Демонтаж вилки/ Демонтаж розетки",
+    "category": "Электрика",
+    "normHours": 0.2,
+    "isActive": true,
+    "sortOrder": 238,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-23e451a4d603",
+    "name": "Установка концевого выключателя / Демонтаж концевого выключателя / регулировка концевика",
+    "category": "Электрика",
+    "normHours": 0.7,
+    "isActive": true,
+    "sortOrder": 239,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c65c2606202c",
+    "name": "Установка системы определения нагрузки (ножничный подъёмник)",
+    "category": "Электрика",
+    "normHours": 5.0,
+    "isActive": true,
+    "sortOrder": 240,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-90aa72af3c2b",
+    "name": "Диагностика вариатора ножничного подъемника",
+    "category": "Электрика / Диагностика",
+    "normHours": 2.0,
+    "isActive": true,
+    "sortOrder": 241,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-c3aec774a3d9",
+    "name": "Калибровка датчика наклона — диагностика",
+    "category": "Электрика / Диагностика",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 242,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-a065d802c46f",
+    "name": "Переборка разъёма впу — диагностика",
+    "category": "Электрика / Диагностика",
+    "normHours": 3.0,
+    "isActive": true,
+    "sortOrder": 243,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-56d0b82a226f",
+    "name": "Ремонт главного реле — диагностика",
+    "category": "Электрика / Диагностика",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 244,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-6ea1967e5c57",
+    "name": "Смазывание шарнирно-пальцевых соединений коленчатого/ телескопического подъёмника — диагностика",
+    "category": "Электрика / Диагностика",
+    "normHours": 0.3,
+    "isActive": true,
+    "sortOrder": 245,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-179581d7a42e",
+    "name": "Установка вилки / Установка розетки / Демонтаж вилки/ Демонтаж розетки — диагностика",
+    "category": "Электрика / Диагностика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 246,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  },
+  {
+    "id": "SW-ffd5e49eb66a",
+    "name": "Установка концевого выключателя / Демонтаж концевого выключателя / регулировка концевика — диагностика",
+    "category": "Электрика / Диагностика",
+    "normHours": 1.0,
+    "isActive": true,
+    "sortOrder": 247,
+    "createdAt": "2026-04-13T00:00:00.000Z",
+    "updatedAt": "2026-04-13T00:00:00.000Z"
+  }
+]

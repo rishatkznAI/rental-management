@@ -108,13 +108,16 @@ function legacyParts(ticket: ServiceTicket): ServicePartUsage[] {
 }
 
 function workItemsToResult(items: RepairWorkItem[]): ServiceWorkPerformed[] {
-  return items.map(item => ({
-    catalogId: item.workId,
-    name: item.nameSnapshot,
-    normHours: item.normHoursSnapshot,
-    qty: item.quantity,
-    totalNormHours: Number((item.normHoursSnapshot * item.quantity).toFixed(2)),
-  }));
+  return items.map(item => {
+    const normHours = isNaN(item.normHoursSnapshot) || item.normHoursSnapshot == null ? 0 : item.normHoursSnapshot;
+    return {
+      catalogId: item.workId,
+      name: item.nameSnapshot,
+      normHours,
+      qty: item.quantity,
+      totalNormHours: Number((normHours * item.quantity).toFixed(2)),
+    };
+  });
 }
 
 function partItemsToResult(items: RepairPartItem[]): ServicePartUsage[] {

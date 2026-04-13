@@ -806,7 +806,14 @@ apiRouter.post('/spare_parts/:id/deactivate', requireAuth, requireWrite('spare_p
 apiRouter.get('/repair_work_items', requireAuth, (req, res) => {
   const repairId = String(req.query.repair_id || '').trim();
   const list = readData('repair_work_items') || [];
-  res.json(repairId ? list.filter(item => item.repairId === repairId) : list);
+  const sanitized = list.map(item => ({
+    ...item,
+    normHoursSnapshot: isNaN(item.normHoursSnapshot) || item.normHoursSnapshot == null
+      ? 0
+      : Number(item.normHoursSnapshot),
+    quantity: isNaN(item.quantity) || item.quantity == null ? 1 : Number(item.quantity),
+  }));
+  res.json(repairId ? sanitized.filter(item => item.repairId === repairId) : sanitized);
 });
 
 apiRouter.post('/repair_work_items', requireAuth, requireWrite('repair_work_items'), (req, res) => {

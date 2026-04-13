@@ -692,6 +692,23 @@ function registerCRUD(router, collection) {
       return res.json({ ok: true, count: list.length });
     }
 
+    // Для users: сохраняем пароли из базы, если в теле запроса их нет
+    // (GET /api/users возвращает пользователей без паролей через sanitizeUser,
+    //  поэтому при bulkReplace пароли нужно восстановить из существующих данных)
+    if (collection === 'users') {
+      const existing = readData('users') || [];
+      const existingById = new Map(existing.map(u => [u.id, u]));
+      const merged = list.map(u => {
+        if (!u.password) {
+          const existingPwd = existingById.get(u.id)?.password;
+          if (existingPwd) return { ...u, password: existingPwd };
+        }
+        return u;
+      });
+      writeData('users', merged);
+      return res.json({ ok: true, count: merged.length });
+    }
+
     writeData(collection, list);
     res.json({ ok: true, count: list.length });
   });

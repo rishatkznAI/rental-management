@@ -110,12 +110,16 @@ function legacyParts(ticket: ServiceTicket): ServicePartUsage[] {
 function workItemsToResult(items: RepairWorkItem[]): ServiceWorkPerformed[] {
   return items.map(item => {
     const normHours = isNaN(item.normHoursSnapshot) || item.normHoursSnapshot == null ? 0 : item.normHoursSnapshot;
+    const ratePerHour = isNaN(item.ratePerHourSnapshot) || item.ratePerHourSnapshot == null ? 0 : item.ratePerHourSnapshot;
+    const totalNormHours = Number((normHours * item.quantity).toFixed(2));
     return {
       catalogId: item.workId,
       name: item.nameSnapshot,
       normHours,
       qty: item.quantity,
-      totalNormHours: Number((normHours * item.quantity).toFixed(2)),
+      totalNormHours,
+      ratePerHour,
+      totalCost: Number((totalNormHours * ratePerHour).toFixed(2)),
     };
   });
 }
@@ -692,10 +696,15 @@ export default function ServiceDetail() {
                             const item = repairWorkItems[index];
                             return (
                             <div key={item?.id ?? `${work.catalogId}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
-                              <div>
-                                <p className="font-medium text-gray-900 dark:text-white">{work.name}</p>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-gray-900 dark:text-white">{work.name || '—'}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
                                   {work.normHours} н/ч × {work.qty} = {work.totalNormHours} н/ч
+                                  {work.ratePerHour > 0 && (
+                                    <span className="ml-2 font-medium text-gray-700 dark:text-gray-300">
+                                      · {work.totalCost.toLocaleString('ru-RU')} ₽
+                                    </span>
+                                  )}
                                 </p>
                               </div>
                               {canEdit && ticket.status !== 'closed' && item && (
@@ -716,10 +725,15 @@ export default function ServiceDetail() {
                             const item = repairPartItems[index];
                             return (
                             <div key={item?.id ?? `${part.catalogId ?? part.name}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
-                              <div>
-                                <p className="font-medium text-gray-900 dark:text-white">{part.name}</p>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-gray-900 dark:text-white">{part.name || '—'}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
                                   {part.sku ? `${part.sku} · ` : ''}{part.qty} {item?.unitSnapshot || 'шт'} × {part.cost.toLocaleString('ru-RU')} ₽
+                                  {part.cost > 0 && (
+                                    <span className="ml-2 font-medium text-gray-700 dark:text-gray-300">
+                                      = {(part.qty * part.cost).toLocaleString('ru-RU')} ₽
+                                    </span>
+                                  )}
                                 </p>
                               </div>
                               {canEdit && ticket.status !== 'closed' && item && (

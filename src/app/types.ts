@@ -105,6 +105,7 @@ export interface ServiceWork {
   category?: string;
   description?: string;
   normHours: number;
+  ratePerHour: number;
   isActive: boolean;
   sortOrder: number;
   createdAt: string;
@@ -131,6 +132,7 @@ export interface RepairWorkItem {
   workId: string;
   quantity: number;
   normHoursSnapshot: number;
+  ratePerHourSnapshot: number;
   nameSnapshot: string;
   categorySnapshot?: string;
   createdAt: string;
@@ -169,6 +171,8 @@ export interface ServiceWorkPerformed {
   normHours: number;
   qty: number;
   totalNormHours: number;
+  ratePerHour: number;
+  totalCost: number;
 }
 
 export interface ServiceRepairResult {

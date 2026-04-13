@@ -1761,9 +1761,9 @@ function ServiceWorkCatalogReferenceList() {
     queryFn: serviceWorksService.getAll,
   });
   const [search, setSearch] = React.useState('');
-  const [draft, setDraft] = React.useState({ name: '', category: '', description: '', normHours: '', sortOrder: '0' });
+  const [draft, setDraft] = React.useState({ name: '', category: '', description: '', normHours: '', ratePerHour: '', sortOrder: '0' });
   const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [editing, setEditing] = React.useState({ name: '', category: '', description: '', normHours: '', sortOrder: '0' });
+  const [editing, setEditing] = React.useState({ name: '', category: '', description: '', normHours: '', ratePerHour: '', sortOrder: '0' });
 
   const filtered = React.useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1778,6 +1778,7 @@ function ServiceWorkCatalogReferenceList() {
   const createWork = async () => {
     if (!draft.name.trim()) return;
     const normHours = Number(draft.normHours);
+    const ratePerHour = Number(draft.ratePerHour) || 0;
     const sortOrder = Number(draft.sortOrder);
     if (!Number.isFinite(normHours) || normHours < 0) return;
     await serviceWorksService.create({
@@ -1785,15 +1786,17 @@ function ServiceWorkCatalogReferenceList() {
       category: draft.category.trim() || undefined,
       description: draft.description.trim() || undefined,
       normHours,
+      ratePerHour: Math.max(0, ratePerHour),
       isActive: true,
       sortOrder: Number.isFinite(sortOrder) ? sortOrder : 0,
     });
-    setDraft({ name: '', category: '', description: '', normHours: '', sortOrder: '0' });
+    setDraft({ name: '', category: '', description: '', normHours: '', ratePerHour: '', sortOrder: '0' });
     await reload();
   };
 
   const saveEdit = async (id: string) => {
     const normHours = Number(editing.normHours);
+    const ratePerHour = Number(editing.ratePerHour) || 0;
     const sortOrder = Number(editing.sortOrder);
     if (!editing.name.trim() || !Number.isFinite(normHours) || normHours < 0) return;
     await serviceWorksService.update(id, {
@@ -1801,6 +1804,7 @@ function ServiceWorkCatalogReferenceList() {
       category: editing.category.trim() || undefined,
       description: editing.description.trim() || undefined,
       normHours,
+      ratePerHour: Math.max(0, ratePerHour),
       sortOrder: Number.isFinite(sortOrder) ? sortOrder : 0,
     });
     setEditingId(null);
@@ -1823,8 +1827,9 @@ function ServiceWorkCatalogReferenceList() {
                 <Input value={editing.name} onChange={e => setEditing(prev => ({ ...prev, name: e.target.value }))} placeholder="Название работы" />
                 <Input value={editing.category} onChange={e => setEditing(prev => ({ ...prev, category: e.target.value }))} placeholder="Категория" />
                 <Input value={editing.description} onChange={e => setEditing(prev => ({ ...prev, description: e.target.value }))} placeholder="Описание" />
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2 sm:grid-cols-3">
                   <Input type="number" min="0" step="0.1" value={editing.normHours} onChange={e => setEditing(prev => ({ ...prev, normHours: e.target.value }))} placeholder="Нормо-часы" />
+                  <Input type="number" min="0" step="100" value={editing.ratePerHour} onChange={e => setEditing(prev => ({ ...prev, ratePerHour: e.target.value }))} placeholder="Ставка ₽/н·ч" />
                   <Input type="number" min="0" step="1" value={editing.sortOrder} onChange={e => setEditing(prev => ({ ...prev, sortOrder: e.target.value }))} placeholder="Порядок сортировки" />
                 </div>
                 <div className="flex gap-2">
@@ -1837,7 +1842,7 @@ function ServiceWorkCatalogReferenceList() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium">{item.name}</p>
-                    <p className="text-xs text-gray-500">{item.category || 'Без категории'} · {item.normHours} н/ч · сортировка {item.sortOrder}</p>
+                    <p className="text-xs text-gray-500">{item.category || 'Без категории'} · {item.normHours} н/ч{item.ratePerHour > 0 ? ` · ${item.ratePerHour.toLocaleString('ru-RU')} ₽/н·ч` : ''} · сортировка {item.sortOrder}</p>
                     {item.description && <p className="mt-1 text-xs text-gray-500">{item.description}</p>}
                   </div>
                   <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>{statusLabel(item.isActive ? 'active' : 'inactive')}</Badge>
@@ -1853,6 +1858,7 @@ function ServiceWorkCatalogReferenceList() {
                         category: item.category || '',
                         description: item.description || '',
                         normHours: String(item.normHours),
+                        ratePerHour: item.ratePerHour ? String(item.ratePerHour) : '',
                         sortOrder: String(item.sortOrder),
                       });
                     }}
@@ -1874,8 +1880,9 @@ function ServiceWorkCatalogReferenceList() {
             <Input placeholder="Название работы" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
             <Input placeholder="Категория" value={draft.category} onChange={e => setDraft(prev => ({ ...prev, category: e.target.value }))} />
             <Input placeholder="Описание" value={draft.description} onChange={e => setDraft(prev => ({ ...prev, description: e.target.value }))} />
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
               <Input type="number" min="0" step="0.1" placeholder="Нормо-часы" value={draft.normHours} onChange={e => setDraft(prev => ({ ...prev, normHours: e.target.value }))} />
+              <Input type="number" min="0" step="100" placeholder="Ставка ₽/н·ч" value={draft.ratePerHour} onChange={e => setDraft(prev => ({ ...prev, ratePerHour: e.target.value }))} />
               <Input type="number" min="0" step="1" placeholder="Порядок сортировки" value={draft.sortOrder} onChange={e => setDraft(prev => ({ ...prev, sortOrder: e.target.value }))} />
             </div>
             <Button size="sm" onClick={() => void createWork()}>

@@ -18,6 +18,19 @@
  *  /аренды                  — мои активные аренды
  *  /техника                 — свободная техника
  *  /сервис                  — открытые заявки
+ *  /моизаявки               — сервисные заявки механика
+ *  /вработу <id>            — взять заявку в работу
+ *  /ремонт <id>             — выбрать текущую заявку
+ *  /итог <текст>            — сохранить итог ремонта
+ *  /работы <поиск>          — найти работы в справочнике
+ *  /добавитьработу <№> <qty>
+ *  /запчасти <поиск>        — найти запчасти в справочнике
+ *  /добавитьзапчасть <№> <qty> [цена]
+ *  /черновик                — показать текущий отчет по ремонту
+ *  /ожидание                — перевести в ожидание запчастей
+ *  /готово                  — завершить работы
+ *  /закрыть                 — закрыть заявку
+ *  /сброс                   — сбросить текущую заявку
  *  /помощь                  — список команд
  */
 
@@ -98,6 +111,8 @@ function writeData(name, data) {
 
 function getBotUsers()    { return readData('bot_users') || {}; }
 function saveBotUsers(u)  { writeData('bot_users', u); }
+function getBotSessions() { return readData('bot_sessions') || {}; }
+function saveBotSessions(s) { writeData('bot_sessions', s); }
 function getSnapshot()    { return readData('snapshot') || {}; }
 function saveSnapshot(s)  { writeData('snapshot', s); }
 
@@ -305,6 +320,7 @@ function normalizeServiceWorkRecord(record) {
     category: record.category ? String(record.category).trim() : undefined,
     description: record.description ? String(record.description).trim() : undefined,
     normHours: Math.max(0, Number(record.normHours) || 0),
+    ratePerHour: Math.max(0, Number(record.ratePerHour) || 0),
     isActive: record.isActive !== false,
     sortOrder: Number.isFinite(Number(record.sortOrder)) ? Number(record.sortOrder) : 0,
     createdAt: record.createdAt || timestamp,
@@ -806,13 +822,24 @@ apiRouter.post('/spare_parts/:id/deactivate', requireAuth, requireWrite('spare_p
 apiRouter.get('/repair_work_items', requireAuth, (req, res) => {
   const repairId = String(req.query.repair_id || '').trim();
   const list = readData('repair_work_items') || [];
-  const sanitized = list.map(item => ({
-    ...item,
-    normHoursSnapshot: isNaN(item.normHoursSnapshot) || item.normHoursSnapshot == null
-      ? 0
-      : Number(item.normHoursSnapshot),
-    quantity: isNaN(item.quantity) || item.quantity == null ? 1 : Number(item.quantity),
-  }));
+  const catalog = readData('service_works') || [];
+  const catalogById = new Map(catalog.map(w => [w.id, w]));
+  const sanitized = list.map(item => {
+    const ref = catalogById.get(item.workId);
+    const normHours = isNaN(item.normHoursSnapshot) || item.normHoursSnapshot == null
+      ? (ref ? Math.max(0, Number(ref.normHours) || 0) : 0)
+      : Number(item.normHoursSnapshot);
+    const ratePerHour = isNaN(item.ratePerHourSnapshot) || item.ratePerHourSnapshot == null
+      ? (ref ? Math.max(0, Number(ref.ratePerHour) || 0) : 0)
+      : Number(item.ratePerHourSnapshot);
+    return {
+      ...item,
+      normHoursSnapshot: normHours,
+      ratePerHourSnapshot: ratePerHour,
+      nameSnapshot: item.nameSnapshot || ref?.name || 'Работа',
+      quantity: isNaN(item.quantity) || item.quantity == null ? 1 : Number(item.quantity),
+    };
+  });
   res.json(repairId ? sanitized.filter(item => item.repairId === repairId) : sanitized);
 });
 
@@ -839,6 +866,7 @@ apiRouter.post('/repair_work_items', requireAuth, requireWrite('repair_work_item
       workId,
       quantity,
       normHoursSnapshot: Math.max(0, Number(work.normHours) || 0),
+      ratePerHourSnapshot: Math.max(0, Number(work.ratePerHour) || 0),
       nameSnapshot: String(work.name || '').trim(),
       categorySnapshot: work.category ? String(work.category).trim() : undefined,
       createdAt: nowIso(),
@@ -865,7 +893,21 @@ apiRouter.delete('/repair_work_items/:id', requireAuth, requireWrite('repair_wor
 apiRouter.get('/repair_part_items', requireAuth, (req, res) => {
   const repairId = String(req.query.repair_id || '').trim();
   const list = readData('repair_part_items') || [];
-  res.json(repairId ? list.filter(item => item.repairId === repairId) : list);
+  const catalog = readData('spare_parts') || [];
+  const catalogById = new Map(catalog.map(p => [p.id, p]));
+  const sanitized = list.map(item => {
+    const ref = catalogById.get(item.partId);
+    return {
+      ...item,
+      nameSnapshot: item.nameSnapshot || ref?.name || 'Запчасть',
+      priceSnapshot: isNaN(item.priceSnapshot) || item.priceSnapshot == null
+        ? (ref ? Math.max(0, Number(ref.defaultPrice) || 0) : 0)
+        : Number(item.priceSnapshot),
+      quantity: isNaN(item.quantity) || item.quantity == null ? 1 : Number(item.quantity),
+      unitSnapshot: item.unitSnapshot || ref?.unit || 'шт',
+    };
+  });
+  res.json(repairId ? sanitized.filter(item => item.repairId === repairId) : sanitized);
 });
 
 apiRouter.post('/repair_part_items', requireAuth, requireWrite('repair_part_items'), (req, res) => {
@@ -1203,6 +1245,361 @@ function getAuthorizedUser(phone) {
   return getBotUsers()[phone] || null;
 }
 
+function getBotSession(phone) {
+  return getBotSessions()[phone] || {};
+}
+
+function updateBotSession(phone, patch) {
+  const sessions = getBotSessions();
+  sessions[phone] = {
+    ...(sessions[phone] || {}),
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  saveBotSessions(sessions);
+  return sessions[phone];
+}
+
+function clearBotSession(phone) {
+  const sessions = getBotSessions();
+  delete sessions[phone];
+  saveBotSessions(sessions);
+}
+
+function normalizeBotText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function botSearchMatches(haystack, query) {
+  const text = normalizeBotText(haystack);
+  const normalizedQuery = normalizeBotText(query);
+  if (!normalizedQuery) return true;
+  const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  return tokens.every(token => {
+    if (text.includes(token)) return true;
+    if (token.length >= 5 && text.includes(token.slice(0, -1))) return true;
+    if (token.length >= 6 && text.includes(token.slice(0, -2))) return true;
+    return false;
+  });
+}
+
+function serviceStatusLabel(status) {
+  return ({
+    new: 'Новый',
+    in_progress: 'В работе',
+    waiting_parts: 'Ожидание запчастей',
+    ready: 'Готово',
+    closed: 'Закрыто',
+  })[status] || status;
+}
+
+function servicePriorityLabel(priority) {
+  return ({
+    low: 'Низкий',
+    medium: 'Средний',
+    high: 'Высокий',
+    critical: 'Критический',
+  })[priority] || priority;
+}
+
+function openServiceStatuses() {
+  return ['new', 'in_progress', 'waiting_parts', 'ready'];
+}
+
+function readServiceTickets() {
+  return readData('service') || [];
+}
+
+function writeServiceTickets(tickets) {
+  writeData('service', tickets);
+}
+
+function findServiceTicketById(ticketId) {
+  const normalizedId = normalizeBotText(ticketId);
+  return readServiceTickets().find(ticket => normalizeBotText(ticket.id) === normalizedId) || null;
+}
+
+function saveServiceTicket(updatedTicket) {
+  const tickets = readServiceTickets();
+  const nextTickets = tickets.map(ticket => ticket.id === updatedTicket.id ? updatedTicket : ticket);
+  writeServiceTickets(nextTickets);
+}
+
+function appendServiceLog(ticket, text, author, type = 'comment') {
+  return {
+    ...ticket,
+    workLog: [
+      ...(ticket.workLog || []),
+      { date: new Date().toISOString(), text, author, type },
+    ],
+  };
+}
+
+function getMechanicReferenceByUser(authUser) {
+  const mechanics = readData('mechanics') || [];
+  const byName = mechanics.find(item => item.status === 'active' && normalizeBotText(item.name) === normalizeBotText(authUser.userName));
+  return byName || null;
+}
+
+function syncEquipmentStatusForService(ticket, newStatus) {
+  if (!ticket?.equipmentId && !ticket?.inventoryNumber) return;
+
+  const equipmentList = readData('equipment') || [];
+  const ganttRentals = readData('gantt_rentals') || [];
+  const tickets = readServiceTickets();
+  const openStatuses = openServiceStatuses();
+
+  const remainingOpen = tickets.some(existing =>
+    existing.id !== ticket.id &&
+    openStatuses.includes(existing.status) &&
+    (
+      (ticket.equipmentId && existing.equipmentId === ticket.equipmentId) ||
+      (ticket.inventoryNumber && existing.inventoryNumber === ticket.inventoryNumber)
+    )
+  );
+
+  const hasActiveRental = ganttRentals.some(rental =>
+    rental.equipmentInv === ticket.inventoryNumber &&
+    rental.status !== 'returned' &&
+    rental.status !== 'closed'
+  );
+
+  const nextEquipment = equipmentList.map(item => {
+    const matches =
+      (ticket.equipmentId && item.id === ticket.equipmentId) ||
+      (ticket.inventoryNumber && item.inventoryNumber === ticket.inventoryNumber);
+    if (!matches) return item;
+
+    let nextStatus = item.status;
+    if (openStatuses.includes(newStatus)) {
+      nextStatus = 'in_service';
+    } else if (!remainingOpen) {
+      nextStatus = hasActiveRental ? 'rented' : 'available';
+    }
+    return { ...item, status: nextStatus };
+  });
+
+  writeData('equipment', nextEquipment);
+}
+
+function updateServiceTicketStatus(ticket, newStatus, author, text) {
+  const updated = appendServiceLog({
+    ...ticket,
+    status: newStatus,
+    closedAt: (newStatus === 'closed' || newStatus === 'ready') ? new Date().toISOString() : ticket.closedAt,
+  }, text, author, 'status_change');
+  saveServiceTicket(updated);
+  syncEquipmentStatusForService(updated, newStatus);
+  return updated;
+}
+
+function formatTicketLine(ticket) {
+  const assigned = ticket.assignedMechanicName ? ` · ${ticket.assignedMechanicName}` : '';
+  return `• ${ticket.id} · ${serviceStatusLabel(ticket.status)} · ${ticket.equipment}\n  ${ticket.reason}${assigned}`;
+}
+
+function formatCurrentRepairDraft(ticket) {
+  const workItems = (readData('repair_work_items') || []).filter(item => item.repairId === ticket.id);
+  const partItems = (readData('repair_part_items') || []).filter(item => item.repairId === ticket.id);
+  const summary = ticket.resultData?.summary || ticket.result || 'не заполнен';
+  const worksText = workItems.length
+    ? workItems.map((item, index) => `${index + 1}. ${item.nameSnapshot} × ${item.quantity}`).join('\n')
+    : 'нет';
+  const partsText = partItems.length
+    ? partItems.map((item, index) => `${index + 1}. ${item.nameSnapshot} × ${item.quantity} (${Number(item.priceSnapshot || 0).toLocaleString('ru-RU')} ₽)`).join('\n')
+    : 'нет';
+
+  return [
+    `🧾 Текущий отчет по ${ticket.id}`,
+    `${ticket.equipment}`,
+    `Статус: ${serviceStatusLabel(ticket.status)}`,
+    `Итог: ${summary}`,
+    '',
+    `Работы:\n${worksText}`,
+    '',
+    `Запчасти:\n${partsText}`,
+  ].join('\n');
+}
+
+function getAccessibleServiceTickets(authUser) {
+  const tickets = readServiceTickets();
+  if (authUser.userRole === 'Механик') {
+    return tickets.filter(ticket =>
+      ticket.status !== 'closed' &&
+      (
+        !ticket.assignedMechanicName ||
+        normalizeBotText(ticket.assignedMechanicName) === normalizeBotText(authUser.userName)
+      )
+    );
+  }
+  return tickets.filter(ticket => ticket.status !== 'closed');
+}
+
+function formatServiceForUser(authUser) {
+  const tickets = getAccessibleServiceTickets(authUser);
+  if (!tickets.length) return '✅ Открытых сервисных заявок нет.';
+
+  const lines = tickets.slice(0, 10).map(formatTicketLine);
+  return [
+    authUser.userRole === 'Механик'
+      ? `🔧 Доступные вам сервисные заявки (${tickets.length}):`
+      : `🔧 Открытые сервисные заявки (${tickets.length}):`,
+    ...lines,
+    '',
+    'Подсказка: /вработу ID или /ремонт ID',
+    tickets.length > 10 ? `... и ещё ${tickets.length - 10}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function setCurrentRepair(phone, repairId) {
+  updateBotSession(phone, {
+    activeRepairId: repairId,
+    lastEquipmentSearch: [],
+    lastWorkSearch: [],
+    lastPartSearch: [],
+  });
+}
+
+function getCurrentRepair(phone) {
+  const session = getBotSession(phone);
+  if (!session.activeRepairId) return null;
+  return findServiceTicketById(session.activeRepairId);
+}
+
+function searchServiceWorks(query) {
+  const works = (readData('service_works') || []).filter(item => item.isActive !== false);
+  if (!normalizeBotText(query)) return works.slice(0, 7);
+  return works.filter(item =>
+    botSearchMatches(item.name, query) ||
+    botSearchMatches(item.category, query) ||
+    botSearchMatches(item.description, query)
+  ).slice(0, 7);
+}
+
+function searchSpareParts(query) {
+  const parts = (readData('spare_parts') || []).filter(item => item.isActive !== false);
+  if (!normalizeBotText(query)) return parts.slice(0, 7);
+  return parts.filter(item =>
+    botSearchMatches(item.name, query) ||
+    botSearchMatches(item.article, query) ||
+    botSearchMatches(item.category, query) ||
+    botSearchMatches(item.manufacturer, query)
+  ).slice(0, 7);
+}
+
+function searchEquipmentForBot(query) {
+  const equipment = readData('equipment') || [];
+  if (!normalizeBotText(query)) return equipment.slice(0, 7);
+  return equipment.filter(item =>
+    botSearchMatches(item.inventoryNumber, query) ||
+    botSearchMatches(item.serialNumber, query) ||
+    botSearchMatches(item.manufacturer, query) ||
+    botSearchMatches(item.model, query) ||
+    botSearchMatches(item.location, query)
+  ).slice(0, 7);
+}
+
+function getOpenTicketByEquipment(equipment) {
+  return readServiceTickets().find(ticket =>
+    openServiceStatuses().includes(ticket.status) &&
+    (
+      (equipment.id && ticket.equipmentId === equipment.id) ||
+      (equipment.serialNumber && ticket.serialNumber === equipment.serialNumber) ||
+      (equipment.inventoryNumber && ticket.inventoryNumber === equipment.inventoryNumber)
+    )
+  ) || null;
+}
+
+function createServiceTicketFromBot(equipment, authUser, reason, description = '') {
+  const now = new Date().toISOString();
+  const mechanicRef = getMechanicReferenceByUser(authUser);
+  const assignedName = mechanicRef?.name || authUser.userName;
+  const newTicket = {
+    id: generateId(ID_PREFIXES.service),
+    equipmentId: equipment.id,
+    equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
+    inventoryNumber: equipment.inventoryNumber,
+    serialNumber: equipment.serialNumber,
+    equipmentType: equipment.type,
+    equipmentTypeLabel: equipment.type,
+    location: equipment.location,
+    reason,
+    description: description || reason,
+    priority: 'medium',
+    sla: '24 ч',
+    assignedTo: assignedName,
+    assignedMechanicId: mechanicRef?.id,
+    assignedMechanicName: assignedName,
+    createdBy: authUser.userName,
+    createdByUserId: authUser.userId,
+    createdByUserName: authUser.userName,
+    reporterContact: authUser.userName,
+    source: 'bot',
+    status: 'in_progress',
+    result: '',
+    resultData: {
+      summary: '',
+      partsUsed: [],
+      worksPerformed: [],
+    },
+    workLog: [
+      {
+        date: now,
+        text: 'Заявка создана через MAX',
+        author: authUser.userName,
+        type: 'status_change',
+      },
+      {
+        date: now,
+        text: `Механик ${assignedName} взял заявку в работу через MAX`,
+        author: assignedName,
+        type: 'assign',
+      },
+    ],
+    parts: [],
+    createdAt: now,
+  };
+
+  writeServiceTickets([...readServiceTickets(), newTicket]);
+  syncEquipmentStatusForService(newTicket, 'in_progress');
+  return newTicket;
+}
+
+function addRepairWorkItemFromCatalog(ticket, work, quantity) {
+  const items = readData('repair_work_items') || [];
+  const nextItem = {
+    id: generateId(ID_PREFIXES.repair_work_items),
+    repairId: ticket.id,
+    workId: work.id,
+    quantity,
+    normHoursSnapshot: Math.max(0, Number(work.normHours) || 0),
+    nameSnapshot: work.name,
+    categorySnapshot: work.category,
+    createdAt: nowIso(),
+  };
+  items.push(nextItem);
+  writeData('repair_work_items', items);
+  return nextItem;
+}
+
+function addRepairPartItemFromCatalog(ticket, part, quantity, priceSnapshot) {
+  const items = readData('repair_part_items') || [];
+  const nextItem = {
+    id: generateId(ID_PREFIXES.repair_part_items),
+    repairId: ticket.id,
+    partId: part.id,
+    quantity,
+    priceSnapshot,
+    nameSnapshot: part.name,
+    articleSnapshot: part.article || part.sku,
+    unitSnapshot: part.unit || 'шт',
+    createdAt: nowIso(),
+  };
+  items.push(nextItem);
+  writeData('repair_part_items', items);
+  return nextItem;
+}
+
 // ── Обработчики команд бота ────────────────────────────────────────────────────
 
 function formatRentals(rentals, managerName, role) {
@@ -1237,6 +1634,21 @@ function formatEquipment(equipment) {
     free.length > 10 ? `... и ещё ${free.length - 10}` : ''].filter(Boolean).join('\n');
 }
 
+function formatEquipmentForBot(item) {
+  const typeLabel =
+    item.type === 'scissor' ? 'ножничный'
+      : item.type === 'articulated' ? 'коленчатый'
+      : item.type === 'telescopic' ? 'телескопический'
+      : 'подъёмник';
+
+  return [
+    item.inventoryNumber || 'без INV',
+    `${item.manufacturer || ''} ${item.model || ''}`.trim(),
+    item.serialNumber ? `SN ${item.serialNumber}` : '',
+    typeLabel,
+  ].filter(Boolean).join(' · ');
+}
+
 function formatService(tickets) {
   const open = tickets.filter(t => t.status !== 'closed');
   if (!open.length) return '✅ Открытых заявок нет.';
@@ -1253,20 +1665,43 @@ function formatService(tickets) {
 }
 
 function getHelpText(role) {
-  return [
+  const lines = [
     '',
     '📱 Доступные команды:',
     '',
     `  /аренды    — активные аренды${role === 'Менеджер по аренде' ? ' (только ваши)' : ''}`,
     '  /техника   — свободная техника',
     '  /сервис    — открытые сервисные заявки',
-    '  /помощь    — этот список',
-  ].join('\n');
+  ];
+
+  if (role === 'Механик' || role === 'Администратор') {
+    lines.push(
+      '  /моизаявки             — мои заявки в сервисе',
+      '  /найтитехнику поиск    — найти технику для ремонта',
+      '  /создатьзаявку № причина — открыть ремонт по технике',
+      '  /вработу ID           — взять заявку в работу',
+      '  /ремонт ID            — выбрать текущую заявку',
+      '  /итог текст           — сохранить итог ремонта',
+      '  /работы поиск         — найти работы в справочнике',
+      '  /добавитьработу № qty — добавить работу в отчет',
+      '  /запчасти поиск       — найти запчасти в справочнике',
+      '  /добавитьзапчасть № qty [цена] — добавить запчасть',
+      '  /черновик             — показать текущий отчет',
+      '  /ожидание             — ожидание запчастей',
+      '  /готово               — работы завершены',
+      '  /закрыть              — закрыть заявку',
+      '  /сброс                — сбросить текущую заявку',
+    );
+  }
+
+  lines.push('  /помощь    — этот список');
+  return lines.join('\n');
 }
 
 async function handleCommand(senderId, phone, text) {
-  const lower = text.trim().toLowerCase();
-  const parts  = text.trim().split(/\s+/);
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+  const parts  = trimmed.split(/\s+/);
 
   if (lower.startsWith('/start')) {
     if (parts.length < 3) {
@@ -1294,6 +1729,7 @@ async function handleCommand(senderId, phone, text) {
   }
 
   const { userName, userRole } = authUser;
+  const canManageRepair = userRole === 'Механик' || userRole === 'Администратор';
 
   if (lower === '/аренды' || lower === '/rentals' || lower === '/мои' || lower === 'аренды') {
     const rentals = readData('rentals') || [];
@@ -1306,8 +1742,314 @@ async function handleCommand(senderId, phone, text) {
   }
 
   if (lower === '/сервис' || lower === '/service' || lower === 'сервис' || lower === 'заявки') {
-    const tickets = readData('service') || [];
-    return sendMessage(senderId, formatService(tickets));
+    return sendMessage(senderId, canManageRepair ? formatServiceForUser(authUser) : formatService(readData('service') || []));
+  }
+
+  if ((lower === '/моизаявки' || lower === '/myrepairs' || lower === 'мои заявки') && canManageRepair) {
+    return sendMessage(senderId, formatServiceForUser(authUser));
+  }
+
+  if ((lower.startsWith('/найтитехнику') || lower.startsWith('/техпоиск')) && canManageRepair) {
+    const command = lower.startsWith('/техпоиск') ? '/техпоиск' : '/найтитехнику';
+    const query = trimmed.slice(command.length).trim();
+    const matches = searchEquipmentForBot(query);
+    if (!matches.length) {
+      return sendMessage(senderId, '🔎 Техника не найдена. Ищите по INV, SN, модели или производителю.');
+    }
+    updateBotSession(phone, {
+      lastEquipmentSearch: matches.map(item => ({
+        id: item.id,
+        inventoryNumber: item.inventoryNumber,
+        serialNumber: item.serialNumber,
+        model: item.model,
+      })),
+    });
+    return sendMessage(senderId, [
+      '🚜 Найденная техника:',
+      ...matches.map((item, index) => `${index + 1}. ${formatEquipmentForBot(item)}`),
+      '',
+      'Чтобы открыть ремонт: /создатьзаявку НОМЕР причина',
+      'Пример: /создатьзаявку 1 Течь гидравлики',
+    ].join('\n'));
+  }
+
+  if (lower.startsWith('/создатьзаявку ') && canManageRepair) {
+    const ticketArgs = trimmed.slice('/создатьзаявку'.length).trim();
+    const firstSpace = ticketArgs.indexOf(' ');
+    if (firstSpace <= 0) {
+      return sendMessage(senderId, '❌ Формат команды: /создатьзаявку НОМЕР причина');
+    }
+    const index = Number(ticketArgs.slice(0, firstSpace).trim());
+    const reason = ticketArgs.slice(firstSpace + 1).trim();
+    const session = getBotSession(phone);
+    const lastEquipmentSearch = Array.isArray(session.lastEquipmentSearch) ? session.lastEquipmentSearch : [];
+    if (!Number.isInteger(index) || index <= 0 || index > lastEquipmentSearch.length) {
+      return sendMessage(senderId, '❌ Неверный номер техники. Сначала выполните /найтитехнику поиск.');
+    }
+    if (!reason) {
+      return sendMessage(senderId, '❌ Укажите причину обращения после номера техники.');
+    }
+    const selected = lastEquipmentSearch[index - 1];
+    const equipment = (readData('equipment') || []).find(item => item.id === selected.id);
+    if (!equipment) {
+      return sendMessage(senderId, '❌ Техника больше не найдена в системе. Выполните поиск заново.');
+    }
+    const existingOpenTicket = getOpenTicketByEquipment(equipment);
+    if (existingOpenTicket) {
+      setCurrentRepair(phone, existingOpenTicket.id);
+      return sendMessage(senderId, [
+        `ℹ️ По этой технике уже есть открытая заявка: ${existingOpenTicket.id}`,
+        `${existingOpenTicket.equipment}`,
+        `Причина: ${existingOpenTicket.reason}`,
+        '',
+        'Я открыл её как текущую. Можете продолжать работу:',
+        '• /итог текст',
+        '• /работы поиск',
+        '• /запчасти поиск',
+        '• /готово',
+        '• /закрыть',
+      ].join('\n'));
+    }
+    const ticket = createServiceTicketFromBot(equipment, authUser, reason);
+    setCurrentRepair(phone, ticket.id);
+    return sendMessage(senderId, [
+      `✅ Создана заявка ${ticket.id}`,
+      formatEquipmentForBot(equipment),
+      `Причина: ${ticket.reason}`,
+      '',
+      'Заявка уже открыта как текущая. Дальше можно писать:',
+      '• /итог текст',
+      '• /работы поиск',
+      '• /запчасти поиск',
+      '• /черновик',
+      '• /готово',
+      '• /закрыть',
+    ].join('\n'));
+  }
+
+  if (lower.startsWith('/вработу ') && canManageRepair) {
+    const repairId = trimmed.slice('/вработу'.length).trim();
+    const ticket = findServiceTicketById(repairId);
+    if (!ticket) {
+      return sendMessage(senderId, '❌ Заявка не найдена. Используйте /моизаявки или /сервис.');
+    }
+    const mechanicRef = getMechanicReferenceByUser(authUser);
+    const assignedName = mechanicRef?.name || authUser.userName;
+    const updated = appendServiceLog({
+      ...ticket,
+      assignedTo: assignedName,
+      assignedMechanicId: mechanicRef?.id || ticket.assignedMechanicId,
+      assignedMechanicName: assignedName,
+    }, `Механик ${assignedName} взял заявку в работу через MAX`, assignedName, 'assign');
+    saveServiceTicket(updated);
+    const withStatus = updateServiceTicketStatus(updated, 'in_progress', assignedName, 'Заявка взята в работу через MAX');
+    setCurrentRepair(phone, withStatus.id);
+    return sendMessage(senderId, [
+      `✅ Заявка ${withStatus.id} взята в работу`,
+      `${withStatus.equipment}`,
+      `Причина: ${withStatus.reason}`,
+      '',
+      'Дальше можно сразу работать в чате:',
+      '• /итог текст',
+      '• /работы гидравлика',
+      '• /запчасти фильтр',
+      '• /черновик',
+      '• /готово',
+    ].join('\n'));
+  }
+
+  if (lower.startsWith('/ремонт ') && canManageRepair) {
+    const repairId = trimmed.slice('/ремонт'.length).trim();
+    const ticket = findServiceTicketById(repairId);
+    if (!ticket) {
+      return sendMessage(senderId, '❌ Заявка не найдена.');
+    }
+    setCurrentRepair(phone, ticket.id);
+    return sendMessage(senderId, [
+      `🛠 Текущая заявка: ${ticket.id}`,
+      `${ticket.equipment}`,
+      `Причина: ${ticket.reason}`,
+      `Статус: ${serviceStatusLabel(ticket.status)}`,
+      '',
+      'Теперь можно отправлять:',
+      '• /итог текст',
+      '• /работы поиск',
+      '• /запчасти поиск',
+      '• /черновик',
+    ].join('\n'));
+  }
+
+  if (lower === '/черновик' && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID или /вработу ID');
+    }
+    return sendMessage(senderId, formatCurrentRepairDraft(ticket));
+  }
+
+  if (lower === '/сброс' && canManageRepair) {
+    clearBotSession(phone);
+    return sendMessage(senderId, '🧹 Текущая заявка сброшена. Выберите новую через /ремонт ID');
+  }
+
+  if (lower.startsWith('/итог ') && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+    }
+    const summary = trimmed.slice('/итог'.length).trim();
+    if (!summary) {
+      return sendMessage(senderId, '❌ После команды /итог нужно написать текст результата ремонта.');
+    }
+    const updated = appendServiceLog({
+      ...ticket,
+      result: summary,
+      resultData: {
+        ...(ticket.resultData || {}),
+        summary,
+        worksPerformed: ticket.resultData?.worksPerformed || [],
+        partsUsed: ticket.resultData?.partsUsed || [],
+      },
+    }, 'Обновлён итог ремонта через MAX', authUser.userName, 'repair_result');
+    saveServiceTicket(updated);
+    return sendMessage(senderId, `✅ Итог ремонта сохранён для ${ticket.id}`);
+  }
+
+  if (lower.startsWith('/работы') && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+    }
+    const query = trimmed.slice('/работы'.length).trim();
+    const matches = searchServiceWorks(query);
+    if (!matches.length) {
+      return sendMessage(senderId, '🔎 По этому запросу активные работы не найдены.');
+    }
+    updateBotSession(phone, {
+      activeRepairId: ticket.id,
+      lastWorkSearch: matches.map(item => ({ id: item.id, name: item.name })),
+    });
+    return sendMessage(senderId, [
+      '🧰 Найденные работы:',
+      ...matches.map((item, index) => `${index + 1}. ${item.name}${item.category ? ` · ${item.category}` : ''} · ${Number(item.normHours || 0).toLocaleString('ru-RU')} н/ч`),
+      '',
+      'Добавить: /добавитьработу НОМЕР КОЛИЧЕСТВО',
+      'Пример: /добавитьработу 1 2',
+    ].join('\n'));
+  }
+
+  if (lower.startsWith('/добавитьработу ') && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+    }
+    const [, indexRaw, qtyRaw] = parts;
+    const index = Number(indexRaw);
+    const quantity = Number(qtyRaw);
+    const session = getBotSession(phone);
+    const lastWorkSearch = Array.isArray(session.lastWorkSearch) ? session.lastWorkSearch : [];
+    if (!Number.isInteger(index) || index <= 0 || index > lastWorkSearch.length) {
+      return sendMessage(senderId, '❌ Номер работы указан неверно. Сначала выполните /работы поиск.');
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return sendMessage(senderId, '❌ Количество работы должно быть числом больше 0.');
+    }
+    const selected = lastWorkSearch[index - 1];
+    const work = (readData('service_works') || []).find(item => item.id === selected.id && item.isActive !== false);
+    if (!work) {
+      return sendMessage(senderId, '❌ Работа больше недоступна в справочнике. Выполните поиск заново.');
+    }
+    addRepairWorkItemFromCatalog(ticket, work, quantity);
+    const updated = appendServiceLog(ticket, `Добавлена работа через MAX: ${work.name} × ${quantity}`, authUser.userName, 'repair_result');
+    saveServiceTicket(updated);
+    return sendMessage(senderId, `✅ Добавлена работа: ${work.name} × ${quantity}`);
+  }
+
+  if (lower.startsWith('/запчасти') && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+    }
+    const query = trimmed.slice('/запчасти'.length).trim();
+    const matches = searchSpareParts(query);
+    if (!matches.length) {
+      return sendMessage(senderId, '🔎 По этому запросу активные запчасти не найдены.');
+    }
+    updateBotSession(phone, {
+      activeRepairId: ticket.id,
+      lastPartSearch: matches.map(item => ({ id: item.id, name: item.name })),
+    });
+    return sendMessage(senderId, [
+      '📦 Найденные запчасти:',
+      ...matches.map((item, index) => `${index + 1}. ${item.name}${item.article ? ` · ${item.article}` : ''} · ${Number(item.defaultPrice || 0).toLocaleString('ru-RU')} ₽/${item.unit || 'шт'}`),
+      '',
+      'Добавить: /добавитьзапчасть НОМЕР КОЛИЧЕСТВО [ЦЕНА]',
+      'Пример: /добавитьзапчасть 1 2 3500',
+      'Если цену не указать, возьмётся базовая из справочника.',
+    ].join('\n'));
+  }
+
+  if (lower.startsWith('/добавитьзапчасть ') && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+    }
+    const [, indexRaw, qtyRaw, priceRaw] = parts;
+    const index = Number(indexRaw);
+    const quantity = Number(qtyRaw);
+    const session = getBotSession(phone);
+    const lastPartSearch = Array.isArray(session.lastPartSearch) ? session.lastPartSearch : [];
+    if (!Number.isInteger(index) || index <= 0 || index > lastPartSearch.length) {
+      return sendMessage(senderId, '❌ Номер запчасти указан неверно. Сначала выполните /запчасти поиск.');
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return sendMessage(senderId, '❌ Количество запчасти должно быть числом больше 0.');
+    }
+    const selected = lastPartSearch[index - 1];
+    const part = (readData('spare_parts') || []).find(item => item.id === selected.id && item.isActive !== false);
+    if (!part) {
+      return sendMessage(senderId, '❌ Запчасть больше недоступна в справочнике. Выполните поиск заново.');
+    }
+    const price = priceRaw == null ? Number(part.defaultPrice || 0) : Number(priceRaw);
+    if (!Number.isFinite(price) || price < 0) {
+      return sendMessage(senderId, '❌ Цена должна быть числом не меньше 0.');
+    }
+    addRepairPartItemFromCatalog(ticket, part, quantity, price);
+    const updated = appendServiceLog(ticket, `Добавлена запчасть через MAX: ${part.name} × ${quantity}`, authUser.userName, 'repair_result');
+    saveServiceTicket(updated);
+    return sendMessage(senderId, `✅ Добавлена запчасть: ${part.name} × ${quantity} по ${price.toLocaleString('ru-RU')} ₽`);
+  }
+
+  if (lower === '/ожидание' && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+    }
+    updateServiceTicketStatus(ticket, 'waiting_parts', authUser.userName, 'Заявка переведена в ожидание запчастей через MAX');
+    return sendMessage(senderId, `🟠 ${ticket.id} переведена в статус «Ожидание запчастей»`);
+  }
+
+  if (lower === '/готово' && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+    }
+    const updated = updateServiceTicketStatus(ticket, 'ready', authUser.userName, 'Работы завершены через MAX');
+    return sendMessage(senderId, [
+      `✅ Заявка ${updated.id} переведена в статус «Готово»`,
+      'Если нужно, можно ещё закрыть её командой /закрыть',
+      'Или посмотреть отчет: /черновик',
+    ].join('\n'));
+  }
+
+  if (lower === '/закрыть' && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+    }
+    const updated = updateServiceTicketStatus(ticket, 'closed', authUser.userName, 'Заявка закрыта через MAX');
+    clearBotSession(phone);
+    return sendMessage(senderId, `✅ Заявка ${updated.id} закрыта.`);
   }
 
   if (lower === '/помощь' || lower === '/help' || lower === 'помощь') {

@@ -762,8 +762,6 @@ const COLLECTIONS = [
   'mechanics',
   'service_works',
   'spare_parts',
-  'repair_work_items',
-  'repair_part_items',
   'service_work_catalog',
   'spare_parts_catalog',
   'planner_items',

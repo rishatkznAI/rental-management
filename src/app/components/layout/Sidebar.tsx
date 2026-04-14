@@ -118,7 +118,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             const Icon = item.icon;
             const isActive =
               location.pathname === item.href ||
-              (item.href !== '/' && location.pathname.startsWith(item.href));
+              (item.href !== '/' && location.pathname.startsWith(item.href + '/'));
 
             return (
               <Link

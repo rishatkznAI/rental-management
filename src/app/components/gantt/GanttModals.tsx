@@ -346,7 +346,7 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
 // ========== New Rental Modal =================================================
 interface NewRentalModalProps {
   open: boolean;
-  preselectedEquipment?: string;
+  preselectedEquipmentId?: string;
   /** Текущий список аренд из React-состояния родителя.
    *  Передаётся, чтобы модалка и значок статуса техники
    *  использовали один и тот же источник данных. */
@@ -369,7 +369,7 @@ interface NewRentalModalProps {
 
 export function NewRentalModal({
   open,
-  preselectedEquipment,
+  preselectedEquipmentId,
   ganttRentals: ganttRentalsProp,
   equipmentList: equipmentListProp,
   clients: clientsProp,
@@ -391,8 +391,8 @@ export function NewRentalModal({
   React.useEffect(() => {
     if (!open) return;
     setDailyRate('');
-    if (!preselectedEquipment) setEquipmentId('');
-  }, [open]);
+    if (!preselectedEquipmentId) setEquipmentId('');
+  }, [open, preselectedEquipmentId]);
 
   const { data: clientsData = [] } = useQuery({
     queryKey: ['clients'],
@@ -416,10 +416,10 @@ export function NewRentalModal({
   });
 
   React.useEffect(() => {
-    if (!preselectedEquipment) return;
-    const selected = (equipmentListProp ?? fetchedEquipment).find(item => item.inventoryNumber === preselectedEquipment);
+    if (!preselectedEquipmentId) return;
+    const selected = (equipmentListProp ?? fetchedEquipment).find(item => item.id === preselectedEquipmentId);
     if (selected) setEquipmentId(selected.id);
-  }, [preselectedEquipment, equipmentListProp, fetchedEquipment]);
+  }, [preselectedEquipmentId, equipmentListProp, fetchedEquipment]);
 
   // ─── Данные из справочников ────────────────────────────────────────────────
   const allClients = useMemo(() => clientsProp ?? clientsData, [clientsData, clientsProp]);

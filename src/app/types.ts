@@ -52,6 +52,7 @@ export interface RepairRecord {
   mechanic: string;
   status: 'completed' | 'in_progress' | 'planned';
   cost?: number;
+  totalNormHours?: number;
   source: RepairSource;
 }
 

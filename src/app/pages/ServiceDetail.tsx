@@ -11,7 +11,7 @@ import { SearchableSelect } from '../components/ui/SearchableSelect';
 import {
   ArrowLeft, Wrench, User, Clock, MapPin, Tag, FileText,
   CheckCircle, XCircle, AlertTriangle, Play, Package, History,
-  Camera, Upload, Trash2, X, Plus,
+  Camera, Upload, Trash2, X, Plus, Car,
 } from 'lucide-react';
 import { formatDate } from '../lib/utils';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
@@ -39,6 +39,7 @@ import { rentalsService } from '../services/rentals.service';
 import { serviceWorksService } from '../services/service-works.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
 import { sparePartsService } from '../services/spare-parts.service';
+import { serviceVehiclesService } from '../services/service-vehicles.service';
 import { getEquipmentTypeLabel } from '../lib/equipmentClassification';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -170,6 +171,10 @@ export default function ServiceDetail() {
   const { data: mechanics = [] } = useQuery<Mechanic[]>({
     queryKey: ['mechanics'],
     queryFn: mechanicsService.getAll,
+  });
+  const { data: serviceVehiclesList = [] } = useQuery({
+    queryKey: ['service_vehicles'],
+    queryFn:  serviceVehiclesService.getAll,
   });
   const { data: workCatalog = [] } = useQuery<ServiceWork[]>({
     queryKey: ['serviceWorks', 'active'],
@@ -1030,6 +1035,75 @@ export default function ServiceDetail() {
                       </select>
                     </div>
                     <Button size="sm" onClick={saveAssignee} disabled={!newAssigneeId}>OK</Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Служебная машина */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Car className="h-4 w-4" />
+                Служебная машина
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {ticket.serviceVehicleId ? (
+                (() => {
+                  const sv = serviceVehiclesList.find(v => v.id === ticket.serviceVehicleId);
+                  return sv ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                          {sv.make} {sv.model}
+                        </p>
+                        <p className="text-xs text-gray-500 font-mono">{sv.plateNumber}</p>
+                      </div>
+                      {canEdit && ticket.status !== 'closed' && (
+                        <Button variant="outline" size="sm"
+                          onClick={() => persist({ ...ticket, serviceVehicleId: null })}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">ID: {ticket.serviceVehicleId}</p>
+                  );
+                })()
+              ) : (
+                <p className="text-sm text-gray-400">Машина не назначена</p>
+              )}
+              {canEdit && ticket.status !== 'closed' && (
+                <>
+                  <Divider />
+                  <div className="flex gap-2 items-end">
+                    <div className="flex-1">
+                      <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">
+                        Назначить машину
+                      </label>
+                      <select
+                        defaultValue=""
+                        onChange={e => {
+                          if (e.target.value) {
+                            persist({ ...ticket, serviceVehicleId: e.target.value });
+                            e.target.value = '';
+                          }
+                        }}
+                        className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                      >
+                        <option value="">Выбрать служебную машину…</option>
+                        {serviceVehiclesList
+                          .filter(v => v.status === 'active' || v.status === 'reserve')
+                          .map(v => (
+                            <option key={v.id} value={v.id}>
+                              {v.make} {v.model} · {v.plateNumber}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
                   </div>
                 </>
               )}

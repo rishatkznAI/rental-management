@@ -20,6 +20,8 @@ import Payments from './pages/Payments';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import ServiceVehicles from './pages/ServiceVehicles';
+import ServiceVehicleDetail from './pages/ServiceVehicleDetail';
 
 const basename = import.meta.env.BASE_URL || '/';
 
@@ -52,7 +54,10 @@ export const router = createBrowserRouter([
           { path: 'documents', Component: Documents },
           { path: 'payments', Component: Payments },
           { path: 'reports', Component: Reports },
-          { path: 'settings', Component: Settings },
+          { path: 'settings',                      Component: Settings          },
+          { path: 'service-vehicles',              Component: ServiceVehicles   },
+          { path: 'service-vehicles/new',          Component: ServiceVehicleDetail },
+          { path: 'service-vehicles/:id',          Component: ServiceVehicleDetail },
         ],
       },
     ],

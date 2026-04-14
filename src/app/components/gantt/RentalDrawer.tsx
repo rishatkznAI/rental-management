@@ -127,7 +127,10 @@ export function RentalDrawer({
     // Check conflicts: other rentals for the same equipment that overlap [rental.endDate, newEndDate]
     const conflicts = allRentals.filter(r =>
       r.id !== rental.id &&
-      r.equipmentInv === rental.equipmentInv &&
+      (
+        (rental.equipmentId && r.equipmentId === rental.equipmentId)
+        || (!r.equipmentId && !rental.equipmentId && r.equipmentInv === rental.equipmentInv)
+      ) &&
       r.status !== 'returned' && r.status !== 'closed' &&
       r.startDate < extendDate && r.endDate > rental.endDate
     );

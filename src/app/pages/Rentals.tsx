@@ -158,8 +158,8 @@ function barPosition(
   };
 }
 
-function detectConflicts(rentals: GanttRentalData[], equipmentInv: string): Set<string> {
-  const eqRentals = rentals.filter(r => r.equipmentInv === equipmentInv);
+function detectConflicts(rentals: GanttRentalData[]): Set<string> {
+  const eqRentals = rentals.filter(r => r.status !== 'returned' && r.status !== 'closed');
   const conflictIds = new Set<string>();
 
   for (let i = 0; i < eqRentals.length; i++) {
@@ -240,11 +240,13 @@ function computeEffectiveStatus(
 const OPEN_SERVICE_STATUSES: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'ready'];
 
 function hasOpenServiceTicketForEquipment(serviceTickets: ServiceTicket[], equipment: Equipment) {
+  const inventoryIsUnique = serviceTickets.filter(ticket => ticket.inventoryNumber === equipment.inventoryNumber).length <= 1;
   return serviceTickets.some(ticket =>
     OPEN_SERVICE_STATUSES.includes(ticket.status)
     && (
       ticket.equipmentId === equipment.id
-      || (!!ticket.inventoryNumber && ticket.inventoryNumber === equipment.inventoryNumber)
+      || (!!ticket.serialNumber && !!equipment.serialNumber && ticket.serialNumber === equipment.serialNumber)
+      || (!!ticket.inventoryNumber && inventoryIsUnique && ticket.inventoryNumber === equipment.inventoryNumber)
     ),
   );
 }
@@ -402,7 +404,8 @@ export default function Rentals() {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showDowntimeModal, setShowDowntimeModal] = useState(false);
   const [showNewRentalModal, setShowNewRentalModal] = useState(false);
-  const [preselectedEquipment, setPreselectedEquipment] = useState('');
+  const [preselectedEquipmentInv, setPreselectedEquipmentInv] = useState('');
+  const [preselectedEquipmentId, setPreselectedEquipmentId] = useState('');
   const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
 
   // Filters (always live — no explicit "apply" gate needed)
@@ -563,14 +566,13 @@ export default function Rentals() {
 
   // Conflict detection for all equipment
   const conflictSets = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    filteredEquipment.forEach(eq => {
+      const map = new Map<string, Set<string>>();
+      filteredEquipment.forEach(eq => {
       map.set(eq.id, detectConflicts(
         filteredRentals.filter(r => matchesEquipmentRow(r, eq)),
-        eq.inventoryNumber,
       ));
-    });
-    return map;
+      });
+      return map;
   }, [filteredEquipment, filteredRentals, matchesEquipmentRow]);
 
   // Stats
@@ -642,12 +644,12 @@ export default function Rentals() {
   };
 
   const handleOpenDowntime = (equipmentInv?: string) => {
-    setPreselectedEquipment(equipmentInv || '');
+    setPreselectedEquipmentInv(equipmentInv || '');
     setShowDowntimeModal(true);
   };
 
-  const handleOpenNewRental = (equipmentInv?: string) => {
-    setPreselectedEquipment(equipmentInv || '');
+  const handleOpenNewRental = (equipmentId?: string) => {
+    setPreselectedEquipmentId(equipmentId || '');
     setShowNewRentalModal(true);
   };
 
@@ -1059,7 +1061,7 @@ export default function Rentals() {
                 days={days}
                 today={today}
                 onBarClick={setSelectedRental}
-                onNewRental={() => handleOpenNewRental(eq.inventoryNumber)}
+                onNewRental={() => handleOpenNewRental(eq.id)}
                 onReturn={(rental) => handleOpenReturn(rental)}
                 onDowntime={() => handleOpenDowntime(eq.inventoryNumber)}
               />
@@ -1212,20 +1214,20 @@ export default function Rentals() {
           setReturnRental(null);
         }}
       />
-      <DowntimeModal
-        open={showDowntimeModal}
-        preselectedEquipment={preselectedEquipment}
-        onClose={() => setShowDowntimeModal(false)}
+        <DowntimeModal
+          open={showDowntimeModal}
+          preselectedEquipment={preselectedEquipmentInv}
+          onClose={() => setShowDowntimeModal(false)}
         onConfirm={(data) => {
           console.log('Downtime created:', data);
           setShowDowntimeModal(false);
         }}
       />
-      <NewRentalModal
-        open={showNewRentalModal}
-        preselectedEquipment={preselectedEquipment}
-        ganttRentals={ganttRentals}
-        equipmentList={equipmentList}
+        <NewRentalModal
+          open={showNewRentalModal}
+          preselectedEquipmentId={preselectedEquipmentId}
+          ganttRentals={ganttRentals}
+          equipmentList={equipmentList}
         onClose={() => setShowNewRentalModal(false)}
         onConfirm={(data) => {
           // Если аренда начинается сегодня или в прошлом — сразу 'active',

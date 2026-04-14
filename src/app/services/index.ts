@@ -17,3 +17,4 @@ export { repairWorkItemsService } from './repair-work-items.service';
 export { repairPartItemsService } from './repair-part-items.service';
 export { reportsService } from './reports.service';
 export { plannerService } from './planner.service';
+export { serviceVehiclesService } from './service-vehicles.service';

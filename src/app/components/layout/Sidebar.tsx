@@ -15,6 +15,7 @@ import {
   LogOut,
   X,
   CalendarClock,
+  Car,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -26,7 +27,8 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Техника',      href: '/equipment', icon: Truck,           section: 'equipment'  },
   { name: 'Аренды',       href: '/rentals',   icon: FileText,        section: 'rentals'    },
   { name: 'Планировщик',  href: '/planner',   icon: CalendarClock,   section: 'planner'    },
-  { name: 'Сервис',       href: '/service',   icon: Wrench,          section: 'service'    },
+  { name: 'Сервис',       href: '/service',          icon: Wrench,        section: 'service'          },
+  { name: 'Сл. машины',  href: '/service-vehicles', icon: Car,           section: 'service_vehicles' },
   { name: 'Клиенты',      href: '/clients',   icon: Users,           section: 'clients'    },
   { name: 'Документы',    href: '/documents', icon: FileCheck,       section: 'documents'  },
   { name: 'Платежи',      href: '/payments',  icon: CreditCard,      section: 'payments'   },

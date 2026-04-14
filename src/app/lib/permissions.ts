@@ -17,6 +17,7 @@ export type Section =
   | 'dashboard'
   | 'equipment'
   | 'rentals'
+  | 'planner'
   | 'service'
   | 'clients'
   | 'documents'
@@ -39,6 +40,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard: ALL,
     equipment: ALL,
     rentals:   ALL,
+    planner:   ALL,
     service:   ALL,
     clients:   ALL,
     documents: ALL,
@@ -50,6 +52,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard: VIEW,         // только своё
     equipment: VIEW,
     rentals:   VIEW,
+    planner:   VIEW,         // видит очередь, но не меняет статусы подготовки
     service:   VIEW_CREATE,  // может создавать заявки
     clients:   VIEW,
     documents: VIEW,
@@ -61,6 +64,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     // dashboard: нет
     equipment: ALL,
     rentals:   ALL,
+    planner:   ALL,
     service:   ALL,
     clients:   ALL,
     documents: ALL,
@@ -71,6 +75,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Механик': {
     // dashboard: нет
     equipment: VIEW,
+    planner:   ALL,          // основной рабочий экран механика
     service:   ALL,
     // остальное: нет
   },
@@ -94,6 +99,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname === '/')                       return 'dashboard';
   if (pathname.startsWith('/equipment'))      return 'equipment';
   if (pathname.startsWith('/rentals'))        return 'rentals';
+  if (pathname.startsWith('/planner'))        return 'planner';
   if (pathname.startsWith('/service'))        return 'service';
   if (pathname.startsWith('/clients'))        return 'clients';
   if (pathname.startsWith('/documents'))      return 'documents';
@@ -109,6 +115,7 @@ const SECTION_PATHS: Array<[Section, string]> = [
   ['dashboard',  '/'],
   ['equipment',  '/equipment'],
   ['rentals',    '/rentals'],
+  ['planner',    '/planner'],
   ['service',    '/service'],
   ['clients',    '/clients'],
   ['documents',  '/documents'],

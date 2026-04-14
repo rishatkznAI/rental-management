@@ -14,6 +14,7 @@ import {
   Sun,
   LogOut,
   X,
+  CalendarClock,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -21,15 +22,16 @@ import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, type Section } from '../../lib/permissions';
 
 const navigation: { name: string; href: string; icon: React.ElementType; section: Section }[] = [
-  { name: 'Дашборд',   href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
-  { name: 'Техника',   href: '/equipment', icon: Truck,           section: 'equipment'  },
-  { name: 'Аренды',    href: '/rentals',   icon: FileText,        section: 'rentals'    },
-  { name: 'Сервис',    href: '/service',   icon: Wrench,          section: 'service'    },
-  { name: 'Клиенты',   href: '/clients',   icon: Users,           section: 'clients'    },
-  { name: 'Документы', href: '/documents', icon: FileCheck,       section: 'documents'  },
-  { name: 'Платежи',   href: '/payments',  icon: CreditCard,      section: 'payments'   },
-  { name: 'Отчёты',    href: '/reports',   icon: BarChart3,       section: 'reports'    },
-  { name: 'Настройки', href: '/settings',  icon: Settings,        section: 'settings'   },
+  { name: 'Дашборд',      href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
+  { name: 'Техника',      href: '/equipment', icon: Truck,           section: 'equipment'  },
+  { name: 'Аренды',       href: '/rentals',   icon: FileText,        section: 'rentals'    },
+  { name: 'Планировщик',  href: '/planner',   icon: CalendarClock,   section: 'planner'    },
+  { name: 'Сервис',       href: '/service',   icon: Wrench,          section: 'service'    },
+  { name: 'Клиенты',      href: '/clients',   icon: Users,           section: 'clients'    },
+  { name: 'Документы',    href: '/documents', icon: FileCheck,       section: 'documents'  },
+  { name: 'Платежи',      href: '/payments',  icon: CreditCard,      section: 'payments'   },
+  { name: 'Отчёты',       href: '/reports',   icon: BarChart3,       section: 'reports'    },
+  { name: 'Настройки',    href: '/settings',  icon: Settings,        section: 'settings'   },
 ];
 
 function getInitials(name: string): string {

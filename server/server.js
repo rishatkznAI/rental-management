@@ -167,6 +167,7 @@ const WRITE_PERMISSIONS = {
   repair_part_items: ['Администратор', 'Механик'],
   service_work_catalog: ['Администратор'],
   spare_parts_catalog: ['Администратор'],
+  planner_items:  ['Администратор', 'Офис-менеджер', 'Механик'],
 };
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
@@ -306,6 +307,7 @@ const ID_PREFIXES = {
   spare_parts:    'PT',
   repair_work_items: 'RWI',
   repair_part_items: 'RPI',
+  planner_items:  'PI',
 };
 
 function nowIso() {
@@ -764,6 +766,7 @@ const COLLECTIONS = [
   'repair_part_items',
   'service_work_catalog',
   'spare_parts_catalog',
+  'planner_items',
 ];
 
 for (const col of COLLECTIONS) {
@@ -785,6 +788,184 @@ function findServiceTicketOr404(repairId, res) {
   }
   return ticket;
 }
+
+// ── Планировщик подготовки техники к аренде ──────────────────────────────────
+
+/**
+ * GET /api/planner
+ * Возвращает строки планировщика: объединение аренд, техники, клиентов и оверлеев.
+ * Включает аренды со статусом не 'closed', у которых есть техника и дата начала.
+ * Исключает строки с prepStatus === 'shipped' (уже отгруженные) — если только
+ * не передан query-параметр ?include_shipped=1.
+ */
+apiRouter.get('/planner', requireAuth, (req, res) => {
+  try {
+    const includeShipped = req.query.include_shipped === '1';
+
+    const rentals      = readData('rentals') || [];
+    const equipment    = readData('equipment') || [];
+    const plannerItems = readData('planner_items') || [];
+
+    // Индексы для быстрого доступа
+    const eqByInv = new Map(equipment.map(e => [e.inventoryNumber, e]));
+    const eqById  = new Map(equipment.map(e => [e.id, e]));
+
+    // Оверлеи: ключ = "rentalId__equipmentRef"
+    const overlayMap = new Map(
+      plannerItems.map(p => [`${p.rentalId}__${p.equipmentRef}`, p])
+    );
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const rows = [];
+
+    for (const rental of rentals) {
+      // Пропускаем закрытые аренды
+      if (rental.status === 'closed') continue;
+      // Пропускаем аренды без даты начала
+      if (!rental.startDate) continue;
+
+      const equipmentRefs = Array.isArray(rental.equipment) ? rental.equipment : [];
+      if (equipmentRefs.length === 0) continue;
+
+      const startDate = new Date(rental.startDate);
+      startDate.setHours(0, 0, 0, 0);
+      const daysUntil = Math.round((startDate - today) / (1000 * 60 * 60 * 24));
+
+      for (const ref of equipmentRefs) {
+        if (!ref) continue;
+
+        // Ищем технику по ID или по инвентарному номеру
+        const eq = eqById.get(ref) || eqByInv.get(ref) || null;
+        const equipmentRef = eq ? (eq.inventoryNumber || ref) : ref;
+        const rowId = `${rental.id}__${equipmentRef}`;
+
+        // Оверлей
+        const overlay = overlayMap.get(rowId) || null;
+        const prepStatus = overlay?.prepStatus || 'planned';
+
+        // Пропускаем отгруженные, если не нужны
+        if (!includeShipped && prepStatus === 'shipped') continue;
+
+        // Автоматический приоритет
+        let autoPriority;
+        if (daysUntil <= 1) autoPriority = 'high';
+        else if (daysUntil <= 3) autoPriority = 'medium';
+        else autoPriority = 'low';
+
+        // Если статус подготовки «готова» / «отгружена» — понижаем до medium при daysUntil<=1
+        const isReadyOrShipped = prepStatus === 'ready' || prepStatus === 'shipped';
+        if (isReadyOrShipped && daysUntil <= 1) autoPriority = 'medium';
+
+        const priority = overlay?.priorityOverride || autoPriority;
+
+        // Автоматический флаг риска
+        const isInRepair = eq?.status === 'in_service';
+        const autoRisk = (
+          (daysUntil <= 2 && !isReadyOrShipped) ||
+          isInRepair ||
+          (daysUntil < 0 && !isReadyOrShipped)  // просрочено
+        );
+        const risk = overlay?.riskOverride !== null && overlay?.riskOverride !== undefined
+          ? overlay.riskOverride
+          : autoRisk;
+
+        rows.push({
+          id:              rowId,
+          rentalId:        rental.id,
+          equipmentId:     eq?.id || null,
+          equipmentRef,
+          startDate:       rental.startDate,
+          daysUntil,
+          equipmentLabel:  eq ? `${eq.manufacturer || ''} ${eq.model || ''}`.trim() : ref,
+          inventoryNumber: eq?.inventoryNumber || ref,
+          serialNumber:    eq?.serialNumber || null,
+          equipmentType:   eq?.type || null,
+          client:          rental.client || '',
+          deliveryAddress: rental.deliveryAddress || '',
+          manager:         rental.manager || '',
+          equipmentStatus: eq?.status || null,
+          prepStatus,
+          priority,
+          risk,
+          comment:         overlay?.comment || '',
+          rentalStatus:    rental.status,
+        });
+      }
+    }
+
+    // Сортируем: сначала по дате (раньше = выше), потом по приоритету
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    rows.sort((a, b) => {
+      const dateDiff = new Date(a.startDate) - new Date(b.startDate);
+      if (dateDiff !== 0) return dateDiff;
+      return (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99);
+    });
+
+    res.json(rows);
+  } catch (err) {
+    console.error('[PLANNER] GET /api/planner error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * PUT /api/planner/:rowId
+ * Upsert оверлей для строки планировщика.
+ * rowId = "rentalId__equipmentRef"
+ * Body: { prepStatus?, priorityOverride?, riskOverride?, comment? }
+ */
+apiRouter.put('/planner/:rowId', requireAuth, requireWrite('planner_items'), (req, res) => {
+  try {
+    const { rowId } = req.params;
+    if (!rowId || !rowId.includes('__')) {
+      return res.status(400).json({ ok: false, error: 'Неверный формат rowId' });
+    }
+
+    const [rentalId, ...refParts] = rowId.split('__');
+    const equipmentRef = refParts.join('__');
+
+    const items = readData('planner_items') || [];
+    const existingIdx = items.findIndex(p => p.rentalId === rentalId && p.equipmentRef === equipmentRef);
+
+    const updatedFields = {};
+    if (req.body.prepStatus        !== undefined) updatedFields.prepStatus        = req.body.prepStatus;
+    if (req.body.priorityOverride  !== undefined) updatedFields.priorityOverride  = req.body.priorityOverride;
+    if (req.body.riskOverride      !== undefined) updatedFields.riskOverride      = req.body.riskOverride;
+    if (req.body.comment           !== undefined) updatedFields.comment           = req.body.comment;
+
+    let item;
+    if (existingIdx >= 0) {
+      items[existingIdx] = {
+        ...items[existingIdx],
+        ...updatedFields,
+        updatedAt: nowIso(),
+        updatedBy: req.user.userName,
+      };
+      item = items[existingIdx];
+    } else {
+      item = {
+        id:               generateId('PI'),
+        rentalId,
+        equipmentRef,
+        prepStatus:       updatedFields.prepStatus       || 'planned',
+        priorityOverride: updatedFields.priorityOverride ?? null,
+        riskOverride:     updatedFields.riskOverride     ?? null,
+        comment:          updatedFields.comment          || '',
+        updatedAt:        nowIso(),
+        updatedBy:        req.user.userName,
+      };
+      items.push(item);
+    }
+
+    writeData('planner_items', items);
+    res.json(item);
+  } catch (err) {
+    console.error('[PLANNER] PUT /api/planner/:rowId error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 apiRouter.get('/service_works/active', requireAuth, (req, res) => {
   const list = (readData('service_works') || [])

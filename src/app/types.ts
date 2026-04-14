@@ -268,3 +268,64 @@ export interface Payment {
   status: PaymentStatus;
   comment?: string;
 }
+
+// ── Планировщик подготовки техники к аренде ───────────────────────────────────
+
+/**
+ * Статус подготовки техники под конкретную аренду.
+ * Независим от общего статуса единицы техники.
+ */
+export type PrepStatus =
+  | 'planned'          // Запланирована
+  | 'needs_prep'       // Требует подготовки
+  | 'inspection'       // На осмотре
+  | 'in_repair'        // В ремонте
+  | 'ready'            // Готова к отгрузке
+  | 'shipped'          // Отгружена
+  | 'on_hold'          // Ожидает решения
+  | 'conflict'         // Конфликт
+  | 'not_ready';       // Не готова
+
+export type PlannerPriority = 'high' | 'medium' | 'low';
+
+/**
+ * Оверлей — хранит только то, что сервис меняет вручную.
+ * Остальные поля вычисляются сервером на лету из данных аренды.
+ */
+export interface PlannerItemOverlay {
+  id: string;
+  rentalId: string;
+  equipmentRef: string;       // inventoryNumber или equipmentId
+  prepStatus: PrepStatus;
+  priorityOverride: PlannerPriority | null;   // null = автовычисление
+  riskOverride: boolean | null;               // null = автовычисление
+  comment: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+/**
+ * Строка планировщика — результат объединения аренды + техники + оверлея.
+ * Возвращается сервером из GET /api/planner.
+ */
+export interface PlannerRow {
+  id: string;                     // составной: rentalId__equipmentRef
+  rentalId: string;
+  equipmentId: string | null;
+  equipmentRef: string;           // inventoryNumber
+  startDate: string;
+  daysUntil: number;
+  equipmentLabel: string;         // "Genie GS-2032"
+  inventoryNumber: string;
+  serialNumber: string | null;
+  equipmentType: EquipmentType | null;
+  client: string;
+  deliveryAddress: string;
+  manager: string;
+  equipmentStatus: EquipmentStatus | null;
+  prepStatus: PrepStatus;
+  priority: PlannerPriority;
+  risk: boolean;
+  comment: string;
+  rentalStatus: RentalStatus;
+}

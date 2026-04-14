@@ -1,0 +1,762 @@
+/**
+ * Планировщик подготовки техники к аренде
+ *
+ * Операционный экран для сервиса: показывает будущие отгрузки,
+ * статус подготовки каждой единицы техники под конкретную аренду,
+ * приоритет и признак риска срыва.
+ */
+
+import React, { useMemo, useState, useCallback, useRef } from 'react';
+import { format, parseISO } from 'date-fns';
+import { ru } from 'date-fns/locale';
+import {
+  AlertTriangle,
+  Calendar,
+  ChevronDown,
+  Filter,
+  RefreshCw,
+  Search,
+  X,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '../lib/utils';
+import { usePlannerRows, useUpdatePlannerItem } from '../hooks/usePlanner';
+import { usePermissions } from '../lib/permissions';
+import type { PlannerRow, PrepStatus, PlannerPriority, EquipmentType } from '../types';
+
+// ── Словари ────────────────────────────────────────────────────────────────────
+
+const PREP_STATUS_LABELS: Record<PrepStatus, string> = {
+  planned:    'Запланирована',
+  needs_prep: 'Требует подготовки',
+  inspection: 'На осмотре',
+  in_repair:  'В ремонте',
+  ready:      'Готова к отгрузке',
+  shipped:    'Отгружена',
+  on_hold:    'Ожидает решения',
+  conflict:   'Конфликт',
+  not_ready:  'Не готова',
+};
+
+const PREP_STATUS_COLORS: Record<PrepStatus, string> = {
+  planned:    'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+  needs_prep: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
+  inspection: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  in_repair:  'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  ready:      'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  shipped:    'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400',
+  on_hold:    'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
+  conflict:   'bg-red-200 text-red-900 dark:bg-red-900/60 dark:text-red-200',
+  not_ready:  'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+};
+
+const PRIORITY_LABELS: Record<PlannerPriority, string> = {
+  high:   'Высокий',
+  medium: 'Средний',
+  low:    'Низкий',
+};
+
+const PRIORITY_COLORS: Record<PlannerPriority, string> = {
+  high:   'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+  medium: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  low:    'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
+};
+
+const EQUIPMENT_TYPE_LABELS: Record<EquipmentType, string> = {
+  scissor:    'Ножничный',
+  articulated:'Коленчатый',
+  telescopic: 'Телескопический',
+};
+
+const EQUIPMENT_STATUS_LABELS: Record<string, string> = {
+  available:  'Свободна',
+  rented:     'В аренде',
+  reserved:   'Резерв',
+  in_service: 'В ремонте',
+  inactive:   'Неактивна',
+};
+
+const EQUIPMENT_STATUS_COLORS: Record<string, string> = {
+  available:  'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
+  rented:     'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  reserved:   'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
+  in_service: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+  inactive:   'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+};
+
+const ALL_PREP_STATUSES = Object.keys(PREP_STATUS_LABELS) as PrepStatus[];
+const ALL_PRIORITIES = Object.keys(PRIORITY_LABELS) as PlannerPriority[];
+
+// ── Типы фильтров ──────────────────────────────────────────────────────────────
+
+type DateRange = 'today' | 'tomorrow' | 'week' | 'all' | 'custom';
+
+interface Filters {
+  dateRange:    DateRange;
+  customFrom:   string;
+  customTo:     string;
+  prepStatuses: PrepStatus[];
+  manager:      string;
+  equipType:    EquipmentType | '';
+  riskOnly:     boolean;
+  search:       string;
+}
+
+const DEFAULT_FILTERS: Filters = {
+  dateRange:    'week',
+  customFrom:   '',
+  customTo:     '',
+  prepStatuses: [],
+  manager:      '',
+  equipType:    '',
+  riskOnly:     false,
+  search:       '',
+};
+
+// ── Вспомогательные функции ────────────────────────────────────────────────────
+
+function formatDaysUntil(daysUntil: number): { label: string; className: string } {
+  if (daysUntil < 0) {
+    return {
+      label: `Просрочено на ${Math.abs(daysUntil)} д.`,
+      className: 'text-red-600 dark:text-red-400 font-semibold',
+    };
+  }
+  if (daysUntil === 0) return { label: 'Сегодня', className: 'text-red-600 dark:text-red-400 font-bold' };
+  if (daysUntil === 1) return { label: 'Завтра',  className: 'text-orange-600 dark:text-orange-400 font-semibold' };
+  if (daysUntil <= 3) return {
+    label: `+${daysUntil} дн.`,
+    className: 'text-amber-600 dark:text-amber-400 font-medium',
+  };
+  return { label: `+${daysUntil} дн.`, className: 'text-gray-500 dark:text-gray-400' };
+}
+
+function formatDate(iso: string): string {
+  try {
+    return format(parseISO(iso), 'd MMM', { locale: ru });
+  } catch {
+    return iso;
+  }
+}
+
+function matchesDateRange(row: PlannerRow, filters: Filters): boolean {
+  const { dateRange, customFrom, customTo } = filters;
+  if (dateRange === 'all') return true;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const start = new Date(row.startDate); start.setHours(0,0,0,0);
+  const diff = Math.round((start.getTime() - today.getTime()) / 86400000);
+
+  if (dateRange === 'today')    return diff === 0;
+  if (dateRange === 'tomorrow') return diff === 1;
+  if (dateRange === 'week')     return diff >= 0 && diff <= 7;
+
+  // custom
+  if (dateRange === 'custom') {
+    if (customFrom && start < new Date(customFrom)) return false;
+    if (customTo   && start > new Date(customTo))   return false;
+    return true;
+  }
+  return true;
+}
+
+function matchesSearch(row: PlannerRow, q: string): boolean {
+  if (!q) return true;
+  const lower = q.toLowerCase();
+  return (
+    row.client.toLowerCase().includes(lower) ||
+    row.equipmentLabel.toLowerCase().includes(lower) ||
+    (row.inventoryNumber || '').toLowerCase().includes(lower) ||
+    (row.serialNumber || '').toLowerCase().includes(lower)
+  );
+}
+
+// ── Компонент: бейдж-дропдаун статуса подготовки ─────────────────────────────
+
+interface PrepStatusBadgeProps {
+  rowId:      string;
+  value:      PrepStatus;
+  canEdit:    boolean;
+  onSave:     (rowId: string, status: PrepStatus) => void;
+}
+
+function PrepStatusBadge({ rowId, value, canEdit, onSave }: PrepStatusBadgeProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Закрываем по клику снаружи
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  if (!canEdit) {
+    return (
+      <span className={cn('px-2 py-0.5 rounded text-xs font-medium', PREP_STATUS_COLORS[value])}>
+        {PREP_STATUS_LABELS[value]}
+      </span>
+    );
+  }
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={cn(
+          'flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-opacity hover:opacity-80',
+          PREP_STATUS_COLORS[value],
+        )}
+      >
+        {PREP_STATUS_LABELS[value]}
+        <ChevronDown className="h-3 w-3 shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute z-50 left-0 top-full mt-1 min-w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden">
+          {ALL_PREP_STATUSES.map(status => (
+            <button
+              key={status}
+              onClick={() => { onSave(rowId, status); setOpen(false); }}
+              className={cn(
+                'w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors',
+                status === value && 'font-semibold',
+              )}
+            >
+              <span className={cn('inline-block px-1.5 py-0.5 rounded', PREP_STATUS_COLORS[status])}>
+                {PREP_STATUS_LABELS[status]}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Компонент: инлайн-редактирование комментария ──────────────────────────────
+
+interface CommentCellProps {
+  rowId:   string;
+  value:   string;
+  canEdit: boolean;
+  onSave:  (rowId: string, comment: string) => void;
+}
+
+function CommentCell({ rowId, value, canEdit, onSave }: CommentCellProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft]     = useState(value);
+  const inputRef              = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  if (!canEdit) {
+    return <span className="text-xs text-gray-500 dark:text-gray-400">{value || '—'}</span>;
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => { onSave(rowId, draft); setEditing(false); }}
+        onKeyDown={e => {
+          if (e.key === 'Enter')  { onSave(rowId, draft); setEditing(false); }
+          if (e.key === 'Escape') { setDraft(value); setEditing(false); }
+        }}
+        className="w-full text-xs px-1 py-0.5 border border-blue-400 rounded outline-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={() => { setDraft(value); setEditing(true); }}
+      className="text-left text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dotted underline-offset-2 w-full"
+    >
+      {value || <span className="opacity-40">добавить…</span>}
+    </button>
+  );
+}
+
+// ── Основная страница ─────────────────────────────────────────────────────────
+
+export default function Planner() {
+  const { can } = usePermissions();
+  const canEdit = can('edit', 'planner');
+
+  const [includeShipped, setIncludeShipped] = useState(false);
+  const { data: rows = [], isLoading, isFetching, refetch } = usePlannerRows(includeShipped);
+  const { mutate: updateItem } = useUpdatePlannerItem(includeShipped);
+
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Уникальные менеджеры из данных
+  const managers = useMemo(() => {
+    const set = new Set(rows.map(r => r.manager).filter(Boolean));
+    return Array.from(set).sort();
+  }, [rows]);
+
+  // Применяем фильтры
+  const filtered = useMemo<PlannerRow[]>(() => {
+    return rows.filter(row => {
+      if (!matchesDateRange(row, filters)) return false;
+      if (filters.prepStatuses.length > 0 && !filters.prepStatuses.includes(row.prepStatus)) return false;
+      if (filters.manager  && row.manager !== filters.manager) return false;
+      if (filters.equipType && row.equipmentType !== filters.equipType) return false;
+      if (filters.riskOnly && !row.risk) return false;
+      if (!matchesSearch(row, filters.search)) return false;
+      return true;
+    });
+  }, [rows, filters]);
+
+  // Счётчики
+  const riskCount  = useMemo(() => filtered.filter(r => r.risk).length, [filtered]);
+  const highCount  = useMemo(() => filtered.filter(r => r.priority === 'high').length, [filtered]);
+
+  const handlePrepStatusSave = useCallback((rowId: string, prepStatus: PrepStatus) => {
+    updateItem({ rowId, payload: { prepStatus } }, {
+      onSuccess: () => toast.success('Статус подготовки обновлён'),
+      onError:   () => toast.error('Не удалось сохранить'),
+    });
+  }, [updateItem]);
+
+  const handleCommentSave = useCallback((rowId: string, comment: string) => {
+    updateItem({ rowId, payload: { comment } }, {
+      onError: () => toast.error('Не удалось сохранить'),
+    });
+  }, [updateItem]);
+
+  const handleRiskToggle = useCallback((row: PlannerRow) => {
+    updateItem({ rowId: row.id, payload: { riskOverride: !row.risk } }, {
+      onSuccess: () => toast.success('Риск обновлён'),
+      onError:   () => toast.error('Не удалось сохранить'),
+    });
+  }, [updateItem]);
+
+  const clearFilter = <K extends keyof Filters>(key: K, defaultValue: Filters[K]) => {
+    setFilters(f => ({ ...f, [key]: defaultValue }));
+  };
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (filters.dateRange !== 'week') n++;
+    if (filters.prepStatuses.length > 0) n++;
+    if (filters.manager) n++;
+    if (filters.equipType) n++;
+    if (filters.riskOnly) n++;
+    return n;
+  }, [filters]);
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* ── Заголовок ── */}
+      <div className="flex items-start justify-between gap-3 px-6 pt-5 pb-3">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Планировщик</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            Очередь подготовки техники к будущим арендам
+          </p>
+        </div>
+        <div className="flex items-center gap-2 mt-1">
+          {riskCount > 0 && (
+            <span className="flex items-center gap-1 px-2 py-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-xs font-medium">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {riskCount} риск{riskCount === 1 ? '' : riskCount < 5 ? 'а' : 'ов'}
+            </span>
+          )}
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400"
+            title="Обновить"
+          >
+            <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Фильтры ── */}
+      <div className="px-6 pb-3 space-y-2">
+        {/* Строка поиска + кнопки диапазона дат */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Поиск */}
+          <div className="relative flex-1 min-w-48">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              value={filters.search}
+              onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+              placeholder="Клиент, модель, инв. №, серийный №…"
+              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {filters.search && (
+              <button
+                onClick={() => setFilters(f => ({ ...f, search: '' }))}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Период */}
+          {(['today', 'tomorrow', 'week', 'all'] as DateRange[]).map(range => (
+            <button
+              key={range}
+              onClick={() => setFilters(f => ({ ...f, dateRange: range }))}
+              className={cn(
+                'px-3 py-1.5 text-sm rounded-lg border transition-colors',
+                filters.dateRange === range
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700',
+              )}
+            >
+              {range === 'today'    && 'Сегодня'}
+              {range === 'tomorrow' && 'Завтра'}
+              {range === 'week'     && '7 дней'}
+              {range === 'all'      && 'Все'}
+            </button>
+          ))}
+
+          {/* Кнопка доп. фильтров */}
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors',
+              showFilters || activeFilterCount > 0
+                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400'
+                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700',
+            )}
+          >
+            <Filter className="h-4 w-4" />
+            Фильтры
+            {activeFilterCount > 0 && (
+              <span className="flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-white text-xs font-bold">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+
+          {/* Показать отгруженные */}
+          <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeShipped}
+              onChange={e => setIncludeShipped(e.target.checked)}
+              className="rounded"
+            />
+            Показать отгруженные
+          </label>
+        </div>
+
+        {/* Дополнительные фильтры */}
+        {showFilters && (
+          <div className="flex flex-wrap gap-2 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+            {/* Статус подготовки */}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Статус подготовки</span>
+              <div className="flex flex-wrap gap-1">
+                {ALL_PREP_STATUSES.map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setFilters(f => ({
+                      ...f,
+                      prepStatuses: f.prepStatuses.includes(s)
+                        ? f.prepStatuses.filter(x => x !== s)
+                        : [...f.prepStatuses, s],
+                    }))}
+                    className={cn(
+                      'px-2 py-0.5 rounded text-xs font-medium border transition-colors',
+                      filters.prepStatuses.includes(s)
+                        ? PREP_STATUS_COLORS[s] + ' border-current'
+                        : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400',
+                    )}
+                  >
+                    {PREP_STATUS_LABELS[s]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Менеджер */}
+            {managers.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-500 dark:text-gray-400">Менеджер</span>
+                <select
+                  value={filters.manager}
+                  onChange={e => setFilters(f => ({ ...f, manager: e.target.value }))}
+                  className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                >
+                  <option value="">Все</option>
+                  {managers.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Тип техники */}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Тип техники</span>
+              <select
+                value={filters.equipType}
+                onChange={e => setFilters(f => ({ ...f, equipType: e.target.value as EquipmentType | '' }))}
+                className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+              >
+                <option value="">Все</option>
+                {Object.entries(EQUIPMENT_TYPE_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Только риски */}
+            <div className="flex flex-col gap-1 justify-end">
+              <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.riskOnly}
+                  onChange={e => setFilters(f => ({ ...f, riskOnly: e.target.checked }))}
+                  className="rounded"
+                />
+                Только с риском
+              </label>
+            </div>
+
+            {/* Сброс фильтров */}
+            {activeFilterCount > 0 && (
+              <div className="flex items-end">
+                <button
+                  onClick={() => setFilters(DEFAULT_FILTERS)}
+                  className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                >
+                  Сбросить все
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Статистика ── */}
+      {!isLoading && filtered.length > 0 && (
+        <div className="px-6 pb-2 flex gap-3 text-xs text-gray-500 dark:text-gray-400">
+          <span>Всего: {filtered.length}</span>
+          {highCount > 0 && (
+            <span className="text-red-600 dark:text-red-400 font-medium">
+              🔴 Высокий приоритет: {highCount}
+            </span>
+          )}
+          {riskCount > 0 && (
+            <span className="text-orange-600 dark:text-orange-400 font-medium">
+              ⚠ Рисков: {riskCount}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ── Таблица ── */}
+      <div className="flex-1 overflow-auto px-6 pb-6">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-48 text-gray-400">
+            <RefreshCw className="h-6 w-6 animate-spin mr-2" />
+            Загрузка…
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-500">
+            <Calendar className="h-12 w-12 mb-3 opacity-40" />
+            <p className="text-sm font-medium">Нет записей</p>
+            <p className="text-xs mt-1">
+              {rows.length === 0
+                ? 'Нет активных аренд с будущей датой отгрузки'
+                : 'Попробуйте изменить фильтры'}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    Дата отгрузки
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    Техника
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    Инв. / SN
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    Клиент
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    Менеджер
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    Статус техники
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    Статус подготовки
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    Приоритет
+                  </th>
+                  <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    Риск
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    Комментарий
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                {filtered.map(row => {
+                  const { label: daysLabel, className: daysClass } = formatDaysUntil(row.daysUntil);
+                  const isHighRisk = row.risk;
+                  const isHighPriority = row.priority === 'high';
+
+                  return (
+                    <tr
+                      key={row.id}
+                      className={cn(
+                        'bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/70 transition-colors',
+                        isHighRisk && 'border-l-2 border-l-red-400',
+                        row.prepStatus === 'shipped' && 'opacity-60',
+                      )}
+                    >
+                      {/* Дата отгрузки */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <div className="font-medium text-gray-900 dark:text-gray-100">
+                          {formatDate(row.startDate)}
+                        </div>
+                        <div className={cn('text-xs', daysClass)}>
+                          {daysLabel}
+                        </div>
+                      </td>
+
+                      {/* Техника */}
+                      <td className="px-3 py-2.5">
+                        <div className="font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                          {row.equipmentLabel || '—'}
+                        </div>
+                        {row.equipmentType && (
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {EQUIPMENT_TYPE_LABELS[row.equipmentType] || row.equipmentType}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Инв. / SN */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <div className="text-gray-900 dark:text-gray-100 font-mono text-xs">
+                          {row.inventoryNumber || '—'}
+                        </div>
+                        {row.serialNumber && (
+                          <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">
+                            {row.serialNumber}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Клиент */}
+                      <td className="px-3 py-2.5">
+                        <div className="text-gray-900 dark:text-gray-100 max-w-36 truncate" title={row.client}>
+                          {row.client || '—'}
+                        </div>
+                        {row.deliveryAddress && (
+                          <div className="text-xs text-gray-400 dark:text-gray-500 max-w-36 truncate" title={row.deliveryAddress}>
+                            {row.deliveryAddress}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Менеджер */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <span className="text-gray-700 dark:text-gray-300 text-xs">
+                          {row.manager || '—'}
+                        </span>
+                      </td>
+
+                      {/* Общий статус техники */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {row.equipmentStatus ? (
+                          <span className={cn(
+                            'px-2 py-0.5 rounded text-xs font-medium',
+                            EQUIPMENT_STATUS_COLORS[row.equipmentStatus] || 'bg-gray-100 text-gray-600',
+                          )}>
+                            {EQUIPMENT_STATUS_LABELS[row.equipmentStatus] || row.equipmentStatus}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+
+                      {/* Статус подготовки */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <PrepStatusBadge
+                          rowId={row.id}
+                          value={row.prepStatus}
+                          canEdit={canEdit}
+                          onSave={handlePrepStatusSave}
+                        />
+                      </td>
+
+                      {/* Приоритет */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <span className={cn(
+                          'px-2 py-0.5 rounded text-xs font-medium',
+                          PRIORITY_COLORS[row.priority],
+                        )}>
+                          {PRIORITY_LABELS[row.priority]}
+                        </span>
+                      </td>
+
+                      {/* Риск */}
+                      <td className="px-3 py-2.5 text-center">
+                        {canEdit ? (
+                          <button
+                            onClick={() => handleRiskToggle(row)}
+                            title={row.risk ? 'Снять риск' : 'Поставить риск'}
+                            className={cn(
+                              'inline-flex items-center justify-center rounded transition-opacity hover:opacity-70',
+                            )}
+                          >
+                            {row.risk ? (
+                              <AlertTriangle className="h-4 w-4 text-red-500 dark:text-red-400" />
+                            ) : (
+                              <span className="text-gray-300 dark:text-gray-600 text-sm">—</span>
+                            )}
+                          </button>
+                        ) : (
+                          row.risk
+                            ? <AlertTriangle className="h-4 w-4 text-red-500 dark:text-red-400 mx-auto" />
+                            : <span className="text-gray-300 dark:text-gray-600">—</span>
+                        )}
+                      </td>
+
+                      {/* Комментарий */}
+                      <td className="px-3 py-2.5 max-w-48">
+                        <CommentCell
+                          rowId={row.id}
+                          value={row.comment}
+                          canEdit={canEdit}
+                          onSave={handleCommentSave}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

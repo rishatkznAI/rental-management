@@ -2,6 +2,7 @@ import { createBrowserRouter } from 'react-router';
 import { Layout } from './components/layout/Layout';
 import { PrivateRoute } from './components/auth/PrivateRoute';
 import Dashboard from './pages/Dashboard';
+import Planner from './pages/Planner';
 import Equipment from './pages/Equipment';
 import EquipmentNew from './pages/EquipmentNew';
 import EquipmentDetail from './pages/EquipmentDetail';
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
         Component: Layout,
         children: [
           { index: true, Component: Dashboard },
+          { path: 'planner', Component: Planner },
           { path: 'equipment', Component: Equipment },
           { path: 'equipment/new', Component: EquipmentNew },
           { path: 'equipment/:id', Component: EquipmentDetail },

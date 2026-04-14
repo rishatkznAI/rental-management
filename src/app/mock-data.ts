@@ -82,6 +82,7 @@ export interface GanttRentalData {
   id: string;
   client: string;
   clientShort: string;
+  equipmentId?: string;
   equipmentInv: string;
   startDate: string;
   endDate: string;

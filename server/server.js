@@ -534,14 +534,18 @@ function canEquipmentParticipateInRentals(equipment) {
 }
 
 function findEquipmentForRentalPayload(payload) {
+  const equipmentId = payload?.equipmentId;
   const inventoryNumber =
     payload?.equipmentInv
     || payload?.inventoryNumber
     || (Array.isArray(payload?.equipment) ? payload.equipment[0] : null);
 
-  if (!inventoryNumber) return null;
-
   const equipment = (readData('equipment') || []).map(normalizeEquipmentRecord);
+  if (equipmentId) {
+    const byId = equipment.find(item => item.id === equipmentId);
+    if (byId) return byId;
+  }
+  if (!inventoryNumber) return null;
   return equipment.find(item => item.inventoryNumber === inventoryNumber) || null;
 }
 

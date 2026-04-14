@@ -44,7 +44,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 /** Проверяет, занята ли техника (в аренде) на заданный период */
 function isEquipmentBusy(
-  invNumber: string,
+  equipment: Equipment,
   startDate: string,
   endDate: string,
   rentals: GanttRentalData[],
@@ -53,7 +53,10 @@ function isEquipmentBusy(
   const newStart = new Date(startDate).getTime();
   const newEnd   = new Date(endDate).getTime();
   return rentals.some(r => {
-    if (r.equipmentInv !== invNumber) return false;
+    const matchesEquipment = r.equipmentId
+      ? r.equipmentId === equipment.id
+      : r.equipmentInv === equipment.inventoryNumber;
+    if (!matchesEquipment) return false;
     if (r.status === 'returned' || r.status === 'closed') return false;
     const rStart = new Date(r.startDate).getTime();
     const rEnd   = new Date(r.endDate).getTime();
@@ -355,6 +358,7 @@ interface NewRentalModalProps {
   onClose: () => void;
   onConfirm: (data: {
     client: string;
+    equipmentId: string;
     equipmentInv: string;
     startDate: string;
     endDate: string;
@@ -377,7 +381,7 @@ export function NewRentalModal({
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
   const [client,       setClient]       = useState('');
-  const [equipmentInv, setEquipmentInv] = useState(preselectedEquipment || '');
+  const [equipmentId,  setEquipmentId]  = useState('');
   const [startDate,    setStartDate]    = useState(today);
   const [endDate,      setEndDate]      = useState(nextWeek);
   const [manager,      setManager]      = useState('');
@@ -385,12 +389,15 @@ export function NewRentalModal({
   const [conflictWarn, setConflictWarn] = useState(false);
 
   React.useEffect(() => {
-    if (preselectedEquipment) setEquipmentInv(preselectedEquipment);
-  }, [preselectedEquipment]);
+    if (!preselectedEquipment) return;
+    const selected = (equipmentListProp ?? fetchedEquipment).find(item => item.inventoryNumber === preselectedEquipment);
+    if (selected) setEquipmentId(selected.id);
+  }, [preselectedEquipment, equipmentListProp, fetchedEquipment]);
 
   React.useEffect(() => {
     if (!open) return;
     setDailyRate('');
+    if (!preselectedEquipment) setEquipmentId('');
   }, [open]);
 
   const { data: clientsData = [] } = useQuery({
@@ -445,7 +452,7 @@ export function NewRentalModal({
     const available: Equipment[] = [];
     const busy: Equipment[] = [];
     all.forEach(eq => {
-      if (isEquipmentBusy(eq.inventoryNumber, startDate, endDate, existingRentals)) {
+      if (isEquipmentBusy(eq, startDate, endDate, existingRentals)) {
         busy.push(eq);
       } else {
         available.push(eq);
@@ -454,30 +461,40 @@ export function NewRentalModal({
     return { availableEquipment: available, busyEquipment: busy };
   }, [startDate, endDate, existingRentals, equipmentListProp, fetchedEquipment]);
 
+  const selectedEquipment = useMemo(
+    () => [...availableEquipment, ...busyEquipment].find(eq => eq.id === equipmentId)
+      || (equipmentListProp ?? fetchedEquipment).find(eq => eq.id === equipmentId)
+      || null,
+    [availableEquipment, busyEquipment, equipmentId, equipmentListProp, fetchedEquipment],
+  );
+
   // Проверяем конфликт при выборе техники
-  const handleEquipmentChange = (inv: string) => {
-    setEquipmentInv(inv);
-    const isBusy = busyEquipment.some(e => e.inventoryNumber === inv);
+  const handleEquipmentChange = (id: string) => {
+    setEquipmentId(id);
+    const isBusy = busyEquipment.some(e => e.id === id);
     setConflictWarn(isBusy);
   };
 
   // Перепроверяем конфликт при смене дат
   React.useEffect(() => {
-    if (!equipmentInv) { setConflictWarn(false); return; }
-    setConflictWarn(isEquipmentBusy(equipmentInv, startDate, endDate, existingRentals));
-  }, [startDate, endDate, equipmentInv, existingRentals]);
+    if (!selectedEquipment) { setConflictWarn(false); return; }
+    setConflictWarn(isEquipmentBusy(selectedEquipment, startDate, endDate, existingRentals));
+  }, [startDate, endDate, selectedEquipment, existingRentals]);
 
   // Находим конкретную аренду, вызывающую конфликт (для отображения деталей)
   const conflictingRental = useMemo(() => {
-    if (!conflictWarn || !equipmentInv) return null;
+    if (!conflictWarn || !selectedEquipment) return null;
     const s = new Date(startDate).getTime();
     const e = new Date(endDate).getTime();
     return existingRentals.find(r => {
-      if (r.equipmentInv !== equipmentInv) return false;
+      const matchesEquipment = r.equipmentId
+        ? r.equipmentId === selectedEquipment.id
+        : r.equipmentInv === selectedEquipment.inventoryNumber;
+      if (!matchesEquipment) return false;
       if (r.status === 'returned' || r.status === 'closed') return false;
       return s <= new Date(r.endDate).getTime() && e >= new Date(r.startDate).getTime();
     }) ?? null;
-  }, [conflictWarn, equipmentInv, startDate, endDate, existingRentals]);
+  }, [conflictWarn, selectedEquipment, startDate, endDate, existingRentals]);
 
   const rentalDays = useMemo(() => getRentalDays(startDate, endDate), [startDate, endDate]);
   const totalAmount = useMemo(
@@ -559,8 +576,8 @@ export function NewRentalModal({
                 )}
                 <EquipmentCombobox
                   equipment={[...availableEquipment, ...busyEquipment]}
-                  value={equipmentInv}
-                  valueKey="inventoryNumber"
+                  value={equipmentId}
+                  valueKey="id"
                   onChange={handleEquipmentChange}
                   groups={[
                     ...(availableEquipment.length > 0
@@ -635,10 +652,19 @@ export function NewRentalModal({
           <div className="flex gap-3 pt-2">
             <Button
               onClick={() => {
-                onConfirm({ client, equipmentInv, startDate, endDate, manager, amount: totalAmount });
+                if (!selectedEquipment) return;
+                onConfirm({
+                  client,
+                  equipmentId: selectedEquipment.id,
+                  equipmentInv: selectedEquipment.inventoryNumber,
+                  startDate,
+                  endDate,
+                  manager,
+                  amount: totalAmount,
+                });
                 onClose();
               }}
-              disabled={!client || !equipmentInv || !startDate || !endDate}
+              disabled={!client || !selectedEquipment || !startDate || !endDate}
             >
               Создать аренду
             </Button>

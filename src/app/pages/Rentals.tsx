@@ -179,6 +179,15 @@ function rentalIntersectsRange(
   return rentalStart < rangeEnd && rentalEndExclusive > rangeStart;
 }
 
+function rentalMatchesEquipment(
+  rental: Pick<GanttRentalData, 'equipmentId' | 'equipmentInv'>,
+  equipment: Pick<Equipment, 'id' | 'inventoryNumber'>,
+) {
+  return rental.equipmentId
+    ? rental.equipmentId === equipment.id
+    : rental.equipmentInv === equipment.inventoryNumber;
+}
+
 /**
  * Единый источник истины для статуса техники.
  * Вычисляет статус на основе активных аренд (не из поля equipment.status).
@@ -344,19 +353,20 @@ export default function Rentals() {
     // Для закрытых/возвращённых аренд: если у техники больше нет активных аренд —
     // обновляем статус техники на 'available'.
     const eqList = equipmentList;
-    const affectedInvs = new Set(
-      current
-        .filter(r =>
-          (r.status === 'created' || r.status === 'active') && r.endDate < todayStr,
-        )
-        .map(r => r.equipmentInv),
+    const affectedEquipment = eqList.filter(e =>
+      current.some(r =>
+        (r.status === 'created' || r.status === 'active')
+        && r.endDate < todayStr
+        && rentalMatchesEquipment(r, e),
+      ),
     );
     let eqChanged = false;
     const updatedEq = eqList.map(e => {
-      if (!affectedInvs.has(e.inventoryNumber)) return e;
+      if (!affectedEquipment.some(item => item.id === e.id)) return e;
       const stillActive = cleaned.some(
-        r => r.equipmentInv === e.inventoryNumber
-          && r.status !== 'returned' && r.status !== 'closed',
+        r => rentalMatchesEquipment(r, e)
+          && r.status !== 'returned'
+          && r.status !== 'closed',
       );
       if (!stillActive && e.status !== 'inactive' && e.status !== 'in_service') {
         eqChanged = true;
@@ -491,8 +501,7 @@ export default function Rentals() {
     }
     const hasRentalFilter = !!(filterManager || filterClient || filterUpd || filterPayment || filterStatus);
     if (hasRentalFilter) {
-      const matchingInvs = new Set(visibleFilteredRentals.map(r => r.equipmentInv));
-      eq = eq.filter(e => matchingInvs.has(e.inventoryNumber));
+      eq = eq.filter(e => visibleFilteredRentals.some(r => rentalMatchesEquipment(r, e)));
     }
     return [...eq].sort(compareEquipmentByPriority);
   }, [equipmentList, filterModel, visibleFilteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
@@ -501,7 +510,10 @@ export default function Rentals() {
   const conflictSets = useMemo(() => {
     const map = new Map<string, Set<string>>();
     filteredEquipment.forEach(eq => {
-      map.set(eq.inventoryNumber, detectConflicts(filteredRentals, eq.inventoryNumber));
+      map.set(eq.id, detectConflicts(
+        filteredRentals.filter(r => rentalMatchesEquipment(r, eq)),
+        eq.inventoryNumber,
+      ));
     });
     return map;
   }, [filteredEquipment, filteredRentals]);
@@ -636,7 +648,7 @@ export default function Rentals() {
 
     // Update returnDate on equipment
     const updatedEq = equipmentList.map(e =>
-      e.inventoryNumber === rental.equipmentInv
+      rentalMatchesEquipment(rental, e)
         ? { ...e, returnDate: newEndDate }
         : e
     );
@@ -665,6 +677,7 @@ export default function Rentals() {
   // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
   const handleEarlyReturn = useCallback((rental: GanttRentalData, actualReturnDate: string) => {
     if (!canEditRentals) return;
+    const currentEquipment = equipmentList.find(e => rentalMatchesEquipment(rental, e));
     const updatedRentals = ganttRentals.map(r =>
       r.id === rental.id
         ? { ...r, endDate: actualReturnDate, status: 'returned' as const }
@@ -674,13 +687,16 @@ export default function Rentals() {
 
     // Clear currentClient/returnDate from equipment if no other active rentals
     const hasOtherActive = updatedRentals.some(
-      r => r.equipmentInv === rental.equipmentInv
+      r =>
+        !!currentEquipment
         && r.id !== rental.id
-        && r.status !== 'returned' && r.status !== 'closed'
+        && rentalMatchesEquipment(r, currentEquipment)
+        && r.status !== 'returned'
+        && r.status !== 'closed'
     );
     if (!hasOtherActive) {
       const updatedEq = equipmentList.map(e =>
-        e.inventoryNumber === rental.equipmentInv
+        rentalMatchesEquipment(rental, e)
           ? {
               ...e,
               status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
@@ -967,10 +983,10 @@ export default function Rentals() {
               <EquipmentRow
                 key={eq.id}
                 equipment={eq}
-                rentals={filteredRentals.filter(r => r.equipmentInv === eq.inventoryNumber)}
+                rentals={filteredRentals.filter(r => rentalMatchesEquipment(r, eq))}
                 downtimes={mockDowntimes.filter(d => d.equipmentInv === eq.inventoryNumber)}
                 servicePeriods={servicePeriods.filter(s => s.equipmentInv === eq.inventoryNumber)}
-                conflictIds={conflictSets.get(eq.inventoryNumber) || new Set()}
+                conflictIds={conflictSets.get(eq.id) || new Set()}
                 viewStart={viewStart}
                 totalDays={totalDays}
                 dayWidth={dayWidth}
@@ -993,7 +1009,7 @@ export default function Rentals() {
       {selectedRental && (
         <RentalDrawer
           rental={selectedRental}
-          equipment={equipmentList.find(e => e.inventoryNumber === selectedRental.equipmentInv)}
+          equipment={equipmentList.find(e => rentalMatchesEquipment(selectedRental, e))}
           allRentals={ganttRentals}
           payments={payments}
           canEditRentals={canEditRentals}
@@ -1011,6 +1027,7 @@ export default function Rentals() {
           }}
           onStatusChange={(rental) => {
             if (!canEditRentals) return;
+            const currentEquipment = equipmentList.find(e => rentalMatchesEquipment(rental, e));
             // created → active, returned → closed
             let nextStatus: GanttRentalData['status'] | null = null;
             if (rental.status === 'created') nextStatus = 'active';
@@ -1025,22 +1042,24 @@ export default function Rentals() {
               // При активации аренды — техника "В аренде" + заполняем клиента и дату возврата
               if (nextStatus === 'active') {
                 const newEqList = equipmentList.map(e =>
-                  e.inventoryNumber === rental.equipmentInv
+                  rentalMatchesEquipment(rental, e)
                     ? { ...e, status: 'rented' as EquipmentStatus, currentClient: rental.client, returnDate: rental.endDate }
                     : e,
                 );
                 void persistEquipment(newEqList);
               }
               // При закрытии — если нет других активных аренд, техника "Свободна" + очищаем клиента и дату
-              if (nextStatus === 'closed') {
-                const hasOtherActive = ganttRentals.some(
-                  r => r.equipmentInv === rental.equipmentInv
-                    && r.status !== 'returned' && r.status !== 'closed'
-                    && r.id !== rental.id,
+              if (nextStatus === 'closed' && currentEquipment) {
+                const hasOtherActive = updated.some(
+                  r =>
+                    r.id !== rental.id
+                    && rentalMatchesEquipment(r, currentEquipment)
+                    && r.status !== 'returned'
+                    && r.status !== 'closed',
                 );
                 if (!hasOtherActive) {
                   const newEqList = equipmentList.map(e =>
-                    e.inventoryNumber === rental.equipmentInv
+                    rentalMatchesEquipment(rental, e)
                       ? {
                           ...e,
                           status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
@@ -1060,13 +1079,17 @@ export default function Rentals() {
             const updated = ganttRentals.filter(r => r.id !== rental.id);
             void persistGanttRentals(updated);
             // Если после удаления нет других активных аренд — техника снова свободна, очищаем клиента и дату
+            const currentEquipment = equipmentList.find(e => rentalMatchesEquipment(rental, e));
             const hasOtherActive = updated.some(
-              r => r.equipmentInv === rental.equipmentInv
-                && r.status !== 'returned' && r.status !== 'closed',
+              r =>
+                !!currentEquipment
+                && rentalMatchesEquipment(r, currentEquipment)
+                && r.status !== 'returned'
+                && r.status !== 'closed',
             );
             if (!hasOtherActive) {
               const newEqList = equipmentList.map(e =>
-                e.inventoryNumber === rental.equipmentInv
+                rentalMatchesEquipment(rental, e)
                   ? {
                       ...e,
                       status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
@@ -1099,11 +1122,14 @@ export default function Rentals() {
           // Обновляем статус техники, если нет других активных аренд
           const rental = ganttRentals.find(r => r.id === data.rentalId);
           if (rental) {
-            const currentEquipment = equipmentList.find(e => e.inventoryNumber === rental.equipmentInv);
+            const currentEquipment = equipmentList.find(e => rentalMatchesEquipment(rental, e));
             const hasOtherActive = updated.some(
-              r => r.equipmentInv === rental.equipmentInv
-                && r.status !== 'returned' && r.status !== 'closed'
-                && r.id !== data.rentalId,
+              r =>
+                !!currentEquipment
+                && r.id !== data.rentalId
+                && rentalMatchesEquipment(r, currentEquipment)
+                && r.status !== 'returned'
+                && r.status !== 'closed',
             );
             if (!hasOtherActive) {
               const newStatus: EquipmentStatus =
@@ -1111,7 +1137,7 @@ export default function Rentals() {
                   ? 'in_service'
                   : (currentEquipment && hasOpenServiceTicketForEquipment(serviceTickets, currentEquipment) ? 'in_service' : 'available');
               const newEqList = equipmentList.map(e =>
-                e.inventoryNumber === rental.equipmentInv
+                rentalMatchesEquipment(rental, e)
                   ? { ...e, status: newStatus, currentClient: undefined, returnDate: undefined }
                   : e,
               );
@@ -1149,6 +1175,7 @@ export default function Rentals() {
             id: `GR-${Date.now()}`,
             client: data.client || '',
             clientShort: (data.client || '').substring(0, 20),
+            equipmentId: data.equipmentId,
             equipmentInv: data.equipmentInv || '',
             startDate: data.startDate || '',
             endDate: data.endDate || '',
@@ -1164,10 +1191,10 @@ export default function Rentals() {
           void persistGanttRentals(updated);
 
           // Синхронизируем статус техники + клиента и дату возврата на основе initialStatus аренды
-          if (data.equipmentInv) {
+          if (data.equipmentId) {
             const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
             const newEqList = equipmentList.map(e => {
-              if (e.inventoryNumber !== data.equipmentInv) return e;
+              if (e.id !== data.equipmentId) return e;
               return {
                 ...e,
                 status: eqStatus,

@@ -99,7 +99,7 @@ app.use(cors({
 // ── Конфигурация ───────────────────────────────────────────────────────────────
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const MAX_API   = 'https://botapi.max.ru';
+const MAX_API   = 'https://platform-api.max.ru';
 
 function readData(name) {
   return getData(name);
@@ -1183,7 +1183,7 @@ async function maxRequest(method, endpoint, body = null) {
   const opts = {
     method,
     headers: {
-      'Authorization': `Bearer ${BOT_TOKEN}`,
+      'Authorization': BOT_TOKEN,
       'Content-Type':  'application/json',
     },
   };

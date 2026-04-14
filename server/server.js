@@ -1215,13 +1215,21 @@ async function registerWebhook() {
   }
   const res = await maxRequest('POST', '/subscriptions', {
     url:          `${webhookUrl}/bot/webhook`,
-    update_types: ['message_created'],
+    update_types: ['message_created', 'bot_started'],
   });
   if (res && !res.error) {
     console.log(`[BOT] Webhook зарегистрирован: ${webhookUrl}/bot/webhook`);
   } else {
     console.error('[BOT] Ошибка регистрации webhook:', res?.message || res);
   }
+}
+
+async function handleBotStarted(senderId, phone, payload) {
+  const payloadLine = payload ? `\nPayload: ${payload}` : '';
+  return sendMessage(
+    senderId,
+    `👋 Добро пожаловать в бот «Подъёмники»!${payloadLine}\n\nДля входа напишите:\n/start email@company.ru пароль`,
+  );
 }
 
 // ── Авторизация пользователя бота ──────────────────────────────────────────────
@@ -2073,15 +2081,23 @@ app.post('/bot/webhook', async (req, res) => {
     const updates = req.body?.updates || [req.body];
 
     for (const update of updates) {
+      if (update.update_type === 'bot_started') {
+        const user = update.user;
+        if (!user?.user_id) continue;
+        console.log(`[BOT] [${user.name || user.user_id}] bot_started`);
+        await handleBotStarted(user.user_id, user.user_id, update.payload);
+        continue;
+      }
+
       if (update.update_type !== 'message_created') continue;
 
-      const msg    = update.message;
+      const msg = update.message;
       const sender = msg?.sender;
-      if (!sender) continue;
+      if (!sender?.user_id) continue;
 
       const senderId = sender.user_id;
-      const phone    = sender.user_id;
-      const text     = msg?.body?.text || '';
+      const phone = sender.user_id;
+      const text = msg?.body?.text || '';
 
       if (!text.trim()) continue;
 

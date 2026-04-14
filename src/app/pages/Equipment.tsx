@@ -319,14 +319,13 @@ export default function Equipment() {
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-[--color-primary] text-sm">{eq.inventoryNumber}</span>
+                  <span className="font-semibold text-[--color-primary] text-sm">{eq.manufacturer} {eq.model}</span>
                   {getEquipmentPriorityBadge(eq.priority)}
                   {getEquipmentStatusBadge(eq.status)}
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  SN: {eq.serialNumber || 'не указан'}
+                  Инв.№: {eq.inventoryNumber || '—'} · SN: {eq.serialNumber || 'не указан'}
                 </p>
-                <p className="text-sm font-medium text-gray-900 dark:text-white mt-1 truncate">{eq.manufacturer} {eq.model}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{getEquipmentTypeLabel(eq.type)} · {getEquipmentDriveLabel(eq.drive)}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   {EQUIPMENT_CATEGORY_LABELS[eq.category]} · {getOwnerLabel(eq.owner)} · Активный парк: {eq.activeInFleet ? 'Да' : 'Нет'}
@@ -348,7 +347,7 @@ export default function Equipment() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Инв.№ / Серийный № / Модель</TableHead>
+              <TableHead>Модель / Инв.№ / Серийный №</TableHead>
               <TableHead>Тип</TableHead>
               <TableHead>Приоритет</TableHead>
               <TableHead>Привод</TableHead>
@@ -368,12 +367,14 @@ export default function Equipment() {
                     to={`/equipment/${equipment.id}`}
                     className="font-medium text-[--color-primary] hover:underline"
                   >
-                    {equipment.inventoryNumber}
+                    {equipment.manufacturer} {equipment.model}
                   </Link>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Инв.№: {equipment.inventoryNumber || '—'}
+                  </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     SN: {equipment.serialNumber || 'не указан'}
                   </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{equipment.model}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {EQUIPMENT_CATEGORY_LABELS[equipment.category]} · {getOwnerLabel(equipment.owner)} · Активный парк: {equipment.activeInFleet ? 'Да' : 'Нет'}
                   </p>

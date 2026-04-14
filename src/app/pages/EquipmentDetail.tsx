@@ -12,7 +12,6 @@ import {
   Upload, Trash2, X,
 } from 'lucide-react';
 import {
-  mockRepairRecords,
   EQUIPMENT_STORAGE_KEY,
   SHIPPING_PHOTOS_KEY,
 } from '../mock-data';
@@ -37,6 +36,7 @@ import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
+import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -129,13 +129,24 @@ export default function EquipmentDetail() {
     setAllPayments(paymentData);
   }, [paymentData]);
 
+  const inventoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    allEquipment.forEach(item => {
+      counts.set(item.inventoryNumber, (counts.get(item.inventoryNumber) ?? 0) + 1);
+    });
+    return counts;
+  }, [allEquipment]);
+
   // ── Find equipment (from localStorage, not empty mock) ──
   const rawEquipment = allEquipment.find(e => e.id === id);
 
   // ── Enrich with active rental data (currentClient / returnDate) ──
   const activeRental = rawEquipment
     ? allGanttRentals.find(r =>
-        r.equipmentInv === rawEquipment.inventoryNumber &&
+        (
+          (r.equipmentId && r.equipmentId === rawEquipment.id)
+          || (!r.equipmentId && (inventoryCounts.get(rawEquipment.inventoryNumber) ?? 0) === 1 && r.equipmentInv === rawEquipment.inventoryNumber)
+        ) &&
         (r.status === 'active' || r.status === 'created'))
     : null;
 
@@ -147,23 +158,45 @@ export default function EquipmentDetail() {
 
   // ── Related data (all from localStorage) ──
   const ganttRentals = useMemo(
-    () => equipment ? allGanttRentals.filter(r => r.equipmentInv === equipment.inventoryNumber).sort((a, b) => b.startDate.localeCompare(a.startDate)) : [],
-    [equipment, allGanttRentals]
+    () => equipment ? allGanttRentals.filter(r =>
+      (r.equipmentId && r.equipmentId === equipment.id)
+      || (!r.equipmentId && (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1 && r.equipmentInv === equipment.inventoryNumber)
+    ).sort((a, b) => b.startDate.localeCompare(a.startDate)) : [],
+    [equipment, allGanttRentals, inventoryCounts]
   );
 
   const serviceHistory = useMemo(
     () => equipment
       ? allServiceTickets.filter(s =>
           s.equipmentId === equipment.id ||
-          (s.inventoryNumber && s.inventoryNumber === equipment.inventoryNumber)
+          (s.serialNumber && equipment.serialNumber && s.serialNumber === equipment.serialNumber) ||
+          (s.inventoryNumber && (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1 && s.inventoryNumber === equipment.inventoryNumber)
         ).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       : [],
-    [equipment, allServiceTickets]
+    [equipment, allServiceTickets, inventoryCounts]
   );
 
-  const repairRecords = [...mockRepairRecords]
-    .filter(r => r.equipmentId === id)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const repairRecords = useMemo(() => (
+    serviceHistory
+      .filter(ticket => ticket.status === 'ready' || ticket.status === 'closed')
+      .map(ticket => {
+        const workNormHours = (ticket.resultData?.worksPerformed ?? []).reduce((sum, item) => sum + (item.totalNormHours || 0), 0);
+        const partsCost = (ticket.resultData?.partsUsed ?? []).reduce((sum, item) => sum + ((item.cost || 0) * (item.qty || 0)), 0);
+        return {
+          id: ticket.id,
+          date: ticket.closedAt || ticket.createdAt,
+          type: ticket.reason?.toLowerCase().includes('то') ? 'maintenance' : 'repair',
+          description: ticket.reason || 'Сервисная заявка',
+          comment: ticket.resultData?.summary || ticket.description || undefined,
+          mechanic: ticket.assignedMechanicName || ticket.assignedTo || 'Не назначен',
+          status: ticket.status === 'closed' || ticket.status === 'ready' ? 'completed' : 'in_progress',
+          source: ticket.source === 'bot' ? 'bot' : 'manual',
+          cost: partsCost,
+          totalNormHours: workNormHours,
+        };
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  ), [serviceHistory]);
 
   const [allShippingPhotos, setAllShippingPhotos] = useState<ShippingPhoto[]>([]);
   useEffect(() => {
@@ -273,8 +306,8 @@ export default function EquipmentDetail() {
   };
 
   // ── Modal state ──
-  const [showRepairModal, setShowRepairModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showCreateServiceModal, setShowCreateServiceModal] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // ── Not found screen ──
@@ -1102,12 +1135,10 @@ export default function EquipmentDetail() {
                     {openServiceTickets.length} открытых · {serviceHistory.length} всего
                   </CardDescription>
                 </div>
-                <Link to="/service">
-                  <Button size="sm">
-                    <Plus className="h-3.5 w-3.5" />
-                    Создать заявку
-                  </Button>
-                </Link>
+                <Button size="sm" onClick={() => setShowCreateServiceModal(true)}>
+                  <Plus className="h-3.5 w-3.5" />
+                  Создать заявку
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
@@ -1163,9 +1194,9 @@ export default function EquipmentDetail() {
                 </Table>
               ) : (
                 <EmptyState icon={<Wrench className="h-12 w-12" />} text="Сервисных заявок нет">
-                  <Link to="/service">
-                    <Button variant="secondary" size="sm" className="mt-4">Создать заявку</Button>
-                  </Link>
+                  <Button variant="secondary" size="sm" className="mt-4" onClick={() => setShowCreateServiceModal(true)}>
+                    Создать заявку
+                  </Button>
                 </EmptyState>
               )}
             </CardContent>
@@ -1176,16 +1207,8 @@ export default function EquipmentDetail() {
         <Tabs.Content value="repair-history">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>История ремонтов</CardTitle>
-                  <CardDescription>{repairRecords.length} записей</CardDescription>
-                </div>
-                <Button size="sm" onClick={() => setShowRepairModal(true)}>
-                  <Plus className="h-4 w-4" />
-                  Добавить запись
-                </Button>
-              </div>
+              <CardTitle>История ремонтов</CardTitle>
+              <CardDescription>Построено по завершённым сервисным заявкам · {repairRecords.length} записей</CardDescription>
             </CardHeader>
             <CardContent>
               {repairRecords.length > 0 ? (
@@ -1210,6 +1233,7 @@ export default function EquipmentDetail() {
                           <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
                             <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatDate(record.date)}</span>
                             <span className="flex items-center gap-1"><User className="h-3 w-3" /> {record.mechanic}</span>
+                            {record.totalNormHours > 0 && <span>{record.totalNormHours.toFixed(1)} н/ч</span>}
                           </div>
                         </div>
                         {record.cost != null && record.cost > 0 && (
@@ -1423,7 +1447,43 @@ export default function EquipmentDetail() {
       </Tabs.Root>
 
       {/* ── Modals ── */}
-      <AddRepairModal open={showRepairModal} onOpenChange={setShowRepairModal} />
+      <Dialog.Root open={showCreateServiceModal} onOpenChange={setShowCreateServiceModal}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[min(96vw,960px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-900">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">
+                  Новая сервисная заявка
+                </Dialog.Title>
+                <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Заявка будет создана сразу для текущего подъемника.
+                </Dialog.Description>
+              </div>
+              <Dialog.Close asChild>
+                <button className="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200">
+                  <X className="h-5 w-5" />
+                </button>
+              </Dialog.Close>
+            </div>
+            <ServiceTicketForm
+              initialEquipmentId={equipment.id}
+              lockEquipment
+              submitLabel="Создать заявку"
+              onCancel={() => setShowCreateServiceModal(false)}
+              onCreated={(ticket) => {
+                setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
+                setAllEquipment(prev => prev.map(item =>
+                  item.id === equipment.id
+                    ? { ...item, status: 'in_service', currentClient: undefined, returnDate: undefined }
+                    : item,
+                ));
+                setShowCreateServiceModal(false);
+              }}
+            />
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
       <EditEquipmentModal
         open={showEditModal}
         equipment={equipment}
@@ -1487,87 +1547,6 @@ function EmptyState({ icon, text, children }: { icon: React.ReactNode; text: str
       <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{text}</p>
       {children}
     </div>
-  );
-}
-
-function AddRepairModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const [form, setForm] = useState({ date: '', type: 'maintenance', description: '', comment: '', mechanic: '', status: 'completed', cost: '' });
-  const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
-
-  return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white p-6 shadow-lg dark:bg-gray-800">
-          <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">Добавить запись о ремонте</Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-gray-400">Заполните информацию о ремонте или обслуживании</Dialog.Description>
-          <div className="mt-4 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Дата</label>
-                <input type="date" value={form.date} onChange={e => update('date', e.target.value)}
-                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Тип события</label>
-                <Select value={form.type} onValueChange={v => update('type', v)}>
-                  <SelectTrigger className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="maintenance">Обслуживание</SelectItem>
-                    <SelectItem value="repair">Ремонт</SelectItem>
-                    <SelectItem value="diagnostics">Диагностика</SelectItem>
-                    <SelectItem value="breakdown">Поломка</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Описание работ</label>
-              <textarea
-                className="flex min-h-[60px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                placeholder="Что было сделано..." value={form.description} onChange={e => update('description', e.target.value)} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Комментарий</label>
-              <textarea
-                className="flex min-h-[40px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                placeholder="Дополнительно..." value={form.comment} onChange={e => update('comment', e.target.value)} />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Исполнитель</label>
-                <input value={form.mechanic} onChange={e => update('mechanic', e.target.value)} placeholder="Фамилия И.О."
-                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Сумма, ₽</label>
-                <input type="number" value={form.cost} onChange={e => update('cost', e.target.value)} placeholder="0"
-                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white" />
-              </div>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Статус</label>
-              <Select value={form.status} onValueChange={v => update('status', v)}>
-                <SelectTrigger className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="completed">Выполнено</SelectItem>
-                  <SelectItem value="in_progress">В работе</SelectItem>
-                  <SelectItem value="planned">Запланировано</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="mt-6 flex justify-end gap-3">
-            <Button variant="secondary" onClick={() => onOpenChange(false)}>Отмена</Button>
-            <Button onClick={() => onOpenChange(false)}>Сохранить</Button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
   );
 }
 

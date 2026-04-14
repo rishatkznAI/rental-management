@@ -18,18 +18,33 @@ import { ACTIVE_FLEET_LABELS, compareEquipmentByPriority, EQUIPMENT_CATEGORY_LAB
 // Для каждой единицы техники подтягивает currentClient и returnDate из активной аренды
 // если эти поля не заполнены в самой записи техники (backward-compatibility)
 function enrichEquipment(eqList: EquipmentType_[], ganttRentals: GanttRentalData[]): EquipmentType_[] {
-  const activeByInv = new Map<string, GanttRentalData>();
+  const inventoryCounts = new Map<string, number>();
+  eqList.forEach(eq => {
+    inventoryCounts.set(eq.inventoryNumber, (inventoryCounts.get(eq.inventoryNumber) ?? 0) + 1);
+  });
+
+  const activeById = new Map<string, GanttRentalData>();
+  const activeByUniqueInv = new Map<string, GanttRentalData>();
   for (const r of ganttRentals) {
     if (r.status === 'active' || r.status === 'created') {
-      // Предпочитаем 'active' над 'created'
-      const existing = activeByInv.get(r.equipmentInv);
-      if (!existing || r.status === 'active') {
-        activeByInv.set(r.equipmentInv, r);
+      if (r.equipmentId) {
+        const existing = activeById.get(r.equipmentId);
+        if (!existing || r.status === 'active') {
+          activeById.set(r.equipmentId, r);
+        }
+        continue;
+      }
+
+      if ((inventoryCounts.get(r.equipmentInv) ?? 0) === 1) {
+        const existing = activeByUniqueInv.get(r.equipmentInv);
+        if (!existing || r.status === 'active') {
+          activeByUniqueInv.set(r.equipmentInv, r);
+        }
       }
     }
   }
   return eqList.map(eq => {
-    const active = activeByInv.get(eq.inventoryNumber);
+    const active = activeById.get(eq.id) ?? activeByUniqueInv.get(eq.inventoryNumber);
     if (!active) return eq;
     return {
       ...eq,

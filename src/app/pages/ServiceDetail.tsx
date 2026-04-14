@@ -279,7 +279,11 @@ export default function ServiceDetail() {
     ? (
         equipmentList.find(item => item.id === ticket.equipmentId)
         ?? equipmentList.find(item => ticket.serialNumber && item.serialNumber === ticket.serialNumber)
-        ?? equipmentList.find(item => ticket.inventoryNumber && item.inventoryNumber === ticket.inventoryNumber)
+        ?? equipmentList.find(item =>
+          ticket.inventoryNumber
+          && item.inventoryNumber === ticket.inventoryNumber
+          && equipmentList.filter(eq => eq.inventoryNumber === ticket.inventoryNumber).length === 1
+        )
       )
     : undefined;
   const equipmentTypeDisplay = ticket
@@ -314,17 +318,25 @@ export default function ServiceDetail() {
       ]);
 
       const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'ready'];
+      const ticketInventoryIsUnique = ticket.inventoryNumber
+        ? allEquipment.filter(item => item.inventoryNumber === ticket.inventoryNumber).length === 1
+        : false;
+
       const remainingOpen = allTickets.some(existing =>
         existing.id !== ticket.id
         && openStatuses.includes(existing.status)
         && (
           (ticket.equipmentId && existing.equipmentId === ticket.equipmentId)
-          || (ticket.inventoryNumber && existing.inventoryNumber === ticket.inventoryNumber)
+          || (ticket.serialNumber && existing.serialNumber === ticket.serialNumber)
+          || (ticket.inventoryNumber && ticketInventoryIsUnique && existing.inventoryNumber === ticket.inventoryNumber)
         ),
       );
 
       const hasActiveRental = allGanttRentals.some(rental =>
-        rental.equipmentInv === ticket.inventoryNumber
+        (
+          (ticket.equipmentId && rental.equipmentId === ticket.equipmentId)
+          || (!rental.equipmentId && ticket.inventoryNumber && ticketInventoryIsUnique && rental.equipmentInv === ticket.inventoryNumber)
+        )
         && rental.status !== 'returned'
         && rental.status !== 'closed',
       );
@@ -332,7 +344,8 @@ export default function ServiceDetail() {
       const updatedEquipment = allEquipment.map(item => {
         const matches =
           (ticket.equipmentId && item.id === ticket.equipmentId)
-          || (ticket.inventoryNumber && item.inventoryNumber === ticket.inventoryNumber);
+          || (ticket.serialNumber && item.serialNumber === ticket.serialNumber)
+          || (ticket.inventoryNumber && ticketInventoryIsUnique && item.inventoryNumber === ticket.inventoryNumber);
         if (!matches) return item;
 
         let nextStatus = item.status;

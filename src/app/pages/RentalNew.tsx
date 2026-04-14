@@ -24,12 +24,20 @@ import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/uti
 import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
 
 // Helper: check date overlap
-function isEquipmentBusy(invNumber: string, startDate: string, endDate: string, rentals: GanttRentalData[]): boolean {
+function isEquipmentBusy(
+  equipment: { id: string; inventoryNumber: string },
+  startDate: string,
+  endDate: string,
+  rentals: GanttRentalData[],
+): boolean {
   if (!startDate || !endDate) return false;
   const newStart = new Date(startDate).getTime();
   const newEnd   = new Date(endDate).getTime();
   return rentals.some(r => {
-    if (r.equipmentInv !== invNumber) return false;
+    const matches = r.equipmentId
+      ? r.equipmentId === equipment.id
+      : r.equipmentInv === equipment.inventoryNumber;
+    if (!matches) return false;
     if (r.status === 'returned' || r.status === 'closed') return false;
     const rStart = new Date(r.startDate).getTime();
     const rEnd   = new Date(r.endDate).getTime();
@@ -59,13 +67,13 @@ export default function RentalNew() {
   const today    = new Date().toISOString().split('T')[0];
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
-  const [client,       setClient]       = useState('');
-  const [equipmentInv, setEquipmentInv] = useState('');
-  const [startDate,    setStartDate]    = useState(today);
-  const [endDate,      setEndDate]      = useState(nextWeek);
-  const [dailyRate,    setDailyRate]    = useState('');
-  const [deposit,      setDeposit]      = useState('');
-  const [notes,        setNotes]        = useState('');
+  const [client, setClient] = useState('');
+  const [equipmentId, setEquipmentId] = useState('');
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(nextWeek);
+  const [dailyRate, setDailyRate] = useState('');
+  const [deposit, setDeposit] = useState('');
+  const [notes, setNotes] = useState('');
 
   const rentalDays = useMemo(() => getRentalDays(startDate, endDate), [startDate, endDate]);
   const totalPrice = useMemo(
@@ -78,18 +86,20 @@ export default function RentalNew() {
     const av: typeof allEq = [];
     const bz: typeof allEq = [];
     allEq.forEach(eq => {
-      if (isEquipmentBusy(eq.inventoryNumber, startDate, endDate, ganttRents)) bz.push(eq);
+      if (isEquipmentBusy(eq, startDate, endDate, ganttRents)) bz.push(eq);
       else av.push(eq);
     });
     return { availableEq: av, busyEq: bz };
   }, [startDate, endDate, allEq, ganttRents]);
 
-  const conflictWarn = equipmentInv
-    ? busyEq.some(e => e.inventoryNumber === equipmentInv)
+  const selectedEquipment = allEq.find(e => e.id === equipmentId);
+  const conflictWarn = equipmentId
+    ? busyEq.some(e => e.id === equipmentId)
     : false;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!client || !selectedEquipment) return;
     const todayStr = new Date().toISOString().split('T')[0];
     const initialStatus: GanttRentalData['status'] = startDate <= todayStr ? 'active' : 'created';
 
@@ -97,7 +107,8 @@ export default function RentalNew() {
     await rentalsService.createGanttEntry({
       client,
       clientShort: client.substring(0, 20),
-      equipmentInv,
+      equipmentId: selectedEquipment.id,
+      equipmentInv: selectedEquipment.inventoryNumber,
       startDate,
       endDate,
       manager: '',
@@ -115,7 +126,7 @@ export default function RentalNew() {
       contact: '',
       startDate,
       plannedReturnDate: endDate,
-      equipment: equipmentInv ? [equipmentInv] : [],
+      equipment: [selectedEquipment.inventoryNumber],
       rate: `${dailyRate} ₽/день`,
       price: totalPrice,
       discount: 0,
@@ -126,16 +137,13 @@ export default function RentalNew() {
     });
 
     // Update equipment status
-    if (equipmentInv) {
+    if (selectedEquipment) {
       const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
-      const eq = rawEq.find(e => e.inventoryNumber === equipmentInv);
-      if (eq) {
-        updateEquipment.mutate({ id: eq.id, data: {
-          status: eqStatus,
-          currentClient: initialStatus === 'active' ? client : eq.currentClient,
-          returnDate: initialStatus === 'active' ? endDate : eq.returnDate,
-        } });
-      }
+      updateEquipment.mutate({ id: selectedEquipment.id, data: {
+        status: eqStatus,
+        currentClient: initialStatus === 'active' ? client : selectedEquipment.currentClient,
+        returnDate: initialStatus === 'active' ? endDate : selectedEquipment.returnDate,
+      } });
     }
 
     qc.invalidateQueries();
@@ -223,9 +231,9 @@ export default function RentalNew() {
                   )}
                   <EquipmentCombobox
                     equipment={[...availableEq, ...busyEq]}
-                    value={equipmentInv}
-                    valueKey="inventoryNumber"
-                    onChange={setEquipmentInv}
+                    value={equipmentId}
+                    valueKey="id"
+                    onChange={setEquipmentId}
                     groups={[
                       ...(availableEq.length > 0
                         ? [{ label: '✓ Доступна на выбранный период', items: availableEq }]

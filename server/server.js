@@ -168,6 +168,8 @@ const WRITE_PERMISSIONS = {
   service_work_catalog: ['Администратор'],
   spare_parts_catalog: ['Администратор'],
   planner_items:  ['Администратор', 'Офис-менеджер', 'Механик'],
+  service_vehicles: ['Администратор', 'Офис-менеджер', 'Механик'],
+  vehicle_trips:    ['Администратор', 'Офис-менеджер', 'Механик'],
 };
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
@@ -307,7 +309,9 @@ const ID_PREFIXES = {
   spare_parts:    'PT',
   repair_work_items: 'RWI',
   repair_part_items: 'RPI',
-  planner_items:  'PI',
+  planner_items:    'PI',
+  service_vehicles: 'SV',
+  vehicle_trips:    'VT',
 };
 
 function nowIso() {
@@ -765,6 +769,8 @@ const COLLECTIONS = [
   'service_work_catalog',
   'spare_parts_catalog',
   'planner_items',
+  'service_vehicles',
+  'vehicle_trips',
 ];
 
 for (const col of COLLECTIONS) {
@@ -961,6 +967,232 @@ apiRouter.put('/planner/:rowId', requireAuth, requireWrite('planner_items'), (re
     res.json(item);
   } catch (err) {
     console.error('[PLANNER] PUT /api/planner/:rowId error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Служебные машины — кастомные эндпоинты ────────────────────────────────────
+
+/**
+ * POST /api/service-vehicles
+ * Создать служебную машину.
+ */
+apiRouter.post('/service-vehicles', requireAuth, requireWrite('service_vehicles'), (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!String(body.make || '').trim()) return res.status(400).json({ ok: false, error: 'Поле «Марка» обязательно' });
+    if (!String(body.model || '').trim()) return res.status(400).json({ ok: false, error: 'Поле «Модель» обязательно' });
+    if (!String(body.plateNumber || '').trim()) return res.status(400).json({ ok: false, error: 'Поле «Госномер» обязательно' });
+
+    const now = nowIso();
+    const vehicle = {
+      id: generateId(ID_PREFIXES.service_vehicles),
+      make: String(body.make).trim(),
+      model: String(body.model).trim(),
+      plateNumber: String(body.plateNumber).trim().toUpperCase(),
+      vin: body.vin ? String(body.vin).trim() : null,
+      year: body.year ? Number(body.year) : null,
+      vehicleType: body.vehicleType || 'car',
+      color: body.color ? String(body.color).trim() : null,
+      currentMileage: Math.max(0, Number(body.currentMileage) || 0),
+      mileageUpdatedAt: body.mileageUpdatedAt || null,
+      responsiblePerson: String(body.responsiblePerson || '').trim(),
+      conditionNote: String(body.conditionNote || '').trim(),
+      status: body.status || 'active',
+      osagoExpiresAt: body.osagoExpiresAt || null,
+      insuranceExpiresAt: body.insuranceExpiresAt || null,
+      nextServiceAt: body.nextServiceAt || null,
+      serviceNote: body.serviceNote ? String(body.serviceNote).trim() : null,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: req.user.userName,
+    };
+
+    const list = readData('service_vehicles') || [];
+    list.push(vehicle);
+    writeData('service_vehicles', list);
+    res.status(201).json(vehicle);
+  } catch (err) {
+    console.error('[SV] POST error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * PUT /api/service-vehicles/:id
+ * Обновить служебную машину.
+ */
+apiRouter.put('/service-vehicles/:id', requireAuth, requireWrite('service_vehicles'), (req, res) => {
+  try {
+    const list = readData('service_vehicles') || [];
+    const idx = list.findIndex(v => v.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ ok: false, error: 'Машина не найдена' });
+
+    const body = req.body || {};
+    const existing = list[idx];
+    const updated = {
+      ...existing,
+      make:              body.make !== undefined ? String(body.make).trim() : existing.make,
+      model:             body.model !== undefined ? String(body.model).trim() : existing.model,
+      plateNumber:       body.plateNumber !== undefined ? String(body.plateNumber).trim().toUpperCase() : existing.plateNumber,
+      vin:               body.vin !== undefined ? (body.vin ? String(body.vin).trim() : null) : existing.vin,
+      year:              body.year !== undefined ? (body.year ? Number(body.year) : null) : existing.year,
+      vehicleType:       body.vehicleType !== undefined ? body.vehicleType : existing.vehicleType,
+      color:             body.color !== undefined ? (body.color ? String(body.color).trim() : null) : existing.color,
+      currentMileage:    body.currentMileage !== undefined ? Math.max(0, Number(body.currentMileage) || 0) : existing.currentMileage,
+      mileageUpdatedAt:  body.mileageUpdatedAt !== undefined ? body.mileageUpdatedAt : existing.mileageUpdatedAt,
+      responsiblePerson: body.responsiblePerson !== undefined ? String(body.responsiblePerson).trim() : existing.responsiblePerson,
+      conditionNote:     body.conditionNote !== undefined ? String(body.conditionNote).trim() : existing.conditionNote,
+      status:            body.status !== undefined ? body.status : existing.status,
+      osagoExpiresAt:    body.osagoExpiresAt !== undefined ? body.osagoExpiresAt : existing.osagoExpiresAt,
+      insuranceExpiresAt: body.insuranceExpiresAt !== undefined ? body.insuranceExpiresAt : existing.insuranceExpiresAt,
+      nextServiceAt:     body.nextServiceAt !== undefined ? body.nextServiceAt : existing.nextServiceAt,
+      serviceNote:       body.serviceNote !== undefined ? (body.serviceNote ? String(body.serviceNote).trim() : null) : existing.serviceNote,
+      updatedAt:         nowIso(),
+    };
+
+    list[idx] = updated;
+    writeData('service_vehicles', list);
+    res.json(updated);
+  } catch (err) {
+    console.error('[SV] PUT error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Журнал поездок ─────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/vehicle-trips
+ * Создать запись поездки. Автоматически обновляет пробег машины.
+ */
+apiRouter.post('/vehicle-trips', requireAuth, requireWrite('vehicle_trips'), (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!body.vehicleId) return res.status(400).json({ ok: false, error: 'vehicleId обязателен' });
+    if (!String(body.driver || '').trim()) return res.status(400).json({ ok: false, error: 'Поле «Водитель» обязательно' });
+    if (!String(body.route || '').trim()) return res.status(400).json({ ok: false, error: 'Поле «Маршрут» обязательно' });
+
+    const startMileage = Math.max(0, Number(body.startMileage) || 0);
+    const endMileage   = Math.max(0, Number(body.endMileage)   || 0);
+    if (endMileage < startMileage) {
+      return res.status(400).json({ ok: false, error: 'Конечный пробег не может быть меньше начального' });
+    }
+
+    const distance = endMileage - startMileage;
+    const now = nowIso();
+
+    const trip = {
+      id: generateId(ID_PREFIXES.vehicle_trips),
+      vehicleId:       body.vehicleId,
+      date:            body.date || now.slice(0, 10),
+      driver:          String(body.driver).trim(),
+      route:           String(body.route).trim(),
+      purpose:         String(body.purpose || '').trim(),
+      startMileage,
+      endMileage,
+      distance,
+      serviceTicketId: body.serviceTicketId || null,
+      clientId:        body.clientId || null,
+      comment:         String(body.comment || '').trim(),
+      createdAt:       now,
+      createdBy:       req.user.userName,
+    };
+
+    const trips = readData('vehicle_trips') || [];
+    trips.push(trip);
+    writeData('vehicle_trips', trips);
+
+    // Обновить текущий пробег машины
+    const vehicles = readData('service_vehicles') || [];
+    const vIdx = vehicles.findIndex(v => v.id === body.vehicleId);
+    if (vIdx !== -1 && endMileage >= (vehicles[vIdx].currentMileage || 0)) {
+      vehicles[vIdx] = {
+        ...vehicles[vIdx],
+        currentMileage: endMileage,
+        mileageUpdatedAt: now,
+        updatedAt: now,
+      };
+      writeData('service_vehicles', vehicles);
+    }
+
+    res.status(201).json(trip);
+  } catch (err) {
+    console.error('[VT] POST error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/vehicle-trips
+ * Получить поездки (фильтр ?vehicleId=...).
+ */
+apiRouter.get('/vehicle-trips', requireAuth, (req, res) => {
+  try {
+    let trips = readData('vehicle_trips') || [];
+    if (req.query.vehicleId) {
+      trips = trips.filter(t => t.vehicleId === req.query.vehicleId);
+    }
+    trips.sort((a, b) => b.date.localeCompare(a.date));
+    res.json(trips);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * PUT /api/vehicle-trips/:id
+ * Обновить запись поездки.
+ */
+apiRouter.put('/vehicle-trips/:id', requireAuth, requireWrite('vehicle_trips'), (req, res) => {
+  try {
+    const trips = readData('vehicle_trips') || [];
+    const idx = trips.findIndex(t => t.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ ok: false, error: 'Запись не найдена' });
+
+    const body = req.body || {};
+    const existing = trips[idx];
+    const startMileage = body.startMileage !== undefined ? Math.max(0, Number(body.startMileage) || 0) : existing.startMileage;
+    const endMileage   = body.endMileage   !== undefined ? Math.max(0, Number(body.endMileage)   || 0) : existing.endMileage;
+    if (endMileage < startMileage) {
+      return res.status(400).json({ ok: false, error: 'Конечный пробег не может быть меньше начального' });
+    }
+
+    const updated = {
+      ...existing,
+      date:            body.date !== undefined ? body.date : existing.date,
+      driver:          body.driver !== undefined ? String(body.driver).trim() : existing.driver,
+      route:           body.route !== undefined ? String(body.route).trim() : existing.route,
+      purpose:         body.purpose !== undefined ? String(body.purpose).trim() : existing.purpose,
+      startMileage,
+      endMileage,
+      distance:        endMileage - startMileage,
+      serviceTicketId: body.serviceTicketId !== undefined ? body.serviceTicketId : existing.serviceTicketId,
+      clientId:        body.clientId !== undefined ? body.clientId : existing.clientId,
+      comment:         body.comment !== undefined ? String(body.comment).trim() : existing.comment,
+    };
+
+    trips[idx] = updated;
+    writeData('vehicle_trips', trips);
+    res.json(updated);
+  } catch (err) {
+    console.error('[VT] PUT error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/vehicle-trips/:id
+ */
+apiRouter.delete('/vehicle-trips/:id', requireAuth, requireWrite('vehicle_trips'), (req, res) => {
+  try {
+    const trips = readData('vehicle_trips') || [];
+    const idx = trips.findIndex(t => t.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ ok: false, error: 'Запись не найдена' });
+    trips.splice(idx, 1);
+    writeData('vehicle_trips', trips);
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });

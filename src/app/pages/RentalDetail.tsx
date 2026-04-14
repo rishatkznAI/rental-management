@@ -1,5 +1,11 @@
 import React from 'react';
 import { useNavigate, useParams, Link } from 'react-router';
+import { useClientsList } from '../hooks/useClients';
+import { useDocumentsList } from '../hooks/useDocuments';
+import { useEquipmentList } from '../hooks/useEquipment';
+import { usePaymentsList } from '../hooks/usePayments';
+import { useRentalsList } from '../hooks/useRentals';
+import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -9,64 +15,7 @@ import {
   Truck, Clock, MessageSquare, Wrench, AlertTriangle, CircleCheck
 } from 'lucide-react';
 import { formatCurrency, formatDate, getDaysUntil } from '../lib/utils';
-import { mockRentals, mockEquipment, mockServiceTickets, mockPayments, mockClients, mockDocuments } from '../mock-data';
 import type { RentalStatus } from '../types';
-
-// Mock extended rental data for detail view
-const rentalExtendedData: Record<string, {
-  paidAmount: number;
-  debt: number;
-  comments: { date: string; text: string; author: string }[];
-  history: { date: string; action: string; user: string }[];
-}> = {
-  'R-001': {
-    paidAmount: 85000,
-    debt: 0,
-    comments: [
-      { date: '2026-02-15', text: 'Техника доставлена на объект. Клиент подтвердил приёмку.', author: 'Смирнова А.П.' },
-      { date: '2026-02-16', text: 'УПД подписан, скан загружен в систему.', author: 'Смирнова А.П.' },
-    ],
-    history: [
-      { date: '2026-02-14', action: 'Аренда создана', user: 'Смирнова А.П.' },
-      { date: '2026-02-14', action: 'Статус → Подтверждён', user: 'Смирнова А.П.' },
-      { date: '2026-02-15', action: 'Статус → Активен', user: 'Смирнова А.П.' },
-      { date: '2026-02-16', action: 'Документ: УПД подписан', user: 'Смирнова А.П.' },
-      { date: '2026-02-28', action: 'Оплата получена: 85 000 ₽', user: 'Козлов Д.В.' },
-    ],
-  },
-  'R-002': {
-    paidAmount: 0,
-    debt: 31500,
-    comments: [],
-    history: [
-      { date: '2026-03-04', action: 'Аренда создана', user: 'Козлов Д.В.' },
-      { date: '2026-03-04', action: 'Статус → Подтверждён', user: 'Козлов Д.В.' },
-    ],
-  },
-  'R-003': {
-    paidAmount: 65000,
-    debt: 45000,
-    comments: [
-      { date: '2026-02-01', text: 'Две единицы техники доставлены на объект.', author: 'Смирнова А.П.' },
-      { date: '2026-03-01', text: 'Техника возвращена. Обнаружено незначительное повреждение на INV-001 — требуется осмотр.', author: 'Смирнова А.П.' },
-    ],
-    history: [
-      { date: '2026-01-30', action: 'Аренда создана', user: 'Смирнова А.П.' },
-      { date: '2026-01-31', action: 'Статус → Подтверждён', user: 'Смирнова А.П.' },
-      { date: '2026-02-01', action: 'Статус → Активен', user: 'Смирнова А.П.' },
-      { date: '2026-02-15', action: 'Частичная оплата: 65 000 ₽', user: 'Козлов Д.В.' },
-      { date: '2026-03-01', action: 'Техника возвращена', user: 'Смирнова А.П.' },
-    ],
-  },
-  'R-004': {
-    paidAmount: 0,
-    debt: 0,
-    comments: [],
-    history: [
-      { date: '2026-03-08', action: 'Аренда создана', user: 'Козлов Д.В.' },
-    ],
-  },
-};
 
 const statusLabels: Record<RentalStatus, string> = {
   new: 'Создана',
@@ -80,7 +29,14 @@ const statusLabels: Record<RentalStatus, string> = {
 export default function RentalDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const rental = mockRentals.find(r => r.id === id);
+  const { data: rentals = [] } = useRentalsList();
+  const { data: equipment = [] } = useEquipmentList();
+  const { data: serviceTickets = [] } = useServiceTicketsList();
+  const { data: payments = [] } = usePaymentsList();
+  const { data: clients = [] } = useClientsList();
+  const { data: documents = [] } = useDocumentsList();
+
+  const rental = rentals.find(r => r.id === id);
 
   if (!rental) {
     return (
@@ -96,19 +52,49 @@ export default function RentalDetail() {
     );
   }
 
-  const extended = rentalExtendedData[rental.id] || { paidAmount: 0, debt: 0, comments: [], history: [] };
-  const client = mockClients.find(c => c.company === rental.client);
-  const equipmentList = mockEquipment.filter(e => rental.equipment.includes(e.inventoryNumber));
-  const relatedDocs = mockDocuments.filter(d => d.rental === rental.id);
-  const relatedPayments = mockPayments.filter(p => p.client === rental.client);
-  const relatedService = mockServiceTickets.filter(t =>
+  const client = clients.find(c => c.company === rental.client);
+  const equipmentList = equipment.filter(e => rental.equipment.includes(e.inventoryNumber));
+  const relatedDocs = documents.filter(d => d.rental === rental.id);
+  const relatedPayments = payments.filter(p => p.rentalId === rental.id);
+  const paidAmount = relatedPayments.reduce((sum, p) => sum + (p.paidAmount ?? (p.status === 'paid' ? p.amount : 0)), 0);
+  const relatedService = serviceTickets.filter(t =>
     equipmentList.some(e => e.id === t.equipmentId)
   );
+  const comments = [
+    ...(rental.comments ? [{
+      date: rental.startDate,
+      text: rental.comments,
+      author: rental.manager || 'Система',
+    }] : []),
+    ...relatedPayments
+      .filter(p => p.comment)
+      .map(p => ({
+        date: p.paidDate || p.dueDate,
+        text: p.comment || '',
+        author: 'Платежи',
+      })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const history = [
+    { date: rental.startDate, action: 'Аренда создана', user: rental.manager || 'Система' },
+    ...(relatedDocs.map(doc => ({
+      date: doc.date,
+      action: `Документ: ${doc.number}`,
+      user: 'Документы',
+    }))),
+    ...(relatedPayments.map(payment => ({
+      date: payment.paidDate || payment.dueDate,
+      action: payment.status === 'paid'
+        ? `Оплата получена: ${formatCurrency(payment.paidAmount ?? payment.amount)}`
+        : `Платёж: ${payment.invoiceNumber}`,
+      user: 'Платежи',
+    }))),
+    ...(rental.actualReturnDate ? [{ date: rental.actualReturnDate, action: 'Техника возвращена', user: rental.manager || 'Система' }] : []),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const rentalDays = Math.ceil(
     (new Date(rental.plannedReturnDate).getTime() - new Date(rental.startDate).getTime()) / (1000 * 60 * 60 * 24)
   );
-  const remainingBalance = rental.price - rental.discount - extended.paidAmount;
+  const remainingBalance = rental.price - rental.discount - paidAmount;
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -292,12 +278,12 @@ export default function RentalDetail() {
                 <MessageSquare className="h-5 w-5 text-[--color-primary]" />
                 Комментарии
               </CardTitle>
-              <CardDescription>{extended.comments.length} записей</CardDescription>
+              <CardDescription>{comments.length} записей</CardDescription>
             </CardHeader>
             <CardContent>
-              {extended.comments.length > 0 ? (
+              {comments.length > 0 ? (
                 <div className="space-y-3">
-                  {extended.comments.map((c, idx) => (
+                  {comments.map((c, idx) => (
                     <div key={idx} className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                       <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                         <span className="font-medium">{c.author}</span>
@@ -385,7 +371,7 @@ export default function RentalDetail() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500 dark:text-gray-400">Оплачено</span>
-                    <span className="font-medium text-green-600">{formatCurrency(extended.paidAmount)}</span>
+                    <span className="font-medium text-green-600">{formatCurrency(paidAmount)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500 dark:text-gray-400">Остаток к оплате</span>
@@ -396,11 +382,11 @@ export default function RentalDetail() {
                 </div>
               </div>
 
-              {extended.debt > 0 && (
+              {remainingBalance > 0 && (
                 <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
                   <div className="flex justify-between text-sm">
                     <span className="font-medium text-red-600">Дебиторка</span>
-                    <span className="font-medium text-red-600">{formatCurrency(extended.debt)}</span>
+                    <span className="font-medium text-red-600">{formatCurrency(remainingBalance)}</span>
                   </div>
                 </div>
               )}
@@ -478,10 +464,10 @@ export default function RentalDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {extended.history.length > 0 ? (
+              {history.length > 0 ? (
                 <div className="relative space-y-3 pl-4">
                   <div className="absolute left-1.5 top-1 bottom-1 w-px bg-gray-200 dark:bg-gray-700" />
-                  {extended.history.map((h, idx) => (
+                  {history.map((h, idx) => (
                     <div key={idx} className="relative">
                       <div className="absolute -left-[11px] top-1.5 h-2 w-2 rounded-full bg-[--color-primary]" />
                       <p className="text-sm text-gray-900 dark:text-white">{h.action}</p>

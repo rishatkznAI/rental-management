@@ -216,6 +216,7 @@ export interface ServiceTicket {
   parts: ServicePartUsage[];
   createdAt: string;
   photos?: string[];
+  serviceVehicleId?: string | null;   // Служебная машина, используемая в выезде
 }
 
 export type ClientStatus = 'active' | 'inactive' | 'blocked';
@@ -267,6 +268,55 @@ export interface Payment {
   paidDate?: string;
   status: PaymentStatus;
   comment?: string;
+}
+
+// ── Служебные машины ──────────────────────────────────────────────────────────
+
+export type VehicleStatus = 'active' | 'repair' | 'unavailable' | 'reserve';
+export type VehicleType   = 'car' | 'van' | 'truck' | 'minibus' | 'other';
+
+export interface ServiceVehicle {
+  id: string;
+  // Основные данные
+  make: string;                       // Марка
+  model: string;                      // Модель
+  plateNumber: string;                // Госномер
+  vin: string | null;
+  year: number | null;
+  vehicleType: VehicleType;
+  color: string | null;
+  // Эксплуатация
+  currentMileage: number;
+  mileageUpdatedAt: string | null;
+  responsiblePerson: string;          // Ответственное лицо (≠ водитель)
+  conditionNote: string;
+  status: VehicleStatus;
+  // Документы и обслуживание
+  osagoExpiresAt: string | null;
+  insuranceExpiresAt: string | null;
+  nextServiceAt: string | null;
+  serviceNote: string | null;
+  // Мета
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+export interface VehicleTrip {
+  id: string;
+  vehicleId: string;
+  date: string;
+  driver: string;                     // Водитель (фактически ездил)
+  route: string;
+  purpose: string;
+  startMileage: number;
+  endMileage: number;
+  distance: number;                   // авторасчёт: endMileage - startMileage
+  serviceTicketId: string | null;     // Связанная сервисная заявка
+  clientId: string | null;
+  comment: string;
+  createdAt: string;
+  createdBy: string;
 }
 
 // ── Планировщик подготовки техники к аренде ───────────────────────────────────

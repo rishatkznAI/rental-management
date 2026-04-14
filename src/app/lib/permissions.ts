@@ -19,6 +19,7 @@ export type Section =
   | 'rentals'
   | 'planner'
   | 'service'
+  | 'service_vehicles'
   | 'clients'
   | 'documents'
   | 'payments'
@@ -37,46 +38,50 @@ const VIEW_CREATE: Action[] = ['view', 'create'];
 
 const PERMISSIONS: Record<string, RolePermissions> = {
   'Администратор': {
-    dashboard: ALL,
-    equipment: ALL,
-    rentals:   ALL,
-    planner:   ALL,
-    service:   ALL,
-    clients:   ALL,
-    documents: ALL,
-    payments:  ALL,
-    reports:   ALL,
-    settings:  ALL,
+    dashboard:        ALL,
+    equipment:        ALL,
+    rentals:          ALL,
+    planner:          ALL,
+    service:          ALL,
+    service_vehicles: ALL,
+    clients:          ALL,
+    documents:        ALL,
+    payments:         ALL,
+    reports:          ALL,
+    settings:         ALL,
   },
   'Менеджер по аренде': {
-    dashboard: VIEW,         // только своё
-    equipment: VIEW,
-    rentals:   VIEW,
-    planner:   VIEW,         // видит очередь, но не меняет статусы подготовки
-    service:   VIEW_CREATE,  // может создавать заявки
-    clients:   VIEW,
-    documents: VIEW,
-    payments:  VIEW,
+    dashboard:        VIEW,        // только своё
+    equipment:        VIEW,
+    rentals:          VIEW,
+    planner:          VIEW,
+    service:          VIEW_CREATE,
+    service_vehicles: VIEW,        // видит машины, но не редактирует
+    clients:          VIEW,
+    documents:        VIEW,
+    payments:         VIEW,
     // reports:  нет
     // settings: нет
   },
   'Офис-менеджер': {
     // dashboard: нет
-    equipment: ALL,
-    rentals:   ALL,
-    planner:   ALL,
-    service:   ALL,
-    clients:   ALL,
-    documents: ALL,
-    payments:  ALL,
+    equipment:        ALL,
+    rentals:          ALL,
+    planner:          ALL,
+    service:          ALL,
+    service_vehicles: ALL,
+    clients:          ALL,
+    documents:        ALL,
+    payments:         ALL,
     // reports:  нет
     // settings: нет
   },
   'Механик': {
     // dashboard: нет
-    equipment: VIEW,
-    planner:   ALL,          // основной рабочий экран механика
-    service:   ALL,
+    equipment:        VIEW,
+    planner:          ALL,
+    service:          ALL,
+    service_vehicles: ALL,         // механик ведёт журнал поездок
     // остальное: нет
   },
 };
@@ -100,6 +105,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname.startsWith('/equipment'))      return 'equipment';
   if (pathname.startsWith('/rentals'))        return 'rentals';
   if (pathname.startsWith('/planner'))        return 'planner';
+  if (pathname.startsWith('/service-vehicles')) return 'service_vehicles';
   if (pathname.startsWith('/service'))        return 'service';
   if (pathname.startsWith('/clients'))        return 'clients';
   if (pathname.startsWith('/documents'))      return 'documents';
@@ -115,8 +121,9 @@ const SECTION_PATHS: Array<[Section, string]> = [
   ['dashboard',  '/'],
   ['equipment',  '/equipment'],
   ['rentals',    '/rentals'],
-  ['planner',    '/planner'],
-  ['service',    '/service'],
+  ['planner',          '/planner'],
+  ['service',          '/service'],
+  ['service_vehicles', '/service-vehicles'],
   ['clients',    '/clients'],
   ['documents',  '/documents'],
   ['payments',   '/payments'],

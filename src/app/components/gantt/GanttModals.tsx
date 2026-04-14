@@ -389,12 +389,6 @@ export function NewRentalModal({
   const [conflictWarn, setConflictWarn] = useState(false);
 
   React.useEffect(() => {
-    if (!preselectedEquipment) return;
-    const selected = (equipmentListProp ?? fetchedEquipment).find(item => item.inventoryNumber === preselectedEquipment);
-    if (selected) setEquipmentId(selected.id);
-  }, [preselectedEquipment, equipmentListProp, fetchedEquipment]);
-
-  React.useEffect(() => {
     if (!open) return;
     setDailyRate('');
     if (!preselectedEquipment) setEquipmentId('');
@@ -420,6 +414,12 @@ export function NewRentalModal({
     queryFn: equipmentService.getAll,
     enabled: !equipmentListProp,
   });
+
+  React.useEffect(() => {
+    if (!preselectedEquipment) return;
+    const selected = (equipmentListProp ?? fetchedEquipment).find(item => item.inventoryNumber === preselectedEquipment);
+    if (selected) setEquipmentId(selected.id);
+  }, [preselectedEquipment, equipmentListProp, fetchedEquipment]);
 
   // ─── Данные из справочников ────────────────────────────────────────────────
   const allClients = useMemo(() => clientsProp ?? clientsData, [clientsData, clientsProp]);

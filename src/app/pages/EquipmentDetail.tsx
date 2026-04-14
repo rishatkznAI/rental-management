@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge, getEquipmentStatusBadge } from '../components/ui/badge';
+import { Badge, getEquipmentPriorityBadge, getEquipmentStatusBadge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
@@ -24,7 +24,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../components/ui/select';
 import type { Equipment, EquipmentOwnerType, RepairEventType } from '../types';
-import { EQUIPMENT_CATEGORY_LABELS } from '../lib/equipmentClassification';
+import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS } from '../lib/equipmentClassification';
 import type { GanttRentalData } from '../mock-data';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -378,6 +378,7 @@ export default function EquipmentDetail() {
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">
                 {equipment.inventoryNumber}
               </h1>
+              {getEquipmentPriorityBadge(equipment.priority)}
               {getEquipmentStatusBadge(equipment.status)}
               <Badge variant={equipment.owner === 'own' ? 'success' : equipment.owner === 'investor' ? 'info' : 'warning'}>
                 {ownerLabels[equipment.owner]}
@@ -623,6 +624,7 @@ export default function EquipmentDetail() {
               <InfoField label="Производитель" value={equipment.manufacturer} />
               <InfoField label="Модель" value={equipment.model} />
               <InfoField label="Тип" value={TYPE_LABELS[equipment.type] || equipment.type} />
+              <InfoField label="Приоритет" value={EQUIPMENT_PRIORITY_LABELS[equipment.priority]} />
               <InfoField label="Привод" value={equipment.drive === 'diesel' ? 'Дизель' : 'Электро'} />
               <InfoField label="Серийный номер" value={equipment.serialNumber} mono />
               <InfoField label="Инвентарный номер" value={equipment.inventoryNumber} mono />
@@ -1898,6 +1900,19 @@ function EditEquipmentModal({
                       { value: 'sold', label: EQUIPMENT_CATEGORY_LABELS.sold },
                       { value: 'client', label: EQUIPMENT_CATEGORY_LABELS.client },
                       { value: 'partner', label: EQUIPMENT_CATEGORY_LABELS.partner },
+                    ]}
+                  />
+                </FormField>
+
+                <FormField label="Приоритет техники" hint="Влияет на сортировку и визуальный акцент в списках и планировщике">
+                  <FieldSelect
+                    value={form.priority}
+                    onValueChange={setStr('priority')}
+                    options={[
+                      { value: 'critical', label: EQUIPMENT_PRIORITY_LABELS.critical },
+                      { value: 'high', label: EQUIPMENT_PRIORITY_LABELS.high },
+                      { value: 'medium', label: EQUIPMENT_PRIORITY_LABELS.medium },
+                      { value: 'low', label: EQUIPMENT_PRIORITY_LABELS.low },
                     ]}
                   />
                 </FormField>

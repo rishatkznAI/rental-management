@@ -1,4 +1,4 @@
-import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentType } from '../types';
+import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentType } from '../types';
 
 export const EQUIPMENT_CATEGORY_LABELS: Record<EquipmentCategory, string> = {
   own: 'Собственная',
@@ -12,15 +12,30 @@ export const ACTIVE_FLEET_LABELS = {
   no: 'Нет',
 } as const;
 
-export function normalizeEquipment<T extends Partial<Equipment>>(equipment: T): T & Pick<Equipment, 'category' | 'activeInFleet'> {
+export const EQUIPMENT_PRIORITY_LABELS: Record<EquipmentPriority, string> = {
+  low: 'Низкий',
+  medium: 'Средний',
+  high: 'Высокий',
+  critical: 'Критический',
+};
+
+export const EQUIPMENT_PRIORITY_ORDER: Record<EquipmentPriority, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
+export function normalizeEquipment<T extends Partial<Equipment>>(equipment: T): T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority'> {
   return {
     ...equipment,
     category: equipment.category ?? 'own',
     activeInFleet: equipment.activeInFleet ?? true,
+    priority: equipment.priority ?? 'medium',
   };
 }
 
-export function normalizeEquipmentList<T extends Partial<Equipment>>(list: T[]): Array<T & Pick<Equipment, 'category' | 'activeInFleet'>> {
+export function normalizeEquipmentList<T extends Partial<Equipment>>(list: T[]): Array<T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority'>> {
   return list.map(normalizeEquipment);
 }
 
@@ -46,4 +61,12 @@ export function getEquipmentTypeLabel(equipment: Partial<Equipment>): string {
   const label = [drive, type].filter(Boolean).join(' ');
   if (label) return label.charAt(0).toUpperCase() + label.slice(1);
   return equipment.model ? `Подъемник ${equipment.model}` : 'Подъемник';
+}
+
+export function compareEquipmentByPriority(a: Partial<Equipment>, b: Partial<Equipment>) {
+  const aPriority = normalizeEquipment(a).priority;
+  const bPriority = normalizeEquipment(b).priority;
+  const byPriority = EQUIPMENT_PRIORITY_ORDER[aPriority] - EQUIPMENT_PRIORITY_ORDER[bPriority];
+  if (byPriority !== 0) return byPriority;
+  return (a.inventoryNumber || '').localeCompare(b.inventoryNumber || '', 'ru', { numeric: true, sensitivity: 'base' });
 }

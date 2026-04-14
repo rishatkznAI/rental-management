@@ -524,6 +524,7 @@ function normalizeEquipmentRecord(equipment) {
     ...equipment,
     category: equipment.category || 'own',
     activeInFleet: equipment.activeInFleet !== false,
+    priority: equipment.priority || 'medium',
   };
 }
 

@@ -5,6 +5,7 @@ export type EquipmentType = 'scissor' | 'articulated' | 'telescopic';
 export type EquipmentDrive = 'diesel' | 'electric';
 export type EquipmentOwnerType = 'own' | 'investor' | 'sublease';
 export type EquipmentCategory = 'own' | 'sold' | 'client' | 'partner';
+export type EquipmentPriority = 'low' | 'medium' | 'high' | 'critical';
 export type RepairEventType = 'repair' | 'maintenance' | 'diagnostics' | 'breakdown';
 export type RepairSource = 'manual' | 'bot';
 export type ShippingEventType = 'shipping' | 'receiving';
@@ -28,6 +29,7 @@ export interface Equipment {
   status: EquipmentStatus;
   owner: EquipmentOwnerType;
   category: EquipmentCategory;
+  priority: EquipmentPriority;
   activeInFleet: boolean;
   subleasePrice?: number;
   plannedMonthlyRevenue: number;

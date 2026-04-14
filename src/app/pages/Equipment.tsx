@@ -3,7 +3,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { getEquipmentStatusBadge } from '../components/ui/badge';
+import { getEquipmentPriorityBadge, getEquipmentStatusBadge } from '../components/ui/badge';
 import { Search, Filter, MoreVertical, Plus } from 'lucide-react';
 import { Link } from 'react-router';
 import { formatDate } from '../lib/utils';
@@ -13,7 +13,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { usePermissions } from '../lib/permissions';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData } from '../hooks/useRentals';
-import { ACTIVE_FLEET_LABELS, EQUIPMENT_CATEGORY_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
+import { ACTIVE_FLEET_LABELS, compareEquipmentByPriority, EQUIPMENT_CATEGORY_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
 
 // Для каждой единицы техники подтягивает currentClient и returnDate из активной аренды
 // если эти поля не заполнены в самой записи техники (backward-compatibility)
@@ -80,23 +80,38 @@ export default function Equipment() {
     return true;
   }, [activeTab]);
 
-  const filteredEquipment = enrichedEquipmentList.filter(eq => {
-    const matchesSearch = search === '' ||
-      eq.inventoryNumber.toLowerCase().includes(search.toLowerCase()) ||
-      eq.model.toLowerCase().includes(search.toLowerCase()) ||
-      eq.serialNumber.toLowerCase().includes(search.toLowerCase()) ||
-      eq.currentClient?.toLowerCase().includes(search.toLowerCase());
+  const filteredEquipment = React.useMemo(() => (
+    enrichedEquipmentList
+      .filter(eq => {
+        const matchesSearch = search === '' ||
+          eq.inventoryNumber.toLowerCase().includes(search.toLowerCase()) ||
+          eq.model.toLowerCase().includes(search.toLowerCase()) ||
+          eq.serialNumber.toLowerCase().includes(search.toLowerCase()) ||
+          eq.currentClient?.toLowerCase().includes(search.toLowerCase());
 
-    const matchesStatus = statusFilter === 'all' || eq.status === statusFilter;
-    const matchesType = typeFilter === 'all' || eq.type === typeFilter;
-    const matchesDrive = driveFilter === 'all' || eq.drive === driveFilter;
-    const matchesCategory = categoryFilter === 'all' || eq.category === categoryFilter;
-    const matchesFleet = fleetFilter === 'all' || String(eq.activeInFleet) === fleetFilter;
-    const matchesOwner = ownerFilter === 'all' || eq.owner === ownerFilter;
-    const matchesLocation = locationFilter === 'all' || eq.location === locationFilter;
+        const matchesStatus = statusFilter === 'all' || eq.status === statusFilter;
+        const matchesType = typeFilter === 'all' || eq.type === typeFilter;
+        const matchesDrive = driveFilter === 'all' || eq.drive === driveFilter;
+        const matchesCategory = categoryFilter === 'all' || eq.category === categoryFilter;
+        const matchesFleet = fleetFilter === 'all' || String(eq.activeInFleet) === fleetFilter;
+        const matchesOwner = ownerFilter === 'all' || eq.owner === ownerFilter;
+        const matchesLocation = locationFilter === 'all' || eq.location === locationFilter;
 
-    return matchesSearch && matchesStatus && matchesType && matchesDrive && matchesCategory && matchesFleet && matchesOwner && matchesLocation && matchesTab(eq);
-  });
+        return matchesSearch && matchesStatus && matchesType && matchesDrive && matchesCategory && matchesFleet && matchesOwner && matchesLocation && matchesTab(eq);
+      })
+      .sort(compareEquipmentByPriority)
+  ), [
+    enrichedEquipmentList,
+    search,
+    statusFilter,
+    typeFilter,
+    driveFilter,
+    categoryFilter,
+    fleetFilter,
+    ownerFilter,
+    locationFilter,
+    matchesTab,
+  ]);
 
   const getEquipmentTypeLabel = (type: EquipmentType): string => {
     const labels: Record<EquipmentType, string> = {
@@ -290,6 +305,7 @@ export default function Equipment() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-[--color-primary] text-sm">{eq.inventoryNumber}</span>
+                  {getEquipmentPriorityBadge(eq.priority)}
                   {getEquipmentStatusBadge(eq.status)}
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -319,6 +335,7 @@ export default function Equipment() {
             <TableRow>
               <TableHead>Инв.№ / Серийный № / Модель</TableHead>
               <TableHead>Тип</TableHead>
+              <TableHead>Приоритет</TableHead>
               <TableHead>Привод</TableHead>
               <TableHead>Статус</TableHead>
               <TableHead>Локация</TableHead>
@@ -347,6 +364,7 @@ export default function Equipment() {
                   </p>
                 </TableCell>
                 <TableCell className="text-gray-700 dark:text-gray-300">{getEquipmentTypeLabel(equipment.type)}</TableCell>
+                <TableCell>{getEquipmentPriorityBadge(equipment.priority)}</TableCell>
                 <TableCell className="text-gray-700 dark:text-gray-300">{getEquipmentDriveLabel(equipment.drive)}</TableCell>
                 <TableCell>{getEquipmentStatusBadge(equipment.status)}</TableCell>
                 <TableCell>

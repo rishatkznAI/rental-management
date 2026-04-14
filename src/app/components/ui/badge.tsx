@@ -1,6 +1,6 @@
 import React from 'react';
 import { cn } from '../../lib/utils';
-import type { EquipmentStatus, RentalStatus, ServiceStatus, ServicePriority, PaymentStatus, DocumentStatus } from '../../types';
+import type { EquipmentPriority, EquipmentStatus, RentalStatus, ServiceStatus, ServicePriority, PaymentStatus, DocumentStatus } from '../../types';
 
 type BadgeVariant = 'success' | 'warning' | 'error' | 'danger' | 'info' | 'default';
 
@@ -33,6 +33,17 @@ export function getEquipmentStatusBadge(status: EquipmentStatus) {
     inactive: { label: 'Списан', variant: 'default' },
   };
   const { label, variant } = map[status];
+  return <Badge variant={variant}>{label}</Badge>;
+}
+
+export function getEquipmentPriorityBadge(priority: EquipmentPriority) {
+  const map: Record<EquipmentPriority, { label: string; variant: BadgeVariant }> = {
+    low: { label: 'Низкий', variant: 'default' },
+    medium: { label: 'Средний', variant: 'info' },
+    high: { label: 'Высокий', variant: 'warning' },
+    critical: { label: 'Критический', variant: 'error' },
+  };
+  const { label, variant } = map[priority];
   return <Badge variant={variant}>{label}</Badge>;
 }
 

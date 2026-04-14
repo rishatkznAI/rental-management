@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useCreateEquipment } from '../hooks/useEquipment';
 import { api } from '../lib/api';
-import { EQUIPMENT_CATEGORY_LABELS } from '../lib/equipmentClassification';
+import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS } from '../lib/equipmentClassification';
 
 // ─── Вспомогательные компоненты ────────────────────────────────────────────
 
@@ -170,6 +170,7 @@ export default function EquipmentNew() {
     maintenancePTO: '',
     ownerId: defaultOwnerId,
     category: 'own',
+    priority: 'medium',
     activeInFleet: 'yes',
     subleasePrice: '',
     location: '',
@@ -204,6 +205,7 @@ export default function EquipmentNew() {
       status:                form.status as 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive',
       owner:                 ownerType as 'own' | 'investor' | 'sublease',
       category:              form.category as 'own' | 'sold' | 'client' | 'partner',
+      priority:              form.priority as 'low' | 'medium' | 'high' | 'critical',
       activeInFleet:         form.activeInFleet === 'yes',
       subleasePrice:         form.subleasePrice ? Number(form.subleasePrice) : undefined,
       plannedMonthlyRevenue: Number(form.plannedMonthlyRevenue) || 0,
@@ -277,6 +279,22 @@ export default function EquipmentNew() {
                 />
                 <FieldHint>Заводской номер из паспорта или шильдика</FieldHint>
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <SelectField
+                label="Приоритет техники"
+                value={form.priority}
+                onValueChange={(value) => update('priority', value)}
+                options={[
+                  { value: 'critical', label: EQUIPMENT_PRIORITY_LABELS.critical },
+                  { value: 'high', label: EQUIPMENT_PRIORITY_LABELS.high },
+                  { value: 'medium', label: EQUIPMENT_PRIORITY_LABELS.medium },
+                  { value: 'low', label: EQUIPMENT_PRIORITY_LABELS.low },
+                ]}
+                hint="Используется для сортировки техники в списках и планировщике аренды."
+                required
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Input

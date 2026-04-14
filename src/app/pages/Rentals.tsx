@@ -28,7 +28,7 @@ import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
-import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
+import { canEquipmentParticipateInRentals, compareEquipmentByPriority, EQUIPMENT_PRIORITY_LABELS } from '../lib/equipmentClassification';
 import {
   addDays, addMonths, addYears, differenceInDays, endOfMonth, endOfQuarter,
   endOfYear, format, isSameDay, isWeekend, max as dateMax, min as dateMin,
@@ -55,6 +55,13 @@ const TYPE_LABELS: Record<EquipmentType, string> = {
   articulated: 'Коленчатый',
   telescopic: 'Телескопический',
 };
+
+const PRIORITY_STYLES = {
+  critical: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+  high: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+  medium: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  low: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+} as const;
 
 const EQ_STATUS_LABELS: Record<string, { label: string; color: string }> = {
   available: { label: 'Свободна', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
@@ -162,6 +169,16 @@ function detectConflicts(rentals: GanttRentalData[], equipmentInv: string): Set<
   return conflictIds;
 }
 
+function rentalIntersectsRange(
+  rental: Pick<GanttRentalData, 'startDate' | 'endDate'>,
+  rangeStart: Date,
+  rangeEnd: Date,
+) {
+  const rentalStart = startOfDay(new Date(rental.startDate));
+  const rentalEndExclusive = addDays(startOfDay(new Date(rental.endDate)), 1);
+  return rentalStart < rangeEnd && rentalEndExclusive > rangeStart;
+}
+
 /**
  * Единый источник истины для статуса техники.
  * Вычисляет статус на основе активных аренд (не из поля equipment.status).
@@ -171,10 +188,18 @@ function computeEffectiveStatus(
   equipment: Equipment,
   rentals: GanttRentalData[], // уже отфильтрованные для данной единицы техники
   today: Date,
+  visibleRange?: { start: Date; end: Date },
 ): EquipmentStatus {
   // Ручные статусы переопределяют всё
   if (equipment.status === 'inactive' || equipment.status === 'in_service') {
     return equipment.status;
+  }
+  const visibleRentals = visibleRange
+    ? rentals.filter(r => rentalIntersectsRange(r, visibleRange.start, visibleRange.end))
+    : [];
+  if (visibleRentals.length > 0) {
+    const hasVisibleOccupiedRental = visibleRentals.some(r => r.status !== 'created');
+    return hasVisibleOccupiedRental ? 'rented' : 'reserved';
   }
   const todayStr = format(today, 'yyyy-MM-dd');
   const activeRentals = rentals.filter(
@@ -445,6 +470,11 @@ export default function Rentals() {
     return rentals;
   }, [ganttRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
 
+  const visibleFilteredRentals = useMemo(
+    () => filteredRentals.filter(r => rentalIntersectsRange(r, viewStart, viewEnd)),
+    [filteredRentals, viewStart, viewEnd],
+  );
+
   // ── Filter equipment (always live) ───────────────────────────────────────────
   // Step 1: filter by model/INV/SN text
   // Step 2 (cross-link): when rental-level filters are active, only show equipment
@@ -461,11 +491,11 @@ export default function Rentals() {
     }
     const hasRentalFilter = !!(filterManager || filterClient || filterUpd || filterPayment || filterStatus);
     if (hasRentalFilter) {
-      const matchingInvs = new Set(filteredRentals.map(r => r.equipmentInv));
+      const matchingInvs = new Set(visibleFilteredRentals.map(r => r.equipmentInv));
       eq = eq.filter(e => matchingInvs.has(e.inventoryNumber));
     }
-    return eq;
-  }, [equipmentList, filterModel, filteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
+    return [...eq].sort(compareEquipmentByPriority);
+  }, [equipmentList, filterModel, visibleFilteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
 
   // Conflict detection for all equipment
   const conflictSets = useMemo(() => {
@@ -945,6 +975,7 @@ export default function Rentals() {
                 totalDays={totalDays}
                 dayWidth={dayWidth}
                 todayOffset={todayOffset}
+                viewEnd={viewEnd}
                 scale={scale}
                 days={days}
                 today={today}
@@ -1173,6 +1204,7 @@ interface EquipmentRowProps {
   totalDays: number;
   dayWidth: number;
   todayOffset: number | null;
+  viewEnd: Date;
   scale: Scale;
   days: Date[];
   today: Date;
@@ -1184,12 +1216,12 @@ interface EquipmentRowProps {
 
 function EquipmentRow({
   equipment, rentals, downtimes, servicePeriods, conflictIds,
-  viewStart, totalDays, dayWidth, todayOffset, scale, days, today,
+  viewStart, totalDays, dayWidth, todayOffset, viewEnd, scale, days, today,
   onBarClick, onNewRental, onReturn, onDowntime
 }: EquipmentRowProps) {
   const { can: canDo } = usePermissions();
   // Статус вычисляется динамически из аренд, а не из equipment.status
-  const effectiveStatus = computeEffectiveStatus(equipment, rentals, today);
+  const effectiveStatus = computeEffectiveStatus(equipment, rentals, today, { start: viewStart, end: viewEnd });
   const eqStatus = EQ_STATUS_LABELS[effectiveStatus] || EQ_STATUS_LABELS.available;
   const hasActiveRental = rentals.some(r => r.status === 'active');
   const timelineWidth = totalDays * dayWidth;
@@ -1209,6 +1241,9 @@ function EquipmentRow({
           <div className="mt-0.5 flex items-center gap-1 flex-wrap">
             <span className={`inline-flex rounded px-1 py-0 text-[8px] leading-4 ${eqStatus.color}`}>
               {eqStatus.label}
+            </span>
+            <span className={`inline-flex rounded px-1 py-0 text-[8px] leading-4 ${PRIORITY_STYLES[equipment.priority]}`}>
+              {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
             </span>
             <span className="truncate text-[8px] uppercase tracking-[0.04em] text-gray-400 dark:text-gray-500">
               {TYPE_LABELS[equipment.type]}

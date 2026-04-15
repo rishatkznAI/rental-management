@@ -61,8 +61,44 @@ function createBotHandlers(deps) {
     return keyboard([
       [button('Черновик', 'menu:draft'), button('Итог', 'menu:summary')],
       [button('Работы', 'menu:works'), button('Запчасти', 'menu:parts')],
-      [button('Готово', 'menu:ready'), button('Закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close')],
+      [button('Готово', 'menu:ready'), button('Ожидание', 'menu:waiting')],
+      [button('Закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close')],
       [button('Мои заявки', 'menu:myrepairs')],
+    ]);
+  }
+
+  const REPAIR_REASON_TEMPLATES = [
+    { key: 'hydraulic_leak', text: 'Течь гидравлики' },
+    { key: 'no_lift', text: 'Не поднимается платформа' },
+    { key: 'electrics_fault', text: 'Неисправность электрики' },
+    { key: 'no_charge', text: 'Не заряжается' },
+    { key: 'control_fault', text: 'Неисправность пульта управления' },
+    { key: 'return_inspection', text: 'Осмотр после возврата с аренды' },
+  ];
+
+  const REPAIR_REASON_BY_KEY = Object.fromEntries(
+    REPAIR_REASON_TEMPLATES.map(item => [item.key, item.text]),
+  );
+
+  function repairReasonKeyboard() {
+    const buttons = REPAIR_REASON_TEMPLATES.map(item =>
+      button(item.text, `reason:${item.key}`),
+    );
+    return keyboard([
+      ...chunkButtons(buttons, 2),
+      [button('Своя причина', 'reason:custom')],
+    ]);
+  }
+
+  function quantityKeyboard(kind) {
+    return keyboard([
+      [
+        button('1', `qty:${kind}:1`),
+        button('2', `qty:${kind}:2`),
+        button('3', `qty:${kind}:3`),
+        button('5', `qty:${kind}:5`),
+      ],
+      [button('Ввести руками', `qty:${kind}:manual`)],
     ]);
   }
 
@@ -686,9 +722,8 @@ function createBotHandlers(deps) {
       '🚜 Найденная техника:',
       ...matches.map((item, index) => `${index + 1}. ${formatEquipmentForBot(item)}`),
       '',
-      'Можно нажать кнопку с техникой ниже или ответить сообщением:',
-      'НОМЕР причина',
-      'Пример: 1 Течь гидравлики',
+      'Можно нажать кнопку с техникой ниже.',
+      'После выбора я предложу типовые причины ремонта.',
     ].join('\n'), ['новый поиск: найти технику', 'отмена: /сброс']), {
       attachments: equipmentSearchKeyboard(matches),
     });
@@ -935,6 +970,7 @@ function createBotHandlers(deps) {
       'menu:works': '/работы',
       'menu:parts': '/запчасти',
       'menu:ready': '/готово',
+      'menu:waiting': '/ожидание',
       'menu:close': '/закрыть',
     };
 
@@ -993,8 +1029,13 @@ function createBotHandlers(deps) {
       });
       return reply(
         senderId,
-        `🚜 Выбрана техника:\n${formatEquipmentForBot(equipment)}\n\nТеперь напишите причину ремонта следующим сообщением.`,
-        { attachments: keyboard([[button('Отмена', 'menu:cancel_login')]]) },
+        [
+          `🚜 Выбрана техника:`,
+          formatEquipmentForBot(equipment),
+          '',
+          'Выберите типовую причину кнопкой ниже или нажмите «Своя причина».',
+        ].join('\n'),
+        { attachments: repairReasonKeyboard() },
       );
     }
 
@@ -1019,8 +1060,8 @@ function createBotHandlers(deps) {
       });
       return reply(
         senderId,
-        `🧰 Выбрана работа:\n${work.name}\n\nТеперь напишите количество одним числом. Например: 2`,
-        { attachments: currentRepairKeyboard(ticket.id) },
+        `🧰 Выбрана работа:\n${work.name}\n\nВыберите количество кнопкой ниже или нажмите «Ввести руками».`,
+        { attachments: quantityKeyboard('work') },
       );
     }
 
@@ -1045,9 +1086,89 @@ function createBotHandlers(deps) {
       });
       return reply(
         senderId,
-        `📦 Выбрана запчасть:\n${part.name}\n\nТеперь напишите:\nКОЛИЧЕСТВО [ЦЕНА]\nПример: 2 3500\nЕсли цену не указывать, возьмётся базовая.`,
-        { attachments: currentRepairKeyboard(ticket.id) },
+        [
+          `📦 Выбрана запчасть:`,
+          part.name,
+          '',
+          'Выберите количество кнопкой ниже.',
+          'Если нужна своя цена, нажмите «Ввести руками» и отправьте:',
+          'КОЛИЧЕСТВО [ЦЕНА]',
+          'Пример: 2 3500',
+        ].join('\n'),
+        { attachments: quantityKeyboard('part') },
       );
+    }
+
+    if (normalized.startsWith('reason:')) {
+      const reasonKey = normalized.slice('reason:'.length);
+      const currentReason = REPAIR_REASON_BY_KEY[reasonKey];
+      if (reasonKey === 'custom') {
+        const selectedEquipmentId = getBotSession(phone).pendingPayload?.selectedEquipmentId;
+        if (!selectedEquipmentId) {
+          return reply(senderId, '❌ Сначала выберите технику.', {
+            attachments: mechanicKeyboard(),
+          });
+        }
+        updateBotSession(phone, {
+          pendingAction: 'ticket_reason',
+          pendingPayload: { selectedEquipmentId },
+        });
+        return reply(
+          senderId,
+          '📝 Напишите свою причину ремонта следующим сообщением.',
+          { attachments: keyboard([[button('Отмена', 'menu:cancel_login')]]) },
+        );
+      }
+      if (!currentReason) {
+        return reply(senderId, '❌ Причина не распознана. Выберите кнопку ещё раз.', {
+          attachments: repairReasonKeyboard(),
+        });
+      }
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', { attachments: authKeyboard() });
+      }
+      return handleCreateTicketRequest(senderId, phone, authUser, currentReason);
+    }
+
+    if (normalized.startsWith('qty:')) {
+      const [, kind, value] = normalized.split(':');
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', { attachments: authKeyboard() });
+      }
+      const ticket = getCurrentRepair(phone);
+      if (!ticket) {
+        return reply(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID', {
+          attachments: mechanicKeyboard(),
+        });
+      }
+
+      if (value === 'manual') {
+        if (kind === 'work') {
+          return reply(senderId, '🧰 Напишите количество работы одним числом. Например: 2', {
+            attachments: currentRepairKeyboard(ticket.id),
+          });
+        }
+        if (kind === 'part') {
+          return reply(senderId, '📦 Напишите: КОЛИЧЕСТВО [ЦЕНА]\nПример: 2 3500\nЕсли цену не указывать, возьмётся базовая.', {
+            attachments: currentRepairKeyboard(ticket.id),
+          });
+        }
+      }
+
+      if (!['1', '2', '3', '5'].includes(value || '')) {
+        return reply(senderId, '❌ Количество не распознано.', {
+          attachments: currentRepairKeyboard(ticket.id),
+        });
+      }
+
+      if (kind === 'work') {
+        return handleAddWorkRequest(senderId, phone, authUser, ticket, value);
+      }
+      if (kind === 'part') {
+        return handleAddPartRequest(senderId, phone, authUser, ticket, value);
+      }
     }
 
     if (map[normalized]) {

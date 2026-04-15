@@ -137,6 +137,7 @@ function saveSnapshot(s)  { writeData('snapshot', s); }
 
 const {
   sendMessage,
+  answerCallback,
   registerWebhook,
 } = createMaxApiClient({
   botToken: BOT_TOKEN,

@@ -1,10 +1,12 @@
 function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logger = console }) {
   async function maxRequest(method, endpoint, body = null) {
+    const token = (botToken || '').trim();
     const url = `${maxApiBase}${endpoint}`;
+    logger.log(`[MAX API] token prefix="${token.slice(0, 8)}" len=${token.length}`);
     const opts = {
       method,
       headers: {
-        Authorization: `Bearer ${botToken}`,
+        Authorization: token,
         'Content-Type': 'application/json',
       },
     };

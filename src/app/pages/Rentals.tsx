@@ -731,6 +731,94 @@ export default function Rentals() {
     }
   }, [canEditRentals, ganttRentals, selectedRental]);
 
+  const handleUpdateRental = useCallback((rental: GanttRentalData, data: Partial<GanttRentalData>) => {
+    if (!canEditRentals) return;
+
+    const previousEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
+    const nextRental = { ...rental, ...data };
+    const updatedRentals = ganttRentals.map(item =>
+      item.id === rental.id ? nextRental : item
+    );
+    void persistGanttRentals(updatedRentals);
+
+    if (previousEquipment) {
+      const hasOtherActive = updatedRentals.some(item =>
+        item.id !== rental.id &&
+        matchesEquipmentRow(item, previousEquipment) &&
+        item.status !== 'returned' &&
+        item.status !== 'closed'
+      );
+      const nextEquipmentStatus: EquipmentStatus = nextRental.status === 'active'
+        ? 'rented'
+        : nextRental.status === 'created'
+          ? 'reserved'
+          : hasOpenServiceTicketForEquipment(serviceTickets, previousEquipment)
+            ? 'in_service'
+            : 'available';
+
+      const updatedEquipment = equipmentList.map(item =>
+        item.id !== previousEquipment.id
+          ? item
+          : {
+              ...item,
+              status: (nextRental.status === 'returned' || nextRental.status === 'closed')
+                ? (hasOtherActive ? item.status : nextEquipmentStatus)
+                : nextEquipmentStatus,
+              currentClient: nextRental.status === 'active'
+                ? nextRental.client
+                : nextRental.status === 'created'
+                  ? item.currentClient
+                  : hasOtherActive
+                    ? item.currentClient
+                    : undefined,
+              returnDate: nextRental.status === 'active'
+                ? nextRental.endDate
+                : nextRental.status === 'created'
+                  ? item.returnDate
+                  : hasOtherActive
+                    ? item.returnDate
+                    : undefined,
+            }
+      );
+      void persistEquipment(updatedEquipment);
+    }
+
+    if (selectedRental?.id === rental.id) {
+      setSelectedRental(nextRental);
+    }
+  }, [canEditRentals, equipmentList, ganttRentals, matchesEquipmentRow, persistEquipment, persistGanttRentals, selectedRental, serviceTickets]);
+
+  const handleAddRentalComment = useCallback((rental: GanttRentalData, text: string) => {
+    if (!canEditRentals) return;
+    const nextComment = {
+      date: format(new Date(), 'yyyy-MM-dd'),
+      text,
+      author: 'Планировщик аренды',
+    };
+    const updatedRentals = ganttRentals.map(item =>
+      item.id === rental.id
+        ? { ...item, comments: [...(item.comments || []), nextComment] }
+        : item
+    );
+    void persistGanttRentals(updatedRentals);
+    if (selectedRental?.id === rental.id) {
+      setSelectedRental(updatedRentals.find(item => item.id === rental.id) || null);
+    }
+    showToast('Запись добавлена в историю аренды');
+  }, [canEditRentals, ganttRentals, persistGanttRentals, selectedRental, showToast]);
+
+  const handlePaymentStatusChange = useCallback((rental: GanttRentalData, status: GanttRentalData['paymentStatus']) => {
+    if (!canEditRentals) return;
+    const updatedRentals = ganttRentals.map(item =>
+      item.id === rental.id ? { ...item, paymentStatus: status } : item
+    );
+    void persistGanttRentals(updatedRentals);
+    if (selectedRental?.id === rental.id) {
+      setSelectedRental(updatedRentals.find(item => item.id === rental.id) || null);
+    }
+    showToast(`Статус оплаты обновлён: ${status === 'paid' ? 'Оплачено' : status === 'partial' ? 'Частично' : 'Не оплачено'}`);
+  }, [canEditRentals, ganttRentals, persistGanttRentals, selectedRental, showToast]);
+
   // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
   const handleEarlyReturn = useCallback((rental: GanttRentalData, actualReturnDate: string) => {
     if (!canEditRentals) return;
@@ -1167,6 +1255,9 @@ export default function Rentals() {
             }
             setSelectedRental(null);
           }}
+          onUpdate={handleUpdateRental}
+          onAddComment={handleAddRentalComment}
+          onPaymentStatusChange={handlePaymentStatusChange}
         />
       )}
 

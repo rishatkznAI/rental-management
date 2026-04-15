@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X, Calendar, CreditCard, FileText, User, MessageSquare,
   ArrowRight, RotateCcw, CirclePause as PauseCircle,
@@ -23,6 +23,9 @@ interface RentalDrawerProps {
   onReturn: (rental: GanttRentalData) => void;
   onStatusChange: (rental: GanttRentalData) => void;
   onDelete: (rental: GanttRentalData) => void;
+  onUpdate: (rental: GanttRentalData, data: Partial<GanttRentalData>) => void;
+  onAddComment: (rental: GanttRentalData, text: string) => void;
+  onPaymentStatusChange: (rental: GanttRentalData, status: GanttRentalData['paymentStatus']) => void;
   onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string) => void;
   onExtend: (rental: GanttRentalData, newEndDate: string) => void;
   onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
@@ -59,9 +62,20 @@ export function RentalDrawer({
   rental, equipment, allRentals, payments,
   canEditRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
-  onAddPayment, onExtend, onEarlyReturn, onUpdChange,
+  onUpdate, onAddComment, onPaymentStatusChange, onAddPayment, onExtend, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editClient, setEditClient] = useState('');
+  const [editManager, setEditManager] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editEndDate, setEditEndDate] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+  const [editExpectedPaymentDate, setEditExpectedPaymentDate] = useState('');
+  const [editError, setEditError] = useState('');
+  const [showCommentForm, setShowCommentForm] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [commentError, setCommentError] = useState('');
 
   // Add payment form state
   const [showAddPayment, setShowAddPayment] = useState(false);
@@ -87,6 +101,21 @@ export function RentalDrawer({
   const [updUnsignConfirm, setUpdUnsignConfirm] = useState(false);
 
   if (!rental) return null;
+
+  useEffect(() => {
+    if (!rental) return;
+    setShowEdit(false);
+    setEditClient(rental.client);
+    setEditManager(rental.manager);
+    setEditStartDate(rental.startDate);
+    setEditEndDate(rental.endDate);
+    setEditAmount(String(rental.amount || 0));
+    setEditExpectedPaymentDate(rental.expectedPaymentDate || '');
+    setEditError('');
+    setShowCommentForm(false);
+    setCommentText('');
+    setCommentError('');
+  }, [rental]);
 
   // Payments for this rental
   const rentalPayments = payments.filter(p => p.rentalId === rental.id);
@@ -164,6 +193,67 @@ export function RentalDrawer({
     setEarlyReturnConfirm(false);
   };
 
+  const handleEditSave = () => {
+    if (!canEditRentals) return;
+    if (!editClient.trim()) {
+      setEditError('Укажите клиента');
+      return;
+    }
+    if (!editStartDate || !editEndDate) {
+      setEditError('Укажите даты аренды');
+      return;
+    }
+    if (editEndDate < editStartDate) {
+      setEditError('Дата окончания не может быть раньше даты начала');
+      return;
+    }
+    const amount = Number(editAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setEditError('Сумма должна быть числом не меньше 0');
+      return;
+    }
+    const conflicts = allRentals.filter(r =>
+      r.id !== rental.id &&
+      (
+        (rental.equipmentId && r.equipmentId === rental.equipmentId)
+        || (!r.equipmentId && !rental.equipmentId && r.equipmentInv === rental.equipmentInv)
+      ) &&
+      r.status !== 'returned' && r.status !== 'closed' &&
+      editStartDate <= r.endDate && editEndDate >= r.startDate
+    );
+    if (conflicts.length > 0) {
+      setEditError(`Конфликт: техника занята ${formatDate(conflicts[0].startDate)} — ${formatDate(conflicts[0].endDate)} (${conflicts[0].client})`);
+      return;
+    }
+
+    setEditError('');
+    onUpdate(rental, {
+      client: editClient.trim(),
+      clientShort: editClient.trim().substring(0, 20),
+      manager: editManager.trim(),
+      managerInitials: editManager.trim()
+        ? editManager.trim().split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase()
+        : rental.managerInitials,
+      startDate: editStartDate,
+      endDate: editEndDate,
+      amount,
+      expectedPaymentDate: editExpectedPaymentDate || undefined,
+    });
+    setShowEdit(false);
+  };
+
+  const handleCommentSave = () => {
+    if (!canEditRentals) return;
+    if (!commentText.trim()) {
+      setCommentError('Введите текст заметки');
+      return;
+    }
+    onAddComment(rental, commentText.trim());
+    setCommentText('');
+    setCommentError('');
+    setShowCommentForm(false);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       {/* Overlay */}
@@ -194,6 +284,93 @@ export function RentalDrawer({
 
         {/* Content */}
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
+          {canEditRentals && (
+            <section>
+              <button
+                onClick={() => {
+                  setShowEdit(v => !v);
+                  setEditError('');
+                }}
+                className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300 dark:hover:bg-gray-700/50"
+              >
+                <div className="flex items-center gap-2">
+                  <Edit className="h-4 w-4 text-gray-400" />
+                  <span>Редактировать аренду</span>
+                </div>
+                {showEdit ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+              </button>
+
+              {showEdit && (
+                <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2">
+                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Клиент *</label>
+                      <input
+                        type="text"
+                        value={editClient}
+                        onChange={e => setEditClient(e.target.value)}
+                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Менеджер</label>
+                      <input
+                        type="text"
+                        value={editManager}
+                        onChange={e => setEditManager(e.target.value)}
+                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Сумма (₽)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editAmount}
+                        onChange={e => setEditAmount(e.target.value)}
+                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Дата начала *</label>
+                      <input
+                        type="date"
+                        value={editStartDate}
+                        onChange={e => setEditStartDate(e.target.value)}
+                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Дата окончания *</label>
+                      <input
+                        type="date"
+                        value={editEndDate}
+                        onChange={e => setEditEndDate(e.target.value)}
+                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Ожидаемая дата оплаты</label>
+                      <input
+                        type="date"
+                        value={editExpectedPaymentDate}
+                        onChange={e => setEditExpectedPaymentDate(e.target.value)}
+                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                  {editError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{editError}</p>}
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" onClick={handleEditSave}>Сохранить</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setShowEdit(false); setEditError(''); }}>
+                      Отмена
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Dates */}
           <section>
             <div className="mb-2 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -271,6 +448,27 @@ export function RentalDrawer({
                 <div className="mt-2 flex items-center gap-1 text-xs text-gray-500">
                   <Clock className="h-3 w-3" />
                   <span>Ожидаемая оплата: {formatDate(rental.expectedPaymentDate)}</span>
+                </div>
+              )}
+
+              {canEditRentals && (
+                <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+                  <div className="mb-2 text-xs text-gray-500 dark:text-gray-400">Статус оплаты</div>
+                  <div className="flex flex-wrap gap-2">
+                    {(['paid', 'partial', 'unpaid'] as const).map(status => (
+                      <button
+                        key={status}
+                        onClick={() => onPaymentStatusChange(rental, status)}
+                        className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+                          rental.paymentStatus === status
+                            ? 'bg-[--color-primary] text-white'
+                            : 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        {paymentLabels[status]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -572,10 +770,42 @@ export function RentalDrawer({
 
           {/* Comments / History */}
           <section>
-            <div className="mb-2 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <MessageSquare className="h-4 w-4" />
-              <span>История изменений</span>
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                <MessageSquare className="h-4 w-4" />
+                <span>История изменений</span>
+              </div>
+              {canEditRentals && (
+                <button
+                  onClick={() => {
+                    setShowCommentForm(v => !v);
+                    setCommentError('');
+                  }}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                >
+                  <Plus className="h-3 w-3" />
+                  Добавить запись
+                </button>
+              )}
             </div>
+            {canEditRentals && showCommentForm && (
+              <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                <div className="mb-1 text-xs font-medium text-blue-700 dark:text-blue-400">Новая запись в историю</div>
+                <textarea
+                  value={commentText}
+                  onChange={e => setCommentText(e.target.value)}
+                  placeholder="Например: согласовано продление, ждём оплату, клиент подтвердил возврат..."
+                  className="min-h-24 w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                />
+                {commentError && <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{commentError}</p>}
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" onClick={handleCommentSave}>Сохранить</Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setShowCommentForm(false); setCommentError(''); }}>
+                    Отмена
+                  </Button>
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               {rental.comments.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-gray-200 p-3 text-center text-sm text-gray-400 dark:border-gray-700">

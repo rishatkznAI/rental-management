@@ -37,13 +37,27 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
     }
   }
 
-  async function sendMessage(target, text) {
+  async function sendMessage(target, text, options = {}) {
     const recipientQuery = resolveRecipientQuery(target);
     logger.log(`[MAX API] sendMessage → ${recipientQuery} text="${String(text).slice(0, 60)}"`);
-    const res = await maxRequest('POST', `/messages?${recipientQuery}`, {
+    const body = {
       text,
-    });
+      ...(options.attachments ? { attachments: options.attachments } : {}),
+      ...(options.format ? { format: options.format } : {}),
+      ...(options.notify != null ? { notify: options.notify } : {}),
+    };
+    const res = await maxRequest('POST', `/messages?${recipientQuery}`, body);
     logger.log(`[MAX API] sendMessage ← ${JSON.stringify(res).slice(0, 200)}`);
+    return res;
+  }
+
+  async function answerCallback(callbackId, options = {}) {
+    if (!callbackId) return null;
+    const res = await maxRequest('POST', `/answers?callback_id=${encodeURIComponent(callbackId)}`, {
+      ...(options.notification ? { notification: options.notification } : {}),
+      ...(options.message ? { message: options.message } : {}),
+    });
+    logger.log(`[MAX API] answerCallback ← ${JSON.stringify(res).slice(0, 200)}`);
     return res;
   }
 
@@ -55,7 +69,7 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
     }
     const res = await maxRequest('POST', '/subscriptions', {
       url: `${webhookUrl}/bot/webhook`,
-      update_types: ['message_created', 'bot_started'],
+      update_types: ['message_created', 'bot_started', 'message_callback'],
     });
     if (res && !res.error) {
       logger.log(`[BOT] Webhook зарегистрирован: ${webhookUrl}/bot/webhook`);
@@ -67,6 +81,7 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
   return {
     maxRequest,
     sendMessage,
+    answerCallback,
     registerWebhook,
   };
 }

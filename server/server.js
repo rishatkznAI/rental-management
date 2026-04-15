@@ -650,6 +650,7 @@ const {
   withBotMenu,
   handleBotStarted,
   handleCommand,
+  handleCallback,
 } = createBotHandlers({
   readData,
   writeData,
@@ -1202,6 +1203,8 @@ function applyAdminResetFromEnv() {
 registerBotRoutes(app, {
   handleCommand,
   handleBotStarted,
+  handleCallback,
+  answerCallback,
   logger: console,
 });
 

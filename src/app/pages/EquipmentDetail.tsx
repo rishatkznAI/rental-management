@@ -28,6 +28,7 @@ import type { GanttRentalData } from '../mock-data';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { usePermissions } from '../lib/permissions';
+import { useAuth } from '../contexts/AuthContext';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
@@ -81,9 +82,12 @@ const SERVICE_STATUS_LABELS: Record<string, string> = {
 };
 
 export default function EquipmentDetail() {
+  const { user } = useAuth();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const canEditEquipment = can('edit', 'equipment');
+  const canCreateService = can('create', 'service');
+  const canManageAcceptance = canEditEquipment || canCreateService || user?.role === 'Механик';
   const { id } = useParams();
 
   const [allEquipment, setAllEquipment] = useState<Equipment[]>([]);
@@ -223,6 +227,12 @@ export default function EquipmentDetail() {
     await queryClient.invalidateQueries({ queryKey: ['shippingPhotos', id] });
   }, [id, queryClient]);
 
+  const persistGanttRentals = React.useCallback(async (list: GanttRentalData[]) => {
+    setAllGanttRentals(list);
+    await rentalsService.bulkReplaceGantt(list);
+    await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+  }, [queryClient]);
+
   // ── Photo upload state ──
   const [showUploadPhotoForm, setShowUploadPhotoForm] = useState(false);
   const [uploadEventType, setUploadEventType] = useState<'shipping' | 'receiving'>('shipping');
@@ -275,7 +285,7 @@ export default function EquipmentDetail() {
   };
 
   const handleShippingPhotoFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEditEquipment) {
+    if (!canManageAcceptance) {
       e.target.value = '';
       return;
     }
@@ -286,20 +296,136 @@ export default function EquipmentDetail() {
     e.target.value = '';
   };
 
-  const handleShippingPhotoSave = () => {
-    if (!canEditEquipment || !uploadPending.length || !equipment) return;
+  const activeOrCreatedRental = ganttRentals.find(r => r.status === 'active' || r.status === 'created');
+
+  const openReceptionForm = (type: 'shipping' | 'receiving') => {
+    setUploadEventType(type);
+    setUploadPending([]);
+    setUploadComment('');
+    setShowUploadPhotoForm(true);
+  };
+
+  const handleShippingPhotoSave = async () => {
+    if (!canManageAcceptance || !uploadPending.length || !equipment) return;
+    const authorName = user?.name || 'Сотрудник';
+    const todayStr = new Date().toISOString().split('T')[0];
+    const nowIso = new Date().toISOString();
     const newEvent: ShippingPhoto = {
       id: `sp-${Date.now()}`,
       equipmentId: equipment.id,
-      date: new Date().toISOString().split('T')[0],
+      date: todayStr,
       type: uploadEventType,
-      uploadedBy: 'Менеджер',
+      uploadedBy: authorName,
       photos: uploadPending,
       comment: uploadComment || undefined,
+      rentalId: activeOrCreatedRental?.id,
       source: 'manual',
     };
-    const updated = [...allShippingPhotos, newEvent];
-    void persistShippingPhotos(updated);
+
+    const updatedPhotos = [...allShippingPhotos, newEvent];
+
+    const updatedEquipment = allEquipment.map(eq => {
+      if (eq.id !== equipment.id) return eq;
+
+      if (uploadEventType === 'shipping') {
+        return {
+          ...eq,
+          status: 'rented' as const,
+          currentClient: activeOrCreatedRental?.client || eq.currentClient,
+          returnDate: activeOrCreatedRental?.endDate || eq.returnDate,
+        };
+      }
+
+      return {
+        ...eq,
+        status: 'in_service' as const,
+        currentClient: undefined,
+        returnDate: undefined,
+      };
+    });
+
+    const updatedGantt = allGanttRentals.map(rental => {
+      if (rental.equipmentId !== equipment.id || rental.id !== activeOrCreatedRental?.id) return rental;
+
+      if (uploadEventType === 'shipping' && rental.status === 'created') {
+        return {
+          ...rental,
+          status: 'active' as const,
+          comments: [
+            ...(rental.comments ?? []),
+            { date: nowIso, text: 'Техника отгружена клиенту, добавлен фотоотчёт отправки', author: authorName },
+          ],
+        };
+      }
+
+      if (uploadEventType === 'receiving' && (rental.status === 'active' || rental.status === 'created')) {
+        return {
+          ...rental,
+          status: 'returned' as const,
+          endDate: todayStr,
+          comments: [
+            ...(rental.comments ?? []),
+            { date: nowIso, text: 'Техника принята с аренды, добавлен фотоотчёт приёмки', author: authorName },
+          ],
+        };
+      }
+
+      return rental;
+    });
+
+    await persistShippingPhotos(updatedPhotos);
+    await persistEquipment(updatedEquipment);
+    await persistGanttRentals(updatedGantt);
+
+    if (uploadEventType === 'receiving') {
+      const hasOpenTicket = serviceHistory.some(ticket => ticket.status !== 'closed');
+      if (!hasOpenTicket) {
+        await serviceTicketsService.create({
+          equipmentId: equipment.id,
+          equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
+          inventoryNumber: equipment.inventoryNumber,
+          serialNumber: equipment.serialNumber,
+          equipmentType: equipment.type,
+          equipmentTypeLabel: TYPE_LABELS[equipment.type] || equipment.type,
+          location: equipment.location,
+          reason: 'Приёмка с аренды',
+          description: uploadComment?.trim()
+            ? `Техника принята с аренды. Комментарий механика: ${uploadComment.trim()}`
+            : 'Техника принята с аренды, требуется осмотр и дефектовка после возврата.',
+          priority: 'medium',
+          sla: '24 ч',
+          assignedTo: undefined,
+          assignedMechanicId: undefined,
+          assignedMechanicName: undefined,
+          createdBy: authorName,
+          createdByUserId: user?.id,
+          createdByUserName: authorName,
+          reporterContact: activeOrCreatedRental?.client || authorName,
+          source: 'system',
+          status: 'new',
+          result: undefined,
+          resultData: {
+            summary: '',
+            partsUsed: [],
+            worksPerformed: [],
+          },
+          workLog: [
+            {
+              date: nowIso,
+              text: 'Заявка автоматически создана после приёмки техники с аренды',
+              author: authorName,
+              type: 'status_change',
+            },
+          ],
+          parts: [],
+          createdAt: nowIso,
+          photos: uploadPending,
+        });
+        await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all });
+        await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.byEquipment(equipment.id) });
+      }
+    }
+
     setUploadPending([]);
     setUploadComment('');
     setShowUploadPhotoForm(false);
@@ -1276,21 +1402,33 @@ export default function EquipmentDetail() {
                   <CardTitle>Фото отгрузок и приёмки</CardTitle>
                   <CardDescription>{shippingPhotos.length} событий</CardDescription>
                 </div>
-                {canEditEquipment && (
-                  <Button size="sm" variant="secondary" onClick={() => setShowUploadPhotoForm(v => !v)}>
+                {canManageAcceptance && (
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => openReceptionForm('shipping')}>
+                      <Upload className="h-4 w-4" />
+                      Отправить в аренду
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => openReceptionForm('receiving')}>
+                      <Camera className="h-4 w-4" />
+                      Принять с аренды
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setShowUploadPhotoForm(v => !v)}>
                     <Plus className="h-4 w-4" />
                     Загрузить фото
-                  </Button>
+                    </Button>
+                  </div>
                 )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
 
               {/* Upload form */}
-              {canEditEquipment && showUploadPhotoForm && (
+              {canManageAcceptance && showUploadPhotoForm && (
                 <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-blue-900 dark:text-blue-200">Новое фотособытие</span>
+                    <span className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                      {uploadEventType === 'shipping' ? 'Отправка техники в аренду' : 'Приёмка техники с аренды'}
+                    </span>
                     <button
                       onClick={() => { setShowUploadPhotoForm(false); setUploadPending([]); setUploadComment(''); }}
                       className="rounded p-1 text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-800"
@@ -1315,6 +1453,18 @@ export default function EquipmentDetail() {
                       </button>
                     ))}
                   </div>
+
+                  {uploadEventType === 'shipping' && (
+                    <div className="rounded-md border border-blue-200 bg-white/70 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300">
+                      После сохранения фотоотчёт запишется в карточку техники. Если по технике есть бронь/аренда, она будет переведена в статус активной.
+                    </div>
+                  )}
+
+                  {uploadEventType === 'receiving' && (
+                    <div className="rounded-md border border-amber-200 bg-white/70 px-3 py-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                      После сохранения техника автоматически перейдёт в сервис, аренда будет отмечена как возвращённая, и будет создана сервисная заявка на осмотр после возврата.
+                    </div>
+                  )}
 
                   {/* Comment */}
                   <input

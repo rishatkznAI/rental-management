@@ -2,6 +2,8 @@ function registerBotRoutes(app, deps) {
   const {
     handleCommand,
     handleBotStarted,
+    handleCallback,
+    answerCallback,
     logger = console,
   } = deps;
 
@@ -27,6 +29,24 @@ function registerBotRoutes(app, deps) {
           continue;
         }
 
+        if (update.update_type === 'message_callback') {
+          const callback = update.callback || update.message_callback || update.messageCallback || {};
+          const callbackId = callback.callback_id || callback.callbackId || update.callback_id;
+          const payload = callback.payload || callback.data || update.payload || '';
+          const sender = callback.sender || callback.user || update.user || {};
+          const recipient = callback.recipient || update.recipient || {};
+          const replyTarget = {
+            chat_id: recipient.chat_id || recipient.chatId || update.chat_id || update.chatId,
+            user_id: sender.user_id || sender.userId || update.user_id,
+          };
+          const phone = String(replyTarget.user_id || '');
+
+          logger.log(`[BOT] callback payload=${payload} target=${JSON.stringify(replyTarget)}`);
+          await answerCallback(callbackId, { notification: { text: 'Обрабатываю...' } });
+          await handleCallback(replyTarget, phone, String(payload || ''), callback);
+          continue;
+        }
+
         if (update.update_type !== 'message_created') continue;
 
         const msg = update.message;
@@ -43,11 +63,12 @@ function registerBotRoutes(app, deps) {
         const senderId = replyTarget;
         const phone = String(sender.user_id);
         const text = msg?.body?.text || '';
+        const attachments = msg?.body?.attachments || msg?.attachments || [];
 
-        if (!text.trim()) continue;
+        if (!text.trim() && (!Array.isArray(attachments) || attachments.length === 0)) continue;
 
-        logger.log(`[BOT] [${sender.name || sender.user_id}] replyTarget=${JSON.stringify(replyTarget)} ${text}`);
-        await handleCommand(senderId, phone, text);
+        logger.log(`[BOT] [${sender.name || sender.user_id}] replyTarget=${JSON.stringify(replyTarget)} text="${text}" attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
+        await handleCommand(senderId, phone, text, { message: msg, body: msg?.body, attachments });
       }
     } catch (err) {
       logger.error('[BOT] Ошибка обработки webhook:', err?.message || String(err));

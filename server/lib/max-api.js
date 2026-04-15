@@ -1,10 +1,10 @@
 function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logger = console }) {
   async function maxRequest(method, endpoint, body = null) {
-    // MAX Bot API аутентификация: access_token передаётся как query-параметр
-    const url = `${maxApiBase}${endpoint}?access_token=${botToken}`;
+    const url = `${maxApiBase}${endpoint}`;
     const opts = {
       method,
       headers: {
+        Authorization: botToken,
         'Content-Type': 'application/json',
       },
     };
@@ -23,11 +23,14 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
     }
   }
 
-  async function sendMessage(userId, text) {
-    return maxRequest('POST', '/messages', {
-      recipient: { user_id: userId },
+  async function sendMessage(chatId, text) {
+    logger.log(`[MAX API] sendMessage → chatId=${chatId} text="${String(text).slice(0, 60)}"`);
+    const res = await maxRequest('POST', '/messages', {
+      recipient: { chat_id: chatId },
       body: { type: 'text', text },
     });
+    logger.log(`[MAX API] sendMessage ← ${JSON.stringify(res).slice(0, 200)}`);
+    return res;
   }
 
   async function registerWebhook() {

@@ -9,6 +9,7 @@ function registerBotRoutes(app, deps) {
     res.sendStatus(200);
 
     try {
+      logger.log('[BOT] Webhook получен:', JSON.stringify(req.body).slice(0, 300));
       const updates = req.body?.updates || [req.body];
 
       for (const update of updates) {

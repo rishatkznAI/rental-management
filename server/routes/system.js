@@ -92,7 +92,7 @@ function registerSystemRoutes(app, deps) {
               (notification.role === 'manager' && botUser.userName === notification.managerName);
 
             if (shouldNotify) {
-              await sendMessage(Number(phone), notification.text);
+              await sendMessage(botUser.replyTarget || { user_id: Number(phone) }, notification.text);
             }
           }
         }
@@ -117,7 +117,7 @@ function registerSystemRoutes(app, deps) {
     const chatId = Number(req.query.chatId) || 134374193;
     const text = req.query.text || 'Тест бота';
     try {
-      const result = await sendMessage(chatId, text);
+      const result = await sendMessage({ chat_id: chatId }, text);
       res.json({ ok: true, chatId, text, maxApiResponse: result });
     } catch (err) {
       res.json({ ok: false, error: err.message, stack: err.stack });

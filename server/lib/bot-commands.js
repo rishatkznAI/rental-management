@@ -41,7 +41,20 @@ function createBotHandlers(deps) {
     );
   }
 
-  function authorizeUser(phone, email, password) {
+  function normalizeReplyTarget(target, fallbackPhone = '') {
+    if (target && typeof target === 'object') {
+      return {
+        chat_id: target.chat_id ?? target.chatId ?? null,
+        user_id: target.user_id ?? target.userId ?? (fallbackPhone ? Number(fallbackPhone) : null),
+      };
+    }
+    return {
+      chat_id: null,
+      user_id: fallbackPhone ? Number(fallbackPhone) : Number(target || 0),
+    };
+  }
+
+  function authorizeUser(phone, email, password, replyTarget = null) {
     const users = readData('users') || [];
     const found = users.find(
       user => user.email.toLowerCase() === email.toLowerCase() &&
@@ -56,6 +69,7 @@ function createBotHandlers(deps) {
       userName: found.name,
       userRole: found.role,
       email: found.email,
+      replyTarget: normalizeReplyTarget(replyTarget, phone),
     };
     saveBotUsers(botUsers);
     return found;
@@ -618,7 +632,7 @@ function createBotHandlers(deps) {
       console.log('[TRACE] authorizing email=%s', email);
       let user;
       try {
-        user = authorizeUser(String(phone), email, password);
+        user = authorizeUser(String(phone), email, password, senderId);
       } catch (e) {
         console.error('[TRACE] authorizeUser threw:', e.message, e.stack);
         return sendMessage(senderId, '❌ Внутренняя ошибка авторизации. Попробуйте позже.');
@@ -645,6 +659,13 @@ function createBotHandlers(deps) {
         '🔒 Вы не авторизованы.\n\nНапишите:\n/start email@company.ru пароль',
       );
     }
+
+    const botUsers = getBotUsers();
+    botUsers[String(phone)] = {
+      ...authUser,
+      replyTarget: normalizeReplyTarget(senderId, phone),
+    };
+    saveBotUsers(botUsers);
 
     const { userName, userRole } = authUser;
     const canManageRepair = userRole === 'Механик' || userRole === 'Администратор';

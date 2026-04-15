@@ -1,4 +1,16 @@
 function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logger = console }) {
+  function resolveRecipientQuery(target) {
+    if (target && typeof target === 'object') {
+      const chatId = target.chatId ?? target.chat_id;
+      if (chatId) return `chat_id=${encodeURIComponent(chatId)}`;
+
+      const userId = target.userId ?? target.user_id;
+      if (userId) return `user_id=${encodeURIComponent(userId)}`;
+    }
+
+    return `user_id=${encodeURIComponent(target)}`;
+  }
+
   async function maxRequest(method, endpoint, body = null) {
     const token = (botToken || '').trim();
     const url = `${maxApiBase}${endpoint}`;
@@ -25,11 +37,11 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
     }
   }
 
-  async function sendMessage(chatId, text) {
-    logger.log(`[MAX API] sendMessage → chatId=${chatId} text="${String(text).slice(0, 60)}"`);
-    const res = await maxRequest('POST', '/messages', {
-      recipient: { user_id: chatId },
-      body: { type: 'text', text },
+  async function sendMessage(target, text) {
+    const recipientQuery = resolveRecipientQuery(target);
+    logger.log(`[MAX API] sendMessage → ${recipientQuery} text="${String(text).slice(0, 60)}"`);
+    const res = await maxRequest('POST', `/messages?${recipientQuery}`, {
+      text,
     });
     logger.log(`[MAX API] sendMessage ← ${JSON.stringify(res).slice(0, 200)}`);
     return res;

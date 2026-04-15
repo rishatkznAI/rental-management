@@ -18,10 +18,12 @@ function registerBotRoutes(app, deps) {
         if (update.update_type === 'bot_started') {
           const user = update.user;
           if (!user?.user_id) continue;
-          // Для ответа используем user_id пользователя (chat_id диалога не подходит)
-          const startChatId = user.user_id;
-          logger.log(`[BOT] [${user.name || user.user_id}] bot_started chatId=${startChatId}`);
-          await handleBotStarted(startChatId, String(startChatId), update.payload);
+          const startReplyTarget = {
+            chat_id: update.chat_id || update.chatId || update.recipient?.chat_id || user.chat_id,
+            user_id: user.user_id,
+          };
+          logger.log(`[BOT] [${user.name || user.user_id}] bot_started target=${JSON.stringify(startReplyTarget)}`);
+          await handleBotStarted(startReplyTarget, String(user.user_id), update.payload);
           continue;
         }
 
@@ -34,15 +36,17 @@ function registerBotRoutes(app, deps) {
         logger.log('[BOT] msg.recipient:', JSON.stringify(msg?.recipient));
         logger.log('[BOT] msg.sender:', JSON.stringify(sender));
 
-        // MAX API: для ответа в диалоге используем user_id отправителя
-        const chatId = sender.user_id;
-        const senderId = chatId;
-        const phone = String(chatId);
+        const replyTarget = {
+          chat_id: msg?.recipient?.chat_id,
+          user_id: sender.user_id,
+        };
+        const senderId = replyTarget;
+        const phone = String(sender.user_id);
         const text = msg?.body?.text || '';
 
         if (!text.trim()) continue;
 
-        logger.log(`[BOT] [${sender.name || sender.user_id}] chatId=${chatId} ${text}`);
+        logger.log(`[BOT] [${sender.name || sender.user_id}] replyTarget=${JSON.stringify(replyTarget)} ${text}`);
         await handleCommand(senderId, phone, text);
       }
     } catch (err) {

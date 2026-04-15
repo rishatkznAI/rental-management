@@ -1,0 +1,223 @@
+const express = require('express');
+
+function registerCrudRoutes(deps) {
+  const {
+    collections,
+    idPrefixes,
+    readData,
+    writeData,
+    requireAuth,
+    requireWrite,
+    sanitizeUser,
+    publicUserView,
+    canReadFullUsers,
+    normalizeServiceWorkRecord,
+    normalizeSparePartRecord,
+    validateRentalPayload,
+    requireNonEmptyString,
+    generateId,
+    nowIso,
+  } = deps;
+
+  const router = express.Router();
+
+  function registerCRUD(collection) {
+    const prefix = idPrefixes[collection] || collection;
+
+    router.get(`/${collection}`, requireAuth, (req, res) => {
+      let data = readData(collection) || [];
+      if (collection === 'service_works') {
+        data = data
+          .map(normalizeServiceWorkRecord)
+          .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ru'));
+        if (req.query.active === '1') {
+          data = data.filter(item => item.isActive);
+        }
+      }
+      if (collection === 'spare_parts') {
+        data = data
+          .map(normalizeSparePartRecord)
+          .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+        if (req.query.active === '1') {
+          data = data.filter(item => item.isActive);
+        }
+      }
+      if (collection === 'users') {
+        if (canReadFullUsers(req)) {
+          return res.json(data.map(sanitizeUser));
+        }
+        return res.json(data.filter(item => item.status === 'Активен').map(publicUserView));
+      }
+      return res.json(data);
+    });
+
+    router.get(`/${collection}/:id`, requireAuth, (req, res) => {
+      const data = readData(collection) || [];
+      let item = data.find(entry => entry.id === req.params.id);
+      if (!item) return res.status(404).json({ ok: false, error: 'Not found' });
+      if (collection === 'service_works') item = normalizeServiceWorkRecord(item);
+      if (collection === 'spare_parts') item = normalizeSparePartRecord(item);
+      if (collection === 'users') {
+        if (canReadFullUsers(req) || item.id === req.user.userId) {
+          return res.json(sanitizeUser(item));
+        }
+        return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
+      return res.json(item);
+    });
+
+    router.post(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+      try {
+        if (collection === 'rentals' || collection === 'gantt_rentals') {
+          const validation = validateRentalPayload(collection, req.body, readData(collection) || []);
+          if (!validation.ok) {
+            return res.status(validation.status).json({ ok: false, error: validation.error });
+          }
+        }
+
+        if (collection === 'service_works') {
+          requireNonEmptyString(req.body?.name, 'Название работы');
+        }
+        if (collection === 'spare_parts') {
+          requireNonEmptyString(req.body?.name, 'Название запчасти');
+          requireNonEmptyString(req.body?.unit, 'Единица измерения');
+        }
+
+        const data = readData(collection) || [];
+        let newItem = { ...req.body, id: req.body.id || generateId(prefix) };
+        if (collection === 'service_works') {
+          newItem = normalizeServiceWorkRecord({ ...newItem, updatedAt: nowIso() });
+        }
+        if (collection === 'spare_parts') {
+          newItem = normalizeSparePartRecord({ ...newItem, updatedAt: nowIso() });
+        }
+        data.push(newItem);
+        writeData(collection, data);
+        if (collection === 'users') {
+          return res.status(201).json(sanitizeUser(newItem));
+        }
+        return res.status(201).json(newItem);
+      } catch (error) {
+        return res.status(400).json({ ok: false, error: error.message });
+      }
+    });
+
+    router.patch(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+      const data = readData(collection) || [];
+      const idx = data.findIndex(entry => entry.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+
+      try {
+        if (collection === 'rentals' || collection === 'gantt_rentals') {
+          const validation = validateRentalPayload(
+            collection,
+            { ...data[idx], ...req.body },
+            data,
+            data[idx].id,
+          );
+          if (!validation.ok) {
+            return res.status(validation.status).json({ ok: false, error: validation.error });
+          }
+        }
+
+        if (collection === 'service_works') {
+          requireNonEmptyString(req.body?.name ?? data[idx].name, 'Название работы');
+          data[idx] = normalizeServiceWorkRecord({
+            ...data[idx],
+            ...req.body,
+            id: data[idx].id,
+            createdAt: data[idx].createdAt,
+            updatedAt: nowIso(),
+          });
+        } else if (collection === 'spare_parts') {
+          requireNonEmptyString(req.body?.name ?? data[idx].name, 'Название запчасти');
+          requireNonEmptyString(req.body?.unit ?? data[idx].unit, 'Единица измерения');
+          data[idx] = normalizeSparePartRecord({
+            ...data[idx],
+            ...req.body,
+            id: data[idx].id,
+            createdAt: data[idx].createdAt,
+            updatedAt: nowIso(),
+          });
+        } else {
+          data[idx] = { ...data[idx], ...req.body, id: data[idx].id };
+        }
+        writeData(collection, data);
+        if (collection === 'users') {
+          return res.json(sanitizeUser(data[idx]));
+        }
+        return res.json(data[idx]);
+      } catch (error) {
+        return res.status(400).json({ ok: false, error: error.message });
+      }
+    });
+
+    router.delete(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+      const data = readData(collection) || [];
+      const idx = data.findIndex(entry => entry.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+      if (collection === 'service') {
+        const repairId = data[idx].id;
+        writeData('repair_work_items', (readData('repair_work_items') || []).filter(item => item.repairId !== repairId));
+        writeData('repair_part_items', (readData('repair_part_items') || []).filter(item => item.repairId !== repairId));
+      }
+      data.splice(idx, 1);
+      writeData(collection, data);
+      return res.json({ ok: true });
+    });
+
+    router.put(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+      const body = req.body;
+      const list = Array.isArray(body) ? body : body.data;
+      if (!Array.isArray(list)) {
+        return res.status(400).json({ ok: false, error: 'Expected array' });
+      }
+
+      if (collection === 'rentals' || collection === 'gantt_rentals') {
+        for (const item of list) {
+          const validation = validateRentalPayload(collection, item, list, item.id);
+          if (!validation.ok) {
+            return res.status(validation.status).json({ ok: false, error: validation.error });
+          }
+        }
+      }
+
+      if (collection === 'service_works') {
+        writeData(collection, list.map(item => normalizeServiceWorkRecord({ ...item, updatedAt: nowIso() })));
+        return res.json({ ok: true, count: list.length });
+      }
+
+      if (collection === 'spare_parts') {
+        writeData(collection, list.map(item => normalizeSparePartRecord({ ...item, updatedAt: nowIso() })));
+        return res.json({ ok: true, count: list.length });
+      }
+
+      if (collection === 'users') {
+        const existing = readData('users') || [];
+        const existingById = new Map(existing.map(item => [item.id, item]));
+        const merged = list.map(item => {
+          if (!item.password) {
+            const existingPwd = existingById.get(item.id)?.password;
+            if (existingPwd) return { ...item, password: existingPwd };
+          }
+          return item;
+        });
+        writeData('users', merged);
+        return res.json({ ok: true, count: merged.length });
+      }
+
+      writeData(collection, list);
+      return res.json({ ok: true, count: list.length });
+    });
+  }
+
+  for (const collection of collections) {
+    registerCRUD(collection);
+  }
+
+  return router;
+}
+
+module.exports = {
+  registerCrudRoutes,
+};

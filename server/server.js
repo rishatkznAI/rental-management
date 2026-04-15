@@ -539,6 +539,22 @@ function canEquipmentParticipateInRentals(equipment) {
   return normalized.activeInFleet && (normalized.category === 'own' || normalized.category === 'partner');
 }
 
+function countEquipmentByInventory(equipmentList) {
+  const counts = new Map();
+  (equipmentList || []).forEach(item => {
+    const inventoryNumber = item?.inventoryNumber;
+    if (!inventoryNumber) return;
+    counts.set(inventoryNumber, (counts.get(inventoryNumber) || 0) + 1);
+  });
+  return counts;
+}
+
+function isUniqueInventoryNumber(inventoryNumber, equipmentList) {
+  if (!inventoryNumber) return false;
+  const counts = countEquipmentByInventory(equipmentList);
+  return (counts.get(inventoryNumber) || 0) === 1;
+}
+
 function findEquipmentForRentalPayload(payload) {
   const equipmentId = payload?.equipmentId;
   const inventoryNumber =
@@ -552,6 +568,7 @@ function findEquipmentForRentalPayload(payload) {
     if (byId) return byId;
   }
   if (!inventoryNumber) return null;
+  if (!isUniqueInventoryNumber(inventoryNumber, equipment)) return null;
   return equipment.find(item => item.inventoryNumber === inventoryNumber) || null;
 }
 
@@ -1772,18 +1789,25 @@ function syncEquipmentStatusForService(ticket, newStatus) {
   const ganttRentals = readData('gantt_rentals') || [];
   const tickets = readServiceTickets();
   const openStatuses = openServiceStatuses();
+  const ticketInventoryIsUnique = ticket.inventoryNumber
+    ? isUniqueInventoryNumber(ticket.inventoryNumber, equipmentList)
+    : false;
 
   const remainingOpen = tickets.some(existing =>
     existing.id !== ticket.id &&
     openStatuses.includes(existing.status) &&
     (
       (ticket.equipmentId && existing.equipmentId === ticket.equipmentId) ||
-      (ticket.inventoryNumber && existing.inventoryNumber === ticket.inventoryNumber)
+      (ticket.serialNumber && existing.serialNumber === ticket.serialNumber) ||
+      (ticket.inventoryNumber && ticketInventoryIsUnique && existing.inventoryNumber === ticket.inventoryNumber)
     )
   );
 
   const hasActiveRental = ganttRentals.some(rental =>
-    rental.equipmentInv === ticket.inventoryNumber &&
+    (
+      (ticket.equipmentId && rental.equipmentId === ticket.equipmentId) ||
+      (!rental.equipmentId && ticket.inventoryNumber && ticketInventoryIsUnique && rental.equipmentInv === ticket.inventoryNumber)
+    ) &&
     rental.status !== 'returned' &&
     rental.status !== 'closed'
   );
@@ -1791,7 +1815,8 @@ function syncEquipmentStatusForService(ticket, newStatus) {
   const nextEquipment = equipmentList.map(item => {
     const matches =
       (ticket.equipmentId && item.id === ticket.equipmentId) ||
-      (ticket.inventoryNumber && item.inventoryNumber === ticket.inventoryNumber);
+      (ticket.serialNumber && item.serialNumber === ticket.serialNumber) ||
+      (ticket.inventoryNumber && ticketInventoryIsUnique && item.inventoryNumber === ticket.inventoryNumber);
     if (!matches) return item;
 
     let nextStatus = item.status;
@@ -1924,12 +1949,14 @@ function searchEquipmentForBot(query) {
 }
 
 function getOpenTicketByEquipment(equipment) {
+  const equipmentList = readData('equipment') || [];
+  const inventoryIsUnique = isUniqueInventoryNumber(equipment.inventoryNumber, equipmentList);
   return readServiceTickets().find(ticket =>
     openServiceStatuses().includes(ticket.status) &&
     (
       (equipment.id && ticket.equipmentId === equipment.id) ||
       (equipment.serialNumber && ticket.serialNumber === equipment.serialNumber) ||
-      (equipment.inventoryNumber && ticket.inventoryNumber === equipment.inventoryNumber)
+      (equipment.inventoryNumber && inventoryIsUnique && ticket.inventoryNumber === equipment.inventoryNumber)
     )
   ) || null;
 }

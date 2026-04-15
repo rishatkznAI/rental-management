@@ -51,6 +51,8 @@ const PAYMENT_STATUS_LABELS: Record<string, string> = {
 
 interface ReportRow {
   rentalId: string;
+  equipmentId: string;
+  equipmentFilterKey: string;
   monthLabel: string;
   monthKey: string;
   manager: string;
@@ -122,8 +124,18 @@ function buildRows(
   equipmentList: Equipment[],
   payments: Payment[],
 ): ReportRow[] {
-  const eqMap = new Map<string, Equipment>();
-  for (const eq of equipmentList) eqMap.set(eq.inventoryNumber, eq);
+  const eqById = new Map<string, Equipment>();
+  const eqByUniqueInv = new Map<string, Equipment>();
+  const inventoryCounts = new Map<string, number>();
+  for (const eq of equipmentList) {
+    eqById.set(eq.id, eq);
+    inventoryCounts.set(eq.inventoryNumber, (inventoryCounts.get(eq.inventoryNumber) ?? 0) + 1);
+  }
+  for (const eq of equipmentList) {
+    if ((inventoryCounts.get(eq.inventoryNumber) ?? 0) === 1) {
+      eqByUniqueInv.set(eq.inventoryNumber, eq);
+    }
+  }
 
   const paysByRental = new Map<string, Payment[]>();
   for (const p of payments) {
@@ -135,7 +147,7 @@ function buildRows(
   }
 
   return rentals.map(r => {
-    const eq = eqMap.get(r.equipmentInv);
+    const eq = (r.equipmentId ? eqById.get(r.equipmentId) : undefined) ?? eqByUniqueInv.get(r.equipmentInv);
     const d = new Date(r.startDate);
     const valid = !isNaN(d.getTime());
     const monthKey = valid
@@ -171,6 +183,8 @@ function buildRows(
 
     return {
       rentalId:        r.id,
+      equipmentId:     eq?.id || r.equipmentId || '',
+      equipmentFilterKey: eq?.id || r.equipmentId || `inv:${r.equipmentInv || '—'}`,
       monthLabel,
       monthKey,
       manager:         r.manager     || '—',
@@ -792,10 +806,25 @@ export default function ManagerReport() {
   }, [allRows]);
 
   const invOptions = useMemo(() => {
-    const set = new Set(allRows.map(r => r.equipmentInv));
     return [
       { value: 'all', label: 'Вся техника (INV)' },
-      ...[...set].sort().map(v => ({ value: v, label: v })),
+      ...[...allRows]
+        .sort((a, b) => {
+          const byInv = a.equipmentInv.localeCompare(b.equipmentInv, 'ru');
+          if (byInv !== 0) return byInv;
+          return a.equipmentName.localeCompare(b.equipmentName, 'ru');
+        })
+        .reduce<Array<{ value: string; label: string }>>((acc, row) => {
+          if (acc.some(item => item.value === row.equipmentFilterKey)) return acc;
+          const suffix = row.equipmentName && row.equipmentName !== row.equipmentInv
+            ? ` · ${row.equipmentName}`
+            : '';
+          acc.push({
+            value: row.equipmentFilterKey,
+            label: `${row.equipmentInv}${suffix}`,
+          });
+          return acc;
+        }, []),
     ];
   }, [allRows]);
 
@@ -815,7 +844,7 @@ export default function ManagerReport() {
       if (filters.manager !== 'all' && row.manager !== filters.manager) return false;
       if (filters.client  !== 'all' && row.client  !== filters.client)  return false;
       if (filters.equipmentType !== 'all' && row.equipmentType !== filters.equipmentType) return false;
-      if (filters.equipmentInv  !== 'all' && row.equipmentInv  !== filters.equipmentInv)  return false;
+      if (filters.equipmentInv  !== 'all' && row.equipmentFilterKey !== filters.equipmentInv)  return false;
       if (filters.paymentStatus !== 'all' && row.paymentStatus !== filters.paymentStatus)  return false;
       if (filters.updStatus !== 'all') {
         if (filters.updStatus === 'signed'   && !row.updSigned) return false;

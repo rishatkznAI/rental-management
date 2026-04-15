@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -73,6 +73,25 @@ export default function Dashboard() {
 
   // For modal props that expect Equipment[]
   const equipmentList = equipment as Equipment[];
+  const equipmentById = useMemo(
+    () => new Map(equipmentList.map(item => [item.id, item])),
+    [equipmentList],
+  );
+  const uniqueEquipmentByInventory = useMemo(() => {
+    const counts = new Map<string, number>();
+    equipmentList.forEach(item => {
+      if (!item.inventoryNumber) return;
+      counts.set(item.inventoryNumber, (counts.get(item.inventoryNumber) || 0) + 1);
+    });
+    const uniqueMap = new Map<string, Equipment>();
+    equipmentList.forEach(item => {
+      if (!item.inventoryNumber) return;
+      if ((counts.get(item.inventoryNumber) || 0) === 1) {
+        uniqueMap.set(item.inventoryNumber, item);
+      }
+    });
+    return uniqueMap;
+  }, [equipmentList]);
 
   const [selectedKPI, setSelectedKPI] = useState<
     'utilization' | 'activeRentals' | 'overdueReturns' | 'inService' |
@@ -225,7 +244,11 @@ export default function Dashboard() {
   // Equipment in service with critical tickets (blocking rentals)
   const criticalInService = equipmentInServiceList.filter(e =>
     tickets.some(t =>
-      t.equipment === e.inventoryNumber &&
+      (
+        (t.equipmentId && t.equipmentId === e.id) ||
+        (t.serialNumber && t.serialNumber === e.serialNumber) ||
+        (!t.equipmentId && t.inventoryNumber && uniqueEquipmentByInventory.get(t.inventoryNumber)?.id === e.id)
+      ) &&
       (t.priority === 'critical' || t.priority === 'high') &&
       t.status !== 'closed'
     )
@@ -316,9 +339,17 @@ export default function Dashboard() {
     return (r.status === 'confirmed' || r.status === 'new') && s >= today && s <= soon2;
   });
   startingSoonRentals.forEach(r => {
-    const blockedEq = (r.equipment || []).filter(eqName =>
-      equipment.some(e => (e.inventoryNumber === eqName || e.model === eqName) && e.status === 'in_service')
-    );
+    const blockedEq = (r.equipment || [])
+      .map(eqName => {
+        const byUniqueInventory = uniqueEquipmentByInventory.get(eqName);
+        if (byUniqueInventory) return byUniqueInventory;
+        const exactById = equipmentById.get(eqName);
+        if (exactById) return exactById;
+        return null;
+      })
+      .filter((item): item is Equipment => Boolean(item))
+      .filter(item => item.status === 'in_service')
+      .map(item => item.inventoryNumber || `${item.manufacturer} ${item.model}`);
     if (blockedEq.length > 0) {
       const isToday = new Date(r.startDate) < tomorrowStart;
       alertItems.push({
@@ -1322,6 +1353,7 @@ export default function Dashboard() {
             id: `GR-${Date.now()}`,
             client: formData.client || '',
             clientShort: (formData.client || '').substring(0, 20),
+            equipmentId: formData.equipmentId || '',
             equipmentInv: formData.equipmentInv || '',
             startDate: formData.startDate || '',
             endDate: formData.endDate || '',
@@ -1340,9 +1372,9 @@ export default function Dashboard() {
 
           // Persist via API then invalidate queries to refresh all panels
           rentalsService.createGanttEntry(newRental).then(() => {
-            if (formData.equipmentInv) {
+            if (formData.equipmentId) {
               const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
-              const eq = equipmentList.find(e => e.inventoryNumber === formData.equipmentInv);
+              const eq = equipmentList.find(e => e.id === formData.equipmentId);
               if (eq) {
                 equipmentService.update(eq.id, {
                   status: eqStatus,

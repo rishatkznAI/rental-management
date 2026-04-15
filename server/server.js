@@ -1634,6 +1634,13 @@ async function sendMessage(userId, text) {
   });
 }
 
+function withBotMenu(text, lines = []) {
+  const footer = lines.length
+    ? `\n\nБыстро:\n${lines.map(line => `• ${line}`).join('\n')}`
+    : '';
+  return `${text}${footer}`;
+}
+
 async function registerWebhook() {
   if (!BOT_TOKEN) return;
   const webhookUrl = process.env.WEBHOOK_URL;
@@ -1656,7 +1663,10 @@ async function handleBotStarted(senderId, phone, payload) {
   const payloadLine = payload ? `\nPayload: ${payload}` : '';
   return sendMessage(
     senderId,
-    `👋 Добро пожаловать в бот «Подъёмники»!${payloadLine}\n\nДля входа напишите:\n/start email@company.ru пароль`,
+    withBotMenu(
+      `👋 Добро пожаловать в бот «Подъёмники»!${payloadLine}\n\nДля входа напишите:\n/start email@company.ru пароль`,
+      ['после входа: меню', 'новая заявка', 'мои заявки'],
+    ),
   );
 }
 
@@ -1705,6 +1715,13 @@ function clearBotSession(phone) {
   const sessions = getBotSessions();
   delete sessions[phone];
   saveBotSessions(sessions);
+}
+
+function resetBotFlow(phone) {
+  return updateBotSession(phone, {
+    pendingAction: null,
+    pendingPayload: null,
+  });
 }
 
 function normalizeBotText(value) {
@@ -1906,6 +1923,8 @@ function setCurrentRepair(phone, repairId) {
     lastEquipmentSearch: [],
     lastWorkSearch: [],
     lastPartSearch: [],
+    pendingAction: null,
+    pendingPayload: null,
   });
 }
 
@@ -2115,6 +2134,198 @@ function formatService(tickets) {
     open.length > 10 ? `... и ещё ${open.length - 10}` : ''].filter(Boolean).join('\n');
 }
 
+async function handleEquipmentSearchRequest(senderId, phone, query) {
+  const matches = searchEquipmentForBot(query);
+  if (!matches.length) {
+    updateBotSession(phone, { pendingAction: 'equipment_search', pendingPayload: null });
+    return sendMessage(
+      senderId,
+      withBotMenu(
+        '🔎 Техника не найдена. Напишите INV, SN, модель или производителя ещё раз.',
+        ['пример: 083', 'пример: B200063918', 'отмена: /сброс'],
+      ),
+    );
+  }
+  updateBotSession(phone, {
+    lastEquipmentSearch: matches.map(item => ({
+      id: item.id,
+      inventoryNumber: item.inventoryNumber,
+      serialNumber: item.serialNumber,
+      model: item.model,
+    })),
+    pendingAction: 'ticket_reason',
+    pendingPayload: null,
+  });
+  return sendMessage(senderId, withBotMenu([
+    '🚜 Найденная техника:',
+    ...matches.map((item, index) => `${index + 1}. ${formatEquipmentForBot(item)}`),
+    '',
+    'Ответьте сообщением в формате:',
+    'НОМЕР причина',
+    'Пример: 1 Течь гидравлики',
+  ].join('\n'), ['новый поиск: найти технику', 'отмена: /сброс']));
+}
+
+async function handleCreateTicketRequest(senderId, phone, authUser, selectionText) {
+  const firstSpace = selectionText.indexOf(' ');
+  if (firstSpace <= 0) {
+    updateBotSession(phone, { pendingAction: 'ticket_reason' });
+    return sendMessage(senderId, '❌ Формат: НОМЕР причина. Пример: 1 Течь гидравлики');
+  }
+  const index = Number(selectionText.slice(0, firstSpace).trim());
+  const reason = selectionText.slice(firstSpace + 1).trim();
+  const session = getBotSession(phone);
+  const lastEquipmentSearch = Array.isArray(session.lastEquipmentSearch) ? session.lastEquipmentSearch : [];
+  if (!Number.isInteger(index) || index <= 0 || index > lastEquipmentSearch.length) {
+    return sendMessage(senderId, '❌ Неверный номер техники. Сначала выполните поиск заново.');
+  }
+  if (!reason) {
+    return sendMessage(senderId, '❌ Укажите причину обращения после номера техники.');
+  }
+  const selected = lastEquipmentSearch[index - 1];
+  const equipment = (readData('equipment') || []).find(item => item.id === selected.id);
+  if (!equipment) {
+    return sendMessage(senderId, '❌ Техника больше не найдена в системе. Выполните поиск заново.');
+  }
+  const existingOpenTicket = getOpenTicketByEquipment(equipment);
+  if (existingOpenTicket) {
+    setCurrentRepair(phone, existingOpenTicket.id);
+    return sendMessage(senderId, withBotMenu([
+      `ℹ️ По этой технике уже есть открытая заявка: ${existingOpenTicket.id}`,
+      `${existingOpenTicket.equipment}`,
+      `Причина: ${existingOpenTicket.reason}`,
+      '',
+      'Я открыл её как текущую.',
+    ].join('\n'), ['черновик', 'работы гидравлика', 'запчасти фильтр', 'готово', 'закрыть']));
+  }
+  const ticket = createServiceTicketFromBot(equipment, authUser, reason);
+  setCurrentRepair(phone, ticket.id);
+  return sendMessage(senderId, withBotMenu([
+    `✅ Создана заявка ${ticket.id}`,
+    formatEquipmentForBot(equipment),
+    `Причина: ${ticket.reason}`,
+    '',
+    'Заявка открыта как текущая.',
+  ].join('\n'), ['итог', 'работы гидравлика', 'запчасти фильтр', 'черновик', 'готово']));
+}
+
+async function handleWorkSearchRequest(senderId, phone, ticket, query) {
+  const matches = searchServiceWorks(query);
+  if (!matches.length) {
+    updateBotSession(phone, { pendingAction: 'work_search', activeRepairId: ticket.id });
+    return sendMessage(senderId, '🔎 По этому запросу активные работы не найдены. Напишите другой запрос.');
+  }
+  updateBotSession(phone, {
+    activeRepairId: ticket.id,
+    lastWorkSearch: matches.map(item => ({ id: item.id, name: item.name })),
+    pendingAction: 'work_pick',
+    pendingPayload: null,
+  });
+  return sendMessage(senderId, withBotMenu([
+    '🧰 Найденные работы:',
+    ...matches.map((item, index) => `${index + 1}. ${item.name}${item.category ? ` · ${item.category}` : ''} · ${Number(item.normHours || 0).toLocaleString('ru-RU')} н/ч`),
+    '',
+    'Ответьте сообщением:',
+    'НОМЕР КОЛИЧЕСТВО',
+    'Пример: 1 2',
+  ].join('\n'), ['новый поиск работ', 'черновик', 'отмена: /сброс']));
+}
+
+async function handleAddWorkRequest(senderId, phone, authUser, ticket, selectionText) {
+  const [indexRaw, qtyRaw] = selectionText.trim().split(/\s+/);
+  const index = Number(indexRaw);
+  const quantity = Number(qtyRaw);
+  const session = getBotSession(phone);
+  const lastWorkSearch = Array.isArray(session.lastWorkSearch) ? session.lastWorkSearch : [];
+  if (!Number.isInteger(index) || index <= 0 || index > lastWorkSearch.length) {
+    return sendMessage(senderId, '❌ Номер работы указан неверно. Сначала выполните поиск работ.');
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return sendMessage(senderId, '❌ Количество работы должно быть числом больше 0.');
+  }
+  const selected = lastWorkSearch[index - 1];
+  const work = (readData('service_works') || []).find(item => item.id === selected.id && item.isActive !== false);
+  if (!work) {
+    return sendMessage(senderId, '❌ Работа больше недоступна в справочнике. Выполните поиск заново.');
+  }
+  addRepairWorkItemFromCatalog(ticket, work, quantity);
+  const updated = appendServiceLog(ticket, `Добавлена работа через MAX: ${work.name} × ${quantity}`, authUser.userName, 'repair_result');
+  saveServiceTicket(updated);
+  resetBotFlow(phone);
+  return sendMessage(senderId, withBotMenu(`✅ Добавлена работа: ${work.name} × ${quantity}`, ['ещё работы', 'запчасти', 'черновик', 'готово']));
+}
+
+async function handlePartSearchRequest(senderId, phone, ticket, query) {
+  const matches = searchSpareParts(query);
+  if (!matches.length) {
+    updateBotSession(phone, { pendingAction: 'part_search', activeRepairId: ticket.id });
+    return sendMessage(senderId, '🔎 По этому запросу активные запчасти не найдены. Напишите другой запрос.');
+  }
+  updateBotSession(phone, {
+    activeRepairId: ticket.id,
+    lastPartSearch: matches.map(item => ({ id: item.id, name: item.name })),
+    pendingAction: 'part_pick',
+    pendingPayload: null,
+  });
+  return sendMessage(senderId, withBotMenu([
+    '📦 Найденные запчасти:',
+    ...matches.map((item, index) => `${index + 1}. ${item.name}${item.article ? ` · ${item.article}` : ''} · ${Number(item.defaultPrice || 0).toLocaleString('ru-RU')} ₽/${item.unit || 'шт'}`),
+    '',
+    'Ответьте сообщением:',
+    'НОМЕР КОЛИЧЕСТВО [ЦЕНА]',
+    'Пример: 1 2 3500',
+    'Если цену не указать, возьмётся базовая из справочника.',
+  ].join('\n'), ['новый поиск запчастей', 'черновик', 'отмена: /сброс']));
+}
+
+async function handleAddPartRequest(senderId, phone, authUser, ticket, selectionText) {
+  const [indexRaw, qtyRaw, priceRaw] = selectionText.trim().split(/\s+/);
+  const index = Number(indexRaw);
+  const quantity = Number(qtyRaw);
+  const session = getBotSession(phone);
+  const lastPartSearch = Array.isArray(session.lastPartSearch) ? session.lastPartSearch : [];
+  if (!Number.isInteger(index) || index <= 0 || index > lastPartSearch.length) {
+    return sendMessage(senderId, '❌ Номер запчасти указан неверно. Сначала выполните поиск запчастей.');
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return sendMessage(senderId, '❌ Количество запчасти должно быть числом больше 0.');
+  }
+  const selected = lastPartSearch[index - 1];
+  const part = (readData('spare_parts') || []).find(item => item.id === selected.id && item.isActive !== false);
+  if (!part) {
+    return sendMessage(senderId, '❌ Запчасть больше недоступна в справочнике. Выполните поиск заново.');
+  }
+  const price = priceRaw == null ? Number(part.defaultPrice || 0) : Number(priceRaw);
+  if (!Number.isFinite(price) || price < 0) {
+    return sendMessage(senderId, '❌ Цена должна быть числом не меньше 0.');
+  }
+  addRepairPartItemFromCatalog(ticket, part, quantity, price);
+  const updated = appendServiceLog(ticket, `Добавлена запчасть через MAX: ${part.name} × ${quantity}`, authUser.userName, 'repair_result');
+  saveServiceTicket(updated);
+  resetBotFlow(phone);
+  return sendMessage(senderId, withBotMenu(`✅ Добавлена запчасть: ${part.name} × ${quantity} по ${price.toLocaleString('ru-RU')} ₽`, ['ещё запчасти', 'работы', 'черновик', 'готово']));
+}
+
+async function handleSummaryRequest(senderId, phone, authUser, ticket, summary) {
+  if (!summary) {
+    updateBotSession(phone, { pendingAction: 'summary', activeRepairId: ticket.id });
+    return sendMessage(senderId, '📝 Напишите следующим сообщением итог ремонта одним текстом.');
+  }
+  const updated = appendServiceLog({
+    ...ticket,
+    result: summary,
+    resultData: {
+      ...(ticket.resultData || {}),
+      summary,
+      worksPerformed: ticket.resultData?.worksPerformed || [],
+      partsUsed: ticket.resultData?.partsUsed || [],
+    },
+  }, 'Обновлён итог ремонта через MAX', authUser.userName, 'repair_result');
+  saveServiceTicket(updated);
+  resetBotFlow(phone);
+  return sendMessage(senderId, withBotMenu(`✅ Итог ремонта сохранён для ${ticket.id}`, ['работы', 'запчасти', 'черновик', 'готово']));
+}
+
 function getHelpText(role) {
   const lines = [
     '',
@@ -2157,7 +2368,10 @@ async function handleCommand(senderId, phone, text) {
   if (lower.startsWith('/start')) {
     if (parts.length < 3) {
       return sendMessage(senderId,
-        '👋 Добро пожаловать в бот «Подъёмники»!\n\nДля входа напишите:\n/start email@company.ru пароль'
+        withBotMenu(
+          '👋 Добро пожаловать в бот «Подъёмники»!\n\nДля входа напишите:\n/start email@company.ru пароль',
+          ['после входа: меню', 'новая заявка', 'мои заявки'],
+        )
       );
     }
     const [, email, password] = parts;
@@ -2168,7 +2382,10 @@ async function handleCommand(senderId, phone, text) {
       );
     }
     return sendMessage(senderId,
-      `✅ Вы вошли как ${user.name} (${user.role})\n${getHelpText(user.role)}`
+      withBotMenu(
+        `✅ Вы вошли как ${user.name} (${user.role})\n${getHelpText(user.role)}`,
+        ['меню', 'мои заявки', 'новая заявка'],
+      )
     );
   }
 
@@ -2181,6 +2398,37 @@ async function handleCommand(senderId, phone, text) {
 
   const { userName, userRole } = authUser;
   const canManageRepair = userRole === 'Механик' || userRole === 'Администратор';
+  const session = getBotSession(phone);
+
+  if (!trimmed.startsWith('/') && canManageRepair) {
+    const currentTicket = getCurrentRepair(phone);
+    if (session.pendingAction === 'equipment_search') {
+      return handleEquipmentSearchRequest(senderId, phone, trimmed);
+    }
+    if (session.pendingAction === 'ticket_reason') {
+      return handleCreateTicketRequest(senderId, phone, authUser, trimmed);
+    }
+    if (session.pendingAction === 'work_search') {
+      if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+      return handleWorkSearchRequest(senderId, phone, currentTicket, trimmed);
+    }
+    if (session.pendingAction === 'work_pick') {
+      if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+      return handleAddWorkRequest(senderId, phone, authUser, currentTicket, trimmed);
+    }
+    if (session.pendingAction === 'part_search') {
+      if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+      return handlePartSearchRequest(senderId, phone, currentTicket, trimmed);
+    }
+    if (session.pendingAction === 'part_pick') {
+      if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+      return handleAddPartRequest(senderId, phone, authUser, currentTicket, trimmed);
+    }
+    if (session.pendingAction === 'summary') {
+      if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+      return handleSummaryRequest(senderId, phone, authUser, currentTicket, trimmed);
+    }
+  }
 
   if (lower === '/аренды' || lower === '/rentals' || lower === '/мои' || lower === 'аренды') {
     const rentals = readData('rentals') || [];
@@ -2200,82 +2448,38 @@ async function handleCommand(senderId, phone, text) {
     return sendMessage(senderId, formatServiceForUser(authUser));
   }
 
+  if ((lower === '/меню' || lower === 'меню') && canManageRepair) {
+    return sendMessage(
+      senderId,
+      withBotMenu(getHelpText(userRole), ['мои заявки', 'новая заявка', 'черновик']),
+    );
+  }
+
+  if ((lower === '/новаязаявка' || lower === 'новая заявка' || lower === 'создать заявку') && canManageRepair) {
+    updateBotSession(phone, {
+      pendingAction: 'equipment_search',
+      pendingPayload: null,
+      lastEquipmentSearch: [],
+    });
+    return sendMessage(
+      senderId,
+      '🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.',
+    );
+  }
+
   if ((lower.startsWith('/найтитехнику') || lower.startsWith('/техпоиск')) && canManageRepair) {
     const command = lower.startsWith('/техпоиск') ? '/техпоиск' : '/найтитехнику';
     const query = trimmed.slice(command.length).trim();
-    const matches = searchEquipmentForBot(query);
-    if (!matches.length) {
-      return sendMessage(senderId, '🔎 Техника не найдена. Ищите по INV, SN, модели или производителю.');
+    if (!query) {
+      updateBotSession(phone, { pendingAction: 'equipment_search', pendingPayload: null });
+      return sendMessage(senderId, '🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.');
     }
-    updateBotSession(phone, {
-      lastEquipmentSearch: matches.map(item => ({
-        id: item.id,
-        inventoryNumber: item.inventoryNumber,
-        serialNumber: item.serialNumber,
-        model: item.model,
-      })),
-    });
-    return sendMessage(senderId, [
-      '🚜 Найденная техника:',
-      ...matches.map((item, index) => `${index + 1}. ${formatEquipmentForBot(item)}`),
-      '',
-      'Чтобы открыть ремонт: /создатьзаявку НОМЕР причина',
-      'Пример: /создатьзаявку 1 Течь гидравлики',
-    ].join('\n'));
+    return handleEquipmentSearchRequest(senderId, phone, query);
   }
 
   if (lower.startsWith('/создатьзаявку ') && canManageRepair) {
     const ticketArgs = trimmed.slice('/создатьзаявку'.length).trim();
-    const firstSpace = ticketArgs.indexOf(' ');
-    if (firstSpace <= 0) {
-      return sendMessage(senderId, '❌ Формат команды: /создатьзаявку НОМЕР причина');
-    }
-    const index = Number(ticketArgs.slice(0, firstSpace).trim());
-    const reason = ticketArgs.slice(firstSpace + 1).trim();
-    const session = getBotSession(phone);
-    const lastEquipmentSearch = Array.isArray(session.lastEquipmentSearch) ? session.lastEquipmentSearch : [];
-    if (!Number.isInteger(index) || index <= 0 || index > lastEquipmentSearch.length) {
-      return sendMessage(senderId, '❌ Неверный номер техники. Сначала выполните /найтитехнику поиск.');
-    }
-    if (!reason) {
-      return sendMessage(senderId, '❌ Укажите причину обращения после номера техники.');
-    }
-    const selected = lastEquipmentSearch[index - 1];
-    const equipment = (readData('equipment') || []).find(item => item.id === selected.id);
-    if (!equipment) {
-      return sendMessage(senderId, '❌ Техника больше не найдена в системе. Выполните поиск заново.');
-    }
-    const existingOpenTicket = getOpenTicketByEquipment(equipment);
-    if (existingOpenTicket) {
-      setCurrentRepair(phone, existingOpenTicket.id);
-      return sendMessage(senderId, [
-        `ℹ️ По этой технике уже есть открытая заявка: ${existingOpenTicket.id}`,
-        `${existingOpenTicket.equipment}`,
-        `Причина: ${existingOpenTicket.reason}`,
-        '',
-        'Я открыл её как текущую. Можете продолжать работу:',
-        '• /итог текст',
-        '• /работы поиск',
-        '• /запчасти поиск',
-        '• /готово',
-        '• /закрыть',
-      ].join('\n'));
-    }
-    const ticket = createServiceTicketFromBot(equipment, authUser, reason);
-    setCurrentRepair(phone, ticket.id);
-    return sendMessage(senderId, [
-      `✅ Создана заявка ${ticket.id}`,
-      formatEquipmentForBot(equipment),
-      `Причина: ${ticket.reason}`,
-      '',
-      'Заявка уже открыта как текущая. Дальше можно писать:',
-      '• /итог текст',
-      '• /работы поиск',
-      '• /запчасти поиск',
-      '• /черновик',
-      '• /готово',
-      '• /закрыть',
-    ].join('\n'));
+    return handleCreateTicketRequest(senderId, phone, authUser, ticketArgs);
   }
 
   if (lower.startsWith('/вработу ') && canManageRepair) {
@@ -2295,18 +2499,13 @@ async function handleCommand(senderId, phone, text) {
     saveServiceTicket(updated);
     const withStatus = updateServiceTicketStatus(updated, 'in_progress', assignedName, 'Заявка взята в работу через MAX');
     setCurrentRepair(phone, withStatus.id);
-    return sendMessage(senderId, [
+    return sendMessage(senderId, withBotMenu([
       `✅ Заявка ${withStatus.id} взята в работу`,
       `${withStatus.equipment}`,
       `Причина: ${withStatus.reason}`,
       '',
-      'Дальше можно сразу работать в чате:',
-      '• /итог текст',
-      '• /работы гидравлика',
-      '• /запчасти фильтр',
-      '• /черновик',
-      '• /готово',
-    ].join('\n'));
+      'Можно сразу работать в чате.',
+    ].join('\n'), ['итог', 'работы гидравлика', 'запчасти фильтр', 'черновик', 'готово']));
   }
 
   if (lower.startsWith('/ремонт ') && canManageRepair) {
@@ -2316,18 +2515,14 @@ async function handleCommand(senderId, phone, text) {
       return sendMessage(senderId, '❌ Заявка не найдена.');
     }
     setCurrentRepair(phone, ticket.id);
-    return sendMessage(senderId, [
+    return sendMessage(senderId, withBotMenu([
       `🛠 Текущая заявка: ${ticket.id}`,
       `${ticket.equipment}`,
       `Причина: ${ticket.reason}`,
       `Статус: ${serviceStatusLabel(ticket.status)}`,
       '',
-      'Теперь можно отправлять:',
-      '• /итог текст',
-      '• /работы поиск',
-      '• /запчасти поиск',
-      '• /черновик',
-    ].join('\n'));
+      'Теперь можно работать по заявке.',
+    ].join('\n'), ['итог', 'работы поиск', 'запчасти поиск', 'черновик']));
   }
 
   if (lower === '/черновик' && canManageRepair) {
@@ -2349,21 +2544,15 @@ async function handleCommand(senderId, phone, text) {
       return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
     }
     const summary = trimmed.slice('/итог'.length).trim();
-    if (!summary) {
-      return sendMessage(senderId, '❌ После команды /итог нужно написать текст результата ремонта.');
+    return handleSummaryRequest(senderId, phone, authUser, ticket, summary);
+  }
+
+  if ((lower === '/итог' || lower === 'итог') && canManageRepair) {
+    const ticket = getCurrentRepair(phone);
+    if (!ticket) {
+      return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
     }
-    const updated = appendServiceLog({
-      ...ticket,
-      result: summary,
-      resultData: {
-        ...(ticket.resultData || {}),
-        summary,
-        worksPerformed: ticket.resultData?.worksPerformed || [],
-        partsUsed: ticket.resultData?.partsUsed || [],
-      },
-    }, 'Обновлён итог ремонта через MAX', authUser.userName, 'repair_result');
-    saveServiceTicket(updated);
-    return sendMessage(senderId, `✅ Итог ремонта сохранён для ${ticket.id}`);
+    return handleSummaryRequest(senderId, phone, authUser, ticket, '');
   }
 
   if (lower.startsWith('/работы') && canManageRepair) {
@@ -2372,21 +2561,11 @@ async function handleCommand(senderId, phone, text) {
       return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
     }
     const query = trimmed.slice('/работы'.length).trim();
-    const matches = searchServiceWorks(query);
-    if (!matches.length) {
-      return sendMessage(senderId, '🔎 По этому запросу активные работы не найдены.');
+    if (!query) {
+      updateBotSession(phone, { pendingAction: 'work_search', activeRepairId: ticket.id });
+      return sendMessage(senderId, '🧰 Напишите следующим сообщением запрос для поиска работ. Например: гидравлика');
     }
-    updateBotSession(phone, {
-      activeRepairId: ticket.id,
-      lastWorkSearch: matches.map(item => ({ id: item.id, name: item.name })),
-    });
-    return sendMessage(senderId, [
-      '🧰 Найденные работы:',
-      ...matches.map((item, index) => `${index + 1}. ${item.name}${item.category ? ` · ${item.category}` : ''} · ${Number(item.normHours || 0).toLocaleString('ru-RU')} н/ч`),
-      '',
-      'Добавить: /добавитьработу НОМЕР КОЛИЧЕСТВО',
-      'Пример: /добавитьработу 1 2',
-    ].join('\n'));
+    return handleWorkSearchRequest(senderId, phone, ticket, query);
   }
 
   if (lower.startsWith('/добавитьработу ') && canManageRepair) {
@@ -2394,26 +2573,7 @@ async function handleCommand(senderId, phone, text) {
     if (!ticket) {
       return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
     }
-    const [, indexRaw, qtyRaw] = parts;
-    const index = Number(indexRaw);
-    const quantity = Number(qtyRaw);
-    const session = getBotSession(phone);
-    const lastWorkSearch = Array.isArray(session.lastWorkSearch) ? session.lastWorkSearch : [];
-    if (!Number.isInteger(index) || index <= 0 || index > lastWorkSearch.length) {
-      return sendMessage(senderId, '❌ Номер работы указан неверно. Сначала выполните /работы поиск.');
-    }
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      return sendMessage(senderId, '❌ Количество работы должно быть числом больше 0.');
-    }
-    const selected = lastWorkSearch[index - 1];
-    const work = (readData('service_works') || []).find(item => item.id === selected.id && item.isActive !== false);
-    if (!work) {
-      return sendMessage(senderId, '❌ Работа больше недоступна в справочнике. Выполните поиск заново.');
-    }
-    addRepairWorkItemFromCatalog(ticket, work, quantity);
-    const updated = appendServiceLog(ticket, `Добавлена работа через MAX: ${work.name} × ${quantity}`, authUser.userName, 'repair_result');
-    saveServiceTicket(updated);
-    return sendMessage(senderId, `✅ Добавлена работа: ${work.name} × ${quantity}`);
+    return handleAddWorkRequest(senderId, phone, authUser, ticket, trimmed.slice('/добавитьработу'.length).trim());
   }
 
   if (lower.startsWith('/запчасти') && canManageRepair) {
@@ -2422,22 +2582,11 @@ async function handleCommand(senderId, phone, text) {
       return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
     }
     const query = trimmed.slice('/запчасти'.length).trim();
-    const matches = searchSpareParts(query);
-    if (!matches.length) {
-      return sendMessage(senderId, '🔎 По этому запросу активные запчасти не найдены.');
+    if (!query) {
+      updateBotSession(phone, { pendingAction: 'part_search', activeRepairId: ticket.id });
+      return sendMessage(senderId, '📦 Напишите следующим сообщением запрос для поиска запчастей. Например: фильтр');
     }
-    updateBotSession(phone, {
-      activeRepairId: ticket.id,
-      lastPartSearch: matches.map(item => ({ id: item.id, name: item.name })),
-    });
-    return sendMessage(senderId, [
-      '📦 Найденные запчасти:',
-      ...matches.map((item, index) => `${index + 1}. ${item.name}${item.article ? ` · ${item.article}` : ''} · ${Number(item.defaultPrice || 0).toLocaleString('ru-RU')} ₽/${item.unit || 'шт'}`),
-      '',
-      'Добавить: /добавитьзапчасть НОМЕР КОЛИЧЕСТВО [ЦЕНА]',
-      'Пример: /добавитьзапчасть 1 2 3500',
-      'Если цену не указать, возьмётся базовая из справочника.',
-    ].join('\n'));
+    return handlePartSearchRequest(senderId, phone, ticket, query);
   }
 
   if (lower.startsWith('/добавитьзапчасть ') && canManageRepair) {
@@ -2445,30 +2594,7 @@ async function handleCommand(senderId, phone, text) {
     if (!ticket) {
       return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
     }
-    const [, indexRaw, qtyRaw, priceRaw] = parts;
-    const index = Number(indexRaw);
-    const quantity = Number(qtyRaw);
-    const session = getBotSession(phone);
-    const lastPartSearch = Array.isArray(session.lastPartSearch) ? session.lastPartSearch : [];
-    if (!Number.isInteger(index) || index <= 0 || index > lastPartSearch.length) {
-      return sendMessage(senderId, '❌ Номер запчасти указан неверно. Сначала выполните /запчасти поиск.');
-    }
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      return sendMessage(senderId, '❌ Количество запчасти должно быть числом больше 0.');
-    }
-    const selected = lastPartSearch[index - 1];
-    const part = (readData('spare_parts') || []).find(item => item.id === selected.id && item.isActive !== false);
-    if (!part) {
-      return sendMessage(senderId, '❌ Запчасть больше недоступна в справочнике. Выполните поиск заново.');
-    }
-    const price = priceRaw == null ? Number(part.defaultPrice || 0) : Number(priceRaw);
-    if (!Number.isFinite(price) || price < 0) {
-      return sendMessage(senderId, '❌ Цена должна быть числом не меньше 0.');
-    }
-    addRepairPartItemFromCatalog(ticket, part, quantity, price);
-    const updated = appendServiceLog(ticket, `Добавлена запчасть через MAX: ${part.name} × ${quantity}`, authUser.userName, 'repair_result');
-    saveServiceTicket(updated);
-    return sendMessage(senderId, `✅ Добавлена запчасть: ${part.name} × ${quantity} по ${price.toLocaleString('ru-RU')} ₽`);
+    return handleAddPartRequest(senderId, phone, authUser, ticket, trimmed.slice('/добавитьзапчасть'.length).trim());
   }
 
   if (lower === '/ожидание' && canManageRepair) {
@@ -2486,11 +2612,11 @@ async function handleCommand(senderId, phone, text) {
       return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
     }
     const updated = updateServiceTicketStatus(ticket, 'ready', authUser.userName, 'Работы завершены через MAX');
-    return sendMessage(senderId, [
+    return sendMessage(senderId, withBotMenu([
       `✅ Заявка ${updated.id} переведена в статус «Готово»`,
       'Если нужно, можно ещё закрыть её командой /закрыть',
       'Или посмотреть отчет: /черновик',
-    ].join('\n'));
+    ].join('\n'), ['черновик', 'закрыть', 'мои заявки']));
   }
 
   if (lower === '/закрыть' && canManageRepair) {
@@ -2500,7 +2626,7 @@ async function handleCommand(senderId, phone, text) {
     }
     const updated = updateServiceTicketStatus(ticket, 'closed', authUser.userName, 'Заявка закрыта через MAX');
     clearBotSession(phone);
-    return sendMessage(senderId, `✅ Заявка ${updated.id} закрыта.`);
+    return sendMessage(senderId, withBotMenu(`✅ Заявка ${updated.id} закрыта.`, ['мои заявки', 'новая заявка', 'меню']));
   }
 
   if (lower === '/помощь' || lower === '/help' || lower === 'помощь') {

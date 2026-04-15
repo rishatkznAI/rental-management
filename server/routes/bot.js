@@ -16,10 +16,8 @@ function registerBotRoutes(app, deps) {
         if (update.update_type === 'bot_started') {
           const user = update.user;
           if (!user?.user_id) continue;
-          // chat_id для bot_started: берём из update.chat или fallback к user_id
-          const startChatId = update.chat?.chat_id || user.user_id;
-          logger.log(`[BOT] [${user.name || user.user_id}] bot_started chatId=${startChatId}`);
-          await handleBotStarted(startChatId, String(startChatId), update.payload);
+          logger.log(`[BOT] [${user.name || user.user_id}] bot_started`);
+          await handleBotStarted(user.user_id, user.user_id, update.payload);
           continue;
         }
 
@@ -29,16 +27,13 @@ function registerBotRoutes(app, deps) {
         const sender = msg?.sender;
         if (!sender?.user_id) continue;
 
-        // MAX API: для отправки ответа нужен chat_id, а не user_id
-        // Используем chat_id как единый ключ сессий и цель для sendMessage
-        const chatId = msg?.recipient?.chat_id || sender.user_id;
-        const senderId = chatId;
-        const phone = String(chatId);
+        const senderId = sender.user_id;
+        const phone = sender.user_id;
         const text = msg?.body?.text || '';
 
         if (!text.trim()) continue;
 
-        logger.log(`[BOT] [${sender.name || sender.user_id}] chatId=${chatId} ${text}`);
+        logger.log(`[BOT] [${sender.name || senderId}] ${text}`);
         await handleCommand(senderId, phone, text);
       }
     } catch (err) {

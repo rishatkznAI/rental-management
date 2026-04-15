@@ -23,10 +23,10 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
     }
   }
 
-  async function sendMessage(userId, text) {
-    logger.log(`[MAX API] sendMessage → userId=${userId} text="${String(text).slice(0, 60)}"`);
+  async function sendMessage(chatId, text) {
+    logger.log(`[MAX API] sendMessage → chatId=${chatId} text="${String(text).slice(0, 60)}"`);
     const res = await maxRequest('POST', '/messages', {
-      recipient: { user_id: userId },
+      recipient: { chat_id: chatId },
       body: { type: 'text', text },
     });
     logger.log(`[MAX API] sendMessage ← ${JSON.stringify(res).slice(0, 200)}`);

@@ -601,8 +601,12 @@ function createBotHandlers(deps) {
     const lower = trimmed.toLowerCase();
     const parts = trimmed.split(/\s+/);
 
+    console.log('[TRACE] handleCommand senderId=%s phone=%s text=%s', senderId, phone, text);
+
     if (lower.startsWith('/start')) {
+      console.log('[TRACE] /start matched, parts=%d', parts.length);
       if (parts.length < 3) {
+        console.log('[TRACE] sending welcome (no args)');
         return sendMessage(senderId,
           withBotMenu(
             '👋 Добро пожаловать в бот «Подъёмники»!\n\nДля входа напишите:\n/start email@company.ru пароль',
@@ -611,12 +615,22 @@ function createBotHandlers(deps) {
         );
       }
       const [, email, password] = parts;
-      const user = authorizeUser(String(phone), email, password);
+      console.log('[TRACE] authorizing email=%s', email);
+      let user;
+      try {
+        user = authorizeUser(String(phone), email, password);
+      } catch (e) {
+        console.error('[TRACE] authorizeUser threw:', e.message, e.stack);
+        return sendMessage(senderId, '❌ Внутренняя ошибка авторизации. Попробуйте позже.');
+      }
+      console.log('[TRACE] user=%s', user ? user.name : 'null');
       if (!user) {
+        console.log('[TRACE] sending auth error');
         return sendMessage(senderId,
           '❌ Неверный email или пароль, либо аккаунт деактивирован.\n\nПопробуйте снова:\n/start email@company.ru пароль',
         );
       }
+      console.log('[TRACE] sending welcome message for user');
       return sendMessage(senderId,
         withBotMenu(
           `✅ Вы вошли как ${user.name} (${user.role})\n${getHelpText(user.role)}`,

@@ -46,7 +46,8 @@ function registerBotRoutes(app, deps) {
         await handleCommand(senderId, phone, text);
       }
     } catch (err) {
-      logger.error('[BOT] Ошибка обработки webhook:', err.message);
+      logger.error('[BOT] Ошибка обработки webhook:', err?.message || String(err));
+      logger.error('[BOT] Stack:', err?.stack || 'no stack');
     }
   });
 }

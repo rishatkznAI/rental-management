@@ -113,6 +113,17 @@ function registerSystemRoutes(app, deps) {
     res.json({ ok: true, service: 'rental-management-api', uptime: Math.round(process.uptime()) });
   });
 
+  app.get('/api/bot-test', async (req, res) => {
+    const chatId = Number(req.query.chatId) || 134374193;
+    const text = req.query.text || 'Тест бота';
+    try {
+      const result = await sendMessage(chatId, text);
+      res.json({ ok: true, chatId, text, maxApiResponse: result });
+    } catch (err) {
+      res.json({ ok: false, error: err.message, stack: err.stack });
+    }
+  });
+
   app.get('/api/status', (req, res) => {
     const equipment = readData('equipment') || [];
     const rentals = readData('rentals') || [];

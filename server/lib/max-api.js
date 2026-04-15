@@ -1,10 +1,10 @@
 function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logger = console }) {
   async function maxRequest(method, endpoint, body = null) {
-    const url = `${maxApiBase}${endpoint}`;
+    // MAX Bot API аутентификация: access_token передаётся как query-параметр
+    const url = `${maxApiBase}${endpoint}?access_token=${botToken}`;
     const opts = {
       method,
       headers: {
-        Authorization: botToken,
         'Content-Type': 'application/json',
       },
     };
@@ -13,6 +13,9 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
     try {
       const res = await fetchImpl(url, opts);
       const json = await res.json();
+      if (json.error) {
+        logger.error(`[MAX API] Ошибка ответа (${endpoint}):`, JSON.stringify(json));
+      }
       return json;
     } catch (err) {
       logger.error('[MAX API] Ошибка:', err.message);

@@ -3,7 +3,7 @@ import {
   X, Calendar, CreditCard, FileText, User, MessageSquare,
   ArrowRight, RotateCcw, CirclePause as PauseCircle,
   CircleCheck, CircleAlert, Clock, Trash2, Plus, ChevronDown, ChevronUp,
-  CalendarClock, LogOut
+  CalendarClock, LogOut, Edit
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';

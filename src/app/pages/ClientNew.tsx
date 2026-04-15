@@ -14,6 +14,8 @@ import {
 import { ArrowLeft, Info } from 'lucide-react';
 import { useCreateClient } from '../hooks/useClients';
 import { api } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
+import { createAuditEntry } from '../lib/entity-history';
 import type { Client } from '../types';
 
 const PAYMENT_TERMS_OPTIONS = [
@@ -59,6 +61,7 @@ function FieldWrapper({
 export default function ClientNew() {
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const { user } = useAuth();
   const createClient = useCreateClient();
   const [managers, setManagers] = React.useState<{ id: string; name: string; role: string; status: string }[]>([]);
 
@@ -104,7 +107,13 @@ export default function ClientNew() {
       notes:        formData.notes     || undefined,
       status:       'active',
       createdAt:    now,
-      createdBy:    'Оператор',
+      createdBy:    user?.name || 'Оператор',
+      history: [
+        createAuditEntry(
+          user?.name || 'Оператор',
+          `Клиент создан: ${formData.companyName}`,
+        ),
+      ],
     }, { onSuccess: (newClient) => navigate(`/clients/${newClient.id}`) });
   };
 

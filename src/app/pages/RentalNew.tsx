@@ -17,9 +17,12 @@ import { useEquipmentList, useUpdateEquipment } from '../hooks/useEquipment';
 import { useGanttData } from '../hooks/useRentals';
 import { rentalsService } from '../services/rentals.service';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData } from '../mock-data';
 import type { EquipmentStatus } from '../types';
 import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
+import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
+import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/utils';
 import { isEquipmentBusy } from '../lib/rental-conflicts';
 import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
@@ -27,6 +30,7 @@ import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
 export default function RentalNew() {
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const { user } = useAuth();
   const qc = useQueryClient();
   const updateEquipment = useUpdateEquipment();
   const { data: clients = [] } = useClientsList();
@@ -96,7 +100,20 @@ export default function RentalNew() {
       paymentStatus: 'unpaid',
       updSigned: false,
       amount: totalPrice,
-      comments: [],
+      comments: [
+        buildRentalCreationHistory(
+          {
+            client,
+            startDate,
+            endDate,
+            status: initialStatus,
+          },
+          user?.name || 'Система',
+        ),
+        ...(notes.trim()
+          ? [createRentalHistoryEntry(user?.name || 'Система', notes.trim(), 'comment')]
+          : []),
+      ],
     });
 
     // Classic rental
@@ -118,10 +135,23 @@ export default function RentalNew() {
     // Update equipment status
     if (selectedEquipment) {
       const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
+      const equipmentWithHistory = appendAuditHistory(
+        {
+          ...selectedEquipment,
+          status: eqStatus,
+          currentClient: initialStatus === 'active' ? client : selectedEquipment.currentClient,
+          returnDate: initialStatus === 'active' ? endDate : selectedEquipment.returnDate,
+        },
+        createAuditEntry(
+          user?.name || 'Система',
+          initialStatus === 'active'
+            ? `Создана аренда и техника выдана клиенту ${client}`
+            : `Создана бронь под клиента ${client}`,
+        ),
+      );
+      const { id: _equipmentId, ...equipmentUpdateData } = equipmentWithHistory;
       updateEquipment.mutate({ id: selectedEquipment.id, data: {
-        status: eqStatus,
-        currentClient: initialStatus === 'active' ? client : selectedEquipment.currentClient,
-        returnDate: initialStatus === 'active' ? endDate : selectedEquipment.returnDate,
+        ...equipmentUpdateData,
       } });
     }
 

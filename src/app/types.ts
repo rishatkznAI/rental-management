@@ -10,6 +10,13 @@ export type RepairEventType = 'repair' | 'maintenance' | 'diagnostics' | 'breakd
 export type RepairSource = 'manual' | 'bot';
 export type ShippingEventType = 'shipping' | 'receiving';
 
+export interface AuditEntry {
+  date: string;
+  text: string;
+  author: string;
+  type?: 'system' | 'comment';
+}
+
 export interface Equipment {
   id: string;
   inventoryNumber: string;
@@ -40,6 +47,7 @@ export interface Equipment {
   currentClient?: string;
   returnDate?: string;
   photo?: string;
+  history?: AuditEntry[];
 }
 
 export interface RepairRecord {
@@ -240,6 +248,7 @@ export interface Client {
   notes?: string;
   createdAt?: string;
   createdBy?: string;
+  history?: AuditEntry[];
 }
 
 export type DocumentType = 'contract' | 'act' | 'invoice';

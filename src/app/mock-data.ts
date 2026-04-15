@@ -94,7 +94,14 @@ export interface GanttRentalData {
   updDate?: string;
   amount: number;
   expectedPaymentDate?: string;
-  comments: { date: string; text: string; author: string }[];
+  comments: RentalHistoryEntry[];
+}
+
+export interface RentalHistoryEntry {
+  date: string;
+  text: string;
+  author: string;
+  type?: 'system' | 'comment';
 }
 
 export interface DowntimePeriod {

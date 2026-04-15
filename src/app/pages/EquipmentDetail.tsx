@@ -16,7 +16,7 @@ import {
   SHIPPING_PHOTOS_KEY,
 } from '../mock-data';
 import type { ShippingPhoto, ServiceTicket, Payment } from '../types';
-import { formatDate, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
+import { formatDate, formatDateTime, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
@@ -38,6 +38,7 @@ import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
+import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -328,20 +329,32 @@ export default function EquipmentDetail() {
       if (eq.id !== equipment.id) return eq;
 
       if (uploadEventType === 'shipping') {
-        return {
-          ...eq,
-          status: 'rented' as const,
-          currentClient: activeOrCreatedRental?.client || eq.currentClient,
-          returnDate: activeOrCreatedRental?.endDate || eq.returnDate,
-        };
+        return appendAuditHistory(
+          {
+            ...eq,
+            status: 'rented' as const,
+            currentClient: activeOrCreatedRental?.client || eq.currentClient,
+            returnDate: activeOrCreatedRental?.endDate || eq.returnDate,
+          },
+          createAuditEntry(
+            authorName,
+            `Техника отгружена в аренду${activeOrCreatedRental?.client ? ` клиенту ${activeOrCreatedRental.client}` : ''}. Добавлен фотоотчёт отправки (${uploadPending.length} фото)`,
+          ),
+        );
       }
 
-      return {
-        ...eq,
-        status: 'in_service' as const,
-        currentClient: undefined,
-        returnDate: undefined,
-      };
+      return appendAuditHistory(
+        {
+          ...eq,
+          status: 'in_service' as const,
+          currentClient: undefined,
+          returnDate: undefined,
+        },
+        createAuditEntry(
+          authorName,
+          `Техника принята с аренды и переведена в сервис. Добавлен фотоотчёт приёмки (${uploadPending.length} фото)`,
+        ),
+      );
     });
 
     const updatedGantt = allGanttRentals.map(rental => {
@@ -423,6 +436,19 @@ export default function EquipmentDetail() {
         });
         await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all });
         await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.byEquipment(equipment.id) });
+
+        const equipmentWithServiceHistory = updatedEquipment.map(eq =>
+          eq.id === equipment.id
+            ? appendAuditHistory(
+                eq,
+                createAuditEntry(
+                  authorName,
+                  'Автоматически создана сервисная заявка после приёмки с аренды',
+                ),
+              )
+            : eq,
+        );
+        await persistEquipment(equipmentWithServiceHistory);
       }
     }
 
@@ -1040,6 +1066,32 @@ export default function EquipmentDetail() {
               </CardContent>
             </Card>
           )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>История изменений</CardTitle>
+              <CardDescription>Кто и что менял в карточке техники</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {(equipment.history || []).length === 0 ? (
+                <p className="text-sm text-gray-400 dark:text-gray-500">История пока пуста</p>
+              ) : (
+                <div className="space-y-3">
+                  {[...(equipment.history || [])]
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .map((entry, idx) => (
+                      <div key={`${entry.date}-${idx}`} className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+                        <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                          <span className="font-medium">{entry.author}</span>
+                          <span>{formatDateTime(entry.date)}</span>
+                        </div>
+                        <p className="mt-1.5 text-sm text-gray-700 dark:text-gray-300">{entry.text}</p>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </Tabs.Content>
 
         {/* ══ FINANCIAL TAB ══ */}
@@ -1623,11 +1675,18 @@ export default function EquipmentDetail() {
               onCancel={() => setShowCreateServiceModal(false)}
               onCreated={(ticket) => {
                 setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
-                setAllEquipment(prev => prev.map(item =>
+                const nextEquipment = allEquipment.map(item =>
                   item.id === equipment.id
-                    ? { ...item, status: 'in_service', currentClient: undefined, returnDate: undefined }
+                    ? appendAuditHistory(
+                        { ...item, status: 'in_service', currentClient: undefined, returnDate: undefined },
+                        createAuditEntry(
+                          user?.name || 'Система',
+                          `Создана сервисная заявка ${ticket.id}: ${ticket.reason}`,
+                        ),
+                      )
                     : item,
-                ));
+                );
+                void persistEquipment(nextEquipment);
                 setShowCreateServiceModal(false);
               }}
             />
@@ -1639,7 +1698,41 @@ export default function EquipmentDetail() {
         equipment={equipment}
         onOpenChange={setShowEditModal}
         onSave={(updated) => {
-          const list = allEquipment.map(e => e.id === updated.id ? updated : e);
+          const historyEntries = buildFieldDiffHistory(
+            equipment,
+            updated,
+            {
+              inventoryNumber: 'инвентарный номер',
+              serialNumber: 'серийный номер',
+              manufacturer: 'производитель',
+              model: 'модель',
+              type: 'тип',
+              drive: 'привод',
+              year: 'год выпуска',
+              hours: 'моточасы',
+              liftHeight: 'высота подъёма',
+              workingHeight: 'рабочая высота',
+              loadCapacity: 'грузоподъёмность',
+              weight: 'масса',
+              dimensions: 'габариты',
+              owner: 'собственник',
+              category: 'категория',
+              priority: 'приоритет',
+              activeInFleet: 'активный парк',
+              subleasePrice: 'стоимость субаренды',
+              location: 'локация',
+              status: 'статус',
+              plannedMonthlyRevenue: 'плановый доход',
+              nextMaintenance: 'следующее ТО',
+              maintenanceCHTO: 'дата ЧТО',
+              maintenancePTO: 'дата ПТО',
+              notes: 'примечание',
+            },
+            user?.name || 'Система',
+            'Обновлена карточка техники',
+          );
+          const withHistory = appendAuditHistory(updated, ...historyEntries);
+          const list = allEquipment.map(e => e.id === updated.id ? withHistory : e);
           void persistEquipment(list);
           setShowEditModal(false);
         }}

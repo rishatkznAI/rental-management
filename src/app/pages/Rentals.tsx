@@ -17,6 +17,7 @@ import {
 } from '../mock-data';
 import type { SystemUser } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
+import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
 import type { Equipment, EquipmentType, EquipmentStatus, Payment, ServiceTicket, ServiceStatus } from '../types';
 import { equipmentService } from '../services/equipment.service';
@@ -29,6 +30,13 @@ import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { canEquipmentParticipateInRentals, compareEquipmentByPriority, EQUIPMENT_PRIORITY_LABELS } from '../lib/equipmentClassification';
+import {
+  appendRentalHistory,
+  buildRentalCreationHistory,
+  buildRentalUpdateHistory,
+  createRentalHistoryEntry,
+} from '../lib/rental-history';
+import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import {
   addDays, addMonths, addYears, differenceInDays, endOfMonth, endOfQuarter,
   endOfYear, format, isSameDay, isWeekend, max as dateMax, min as dateMin,
@@ -254,10 +262,14 @@ function hasOpenServiceTicketForEquipment(serviceTickets: ServiceTicket[], equip
 // ========== Main Component ==========
 export default function Rentals() {
   const { can } = usePermissions();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
+  const historyAuthor = user?.name || 'Система';
   const canEditRentals = can('edit', 'rentals');
   const canDeleteRentals = can('delete', 'rentals');
   const canCreatePayments = can('create', 'payments');
+  const canEditRentalDates = user?.role === 'Администратор';
+  const canRestoreRentals = user?.role === 'Администратор';
   const today = useMemo(() => startOfDay(new Date()), []);
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>([]);
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
@@ -407,6 +419,15 @@ export default function Rentals() {
   const [preselectedEquipmentInv, setPreselectedEquipmentInv] = useState('');
   const [preselectedEquipmentId, setPreselectedEquipmentId] = useState('');
   const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
+
+  const appendEquipmentHistoryEntry = useCallback(
+    (equipment: Equipment, text: string) =>
+      appendAuditHistory(
+        equipment,
+        createAuditEntry(historyAuthor, text),
+      ),
+    [historyAuthor],
+  );
 
   // Filters (always live — no explicit "apply" gate needed)
   const [filterModel, setFilterModel] = useState('');
@@ -685,7 +706,15 @@ export default function Rentals() {
     else if (totalPaid > 0) newPaymentStatus = 'partial';
 
     const updatedRentals = ganttRentals.map(r =>
-      r.id === rentalId ? { ...r, paymentStatus: newPaymentStatus } : r
+      r.id === rentalId
+        ? appendRentalHistory(
+            { ...r, paymentStatus: newPaymentStatus },
+            createRentalHistoryEntry(
+              historyAuthor,
+              `Добавлен платеж: ${amount.toLocaleString('ru-RU')} ₽ от ${paidDate}. Статус оплаты: ${newPaymentStatus === 'paid' ? 'Оплачено' : newPaymentStatus === 'partial' ? 'Частично' : 'Не оплачено'}`,
+            ),
+          )
+        : r
     );
     void persistGanttRentals(updatedRentals);
 
@@ -693,20 +722,31 @@ export default function Rentals() {
     if (selectedRental?.id === rentalId) {
       setSelectedRental(updatedRentals.find(r => r.id === rentalId) || null);
     }
-  }, [canCreatePayments, ganttRentals, payments, selectedRental]);
+  }, [canCreatePayments, ganttRentals, historyAuthor, payments, selectedRental]);
 
   // Extend rental: update endDate, update equipment returnDate
   const handleExtend = useCallback((rental: GanttRentalData, newEndDate: string) => {
-    if (!canEditRentals) return;
+    if (!canEditRentals || !canEditRentalDates) return;
     const updatedRentals = ganttRentals.map(r =>
-      r.id === rental.id ? { ...r, endDate: newEndDate } : r
+      r.id === rental.id
+        ? appendRentalHistory(
+            { ...r, endDate: newEndDate },
+            createRentalHistoryEntry(
+              historyAuthor,
+              `Продлена аренда: ${r.endDate} → ${newEndDate}`,
+            ),
+          )
+        : r
     );
     void persistGanttRentals(updatedRentals);
 
     // Update returnDate on equipment
     const updatedEq = equipmentList.map(e =>
       matchesEquipmentRow(rental, e)
-        ? { ...e, returnDate: newEndDate }
+        ? appendEquipmentHistoryEntry(
+            { ...e, returnDate: newEndDate },
+            `Изменена дата возврата по аренде: ${rental.endDate} → ${newEndDate}`,
+          )
         : e
     );
     void persistEquipment(updatedEq);
@@ -715,29 +755,46 @@ export default function Rentals() {
     if (selectedRental?.id === rental.id) {
       setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
     }
-  }, [canEditRentals, ganttRentals, equipmentList, matchesEquipmentRow, selectedRental]);
+  }, [appendEquipmentHistoryEntry, canEditRentals, canEditRentalDates, ganttRentals, equipmentList, historyAuthor, matchesEquipmentRow, selectedRental]);
 
   // Update UPD signed status + optional date
   const handleUpdChange = useCallback((rental: GanttRentalData, updSigned: boolean, updDate?: string) => {
     if (!canEditRentals) return;
     const updatedRentals = ganttRentals.map(r =>
       r.id === rental.id
-        ? { ...r, updSigned, updDate: updSigned ? (updDate || r.updDate) : undefined }
+        ? appendRentalHistory(
+            {
+              ...r,
+              updSigned,
+              updDate: updSigned ? (updDate || r.updDate) : undefined,
+            },
+            createRentalHistoryEntry(
+              historyAuthor,
+              updSigned
+                ? `УПД отмечен как подписанный${updDate ? ` (${updDate})` : ''}`
+                : 'УПД снят с отметки «подписан»',
+            ),
+          )
         : r
     );
     void persistGanttRentals(updatedRentals);
     if (selectedRental?.id === rental.id) {
       setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
     }
-  }, [canEditRentals, ganttRentals, selectedRental]);
+  }, [canEditRentals, ganttRentals, historyAuthor, selectedRental]);
 
   const handleUpdateRental = useCallback((rental: GanttRentalData, data: Partial<GanttRentalData>) => {
     if (!canEditRentals) return;
+    if (!canEditRentalDates) {
+      delete data.startDate;
+      delete data.endDate;
+    }
 
     const previousEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
     const nextRental = { ...rental, ...data };
+    const historyEntries = buildRentalUpdateHistory(rental, nextRental, historyAuthor);
     const updatedRentals = ganttRentals.map(item =>
-      item.id === rental.id ? nextRental : item
+      item.id === rental.id ? appendRentalHistory(nextRental, ...historyEntries) : item
     );
     void persistGanttRentals(updatedRentals);
 
@@ -759,26 +816,29 @@ export default function Rentals() {
       const updatedEquipment = equipmentList.map(item =>
         item.id !== previousEquipment.id
           ? item
-          : {
-              ...item,
-              status: (nextRental.status === 'returned' || nextRental.status === 'closed')
-                ? (hasOtherActive ? item.status : nextEquipmentStatus)
-                : nextEquipmentStatus,
-              currentClient: nextRental.status === 'active'
-                ? nextRental.client
-                : nextRental.status === 'created'
-                  ? item.currentClient
-                  : hasOtherActive
+          : appendEquipmentHistoryEntry(
+              {
+                ...item,
+                status: (nextRental.status === 'returned' || nextRental.status === 'closed')
+                  ? (hasOtherActive ? item.status : nextEquipmentStatus)
+                  : nextEquipmentStatus,
+                currentClient: nextRental.status === 'active'
+                  ? nextRental.client
+                  : nextRental.status === 'created'
                     ? item.currentClient
-                    : undefined,
-              returnDate: nextRental.status === 'active'
-                ? nextRental.endDate
-                : nextRental.status === 'created'
-                  ? item.returnDate
-                  : hasOtherActive
+                    : hasOtherActive
+                      ? item.currentClient
+                      : undefined,
+                returnDate: nextRental.status === 'active'
+                  ? nextRental.endDate
+                  : nextRental.status === 'created'
                     ? item.returnDate
-                    : undefined,
-            }
+                    : hasOtherActive
+                      ? item.returnDate
+                      : undefined,
+              },
+              `Обновлено состояние техники из аренды ${rental.id}: статус ${item.status} → ${nextRental.status === 'active' ? 'rented' : nextRental.status === 'created' ? 'reserved' : hasOtherActive ? item.status : nextEquipmentStatus}`,
+            )
       );
       void persistEquipment(updatedEquipment);
     }
@@ -786,18 +846,57 @@ export default function Rentals() {
     if (selectedRental?.id === rental.id) {
       setSelectedRental(nextRental);
     }
-  }, [canEditRentals, equipmentList, ganttRentals, matchesEquipmentRow, persistEquipment, persistGanttRentals, selectedRental, serviceTickets]);
+  }, [appendEquipmentHistoryEntry, canEditRentals, canEditRentalDates, equipmentList, ganttRentals, historyAuthor, matchesEquipmentRow, persistEquipment, persistGanttRentals, selectedRental, serviceTickets]);
+
+  const handleRestoreRental = useCallback((rental: GanttRentalData) => {
+    if (!canRestoreRentals) return;
+    const restoredStatus: GanttRentalData['status'] = rental.status === 'closed' ? 'returned' : 'active';
+    const updatedRentals = ganttRentals.map(item =>
+      item.id === rental.id
+        ? appendRentalHistory(
+            { ...item, status: restoredStatus },
+            createRentalHistoryEntry(
+              historyAuthor,
+              restoredStatus === 'active'
+                ? 'Аренда восстановлена в статус «В аренде»'
+                : 'Аренда восстановлена в статус «Возвращена»',
+            ),
+          )
+        : item,
+    );
+    void persistGanttRentals(updatedRentals);
+
+    if (restoredStatus === 'active') {
+      const updatedEquipment = equipmentList.map(item =>
+        matchesEquipmentRow(rental, item)
+          ? appendEquipmentHistoryEntry(
+              {
+                ...item,
+                status: 'rented' as EquipmentStatus,
+                currentClient: rental.client,
+                returnDate: rental.endDate,
+              },
+              `Аренда ${rental.id} восстановлена. Техника снова в аренде у клиента ${rental.client}`,
+            )
+          : item,
+      );
+      void persistEquipment(updatedEquipment);
+    }
+
+    if (selectedRental?.id === rental.id) {
+      setSelectedRental(updatedRentals.find(item => item.id === rental.id) || null);
+    }
+    showToast(restoredStatus === 'active' ? 'Аренда восстановлена в статус «В аренде»' : 'Аренда восстановлена в статус «Возвращена»');
+  }, [appendEquipmentHistoryEntry, canRestoreRentals, ganttRentals, equipmentList, historyAuthor, matchesEquipmentRow, persistEquipment, persistGanttRentals, selectedRental, showToast]);
 
   const handleAddRentalComment = useCallback((rental: GanttRentalData, text: string) => {
     if (!canEditRentals) return;
-    const nextComment = {
-      date: format(new Date(), 'yyyy-MM-dd'),
-      text,
-      author: 'Планировщик аренды',
-    };
     const updatedRentals = ganttRentals.map(item =>
       item.id === rental.id
-        ? { ...item, comments: [...(item.comments || []), nextComment] }
+        ? appendRentalHistory(
+            item,
+            createRentalHistoryEntry(historyAuthor, text, 'comment'),
+          )
         : item
     );
     void persistGanttRentals(updatedRentals);
@@ -805,27 +904,41 @@ export default function Rentals() {
       setSelectedRental(updatedRentals.find(item => item.id === rental.id) || null);
     }
     showToast('Запись добавлена в историю аренды');
-  }, [canEditRentals, ganttRentals, persistGanttRentals, selectedRental, showToast]);
+  }, [canEditRentals, ganttRentals, historyAuthor, persistGanttRentals, selectedRental, showToast]);
 
   const handlePaymentStatusChange = useCallback((rental: GanttRentalData, status: GanttRentalData['paymentStatus']) => {
     if (!canEditRentals) return;
     const updatedRentals = ganttRentals.map(item =>
-      item.id === rental.id ? { ...item, paymentStatus: status } : item
+      item.id === rental.id
+        ? appendRentalHistory(
+            { ...item, paymentStatus: status },
+            createRentalHistoryEntry(
+              historyAuthor,
+              `Статус оплаты изменен: ${status === 'paid' ? 'Оплачено' : status === 'partial' ? 'Частично' : 'Не оплачено'}`,
+            ),
+          )
+        : item
     );
     void persistGanttRentals(updatedRentals);
     if (selectedRental?.id === rental.id) {
       setSelectedRental(updatedRentals.find(item => item.id === rental.id) || null);
     }
     showToast(`Статус оплаты обновлён: ${status === 'paid' ? 'Оплачено' : status === 'partial' ? 'Частично' : 'Не оплачено'}`);
-  }, [canEditRentals, ganttRentals, persistGanttRentals, selectedRental, showToast]);
+  }, [canEditRentals, ganttRentals, historyAuthor, persistGanttRentals, selectedRental, showToast]);
 
   // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
   const handleEarlyReturn = useCallback((rental: GanttRentalData, actualReturnDate: string) => {
-    if (!canEditRentals) return;
+    if (!canEditRentals || !canEditRentalDates) return;
     const currentEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
     const updatedRentals = ganttRentals.map(r =>
       r.id === rental.id
-        ? { ...r, endDate: actualReturnDate, status: 'returned' as const }
+        ? appendRentalHistory(
+            { ...r, endDate: actualReturnDate, status: 'returned' as const },
+            createRentalHistoryEntry(
+              historyAuthor,
+              `Оформлен досрочный возврат: дата возврата ${actualReturnDate}`,
+            ),
+          )
         : r
     );
     void persistGanttRentals(updatedRentals);
@@ -842,19 +955,22 @@ export default function Rentals() {
     if (!hasOtherActive) {
       const updatedEq = equipmentList.map(e =>
         matchesEquipmentRow(rental, e)
-          ? {
-              ...e,
-              status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
-              currentClient: undefined,
-              returnDate: undefined,
-            }
+          ? appendEquipmentHistoryEntry(
+              {
+                ...e,
+                status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
+                currentClient: undefined,
+                returnDate: undefined,
+              },
+              'Оформлен досрочный возврат техники',
+            )
           : e
       );
       void persistEquipment(updatedEq);
     }
 
     setSelectedRental(null);
-  }, [canEditRentals, ganttRentals, equipmentList, matchesEquipmentRow, persistEquipment, persistGanttRentals, serviceTickets]);
+  }, [appendEquipmentHistoryEntry, canEditRentals, canEditRentalDates, ganttRentals, equipmentList, historyAuthor, matchesEquipmentRow, persistEquipment, persistGanttRentals, serviceTickets]);
 
   // ===== Today line position =====
   const todayOffset = useMemo(() => {
@@ -1166,6 +1282,8 @@ export default function Rentals() {
           allRentals={ganttRentals}
           payments={payments}
           canEditRentals={canEditRentals}
+          canEditRentalDates={canEditRentalDates}
+          canRestoreRentals={canRestoreRentals}
           canDeleteRentals={canDeleteRentals}
           canCreatePayments={canCreatePayments}
           onClose={() => setSelectedRental(null)}
@@ -1173,6 +1291,7 @@ export default function Rentals() {
           onExtend={handleExtend}
           onEarlyReturn={handleEarlyReturn}
           onUpdChange={handleUpdChange}
+          onRestore={handleRestoreRental}
           onReturn={(r) => {
             if (!canEditRentals) return;
             setSelectedRental(null);
@@ -1188,7 +1307,17 @@ export default function Rentals() {
 
             if (nextStatus) {
               const updated = ganttRentals.map(r =>
-                r.id === rental.id ? { ...r, status: nextStatus! } : r,
+                r.id === rental.id
+                  ? appendRentalHistory(
+                      { ...r, status: nextStatus! },
+                      createRentalHistoryEntry(
+                        historyAuthor,
+                        nextStatus === 'active'
+                          ? 'Аренда переведена в статус «В аренде»'
+                          : 'Аренда закрыта',
+                      ),
+                    )
+                  : r,
               );
               void persistGanttRentals(updated);
 
@@ -1196,7 +1325,10 @@ export default function Rentals() {
               if (nextStatus === 'active') {
                 const newEqList = equipmentList.map(e =>
                   matchesEquipmentRow(rental, e)
-                    ? { ...e, status: 'rented' as EquipmentStatus, currentClient: rental.client, returnDate: rental.endDate }
+                    ? appendEquipmentHistoryEntry(
+                        { ...e, status: 'rented' as EquipmentStatus, currentClient: rental.client, returnDate: rental.endDate },
+                        `Техника выдана в аренду клиенту ${rental.client}`,
+                      )
                     : e,
                 );
                 void persistEquipment(newEqList);
@@ -1213,12 +1345,15 @@ export default function Rentals() {
                 if (!hasOtherActive) {
                   const newEqList = equipmentList.map(e =>
                     matchesEquipmentRow(rental, e)
-                      ? {
-                          ...e,
-                          status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
-                          currentClient: undefined,
-                          returnDate: undefined,
-                        }
+                      ? appendEquipmentHistoryEntry(
+                          {
+                            ...e,
+                            status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
+                            currentClient: undefined,
+                            returnDate: undefined,
+                          },
+                          'Аренда закрыта, техника освобождена',
+                        )
                       : e,
                   );
                   void persistEquipment(newEqList);
@@ -1243,12 +1378,15 @@ export default function Rentals() {
             if (!hasOtherActive) {
               const newEqList = equipmentList.map(e =>
                 matchesEquipmentRow(rental, e)
-                  ? {
-                      ...e,
-                      status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
-                      currentClient: undefined,
-                      returnDate: undefined,
-                    }
+                  ? appendEquipmentHistoryEntry(
+                      {
+                        ...e,
+                        status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
+                        currentClient: undefined,
+                        returnDate: undefined,
+                      },
+                      'Аренда удалена, техника переведена в свободный статус',
+                    )
                   : e,
               );
               void persistEquipment(newEqList);
@@ -1271,7 +1409,17 @@ export default function Rentals() {
           if (!canEditRentals) return;
           // Обновляем статус аренды на 'returned'
           const updated = ganttRentals.map(r =>
-            r.id === data.rentalId ? { ...r, status: 'returned' as const } : r,
+            r.id === data.rentalId
+              ? appendRentalHistory(
+                  { ...r, status: 'returned' as const },
+                  createRentalHistoryEntry(
+                    historyAuthor,
+                    data.result === 'service'
+                      ? 'Техника принята с аренды и отправлена в сервис'
+                      : 'Техника принята с аренды и возвращена в парк',
+                  ),
+                )
+              : r,
           );
           void persistGanttRentals(updated);
 
@@ -1294,7 +1442,12 @@ export default function Rentals() {
                   : (currentEquipment && hasOpenServiceTicketForEquipment(serviceTickets, currentEquipment) ? 'in_service' : 'available');
               const newEqList = equipmentList.map(e =>
                 matchesEquipmentRow(rental, e)
-                  ? { ...e, status: newStatus, currentClient: undefined, returnDate: undefined }
+                  ? appendEquipmentHistoryEntry(
+                      { ...e, status: newStatus, currentClient: undefined, returnDate: undefined },
+                      data.result === 'service'
+                        ? 'Техника принята с аренды и передана в сервис'
+                        : 'Техника принята с аренды и возвращена в свободный парк',
+                    )
                   : e,
               );
               void persistEquipment(newEqList);
@@ -1341,7 +1494,17 @@ export default function Rentals() {
             paymentStatus: 'unpaid',
             updSigned: false,
             amount: data.amount || 0,
-            comments: [],
+            comments: [
+              buildRentalCreationHistory(
+                {
+                  client: data.client || '',
+                  startDate: data.startDate || '',
+                  endDate: data.endDate || '',
+                  status: initialStatus,
+                },
+                historyAuthor,
+              ),
+            ],
           };
           const updated = [...ganttRentals, newRental];
           void persistGanttRentals(updated);
@@ -1351,12 +1514,17 @@ export default function Rentals() {
             const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
             const newEqList = equipmentList.map(e => {
               if (e.id !== data.equipmentId) return e;
-              return {
-                ...e,
-                status: eqStatus,
-                currentClient: initialStatus === 'active' ? newRental.client : e.currentClient,
-                returnDate: initialStatus === 'active' ? newRental.endDate : e.returnDate,
-              };
+              return appendEquipmentHistoryEntry(
+                {
+                  ...e,
+                  status: eqStatus,
+                  currentClient: initialStatus === 'active' ? newRental.client : e.currentClient,
+                  returnDate: initialStatus === 'active' ? newRental.endDate : e.returnDate,
+                },
+                initialStatus === 'active'
+                  ? `Создана и сразу активирована аренда для клиента ${newRental.client}`
+                  : `Создана бронь под клиента ${newRental.client}`,
+              );
             });
             void persistEquipment(newEqList);
           }

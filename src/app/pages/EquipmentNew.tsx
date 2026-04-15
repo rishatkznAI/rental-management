@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { useCreateEquipment } from '../hooks/useEquipment';
 import { api } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
+import { createAuditEntry } from '../lib/entity-history';
 import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS } from '../lib/equipmentClassification';
 
 // ─── Вспомогательные компоненты ────────────────────────────────────────────
@@ -139,6 +141,7 @@ const DEFAULT_OWNERS = [
 export default function EquipmentNew() {
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const { user } = useAuth();
   const createEquipment = useCreateEquipment();
   const [owners, setOwners] = React.useState(DEFAULT_OWNERS);
 
@@ -213,6 +216,12 @@ export default function EquipmentNew() {
       maintenanceCHTO:       form.maintenanceCHTO || undefined,
       maintenancePTO:        form.maintenancePTO || undefined,
       notes:                 form.notes || undefined,
+      history: [
+        createAuditEntry(
+          user?.name || 'Система',
+          `Техника создана: ${form.inventoryNumber} · ${form.manufacturer} ${form.model}`,
+        ),
+      ],
     }, { onSuccess: () => navigate('/equipment') });
   };
 

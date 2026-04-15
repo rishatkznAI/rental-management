@@ -7,6 +7,7 @@ import { useEquipmentList } from '../hooks/useEquipment';
 import { usePaymentsList } from '../hooks/usePayments';
 import { RENTAL_KEYS, useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -19,7 +20,8 @@ import {
   Truck, Clock, MessageSquare, Wrench, AlertTriangle, CircleCheck, Save, X,
 } from 'lucide-react';
 import { rentalsService } from '../services/rentals.service';
-import { formatCurrency, formatDate, getDaysUntil, getRentalDays } from '../lib/utils';
+import { appendRentalHistory, buildRentalUpdateHistory } from '../lib/rental-history';
+import { formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
 import type { Equipment, RentalStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
@@ -87,6 +89,7 @@ export default function RentalDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { data: rentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: equipment = [] } = useEquipmentList();
@@ -147,12 +150,21 @@ export default function RentalDetail() {
     resolvedRentalEquipment.some(eq => eq.id === ticket.equipmentId),
   );
 
+  const historyAuthor = user?.name || 'Система';
+
   const comments = [
     ...(rental?.comments ? [{
       date: rental.startDate,
       text: rental.comments,
       author: rental.manager || 'Система',
     }] : []),
+    ...((linkedGanttRental?.comments || [])
+      .filter(entry => entry.type !== 'system')
+      .map(entry => ({
+        date: entry.date,
+        text: entry.text,
+        author: entry.author,
+      }))),
     ...relatedPayments
       .filter(p => p.comment)
       .map(p => ({
@@ -163,7 +175,16 @@ export default function RentalDetail() {
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const history = [
-    ...(rental ? [{ date: rental.startDate, action: 'Аренда создана', user: rental.manager || 'Система' }] : []),
+    ...((linkedGanttRental?.comments || [])
+      .filter(entry => entry.type === 'system')
+      .map(entry => ({
+        date: entry.date,
+        action: entry.text,
+        user: entry.author,
+      }))),
+    ...((!linkedGanttRental?.comments?.some(entry => entry.type === 'system') && rental)
+      ? [{ date: rental.startDate, action: 'Аренда создана', user: rental.manager || 'Система' }]
+      : []),
     ...(relatedDocs.map(doc => ({
       date: doc.date,
       action: `Документ: ${doc.number}`,
@@ -290,7 +311,8 @@ export default function RentalDetail() {
           : formState.status === 'active'
             ? 'active'
             : 'created';
-        await rentalsService.updateGanttEntry(linkedGanttRental.id, {
+        const nextGanttRental: GanttRentalData = {
+          ...linkedGanttRental,
           client: formState.client.trim(),
           clientShort: formState.client.trim().substring(0, 20),
           startDate: formState.startDate,
@@ -299,6 +321,12 @@ export default function RentalDetail() {
           managerInitials: managerInitials(formState.manager),
           status: nextGanttStatus,
           amount: priceValue,
+        };
+        await rentalsService.updateGanttEntry(linkedGanttRental.id, {
+          ...appendRentalHistory(
+            nextGanttRental,
+            ...buildRentalUpdateHistory(linkedGanttRental, nextGanttRental, historyAuthor),
+          ),
         });
         setSaveInfo('Изменения сохранены и синхронизированы с планировщиком.');
       } else if (linkedGanttCandidates.length > 1) {
@@ -584,7 +612,7 @@ export default function RentalDetail() {
                     <div key={idx} className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                       <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                         <span className="font-medium">{comment.author}</span>
-                        <span>{formatDate(comment.date)}</span>
+                      <span>{formatDateTime(comment.date)}</span>
                       </div>
                       <p className="mt-1.5 text-sm text-gray-700 dark:text-gray-300">{comment.text}</p>
                     </div>
@@ -802,7 +830,7 @@ export default function RentalDetail() {
                     <div key={idx} className="relative">
                       <div className="absolute -left-[11px] top-1.5 h-2 w-2 rounded-full bg-[--color-primary]" />
                       <p className="text-sm text-gray-900 dark:text-white">{item.action}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(item.date)} · {item.user}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(item.date)} · {item.user}</p>
                     </div>
                   ))}
                 </div>

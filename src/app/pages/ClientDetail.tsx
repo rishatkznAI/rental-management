@@ -10,12 +10,14 @@ import {
   Building2, MapPin, User, CreditCard, CheckCircle, XCircle,
   AlertTriangle, Plus, Save, X,
 } from 'lucide-react';
-import { formatDate, formatCurrency } from '../lib/utils';
+import { formatDate, formatDateTime, formatCurrency } from '../lib/utils';
 import { useClientById, useUpdateClient } from '../hooks/useClients';
 import { useRentalsList } from '../hooks/useRentals';
 import { useDocumentsList } from '../hooks/useDocuments';
 import type { Client, ClientStatus } from '../types';
 import { usePermissions } from '../lib/permissions';
+import { useAuth } from '../contexts/AuthContext';
+import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -82,6 +84,7 @@ export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const { user } = useAuth();
   const canEdit = can('edit', 'clients');
 
   const { data: fetchedClient } = useClientById(id ?? '');
@@ -123,7 +126,28 @@ export default function ClientDetail() {
 
   const saveEdit = () => {
     if (!client || !canEdit) return;
-    persist({ ...client, ...editData });
+    const nextClient = { ...client, ...editData };
+    const historyEntries = buildFieldDiffHistory(
+      client,
+      nextClient,
+      {
+        company: 'компания',
+        inn: 'ИНН',
+        email: 'email',
+        address: 'адрес',
+        contact: 'контакт',
+        phone: 'телефон',
+        paymentTerms: 'условия оплаты',
+        creditLimit: 'кредитный лимит',
+        debt: 'задолженность',
+        manager: 'менеджер',
+        notes: 'примечание',
+        status: 'статус',
+      },
+      user?.name || 'Система',
+      'Обновлён клиент',
+    );
+    persist(appendAuditHistory(nextClient, ...historyEntries));
     setEditing(false);
     setEditData({});
   };
@@ -500,6 +524,34 @@ export default function ClientDetail() {
                   <Divider />
                   <Field label="Клиент с" value={formatDate(client.createdAt)} />
                 </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Clock className="h-4 w-4" />
+                История изменений
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(client.history || []).length === 0 ? (
+                <p className="text-sm text-gray-400 italic">История пока пуста</p>
+              ) : (
+                <div className="space-y-3">
+                  {[...(client.history || [])]
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .map((entry, idx) => (
+                      <div key={`${entry.date}-${idx}`} className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+                        <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                          <span className="font-medium">{entry.author}</span>
+                          <span>{formatDateTime(entry.date)}</span>
+                        </div>
+                        <p className="mt-1.5 text-sm text-gray-700 dark:text-gray-300">{entry.text}</p>
+                      </div>
+                    ))}
+                </div>
               )}
             </CardContent>
           </Card>

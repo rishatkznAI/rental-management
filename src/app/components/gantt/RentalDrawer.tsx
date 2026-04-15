@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { formatCurrency, formatDate, getRentalDays } from '../../lib/utils';
+import { formatCurrency, formatDate, formatDateTime, getRentalDays } from '../../lib/utils';
 import { findConflictingRental } from '../../lib/rental-conflicts';
 import type { GanttRentalData } from '../../mock-data';
 import type { Equipment, Payment } from '../../types';
@@ -18,11 +18,14 @@ interface RentalDrawerProps {
   allRentals: GanttRentalData[];
   payments: Payment[];
   canEditRentals: boolean;
+  canEditRentalDates: boolean;
+  canRestoreRentals: boolean;
   canDeleteRentals: boolean;
   canCreatePayments: boolean;
   onClose: () => void;
   onReturn: (rental: GanttRentalData) => void;
   onStatusChange: (rental: GanttRentalData) => void;
+  onRestore: (rental: GanttRentalData) => void;
   onDelete: (rental: GanttRentalData) => void;
   onUpdate: (rental: GanttRentalData, data: Partial<GanttRentalData>) => void;
   onAddComment: (rental: GanttRentalData, text: string) => void;
@@ -61,9 +64,9 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
 
 export function RentalDrawer({
   rental, equipment, allRentals, payments,
-  canEditRentals, canDeleteRentals, canCreatePayments,
+  canEditRentals, canEditRentalDates, canRestoreRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
-  onUpdate, onAddComment, onPaymentStatusChange, onAddPayment, onExtend, onEarlyReturn, onUpdChange,
+  onRestore, onUpdate, onAddComment, onPaymentStatusChange, onAddPayment, onExtend, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -334,6 +337,7 @@ export function RentalDrawer({
                         type="date"
                         value={editStartDate}
                         onChange={e => setEditStartDate(e.target.value)}
+                        disabled={!canEditRentalDates}
                         className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                       />
                     </div>
@@ -343,6 +347,7 @@ export function RentalDrawer({
                         type="date"
                         value={editEndDate}
                         onChange={e => setEditEndDate(e.target.value)}
+                        disabled={!canEditRentalDates}
                         className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                       />
                     </div>
@@ -356,6 +361,11 @@ export function RentalDrawer({
                       />
                     </div>
                   </div>
+                  {!canEditRentalDates && (
+                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      Изменять даты аренды может только администратор.
+                    </p>
+                  )}
                   {editError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{editError}</p>}
                   <div className="mt-3 flex gap-2">
                     <Button size="sm" onClick={handleEditSave}>Сохранить</Button>
@@ -535,7 +545,7 @@ export function RentalDrawer({
           </section>
 
           {/* Extend Rental — only for active/created */}
-          {canEditRentals && (rental.status === 'active' || rental.status === 'created') && (
+          {canEditRentalDates && (rental.status === 'active' || rental.status === 'created') && (
             <section>
               <button
                 onClick={() => setShowExtend(v => !v)}
@@ -585,7 +595,7 @@ export function RentalDrawer({
           )}
 
           {/* Early Return — only for active */}
-          {canEditRentals && rental.status === 'active' && (
+          {canEditRentalDates && rental.status === 'active' && (
             <section>
               <button
                 onClick={() => setShowEarlyReturn(v => !v)}
@@ -813,7 +823,7 @@ export function RentalDrawer({
                   <div key={idx} className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                     <div className="flex items-center justify-between text-xs text-gray-500">
                       <span>{comment.author}</span>
-                      <span>{formatDate(comment.date)}</span>
+                      <span>{formatDateTime(comment.date)}</span>
                     </div>
                     <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">{comment.text}</p>
                   </div>
@@ -841,6 +851,12 @@ export function RentalDrawer({
             <Button size="sm" onClick={() => onStatusChange(rental)}>
               <CircleCheck className="h-3.5 w-3.5" />
               Закрыть аренду
+            </Button>
+          )}
+          {canRestoreRentals && (rental.status === 'returned' || rental.status === 'closed') && (
+            <Button size="sm" variant="secondary" onClick={() => onRestore(rental)}>
+              <RotateCcw className="h-3.5 w-3.5" />
+              Восстановить аренду
             </Button>
           )}
           <Button size="sm" variant="ghost">

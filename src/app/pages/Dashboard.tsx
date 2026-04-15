@@ -28,6 +28,8 @@ import { NewClientModal } from '../components/modals/NewClientModal';
 import { NewRentalModal } from '../components/gantt/GanttModals';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
+import { buildRentalCreationHistory } from '../lib/rental-history';
+import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import type { Equipment, Rental, ServiceTicket, Client, Payment, Document, EquipmentStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
@@ -1367,7 +1369,17 @@ export default function Dashboard() {
             paymentStatus: 'unpaid',
             updSigned: false,
             amount: Number(formData.amount) || 0,
-            comments: [],
+            comments: [
+              buildRentalCreationHistory(
+                {
+                  client: formData.client || '',
+                  startDate: formData.startDate || '',
+                  endDate: formData.endDate || '',
+                  status: initialStatus,
+                },
+                user?.name || 'Система',
+              ),
+            ],
           };
 
           // Persist via API then invalidate queries to refresh all panels
@@ -1376,10 +1388,23 @@ export default function Dashboard() {
               const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
               const eq = equipmentList.find(e => e.id === formData.equipmentId);
               if (eq) {
+                const equipmentWithHistory = appendAuditHistory(
+                  {
+                    ...eq,
+                    status: eqStatus,
+                    currentClient: initialStatus === 'active' ? newRental.client : eq.currentClient,
+                    returnDate: initialStatus === 'active' ? newRental.endDate : eq.returnDate,
+                  },
+                  createAuditEntry(
+                    user?.name || 'Система',
+                    initialStatus === 'active'
+                      ? `Создана аренда и техника выдана клиенту ${newRental.client}`
+                      : `Создана бронь под клиента ${newRental.client}`,
+                  ),
+                );
+                const { id: _equipmentId, ...equipmentUpdateData } = equipmentWithHistory;
                 equipmentService.update(eq.id, {
-                  status: eqStatus,
-                  currentClient: initialStatus === 'active' ? newRental.client : eq.currentClient,
-                  returnDate: initialStatus === 'active' ? newRental.endDate : eq.returnDate,
+                  ...equipmentUpdateData,
                 });
               }
             }

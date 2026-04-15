@@ -11,6 +11,7 @@ import { EQUIPMENT_KEYS, useEquipmentList } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
 import type { EquipmentStatus, ServiceTicket } from '../../types';
 import { getEquipmentTypeLabel } from '../../lib/equipmentClassification';
+import { appendAuditHistory, createAuditEntry } from '../../lib/entity-history';
 import { equipmentService } from '../../services/equipment.service';
 import { rentalsService } from '../../services/rentals.service';
 
@@ -210,7 +211,13 @@ export function ServiceTicketForm({
 
       const updatedEquipment = allEquipment.map(item =>
         item.id === eq.id
-          ? { ...item, status: 'in_service' as EquipmentStatus, currentClient: undefined, returnDate: undefined }
+          ? appendAuditHistory(
+              { ...item, status: 'in_service' as EquipmentStatus, currentClient: undefined, returnDate: undefined },
+              createAuditEntry(
+                authorName,
+                `Техника переведена в сервис по заявке ${createdTicket.id}: ${createdTicket.reason}`,
+              ),
+            )
           : item,
       );
 

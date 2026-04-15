@@ -4,7 +4,7 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
     const opts = {
       method,
       headers: {
-        Authorization: botToken,
+        Authorization: `Bearer ${botToken}`,
         'Content-Type': 'application/json',
       },
     };

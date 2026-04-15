@@ -21,29 +21,8 @@ import type { GanttRentalData } from '../mock-data';
 import type { EquipmentStatus } from '../types';
 import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/utils';
+import { isEquipmentBusy } from '../lib/rental-conflicts';
 import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
-
-// Helper: check date overlap
-function isEquipmentBusy(
-  equipment: { id: string; inventoryNumber: string },
-  startDate: string,
-  endDate: string,
-  rentals: GanttRentalData[],
-): boolean {
-  if (!startDate || !endDate) return false;
-  const newStart = new Date(startDate).getTime();
-  const newEnd   = new Date(endDate).getTime();
-  return rentals.some(r => {
-    const matches = r.equipmentId
-      ? r.equipmentId === equipment.id
-      : r.equipmentInv === equipment.inventoryNumber;
-    if (!matches) return false;
-    if (r.status === 'returned' || r.status === 'closed') return false;
-    const rStart = new Date(r.startDate).getTime();
-    const rEnd   = new Date(r.endDate).getTime();
-    return newStart <= rEnd && newEnd >= rStart;
-  });
-}
 
 export default function RentalNew() {
   const navigate = useNavigate();

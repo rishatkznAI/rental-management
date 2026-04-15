@@ -42,6 +42,12 @@ const crypto  = require('crypto');
 const fs      = require('fs');
 const path    = require('path');
 const {
+  countEquipmentByInventory,
+  isUniqueInventoryNumber,
+  findEquipmentForRentalPayload: resolveEquipmentForRentalPayload,
+  equipmentMatchesServiceTicket,
+} = require('./lib/equipment-matching');
+const {
   DB_PATH,
   cloneCollectionIfMissing,
   countActiveSessions,
@@ -539,22 +545,6 @@ function canEquipmentParticipateInRentals(equipment) {
   return normalized.activeInFleet && (normalized.category === 'own' || normalized.category === 'partner');
 }
 
-function countEquipmentByInventory(equipmentList) {
-  const counts = new Map();
-  (equipmentList || []).forEach(item => {
-    const inventoryNumber = item?.inventoryNumber;
-    if (!inventoryNumber) return;
-    counts.set(inventoryNumber, (counts.get(inventoryNumber) || 0) + 1);
-  });
-  return counts;
-}
-
-function isUniqueInventoryNumber(inventoryNumber, equipmentList) {
-  if (!inventoryNumber) return false;
-  const counts = countEquipmentByInventory(equipmentList);
-  return (counts.get(inventoryNumber) || 0) === 1;
-}
-
 function findEquipmentForRentalPayload(payload) {
   const equipmentId = payload?.equipmentId;
   const inventoryNumber =
@@ -563,13 +553,7 @@ function findEquipmentForRentalPayload(payload) {
     || (Array.isArray(payload?.equipment) ? payload.equipment[0] : null);
 
   const equipment = (readData('equipment') || []).map(normalizeEquipmentRecord);
-  if (equipmentId) {
-    const byId = equipment.find(item => item.id === equipmentId);
-    if (byId) return byId;
-  }
-  if (!inventoryNumber) return null;
-  if (!isUniqueInventoryNumber(inventoryNumber, equipment)) return null;
-  return equipment.find(item => item.inventoryNumber === inventoryNumber) || null;
+  return resolveEquipmentForRentalPayload({ equipmentId, inventoryNumber }, equipment);
 }
 
 function validateRentalEquipmentPayload(payload) {
@@ -1969,14 +1953,9 @@ function searchEquipmentForBot(query) {
 
 function getOpenTicketByEquipment(equipment) {
   const equipmentList = readData('equipment') || [];
-  const inventoryIsUnique = isUniqueInventoryNumber(equipment.inventoryNumber, equipmentList);
   return readServiceTickets().find(ticket =>
     openServiceStatuses().includes(ticket.status) &&
-    (
-      (equipment.id && ticket.equipmentId === equipment.id) ||
-      (equipment.serialNumber && ticket.serialNumber === equipment.serialNumber) ||
-      (equipment.inventoryNumber && inventoryIsUnique && ticket.inventoryNumber === equipment.inventoryNumber)
-    )
+    equipmentMatchesServiceTicket(ticket, equipment, equipmentList)
   ) || null;
 }
 

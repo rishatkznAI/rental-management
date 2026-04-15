@@ -8,6 +8,7 @@ import {
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { formatCurrency, formatDate } from '../../lib/utils';
+import { findConflictingRental } from '../../lib/rental-conflicts';
 import type { GanttRentalData } from '../../mock-data';
 import type { Equipment, Payment } from '../../types';
 
@@ -154,17 +155,15 @@ export function RentalDrawer({
       return;
     }
     // Check conflicts: other rentals for the same equipment that overlap [rental.endDate, newEndDate]
-    const conflicts = allRentals.filter(r =>
-      r.id !== rental.id &&
-      (
-        (rental.equipmentId && r.equipmentId === rental.equipmentId)
-        || (!r.equipmentId && !rental.equipmentId && r.equipmentInv === rental.equipmentInv)
-      ) &&
-      r.status !== 'returned' && r.status !== 'closed' &&
-      r.startDate < extendDate && r.endDate > rental.endDate
+    const conflict = findConflictingRental(
+      { id: rental.equipmentId || rental.equipmentInv, inventoryNumber: rental.equipmentInv },
+      rental.endDate,
+      extendDate,
+      allRentals,
+      rental.id,
     );
-    if (conflicts.length > 0) {
-      setExtendError(`Конфликт: техника занята до ${formatDate(conflicts[0].endDate)} (${conflicts[0].client})`);
+    if (conflict) {
+      setExtendError(`Конфликт: техника занята до ${formatDate(conflict.endDate)} (${conflict.client})`);
       return;
     }
     setExtendError('');
@@ -212,17 +211,15 @@ export function RentalDrawer({
       setEditError('Сумма должна быть числом не меньше 0');
       return;
     }
-    const conflicts = allRentals.filter(r =>
-      r.id !== rental.id &&
-      (
-        (rental.equipmentId && r.equipmentId === rental.equipmentId)
-        || (!r.equipmentId && !rental.equipmentId && r.equipmentInv === rental.equipmentInv)
-      ) &&
-      r.status !== 'returned' && r.status !== 'closed' &&
-      editStartDate <= r.endDate && editEndDate >= r.startDate
+    const conflict = findConflictingRental(
+      { id: rental.equipmentId || rental.equipmentInv, inventoryNumber: rental.equipmentInv },
+      editStartDate,
+      editEndDate,
+      allRentals,
+      rental.id,
     );
-    if (conflicts.length > 0) {
-      setEditError(`Конфликт: техника занята ${formatDate(conflicts[0].startDate)} — ${formatDate(conflicts[0].endDate)} (${conflicts[0].client})`);
+    if (conflict) {
+      setEditError(`Конфликт: техника занята ${formatDate(conflict.startDate)} — ${formatDate(conflict.endDate)} (${conflict.client})`);
       return;
     }
 

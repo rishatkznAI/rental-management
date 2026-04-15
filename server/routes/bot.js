@@ -35,6 +35,14 @@ function registerBotRoutes(app, deps) {
           const payload = callback.payload || callback.data || update.payload || '';
           const sender = callback.sender || callback.user || update.user || {};
           const recipient = callback.recipient || update.recipient || {};
+          const callbackMessage = callback.message || update.message || {};
+          const callbackMessageId =
+            callbackMessage.message_id ||
+            callbackMessage.mid ||
+            callbackMessage.id ||
+            update.message_id ||
+            update.mid ||
+            null;
           const replyTarget = {
             chat_id: recipient.chat_id || recipient.chatId || update.chat_id || update.chatId,
             user_id: sender.user_id || sender.userId || update.user_id,
@@ -42,8 +50,11 @@ function registerBotRoutes(app, deps) {
           const phone = String(replyTarget.user_id || '');
 
           logger.log(`[BOT] callback payload=${payload} target=${JSON.stringify(replyTarget)}`);
-          await answerCallback(callbackId, { notification: { text: 'Обрабатываю...' } });
-          await handleCallback(replyTarget, phone, String(payload || ''), callback);
+          await handleCallback(replyTarget, phone, String(payload || ''), {
+            callbackId,
+            messageId: callbackMessageId,
+            raw: callback,
+          });
           continue;
         }
 

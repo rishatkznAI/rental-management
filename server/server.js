@@ -137,6 +137,7 @@ function saveSnapshot(s)  { writeData('snapshot', s); }
 
 const {
   sendMessage,
+  deleteMessage,
   answerCallback,
   registerWebhook,
 } = createMaxApiClient({
@@ -661,6 +662,8 @@ const {
   getBotSessions,
   saveBotSessions,
   sendMessage,
+  deleteMessage,
+  answerCallback,
   generateId,
   idPrefixes: ID_PREFIXES,
   nowIso,

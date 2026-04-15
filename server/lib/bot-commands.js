@@ -8,6 +8,8 @@ function createBotHandlers(deps) {
     getBotSessions,
     saveBotSessions,
     sendMessage,
+    deleteMessage,
+    answerCallback,
     generateId,
     idPrefixes,
     nowIso,
@@ -62,7 +64,7 @@ function createBotHandlers(deps) {
       [button('Черновик', 'menu:draft'), button('Итог', 'menu:summary')],
       [button('Работы', 'menu:works'), button('Запчасти', 'menu:parts')],
       [button('Готово', 'menu:ready'), button('Ожидание', 'menu:waiting')],
-      [button('Закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close')],
+      [button('Закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close'), button('Назад', 'menu:main')],
       [button('Мои заявки', 'menu:myrepairs')],
     ]);
   }
@@ -87,6 +89,7 @@ function createBotHandlers(deps) {
     return keyboard([
       ...chunkButtons(buttons, 2),
       [button('Своя причина', 'reason:custom')],
+      [button('Назад', 'menu:new_ticket')],
     ]);
   }
 
@@ -99,6 +102,7 @@ function createBotHandlers(deps) {
         button('5', `qty:${kind}:5`),
       ],
       [button('Ввести руками', `qty:${kind}:manual`)],
+      [button('Назад', kind === 'work' ? 'menu:works' : 'menu:parts')],
     ]);
   }
 
@@ -120,10 +124,72 @@ function createBotHandlers(deps) {
     ]);
   }
 
-  function reply(target, text, options = {}) {
-    return sendMessage(target, text, {
-      ...(options.attachments ? { attachments: options.attachments } : {}),
+  function extractMessageId(payload) {
+    return payload?.message?.message_id ||
+      payload?.message?.mid ||
+      payload?.message?.id ||
+      payload?.message_id ||
+      payload?.mid ||
+      payload?.id ||
+      null;
+  }
+
+  async function cleanupPreviousBotMessage(phone, preserveMessageId = null) {
+    if (!phone) return;
+    const session = getBotSession(phone);
+    const previousMessageId = session.lastBotMessageId;
+    if (!previousMessageId || previousMessageId === preserveMessageId) return;
+    try {
+      await deleteMessage(previousMessageId);
+    } catch (error) {
+      // Не блокируем сценарий, если MAX не дал удалить старое сообщение.
+    }
+  }
+
+  async function rememberBotMessage(phone, payload, fallbackMessageId = null) {
+    if (!phone) return;
+    const messageId = fallbackMessageId || extractMessageId(payload);
+    if (!messageId) return;
+    updateBotSession(phone, { lastBotMessageId: messageId });
+  }
+
+  async function reply(target, text, options = {}) {
+    const {
+      attachments,
+      phone = '',
+      callbackContext = null,
+      replaceMessage = false,
+      cleanupPrevious = false,
+      notification = null,
+    } = options;
+
+    if (replaceMessage && callbackContext?.callbackId) {
+      const payload = await answerCallback(callbackContext.callbackId, {
+        ...(notification ? { notification: { text: notification } } : {}),
+        message: {
+          text,
+          ...(attachments ? { attachments } : {}),
+        },
+      });
+      await rememberBotMessage(phone, payload, callbackContext.messageId || null);
+      return payload;
+    }
+
+    if (callbackContext?.callbackId && notification) {
+      await answerCallback(callbackContext.callbackId, {
+        notification: { text: notification },
+      });
+    }
+
+    if (cleanupPrevious && phone) {
+      await cleanupPreviousBotMessage(phone, callbackContext?.messageId || null);
+    }
+
+    const payload = await sendMessage(target, text, {
+      ...(attachments ? { attachments } : {}),
     });
+    await rememberBotMessage(phone, payload);
+    return payload;
   }
 
   function withBotMenu(text, lines = []) {
@@ -145,7 +211,7 @@ function createBotHandlers(deps) {
         `👋 Добро пожаловать в бот «Подъёмники»!${payloadLine}\n\nНажмите «Войти», затем бот по шагам попросит логин и пароль.`,
         ['если хотите вручную: /start email@company.ru пароль'],
       ),
-      { attachments: authKeyboard() },
+      { attachments: authKeyboard(), phone, cleanupPrevious: true },
     );
   }
 
@@ -656,7 +722,7 @@ function createBotHandlers(deps) {
     );
     return keyboard([
       ...chunkButtons(buttons, 2),
-      [button('Новый поиск', 'menu:find_equipment')],
+      [button('Новый поиск', 'menu:find_equipment'), button('Назад', 'menu:main')],
     ]);
   }
 
@@ -667,7 +733,7 @@ function createBotHandlers(deps) {
     );
     return keyboard([
       ...chunkButtons(buttons, 2),
-      [button('Новый поиск работ', 'menu:works')],
+      [button('Новый поиск работ', 'menu:works'), button('Назад', 'menu:draft')],
     ]);
   }
 
@@ -678,7 +744,7 @@ function createBotHandlers(deps) {
     );
     return keyboard([
       ...chunkButtons(buttons, 2),
-      [button('Новый поиск запчастей', 'menu:parts')],
+      [button('Новый поиск запчастей', 'menu:parts'), button('Назад', 'menu:draft')],
     ]);
   }
 
@@ -696,7 +762,7 @@ function createBotHandlers(deps) {
       open.length > 10 ? `... и ещё ${open.length - 10}` : ''].filter(Boolean).join('\n');
   }
 
-  async function handleEquipmentSearchRequest(senderId, phone, query) {
+  async function handleEquipmentSearchRequest(senderId, phone, query, uiContext = {}) {
     const matches = searchEquipmentForBot(query);
     if (!matches.length) {
       updateBotSession(phone, { pendingAction: 'equipment_search', pendingPayload: null });
@@ -726,10 +792,14 @@ function createBotHandlers(deps) {
       'После выбора я предложу типовые причины ремонта.',
     ].join('\n'), ['новый поиск: найти технику', 'отмена: /сброс']), {
       attachments: equipmentSearchKeyboard(matches),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
     });
   }
 
-  async function handleCreateTicketRequest(senderId, phone, authUser, selectionText) {
+  async function handleCreateTicketRequest(senderId, phone, authUser, selectionText, uiContext = {}) {
     const session = getBotSession(phone);
     const preselectedEquipmentId = session.pendingPayload?.selectedEquipmentId;
     let reason = '';
@@ -777,6 +847,10 @@ function createBotHandlers(deps) {
         'Я открыл её как текущую.',
       ].join('\n'), ['черновик', 'работы гидравлика', 'запчасти фильтр', 'готово', 'закрыть']), {
         attachments: currentRepairKeyboard(existingOpenTicket.id),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
       });
     }
     const ticket = createServiceTicketFromBot(equipment, authUser, reason);
@@ -789,10 +863,14 @@ function createBotHandlers(deps) {
       'Заявка открыта как текущая.',
     ].join('\n'), ['итог', 'работы гидравлика', 'запчасти фильтр', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
     });
   }
 
-  async function handleWorkSearchRequest(senderId, phone, ticket, query) {
+  async function handleWorkSearchRequest(senderId, phone, ticket, query, uiContext = {}) {
     const matches = searchServiceWorks(query);
     if (!matches.length) {
       updateBotSession(phone, { pendingAction: 'work_search', activeRepairId: ticket.id });
@@ -813,10 +891,14 @@ function createBotHandlers(deps) {
       'Пример: 1 2',
     ].join('\n'), ['новый поиск работ', 'черновик', 'отмена: /сброс']), {
       attachments: workSearchKeyboard(matches),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
     });
   }
 
-  async function handleAddWorkRequest(senderId, phone, authUser, ticket, selectionText) {
+  async function handleAddWorkRequest(senderId, phone, authUser, ticket, selectionText, uiContext = {}) {
     const [firstRaw, secondRaw] = selectionText.trim().split(/\s+/);
     const session = getBotSession(phone);
     const selectedWorkId = session.pendingPayload?.selectedWorkId;
@@ -846,10 +928,14 @@ function createBotHandlers(deps) {
     resetBotFlow(phone);
     return reply(senderId, withBotMenu(`✅ Добавлена работа: ${work.name} × ${quantity}`, ['ещё работы', 'запчасти', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
     });
   }
 
-  async function handlePartSearchRequest(senderId, phone, ticket, query) {
+  async function handlePartSearchRequest(senderId, phone, ticket, query, uiContext = {}) {
     const matches = searchSpareParts(query);
     if (!matches.length) {
       updateBotSession(phone, { pendingAction: 'part_search', activeRepairId: ticket.id });
@@ -871,10 +957,14 @@ function createBotHandlers(deps) {
       'Если цену не указать, возьмётся базовая из справочника.',
     ].join('\n'), ['новый поиск запчастей', 'черновик', 'отмена: /сброс']), {
       attachments: partSearchKeyboard(matches),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
     });
   }
 
-  async function handleAddPartRequest(senderId, phone, authUser, ticket, selectionText) {
+  async function handleAddPartRequest(senderId, phone, authUser, ticket, selectionText, uiContext = {}) {
     const [firstRaw, secondRaw, thirdRaw] = selectionText.trim().split(/\s+/);
     const session = getBotSession(phone);
     const selectedPartId = session.pendingPayload?.selectedPartId;
@@ -908,10 +998,14 @@ function createBotHandlers(deps) {
     resetBotFlow(phone);
     return reply(senderId, withBotMenu(`✅ Добавлена запчасть: ${part.name} × ${quantity} по ${price.toLocaleString('ru-RU')} ₽`, ['ещё запчасти', 'работы', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
     });
   }
 
-  async function handleSummaryRequest(senderId, phone, authUser, ticket, summary) {
+  async function handleSummaryRequest(senderId, phone, authUser, ticket, summary, uiContext = {}) {
     if (!summary) {
       updateBotSession(phone, { pendingAction: 'summary', activeRepairId: ticket.id });
       return reply(senderId, '📝 Напишите следующим сообщением итог ремонта одним текстом.');
@@ -930,10 +1024,14 @@ function createBotHandlers(deps) {
     resetBotFlow(phone);
     return reply(senderId, withBotMenu(`✅ Итог ремонта сохранён для ${ticket.id}`, ['работы', 'запчасти', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
     });
   }
 
-  async function handleCallback(senderId, phone, payload) {
+  async function handleCallback(senderId, phone, payload, callbackContext = null) {
     const normalized = String(payload || '').trim();
 
     if (normalized === 'auth:start') {
@@ -941,22 +1039,38 @@ function createBotHandlers(deps) {
       return reply(
         senderId,
         '👤 Напишите логин (email) следующим сообщением.',
-        { attachments: keyboard([[button('Отмена', 'menu:cancel_login')]]) },
+        {
+          attachments: keyboard([[button('Назад', 'menu:cancel_login')]]),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        },
       );
     }
 
     if (normalized === 'menu:cancel_login') {
       resetBotFlow(phone);
-      return reply(senderId, '❎ Вход отменён.', { attachments: authKeyboard() });
+      return reply(senderId, '❎ Вход отменён.', {
+        attachments: authKeyboard(),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
     }
 
     if (normalized === 'menu:cancel_photo_event') {
       resetBotFlow(phone);
-      return reply(senderId, '❎ Сценарий отгрузки/приёмки отменён.', { attachments: mechanicKeyboard() });
+      return reply(senderId, '❎ Сценарий отгрузки/приёмки отменён.', {
+        attachments: mechanicKeyboard(),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
     }
 
     const map = {
       'menu:help': '/помощь',
+      'menu:main': '/меню',
       'menu:rentals': '/аренды',
       'menu:equipment': '/техника',
       'menu:service': '/сервис',
@@ -976,12 +1090,12 @@ function createBotHandlers(deps) {
 
     if (normalized.startsWith('ticket:open:')) {
       const ticketId = normalized.slice('ticket:open:'.length);
-      return handleCommand(senderId, phone, `/ремонт ${ticketId}`);
+      return handleCommand(senderId, phone, `/ремонт ${ticketId}`, {}, { callbackContext, replaceMessage: true });
     }
 
     if (normalized.startsWith('ticket:take:')) {
       const ticketId = normalized.slice('ticket:take:'.length);
-      return handleCommand(senderId, phone, `/вработу ${ticketId}`);
+      return handleCommand(senderId, phone, `/вработу ${ticketId}`, {}, { callbackContext, replaceMessage: true });
     }
 
     if (normalized.startsWith('ticket:close:')) {
@@ -990,7 +1104,7 @@ function createBotHandlers(deps) {
       if (!current || current.id !== ticketId) {
         setCurrentRepair(phone, ticketId);
       }
-      return handleCommand(senderId, phone, '/закрыть');
+      return handleCommand(senderId, phone, '/закрыть', {}, { callbackContext, replaceMessage: true });
     }
 
     if (normalized.startsWith('equipment:choose:')) {
@@ -1019,7 +1133,12 @@ function createBotHandlers(deps) {
             'Теперь отправьте фото этой техники в чат.',
             'Можно приложить сразу несколько фото и добавить подпись комментарием.',
           ].join('\n'),
-          { attachments: keyboard([[button('Отмена', 'menu:cancel_photo_event')]]) },
+          {
+            attachments: keyboard([[button('Назад', 'menu:cancel_photo_event')]]),
+            phone,
+            callbackContext,
+            replaceMessage: true,
+          },
         );
       }
 
@@ -1035,7 +1154,12 @@ function createBotHandlers(deps) {
           '',
           'Выберите типовую причину кнопкой ниже или нажмите «Своя причина».',
         ].join('\n'),
-        { attachments: repairReasonKeyboard() },
+        {
+          attachments: repairReasonKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        },
       );
     }
 
@@ -1061,7 +1185,12 @@ function createBotHandlers(deps) {
       return reply(
         senderId,
         `🧰 Выбрана работа:\n${work.name}\n\nВыберите количество кнопкой ниже или нажмите «Ввести руками».`,
-        { attachments: quantityKeyboard('work') },
+        {
+          attachments: quantityKeyboard('work'),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        },
       );
     }
 
@@ -1095,7 +1224,12 @@ function createBotHandlers(deps) {
           'КОЛИЧЕСТВО [ЦЕНА]',
           'Пример: 2 3500',
         ].join('\n'),
-        { attachments: quantityKeyboard('part') },
+        {
+          attachments: quantityKeyboard('part'),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        },
       );
     }
 
@@ -1116,7 +1250,12 @@ function createBotHandlers(deps) {
         return reply(
           senderId,
           '📝 Напишите свою причину ремонта следующим сообщением.',
-          { attachments: keyboard([[button('Отмена', 'menu:cancel_login')]]) },
+          {
+            attachments: keyboard([[button('Назад', 'menu:new_ticket')]]),
+            phone,
+            callbackContext,
+            replaceMessage: true,
+          },
         );
       }
       if (!currentReason) {
@@ -1128,7 +1267,7 @@ function createBotHandlers(deps) {
       if (!authUser) {
         return reply(senderId, '🔒 Сначала авторизуйтесь.', { attachments: authKeyboard() });
       }
-      return handleCreateTicketRequest(senderId, phone, authUser, currentReason);
+      return handleCreateTicketRequest(senderId, phone, authUser, currentReason, { callbackContext });
     }
 
     if (normalized.startsWith('qty:')) {
@@ -1148,11 +1287,17 @@ function createBotHandlers(deps) {
         if (kind === 'work') {
           return reply(senderId, '🧰 Напишите количество работы одним числом. Например: 2', {
             attachments: currentRepairKeyboard(ticket.id),
+            phone,
+            callbackContext,
+            replaceMessage: true,
           });
         }
         if (kind === 'part') {
           return reply(senderId, '📦 Напишите: КОЛИЧЕСТВО [ЦЕНА]\nПример: 2 3500\nЕсли цену не указывать, возьмётся базовая.', {
             attachments: currentRepairKeyboard(ticket.id),
+            phone,
+            callbackContext,
+            replaceMessage: true,
           });
         }
       }
@@ -1164,19 +1309,22 @@ function createBotHandlers(deps) {
       }
 
       if (kind === 'work') {
-        return handleAddWorkRequest(senderId, phone, authUser, ticket, value);
+        return handleAddWorkRequest(senderId, phone, authUser, ticket, value, { callbackContext });
       }
       if (kind === 'part') {
-        return handleAddPartRequest(senderId, phone, authUser, ticket, value);
+        return handleAddPartRequest(senderId, phone, authUser, ticket, value, { callbackContext });
       }
     }
 
     if (map[normalized]) {
-      return handleCommand(senderId, phone, map[normalized]);
+      return handleCommand(senderId, phone, map[normalized], {}, { callbackContext, replaceMessage: true });
     }
 
     return reply(senderId, 'ℹ️ Действие кнопки пока не распознано.', {
       attachments: defaultKeyboardForRole(getAuthorizedUser(String(phone))?.userRole || ''),
+      phone,
+      callbackContext,
+      replaceMessage: true,
     });
   }
 
@@ -1220,6 +1368,18 @@ function createBotHandlers(deps) {
     const parts = trimmed.split(/\s+/);
     const session = getBotSession(phone);
     const messageMeta = arguments[3] || {};
+    const uiContext = arguments[4] || {};
+    const callbackContext = uiContext.callbackContext || null;
+
+    function replyWithUi(textValue, options = {}) {
+      return reply(senderId, textValue, {
+        phone,
+        callbackContext,
+        replaceMessage: Boolean(uiContext.replaceMessage),
+        cleanupPrevious: !callbackContext,
+        ...options,
+      });
+    }
 
     console.log('[TRACE] handleCommand senderId=%s phone=%s text=%s', senderId, phone, text);
 
@@ -1230,7 +1390,7 @@ function createBotHandlers(deps) {
         return reply(
           senderId,
           '👤 Напишите логин (email) следующим сообщением.',
-          { attachments: keyboard([[button('Отмена', 'menu:cancel_login')]]) },
+          { attachments: keyboard([[button('Назад', 'menu:cancel_login')]]), phone, callbackContext, replaceMessage: Boolean(uiContext.replaceMessage), cleanupPrevious: !callbackContext },
         );
       }
       const [, email, password] = parts;
@@ -1249,15 +1409,14 @@ function createBotHandlers(deps) {
           pendingAction: 'login_email',
           pendingPayload: null,
         });
-        return reply(
-          senderId,
+        return replyWithUi(
           '❌ Неверный логин или пароль.\n\nНажмите «Войти» и попробуйте снова.',
           { attachments: authKeyboard() },
         );
       }
       console.log('[TRACE] sending welcome message for user');
       resetBotFlow(phone);
-      return reply(senderId,
+      return replyWithUi(
         withBotMenu(
           `✅ Вы вошли как ${user.name} (${user.role})\n${getHelpText(user.role)}`,
           ['меню', 'мои заявки', 'новая заявка'],
@@ -1286,7 +1445,7 @@ function createBotHandlers(deps) {
           return reply(
             senderId,
             `📷 Я жду фото для сценария «${eventType === 'shipping' ? 'Отгрузка' : 'Приёмка'}».\nМожно приложить фото и, при желании, добавить подпись текстом.`,
-            { attachments: keyboard([[button('Отмена', 'menu:cancel_photo_event')]]) },
+            { attachments: keyboard([[button('Назад', 'menu:cancel_photo_event')]]) },
           );
         }
 
@@ -1325,7 +1484,7 @@ function createBotHandlers(deps) {
         return reply(
           senderId,
           `🔐 Логин принят: ${trimmed}\nТеперь напишите пароль следующим сообщением.`,
-          { attachments: keyboard([[button('Отмена', 'menu:cancel_login')]]) },
+          { attachments: keyboard([[button('Назад', 'menu:cancel_login')]]) },
         );
       }
 
@@ -1346,7 +1505,7 @@ function createBotHandlers(deps) {
           return reply(
             senderId,
             '❌ Неверный логин или пароль. Давайте начнём заново: напишите логин (email).',
-            { attachments: keyboard([[button('Отмена', 'menu:cancel_login')]]) },
+            { attachments: keyboard([[button('Назад', 'menu:cancel_login')]]) },
           );
         }
         resetBotFlow(phone);
@@ -1382,62 +1541,61 @@ function createBotHandlers(deps) {
     if (!trimmed.startsWith('/') && canManageRepair) {
       const currentTicket = getCurrentRepair(phone);
       if (session.pendingAction === 'equipment_search') {
-        return handleEquipmentSearchRequest(senderId, phone, trimmed);
+        return handleEquipmentSearchRequest(senderId, phone, trimmed, uiContext);
       }
       if (session.pendingAction === 'ticket_reason') {
-        return handleCreateTicketRequest(senderId, phone, authUser, trimmed);
+        return handleCreateTicketRequest(senderId, phone, authUser, trimmed, uiContext);
       }
       if (session.pendingAction === 'work_search') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
-        return handleWorkSearchRequest(senderId, phone, currentTicket, trimmed);
+        return handleWorkSearchRequest(senderId, phone, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'work_pick') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
-        return handleAddWorkRequest(senderId, phone, authUser, currentTicket, trimmed);
+        return handleAddWorkRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'part_search') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
-        return handlePartSearchRequest(senderId, phone, currentTicket, trimmed);
+        return handlePartSearchRequest(senderId, phone, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'part_pick') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
-        return handleAddPartRequest(senderId, phone, authUser, currentTicket, trimmed);
+        return handleAddPartRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'summary') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
-        return handleSummaryRequest(senderId, phone, authUser, currentTicket, trimmed);
+        return handleSummaryRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
       }
     }
 
     if (lower === '/аренды' || lower === '/rentals' || lower === '/мои' || lower === 'аренды') {
       const rentals = readData('rentals') || [];
-      return reply(senderId, formatRentals(rentals, userName, userRole), {
+      return replyWithUi(formatRentals(rentals, userName, userRole), {
         attachments: defaultKeyboardForRole(userRole),
       });
     }
 
     if (lower === '/техника' || lower === '/equipment' || lower === 'техника') {
       const equipment = readData('equipment') || [];
-      return reply(senderId, formatEquipment(equipment), {
+      return replyWithUi(formatEquipment(equipment), {
         attachments: defaultKeyboardForRole(userRole),
       });
     }
 
     if (lower === '/сервис' || lower === '/service' || lower === 'сервис' || lower === 'заявки') {
-      return reply(senderId, canManageRepair ? formatServiceForUser(authUser) : formatService(readData('service') || []), {
+      return replyWithUi(canManageRepair ? formatServiceForUser(authUser) : formatService(readData('service') || []), {
         attachments: defaultKeyboardForRole(userRole),
       });
     }
 
     if ((lower === '/моизаявки' || lower === '/myrepairs' || lower === 'мои заявки') && canManageRepair) {
-      return reply(senderId, formatServiceForUser(authUser), {
+      return replyWithUi(formatServiceForUser(authUser), {
         attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
       });
     }
 
     if ((lower === '/меню' || lower === 'меню') && canManageRepair) {
-      return reply(
-        senderId,
+      return replyWithUi(
         withBotMenu(getHelpText(userRole), ['мои заявки', 'новая заявка', 'черновик']),
         { attachments: defaultKeyboardForRole(userRole) },
       );
@@ -1449,10 +1607,7 @@ function createBotHandlers(deps) {
         pendingPayload: null,
         lastEquipmentSearch: [],
       });
-      return sendMessage(
-        senderId,
-        '🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.',
-      );
+      return replyWithUi('🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.');
     }
 
     if ((lower === '/отгрузка' || lower === 'отгрузка') && canManageRepair) {
@@ -1461,7 +1616,7 @@ function createBotHandlers(deps) {
         pendingPayload: { flow: 'photo_event', photoEventType: 'shipping' },
         lastEquipmentSearch: [],
       });
-      return reply(senderId, '🚚 Напишите INV, SN, модель или производителя техники для отгрузки.', {
+      return replyWithUi('🚚 Напишите INV, SN, модель или производителя техники для отгрузки.', {
         attachments: mechanicKeyboard(),
       });
     }
@@ -1472,7 +1627,7 @@ function createBotHandlers(deps) {
         pendingPayload: { flow: 'photo_event', photoEventType: 'receiving' },
         lastEquipmentSearch: [],
       });
-      return reply(senderId, '📥 Напишите INV, SN, модель или производителя техники для приёмки с аренды.', {
+      return replyWithUi('📥 Напишите INV, SN, модель или производителя техники для приёмки с аренды.', {
         attachments: mechanicKeyboard(),
       });
     }
@@ -1482,13 +1637,13 @@ function createBotHandlers(deps) {
       const query = trimmed.slice(command.length).trim();
       if (!query) {
         updateBotSession(phone, { pendingAction: 'equipment_search', pendingPayload: null });
-        return sendMessage(senderId, '🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.');
+        return replyWithUi('🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.');
       }
-      return handleEquipmentSearchRequest(senderId, phone, query);
+      return handleEquipmentSearchRequest(senderId, phone, query, uiContext);
     }
 
     if (lower.startsWith('/создатьзаявку ') && canManageRepair) {
-      return handleCreateTicketRequest(senderId, phone, authUser, trimmed.slice('/создатьзаявку'.length).trim());
+      return handleCreateTicketRequest(senderId, phone, authUser, trimmed.slice('/создатьзаявку'.length).trim(), uiContext);
     }
 
     if (lower.startsWith('/вработу ') && canManageRepair) {
@@ -1508,7 +1663,7 @@ function createBotHandlers(deps) {
       saveServiceTicket(updated);
       const withStatus = updateServiceTicketStatus(updated, 'in_progress', assignedName, 'Заявка взята в работу через MAX');
       setCurrentRepair(phone, withStatus.id);
-      return reply(senderId, withBotMenu([
+      return replyWithUi(withBotMenu([
         `✅ Заявка ${withStatus.id} взята в работу`,
         `${withStatus.equipment}`,
         `Причина: ${withStatus.reason}`,
@@ -1526,7 +1681,7 @@ function createBotHandlers(deps) {
         return sendMessage(senderId, '❌ Заявка не найдена.');
       }
       setCurrentRepair(phone, ticket.id);
-      return reply(senderId, withBotMenu([
+      return replyWithUi(withBotMenu([
         `🛠 Текущая заявка: ${ticket.id}`,
         `${ticket.equipment}`,
         `Причина: ${ticket.reason}`,
@@ -1556,7 +1711,7 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
       }
-      return handleSummaryRequest(senderId, phone, authUser, ticket, trimmed.slice('/итог'.length).trim());
+      return handleSummaryRequest(senderId, phone, authUser, ticket, trimmed.slice('/итог'.length).trim(), uiContext);
     }
 
     if ((lower === '/итог' || lower === 'итог') && canManageRepair) {
@@ -1564,7 +1719,7 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
       }
-      return handleSummaryRequest(senderId, phone, authUser, ticket, '');
+      return handleSummaryRequest(senderId, phone, authUser, ticket, '', uiContext);
     }
 
     if (lower.startsWith('/работы') && canManageRepair) {
@@ -1575,9 +1730,9 @@ function createBotHandlers(deps) {
       const query = trimmed.slice('/работы'.length).trim();
       if (!query) {
         updateBotSession(phone, { pendingAction: 'work_search', activeRepairId: ticket.id });
-        return sendMessage(senderId, '🧰 Напишите следующим сообщением запрос для поиска работ. Например: гидравлика');
+        return replyWithUi('🧰 Напишите следующим сообщением запрос для поиска работ. Например: гидравлика');
       }
-      return handleWorkSearchRequest(senderId, phone, ticket, query);
+      return handleWorkSearchRequest(senderId, phone, ticket, query, uiContext);
     }
 
     if (lower.startsWith('/добавитьработу ') && canManageRepair) {
@@ -1585,7 +1740,7 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
       }
-      return handleAddWorkRequest(senderId, phone, authUser, ticket, trimmed.slice('/добавитьработу'.length).trim());
+      return handleAddWorkRequest(senderId, phone, authUser, ticket, trimmed.slice('/добавитьработу'.length).trim(), uiContext);
     }
 
     if (lower.startsWith('/запчасти') && canManageRepair) {
@@ -1596,9 +1751,9 @@ function createBotHandlers(deps) {
       const query = trimmed.slice('/запчасти'.length).trim();
       if (!query) {
         updateBotSession(phone, { pendingAction: 'part_search', activeRepairId: ticket.id });
-        return sendMessage(senderId, '📦 Напишите следующим сообщением запрос для поиска запчастей. Например: фильтр');
+        return replyWithUi('📦 Напишите следующим сообщением запрос для поиска запчастей. Например: фильтр');
       }
-      return handlePartSearchRequest(senderId, phone, ticket, query);
+      return handlePartSearchRequest(senderId, phone, ticket, query, uiContext);
     }
 
     if (lower.startsWith('/добавитьзапчасть ') && canManageRepair) {
@@ -1606,7 +1761,7 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
       }
-      return handleAddPartRequest(senderId, phone, authUser, ticket, trimmed.slice('/добавитьзапчасть'.length).trim());
+      return handleAddPartRequest(senderId, phone, authUser, ticket, trimmed.slice('/добавитьзапчасть'.length).trim(), uiContext);
     }
 
     if (lower === '/ожидание' && canManageRepair) {
@@ -1615,7 +1770,9 @@ function createBotHandlers(deps) {
         return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
       }
       updateServiceTicketStatus(ticket, 'waiting_parts', authUser.userName, 'Заявка переведена в ожидание запчастей через MAX');
-      return sendMessage(senderId, `🟠 ${ticket.id} переведена в статус «Ожидание запчастей»`);
+      return replyWithUi(`🟠 ${ticket.id} переведена в статус «Ожидание запчастей»`, {
+        attachments: currentRepairKeyboard(ticket.id),
+      });
     }
 
     if (lower === '/готово' && canManageRepair) {
@@ -1624,11 +1781,13 @@ function createBotHandlers(deps) {
         return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
       }
       const updated = updateServiceTicketStatus(ticket, 'ready', authUser.userName, 'Работы завершены через MAX');
-      return sendMessage(senderId, withBotMenu([
+      return replyWithUi(withBotMenu([
         `✅ Заявка ${updated.id} переведена в статус «Готово»`,
         'Если нужно, можно ещё закрыть её командой /закрыть',
         'Или посмотреть отчет: /черновик',
-      ].join('\n'), ['черновик', 'закрыть', 'мои заявки']));
+      ].join('\n'), ['черновик', 'закрыть', 'мои заявки']), {
+        attachments: currentRepairKeyboard(updated.id),
+      });
     }
 
     if (lower === '/закрыть' && canManageRepair) {
@@ -1638,11 +1797,13 @@ function createBotHandlers(deps) {
       }
       const updated = updateServiceTicketStatus(ticket, 'closed', authUser.userName, 'Заявка закрыта через MAX');
       clearBotSession(phone);
-      return sendMessage(senderId, withBotMenu(`✅ Заявка ${updated.id} закрыта.`, ['мои заявки', 'новая заявка', 'меню']));
+      return replyWithUi(withBotMenu(`✅ Заявка ${updated.id} закрыта.`, ['мои заявки', 'новая заявка', 'меню']), {
+        attachments: mechanicKeyboard(),
+      });
     }
 
     if (lower === '/помощь' || lower === '/help' || lower === 'помощь') {
-      return reply(senderId, getHelpText(userRole), {
+      return replyWithUi(getHelpText(userRole), {
         attachments: defaultKeyboardForRole(userRole),
       });
     }

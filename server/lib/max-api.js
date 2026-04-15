@@ -51,6 +51,13 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
     return res;
   }
 
+  async function deleteMessage(messageId) {
+    if (!messageId) return null;
+    const res = await maxRequest('DELETE', `/messages?message_id=${encodeURIComponent(messageId)}`);
+    logger.log(`[MAX API] deleteMessage(${messageId}) ← ${JSON.stringify(res).slice(0, 200)}`);
+    return res;
+  }
+
   async function answerCallback(callbackId, options = {}) {
     if (!callbackId) return null;
     const res = await maxRequest('POST', `/answers?callback_id=${encodeURIComponent(callbackId)}`, {
@@ -81,6 +88,7 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
   return {
     maxRequest,
     sendMessage,
+    deleteMessage,
     answerCallback,
     registerWebhook,
   };

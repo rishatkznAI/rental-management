@@ -18,8 +18,8 @@ function registerBotRoutes(app, deps) {
         if (update.update_type === 'bot_started') {
           const user = update.user;
           if (!user?.user_id) continue;
-          // chat_id для bot_started: берём из update.chat или fallback к user_id
-          const startChatId = update.chat?.chat_id || user.user_id;
+          // Для ответа используем user_id пользователя (chat_id диалога не подходит)
+          const startChatId = user.user_id;
           logger.log(`[BOT] [${user.name || user.user_id}] bot_started chatId=${startChatId}`);
           await handleBotStarted(startChatId, String(startChatId), update.payload);
           continue;
@@ -34,8 +34,8 @@ function registerBotRoutes(app, deps) {
         logger.log('[BOT] msg.recipient:', JSON.stringify(msg?.recipient));
         logger.log('[BOT] msg.sender:', JSON.stringify(sender));
 
-        // MAX API: для отправки ответа нужен chat_id, а не user_id
-        const chatId = msg?.recipient?.chat_id || sender.user_id;
+        // MAX API: для ответа в диалоге используем user_id отправителя
+        const chatId = sender.user_id;
         const senderId = chatId;
         const phone = String(chatId);
         const text = msg?.body?.text || '';

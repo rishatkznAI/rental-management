@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { formatCurrency, formatDate } from '../../lib/utils';
+import { formatCurrency, formatDate, getRentalDays } from '../../lib/utils';
 import { findConflictingRental } from '../../lib/rental-conflicts';
 import type { GanttRentalData } from '../../mock-data';
 import type { Equipment, Payment } from '../../types';
@@ -388,7 +388,7 @@ export function RentalDrawer({
                 <div className="ml-auto">
                   <div className="text-xs text-gray-500">Дней</div>
                   <div className="text-sm text-gray-900 dark:text-white">
-                    {Math.ceil((new Date(rental.endDate).getTime() - new Date(rental.startDate).getTime()) / (1000 * 60 * 60 * 24))}
+                    {getRentalDays(rental.startDate, rental.endDate)}
                   </div>
                 </div>
               </div>

@@ -23,6 +23,7 @@ import type {
   Mechanic,
   RepairPartItem,
   RepairWorkItem,
+  ServiceCloseChecklist,
   ServicePartUsage,
   ServiceRepairResult,
   ServiceWork,
@@ -151,6 +152,94 @@ function normalizeTicket(ticket: ServiceTicket): ServiceTicket {
     createdBy: ticket.createdByUserName ?? ticket.createdBy,
     result: getRepairSummary(ticket),
   };
+}
+
+const CLOSE_CHECKLIST_LABELS: Record<keyof ServiceCloseChecklist, string> = {
+  faultEliminated: 'Неисправность устранена',
+  worksRecorded: 'Работы внесены в отчёт',
+  partsRecordedOrNotRequired: 'Запчасти внесены или не требовались',
+  beforePhotosAttached: 'Фото ДО приложены',
+  afterPhotosAttached: 'Фото ПОСЛЕ приложены',
+  summaryFilled: 'Итог ремонта заполнен',
+};
+
+function repairCloseChecklistEntries(ticket: ServiceTicket, workItems: RepairWorkItem[], partItems: RepairPartItem[]) {
+  const repairPhotos = ticket.repairPhotos ?? { before: [], after: [] };
+  const summaryFilled = Boolean(getRepairSummary(ticket).trim());
+  const fallback = {
+    faultEliminated: false,
+    worksRecorded: workItems.length > 0,
+    partsRecordedOrNotRequired: partItems.length > 0,
+    beforePhotosAttached: (repairPhotos.before ?? []).length > 0,
+    afterPhotosAttached: (repairPhotos.after ?? []).length > 0,
+    summaryFilled,
+  } satisfies ServiceCloseChecklist;
+
+  const merged = {
+    ...fallback,
+    ...(ticket.closeChecklist ?? {}),
+    worksRecorded: workItems.length > 0,
+    beforePhotosAttached: (repairPhotos.before ?? []).length > 0,
+    afterPhotosAttached: (repairPhotos.after ?? []).length > 0,
+    summaryFilled,
+  };
+
+  return (Object.keys(CLOSE_CHECKLIST_LABELS) as Array<keyof ServiceCloseChecklist>).map(key => ({
+    key,
+    label: CLOSE_CHECKLIST_LABELS[key],
+    done: Boolean(merged[key]),
+  }));
+}
+
+function RepairPhotoGroup({
+  title,
+  photos,
+  uploadedAt,
+  uploadedBy,
+}: {
+  title: string;
+  photos?: string[];
+  uploadedAt?: string | null;
+  uploadedBy?: string | null;
+}) {
+  const safePhotos = Array.isArray(photos) ? photos : [];
+  const hasMeta = Boolean(uploadedAt || uploadedBy);
+
+  return (
+    <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-gray-900 dark:text-white">{title}</p>
+          {hasMeta && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {[uploadedBy, uploadedAt ? formatDate(uploadedAt) : null].filter(Boolean).join(' · ')}
+            </p>
+          )}
+        </div>
+        <Badge variant={safePhotos.length > 0 ? 'info' : 'default'}>{safePhotos.length} фото</Badge>
+      </div>
+
+      {safePhotos.length > 0 ? (
+        <div className="grid grid-cols-3 gap-2">
+          {safePhotos.map((src, index) => (
+            <button
+              type="button"
+              key={`${title}-${index}`}
+              onClick={() => window.open(src, '_blank')}
+              className="group relative aspect-square overflow-hidden rounded-md border border-gray-200 dark:border-gray-700"
+            >
+              <img src={src} alt={`${title} ${index + 1}`} className="h-full w-full object-cover group-hover:opacity-90" />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+          <Camera className="h-4 w-4" />
+          Фото пока не добавлены
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── main component ────────────────────────────────────────────────────────────
@@ -296,6 +385,8 @@ export default function ServiceDetail() {
     : '';
   const activeMechanics = mechanics.filter(item => item.status === 'active');
   const repairResult = ticket ? buildRepairResult(ticket, repairWorkItems, repairPartItems) : null;
+  const repairPhotos = ticket.repairPhotos ?? { before: [], after: [] };
+  const closeChecklistEntries = repairCloseChecklistEntries(ticket, repairWorkItems, repairPartItems);
 
   // ── actions ────────────────────────────────────────────────────────────────
 
@@ -536,7 +627,7 @@ export default function ServiceDetail() {
 
   if (canEdit && ticket.status === 'new') {
     actions.push(
-      <Button key="start" onClick={() => changeStatus('in_progress', 'Заявка взята в работу')}>
+      <Button key="start" className="w-full sm:w-auto" onClick={() => changeStatus('in_progress', 'Заявка взята в работу')}>
         <Play className="h-4 w-4" />
         Взять в работу
       </Button>
@@ -544,13 +635,13 @@ export default function ServiceDetail() {
   }
   if (canEdit && ticket.status === 'in_progress') {
     actions.push(
-      <Button key="parts" variant="secondary" onClick={() => changeStatus('waiting_parts', 'Заявка переведена в статус «Ожидание запчастей»')}>
+      <Button key="parts" variant="secondary" className="w-full sm:w-auto" onClick={() => changeStatus('waiting_parts', 'Заявка переведена в статус «Ожидание запчастей»')}>
         <Package className="h-4 w-4" />
         Ожидание запчастей
       </Button>
     );
     actions.push(
-      <Button key="ready" onClick={() => changeStatus('ready', 'Работы завершены, заявка готова к закрытию')}>
+      <Button key="ready" className="w-full sm:w-auto" onClick={() => changeStatus('ready', 'Работы завершены, заявка готова к закрытию')}>
         <CheckCircle className="h-4 w-4" />
         Работы завершены
       </Button>
@@ -558,7 +649,7 @@ export default function ServiceDetail() {
   }
   if (canEdit && ticket.status === 'waiting_parts') {
     actions.push(
-      <Button key="resume" variant="secondary" onClick={() => changeStatus('in_progress', 'Запчасти получены, возобновлена работа')}>
+      <Button key="resume" variant="secondary" className="w-full sm:w-auto" onClick={() => changeStatus('in_progress', 'Запчасти получены, возобновлена работа')}>
         <Play className="h-4 w-4" />
         Запчасти получены
       </Button>
@@ -566,7 +657,7 @@ export default function ServiceDetail() {
   }
   if (canEdit && ticket.status === 'ready') {
     actions.push(
-      <Button key="close" onClick={() => changeStatus('closed', 'Заявка закрыта')}>
+      <Button key="close" className="w-full sm:w-auto" onClick={() => changeStatus('closed', 'Заявка закрыта')}>
         <CheckCircle className="h-4 w-4" />
         Закрыть заявку
       </Button>
@@ -574,7 +665,7 @@ export default function ServiceDetail() {
   }
   if (canEdit && ticket.status !== 'closed') {
     actions.push(
-      <Button key="cancel" variant="secondary" className="border-red-200 text-red-600 hover:bg-red-50"
+      <Button key="cancel" variant="secondary" className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50"
         onClick={() => changeStatus('closed', 'Заявка отменена / закрыта без выполнения')}>
         <XCircle className="h-4 w-4" />
         Отменить
@@ -595,23 +686,23 @@ export default function ServiceDetail() {
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-4">
-          <Button variant="secondary" onClick={() => navigate('/service')}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="flex items-start gap-3">
+          <Button variant="secondary" size="sm" onClick={() => navigate('/service')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{ticket.id}</h1>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{ticket.id}</h1>
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
             </div>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{ticket.equipment}</p>
+            <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400 truncate max-w-[280px] sm:max-w-none">{ticket.equipment}</p>
           </div>
         </div>
         {/* Action buttons */}
         {actions.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             {actions}
           </div>
         )}

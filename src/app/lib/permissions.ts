@@ -66,7 +66,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Офис-менеджер': {
     // dashboard: нет
     equipment:        ALL,
-    rentals:          ALL,
+    rentals:          VIEW_CREATE,
     planner:          ALL,
     service:          ALL,
     service_vehicles: ALL,

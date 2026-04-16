@@ -352,6 +352,14 @@ export default function EquipmentDetail() {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     [allShippingPhotos, id],
   );
+  const latestShippingEvent = useMemo(
+    () => shippingPhotos.find(event => event.type === 'shipping') || null,
+    [shippingPhotos],
+  );
+  const latestReceivingEvent = useMemo(
+    () => shippingPhotos.find(event => event.type === 'receiving') || null,
+    [shippingPhotos],
+  );
 
   const persistEquipment = React.useCallback(async (list: Equipment[]) => {
     setAllEquipment(list);
@@ -686,7 +694,7 @@ export default function EquipmentDetail() {
   const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
 
   const tabTriggerClass =
-    'border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:hover:text-gray-200';
+    'whitespace-nowrap shrink-0 border-b-2 border-transparent px-3 py-2.5 sm:px-4 sm:py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:hover:text-gray-200';
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -896,24 +904,24 @@ export default function EquipmentDetail() {
               className="hidden"
               onChange={handleMainPhotoUpload}
             />
-	            <div className="group relative">
-	              {equipment.photo ? (
-	                <div className="flex min-h-[18rem] items-center justify-center overflow-hidden rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
-	                  <img
-	                    src={equipment.photo}
-	                    alt={equipment.model}
-	                    className="max-h-[32rem] w-full cursor-zoom-in rounded-md object-contain"
-	                    onClick={() => setPreviewImage(equipment.photo ?? null)}
-	                  />
-	                </div>
-	              ) : (
-	                <div className="flex h-64 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
-	                  <ImageIcon className="h-16 w-16 text-gray-400" />
-	                </div>
-	              )}
-              {/* Photo action overlay */}
-              <div className="absolute inset-0 flex items-end justify-center rounded-lg bg-black/0 pb-3 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100">
-                {canEditEquipment && (
+            <div className="group relative">
+              {equipment.photo ? (
+                <div className="flex min-h-[18rem] items-center justify-center overflow-hidden rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
+                  <img
+                    src={equipment.photo}
+                    alt={equipment.model}
+                    className="max-h-[32rem] w-full cursor-zoom-in rounded-md object-contain"
+                    onClick={() => setPreviewImage(equipment.photo ?? null)}
+                  />
+                </div>
+              ) : (
+                <div className="flex h-48 sm:h-64 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
+                  <ImageIcon className="h-16 w-16 text-gray-400" />
+                </div>
+              )}
+              {/* Desktop: hover overlay */}
+              {canEditEquipment && (
+                <div className="hidden sm:flex absolute inset-0 items-end justify-center rounded-lg bg-black/0 pb-3 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100">
                   <div className="flex gap-2">
                     <button
                       onClick={() => mainPhotoInputRef.current?.click()}
@@ -932,13 +940,39 @@ export default function EquipmentDetail() {
                       </button>
                     )}
                   </div>
+                </div>
+              )}
+            </div>
+            {/* Mobile: always-visible photo buttons */}
+            {canEditEquipment && (
+              <div className="flex gap-2 px-3 py-2 sm:hidden">
+                <button
+                  onClick={() => mainPhotoInputRef.current?.click()}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 active:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  {equipment.photo ? 'Заменить фото' : 'Загрузить фото'}
+                </button>
+                {equipment.photo && (
+                  <button
+                    onClick={handleMainPhotoDelete}
+                    className="flex items-center justify-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-600 active:bg-red-100 dark:border-red-800 dark:bg-red-900/20"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Удалить
+                  </button>
                 )}
               </div>
-            </div>
-            <p className="px-3 py-2 text-center text-xs text-gray-400 dark:text-gray-500">
+            )}
+            {\!canEditEquipment && (
+              <p className="px-3 py-2 text-center text-xs text-gray-400 dark:text-gray-500">
+                Фото доступно только для просмотра
+              </p>
+            )}
+            <p className="hidden sm:block px-3 py-1 text-center text-xs text-gray-400 dark:text-gray-500">
               {canEditEquipment
                 ? equipment.photo ? 'Наведите для изменения фото' : 'Наведите для загрузки фото'
-                : 'Фото доступно только для просмотра'}
+                : ''}
             </p>
           </CardContent>
         </Card>
@@ -1616,6 +1650,86 @@ export default function EquipmentDetail() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {(latestShippingEvent || latestReceivingEvent) && (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {[latestShippingEvent, latestReceivingEvent].filter(Boolean).map(event => {
+                    const categoryCount = event?.photoCategories
+                      ? Object.values(event.photoCategories).filter(list => Array.isArray(list) && list.length > 0).length
+                      : (event?.photos?.length ? 1 : 0);
+                    const checklistComplete = event?.checklist ? Object.values(event.checklist).every(Boolean) : false;
+                    return (
+                      <div
+                        key={event!.id}
+                        className={`rounded-xl border p-4 ${
+                          event!.type === 'shipping'
+                            ? 'border-blue-200 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-900/15'
+                            : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/15'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant={event!.type === 'shipping' ? 'info' : 'success'}>
+                                {event!.type === 'shipping' ? 'Последняя отгрузка' : 'Последняя приёмка'}
+                              </Badge>
+                              <span className="text-xs text-gray-500 dark:text-gray-400">{formatDate(event!.date)}</span>
+                            </div>
+                            <p className="mt-2 text-sm font-medium text-gray-900 dark:text-white">
+                              {event!.uploadedBy}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              Моточасы: {event!.hoursValue ?? equipment.hours ?? '—'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => printHandoffAct(event!, equipment)}
+                            className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-blue-600 shadow-sm hover:bg-blue-50 dark:bg-gray-900 dark:text-blue-400 dark:hover:bg-gray-800"
+                          >
+                            Акт PDF
+                          </button>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                          <div className="rounded-lg bg-white/80 p-3 dark:bg-gray-900/40">
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Чек-лист</p>
+                            <p className={`mt-1 font-medium ${checklistComplete ? 'text-green-700 dark:text-green-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                              {checklistComplete ? 'Заполнен полностью' : 'Заполнен частично'}
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-white/80 p-3 dark:bg-gray-900/40">
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Категории фото</p>
+                            <p className="mt-1 font-medium text-gray-900 dark:text-white">{categoryCount}</p>
+                          </div>
+                        </div>
+
+                        {event!.damageDescription && (
+                          <div className="mt-3 rounded-lg border border-amber-200 bg-white/80 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-gray-900/40 dark:text-amber-300">
+                            <p className="text-xs uppercase tracking-wide text-amber-600 dark:text-amber-400">Повреждения</p>
+                            <p className="mt-1">{event!.damageDescription}</p>
+                          </div>
+                        )}
+
+                        {event!.photoCategories && Object.keys(event!.photoCategories).length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {Object.entries(PHOTO_CATEGORY_LABELS).map(([key, label]) => {
+                              const photos = event!.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [];
+                              if (!photos.length) return null;
+                              return (
+                                <span
+                                  key={key}
+                                  className="rounded-full bg-white/90 px-2.5 py-1 text-xs text-gray-700 dark:bg-gray-900/50 dark:text-gray-300"
+                                >
+                                  {label}: {photos.length}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Upload form */}
               {canManageAcceptance && showUploadPhotoForm && (

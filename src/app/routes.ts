@@ -22,6 +22,8 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 import ServiceVehicles from './pages/ServiceVehicles';
 import ServiceVehicleDetail from './pages/ServiceVehicleDetail';
+import ManagerReport from './pages/ManagerReport';
+import ErrorPage from './pages/ErrorPage';
 
 const basename = import.meta.env.BASE_URL || '/';
 
@@ -29,13 +31,16 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     Component: Login,
+    ErrorBoundary: ErrorPage,
   },
   {
     path: '/',
     Component: PrivateRoute,
+    ErrorBoundary: ErrorPage,
     children: [
       {
         Component: Layout,
+        ErrorBoundary: ErrorPage,
         children: [
           { index: true, Component: Dashboard },
           { path: 'planner', Component: Planner },
@@ -57,6 +62,7 @@ export const router = createBrowserRouter([
           { path: 'settings',                      Component: Settings          },
           { path: 'service-vehicles',              Component: ServiceVehicles      },
           { path: 'service-vehicles/:id',          Component: ServiceVehicleDetail },
+          { path: 'manager-report',                Component: ManagerReport        },
         ],
       },
     ],

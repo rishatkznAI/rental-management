@@ -21,6 +21,7 @@ import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, type Section } from '../../lib/permissions';
+import { NotificationCenter } from './NotificationCenter';
 
 const navigation: { name: string; href: string; icon: React.ElementType; section: Section }[] = [
   { name: 'Дашборд',      href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
@@ -90,6 +91,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             <span className="ml-2 text-lg font-bold text-gray-900 dark:text-white">Подъёмники</span>
           </div>
           <div className="flex items-center gap-1">
+            <NotificationCenter />
             <button
               onClick={toggleTheme}
               className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"

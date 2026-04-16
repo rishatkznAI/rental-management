@@ -3,6 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { LayoutDashboard, Truck, FileText, Wrench, Users, Menu } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { NotificationCenter } from './NotificationCenter';
 
 const BOTTOM_NAV = [
   { name: 'Дашборд', href: '/', icon: LayoutDashboard },
@@ -42,8 +43,7 @@ export function Layout() {
           <Truck className="h-6 w-6 text-[--color-primary]" />
           <span className="text-base font-bold text-gray-900 dark:text-white">Подъёмники</span>
         </div>
-        {/* spacer to centre title */}
-        <div className="w-9" />
+        <NotificationCenter />
       </header>
 
       {/* Main content */}

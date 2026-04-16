@@ -18,6 +18,7 @@ const JSON_COLLECTIONS = [
   'payments',
   'users',
   'shipping_photos',
+  'equipment_operation_sessions',
   'owners',
   'mechanics',
   'service_works',

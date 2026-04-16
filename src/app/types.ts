@@ -9,6 +9,17 @@ export type EquipmentPriority = 'low' | 'medium' | 'high' | 'critical';
 export type RepairEventType = 'repair' | 'maintenance' | 'diagnostics' | 'breakdown';
 export type RepairSource = 'manual' | 'bot';
 export type ShippingEventType = 'shipping' | 'receiving';
+export type EquipmentOperationPhotoCategory =
+  | 'front'
+  | 'rear'
+  | 'side_1'
+  | 'side_2'
+  | 'plate'
+  | 'hours_photo'
+  | 'control_panel'
+  | 'basket'
+  | 'engine_bay'
+  | 'damage_photo';
 
 export interface AuditEntry {
   date: string;
@@ -74,6 +85,10 @@ export interface ShippingPhoto {
   comment?: string;
   rentalId?: string;
   source: RepairSource;
+  photoCategories?: Partial<Record<EquipmentOperationPhotoCategory, string[]>>;
+  hoursValue?: number;
+  damageDescription?: string;
+  operationSessionId?: string;
 }
 
 export type RentalStatus = 'new' | 'confirmed' | 'delivery' | 'active' | 'return_planned' | 'closed';

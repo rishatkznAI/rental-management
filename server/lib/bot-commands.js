@@ -82,6 +82,40 @@ function createBotHandlers(deps) {
     REPAIR_REASON_TEMPLATES.map(item => [item.key, item.text]),
   );
 
+  const OPERATION_STEP_META = {
+    front: { kind: 'photo', label: 'фото спереди', prompt: 'Сделайте фото техники спереди' },
+    rear: { kind: 'photo', label: 'фото сзади', prompt: 'Теперь сделайте фото техники сзади' },
+    side_1: { kind: 'photo', label: 'первое фото сбоку', prompt: 'Сделайте первое фото сбоку' },
+    side_2: { kind: 'photo', label: 'второе фото сбоку', prompt: 'Сделайте второе фото сбоку' },
+    plate: { kind: 'photo', label: 'фото шильдика', prompt: 'Сделайте фото шильдика' },
+    hours_photo: { kind: 'photo', label: 'фото моточасов', prompt: 'Сделайте фото моточасов' },
+    hours_value: { kind: 'number', label: 'моточасы', prompt: 'Введите моточасы числом' },
+    control_panel: { kind: 'photo', label: 'фото пульта', prompt: 'Сделайте фото пульта' },
+    basket: { kind: 'photo', label: 'фото люльки', prompt: 'Сделайте фото люльки / рабочей платформы' },
+    engine_bay: { kind: 'photo', label: 'фото подкапотного пространства', prompt: 'Сделайте фото подкапотного пространства' },
+    damage_photo: { kind: 'photo', label: 'фото повреждений', prompt: 'Сделайте фото повреждений' },
+    damage_text: { kind: 'text', label: 'описание повреждений', prompt: 'Опишите повреждения текстом' },
+  };
+
+  const SHIPPING_OPERATION_STEPS = [
+    'front',
+    'rear',
+    'side_1',
+    'side_2',
+    'plate',
+    'hours_photo',
+    'hours_value',
+    'control_panel',
+    'basket',
+    'engine_bay',
+  ];
+
+  const RECEIVING_OPERATION_STEPS = [
+    ...SHIPPING_OPERATION_STEPS,
+    'damage_photo',
+    'damage_text',
+  ];
+
   function repairReasonKeyboard() {
     const buttons = REPAIR_REASON_TEMPLATES.map(item =>
       button(item.text, `reason:${item.key}`),
@@ -103,6 +137,20 @@ function createBotHandlers(deps) {
       ],
       [button('Ввести руками', `qty:${kind}:manual`)],
       [button('Назад', kind === 'work' ? 'menu:works' : 'menu:parts')],
+    ]);
+  }
+
+  function operationKeyboard(operation, isReview = false) {
+    const operationId = operation?.id || '';
+    if (!operationId) return null;
+    if (isReview) {
+      return keyboard([
+        [button('Завершить', `operation:complete:${operationId}`)],
+        [button('Назад', `operation:back:${operationId}`), button('Отменить', `operation:cancel:${operationId}`)],
+      ]);
+    }
+    return keyboard([
+      [button('Назад', `operation:back:${operationId}`), button('Отменить', `operation:cancel:${operationId}`)],
     ]);
   }
 
@@ -278,6 +326,132 @@ function createBotHandlers(deps) {
     return updateBotSession(phone, {
       pendingAction: null,
       pendingPayload: null,
+    });
+  }
+
+  function getOperationSteps(type) {
+    return type === 'receiving' ? RECEIVING_OPERATION_STEPS : SHIPPING_OPERATION_STEPS;
+  }
+
+  function createEmptyOperationPhotos() {
+    return {
+      front: [],
+      rear: [],
+      side_1: [],
+      side_2: [],
+      plate: [],
+      hours_photo: [],
+      control_panel: [],
+      basket: [],
+      engine_bay: [],
+      damage_photo: [],
+    };
+  }
+
+  function getOperationSessions() {
+    return readData('equipment_operation_sessions') || [];
+  }
+
+  function writeOperationSessions(sessions) {
+    writeData('equipment_operation_sessions', sessions);
+  }
+
+  function getOperationSessionById(operationId) {
+    return getOperationSessions().find(item => item.id === operationId) || null;
+  }
+
+  function saveOperationSession(operation) {
+    const sessions = getOperationSessions();
+    const next = sessions.some(item => item.id === operation.id)
+      ? sessions.map(item => item.id === operation.id ? operation : item)
+      : [...sessions, operation];
+    writeOperationSessions(next);
+    return operation;
+  }
+
+  function createOperationSession(type, equipment, authUser) {
+    const steps = getOperationSteps(type);
+    const operation = {
+      id: generateId(`${idPrefixes.shipping_photos}_OP`),
+      type,
+      status: 'in_progress',
+      equipmentId: equipment.id,
+      createdByUserId: authUser.userId,
+      createdByUserName: authUser.userName,
+      startedAt: nowIso(),
+      completedAt: null,
+      currentStep: steps[0],
+      steps: steps.map(step => ({
+        key: step,
+        status: 'pending',
+        completedAt: null,
+      })),
+      photos: createEmptyOperationPhotos(),
+      hoursValue: null,
+      damageDescription: '',
+      source: 'bot',
+    };
+    return saveOperationSession(operation);
+  }
+
+  function getOperationStepIndex(operation, stepKey = operation.currentStep) {
+    return getOperationSteps(operation.type).findIndex(step => step === stepKey);
+  }
+
+  function getOperationStepPrompt(operation) {
+    const steps = getOperationSteps(operation.type);
+    const stepIndex = getOperationStepIndex(operation);
+    const stepKey = operation.currentStep;
+    const meta = OPERATION_STEP_META[stepKey];
+    if (!meta || stepIndex < 0) return 'Сценарий не найден.';
+    const equipment = (readData('equipment') || []).find(item => item.id === operation.equipmentId);
+    const operationLabel = operation.type === 'receiving' ? 'Приёмка' : 'Отгрузка';
+    const lines = [
+      `${operation.type === 'receiving' ? '📥' : '🚚'} ${operationLabel}: ${equipment ? formatEquipmentForBot(equipment) : operation.equipmentId}`,
+      '',
+      `Шаг ${stepIndex + 1} из ${steps.length}. ${meta.prompt}`,
+    ];
+    if (stepKey === 'hours_value') {
+      lines.push('Пример: 1542');
+    }
+    if (stepKey === 'damage_text') {
+      lines.push('Пример: Трещина на кожухе, потертости на люльке');
+    }
+    lines.push('', 'Можно нажать «Назад» или «Отменить».');
+    return lines.join('\n');
+  }
+
+  function getOperationSummary(operation) {
+    const equipment = (readData('equipment') || []).find(item => item.id === operation.equipmentId);
+    const steps = getOperationSteps(operation.type);
+    const completedPhotoCount = Object.values(operation.photos || {}).reduce((sum, value) => sum + (Array.isArray(value) && value.length ? 1 : 0), 0);
+    return [
+      `${operation.type === 'receiving' ? '📥' : '🚚'} ${operation.type === 'receiving' ? 'Приёмка' : 'Отгрузка'} почти завершена`,
+      equipment ? formatEquipmentForBot(equipment) : operation.equipmentId,
+      `Моточасы: ${operation.hoursValue ?? 'не указаны'}`,
+      `Фото-категорий заполнено: ${completedPhotoCount} из ${steps.filter(step => OPERATION_STEP_META[step]?.kind === 'photo').length}`,
+      operation.type === 'receiving'
+        ? `Повреждения: ${operation.damageDescription ? 'указаны' : 'не указаны'}`
+        : 'Повреждения: не требуются',
+      '',
+      'Проверьте данные и завершите операцию.',
+    ].join('\n');
+  }
+
+  function goToPreviousOperationStep(operation) {
+    const steps = getOperationSteps(operation.type);
+    if (operation.currentStep === 'review') {
+      return saveOperationSession({
+        ...operation,
+        currentStep: steps[steps.length - 1],
+      });
+    }
+    const index = getOperationStepIndex(operation);
+    if (index <= 0) return operation;
+    const previousStep = steps[index - 1];
+    return saveOperationSession({
+      ...operation,
+      currentStep: previousStep,
     });
   }
 
@@ -551,6 +725,140 @@ function createBotHandlers(deps) {
     return newTicket;
   }
 
+  function appendEquipmentHistoryEntry(equipment, entry) {
+    return {
+      ...equipment,
+      history: [
+        ...(Array.isArray(equipment.history) ? equipment.history : []),
+        entry,
+      ],
+    };
+  }
+
+  function completeBotEquipmentOperation(operation, authUser) {
+    const equipmentList = readData('equipment') || [];
+    const equipment = equipmentList.find(item => item.id === operation.equipmentId);
+    if (!equipment) {
+      throw new Error('Техника для операции не найдена');
+    }
+
+    const rentals = readData('gantt_rentals') || [];
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const now = nowIso();
+    const activeRental = rentals.find(r =>
+      r.equipmentId === equipment.id &&
+      (r.status === 'active' || r.status === 'created')
+    ) || null;
+
+    const flattenedPhotos = Object.values(operation.photos || {}).flat();
+    const eventType = operation.type === 'receiving' ? 'receiving' : 'shipping';
+    const comment = operation.type === 'receiving'
+      ? operation.damageDescription || undefined
+      : undefined;
+    const events = readData('shipping_photos') || [];
+    const newEvent = {
+      id: generateId(idPrefixes.shipping_photos),
+      equipmentId: equipment.id,
+      date: todayStr,
+      type: eventType,
+      uploadedBy: authUser.userName,
+      photos: flattenedPhotos,
+      comment,
+      rentalId: activeRental?.id,
+      source: 'bot',
+      photoCategories: operation.photos,
+      hoursValue: operation.hoursValue,
+      damageDescription: operation.type === 'receiving' ? operation.damageDescription : undefined,
+      operationSessionId: operation.id,
+    };
+    writeData('shipping_photos', [...events, newEvent]);
+
+    const operationSummary = operation.type === 'receiving'
+      ? `Выполнена приёмка с аренды через MAX. Моточасы: ${operation.hoursValue}. Повреждения: ${operation.damageDescription}`
+      : `Выполнена отгрузка в аренду через MAX. Моточасы: ${operation.hoursValue}`;
+
+    const nextEquipment = equipmentList.map(item => {
+      if (item.id !== equipment.id) return item;
+      const base = appendEquipmentHistoryEntry(item, {
+        date: now,
+        author: authUser.userName,
+        type: 'system',
+        text: operationSummary,
+      });
+
+      if (operation.type === 'shipping') {
+        return {
+          ...base,
+          hours: operation.hoursValue,
+          status: 'rented',
+          currentClient: activeRental?.client || item.currentClient,
+          returnDate: activeRental?.endDate || item.returnDate,
+        };
+      }
+
+      return {
+        ...base,
+        hours: operation.hoursValue,
+        status: 'in_service',
+        currentClient: undefined,
+        returnDate: undefined,
+      };
+    });
+    writeData('equipment', nextEquipment);
+
+    const nextRentals = rentals.map(rental => {
+      if (rental.id !== activeRental?.id) return rental;
+      if (operation.type === 'shipping' && rental.status === 'created') {
+        return {
+          ...rental,
+          status: 'active',
+          comments: [
+            ...(rental.comments || []),
+            { date: now, text: `Техника отгружена клиенту через MAX. Моточасы: ${operation.hoursValue}`, author: authUser.userName },
+          ],
+        };
+      }
+      if (operation.type === 'receiving' && (rental.status === 'active' || rental.status === 'created')) {
+        return {
+          ...rental,
+          status: 'returned',
+          endDate: todayStr,
+          comments: [
+            ...(rental.comments || []),
+            { date: now, text: `Техника принята с аренды через MAX. Моточасы: ${operation.hoursValue}. Повреждения: ${operation.damageDescription}`, author: authUser.userName },
+          ],
+        };
+      }
+      return rental;
+    });
+    writeData('gantt_rentals', nextRentals);
+
+    const createdServiceTicket = operation.type === 'receiving'
+      ? createReturnInspectionTicketFromBot(
+        equipment,
+        authUser,
+        activeRental,
+        flattenedPhotos,
+        operation.damageDescription,
+      )
+      : null;
+
+    const completedOperation = saveOperationSession({
+      ...operation,
+      status: 'completed',
+      completedAt: now,
+      currentStep: 'review',
+      updatedAt: now,
+    });
+
+    return {
+      operation: completedOperation,
+      event: newEvent,
+      activeRental,
+      createdServiceTicket,
+    };
+  }
+
   function saveBotShippingPhotoEvent(equipment, authUser, type, photoUrls, comment = '') {
     const events = readData('shipping_photos') || [];
     const rentals = readData('gantt_rentals') || [];
@@ -764,8 +1072,14 @@ function createBotHandlers(deps) {
 
   async function handleEquipmentSearchRequest(senderId, phone, query, uiContext = {}) {
     const matches = searchEquipmentForBot(query);
+    const session = getBotSession(phone);
+    const flow = session.pendingPayload?.flow;
+    const photoEventType = session.pendingPayload?.photoEventType;
     if (!matches.length) {
-      updateBotSession(phone, { pendingAction: 'equipment_search', pendingPayload: null });
+      updateBotSession(phone, {
+        pendingAction: 'equipment_search',
+        pendingPayload: flow === 'photo_event' ? { flow, photoEventType } : null,
+      });
       return sendMessage(
         senderId,
         withBotMenu(
@@ -781,15 +1095,18 @@ function createBotHandlers(deps) {
         serialNumber: item.serialNumber,
         model: item.model,
       })),
-      pendingAction: 'ticket_reason',
-      pendingPayload: null,
+      pendingAction: flow === 'photo_event' ? 'equipment_search' : 'ticket_reason',
+      pendingPayload: flow === 'photo_event' ? { flow, photoEventType } : null,
     });
+    const isPhotoFlow = flow === 'photo_event';
     return reply(senderId, withBotMenu([
       '🚜 Найденная техника:',
       ...matches.map((item, index) => `${index + 1}. ${formatEquipmentForBot(item)}`),
       '',
       'Можно нажать кнопку с техникой ниже.',
-      'После выбора я предложу типовые причины ремонта.',
+      isPhotoFlow
+        ? `После выбора начнётся пошаговая ${photoEventType === 'shipping' ? 'отгрузка' : 'приёмка'}.`
+        : 'После выбора я предложу типовые причины ремонта.',
     ].join('\n'), ['новый поиск: найти технику', 'отмена: /сброс']), {
       attachments: equipmentSearchKeyboard(matches),
       phone,
@@ -863,6 +1180,140 @@ function createBotHandlers(deps) {
       'Заявка открыта как текущая.',
     ].join('\n'), ['итог', 'работы гидравлика', 'запчасти фильтр', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
+    });
+  }
+
+  async function startEquipmentOperationRequest(senderId, phone, authUser, equipment, type, uiContext = {}) {
+    const operation = createOperationSession(type, equipment, authUser);
+    updateBotSession(phone, {
+      pendingAction: 'operation_step',
+      pendingPayload: { operationSessionId: operation.id },
+    });
+    return reply(senderId, getOperationStepPrompt(operation), {
+      attachments: operationKeyboard(operation),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
+    });
+  }
+
+  async function handleOperationStepInput(senderId, phone, authUser, messageMeta = {}, uiContext = {}) {
+    const operationSessionId = getBotSession(phone).pendingPayload?.operationSessionId;
+    const operation = getOperationSessionById(operationSessionId);
+
+    if (!operation || operation.status !== 'in_progress') {
+      resetBotFlow(phone);
+      return reply(senderId, '❌ Активный сценарий приёмки/отгрузки не найден. Начните заново.', {
+        attachments: mechanicKeyboard(),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+      });
+    }
+
+    const stepKey = operation.currentStep;
+    const stepMeta = OPERATION_STEP_META[stepKey];
+    if (!stepMeta) {
+      resetBotFlow(phone);
+      return reply(senderId, '❌ Текущий шаг сценария не распознан. Начните заново.', {
+        attachments: mechanicKeyboard(),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+      });
+    }
+
+    let nextOperation = { ...operation };
+    const now = nowIso();
+
+    if (stepMeta.kind === 'photo') {
+      const photoUrls = extractPhotoUrlsFromMessage(messageMeta);
+      if (!photoUrls.length) {
+        return reply(senderId, `📷 Я жду ${stepMeta.label}. Пожалуйста, отправьте фото.`, {
+          attachments: operationKeyboard(operation),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      nextOperation = {
+        ...nextOperation,
+        photos: {
+          ...(nextOperation.photos || createEmptyOperationPhotos()),
+          [stepKey]: photoUrls,
+        },
+      };
+    }
+
+    if (stepMeta.kind === 'number') {
+      const rawText = String(messageMeta?.text || messageMeta?.body?.text || '').trim().replace(',', '.');
+      const value = Number(rawText);
+      if (!Number.isFinite(value) || value < 0) {
+        return reply(senderId, '❌ Моточасы должны быть числом не меньше 0. Например: 1542', {
+          attachments: operationKeyboard(operation),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      nextOperation = {
+        ...nextOperation,
+        hoursValue: value,
+      };
+    }
+
+    if (stepMeta.kind === 'text') {
+      const rawText = String(messageMeta?.text || messageMeta?.body?.text || '').trim();
+      if (!rawText) {
+        return reply(senderId, '❌ Опишите повреждения текстом.', {
+          attachments: operationKeyboard(operation),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      nextOperation = {
+        ...nextOperation,
+        damageDescription: rawText,
+      };
+    }
+
+    nextOperation = {
+      ...nextOperation,
+      steps: nextOperation.steps.map(step =>
+        step.key === stepKey ? { ...step, status: 'done', completedAt: now } : step
+      ),
+    };
+
+    const steps = getOperationSteps(nextOperation.type);
+    const currentIndex = getOperationStepIndex(nextOperation, stepKey);
+    const nextStep = steps[currentIndex + 1] || null;
+
+    if (!nextStep) {
+      nextOperation = saveOperationSession({
+        ...nextOperation,
+        currentStep: 'review',
+      });
+      return reply(senderId, getOperationSummary(nextOperation), {
+        attachments: operationKeyboard(nextOperation, true),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      });
+    }
+
+    nextOperation = saveOperationSession({
+      ...nextOperation,
+      currentStep: nextStep,
+    });
+    return reply(senderId, getOperationStepPrompt(nextOperation), {
+      attachments: operationKeyboard(nextOperation),
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1059,8 +1510,148 @@ function createBotHandlers(deps) {
     }
 
     if (normalized === 'menu:cancel_photo_event') {
+      const activeOperationId = getBotSession(phone).pendingPayload?.operationSessionId;
+      if (activeOperationId) {
+        const operation = getOperationSessionById(activeOperationId);
+        if (operation && operation.status === 'in_progress') {
+          saveOperationSession({
+            ...operation,
+            status: 'cancelled',
+            completedAt: nowIso(),
+          });
+        }
+      }
       resetBotFlow(phone);
       return reply(senderId, '❎ Сценарий отгрузки/приёмки отменён.', {
+        attachments: mechanicKeyboard(),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('operation:back:')) {
+      const operationId = normalized.slice('operation:back:'.length);
+      const operation = getOperationSessionById(operationId);
+      if (!operation || operation.status !== 'in_progress') {
+        resetBotFlow(phone);
+        return reply(senderId, '❌ Активная операция не найдена.', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const previous = goToPreviousOperationStep(operation);
+      updateBotSession(phone, {
+        pendingAction: 'operation_step',
+        pendingPayload: { operationSessionId: previous.id },
+      });
+      return reply(senderId, getOperationStepPrompt(previous), {
+        attachments: operationKeyboard(previous),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('operation:cancel:')) {
+      const operationId = normalized.slice('operation:cancel:'.length);
+      const operation = getOperationSessionById(operationId);
+      if (operation && operation.status === 'in_progress') {
+        saveOperationSession({
+          ...operation,
+          status: 'cancelled',
+          completedAt: nowIso(),
+        });
+      }
+      resetBotFlow(phone);
+      return reply(senderId, '❎ Сценарий отгрузки/приёмки отменён.', {
+        attachments: mechanicKeyboard(),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('operation:complete:')) {
+      const operationId = normalized.slice('operation:complete:'.length);
+      const operation = getOperationSessionById(operationId);
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      if (!operation || operation.status !== 'in_progress') {
+        resetBotFlow(phone);
+        return reply(senderId, '❌ Активная операция не найдена.', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const expectedSteps = getOperationSteps(operation.type);
+      const missingStep = expectedSteps.find(step => {
+        const meta = OPERATION_STEP_META[step];
+        if (meta.kind === 'photo') {
+          return !Array.isArray(operation.photos?.[step]) || operation.photos[step].length === 0;
+        }
+        if (meta.kind === 'number') {
+          return !Number.isFinite(Number(operation.hoursValue));
+        }
+        if (meta.kind === 'text') {
+          return !String(operation.damageDescription || '').trim();
+        }
+        return false;
+      });
+      if (missingStep) {
+        const restored = saveOperationSession({
+          ...operation,
+          currentStep: missingStep,
+        });
+        updateBotSession(phone, {
+          pendingAction: 'operation_step',
+          pendingPayload: { operationSessionId: restored.id },
+        });
+        return reply(senderId, `❌ Сценарий ещё не завершён.\n\n${getOperationStepPrompt(restored)}`, {
+          attachments: operationKeyboard(restored),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+
+      const result = completeBotEquipmentOperation(operation, authUser);
+      const completedEquipment = (readData('equipment') || []).find(item => item.id === operation.equipmentId);
+      resetBotFlow(phone);
+
+      if (operation.type === 'receiving') {
+        return reply(senderId, withBotMenu([
+          `✅ Приёмка завершена: ${completedEquipment ? formatEquipmentForBot(completedEquipment) : operation.equipmentId}`,
+          `Моточасы: ${operation.hoursValue}`,
+          result.createdServiceTicket
+            ? `Создана сервисная заявка: ${result.createdServiceTicket.id}`
+            : 'Открытая сервисная заявка уже существовала.',
+        ].join('\n'), ['мои заявки', 'черновик', 'новая заявка']), {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+
+      return reply(senderId, withBotMenu([
+        `✅ Отгрузка завершена: ${completedEquipment ? formatEquipmentForBot(completedEquipment) : operation.equipmentId}`,
+        `Моточасы: ${operation.hoursValue}`,
+        result.activeRental
+          ? `Аренда ${result.activeRental.id} переведена в активную.`
+          : 'Фотоотчёт сохранён в карточку техники.',
+      ].join('\n'), ['мои заявки', 'найти технику']), {
         attachments: mechanicKeyboard(),
         phone,
         callbackContext,
@@ -1118,28 +1709,16 @@ function createBotHandlers(deps) {
       const flow = getBotSession(phone).pendingPayload?.flow;
       const photoEventType = getBotSession(phone).pendingPayload?.photoEventType;
       if (flow === 'photo_event') {
-        updateBotSession(phone, {
-          pendingAction: 'photo_event_capture',
-          pendingPayload: {
-            selectedEquipmentId: equipment.id,
-            photoEventType,
-          },
-        });
-        return reply(
-          senderId,
-          [
-            `${photoEventType === 'shipping' ? '🚚 Отгрузка' : '📥 Приёмка'}: ${formatEquipmentForBot(equipment)}`,
-            '',
-            'Теперь отправьте фото этой техники в чат.',
-            'Можно приложить сразу несколько фото и добавить подпись комментарием.',
-          ].join('\n'),
-          {
-            attachments: keyboard([[button('Назад', 'menu:cancel_photo_event')]]),
+        const authUser = getAuthorizedUser(String(phone));
+        if (!authUser) {
+          return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+            attachments: authKeyboard(),
             phone,
             callbackContext,
             replaceMessage: true,
-          },
-        );
+          });
+        }
+        return startEquipmentOperationRequest(senderId, phone, authUser, equipment, photoEventType, { callbackContext });
       }
 
       updateBotSession(phone, {
@@ -1351,6 +1930,8 @@ function createBotHandlers(deps) {
         '  /запчасти поиск       — найти запчасти в справочнике',
         '  /добавитьзапчасть № qty [цена] — добавить запчасть',
         '  /черновик             — показать текущий отчет',
+        '  /отгрузка             — пошаговая отгрузка с фото',
+        '  /приёмка              — пошаговая приёмка с фото',
         '  /ожидание             — ожидание запчастей',
         '  /готово               — работы завершены',
         '  /закрыть              — закрыть заявку',
@@ -1426,54 +2007,15 @@ function createBotHandlers(deps) {
     }
 
     if (!trimmed.startsWith('/')) {
-      if (session.pendingAction === 'photo_event_capture') {
+      if (session.pendingAction === 'operation_step') {
         const authUser = getAuthorizedUser(String(phone));
         if (!authUser) {
           return reply(senderId, '🔒 Сначала авторизуйтесь.', { attachments: authKeyboard() });
         }
-        const selectedEquipmentId = session.pendingPayload?.selectedEquipmentId;
-        const eventType = session.pendingPayload?.photoEventType;
-        const equipment = (readData('equipment') || []).find(item => item.id === selectedEquipmentId);
-        const photoUrls = extractPhotoUrlsFromMessage(messageMeta);
-        const commentText = trimmed || '';
-
-        if (!equipment) {
-          resetBotFlow(phone);
-          return reply(senderId, '❌ Техника не найдена. Начните заново.', { attachments: mechanicKeyboard() });
-        }
-        if (!photoUrls.length) {
-          return reply(
-            senderId,
-            `📷 Я жду фото для сценария «${eventType === 'shipping' ? 'Отгрузка' : 'Приёмка'}».\nМожно приложить фото и, при желании, добавить подпись текстом.`,
-            { attachments: keyboard([[button('Назад', 'menu:cancel_photo_event')]]) },
-          );
-        }
-
-        const result = saveBotShippingPhotoEvent(equipment, authUser, eventType, photoUrls, commentText);
-        resetBotFlow(phone);
-
-        if (eventType === 'receiving') {
-          return reply(
-            senderId,
-            withBotMenu([
-              `✅ Приёмка выполнена: ${formatEquipmentForBot(equipment)}`,
-              `Фото: ${photoUrls.length}`,
-              'Техника переведена в сервис.',
-              result.createdServiceTicket ? `Создана сервисная заявка: ${result.createdServiceTicket.id}` : 'Открытая сервисная заявка уже существовала.',
-            ].join('\n'), ['мои заявки', 'черновик', 'новая заявка']),
-            { attachments: mechanicKeyboard() },
-          );
-        }
-
-        return reply(
-          senderId,
-          withBotMenu([
-            `✅ Отгрузка выполнена: ${formatEquipmentForBot(equipment)}`,
-            `Фото: ${photoUrls.length}`,
-            result.activeRental ? `Аренда ${result.activeRental.id} переведена в активную.` : 'Фотоотчёт сохранён в карточку техники.',
-          ].join('\n'), ['мои заявки', 'найти технику']),
-          { attachments: mechanicKeyboard() },
-        );
+        return handleOperationStepInput(senderId, phone, authUser, {
+          ...messageMeta,
+          text: trimmed,
+        }, uiContext);
       }
 
       if (session.pendingAction === 'login_email') {
@@ -1702,6 +2244,17 @@ function createBotHandlers(deps) {
     }
 
     if (lower === '/сброс' && canManageRepair) {
+      const operationId = getBotSession(phone).pendingPayload?.operationSessionId;
+      if (operationId) {
+        const operation = getOperationSessionById(operationId);
+        if (operation && operation.status === 'in_progress') {
+          saveOperationSession({
+            ...operation,
+            status: 'cancelled',
+            completedAt: nowIso(),
+          });
+        }
+      }
       clearBotSession(phone);
       return sendMessage(senderId, '🧹 Текущая заявка сброшена. Выберите новую через /ремонт ID');
     }

@@ -82,7 +82,33 @@ function createBotHandlers(deps) {
     REPAIR_REASON_TEMPLATES.map(item => [item.key, item.text]),
   );
 
+  const HANDOFF_CHECKLIST_LABELS = {
+    exterior: 'Внешний осмотр выполнен',
+    controlPanel: 'Пульт проверен',
+    batteryCharge: 'АКБ / заряд проверены',
+    basket: 'Люлька / рабочая платформа проверены',
+    tires: 'Колёса / шины осмотрены',
+    leaksAndDamage: 'Течи / повреждения осмотрены',
+  };
+
+  const CHECKLIST_STEP_TO_KEY = {
+    checklist_exterior: 'exterior',
+    checklist_controlPanel: 'controlPanel',
+    checklist_batteryCharge: 'batteryCharge',
+    checklist_basket: 'basket',
+    checklist_tires: 'tires',
+    checklist_leaksAndDamage: 'leaksAndDamage',
+  };
+
+  const CHECKLIST_STEPS = Object.keys(CHECKLIST_STEP_TO_KEY);
+
   const OPERATION_STEP_META = {
+    checklist_exterior: { kind: 'check', label: 'внешний осмотр', prompt: 'Подтвердите: внешний осмотр выполнен' },
+    checklist_controlPanel: { kind: 'check', label: 'пульт', prompt: 'Подтвердите: пульт проверен' },
+    checklist_batteryCharge: { kind: 'check', label: 'АКБ / заряд', prompt: 'Подтвердите: АКБ / заряд проверены' },
+    checklist_basket: { kind: 'check', label: 'люлька', prompt: 'Подтвердите: люлька / рабочая платформа проверены' },
+    checklist_tires: { kind: 'check', label: 'колёса / шины', prompt: 'Подтвердите: колёса / шины осмотрены' },
+    checklist_leaksAndDamage: { kind: 'check', label: 'течи / повреждения', prompt: 'Подтвердите: течи / повреждения осмотрены' },
     front: { kind: 'photo', label: 'фото спереди', prompt: 'Сделайте фото техники спереди' },
     rear: { kind: 'photo', label: 'фото сзади', prompt: 'Теперь сделайте фото техники сзади' },
     side_1: { kind: 'photo', label: 'первое фото сбоку', prompt: 'Сделайте первое фото сбоку' },
@@ -98,6 +124,7 @@ function createBotHandlers(deps) {
   };
 
   const SHIPPING_OPERATION_STEPS = [
+    ...CHECKLIST_STEPS,
     'front',
     'rear',
     'side_1',
@@ -146,6 +173,13 @@ function createBotHandlers(deps) {
     if (isReview) {
       return keyboard([
         [button('Завершить', `operation:complete:${operationId}`)],
+        [button('Назад', `operation:back:${operationId}`), button('Отменить', `operation:cancel:${operationId}`)],
+      ]);
+    }
+    const stepMeta = OPERATION_STEP_META[operation.currentStep];
+    if (stepMeta?.kind === 'check') {
+      return keyboard([
+        [button('Подтвердить', `operation:check:${operationId}`)],
         [button('Назад', `operation:back:${operationId}`), button('Отменить', `operation:cancel:${operationId}`)],
       ]);
     }
@@ -348,6 +382,17 @@ function createBotHandlers(deps) {
     };
   }
 
+  function createEmptyOperationChecklist() {
+    return {
+      exterior: false,
+      controlPanel: false,
+      batteryCharge: false,
+      basket: false,
+      tires: false,
+      leaksAndDamage: false,
+    };
+  }
+
   function getOperationSessions() {
     return readData('equipment_operation_sessions') || [];
   }
@@ -387,6 +432,7 @@ function createBotHandlers(deps) {
         completedAt: null,
       })),
       photos: createEmptyOperationPhotos(),
+      checklist: createEmptyOperationChecklist(),
       hoursValue: null,
       damageDescription: '',
       source: 'bot',
@@ -414,6 +460,12 @@ function createBotHandlers(deps) {
     if (stepKey === 'hours_value') {
       lines.push('Пример: 1542');
     }
+    if (stepMeta.kind === 'check') {
+      const checklistKey = CHECKLIST_STEP_TO_KEY[stepKey];
+      const checklistLabel = checklistKey ? HANDOFF_CHECKLIST_LABELS[checklistKey] : meta.label;
+      lines.push(`Пункт чек-листа: ${checklistLabel}`);
+      lines.push('Нажмите «Подтвердить», когда проверка выполнена.');
+    }
     if (stepKey === 'damage_text') {
       lines.push('Пример: Трещина на кожухе, потертости на люльке');
     }
@@ -429,6 +481,7 @@ function createBotHandlers(deps) {
       `${operation.type === 'receiving' ? '📥' : '🚚'} ${operation.type === 'receiving' ? 'Приёмка' : 'Отгрузка'} почти завершена`,
       equipment ? formatEquipmentForBot(equipment) : operation.equipmentId,
       `Моточасы: ${operation.hoursValue ?? 'не указаны'}`,
+      `Чек-лист: ${Object.values(operation.checklist || {}).every(Boolean) ? 'заполнен' : 'не заполнен'}`,
       `Фото-категорий заполнено: ${completedPhotoCount} из ${steps.filter(step => OPERATION_STEP_META[step]?.kind === 'photo').length}`,
       operation.type === 'receiving'
         ? `Повреждения: ${operation.damageDescription ? 'указаны' : 'не указаны'}`
@@ -767,6 +820,7 @@ function createBotHandlers(deps) {
       rentalId: activeRental?.id,
       source: 'bot',
       photoCategories: operation.photos,
+      checklist: operation.checklist,
       hoursValue: operation.hoursValue,
       damageDescription: operation.type === 'receiving' ? operation.damageDescription : undefined,
       operationSessionId: operation.id,
@@ -1231,6 +1285,15 @@ function createBotHandlers(deps) {
     let nextOperation = { ...operation };
     const now = nowIso();
 
+    if (stepMeta.kind === 'check') {
+      return reply(senderId, `✅ Пункт «${stepMeta.label}» подтверждается кнопкой ниже.`, {
+        attachments: operationKeyboard(operation),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+      });
+    }
+
     if (stepMeta.kind === 'photo') {
       const photoUrls = extractPhotoUrlsFromMessage(messageMeta);
       if (!photoUrls.length) {
@@ -1555,6 +1618,63 @@ function createBotHandlers(deps) {
       });
     }
 
+    if (normalized.startsWith('operation:check:')) {
+      const operationId = normalized.slice('operation:check:'.length);
+      const operation = getOperationSessionById(operationId);
+      if (!operation || operation.status !== 'in_progress') {
+        resetBotFlow(phone);
+        return reply(senderId, '❌ Активная операция не найдена.', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const stepKey = operation.currentStep;
+      const checklistKey = CHECKLIST_STEP_TO_KEY[stepKey];
+      if (!checklistKey) {
+        return reply(senderId, '❌ Этот шаг нельзя подтвердить кнопкой.', {
+          attachments: operationKeyboard(operation),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const now = nowIso();
+      const steps = getOperationSteps(operation.type);
+      const currentIndex = getOperationStepIndex(operation, stepKey);
+      const nextStep = steps[currentIndex + 1] || 'review';
+      const updated = saveOperationSession({
+        ...operation,
+        checklist: {
+          ...(operation.checklist || createEmptyOperationChecklist()),
+          [checklistKey]: true,
+        },
+        steps: operation.steps.map(step =>
+          step.key === stepKey ? { ...step, status: 'done', completedAt: now } : step
+        ),
+        currentStep: nextStep,
+      });
+      updateBotSession(phone, {
+        pendingAction: 'operation_step',
+        pendingPayload: { operationSessionId: updated.id },
+      });
+      if (nextStep === 'review') {
+        return reply(senderId, getOperationSummary(updated), {
+          attachments: operationKeyboard(updated, true),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      return reply(senderId, getOperationStepPrompt(updated), {
+        attachments: operationKeyboard(updated),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
     if (normalized.startsWith('operation:cancel:')) {
       const operationId = normalized.slice('operation:cancel:'.length);
       const operation = getOperationSessionById(operationId);
@@ -1600,6 +1720,10 @@ function createBotHandlers(deps) {
         const meta = OPERATION_STEP_META[step];
         if (meta.kind === 'photo') {
           return !Array.isArray(operation.photos?.[step]) || operation.photos[step].length === 0;
+        }
+        if (meta.kind === 'check') {
+          const checklistKey = CHECKLIST_STEP_TO_KEY[step];
+          return !checklistKey || !operation.checklist?.[checklistKey];
         }
         if (meta.kind === 'number') {
           return !Number.isFinite(Number(operation.hoursValue));

@@ -82,6 +82,145 @@ const SERVICE_STATUS_LABELS: Record<string, string> = {
   closed: 'Закрыта',
 };
 
+const HANDOFF_CHECKLIST_LABELS = {
+  exterior: 'Внешний осмотр выполнен',
+  controlPanel: 'Пульт проверен',
+  batteryCharge: 'АКБ / заряд проверены',
+  basket: 'Люлька / рабочая платформа проверены',
+  tires: 'Колёса / шины осмотрены',
+  leaksAndDamage: 'Течи / повреждения осмотрены',
+} as const;
+
+const PHOTO_CATEGORY_LABELS = {
+  front: 'Спереди',
+  rear: 'Сзади',
+  side_1: 'Сбоку 1',
+  side_2: 'Сбоку 2',
+  plate: 'Шильдик',
+  hours_photo: 'Моточасы',
+  control_panel: 'Пульт',
+  basket: 'Люлька',
+  engine_bay: 'Подкапотное пространство',
+  damage_photo: 'Повреждения',
+} as const;
+
+function createEmptyHandoffChecklist() {
+  return {
+    exterior: false,
+    controlPanel: false,
+    batteryCharge: false,
+    basket: false,
+    tires: false,
+    leaksAndDamage: false,
+  };
+}
+
+function isChecklistComplete(checklist: ReturnType<typeof createEmptyHandoffChecklist>) {
+  return Object.values(checklist).every(Boolean);
+}
+
+function escapeHtml(value: string) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function printHandoffAct(event: ShippingPhoto, equipment: Equipment) {
+  const photoGroups = event.photoCategories && Object.keys(event.photoCategories).length > 0
+    ? Object.entries(PHOTO_CATEGORY_LABELS)
+        .map(([key, label]) => ({
+          label,
+          photos: event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [],
+        }))
+        .filter(group => group.photos.length > 0)
+    : [{ label: 'Фотографии', photos: event.photos || [] }];
+
+  const checklistRows = event.checklist
+    ? Object.entries(HANDOFF_CHECKLIST_LABELS).map(([key, label]) => `
+      <tr>
+        <td>${escapeHtml(label)}</td>
+        <td>${event.checklist?.[key as keyof typeof HANDOFF_CHECKLIST_LABELS] ? 'Проверено' : 'Не отмечено'}</td>
+      </tr>
+    `).join('')
+    : '<tr><td colspan="2">Чек-лист не заполнен</td></tr>';
+
+  const photoSections = photoGroups.map(group => `
+    <section style="margin-top:16px;">
+      <h3 style="margin:0 0 8px;font-size:14px;">${escapeHtml(group.label)}</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${group.photos.map(photo => `
+          <div style="width:180px;">
+            <img src="${photo}" style="width:100%;height:130px;object-fit:cover;border:1px solid #d1d5db;border-radius:6px;" />
+          </div>
+        `).join('')}
+      </div>
+    </section>
+  `).join('');
+
+  const popup = window.open('', '_blank', 'noopener,noreferrer,width=1100,height=900');
+  if (!popup) return;
+
+  const title = `${event.type === 'shipping' ? 'Акт отгрузки' : 'Акт приёмки'} ${equipment.inventoryNumber}`;
+  popup.document.write(`
+    <!doctype html>
+    <html lang="ru">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #111827; margin: 24px; }
+          h1, h2, h3 { color: #111827; }
+          .meta { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px; margin-bottom:16px; }
+          .card { border:1px solid #d1d5db; border-radius:8px; padding:12px; }
+          table { width:100%; border-collapse: collapse; margin-top:8px; }
+          th, td { border:1px solid #d1d5db; padding:8px; text-align:left; font-size:12px; }
+          th { background:#f3f4f6; }
+          .muted { color:#6b7280; font-size:12px; }
+          @media print { body { margin: 12mm; } button { display:none; } }
+        </style>
+      </head>
+      <body>
+        <h1>${escapeHtml(title)}</h1>
+        <p class="muted">Дата операции: ${escapeHtml(formatDate(event.date))} · Исполнитель: ${escapeHtml(event.uploadedBy)}</p>
+        <div class="meta">
+          <div class="card">
+            <strong>Техника</strong>
+            <div>${escapeHtml(equipment.manufacturer)} ${escapeHtml(equipment.model)}</div>
+            <div>INV: ${escapeHtml(equipment.inventoryNumber)}</div>
+            <div>SN: ${escapeHtml(equipment.serialNumber)}</div>
+          </div>
+          <div class="card">
+            <strong>Состояние</strong>
+            <div>Моточасы: ${escapeHtml(String(event.hoursValue ?? equipment.hours ?? '—'))}</div>
+            <div>Тип события: ${event.type === 'shipping' ? 'Отгрузка' : 'Приёмка'}</div>
+            ${event.damageDescription ? `<div>Повреждения: ${escapeHtml(event.damageDescription)}</div>` : ''}
+          </div>
+        </div>
+        <section>
+          <h2 style="font-size:16px;margin:0 0 8px;">Чек-лист</h2>
+          <table>
+            <thead>
+              <tr><th>Пункт</th><th>Статус</th></tr>
+            </thead>
+            <tbody>${checklistRows}</tbody>
+          </table>
+        </section>
+        ${event.comment ? `<section style="margin-top:16px;"><h2 style="font-size:16px;margin:0 0 8px;">Комментарий</h2><div class="card">${escapeHtml(event.comment)}</div></section>` : ''}
+        ${event.damageDescription ? `<section style="margin-top:16px;"><h2 style="font-size:16px;margin:0 0 8px;">Описание повреждений</h2><div class="card">${escapeHtml(event.damageDescription)}</div></section>` : ''}
+        ${photoSections}
+        <script>
+          window.onload = () => {
+            setTimeout(() => window.print(), 200);
+          };
+        </script>
+      </body>
+    </html>
+  `);
+  popup.document.close();
+}
+
 export default function EquipmentDetail() {
   const { user } = useAuth();
   const { can } = usePermissions();
@@ -239,6 +378,7 @@ export default function EquipmentDetail() {
   const [uploadEventType, setUploadEventType] = useState<'shipping' | 'receiving'>('shipping');
   const [uploadComment, setUploadComment] = useState('');
   const [uploadPending, setUploadPending] = useState<string[]>([]);  // base64 previews
+  const [uploadChecklist, setUploadChecklist] = useState(createEmptyHandoffChecklist);
   const mainPhotoInputRef = React.useRef<HTMLInputElement>(null);
   const shippingPhotoInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -303,11 +443,12 @@ export default function EquipmentDetail() {
     setUploadEventType(type);
     setUploadPending([]);
     setUploadComment('');
+    setUploadChecklist(createEmptyHandoffChecklist());
     setShowUploadPhotoForm(true);
   };
 
   const handleShippingPhotoSave = async () => {
-    if (!canManageAcceptance || !uploadPending.length || !equipment) return;
+    if (!canManageAcceptance || !uploadPending.length || !equipment || !isChecklistComplete(uploadChecklist)) return;
     const authorName = user?.name || 'Сотрудник';
     const todayStr = new Date().toISOString().split('T')[0];
     const nowIso = new Date().toISOString();
@@ -321,6 +462,7 @@ export default function EquipmentDetail() {
       comment: uploadComment || undefined,
       rentalId: activeOrCreatedRental?.id,
       source: 'manual',
+      checklist: uploadChecklist,
     };
 
     const updatedPhotos = [...allShippingPhotos, newEvent];
@@ -454,6 +596,7 @@ export default function EquipmentDetail() {
 
     setUploadPending([]);
     setUploadComment('');
+    setUploadChecklist(createEmptyHandoffChecklist());
     setShowUploadPhotoForm(false);
   };
 
@@ -1482,7 +1625,7 @@ export default function EquipmentDetail() {
                       {uploadEventType === 'shipping' ? 'Отправка техники в аренду' : 'Приёмка техники с аренды'}
                     </span>
                     <button
-                      onClick={() => { setShowUploadPhotoForm(false); setUploadPending([]); setUploadComment(''); }}
+                      onClick={() => { setShowUploadPhotoForm(false); setUploadPending([]); setUploadComment(''); setUploadChecklist(createEmptyHandoffChecklist()); }}
                       className="rounded p-1 text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-800"
                     >
                       <X className="h-4 w-4" />
@@ -1494,7 +1637,7 @@ export default function EquipmentDetail() {
                     {(['shipping', 'receiving'] as const).map(t => (
                       <button
                         key={t}
-                        onClick={() => setUploadEventType(t)}
+                        onClick={() => { setUploadEventType(t); setUploadChecklist(createEmptyHandoffChecklist()); }}
                         className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                           uploadEventType === t
                             ? 'bg-blue-600 text-white'
@@ -1526,6 +1669,42 @@ export default function EquipmentDetail() {
                     onChange={e => setUploadComment(e.target.value)}
                     className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+
+                  {/* Checklist */}
+                  <div className="rounded-md border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/30">
+                    <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">
+                      Чек-лист {uploadEventType === 'shipping' ? 'отгрузки' : 'приёмки'}
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {Object.entries(HANDOFF_CHECKLIST_LABELS).map(([key, label]) => {
+                        const checklistKey = key as keyof typeof HANDOFF_CHECKLIST_LABELS;
+                        const checked = uploadChecklist[checklistKey];
+                        return (
+                          <label
+                            key={key}
+                            className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                              checked
+                                ? 'border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300'
+                                : 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-300'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              checked={checked}
+                              onChange={(e) => setUploadChecklist(prev => ({ ...prev, [checklistKey]: e.target.checked }))}
+                            />
+                            <span>{label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {!isChecklistComplete(uploadChecklist) && (
+                      <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                        Перед сохранением нужно отметить все пункты чек-листа.
+                      </p>
+                    )}
+                  </div>
 
                   {/* File picker */}
                   <div>
@@ -1564,7 +1743,7 @@ export default function EquipmentDetail() {
                     </div>
                   )}
 
-                  <Button size="sm" onClick={handleShippingPhotoSave} disabled={!uploadPending.length}>
+                  <Button size="sm" onClick={handleShippingPhotoSave} disabled={!uploadPending.length || !isChecklistComplete(uploadChecklist)}>
                     <Upload className="h-4 w-4" />
                     Сохранить событие
                   </Button>
@@ -1588,6 +1767,13 @@ export default function EquipmentDetail() {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-gray-500 dark:text-gray-400">Загрузил: {event.uploadedBy}</span>
+                          <button
+                            onClick={() => printHandoffAct(event, equipment)}
+                            className="rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                            title="Скачать акт PDF"
+                          >
+                            Акт PDF
+                          </button>
                           {canEditEquipment && (
                             <button
                               onClick={() => {
@@ -1603,14 +1789,66 @@ export default function EquipmentDetail() {
                         </div>
                       </div>
                       {event.comment && <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">{event.comment}</p>}
-                      <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
-	                        {event.photos.map((photo, idx) => (
-	                          <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
-	                            className="h-32 w-48 shrink-0 rounded-lg border border-gray-200 dark:border-gray-700 object-cover cursor-zoom-in hover:opacity-90"
-	                            onClick={() => setPreviewImage(photo)}
-	                          />
-	                        ))}
-	                      </div>
+                      {event.checklist && (
+                        <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/30">
+                          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Чек-лист операции
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {Object.entries(HANDOFF_CHECKLIST_LABELS).map(([key, label]) => {
+                              const checklistKey = key as keyof typeof HANDOFF_CHECKLIST_LABELS;
+                              const checked = event.checklist?.[checklistKey];
+                              return (
+                                <div key={key} className="flex items-center gap-2 text-sm">
+                                  <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-medium ${
+                                    checked
+                                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                      : 'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                                  }`}>
+                                    {checked ? '✓' : '•'}
+                                  </span>
+                                  <span className="text-gray-700 dark:text-gray-300">{label}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {event.photoCategories && Object.keys(event.photoCategories).length > 0 ? (
+                        <div className="mt-3 space-y-3">
+                          {Object.entries(PHOTO_CATEGORY_LABELS).map(([key, label]) => {
+                            const photos = event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [];
+                            if (!photos.length) return null;
+                            return (
+                              <div key={key}>
+                                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                  {label}
+                                </div>
+                                <div className="flex gap-3 overflow-x-auto pb-1">
+                                  {photos.map((photo, idx) => (
+                                    <img
+                                      key={`${key}-${idx}`}
+                                      src={photo}
+                                      alt={`${label} ${idx + 1}`}
+                                      className="h-32 w-48 shrink-0 rounded-lg border border-gray-200 object-cover cursor-zoom-in hover:opacity-90 dark:border-gray-700"
+                                      onClick={() => setPreviewImage(photo)}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+	                          {event.photos.map((photo, idx) => (
+	                            <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
+	                              className="h-32 w-48 shrink-0 rounded-lg border border-gray-200 dark:border-gray-700 object-cover cursor-zoom-in hover:opacity-90"
+	                              onClick={() => setPreviewImage(photo)}
+	                            />
+	                          ))}
+	                        </div>
+                      )}
                       <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">{event.photos.length} фото · нажмите для просмотра</p>
                     </div>
                   ))}

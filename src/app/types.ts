@@ -21,6 +21,23 @@ export type EquipmentOperationPhotoCategory =
   | 'engine_bay'
   | 'damage_photo';
 
+export type EquipmentHandoffChecklistKey =
+  | 'exterior'
+  | 'controlPanel'
+  | 'batteryCharge'
+  | 'basket'
+  | 'tires'
+  | 'leaksAndDamage';
+
+export interface EquipmentHandoffChecklist {
+  exterior: boolean;
+  controlPanel: boolean;
+  batteryCharge: boolean;
+  basket: boolean;
+  tires: boolean;
+  leaksAndDamage: boolean;
+}
+
 export interface AuditEntry {
   date: string;
   text: string;
@@ -89,6 +106,7 @@ export interface ShippingPhoto {
   hoursValue?: number;
   damageDescription?: string;
   operationSessionId?: string;
+  checklist?: EquipmentHandoffChecklist;
 }
 
 export type RentalStatus = 'new' | 'confirmed' | 'delivery' | 'active' | 'return_planned' | 'closed';

@@ -10,13 +10,16 @@ import { Badge } from '../ui/badge';
 import { formatCurrency, formatDate, formatDateTime, getRentalDays } from '../../lib/utils';
 import { findConflictingRental } from '../../lib/rental-conflicts';
 import type { GanttRentalData } from '../../mock-data';
-import type { Equipment, Payment } from '../../types';
+import type { Client, Equipment, Payment } from '../../types';
+import type { ClientReceivableRow } from '../../lib/finance';
 
 interface RentalDrawerProps {
   rental: GanttRentalData | null;
   equipment: Equipment | undefined;
   allRentals: GanttRentalData[];
   payments: Payment[];
+  clients?: Client[];
+  clientReceivables?: ClientReceivableRow[];
   canEditRentals: boolean;
   canEditRentalDates: boolean;
   canRestoreRentals: boolean;
@@ -64,6 +67,7 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
 
 export function RentalDrawer({
   rental, equipment, allRentals, payments,
+  clients = [], clientReceivables = [],
   canEditRentals, canEditRentalDates, canRestoreRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
   onRestore, onUpdate, onAddComment, onPaymentStatusChange, onAddPayment, onExtend, onEarlyReturn, onUpdChange,
@@ -125,6 +129,8 @@ export function RentalDrawer({
   const rentalPayments = payments.filter(p => p.rentalId === rental.id);
   const totalPaid = rentalPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
   const remaining = rental.amount - totalPaid;
+  const clientProfile = clients.find(item => item.company === rental.client);
+  const clientDebt = clientReceivables.find(item => item.client === rental.client);
 
   // Handle add payment submit
   const handlePaySubmit = () => {
@@ -422,6 +428,44 @@ export function RentalDrawer({
                 </button>
               )}
             </div>
+
+            {(clientProfile || clientDebt) && (
+              <div className={`mb-2 rounded-lg border px-3 py-3 text-sm ${
+                (clientDebt?.exceededLimit || false)
+                  ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
+                  : (clientDebt?.currentDebt || clientProfile?.debt || 0) > 0
+                    ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
+                    : 'border-green-300 bg-green-50 text-green-700 dark:border-green-700 dark:bg-green-900/20 dark:text-green-300'
+              }`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">
+                      {(clientDebt?.exceededLimit || false)
+                        ? 'Превышен кредитный лимит клиента'
+                        : (clientDebt?.currentDebt || clientProfile?.debt || 0) > 0
+                          ? 'У клиента есть задолженность'
+                          : 'Финансовых ограничений не найдено'}
+                    </p>
+                    <p className="mt-1 text-xs opacity-90">
+                      Условия оплаты: {clientProfile?.paymentTerms || 'не указаны'}
+                      {clientProfile?.creditLimit ? ` · Лимит: ${formatCurrency(clientProfile.creditLimit)}` : ''}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-wide opacity-75">Долг</p>
+                    <p className="text-base font-semibold">
+                      {formatCurrency(clientDebt?.currentDebt ?? clientProfile?.debt ?? 0)}
+                    </p>
+                  </div>
+                </div>
+                {(clientDebt?.unpaidRentals || 0) > 0 && (
+                  <p className="mt-2 text-xs opacity-90">
+                    Неоплаченных аренд: {clientDebt?.unpaidRentals}
+                    {(clientDebt?.overdueRentals || 0) > 0 && ` · просроченных: ${clientDebt?.overdueRentals}`}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Payment summary */}
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">

@@ -8,12 +8,14 @@ import type { SystemUser } from '../../lib/userStorage';
 import type { Client, Equipment } from '../../types';
 import { equipmentService } from '../../services/equipment.service';
 import { clientsService } from '../../services/clients.service';
+import { paymentsService } from '../../services/payments.service';
 import { rentalsService } from '../../services/rentals.service';
 import { usersService } from '../../services/users.service';
 import { EQUIPMENT_KEYS } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
 import { canEquipmentParticipateInRentals } from '../../lib/equipmentClassification';
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../../lib/utils';
+import { buildClientFinancialSnapshots } from '../../lib/finance';
 import { EquipmentCombobox } from '../ui/EquipmentCombobox';
 
 // ─── Локальные хелперы ──────────────────────────────────────────────────────
@@ -404,6 +406,10 @@ export function NewRentalModal({
     queryFn: usersService.getAll,
     enabled: !managersProp,
   });
+  const { data: paymentsData = [] } = useQuery({
+    queryKey: ['payments'],
+    queryFn: paymentsService.getAll,
+  });
   const { data: fetchedGanttRentals = [] } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
@@ -433,6 +439,14 @@ export function NewRentalModal({
   const existingRentals = useMemo(
     () => ganttRentalsProp ?? fetchedGanttRentals,
     [fetchedGanttRentals, ganttRentalsProp],
+  );
+  const clientFinancials = useMemo(
+    () => buildClientFinancialSnapshots(allClients, existingRentals, paymentsData),
+    [allClients, existingRentals, paymentsData],
+  );
+  const selectedClientFinancial = useMemo(
+    () => clientFinancials.find(item => item.client === client),
+    [clientFinancials, client],
   );
 
   /**
@@ -539,6 +553,36 @@ export function NewRentalModal({
               </select>
             )}
           </div>
+
+          {client && selectedClientFinancial && (
+            <div className={`rounded-lg border px-3 py-3 text-sm ${
+              selectedClientFinancial.exceededLimit
+                ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
+                : selectedClientFinancial.currentDebt > 0
+                  ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
+                  : 'border-green-300 bg-green-50 text-green-700 dark:border-green-700 dark:bg-green-900/20 dark:text-green-300'
+            }`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-medium">
+                    {selectedClientFinancial.exceededLimit
+                      ? 'Внимание: кредитный лимит клиента превышен'
+                      : selectedClientFinancial.currentDebt > 0
+                        ? 'У клиента есть задолженность'
+                        : 'У клиента нет активной задолженности'}
+                  </p>
+                  <p className="mt-1 text-xs opacity-90">
+                    Неоплаченных аренд: {selectedClientFinancial.unpaidRentals}
+                    {selectedClientFinancial.overdueRentals > 0 && ` · просроченных: ${selectedClientFinancial.overdueRentals}`}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs uppercase tracking-wide opacity-75">Долг</p>
+                  <p className="text-base font-semibold">{formatCurrency(selectedClientFinancial.currentDebt)}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Даты — перед выбором техники, чтобы сразу проверить доступность */}
           <div className="grid grid-cols-2 gap-3">

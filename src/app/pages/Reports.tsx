@@ -11,11 +11,14 @@ import { RefreshCw, Truck, BarChart2, Wrench, TrendingUp, Download } from 'lucid
 import * as Tabs from '@radix-ui/react-tabs';
 import { formatCurrency } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
+import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import type { Equipment, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
 import { equipmentService } from '../services/equipment.service';
 import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
+import { clientsService } from '../services/clients.service';
+import { paymentsService } from '../services/payments.service';
 import { rentalsService } from '../services/rentals.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
@@ -161,6 +164,14 @@ export default function Reports() {
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
   });
+  const { data: clients = [] } = useQuery({
+    queryKey: ['clients'],
+    queryFn: clientsService.getAll,
+  });
+  const { data: payments = [] } = useQuery({
+    queryKey: ['payments'],
+    queryFn: paymentsService.getAll,
+  });
   const { data: tickets = [] } = useQuery<ServiceTicket[]>({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
@@ -208,6 +219,21 @@ export default function Reports() {
     const names = Array.from(new Set((mechanicWorkload?.rows ?? []).flatMap(item => item.partNames).filter(Boolean)));
     return names.sort((a, b) => a.localeCompare(b, 'ru'));
   }, [mechanicWorkload]);
+
+  const financeDebtRows = useMemo(
+    () => buildRentalDebtRows(ganttRentals, payments),
+    [ganttRentals, payments],
+  );
+  const financeClientSnapshots = useMemo(
+    () => buildClientFinancialSnapshots(clients, ganttRentals, payments),
+    [clients, ganttRentals, payments],
+  );
+  const financeTotals = useMemo(() => ({
+    debt: financeClientSnapshots.reduce((sum, item) => sum + item.currentDebt, 0),
+    overdueClients: financeClientSnapshots.filter(item => item.overdueRentals > 0).length,
+    exceededClients: financeClientSnapshots.filter(item => item.exceededLimit).length,
+    unpaidRentals: financeDebtRows.length,
+  }), [financeClientSnapshots, financeDebtRows]);
 
   const filteredMechanicRows = useMemo(() => {
     const rows = mechanicWorkload?.rows ?? [];
@@ -816,6 +842,7 @@ export default function Reports() {
         <Tabs.List className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
           {[
             { value: 'analytics', label: 'Аналитика' },
+            { value: 'finance',   label: 'Финансы' },
             { value: 'managers',  label: 'По менеджерам' },
             { value: 'service',   label: 'По сервису' },
           ].map(tab => (
@@ -1113,6 +1140,130 @@ export default function Reports() {
         </Card>
       </div>
 
+        </Tabs.Content>
+
+        <Tabs.Content value="finance" className="space-y-4 sm:space-y-6">
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Общая дебиторка</CardDescription>
+                <CardTitle className="text-3xl">{formatCurrency(financeTotals.debt)}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Неоплаченные аренды</CardDescription>
+                <CardTitle className="text-3xl">{financeTotals.unpaidRentals}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Клиенты с просрочкой</CardDescription>
+                <CardTitle className="text-3xl">{financeTotals.overdueClients}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Превышен лимит</CardDescription>
+                <CardTitle className="text-3xl">{financeTotals.exceededClients}</CardTitle>
+              </CardHeader>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Дебиторка по клиентам</CardTitle>
+                <CardDescription>Текущая задолженность и риск по лимиту</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {financeClientSnapshots.length === 0 ? (
+                  <EmptyChart message="Нет данных по дебиторке клиентов." />
+                ) : (
+                  <div className="space-y-3">
+                    {financeClientSnapshots.filter(item => item.currentDebt > 0).slice(0, 12).map(item => (
+                      <div
+                        key={item.client}
+                        className={`rounded-lg border px-4 py-3 ${
+                          item.exceededLimit
+                            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+                            : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-medium text-gray-900 dark:text-white">{item.client}</p>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              Активных неоплаченных аренд: {item.unpaidRentals}
+                              {item.overdueRentals > 0 && ` · просроченных: ${item.overdueRentals}`}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className={`font-semibold ${item.exceededLimit ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                              {formatCurrency(item.currentDebt)}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              Лимит: {item.creditLimit > 0 ? formatCurrency(item.creditLimit) : 'не задан'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Неоплаченные аренды</CardTitle>
+                <CardDescription>Аренды с остатком долга по оплате</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {financeDebtRows.length === 0 ? (
+                  <EmptyChart message="Все аренды закрыты по оплате." />
+                ) : (
+                  <div className="space-y-3">
+                    {financeDebtRows.slice(0, 12).map(row => {
+                      const overdue = row.expectedPaymentDate
+                        ? row.expectedPaymentDate < new Date().toISOString().slice(0, 10)
+                        : row.endDate < new Date().toISOString().slice(0, 10);
+                      return (
+                        <div
+                          key={row.rentalId}
+                          className={`rounded-lg border px-4 py-3 ${
+                            overdue
+                              ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+                              : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                {row.equipmentInv} · {row.startDate} — {row.endDate}
+                              </p>
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                {row.expectedPaymentDate ? `Ожидаемая оплата: ${row.expectedPaymentDate}` : 'Дата оплаты не указана'}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className={`font-semibold ${overdue ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                                {formatCurrency(row.outstanding)}
+                              </p>
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                Оплачено: {formatCurrency(row.paidAmount)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </Tabs.Content>
 
         {/* ── Managers report tab ─────────────────────────────────────────── */}

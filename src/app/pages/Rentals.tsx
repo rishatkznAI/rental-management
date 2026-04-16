@@ -24,12 +24,14 @@ import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
+import { clientsService } from '../services/clients.service';
 import { usersService } from '../services/users.service';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { canEquipmentParticipateInRentals, compareEquipmentByPriority, EQUIPMENT_PRIORITY_LABELS } from '../lib/equipmentClassification';
+import { buildClientReceivables, buildRentalDebtRows, mergeClientsWithFinancials } from '../lib/finance';
 import {
   appendRentalHistory,
   buildRentalCreationHistory,
@@ -295,6 +297,10 @@ export default function Rentals() {
     queryKey: ['users'],
     queryFn: usersService.getAll,
   });
+  const { data: clientsData = [] } = useQuery({
+    queryKey: ['clients'],
+    queryFn: clientsService.getAll,
+  });
 
   useEffect(() => {
     setGanttRentals(ganttData);
@@ -307,6 +313,19 @@ export default function Rentals() {
   useEffect(() => {
     setPayments(paymentData);
   }, [paymentData]);
+
+  const computedClients = useMemo(
+    () => mergeClientsWithFinancials(clientsData, ganttRentals, payments),
+    [clientsData, ganttRentals, payments],
+  );
+  const rentalDebtRows = useMemo(
+    () => buildRentalDebtRows(ganttRentals, payments),
+    [ganttRentals, payments],
+  );
+  const clientReceivables = useMemo(
+    () => buildClientReceivables(computedClients, rentalDebtRows),
+    [computedClients, rentalDebtRows],
+  );
 
   // Менеджеры для фильтра (динамически из базы пользователей)
   const managersList = useMemo(() => usersData.filter(u => u.status === 'Активен'), [usersData]);
@@ -1281,6 +1300,8 @@ export default function Rentals() {
           equipment={equipmentList.find(e => matchesEquipmentRow(selectedRental, e))}
           allRentals={ganttRentals}
           payments={payments}
+          clients={computedClients}
+          clientReceivables={clientReceivables}
           canEditRentals={canEditRentals}
           canEditRentalDates={canEditRentalDates}
           canRestoreRentals={canRestoreRentals}

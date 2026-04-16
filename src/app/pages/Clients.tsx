@@ -7,15 +7,25 @@ import { Search, Plus } from 'lucide-react';
 import { Link } from 'react-router';
 import { usePermissions } from '../lib/permissions';
 import { useClientsList } from '../hooks/useClients';
+import { useGanttData } from '../hooks/useRentals';
+import { usePaymentsList } from '../hooks/usePayments';
 import { formatCurrency, formatDate } from '../lib/utils';
 import type { Client } from '../types';
+import { mergeClientsWithFinancials } from '../lib/finance';
 
 export default function Clients() {
   const { can } = usePermissions();
   const { data: clientList = [] } = useClientsList();
+  const { data: ganttRentals = [] } = useGanttData();
+  const { data: payments = [] } = usePaymentsList();
   const [search, setSearch] = React.useState('');
 
-  const filteredClients = clientList.filter(client => {
+  const computedClients = React.useMemo(
+    () => mergeClientsWithFinancials(clientList, ganttRentals, payments),
+    [clientList, ganttRentals, payments],
+  );
+
+  const filteredClients = computedClients.filter(client => {
     const matchesSearch = search === '' ||
       client.company.toLowerCase().includes(search.toLowerCase()) ||
       client.inn.includes(search) ||
@@ -163,7 +173,7 @@ export default function Clients() {
       {/* Results info */}
       {filteredClients.length > 0 && (
         <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-          <p>Показано {filteredClients.length} из {clientList.length} клиентов</p>
+          <p>Показано {filteredClients.length} из {computedClients.length} клиентов</p>
         </div>
       )}
     </div>

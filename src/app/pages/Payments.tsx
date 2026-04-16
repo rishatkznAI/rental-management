@@ -7,10 +7,12 @@ import { getPaymentStatusBadge } from '../components/ui/badge';
 import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
 import { usePermissions } from '../lib/permissions';
 import { usePaymentsList, useCreatePayment } from '../hooks/usePayments';
+import { useClientsList } from '../hooks/useClients';
 import { useGanttData } from '../hooks/useRentals';
 import type { GanttRentalData } from '../mock-data';
 import { formatDate, formatCurrency } from '../lib/utils';
 import type { Payment, PaymentStatus } from '../types';
+import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -217,6 +219,7 @@ export default function Payments() {
   const { can } = usePermissions();
   const { data: paymentList = [] } = usePaymentsList();
   const { data: ganttRentals = [] } = useGanttData();
+  const { data: clients = [] } = useClientsList();
   const createPayment = useCreatePayment();
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
@@ -247,6 +250,15 @@ export default function Payments() {
   const totalPaid = paymentList.filter(p => p.status === 'paid').reduce((s, p) => s + (p.paidAmount ?? p.amount), 0);
   const totalOverdue = paymentList.filter(p => p.status === 'overdue').reduce((s, p) => s + (p.amount - (p.paidAmount ?? 0)), 0);
   const totalPartial = paymentList.filter(p => p.status === 'partial').reduce((s, p) => s + (p.paidAmount ?? 0), 0);
+  const rentalDebtRows = useMemo(() => buildRentalDebtRows(ganttRentals as GanttRentalData[], paymentList), [ganttRentals, paymentList]);
+  const clientReceivables = useMemo(() => buildClientReceivables(clients, rentalDebtRows), [clients, rentalDebtRows]);
+  const overdueDebtRentals = useMemo(
+    () => rentalDebtRows.filter(row => {
+      const today = new Date().toISOString().slice(0, 10);
+      return (row.expectedPaymentDate && row.expectedPaymentDate < today) || row.endDate < today;
+    }),
+    [rentalDebtRows],
+  );
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -310,6 +322,113 @@ export default function Payments() {
             <p className="text-xs text-gray-500 dark:text-gray-400">Всего платежей</p>
             <p className="text-lg font-bold text-gray-900 dark:text-white">{paymentList.length}</p>
           </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+        <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Дебиторка по клиентам</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Клиенты с текущей задолженностью по арендам</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Всего должников</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white">{clientReceivables.length}</p>
+            </div>
+          </div>
+          {clientReceivables.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+              Сейчас активной дебиторки нет
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {clientReceivables.slice(0, 8).map(row => (
+                <div
+                  key={row.client}
+                  className={`rounded-lg border px-4 py-3 ${
+                    row.exceededLimit
+                      ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+                      : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Неоплаченных аренд: {row.unpaidRentals}
+                        {row.overdueRentals > 0 && ` · просроченных: ${row.overdueRentals}`}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`font-semibold ${row.exceededLimit ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                        {formatCurrency(row.currentDebt)}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Лимит: {row.creditLimit > 0 ? formatCurrency(row.creditLimit) : 'не задан'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Неоплаченные аренды</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Самые рискованные аренды по дебиторке</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Всего</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white">{rentalDebtRows.length}</p>
+            </div>
+          </div>
+          {rentalDebtRows.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+              Все аренды закрыты по оплате
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {rentalDebtRows.slice(0, 8).map(row => {
+                const isOverdue = overdueDebtRentals.some(item => item.rentalId === row.rentalId);
+                return (
+                  <div
+                    key={row.rentalId}
+                    className={`rounded-lg border px-4 py-3 ${
+                      isOverdue
+                        ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+                        : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {row.equipmentInv} · {row.startDate} — {row.endDate}
+                        </p>
+                        {row.expectedPaymentDate && (
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Ожидаемая оплата: {formatDate(row.expectedPaymentDate)}
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className={`font-semibold ${isOverdue ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                          {formatCurrency(row.outstanding)}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          Оплачено: {formatCurrency(row.paidAmount)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 

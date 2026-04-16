@@ -15,6 +15,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useClientsList } from '../hooks/useClients';
 import { useEquipmentList, useUpdateEquipment } from '../hooks/useEquipment';
 import { useGanttData } from '../hooks/useRentals';
+import { usePaymentsList } from '../hooks/usePayments';
 import { rentalsService } from '../services/rentals.service';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
@@ -25,6 +26,7 @@ import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/ren
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/utils';
 import { isEquipmentBusy } from '../lib/rental-conflicts';
+import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
 import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
 
 export default function RentalNew() {
@@ -36,6 +38,7 @@ export default function RentalNew() {
   const { data: clients = [] } = useClientsList();
   const { data: rawEq = [] } = useEquipmentList();
   const { data: ganttRentals = [] } = useGanttData();
+  const { data: payments = [] } = usePaymentsList();
 
   const allEq = useMemo(
     () => rawEq.filter(e => canEquipmentParticipateInRentals(e) && e.status !== 'inactive' && e.status !== 'in_service'),
@@ -76,6 +79,10 @@ export default function RentalNew() {
   }, [startDate, endDate, allEq, ganttRents]);
 
   const selectedEquipment = allEq.find(e => e.id === equipmentId);
+  const selectedClient = clients.find(item => item.company === client);
+  const rentalDebtRows = useMemo(() => buildRentalDebtRows(ganttRents, payments), [ganttRents, payments]);
+  const receivables = useMemo(() => buildClientReceivables(clients, rentalDebtRows), [clients, rentalDebtRows]);
+  const selectedClientReceivable = receivables.find(item => item.client === client);
   const conflictWarn = equipmentId
     ? busyEq.some(e => e.id === equipmentId)
     : false;
@@ -202,6 +209,46 @@ export default function RentalNew() {
               )}
             </div>
 
+            {selectedClient && (
+              <div
+                className={`rounded-lg border px-3 py-3 text-sm ${
+                  (selectedClientReceivable?.exceededLimit || false)
+                    ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
+                    : (selectedClientReceivable?.currentDebt || selectedClient.debt || 0) > 0
+                      ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
+                      : 'border-green-300 bg-green-50 text-green-700 dark:border-green-700 dark:bg-green-900/20 dark:text-green-300'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium">
+                      {(selectedClientReceivable?.exceededLimit || false)
+                        ? 'Внимание: превышен кредитный лимит клиента'
+                        : (selectedClientReceivable?.currentDebt || selectedClient.debt || 0) > 0
+                          ? 'У клиента есть действующая задолженность'
+                          : 'У клиента нет активной задолженности'}
+                    </p>
+                    <p className="mt-1 text-xs opacity-90">
+                      Условия оплаты: {selectedClient.paymentTerms || 'не указаны'}
+                      {selectedClient.creditLimit > 0 && ` · Лимит в долг: ${formatCurrency(selectedClient.creditLimit)}`}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-wide opacity-75">Текущий долг</p>
+                    <p className="text-base font-semibold">
+                      {formatCurrency(selectedClientReceivable?.currentDebt ?? selectedClient.debt ?? 0)}
+                    </p>
+                  </div>
+                </div>
+                {(selectedClientReceivable?.unpaidRentals || 0) > 0 && (
+                  <p className="mt-2 text-xs opacity-90">
+                    Неоплаченных аренд: {selectedClientReceivable?.unpaidRentals}
+                    {(selectedClientReceivable?.overdueRentals || 0) > 0 && ` · просроченных: ${selectedClientReceivable?.overdueRentals}`}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Dates — before equipment to check availability */}
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
@@ -307,7 +354,7 @@ export default function RentalNew() {
             </div>
 
             <div className="flex gap-3 pt-4">
-              <Button type="submit" disabled={!client || !equipmentInv || !startDate || !endDate}>
+              <Button type="submit" disabled={!client || !equipmentId || !startDate || !endDate}>
                 Создать договор
               </Button>
               <Button

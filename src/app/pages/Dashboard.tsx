@@ -32,6 +32,7 @@ import { buildRentalCreationHistory } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import type { Equipment, Rental, ServiceTicket, Client, Payment, Document, EquipmentStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
+import { buildClientFinancialSnapshots } from '../lib/finance';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -114,6 +115,19 @@ export default function Dashboard() {
   const today = startOfDay(new Date());
   const weekAgo = daysAgo(7);
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const clientFinancials = useMemo(
+    () => buildClientFinancialSnapshots(clients, ganttRentals, payments),
+    [clients, ganttRentals, payments],
+  );
+  const computedClients = useMemo(
+    () => clients.map(client => {
+      const financial = clientFinancials.find(item => item.client === client.company);
+      return financial
+        ? { ...client, debt: financial.currentDebt, totalRentals: financial.totalRentals, lastRentalDate: financial.lastRentalDate }
+        : client;
+    }),
+    [clients, clientFinancials],
+  );
 
   // Менеджер по аренде видит только свои аренды в KPI
   const isManagerRole = user?.role === 'Менеджер по аренде';
@@ -161,7 +175,7 @@ export default function Dashboard() {
       }, 0);
 
   // Debt
-  const clientDebt = clients.reduce((sum, c) => sum + (c.debt || 0), 0);
+  const clientDebt = computedClients.reduce((sum, c) => sum + (c.debt || 0), 0);
   const overduePayments = payments.filter(p => p.status === 'overdue');
   const overduePaymentsTotal = overduePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
   const totalDebt = clientDebt + overduePaymentsTotal;
@@ -207,7 +221,7 @@ export default function Dashboard() {
 
   // Clients of this manager's rentals
   const myClientNames = [...new Set(myRentals.map(r => r.client))];
-  const myClients = clients.filter(c => myClientNames.includes(c.company));
+  const myClients = computedClients.filter(c => myClientNames.includes(c.company));
   const myClientDebt = myClients.reduce((sum, c) => sum + (c.debt || 0), 0);
   const myOverduePayments = payments.filter(p =>
     p.status === 'overdue' && myClientNames.includes(p.client)
@@ -267,7 +281,7 @@ export default function Dashboard() {
   const MONTHLY_PLAN = 0;
 
   // Overdue debt clients
-  const overdueDebtClients = clients.filter(c => (c.debt ?? 0) > 0);
+  const overdueDebtClients = computedClients.filter(c => (c.debt ?? 0) > 0);
   const overdueDebtCount = overdueDebtClients.length + overduePayments.length;
 
   // ── Alert items ─────────────────────────────────────────────────────────────
@@ -415,7 +429,7 @@ export default function Dashboard() {
   });
 
   // 7. Клиенты со статусом blocked + активными арендами
-  const blockedClientsWithRentals = clients.filter(c => c.status === 'blocked');
+  const blockedClientsWithRentals = computedClients.filter(c => c.status === 'blocked');
   blockedClientsWithRentals.forEach(c => {
     const hasActive = activeRentalsList.some(r => r.client === c.company);
     if (hasActive) {
@@ -434,7 +448,7 @@ export default function Dashboard() {
   });
 
   // 8. Долг превышает кредитный лимит
-  clients.filter(c => c.creditLimit > 0 && c.debt > c.creditLimit).forEach(c => {
+  computedClients.filter(c => c.creditLimit > 0 && c.debt > c.creditLimit).forEach(c => {
     alertItems.push({
       id: `credit-limit-${c.id}`,
       priority: 'high',
@@ -488,7 +502,7 @@ export default function Dashboard() {
     },
     totalDebt: {
       totalDebt,
-      clients: clients.filter(c => (c.debt ?? 0) > 0),
+      clients: computedClients.filter(c => (c.debt ?? 0) > 0),
       overduePayments,
     },
     monthDebt: { monthDebt, overduePayments: monthOverduePayments },

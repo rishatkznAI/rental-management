@@ -12,12 +12,14 @@ import {
 } from 'lucide-react';
 import { formatDate, formatDateTime, formatCurrency } from '../lib/utils';
 import { useClientById, useUpdateClient } from '../hooks/useClients';
-import { useRentalsList } from '../hooks/useRentals';
+import { useRentalsList, useGanttData } from '../hooks/useRentals';
+import { usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
 import type { Client, ClientStatus } from '../types';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
+import { buildClientFinancialSnapshots } from '../lib/finance';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -101,11 +103,23 @@ export default function ClientDetail() {
 
   // Related data via react-query
   const { data: allRentals = [] } = useRentalsList();
+  const { data: ganttRentals = [] } = useGanttData();
+  const { data: payments = [] } = usePaymentsList();
   const clientRentals = allRentals.filter(r => client && r.client === client.company);
   const activeRentals = clientRentals.filter(r => r.status === 'active');
 
   const { data: allDocs = [] } = useDocumentsList();
   const clientDocs = allDocs.filter(d => client && d.client === client.company);
+
+  const clientFinancial = React.useMemo(() => {
+    if (!client) return null;
+    return buildClientFinancialSnapshots([client], ganttRentals, payments)[0] ?? null;
+  }, [client, ganttRentals, payments]);
+
+  const displayedDebt = clientFinancial?.currentDebt ?? client?.debt ?? 0;
+  const displayedTotalRentals = clientFinancial?.totalRentals ?? client?.totalRentals ?? 0;
+  const displayedActiveRentals = clientFinancial?.activeRentals ?? activeRentals.length;
+  const displayedLastRentalDate = clientFinancial?.lastRentalDate ?? client?.lastRentalDate;
 
   // Persist changes — optimistic + server PATCH
   const persist = useCallback((updated: Client) => {
@@ -348,6 +362,9 @@ export default function ClientDetail() {
                       onChange={e => setEditData({ ...editData, debt: Number(e.target.value) })}
                     />
                   </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Текущая задолженность в интерфейсе рассчитывается автоматически по арендам и оплатам.
+                  </p>
                   <Input
                     label="Ответственный менеджер"
                     value={editData.manager ?? ''}
@@ -374,8 +391,8 @@ export default function ClientDetail() {
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Задолженность</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(client.debt)}</p>
-                      <Badge variant={debtVariant(client.debt)}>{debtLabel(client.debt)}</Badge>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(displayedDebt)}</p>
+                      <Badge variant={debtVariant(displayedDebt)}>{debtLabel(displayedDebt)}</Badge>
                     </div>
                   </div>
                   {client.manager && <Field label="Менеджер" value={client.manager} />}
@@ -486,20 +503,20 @@ export default function ClientDetail() {
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Всего аренд</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {clientRentals.length || client.totalRentals}
+                  {clientRentals.length || displayedTotalRentals}
                 </p>
               </div>
               <Divider />
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Активных аренд</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">{activeRentals.length}</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{displayedActiveRentals}</p>
               </div>
-              {client.debt > 0 && (
+              {displayedDebt > 0 && (
                 <>
                   <Divider />
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Задолженность</p>
-                    <p className="text-xl font-bold text-red-600">{formatCurrency(client.debt)}</p>
+                    <p className="text-xl font-bold text-red-600">{formatCurrency(displayedDebt)}</p>
                   </div>
                 </>
               )}
@@ -517,7 +534,7 @@ export default function ClientDetail() {
             <CardContent className="space-y-4">
               <Field
                 label="Последняя аренда"
-                value={client.lastRentalDate ? formatDate(client.lastRentalDate) : '—'}
+                value={displayedLastRentalDate ? formatDate(displayedLastRentalDate) : '—'}
               />
               {client.createdAt && (
                 <>
@@ -557,7 +574,7 @@ export default function ClientDetail() {
           </Card>
 
           {/* Debt alert */}
-          {client.debt > 50000 && (
+          {displayedDebt > 50000 && (
             <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
               <CardContent className="pt-4">
                 <div className="flex items-center gap-2 mb-1">
@@ -565,7 +582,7 @@ export default function ClientDetail() {
                   <p className="text-sm font-semibold text-red-800 dark:text-red-200">Высокая задолженность</p>
                 </div>
                 <p className="text-xs text-red-600 dark:text-red-300">
-                  Задолженность {formatCurrency(client.debt)} превышает допустимый порог. Рекомендуется связаться с клиентом.
+                  Задолженность {formatCurrency(displayedDebt)} превышает допустимый порог. Рекомендуется связаться с клиентом.
                 </p>
               </CardContent>
             </Card>

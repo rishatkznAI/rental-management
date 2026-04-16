@@ -54,8 +54,10 @@ function createBotHandlers(deps) {
       [button('Мои заявки', 'menu:myrepairs'), button('Новая заявка', 'menu:new_ticket')],
       [button('Найти технику', 'menu:find_equipment'), button('Черновик', 'menu:draft')],
       [button('Отгрузка', 'menu:shipout'), button('Приёмка', 'menu:receivein')],
+      [button('Фото ДО', 'menu:repair_before'), button('Фото ПОСЛЕ', 'menu:repair_after')],
       [button('Итог', 'menu:summary'), button('Готово', 'menu:ready')],
-      [button('Закрыть', 'menu:close'), button('Помощь', 'menu:help')],
+      [button('Закрыть', 'menu:close'), button('Отчёт за день', 'menu:day_report')],
+      [button('Помощь', 'menu:help')],
     ]);
   }
 
@@ -63,9 +65,10 @@ function createBotHandlers(deps) {
     return keyboard([
       [button('Черновик', 'menu:draft'), button('Итог', 'menu:summary')],
       [button('Работы', 'menu:works'), button('Запчасти', 'menu:parts')],
+      [button('Фото ДО', 'menu:repair_before'), button('Фото ПОСЛЕ', 'menu:repair_after')],
       [button('Готово', 'menu:ready'), button('Ожидание', 'menu:waiting')],
       [button('Закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close'), button('Назад', 'menu:main')],
-      [button('Мои заявки', 'menu:myrepairs')],
+      [button('Мои заявки', 'menu:myrepairs'), button('Отчёт за день', 'menu:day_report')],
     ]);
   }
 
@@ -101,6 +104,24 @@ function createBotHandlers(deps) {
   };
 
   const CHECKLIST_STEPS = Object.keys(CHECKLIST_STEP_TO_KEY);
+
+  const REPAIR_CLOSE_CHECKLIST_LABELS = {
+    faultEliminated: 'Неисправность устранена',
+    worksRecorded: 'Работы внесены в отчёт',
+    partsRecordedOrNotRequired: 'Запчасти внесены или не требовались',
+    beforePhotosAttached: 'Фото ДО приложены',
+    afterPhotosAttached: 'Фото ПОСЛЕ приложены',
+    summaryFilled: 'Итог ремонта заполнен',
+  };
+
+  const REPAIR_CLOSE_CHECKLIST_ORDER = [
+    'faultEliminated',
+    'worksRecorded',
+    'partsRecordedOrNotRequired',
+    'beforePhotosAttached',
+    'afterPhotosAttached',
+    'summaryFilled',
+  ];
 
   const OPERATION_STEP_META = {
     checklist_exterior: { kind: 'check', label: 'внешний осмотр', prompt: 'Подтвердите: внешний осмотр выполнен' },
@@ -393,6 +414,193 @@ function createBotHandlers(deps) {
     };
   }
 
+  function createEmptyRepairPhotos() {
+    return {
+      before: [],
+      after: [],
+      beforeUploadedAt: null,
+      beforeUploadedBy: '',
+      afterUploadedAt: null,
+      afterUploadedBy: '',
+    };
+  }
+
+  function createEmptyRepairCloseChecklist() {
+    return {
+      faultEliminated: false,
+      worksRecorded: false,
+      partsRecordedOrNotRequired: false,
+      beforePhotosAttached: false,
+      afterPhotosAttached: false,
+      summaryFilled: false,
+    };
+  }
+
+  function normalizeRepairPhotos(ticket) {
+    return {
+      ...createEmptyRepairPhotos(),
+      ...(ticket?.repairPhotos || {}),
+      before: Array.isArray(ticket?.repairPhotos?.before) ? ticket.repairPhotos.before : [],
+      after: Array.isArray(ticket?.repairPhotos?.after) ? ticket.repairPhotos.after : [],
+    };
+  }
+
+  function buildRepairCloseChecklistStatus(ticket, overrides = {}) {
+    const workItems = (readData('repair_work_items') || []).filter(item => item.repairId === ticket.id);
+    const repairPhotos = normalizeRepairPhotos(ticket);
+    const summary = String(ticket.resultData?.summary || ticket.result || '').trim();
+    const base = createEmptyRepairCloseChecklist();
+
+    return {
+      ...base,
+      ...(ticket.closeChecklist || {}),
+      ...overrides,
+      worksRecorded: Boolean(workItems.length),
+      beforePhotosAttached: repairPhotos.before.length > 0,
+      afterPhotosAttached: repairPhotos.after.length > 0,
+      summaryFilled: Boolean(summary),
+    };
+  }
+
+  function nextMissingRepairCloseChecklistKey(checklist) {
+    return REPAIR_CLOSE_CHECKLIST_ORDER.find(key => !checklist?.[key]) || null;
+  }
+
+  function repairCloseChecklistKeyboard(ticket, checklist) {
+    const nextKey = nextMissingRepairCloseChecklistKey(checklist);
+    const actionRows = [];
+
+    if (nextKey === 'faultEliminated' || nextKey === 'partsRecordedOrNotRequired') {
+      actionRows.push([button(`Подтвердить: ${REPAIR_CLOSE_CHECKLIST_LABELS[nextKey]}`, `repairclose:confirm:${ticket.id}:${nextKey}`)]);
+    } else if (nextKey === 'worksRecorded') {
+      actionRows.push([button('Перейти к работам', 'menu:works')]);
+    } else if (nextKey === 'beforePhotosAttached') {
+      actionRows.push([button('Загрузить фото ДО', 'menu:repair_before')]);
+    } else if (nextKey === 'afterPhotosAttached') {
+      actionRows.push([button('Загрузить фото ПОСЛЕ', 'menu:repair_after')]);
+    } else if (nextKey === 'summaryFilled') {
+      actionRows.push([button('Заполнить итог', 'menu:summary')]);
+    } else {
+      actionRows.push([button('Закрыть заявку', `repairclose:complete:${ticket.id}`)]);
+    }
+
+    return keyboard([
+      ...actionRows,
+      [button('Назад', 'menu:draft'), button('Отменить', `repairclose:cancel:${ticket.id}`)],
+    ]);
+  }
+
+  function formatRepairCloseChecklist(ticket, checklist) {
+    const lines = REPAIR_CLOSE_CHECKLIST_ORDER.map((key, index) => {
+      const done = Boolean(checklist?.[key]);
+      const icon = done ? '✅' : '⬜️';
+      return `${index + 1}. ${icon} ${REPAIR_CLOSE_CHECKLIST_LABELS[key]}`;
+    });
+    const nextKey = nextMissingRepairCloseChecklistKey(checklist);
+    const nextHint = nextKey
+      ? `Следующий шаг: ${REPAIR_CLOSE_CHECKLIST_LABELS[nextKey]}`
+      : 'Все пункты выполнены. Можно закрывать заявку.';
+
+    return [
+      `📋 Чек-лист закрытия ${ticket.id}`,
+      `${ticket.equipment}`,
+      '',
+      ...lines,
+      '',
+      nextHint,
+    ].join('\n');
+  }
+
+  function appendRepairPhotos(ticket, phase, photoUrls, author) {
+    const repairPhotos = normalizeRepairPhotos(ticket);
+    const now = nowIso();
+    const nextPhotos = {
+      ...repairPhotos,
+      [phase]: [...repairPhotos[phase], ...photoUrls],
+      [`${phase}UploadedAt`]: now,
+      [`${phase}UploadedBy`]: author,
+    };
+    const actionLabel = phase === 'before' ? 'до ремонта' : 'после ремонта';
+    return appendServiceLog({
+      ...ticket,
+      repairPhotos: nextPhotos,
+    }, `Добавлены фото ${actionLabel} через MAX (${photoUrls.length})`, author, 'repair_result');
+  }
+
+  function formatMechanicDayReport(authUser) {
+    const today = nowIso().slice(0, 10);
+    const normalizeName = normalizeBotText(authUser.userName);
+    const tickets = readServiceTickets();
+    const workItems = readData('repair_work_items') || [];
+    const partItems = readData('repair_part_items') || [];
+
+    const myTickets = tickets.filter(ticket =>
+      normalizeBotText(ticket.assignedMechanicName) === normalizeName ||
+      ticket.workLog?.some(entry => normalizeBotText(entry.author) === normalizeName)
+    );
+
+    const closedToday = myTickets.filter(ticket =>
+      ticket.status === 'closed' &&
+      String(ticket.closedAt || '').startsWith(today) &&
+      normalizeBotText(ticket.assignedMechanicName) === normalizeName
+    );
+    const readyToday = myTickets.filter(ticket =>
+      ticket.workLog?.some(entry =>
+        String(entry.date || '').startsWith(today) &&
+        normalizeBotText(entry.author) === normalizeName &&
+        /готов|завершен/i.test(entry.text || '')
+      )
+    );
+    const takenToday = myTickets.filter(ticket =>
+      ticket.workLog?.some(entry =>
+        String(entry.date || '').startsWith(today) &&
+        normalizeBotText(entry.author) === normalizeName &&
+        /взял заявку в работу/i.test(entry.text || '')
+      )
+    );
+
+    const myWorkItems = workItems.filter(item =>
+      String(item.createdAt || '').startsWith(today) &&
+      normalizeBotText(item.createdByUserName) === normalizeName
+    );
+    const myPartItems = partItems.filter(item =>
+      String(item.createdAt || '').startsWith(today) &&
+      normalizeBotText(item.createdByUserName) === normalizeName
+    );
+
+    const myRepairPhotos = myTickets.reduce((acc, ticket) => {
+      const repairPhotos = normalizeRepairPhotos(ticket);
+      const beforeToday = String(repairPhotos.beforeUploadedAt || '').startsWith(today) &&
+        normalizeBotText(repairPhotos.beforeUploadedBy) === normalizeName;
+      const afterToday = String(repairPhotos.afterUploadedAt || '').startsWith(today) &&
+        normalizeBotText(repairPhotos.afterUploadedBy) === normalizeName;
+      return {
+        before: acc.before + (beforeToday ? repairPhotos.before.length : 0),
+        after: acc.after + (afterToday ? repairPhotos.after.length : 0),
+      };
+    }, { before: 0, after: 0 });
+
+    const totalNormHours = myWorkItems.reduce((sum, item) => sum + ((Number(item.normHoursSnapshot) || 0) * (Number(item.quantity) || 0)), 0);
+    const totalPartsCost = myPartItems.reduce((sum, item) => sum + ((Number(item.priceSnapshot) || 0) * (Number(item.quantity) || 0)), 0);
+    const lastClosedLines = closedToday.slice(0, 5).map(ticket => `• ${ticket.id} · ${ticket.equipment}`);
+
+    return [
+      `📊 Быстрый отчёт за день`,
+      `Механик: ${authUser.userName}`,
+      `Дата: ${today}`,
+      '',
+      `Взято в работу: ${takenToday.length}`,
+      `Переведено в «Готово»: ${readyToday.length}`,
+      `Закрыто заявок: ${closedToday.length}`,
+      `Добавлено работ: ${myWorkItems.length} · ${totalNormHours.toLocaleString('ru-RU')} н/ч`,
+      `Добавлено запчастей: ${myPartItems.length} · ${totalPartsCost.toLocaleString('ru-RU')} ₽`,
+      `Фото ДО: ${myRepairPhotos.before}`,
+      `Фото ПОСЛЕ: ${myRepairPhotos.after}`,
+      '',
+      closedToday.length ? `Последние закрытые:\n${lastClosedLines.join('\n')}` : 'Сегодня закрытых заявок пока нет.',
+    ].join('\n');
+  }
+
   function getOperationSessions() {
     return readData('equipment_operation_sessions') || [];
   }
@@ -460,7 +668,7 @@ function createBotHandlers(deps) {
     if (stepKey === 'hours_value') {
       lines.push('Пример: 1542');
     }
-    if (stepMeta.kind === 'check') {
+    if (meta.kind === 'check') {
       const checklistKey = CHECKLIST_STEP_TO_KEY[stepKey];
       const checklistLabel = checklistKey ? HANDOFF_CHECKLIST_LABELS[checklistKey] : meta.label;
       lines.push(`Пункт чек-листа: ${checklistLabel}`);
@@ -534,6 +742,8 @@ function createBotHandlers(deps) {
     const workItems = (readData('repair_work_items') || []).filter(item => item.repairId === ticket.id);
     const partItems = (readData('repair_part_items') || []).filter(item => item.repairId === ticket.id);
     const summary = ticket.resultData?.summary || ticket.result || 'не заполнен';
+    const repairPhotos = normalizeRepairPhotos(ticket);
+    const closeChecklist = buildRepairCloseChecklistStatus(ticket);
     const worksText = workItems.length
       ? workItems.map((item, index) => `${index + 1}. ${item.nameSnapshot} × ${item.quantity}`).join('\n')
       : 'нет';
@@ -546,6 +756,9 @@ function createBotHandlers(deps) {
       `${ticket.equipment}`,
       `Статус: ${serviceStatusLabel(ticket.status)}`,
       `Итог: ${summary}`,
+      `Фото ДО: ${repairPhotos.before.length}`,
+      `Фото ПОСЛЕ: ${repairPhotos.after.length}`,
+      `Чек-лист закрытия: ${REPAIR_CLOSE_CHECKLIST_ORDER.filter(key => closeChecklist[key]).length}/${REPAIR_CLOSE_CHECKLIST_ORDER.length}`,
       '',
       `Работы:\n${worksText}`,
       '',
@@ -702,6 +915,8 @@ function createBotHandlers(deps) {
         partsUsed: [],
         worksPerformed: [],
       },
+      repairPhotos: createEmptyRepairPhotos(),
+      closeChecklist: createEmptyRepairCloseChecklist(),
       workLog: [
         {
           date: now,
@@ -760,6 +975,8 @@ function createBotHandlers(deps) {
         partsUsed: [],
         worksPerformed: [],
       },
+      repairPhotos: createEmptyRepairPhotos(),
+      closeChecklist: createEmptyRepairCloseChecklist(),
       workLog: [
         {
           date: now,
@@ -994,7 +1211,7 @@ function createBotHandlers(deps) {
     };
   }
 
-  function addRepairWorkItemFromCatalog(ticket, work, quantity) {
+  function addRepairWorkItemFromCatalog(ticket, work, quantity, authUser = null) {
     const items = readData('repair_work_items') || [];
     const nextItem = {
       id: generateId(idPrefixes.repair_work_items),
@@ -1005,13 +1222,15 @@ function createBotHandlers(deps) {
       nameSnapshot: work.name,
       categorySnapshot: work.category,
       createdAt: nowIso(),
+      createdByUserId: authUser?.userId,
+      createdByUserName: authUser?.userName,
     };
     items.push(nextItem);
     writeData('repair_work_items', items);
     return nextItem;
   }
 
-  function addRepairPartItemFromCatalog(ticket, part, quantity, priceSnapshot) {
+  function addRepairPartItemFromCatalog(ticket, part, quantity, priceSnapshot, authUser = null) {
     const items = readData('repair_part_items') || [];
     const nextItem = {
       id: generateId(idPrefixes.repair_part_items),
@@ -1023,6 +1242,8 @@ function createBotHandlers(deps) {
       articleSnapshot: part.article || part.sku,
       unitSnapshot: part.unit || 'шт',
       createdAt: nowIso(),
+      createdByUserId: authUser?.userId,
+      createdByUserName: authUser?.userName,
     };
     items.push(nextItem);
     writeData('repair_part_items', items);
@@ -1400,9 +1621,9 @@ function createBotHandlers(deps) {
       '🧰 Найденные работы:',
       ...matches.map((item, index) => `${index + 1}. ${item.name}${item.category ? ` · ${item.category}` : ''} · ${Number(item.normHours || 0).toLocaleString('ru-RU')} н/ч`),
       '',
-      'Можно нажать кнопку с работой ниже или ответить сообщением:',
-      'НОМЕР КОЛИЧЕСТВО',
-      'Пример: 1 2',
+      query
+        ? 'Нажмите кнопку с работой ниже, чтобы сразу выбрать количество.'
+        : 'Показываю популярные работы. Можно сразу нажать кнопку или выполнить новый текстовый поиск.',
     ].join('\n'), ['новый поиск работ', 'черновик', 'отмена: /сброс']), {
       attachments: workSearchKeyboard(matches),
       phone,
@@ -1436,7 +1657,7 @@ function createBotHandlers(deps) {
     if (!work) {
       return reply(senderId, '❌ Работа больше недоступна в справочнике. Выполните поиск заново.');
     }
-    addRepairWorkItemFromCatalog(ticket, work, quantity);
+    addRepairWorkItemFromCatalog(ticket, work, quantity, authUser);
     const updated = appendServiceLog(ticket, `Добавлена работа через MAX: ${work.name} × ${quantity}`, authUser.userName, 'repair_result');
     saveServiceTicket(updated);
     resetBotFlow(phone);
@@ -1465,10 +1686,10 @@ function createBotHandlers(deps) {
       '📦 Найденные запчасти:',
       ...matches.map((item, index) => `${index + 1}. ${item.name}${item.article ? ` · ${item.article}` : ''} · ${Number(item.defaultPrice || 0).toLocaleString('ru-RU')} ₽/${item.unit || 'шт'}`),
       '',
-      'Можно нажать кнопку с запчастью ниже или ответить сообщением:',
-      'НОМЕР КОЛИЧЕСТВО [ЦЕНА]',
-      'Пример: 1 2 3500',
-      'Если цену не указать, возьмётся базовая из справочника.',
+      query
+        ? 'Нажмите кнопку с запчастью ниже и выберите количество. По кнопке возьмётся базовая цена.'
+        : 'Показываю популярные запчасти. Можно сразу нажать кнопку или выполнить новый текстовый поиск.',
+      'Если нужна своя цена, после выбора нажмите «Ввести руками».',
     ].join('\n'), ['новый поиск запчастей', 'черновик', 'отмена: /сброс']), {
       attachments: partSearchKeyboard(matches),
       phone,
@@ -1506,7 +1727,7 @@ function createBotHandlers(deps) {
     if (!Number.isFinite(price) || price < 0) {
       return reply(senderId, '❌ Цена должна быть числом не меньше 0.');
     }
-    addRepairPartItemFromCatalog(ticket, part, quantity, price);
+    addRepairPartItemFromCatalog(ticket, part, quantity, price, authUser);
     const updated = appendServiceLog(ticket, `Добавлена запчасть через MAX: ${part.name} × ${quantity}`, authUser.userName, 'repair_result');
     saveServiceTicket(updated);
     resetBotFlow(phone);
@@ -1538,6 +1759,73 @@ function createBotHandlers(deps) {
     resetBotFlow(phone);
     return reply(senderId, withBotMenu(`✅ Итог ремонта сохранён для ${ticket.id}`, ['работы', 'запчасти', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
+    });
+  }
+
+  async function handleRepairPhotoRequest(senderId, phone, ticket, phase, uiContext = {}) {
+    const phaseLabel = phase === 'before' ? 'до ремонта' : 'после ремонта';
+    updateBotSession(phone, {
+      pendingAction: phase === 'before' ? 'repair_photo_before' : 'repair_photo_after',
+      activeRepairId: ticket.id,
+      pendingPayload: { repairId: ticket.id, phase },
+    });
+    return reply(senderId, `📷 Отправьте фото ${phaseLabel} для заявки ${ticket.id}. Можно приложить несколько фото одним сообщением.`, {
+      attachments: currentRepairKeyboard(ticket.id),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
+    });
+  }
+
+  async function handleRepairPhotoUpload(senderId, phone, authUser, ticket, phase, messageMeta = {}, uiContext = {}) {
+    const photoUrls = extractPhotoUrlsFromMessage(messageMeta);
+    if (!photoUrls.length) {
+      return reply(senderId, `📷 Я жду фото ${phase === 'before' ? 'до ремонта' : 'после ремонта'}. Пожалуйста, приложите фото сообщением.`, {
+        attachments: currentRepairKeyboard(ticket.id),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+      });
+    }
+    const updated = appendRepairPhotos(ticket, phase, photoUrls, authUser.userName);
+    saveServiceTicket(updated);
+    resetBotFlow(phone);
+    const repairPhotos = normalizeRepairPhotos(updated);
+    return reply(senderId, withBotMenu(`✅ Сохранены фото ${phase === 'before' ? 'до ремонта' : 'после ремонта'}: ${photoUrls.length} шт.`, [
+      'ещё фото',
+      'черновик',
+      'готово',
+      'закрыть',
+    ]), {
+      attachments: currentRepairKeyboard(ticket.id),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
+      notification: `${phase === 'before' ? 'Фото ДО' : 'Фото ПОСЛЕ'}: ${repairPhotos[phase].length}`,
+    });
+  }
+
+  async function startRepairCloseChecklist(senderId, phone, ticket, uiContext = {}) {
+    const checklist = buildRepairCloseChecklistStatus(ticket);
+    updateBotSession(phone, {
+      pendingAction: 'repair_close_checklist',
+      activeRepairId: ticket.id,
+      pendingPayload: {
+        repairId: ticket.id,
+        closeChecklistDraft: {
+          faultEliminated: Boolean(ticket.closeChecklist?.faultEliminated),
+          partsRecordedOrNotRequired: Boolean(ticket.closeChecklist?.partsRecordedOrNotRequired),
+        },
+      },
+    });
+    return reply(senderId, formatRepairCloseChecklist(ticket, checklist), {
+      attachments: repairCloseChecklistKeyboard(ticket, checklist),
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1796,6 +2084,9 @@ function createBotHandlers(deps) {
       'menu:receivein': '/приёмка',
       'menu:draft': '/черновик',
       'menu:summary': '/итог',
+      'menu:repair_before': '/фотодо',
+      'menu:repair_after': '/фотопосле',
+      'menu:day_report': '/мойдень',
       'menu:works': '/работы',
       'menu:parts': '/запчасти',
       'menu:ready': '/готово',
@@ -1819,6 +2110,92 @@ function createBotHandlers(deps) {
       if (!current || current.id !== ticketId) {
         setCurrentRepair(phone, ticketId);
       }
+      return handleCommand(senderId, phone, '/закрыть', {}, { callbackContext, replaceMessage: true });
+    }
+
+    if (normalized.startsWith('repairclose:confirm:')) {
+      const [, , ticketId, checklistKey] = normalized.split(':');
+      const ticket = findServiceTicketById(ticketId);
+      if (!ticket) {
+        return reply(senderId, '❌ Заявка не найдена.', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const session = getBotSession(phone);
+      const draft = {
+        ...(session.pendingPayload?.closeChecklistDraft || {}),
+        [checklistKey]: true,
+      };
+      updateBotSession(phone, {
+        pendingAction: 'repair_close_checklist',
+        activeRepairId: ticket.id,
+        pendingPayload: {
+          repairId: ticket.id,
+          closeChecklistDraft: draft,
+        },
+      });
+      const checklist = buildRepairCloseChecklistStatus(ticket, draft);
+      return reply(senderId, formatRepairCloseChecklist(ticket, checklist), {
+        attachments: repairCloseChecklistKeyboard(ticket, checklist),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+        notification: 'Пункт подтверждён',
+      });
+    }
+
+    if (normalized.startsWith('repairclose:cancel:')) {
+      resetBotFlow(phone);
+      const ticketId = normalized.slice('repairclose:cancel:'.length);
+      return reply(senderId, `❎ Закрытие заявки ${ticketId} отменено.`, {
+        attachments: currentRepairKeyboard(ticketId),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('repairclose:complete:')) {
+      const ticketId = normalized.slice('repairclose:complete:'.length);
+      const ticket = findServiceTicketById(ticketId);
+      if (!ticket) {
+        return reply(senderId, '❌ Заявка не найдена.', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const draft = getBotSession(phone).pendingPayload?.closeChecklistDraft || {};
+      const checklist = buildRepairCloseChecklistStatus(ticket, draft);
+      const missingKey = nextMissingRepairCloseChecklistKey(checklist);
+      if (missingKey) {
+        return reply(senderId, formatRepairCloseChecklist(ticket, checklist), {
+          attachments: repairCloseChecklistKeyboard(ticket, checklist),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+          notification: `Не заполнено: ${REPAIR_CLOSE_CHECKLIST_LABELS[missingKey]}`,
+        });
+      }
+      const updatedWithChecklist = appendServiceLog({
+        ...ticket,
+        closeChecklist: checklist,
+      }, 'Чек-лист закрытия подтверждён через MAX', authUser.userName, 'repair_result');
+      saveServiceTicket(updatedWithChecklist);
+      setCurrentRepair(phone, ticket.id);
       return handleCommand(senderId, phone, '/закрыть', {}, { callbackContext, replaceMessage: true });
     }
 
@@ -2049,16 +2426,19 @@ function createBotHandlers(deps) {
         '  /вработу ID           — взять заявку в работу',
         '  /ремонт ID            — выбрать текущую заявку',
         '  /итог текст           — сохранить итог ремонта',
-        '  /работы поиск         — найти работы в справочнике',
+        '  /работы [поиск]       — выбрать или найти работы в справочнике',
         '  /добавитьработу № qty — добавить работу в отчет',
-        '  /запчасти поиск       — найти запчасти в справочнике',
+        '  /запчасти [поиск]     — выбрать или найти запчасти в справочнике',
         '  /добавитьзапчасть № qty [цена] — добавить запчасть',
         '  /черновик             — показать текущий отчет',
+        '  /фотодо               — приложить фото до ремонта',
+        '  /фотопосле            — приложить фото после ремонта',
         '  /отгрузка             — пошаговая отгрузка с фото',
         '  /приёмка              — пошаговая приёмка с фото',
+        '  /мойдень              — быстрый отчёт механика за день',
         '  /ожидание             — ожидание запчастей',
         '  /готово               — работы завершены',
-        '  /закрыть              — закрыть заявку',
+        '  /закрыть              — закрыть заявку по чек-листу',
         '  /сброс                — сбросить текущую заявку',
       );
     }
@@ -2231,6 +2611,24 @@ function createBotHandlers(deps) {
       if (session.pendingAction === 'summary') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
         return handleSummaryRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
+      }
+      if (session.pendingAction === 'repair_photo_before') {
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        return handleRepairPhotoUpload(senderId, phone, authUser, currentTicket, 'before', { ...messageMeta, text: trimmed }, uiContext);
+      }
+      if (session.pendingAction === 'repair_photo_after') {
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        return handleRepairPhotoUpload(senderId, phone, authUser, currentTicket, 'after', { ...messageMeta, text: trimmed }, uiContext);
+      }
+      if (session.pendingAction === 'repair_close_checklist') {
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        const draft = getBotSession(phone).pendingPayload?.closeChecklistDraft || {};
+        return reply(senderId, `${formatRepairCloseChecklist(currentTicket, buildRepairCloseChecklistStatus(currentTicket, draft))}\n\nИспользуйте кнопки ниже, чтобы продолжить чек-лист.`, {
+          attachments: repairCloseChecklistKeyboard(currentTicket, buildRepairCloseChecklistStatus(currentTicket, draft)),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
       }
     }
 
@@ -2406,8 +2804,7 @@ function createBotHandlers(deps) {
       }
       const query = trimmed.slice('/работы'.length).trim();
       if (!query) {
-        updateBotSession(phone, { pendingAction: 'work_search', activeRepairId: ticket.id });
-        return replyWithUi('🧰 Напишите следующим сообщением запрос для поиска работ. Например: гидравлика');
+        return handleWorkSearchRequest(senderId, phone, ticket, '', uiContext);
       }
       return handleWorkSearchRequest(senderId, phone, ticket, query, uiContext);
     }
@@ -2427,10 +2824,25 @@ function createBotHandlers(deps) {
       }
       const query = trimmed.slice('/запчасти'.length).trim();
       if (!query) {
-        updateBotSession(phone, { pendingAction: 'part_search', activeRepairId: ticket.id });
-        return replyWithUi('📦 Напишите следующим сообщением запрос для поиска запчастей. Например: фильтр');
+        return handlePartSearchRequest(senderId, phone, ticket, '', uiContext);
       }
       return handlePartSearchRequest(senderId, phone, ticket, query, uiContext);
+    }
+
+    if ((lower === '/фотодо' || lower === 'фото до') && canManageRepair) {
+      const ticket = getCurrentRepair(phone);
+      if (!ticket) {
+        return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+      }
+      return handleRepairPhotoRequest(senderId, phone, ticket, 'before', uiContext);
+    }
+
+    if ((lower === '/фотопосле' || lower === 'фото после') && canManageRepair) {
+      const ticket = getCurrentRepair(phone);
+      if (!ticket) {
+        return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+      }
+      return handleRepairPhotoRequest(senderId, phone, ticket, 'after', uiContext);
     }
 
     if (lower.startsWith('/добавитьзапчасть ') && canManageRepair) {
@@ -2472,9 +2884,24 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
       }
-      const updated = updateServiceTicketStatus(ticket, 'closed', authUser.userName, 'Заявка закрыта через MAX');
+      const sessionChecklist = getBotSession(phone).pendingPayload?.closeChecklistDraft || {};
+      const checklist = buildRepairCloseChecklistStatus(ticket, sessionChecklist);
+      const missingKey = nextMissingRepairCloseChecklistKey(checklist);
+      if (missingKey) {
+        return startRepairCloseChecklist(senderId, phone, ticket, uiContext);
+      }
+      const updated = updateServiceTicketStatus({
+        ...ticket,
+        closeChecklist: checklist,
+      }, 'closed', authUser.userName, 'Заявка закрыта через MAX');
       clearBotSession(phone);
       return replyWithUi(withBotMenu(`✅ Заявка ${updated.id} закрыта.`, ['мои заявки', 'новая заявка', 'меню']), {
+        attachments: mechanicKeyboard(),
+      });
+    }
+
+    if ((lower === '/мойдень' || lower === '/отчётзадень' || lower === '/отчетзадень' || lower === 'отчёт за день' || lower === 'отчет за день') && canManageRepair) {
+      return replyWithUi(withBotMenu(formatMechanicDayReport(authUser), ['мои заявки', 'черновик', 'меню']), {
         attachments: mechanicKeyboard(),
       });
     }

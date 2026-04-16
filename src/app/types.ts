@@ -180,6 +180,8 @@ export interface RepairWorkItem {
   nameSnapshot: string;
   categorySnapshot?: string;
   createdAt: string;
+  createdByUserId?: string;
+  createdByUserName?: string;
 }
 
 export interface RepairPartItem {
@@ -192,6 +194,8 @@ export interface RepairPartItem {
   articleSnapshot?: string;
   unitSnapshot: string;
   createdAt: string;
+  createdByUserId?: string;
+  createdByUserName?: string;
 }
 
 export interface ServiceWorkLogEntry {
@@ -225,6 +229,24 @@ export interface ServiceRepairResult {
   worksPerformed: ServiceWorkPerformed[];
 }
 
+export interface ServiceRepairPhotos {
+  before: string[];
+  after: string[];
+  beforeUploadedAt?: string;
+  beforeUploadedBy?: string;
+  afterUploadedAt?: string;
+  afterUploadedBy?: string;
+}
+
+export interface ServiceCloseChecklist {
+  faultEliminated: boolean;
+  worksRecorded: boolean;
+  partsRecordedOrNotRequired: boolean;
+  beforePhotosAttached: boolean;
+  afterPhotosAttached: boolean;
+  summaryFilled: boolean;
+}
+
 export type ServiceWorkCatalogItem = ServiceWork;
 export type SparePartCatalogItem = SparePart;
 
@@ -254,6 +276,8 @@ export interface ServiceTicket {
   closedAt?: string;
   result?: string;
   resultData?: ServiceRepairResult;
+  repairPhotos?: ServiceRepairPhotos;
+  closeChecklist?: ServiceCloseChecklist;
   workLog: ServiceWorkLogEntry[];
   parts: ServicePartUsage[];
   createdAt: string;

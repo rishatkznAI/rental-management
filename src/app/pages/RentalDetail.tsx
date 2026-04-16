@@ -8,6 +8,7 @@ import { usePaymentsList } from '../hooks/usePayments';
 import { RENTAL_KEYS, useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useAuth } from '../contexts/AuthContext';
+import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -90,6 +91,7 @@ export default function RentalDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { can } = usePermissions();
   const { data: rentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: equipment = [] } = useEquipmentList();
@@ -99,6 +101,8 @@ export default function RentalDetail() {
   const { data: documents = [] } = useDocumentsList();
 
   const rental = rentals.find(r => r.id === id);
+  const canEditRentals = can('edit', 'rentals');
+  const canEditRentalDates = user?.role === 'Администратор';
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -260,6 +264,10 @@ export default function RentalDetail() {
   };
 
   const handleSave = async () => {
+    if (!canEditRentals) {
+      setSaveError('Редактировать аренду может только администратор.');
+      return;
+    }
     if (!rental || !formState) return;
     if (!formState.client.trim()) {
       setSaveError('Укажите клиента.');
@@ -267,6 +275,14 @@ export default function RentalDetail() {
     }
     if (!formState.startDate || !formState.plannedReturnDate) {
       setSaveError('Укажите дату начала и окончания аренды.');
+      return;
+    }
+    if (!canEditRentalDates && (
+      formState.startDate !== rental.startDate
+      || formState.plannedReturnDate !== rental.plannedReturnDate
+      || (formState.actualReturnDate || '') !== (rental.actualReturnDate || '')
+    )) {
+      setSaveError('Изменять даты аренды может только администратор.');
       return;
     }
     if (new Date(formState.startDate).getTime() > new Date(formState.plannedReturnDate).getTime()) {
@@ -392,12 +408,12 @@ export default function RentalDetail() {
                 {isSaving ? 'Сохранение...' : 'Сохранить'}
               </Button>
             </>
-          ) : (
+          ) : canEditRentals ? (
             <Button variant="secondary" onClick={() => setIsEditing(true)}>
               <Edit className="h-4 w-4" />
               Редактировать
             </Button>
-          )}
+          ) : null}
           <Button variant="secondary">
             <FileText className="h-4 w-4" />
             Документы
@@ -551,7 +567,7 @@ export default function RentalDetail() {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Дата начала</p>
                   {isEditing ? (
-                    <Input className="mt-1" type="date" value={formState.startDate} onChange={(e) => updateField('startDate', e.target.value)} />
+                    <Input className="mt-1" type="date" value={formState.startDate} disabled={!canEditRentalDates} onChange={(e) => updateField('startDate', e.target.value)} />
                   ) : (
                     <p className="mt-0.5 font-medium text-gray-900 dark:text-white">{formatDate(rental.startDate)}</p>
                   )}
@@ -559,7 +575,7 @@ export default function RentalDetail() {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Плановый возврат</p>
                   {isEditing ? (
-                    <Input className="mt-1" type="date" value={formState.plannedReturnDate} onChange={(e) => updateField('plannedReturnDate', e.target.value)} />
+                    <Input className="mt-1" type="date" value={formState.plannedReturnDate} disabled={!canEditRentalDates} onChange={(e) => updateField('plannedReturnDate', e.target.value)} />
                   ) : (
                     <p className="mt-0.5 font-medium text-gray-900 dark:text-white">{formatDate(rental.plannedReturnDate)}</p>
                   )}
@@ -573,7 +589,7 @@ export default function RentalDetail() {
                 <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
                   <p className="text-sm text-gray-500 dark:text-gray-400">Фактическая дата возврата</p>
                   {isEditing ? (
-                    <Input className="mt-1" type="date" value={formState.actualReturnDate} onChange={(e) => updateField('actualReturnDate', e.target.value)} />
+                    <Input className="mt-1" type="date" value={formState.actualReturnDate} disabled={!canEditRentalDates} onChange={(e) => updateField('actualReturnDate', e.target.value)} />
                   ) : (
                     <p className="mt-0.5 font-medium text-green-600">{formatDate(rental.actualReturnDate)}</p>
                   )}
@@ -588,6 +604,11 @@ export default function RentalDetail() {
                       : `${getDaysUntil(displayPlannedReturn)} дн.`}
                   </p>
                 </div>
+              )}
+              {isEditing && !canEditRentalDates && (
+                <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                  Изменять даты аренды может только администратор.
+                </p>
               )}
             </CardContent>
           </Card>

@@ -21,6 +21,32 @@ function registerCrudRoutes(deps) {
 
   const router = express.Router();
 
+  function officeManagerCanOnlyCreateRental(req, collection, method) {
+    const isRentalCollection = collection === 'rentals' || collection === 'gantt_rentals';
+    if (!isRentalCollection) return false;
+    if (req.user?.userRole !== 'Офис-менеджер') return false;
+    return method !== 'POST';
+  }
+
+  function rentalWriteForbiddenReason(req, collection, method) {
+    const isRentalCollection = collection === 'rentals' || collection === 'gantt_rentals';
+    if (!isRentalCollection) return null;
+
+    const role = req.user?.userRole;
+    if (method === 'POST') {
+      if (role !== 'Администратор' && role !== 'Офис-менеджер') {
+        return 'Forbidden: only admins and office managers can create rentals';
+      }
+      return null;
+    }
+
+    if (role !== 'Администратор') {
+      return 'Forbidden: only admins can modify rentals';
+    }
+
+    return null;
+  }
+
   function registerCRUD(collection) {
     const prefix = idPrefixes[collection] || collection;
 
@@ -67,6 +93,10 @@ function registerCrudRoutes(deps) {
     });
 
     router.post(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+      const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'POST');
+      if (rentalForbiddenReason) {
+        return res.status(403).json({ ok: false, error: rentalForbiddenReason });
+      }
       try {
         if (collection === 'rentals' || collection === 'gantt_rentals') {
           const validation = validateRentalPayload(collection, req.body, readData(collection) || []);
@@ -103,6 +133,13 @@ function registerCrudRoutes(deps) {
     });
 
     router.patch(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+      const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
+      if (rentalForbiddenReason) {
+        return res.status(403).json({ ok: false, error: rentalForbiddenReason });
+      }
+      if (officeManagerCanOnlyCreateRental(req, collection, 'PATCH')) {
+        return res.status(403).json({ ok: false, error: 'Forbidden: office managers can only create rentals' });
+      }
       const data = readData(collection) || [];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -153,6 +190,13 @@ function registerCrudRoutes(deps) {
     });
 
     router.delete(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+      const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'DELETE');
+      if (rentalForbiddenReason) {
+        return res.status(403).json({ ok: false, error: rentalForbiddenReason });
+      }
+      if (officeManagerCanOnlyCreateRental(req, collection, 'DELETE')) {
+        return res.status(403).json({ ok: false, error: 'Forbidden: office managers can only create rentals' });
+      }
       const data = readData(collection) || [];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -167,6 +211,13 @@ function registerCrudRoutes(deps) {
     });
 
     router.put(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+      const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'PUT');
+      if (rentalForbiddenReason) {
+        return res.status(403).json({ ok: false, error: rentalForbiddenReason });
+      }
+      if (officeManagerCanOnlyCreateRental(req, collection, 'PUT')) {
+        return res.status(403).json({ ok: false, error: 'Forbidden: office managers can only create rentals' });
+      }
       const body = req.body;
       const list = Array.isArray(body) ? body : body.data;
       if (!Array.isArray(list)) {

@@ -2546,7 +2546,7 @@ function createBotHandlers(deps) {
     }
 
     if (normalized.startsWith('equipmentmenu:maintenance:')) {
-      const [, , , equipmentId, maintenanceKind] = normalized.split(':');
+      const [, , equipmentId, maintenanceKind] = normalized.split(':');
       const equipment = (readData('equipment') || []).find(item => item.id === equipmentId);
       const maintenanceLabel = MAINTENANCE_REASON_LABELS[maintenanceKind];
       if (!equipment || !maintenanceLabel) {

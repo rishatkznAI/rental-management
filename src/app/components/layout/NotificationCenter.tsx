@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router/dom';
+import { Link } from 'react-router-dom';
 import { useQueries } from '@tanstack/react-query';
 import { AlertTriangle, Bell, CalendarClock, CreditCard, Wrench } from 'lucide-react';
 import { rentalsService } from '../../services/rentals.service';

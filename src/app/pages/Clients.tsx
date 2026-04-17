@@ -4,7 +4,7 @@ import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import { Search, Plus } from 'lucide-react';
-import { Link } from 'react-router/dom';
+import { Link } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { useClientsList } from '../hooks/useClients';
 import { useGanttData } from '../hooks/useRentals';

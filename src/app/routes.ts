@@ -1,6 +1,5 @@
 import { createBrowserRouter } from 'react-router';
 import { Layout } from './components/layout/Layout';
-import { PrivateRoute } from './components/auth/PrivateRoute';
 import Dashboard from './pages/Dashboard';
 import Planner from './pages/Planner';
 import Equipment from './pages/Equipment';
@@ -27,6 +26,9 @@ import ErrorPage from './pages/ErrorPage';
 
 const basename = import.meta.env.BASE_URL || '/';
 
+// Auth guard lives inside Layout (useEffect + navigate) — not as a render-time
+// <Navigate> component. This eliminates the pathless PrivateRoute intermediary
+// that conflicted with React 18 concurrent rendering and prevented Outlet updates.
 export const router = createBrowserRouter([
   {
     path: '/login',
@@ -35,36 +37,30 @@ export const router = createBrowserRouter([
   },
   {
     path: '/',
-    Component: PrivateRoute,
+    Component: Layout,
     ErrorBoundary: ErrorPage,
     children: [
-      {
-        Component: Layout,
-        ErrorBoundary: ErrorPage,
-        children: [
-          { index: true, Component: Dashboard },
-          { path: 'planner', Component: Planner },
-          { path: 'equipment', Component: Equipment },
-          { path: 'equipment/new', Component: EquipmentNew },
-          { path: 'equipment/:id', Component: EquipmentDetail },
-          { path: 'rentals', Component: Rentals },
-          { path: 'rentals/new', Component: RentalNew },
-          { path: 'rentals/:id', Component: RentalDetail },
-          { path: 'service', Component: Service },
-          { path: 'service/new', Component: ServiceNew },
-          { path: 'service/:id', Component: ServiceDetail },
-          { path: 'clients', Component: Clients },
-          { path: 'clients/new', Component: ClientNew },
-          { path: 'clients/:id', Component: ClientDetail },
-          { path: 'documents', Component: Documents },
-          { path: 'payments', Component: Payments },
-          { path: 'reports', Component: Reports },
-          { path: 'settings',                      Component: Settings          },
-          { path: 'service-vehicles',              Component: ServiceVehicles      },
-          { path: 'service-vehicles/:id',          Component: ServiceVehicleDetail },
-          { path: 'manager-report',                Component: ManagerReport        },
-        ],
-      },
+      { index: true, Component: Dashboard },
+      { path: 'planner', Component: Planner },
+      { path: 'equipment', Component: Equipment },
+      { path: 'equipment/new', Component: EquipmentNew },
+      { path: 'equipment/:id', Component: EquipmentDetail },
+      { path: 'rentals', Component: Rentals },
+      { path: 'rentals/new', Component: RentalNew },
+      { path: 'rentals/:id', Component: RentalDetail },
+      { path: 'service', Component: Service },
+      { path: 'service/new', Component: ServiceNew },
+      { path: 'service/:id', Component: ServiceDetail },
+      { path: 'clients', Component: Clients },
+      { path: 'clients/new', Component: ClientNew },
+      { path: 'clients/:id', Component: ClientDetail },
+      { path: 'documents', Component: Documents },
+      { path: 'payments', Component: Payments },
+      { path: 'reports', Component: Reports },
+      { path: 'settings',             Component: Settings          },
+      { path: 'service-vehicles',     Component: ServiceVehicles      },
+      { path: 'service-vehicles/:id', Component: ServiceVehicleDetail },
+      { path: 'manager-report',       Component: ManagerReport        },
     ],
   },
 ], { basename });

@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
-import { Outlet, Link, useLocation } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { LayoutDashboard, Truck, FileText, Wrench, Users, Menu } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
+import { useAuth } from '../../contexts/AuthContext';
+import { usePermissions, pathToSection, pathToRequiredAction } from '../../lib/permissions';
 
 const BOTTOM_NAV = [
   { name: 'Дашборд', href: '/', icon: LayoutDashboard },
@@ -16,6 +18,38 @@ const BOTTOM_NAV = [
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const { isAuthenticated, isLoading } = useAuth();
+  const { can, canView, defaultPath } = usePermissions();
+
+  // Auth + permission guard via useEffect — avoids render-time <Navigate> which
+  // conflicts with React 18 concurrent rendering and breaks Outlet updates.
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (!isAuthenticated) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    const section = pathToSection(location.pathname);
+    if (section && !canView(section)) {
+      navigate(defaultPath(), { replace: true });
+      return;
+    }
+
+    const required = pathToRequiredAction(location.pathname);
+    if (required && !can(required.action, required.section)) {
+      navigate(`/${required.section}`, { replace: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, isAuthenticated, location.pathname]);
+
+  // While checking auth — render nothing
+  if (isLoading) return null;
+  // Not authenticated yet — useEffect will redirect; render nothing in the meantime
+  if (!isAuthenticated) return null;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -49,9 +83,7 @@ export function Layout() {
       {/* Main content */}
       <main className={cn(
         'min-h-screen',
-        // Desktop: always offset by sidebar
         'sm:ml-64',
-        // Mobile: extra top padding for top bar, bottom padding for bottom nav
         'pt-14 pb-16 sm:pt-0 sm:pb-0',
       )}>
         <Outlet />

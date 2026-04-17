@@ -1,6 +1,5 @@
 import { createHashRouter } from 'react-router';
 import { Layout } from './components/layout/Layout';
-import { PrivateRoute } from './components/auth/PrivateRoute';
 import Dashboard from './pages/Dashboard';
 import Planner from './pages/Planner';
 import Equipment from './pages/Equipment';
@@ -27,6 +26,9 @@ import ErrorPage from './pages/ErrorPage';
 
 // Hash router: no basename / 404-redirect tricks needed — works on GitHub Pages out of the box.
 // URLs look like: /rental-management/#/service-vehicles
+//
+// Auth guard is handled inside Layout itself (useEffect + navigate) to avoid
+// render-time <Navigate> conflicts with React 18 concurrent rendering.
 export const router = createHashRouter([
   {
     path: '/login',
@@ -35,35 +37,30 @@ export const router = createHashRouter([
   },
   {
     path: '/',
-    Component: PrivateRoute,
+    Component: Layout,
     ErrorBoundary: ErrorPage,
     children: [
-      {
-        Component: Layout,
-        children: [
-          { index: true, Component: Dashboard },
-          { path: 'planner', Component: Planner },
-          { path: 'equipment', Component: Equipment },
-          { path: 'equipment/new', Component: EquipmentNew },
-          { path: 'equipment/:id', Component: EquipmentDetail },
-          { path: 'rentals', Component: Rentals },
-          { path: 'rentals/new', Component: RentalNew },
-          { path: 'rentals/:id', Component: RentalDetail },
-          { path: 'service', Component: Service },
-          { path: 'service/new', Component: ServiceNew },
-          { path: 'service/:id', Component: ServiceDetail },
-          { path: 'clients', Component: Clients },
-          { path: 'clients/new', Component: ClientNew },
-          { path: 'clients/:id', Component: ClientDetail },
-          { path: 'documents', Component: Documents },
-          { path: 'payments', Component: Payments },
-          { path: 'reports', Component: Reports },
-          { path: 'settings',             Component: Settings          },
-          { path: 'service-vehicles',     Component: ServiceVehicles      },
-          { path: 'service-vehicles/:id', Component: ServiceVehicleDetail },
-          { path: 'manager-report',       Component: ManagerReport        },
-        ],
-      },
+      { index: true, Component: Dashboard },
+      { path: 'planner', Component: Planner },
+      { path: 'equipment', Component: Equipment },
+      { path: 'equipment/new', Component: EquipmentNew },
+      { path: 'equipment/:id', Component: EquipmentDetail },
+      { path: 'rentals', Component: Rentals },
+      { path: 'rentals/new', Component: RentalNew },
+      { path: 'rentals/:id', Component: RentalDetail },
+      { path: 'service', Component: Service },
+      { path: 'service/new', Component: ServiceNew },
+      { path: 'service/:id', Component: ServiceDetail },
+      { path: 'clients', Component: Clients },
+      { path: 'clients/new', Component: ClientNew },
+      { path: 'clients/:id', Component: ClientDetail },
+      { path: 'documents', Component: Documents },
+      { path: 'payments', Component: Payments },
+      { path: 'reports', Component: Reports },
+      { path: 'settings',             Component: Settings          },
+      { path: 'service-vehicles',     Component: ServiceVehicles      },
+      { path: 'service-vehicles/:id', Component: ServiceVehicleDetail },
+      { path: 'manager-report',       Component: ManagerReport        },
     ],
   },
 ]);

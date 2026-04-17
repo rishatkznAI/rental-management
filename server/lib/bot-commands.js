@@ -2777,6 +2777,27 @@ function createBotHandlers(deps) {
     return lines.join('\n');
   }
 
+  function getMainMenuText(user) {
+    const role = user?.userRole || user?.role || '';
+    if (role === 'Механик' || role === 'Администратор') {
+      return [
+        `👋 Главное меню`,
+        `${user.userName || user.name} · ${role}`,
+        '',
+        'Выберите действие кнопками ниже.',
+        'Если нужна подсказка по всем командам, нажмите «Помощь».',
+      ].join('\n');
+    }
+
+    return [
+      `👋 Главное меню`,
+      `${user.userName || user.name} · ${role || 'Пользователь'}`,
+      '',
+      'Выберите нужный раздел кнопками ниже.',
+      'Полный список команд доступен по кнопке «Помощь».',
+    ].join('\n');
+  }
+
   async function handleCommand(senderId, phone, text) {
     const trimmed = text.trim();
     const lower = trimmed.toLowerCase();
@@ -2832,10 +2853,7 @@ function createBotHandlers(deps) {
       console.log('[TRACE] sending welcome message for user');
       resetBotFlow(phone);
       return replyWithUi(
-        withBotMenu(
-          `✅ Вы вошли как ${user.name} (${user.role})\n${getHelpText(user.role)}`,
-          ['меню', 'мои заявки', 'новая заявка'],
-        ),
+        getMainMenuText(user),
         { attachments: defaultKeyboardForRole(user.role) },
       );
     }
@@ -2887,10 +2905,7 @@ function createBotHandlers(deps) {
         resetBotFlow(phone);
         return reply(
           senderId,
-          withBotMenu(
-            `✅ Вы вошли как ${user.name} (${user.role})`,
-            ['мои заявки', 'новая заявка', 'черновик'],
-          ),
+          getMainMenuText(user),
           { attachments: defaultKeyboardForRole(user.role) },
         );
       }
@@ -3017,10 +3032,9 @@ function createBotHandlers(deps) {
     }
 
     if ((lower === '/меню' || lower === 'меню') && canManageRepair) {
-      return replyWithUi(
-        withBotMenu(getHelpText(userRole), ['мои заявки', 'новая заявка', 'черновик']),
-        { attachments: defaultKeyboardForRole(userRole) },
-      );
+      return replyWithUi(getMainMenuText(authUser), {
+        attachments: defaultKeyboardForRole(userRole),
+      });
     }
 
     if ((lower === '/новаязаявка' || lower === 'новая заявка' || lower === 'создать заявку') && canManageRepair) {

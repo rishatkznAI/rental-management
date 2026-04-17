@@ -89,6 +89,12 @@ function createBotHandlers(deps) {
     REPAIR_REASON_TEMPLATES.map(item => [item.key, item.text]),
   );
 
+  const MAINTENANCE_REASON_LABELS = {
+    to: 'ТО',
+    chto: 'ЧТО',
+    pto: 'ПТО',
+  };
+
   const HANDOFF_CHECKLIST_LABELS = {
     exterior: 'Внешний осмотр выполнен',
     controlPanel: 'Пульт проверен',
@@ -838,6 +844,15 @@ function createBotHandlers(deps) {
     ]);
   }
 
+  function equipmentActionKeyboard(equipmentId) {
+    return keyboard([
+      [button('История', `equipmentmenu:history:${equipmentId}`), button('Ремонт', `equipmentmenu:repair:${equipmentId}`)],
+      [button('ТО', `equipmentmenu:maintenance:${equipmentId}:to`), button('ЧТО', `equipmentmenu:maintenance:${equipmentId}:chto`)],
+      [button('ПТО', `equipmentmenu:maintenance:${equipmentId}:pto`)],
+      [button('Назад', 'menu:new_ticket'), button('Главное меню', 'menu:main')],
+    ]);
+  }
+
   function setCurrentRepair(phone, repairId) {
     updateBotSession(phone, {
       activeRepairId: repairId,
@@ -967,6 +982,82 @@ function createBotHandlers(deps) {
     writeServiceTickets([...readServiceTickets(), newTicket]);
     syncEquipmentStatusForService(newTicket, 'in_progress');
     return newTicket;
+  }
+
+  function createMaintenanceTicketFromBot(equipment, authUser, maintenanceKind, summary = '') {
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+    const maintenanceLabel = MAINTENANCE_REASON_LABELS[maintenanceKind] || 'ТО';
+    const mechanicRef = getMechanicReferenceByUser(authUser);
+    const ticket = {
+      id: generateId(idPrefixes.service),
+      equipmentId: equipment.id,
+      equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
+      inventoryNumber: equipment.inventoryNumber,
+      serialNumber: equipment.serialNumber,
+      equipmentType: equipment.type,
+      equipmentTypeLabel: equipment.type,
+      location: equipment.location,
+      reason: maintenanceLabel,
+      description: summary || `${maintenanceLabel} выполнено через MAX`,
+      priority: 'low',
+      sla: '24 ч',
+      assignedTo: authUser.userName,
+      assignedMechanicId: mechanicRef?.id,
+      assignedMechanicName: authUser.userName,
+      createdBy: authUser.userName,
+      createdByUserId: authUser.userId,
+      createdByUserName: authUser.userName,
+      reporterContact: authUser.userName,
+      source: 'bot',
+      status: 'closed',
+      result: summary || `${maintenanceLabel} выполнено`,
+      resultData: {
+        summary: summary || `${maintenanceLabel} выполнено`,
+        partsUsed: [],
+        worksPerformed: [],
+      },
+      repairPhotos: createEmptyRepairPhotos(),
+      closeChecklist: createEmptyRepairCloseChecklist(),
+      workLog: [
+        {
+          date: now,
+          text: `${maintenanceLabel} зафиксировано через MAX`,
+          author: authUser.userName,
+          type: 'status_change',
+        },
+        {
+          date: now,
+          text: `Заявка закрыта после фиксации ${maintenanceLabel} через MAX`,
+          author: authUser.userName,
+          type: 'repair_result',
+        },
+      ],
+      parts: [],
+      createdAt: now,
+      closedAt: now,
+    };
+
+    writeServiceTickets([...readServiceTickets(), ticket]);
+
+    const equipmentList = readData('equipment') || [];
+    const nextEquipment = equipmentList.map(item => {
+      if (item.id !== equipment.id) return item;
+      const withHistory = appendEquipmentHistoryEntry(item, {
+        date: now,
+        author: authUser.userName,
+        type: 'system',
+        text: `${maintenanceLabel} выполнено через MAX${summary ? `: ${summary}` : ''}`,
+      });
+      return {
+        ...withHistory,
+        ...(maintenanceKind === 'chto' ? { maintenanceCHTO: today } : {}),
+        ...(maintenanceKind === 'pto' ? { maintenancePTO: today } : {}),
+      };
+    });
+    writeData('equipment', nextEquipment);
+
+    return ticket;
   }
 
   function createReturnInspectionTicketFromBot(equipment, authUser, activeRental, photoUrls, comment = '') {
@@ -1327,6 +1418,63 @@ function createBotHandlers(deps) {
     ].filter(Boolean).join(' · ');
   }
 
+  function formatBotDate(value) {
+    if (!value) return '—';
+    const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return String(value);
+    return `${match[3]}.${match[2]}.${match[1]}`;
+  }
+
+  function formatEquipmentActionMenu(equipment) {
+    return [
+      '🚜 Выбрана техника:',
+      formatEquipmentForBot(equipment),
+      '',
+      'Выберите действие:',
+      '• История — посмотреть карточку и последние события',
+      '• Ремонт — создать заявку с причиной текстом',
+      '• ТО / ЧТО / ПТО — зафиксировать выполненное обслуживание',
+    ].join('\n');
+  }
+
+  function formatEquipmentHistoryForBot(equipment) {
+    const tickets = readServiceTickets()
+      .filter(ticket => ticket.equipmentId === equipment.id)
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    const historyEntries = [...(equipment.history || [])]
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+      .slice(0, 8);
+
+    const lines = [
+      '📚 История техники',
+      formatEquipmentForBot(equipment),
+      '',
+      `Статус: ${equipment.status || '—'}`,
+      `Моточасы: ${equipment.hours ?? '—'}`,
+      `След. ТО: ${formatBotDate(equipment.nextMaintenance)}`,
+      `ЧТО: ${formatBotDate(equipment.maintenanceCHTO)}`,
+      `ПТО: ${formatBotDate(equipment.maintenancePTO)}`,
+    ];
+
+    if (tickets.length) {
+      lines.push('', 'Последние заявки:');
+      tickets.slice(0, 3).forEach(ticket => {
+        lines.push(`• ${ticket.id} · ${serviceStatusLabel(ticket.status)} · ${ticket.reason}`);
+      });
+    }
+
+    if (historyEntries.length) {
+      lines.push('', 'Последние события:');
+      historyEntries.forEach(entry => {
+        lines.push(`• ${formatBotDate(entry.date)} · ${entry.author}: ${entry.text}`);
+      });
+    } else {
+      lines.push('', 'История техники пока пустая.');
+    }
+
+    return lines.join('\n');
+  }
+
   function equipmentSearchKeyboard(matches) {
     if (!matches.length) return null;
     const buttons = matches.slice(0, 6).map((item, index) =>
@@ -1402,7 +1550,7 @@ function createBotHandlers(deps) {
         serialNumber: item.serialNumber,
         model: item.model,
       })),
-      pendingAction: flow === 'photo_event' ? 'equipment_search' : 'ticket_reason',
+      pendingAction: flow === 'photo_event' ? 'equipment_search' : 'equipment_action_menu',
       pendingPayload: flow === 'photo_event' ? { flow, photoEventType } : null,
     });
     const isPhotoFlow = flow === 'photo_event';
@@ -1413,7 +1561,7 @@ function createBotHandlers(deps) {
       'Можно нажать кнопку с техникой ниже.',
       isPhotoFlow
         ? `После выбора начнётся пошаговая ${photoEventType === 'shipping' ? 'отгрузка' : 'приёмка'}.`
-        : 'После выбора я предложу типовые причины ремонта.',
+        : 'После выбора откроется меню действий по технике.',
     ].join('\n'), ['новый поиск: найти технику', 'отмена: /сброс']), {
       attachments: equipmentSearchKeyboard(matches),
       phone,
@@ -2305,19 +2453,119 @@ function createBotHandlers(deps) {
       }
 
       updateBotSession(phone, {
+        pendingAction: 'equipment_action_menu',
+        pendingPayload: { selectedEquipmentId: equipment.id },
+      });
+      return reply(
+        senderId,
+        formatEquipmentActionMenu(equipment),
+        {
+          attachments: equipmentActionKeyboard(equipment.id),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        },
+      );
+    }
+
+    if (normalized.startsWith('equipmentmenu:open:')) {
+      const equipmentId = normalized.slice('equipmentmenu:open:'.length);
+      const equipment = (readData('equipment') || []).find(item => item.id === equipmentId);
+      if (!equipment) {
+        return reply(senderId, '❌ Техника больше не найдена.', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      updateBotSession(phone, {
+        pendingAction: 'equipment_action_menu',
+        pendingPayload: { selectedEquipmentId: equipment.id },
+      });
+      return reply(senderId, formatEquipmentActionMenu(equipment), {
+        attachments: equipmentActionKeyboard(equipment.id),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('equipmentmenu:history:')) {
+      const equipmentId = normalized.slice('equipmentmenu:history:'.length);
+      const equipment = (readData('equipment') || []).find(item => item.id === equipmentId);
+      if (!equipment) {
+        return reply(senderId, '❌ Техника больше не найдена.', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      updateBotSession(phone, {
+        pendingAction: 'equipment_action_menu',
+        pendingPayload: { selectedEquipmentId: equipment.id },
+      });
+      return reply(senderId, formatEquipmentHistoryForBot(equipment), {
+        attachments: keyboard([
+          [button('Ремонт', `equipmentmenu:repair:${equipment.id}`), button('ТО', `equipmentmenu:maintenance:${equipment.id}:to`)],
+          [button('ЧТО', `equipmentmenu:maintenance:${equipment.id}:chto`), button('ПТО', `equipmentmenu:maintenance:${equipment.id}:pto`)],
+          [button('Назад', `equipmentmenu:open:${equipment.id}`), button('Главное меню', 'menu:main')],
+        ]),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('equipmentmenu:repair:')) {
+      const equipmentId = normalized.slice('equipmentmenu:repair:'.length);
+      const equipment = (readData('equipment') || []).find(item => item.id === equipmentId);
+      if (!equipment) {
+        return reply(senderId, '❌ Техника больше не найдена.', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      updateBotSession(phone, {
         pendingAction: 'ticket_reason',
         pendingPayload: { selectedEquipmentId: equipment.id },
       });
       return reply(
         senderId,
-        [
-          `🚜 Выбрана техника:`,
-          formatEquipmentForBot(equipment),
-          '',
-          'Выберите типовую причину кнопкой ниже или нажмите «Своя причина».',
-        ].join('\n'),
+        `🛠 ${formatEquipmentForBot(equipment)}\n\nНапишите причину ремонта следующим сообщением.`,
         {
-          attachments: repairReasonKeyboard(),
+          attachments: keyboard([backAndMainRow(`equipmentmenu:open:${equipment.id}`)]),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        },
+      );
+    }
+
+    if (normalized.startsWith('equipmentmenu:maintenance:')) {
+      const [, , , equipmentId, maintenanceKind] = normalized.split(':');
+      const equipment = (readData('equipment') || []).find(item => item.id === equipmentId);
+      const maintenanceLabel = MAINTENANCE_REASON_LABELS[maintenanceKind];
+      if (!equipment || !maintenanceLabel) {
+        return reply(senderId, '❌ Техника или тип обслуживания больше не найдены.', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      updateBotSession(phone, {
+        pendingAction: 'maintenance_summary',
+        pendingPayload: { selectedEquipmentId: equipment.id, maintenanceKind },
+      });
+      return reply(
+        senderId,
+        `🧰 ${maintenanceLabel}: ${formatEquipmentForBot(equipment)}\n\nНапишите следующим сообщением, что именно было сделано.`,
+        {
+          attachments: keyboard([backAndMainRow(`equipmentmenu:open:${equipment.id}`)]),
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2673,6 +2921,34 @@ function createBotHandlers(deps) {
       }
       if (session.pendingAction === 'ticket_reason') {
         return handleCreateTicketRequest(senderId, phone, authUser, trimmed, uiContext);
+      }
+      if (session.pendingAction === 'maintenance_summary') {
+        const equipmentId = session.pendingPayload?.selectedEquipmentId;
+        const maintenanceKind = session.pendingPayload?.maintenanceKind;
+        const equipment = (readData('equipment') || []).find(item => item.id === equipmentId);
+        if (!equipment || !maintenanceKind) {
+          resetBotFlow(phone);
+          return reply(senderId, '❌ Не удалось определить технику или тип обслуживания. Начните заново.', {
+            attachments: mechanicKeyboard(),
+            phone,
+            callbackContext: uiContext.callbackContext,
+            replaceMessage: Boolean(uiContext.callbackContext),
+          });
+        }
+        const ticket = createMaintenanceTicketFromBot(equipment, authUser, maintenanceKind, trimmed);
+        resetBotFlow(phone);
+        return reply(senderId, withBotMenu([
+          `✅ ${MAINTENANCE_REASON_LABELS[maintenanceKind]} зафиксировано`,
+          formatEquipmentForBot(equipment),
+          `Заявка: ${ticket.id}`,
+          `Комментарий: ${trimmed}`,
+        ].join('\n'), ['мои заявки', 'новая заявка', 'меню']), {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+          cleanupPrevious: !uiContext.callbackContext,
+        });
       }
       if (session.pendingAction === 'work_search') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');

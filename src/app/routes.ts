@@ -23,18 +23,15 @@ import Login from './pages/Login';
 import ServiceVehicles from './pages/ServiceVehicles';
 import ServiceVehicleDetail from './pages/ServiceVehicleDetail';
 import ManagerReport from './pages/ManagerReport';
-import ErrorPage from './pages/ErrorPage';
 
 export const router = createHashRouter([
   {
     path: '/login',
     Component: Login,
-    ErrorBoundary: ErrorPage,
   },
   {
     path: '/',
     Component: PrivateRoute,
-    ErrorBoundary: ErrorPage,
     children: [
       {
         Component: Layout,

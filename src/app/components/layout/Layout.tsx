@@ -1,11 +1,48 @@
-import { useEffect, useState } from 'react';
-import { Outlet, Link, useLocation, useNavigate } from 'react-router';
+import React, { useState } from 'react';
+import { Outlet, Link, useLocation } from 'react-router';
 import { Sidebar } from './Sidebar';
-import { LayoutDashboard, Truck, FileText, Wrench, Users, Menu } from 'lucide-react';
+import { LayoutDashboard, Truck, FileText, Wrench, Users, Menu, AlertTriangle, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
-import { useAuth } from '../../contexts/AuthContext';
-import { usePermissions, pathToSection, pathToRequiredAction } from '../../lib/permissions';
+
+// Inline error boundary — keeps sidebar visible when a page crashes
+class PageErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 p-8 text-center">
+          <div className="rounded-full bg-red-100 p-4 dark:bg-red-900/30">
+            <AlertTriangle className="h-8 w-8 text-red-500" />
+          </div>
+          <div>
+            <p className="text-lg font-semibold text-gray-900 dark:text-white">Что-то пошло не так</p>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Произошла ошибка при загрузке страницы
+            </p>
+          </div>
+          <button
+            onClick={() => { this.setState({ error: null }); window.location.reload(); }}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Обновить страницу
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const BOTTOM_NAV = [
   { name: 'Дашборд', href: '/', icon: LayoutDashboard },
@@ -18,37 +55,6 @@ const BOTTOM_NAV = [
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
-  const navigate = useNavigate();
-
-  const { isAuthenticated, isLoading } = useAuth();
-  const { can, canView, defaultPath } = usePermissions();
-
-  // Auth + permission guard via useEffect to avoid render-time navigation conflicts
-  useEffect(() => {
-    if (isLoading) return;
-
-    if (!isAuthenticated) {
-      navigate('/login', { replace: true });
-      return;
-    }
-
-    const section = pathToSection(location.pathname);
-    if (section && !canView(section)) {
-      navigate(defaultPath(), { replace: true });
-      return;
-    }
-
-    const required = pathToRequiredAction(location.pathname);
-    if (required && !can(required.action, required.section)) {
-      navigate(`/${required.section}`, { replace: true });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, isAuthenticated, location.pathname]);
-
-  // While auth check is in progress show nothing
-  if (isLoading) return null;
-  // If not authenticated, render nothing (useEffect will navigate to /login)
-  if (!isAuthenticated) return null;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -87,7 +93,9 @@ export function Layout() {
         // Mobile: extra top padding for top bar, bottom padding for bottom nav
         'pt-14 pb-16 sm:pt-0 sm:pb-0',
       )}>
-        <Outlet />
+        <PageErrorBoundary>
+          <Outlet />
+        </PageErrorBoundary>
       </main>
 
       {/* Mobile bottom navigation */}

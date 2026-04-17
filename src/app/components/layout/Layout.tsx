@@ -54,7 +54,7 @@ export function Layout() {
         // Mobile: extra top padding for top bar, bottom padding for bottom nav
         'pt-14 pb-16 sm:pt-0 sm:pb-0',
       )}>
-        <Outlet />
+        <Outlet key={location.pathname} />
       </main>
 
       {/* Mobile bottom navigation */}

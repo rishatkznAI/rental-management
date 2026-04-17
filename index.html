@@ -21,7 +21,10 @@
           var q = params.get('q');
           var pathname = p.replace(/~and~/g, '&');
           var search = q ? ('?' + q.replace(/~and~/g, '&')) : '';
-          window.history.replaceState(null, null, l.pathname + pathname + search + l.hash);
+          var basePath = l.pathname.endsWith('/') && l.pathname !== '/'
+            ? l.pathname.slice(0, -1)
+            : l.pathname;
+          window.history.replaceState(null, null, basePath + pathname + search + l.hash);
         })(window.location);
 
         // ── Принудительный сброс кеша браузера ──────────────────────────────
@@ -31,7 +34,7 @@
         // при каждом открытии вкладки.
         (function() {
           var CACHE_KEY = '__app_cache_v';
-          var BUILD_TS  = '20260417_173000';
+          var BUILD_TS  = '20260417_180500';
           var stored    = localStorage.getItem(CACHE_KEY);
           if (stored !== BUILD_TS) {
             localStorage.setItem(CACHE_KEY, BUILD_TS);

@@ -4,14 +4,14 @@ import { Input } from '../components/ui/input';
 import { Select } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getPaymentStatusBadge } from '../components/ui/badge';
-import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown } from 'lucide-react';
 import { usePermissions } from '../lib/permissions';
 import { usePaymentsList, useCreatePayment } from '../hooks/usePayments';
 import { useClientsList } from '../hooks/useClients';
 import { useGanttData } from '../hooks/useRentals';
 import type { GanttRentalData } from '../mock-data';
 import { formatDate, formatCurrency } from '../lib/utils';
-import type { Payment, PaymentStatus } from '../types';
+import type { Payment, PaymentStatus, Client } from '../types';
 import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -30,9 +30,11 @@ interface AddPaymentModalProps {
   onSave: (p: Payment) => void;
   existing: Payment[];
   rentals: GanttRentalData[];
+  clients: Client[];
+  allPayments: Payment[];
 }
 
-function AddPaymentModal({ onClose, onSave, existing, rentals }: AddPaymentModalProps) {
+function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayments }: AddPaymentModalProps) {
   const [form, setForm] = useState({
     rentalId: '',
     client: '',
@@ -55,6 +57,14 @@ function AddPaymentModal({ onClose, onSave, existing, rentals }: AddPaymentModal
       return next;
     });
   };
+
+  // Compute current client debt (excluding payments being created right now)
+  const clientDebt = useMemo(() => {
+    if (!form.client) return null;
+    const debtRows = buildRentalDebtRows(rentals, allPayments);
+    const receivables = buildClientReceivables(clients, debtRows);
+    return receivables.find(r => r.client === form.client) ?? null;
+  }, [form.client, rentals, allPayments, clients]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,6 +126,40 @@ function AddPaymentModal({ onClose, onSave, existing, rentals }: AddPaymentModal
               value={form.client}
               onChange={e => set('client', e.target.value)}
             />
+            {/* Debt banner */}
+            {clientDebt && clientDebt.currentDebt > 0 && (
+              <div className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${
+                clientDebt.exceededLimit
+                  ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                  : clientDebt.overdueRentals > 0
+                  ? 'bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
+                  : 'bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
+              }`}>
+                {clientDebt.exceededLimit
+                  ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  : <TrendingDown className="mt-0.5 h-4 w-4 shrink-0" />
+                }
+                <div>
+                  <span className="font-semibold">
+                    Текущий долг: {formatCurrency(clientDebt.currentDebt)}
+                  </span>
+                  {clientDebt.overdueRentals > 0 && (
+                    <span className="ml-1.5">· просрочено аренд: {clientDebt.overdueRentals}</span>
+                  )}
+                  {clientDebt.exceededLimit && clientDebt.creditLimit > 0 && (
+                    <div className="mt-0.5 text-xs">
+                      Лимит {formatCurrency(clientDebt.creditLimit)} превышен
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {clientDebt && clientDebt.currentDebt === 0 && form.client && (
+              <div className="mt-2 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                <span>Задолженность отсутствует</span>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -268,6 +312,8 @@ export default function Payments() {
           onSave={handleAddPayment}
           existing={paymentList}
           rentals={ganttRentals as GanttRentalData[]}
+          clients={clients}
+          allPayments={paymentList}
         />
       )}
 

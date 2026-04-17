@@ -8,7 +8,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
 import { RefreshCw, Truck, BarChart2, Wrench, TrendingUp, Download } from 'lucide-react';
-import * as Tabs from '@radix-ui/react-tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import { formatCurrency } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
 import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
@@ -155,6 +155,7 @@ export default function Reports() {
   const [serviceWorkCategory, setServiceWorkCategory] = useState('all');
   const [servicePartName, setServicePartName] = useState('all');
   const [servicePresetId, setServicePresetId] = useState('none');
+  const [activeTab, setActiveTab] = useState('analytics');
   const [servicePresets, setServicePresets] = useState<ServiceReportPreset[]>([]);
   const { data: equipment = [] } = useQuery<Equipment[]>({
     queryKey: EQUIPMENT_KEYS.all,
@@ -838,26 +839,26 @@ export default function Reports() {
         </p>
       </div>
 
-      <Tabs.Root defaultValue="analytics" className="space-y-6">
-        <Tabs.List className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList className="flex h-auto w-full justify-start gap-1 rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
           {[
             { value: 'analytics', label: 'Аналитика' },
             { value: 'finance',   label: 'Финансы' },
             { value: 'managers',  label: 'По менеджерам' },
             { value: 'service',   label: 'По сервису' },
           ].map(tab => (
-            <Tabs.Trigger
+            <TabsTrigger
               key={tab.value}
               value={tab.value}
               className="border-b-2 border-transparent px-5 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] transition-colors"
             >
               {tab.label}
-            </Tabs.Trigger>
+            </TabsTrigger>
           ))}
-        </Tabs.List>
+        </TabsList>
 
         {/* ── Analytics tab ───────────────────────────────────────────────── */}
-        <Tabs.Content value="analytics" className="space-y-4 sm:space-y-6">
+        <TabsContent value="analytics" className="space-y-4 sm:space-y-6">
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1140,9 +1141,9 @@ export default function Reports() {
         </Card>
       </div>
 
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="finance" className="space-y-4 sm:space-y-6">
+        <TabsContent value="finance" className="space-y-4 sm:space-y-6">
           <div className="grid gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="pb-2">
@@ -1264,14 +1265,14 @@ export default function Reports() {
               </CardContent>
             </Card>
           </div>
-        </Tabs.Content>
+        </TabsContent>
 
         {/* ── Managers report tab ─────────────────────────────────────────── */}
-        <Tabs.Content value="managers">
+        <TabsContent value="managers">
           <ManagerReport />
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="service" className="space-y-4 sm:space-y-6">
+        <TabsContent value="service" className="space-y-4 sm:space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Фильтры сервиса</CardTitle>
@@ -1839,9 +1840,8 @@ export default function Reports() {
               )}
             </CardContent>
           </Card>
-        </Tabs.Content>
-
-      </Tabs.Root>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

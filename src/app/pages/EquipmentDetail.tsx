@@ -17,8 +17,8 @@ import {
 } from '../mock-data';
 import type { ShippingPhoto, ServiceTicket, Payment } from '../types';
 import { formatDate, formatDateTime, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
-import * as Tabs from '@radix-ui/react-tabs';
 import * as Dialog from '@radix-ui/react-dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../components/ui/select';
@@ -611,6 +611,7 @@ export default function EquipmentDetail() {
   // ── Modal state ──
   const [showEditModal, setShowEditModal] = useState(false);
   const [showCreateServiceModal, setShowCreateServiceModal] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // ── Not found screen ──
@@ -1036,33 +1037,33 @@ export default function EquipmentDetail() {
       </div>
 
       {/* ── Tabs ── */}
-      <Tabs.Root defaultValue="overview" className="space-y-6">
-        <Tabs.List className="flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
-          <Tabs.Trigger value="overview" className={tabTriggerClass}>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
+          <TabsTrigger value="overview" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><CheckCircle className="h-3.5 w-3.5" /> Обзор</span>
-          </Tabs.Trigger>
-          <Tabs.Trigger value="financial" className={tabTriggerClass}>
+          </TabsTrigger>
+          <TabsTrigger value="financial" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Финансы</span>
-          </Tabs.Trigger>
-          <Tabs.Trigger value="rental-history" className={tabTriggerClass}>
+          </TabsTrigger>
+          <TabsTrigger value="rental-history" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Аренды {ganttRentals.length > 0 && <span className="rounded-full bg-gray-200 px-1.5 text-xs dark:bg-gray-700">{ganttRentals.length}</span>}</span>
-          </Tabs.Trigger>
-          <Tabs.Trigger value="service-history" className={tabTriggerClass}>
+          </TabsTrigger>
+          <TabsTrigger value="service-history" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Сервис {openServiceTickets.length > 0 && <span className="rounded-full bg-red-100 px-1.5 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-400">{openServiceTickets.length}</span>}</span>
-          </Tabs.Trigger>
-          <Tabs.Trigger value="repair-history" className={tabTriggerClass}>
+          </TabsTrigger>
+          <TabsTrigger value="repair-history" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Ремонты</span>
-          </Tabs.Trigger>
-          <Tabs.Trigger value="photos" className={tabTriggerClass}>
+          </TabsTrigger>
+          <TabsTrigger value="photos" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><Camera className="h-3.5 w-3.5" /> Фото</span>
-          </Tabs.Trigger>
-          <Tabs.Trigger value="documents" className={tabTriggerClass}>
+          </TabsTrigger>
+          <TabsTrigger value="documents" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" /> Документы</span>
-          </Tabs.Trigger>
-        </Tabs.List>
+          </TabsTrigger>
+        </TabsList>
 
         {/* ══ OVERVIEW TAB ══ */}
-        <Tabs.Content value="overview" className="space-y-6">
+        <TabsContent value="overview" className="space-y-6">
           <div className="grid gap-6 lg:grid-cols-2">
             {/* Rental block */}
             <Card>
@@ -1269,10 +1270,10 @@ export default function EquipmentDetail() {
               )}
             </CardContent>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
         {/* ══ FINANCIAL TAB ══ */}
-        <Tabs.Content value="financial">
+        <TabsContent value="financial">
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader>
@@ -1396,10 +1397,10 @@ export default function EquipmentDetail() {
               </CardContent>
             </Card>
           </div>
-        </Tabs.Content>
+        </TabsContent>
 
         {/* ══ RENTAL HISTORY TAB ══ */}
-        <Tabs.Content value="rental-history">
+        <TabsContent value="rental-history">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1477,10 +1478,10 @@ export default function EquipmentDetail() {
               )}
             </CardContent>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
         {/* ══ SERVICE HISTORY TAB ══ */}
-        <Tabs.Content value="service-history">
+        <TabsContent value="service-history">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1556,10 +1557,10 @@ export default function EquipmentDetail() {
               )}
             </CardContent>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
         {/* ══ REPAIR HISTORY TAB ══ */}
-        <Tabs.Content value="repair-history">
+        <TabsContent value="repair-history">
           <Card>
             <CardHeader>
               <CardTitle>История ремонтов</CardTitle>
@@ -1611,10 +1612,10 @@ export default function EquipmentDetail() {
               )}
             </CardContent>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
         {/* ══ PHOTOS TAB ══ */}
-        <Tabs.Content value="photos">
+        <TabsContent value="photos">
           {/* Hidden file input for shipping photos */}
           <input
             ref={shippingPhotoInputRef}
@@ -1983,10 +1984,10 @@ export default function EquipmentDetail() {
               )}
             </CardContent>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
         {/* ══ DOCUMENTS TAB ══ */}
-        <Tabs.Content value="documents">
+        <TabsContent value="documents">
           <Card>
             <CardHeader>
               <CardTitle>Документы</CardTitle>
@@ -1997,8 +1998,8 @@ export default function EquipmentDetail() {
               </EmptyState>
             </CardContent>
           </Card>
-        </Tabs.Content>
-      </Tabs.Root>
+        </TabsContent>
+      </Tabs>
 
       {/* ── Modals ── */}
       <Dialog.Root open={showCreateServiceModal} onOpenChange={setShowCreateServiceModal}>

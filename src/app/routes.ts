@@ -1,4 +1,4 @@
-import { createHashRouter } from 'react-router-dom';
+import { createBrowserRouter } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { PrivateRoute } from './components/auth/PrivateRoute';
 import Dashboard from './pages/Dashboard';
@@ -25,7 +25,12 @@ import ServiceVehicleDetail from './pages/ServiceVehicleDetail';
 import ManagerReport from './pages/ManagerReport';
 import ErrorPage from './pages/ErrorPage';
 
-export const router = createHashRouter([
+const rawBase = import.meta.env.BASE_URL || '/';
+const basename = rawBase.endsWith('/') && rawBase !== '/'
+  ? rawBase.slice(0, -1)
+  : rawBase;
+
+export const router = createBrowserRouter([
   {
     path: '/login',
     Component: Login,
@@ -64,4 +69,4 @@ export const router = createHashRouter([
       },
     ],
   },
-]);
+], { basename });

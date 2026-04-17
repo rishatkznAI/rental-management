@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, ChevronLeft, ChevronRight, RotateCcw, CirclePause as PauseCircle,
@@ -266,7 +265,6 @@ function hasOpenServiceTicketForEquipment(serviceTickets: ServiceTicket[], equip
 export default function Rentals() {
   const { can } = usePermissions();
   const { user } = useAuth();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const historyAuthor = user?.name || 'Система';
   const canEditRentals = can('edit', 'rentals');
@@ -279,37 +277,30 @@ export default function Rentals() {
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
 
-  const { data: ganttDataRaw } = useQuery({
+  const { data: ganttData = [] } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
   });
-  const { data: equipmentDataRaw } = useQuery({
+  const { data: equipmentData = [] } = useQuery({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
   });
-  const { data: paymentDataRaw } = useQuery({
+  const { data: paymentData = [] } = useQuery({
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
   });
-  const { data: serviceTicketsRaw } = useQuery<ServiceTicket[]>({
+  const { data: serviceTickets = [] } = useQuery<ServiceTicket[]>({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
   });
-  const { data: usersDataRaw } = useQuery<SystemUser[]>({
+  const { data: usersData = [] } = useQuery<SystemUser[]>({
     queryKey: ['users'],
     queryFn: usersService.getAll,
   });
-  const { data: clientsDataRaw } = useQuery({
+  const { data: clientsData = [] } = useQuery({
     queryKey: ['clients'],
     queryFn: clientsService.getAll,
   });
-
-  const ganttData = Array.isArray(ganttDataRaw) ? ganttDataRaw : [];
-  const equipmentData = Array.isArray(equipmentDataRaw) ? equipmentDataRaw : [];
-  const paymentData = Array.isArray(paymentDataRaw) ? paymentDataRaw : [];
-  const serviceTickets = Array.isArray(serviceTicketsRaw) ? serviceTicketsRaw : [];
-  const usersData = Array.isArray(usersDataRaw) ? usersDataRaw : [];
-  const clientsData = Array.isArray(clientsDataRaw) ? clientsDataRaw : [];
 
   useEffect(() => {
     setGanttRentals(ganttData);
@@ -399,6 +390,63 @@ export default function Rentals() {
       showToast('Не удалось сохранить платежи', 'error');
     }
   }, [queryClient, showToast]);
+
+  // Очистка «призрачных» аренд при загрузке страницы:
+  // - 'created' с прошедшей endDate → 'closed'  (не активированные черновики)
+  // - 'active'  с прошедшей endDate → 'returned' (техника вернулась, но возврат не оформили вручную)
+  React.useEffect(() => {
+    const todayStr = format(today, 'yyyy-MM-dd');
+    const current = ganttRentals;
+
+    const needsCleanup = current.some(r =>
+      (r.status === 'created' && r.endDate < todayStr) ||
+      (r.status === 'active'  && r.endDate < todayStr),
+    );
+
+    if (!needsCleanup) return;
+
+    const cleaned = current.map(r => {
+      if (r.status === 'created' && r.endDate < todayStr)
+        return { ...r, status: 'closed' as const };
+      if (r.status === 'active' && r.endDate < todayStr)
+        return { ...r, status: 'returned' as const };
+      return r;
+    });
+    void persistGanttRentals(cleaned);
+
+    // Для закрытых/возвращённых аренд: если у техники больше нет активных аренд —
+    // обновляем статус техники на 'available'.
+    const eqList = equipmentList;
+    const affectedEquipment = eqList.filter(e =>
+      current.some(r =>
+        (r.status === 'created' || r.status === 'active')
+        && r.endDate < todayStr
+        && matchesEquipmentRow(r, e),
+      ),
+    );
+    let eqChanged = false;
+    const updatedEq = eqList.map(e => {
+      if (!affectedEquipment.some(item => item.id === e.id)) return e;
+      const stillActive = cleaned.some(
+        r => matchesEquipmentRow(r, e)
+          && r.status !== 'returned'
+          && r.status !== 'closed',
+      );
+      if (!stillActive && e.status !== 'inactive' && e.status !== 'in_service') {
+        eqChanged = true;
+        return {
+          ...e,
+          status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
+          currentClient: undefined,
+          returnDate: undefined,
+        };
+      }
+      return e;
+    });
+    if (eqChanged) {
+      void persistEquipment(updatedEq);
+    }
+  }, [today, ganttRentals, equipmentList, persistEquipment, persistGanttRentals, serviceTickets]);
 
   const [scale, setScale] = useState<Scale>('week');
   const [baseDate, setBaseDate] = useState(today);
@@ -555,63 +603,6 @@ export default function Rentals() {
     () => ganttRentals.filter(r => !r.equipmentId && ambiguousInventoryNumbers.has(r.equipmentInv)),
     [ganttRentals, ambiguousInventoryNumbers],
   );
-
-  // Очистка «призрачных» аренд при загрузке страницы:
-  // - 'created' с прошедшей endDate → 'closed'  (не активированные черновики)
-  // - 'active'  с прошедшей endDate → 'returned' (техника вернулась, но возврат не оформили вручную)
-  React.useEffect(() => {
-    const todayStr = format(today, 'yyyy-MM-dd');
-    const current = ganttRentals;
-
-    const needsCleanup = current.some(r =>
-      (r.status === 'created' && r.endDate < todayStr) ||
-      (r.status === 'active'  && r.endDate < todayStr),
-    );
-
-    if (!needsCleanup) return;
-
-    const cleaned = current.map(r => {
-      if (r.status === 'created' && r.endDate < todayStr)
-        return { ...r, status: 'closed' as const };
-      if (r.status === 'active' && r.endDate < todayStr)
-        return { ...r, status: 'returned' as const };
-      return r;
-    });
-    void persistGanttRentals(cleaned);
-
-    // Для закрытых/возвращённых аренд: если у техники больше нет активных аренд —
-    // обновляем статус техники на 'available'.
-    const eqList = equipmentList;
-    const affectedEquipment = eqList.filter(e =>
-      current.some(r =>
-        (r.status === 'created' || r.status === 'active')
-        && r.endDate < todayStr
-        && matchesEquipmentRow(r, e),
-      ),
-    );
-    let eqChanged = false;
-    const updatedEq = eqList.map(e => {
-      if (!affectedEquipment.some(item => item.id === e.id)) return e;
-      const stillActive = cleaned.some(
-        r => matchesEquipmentRow(r, e)
-          && r.status !== 'returned'
-          && r.status !== 'closed',
-      );
-      if (!stillActive && e.status !== 'inactive' && e.status !== 'in_service') {
-        eqChanged = true;
-        return {
-          ...e,
-          status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
-          currentClient: undefined,
-          returnDate: undefined,
-        };
-      }
-      return e;
-    });
-    if (eqChanged) {
-      void persistEquipment(updatedEq);
-    }
-  }, [today, ganttRentals, equipmentList, matchesEquipmentRow, persistEquipment, persistGanttRentals, serviceTickets]);
 
   // ── Filter equipment (always live) ───────────────────────────────────────────
   // Step 1: filter by model/INV/SN text
@@ -1281,7 +1272,7 @@ export default function Rentals() {
                   <Button
                     size="sm"
                     className="mt-4"
-                    onClick={() => navigate('/equipment/new')}
+                    onClick={() => window.location.href = '/rental-management/equipment/new'}
                   >
                     + Добавить технику
                   </Button>

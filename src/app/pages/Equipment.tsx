@@ -5,7 +5,7 @@ import { Select } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getEquipmentPriorityBadge, getEquipmentStatusBadge } from '../components/ui/badge';
 import { Search, Filter, MoreVertical, Plus } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { formatDate } from '../lib/utils';
 import type { EquipmentType, EquipmentDrive, EquipmentOwnerType, Equipment as EquipmentType_ } from '../types';
 import type { GanttRentalData } from '../mock-data';

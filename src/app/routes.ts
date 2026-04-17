@@ -25,11 +25,6 @@ import ServiceVehicleDetail from './pages/ServiceVehicleDetail';
 import ManagerReport from './pages/ManagerReport';
 import ErrorPage from './pages/ErrorPage';
 
-const rawBase = import.meta.env.BASE_URL || '/';
-const basename = rawBase.endsWith('/') && rawBase !== '/'
-  ? rawBase.slice(0, -1)
-  : rawBase;
-
 export const router = createHashRouter([
   {
     path: '/login',
@@ -69,4 +64,4 @@ export const router = createHashRouter([
       },
     ],
   },
-], { basename });
+]);

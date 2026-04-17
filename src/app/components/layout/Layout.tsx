@@ -93,7 +93,7 @@ export function Layout() {
         'pt-14 pb-16 sm:pt-0 sm:pb-0',
       )}>
         <PageErrorBoundary>
-          <Outlet />
+          <Outlet key={location.pathname} />
         </PageErrorBoundary>
       </main>
 

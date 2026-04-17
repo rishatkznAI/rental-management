@@ -42,6 +42,10 @@ function createBotHandlers(deps) {
     }];
   }
 
+  function backAndMainRow(backPayload = 'menu:main', backText = 'Назад') {
+    return [button(backText, backPayload), button('Главное меню', 'menu:main')];
+  }
+
   function authKeyboard() {
     return keyboard([
       [button('Войти', 'auth:start')],
@@ -66,7 +70,8 @@ function createBotHandlers(deps) {
       [button('Работы', 'menu:works'), button('Запчасти', 'menu:parts')],
       [button('Фото ДО', 'menu:repair_before'), button('Фото ПОСЛЕ', 'menu:repair_after')],
       [button('Готово', 'menu:ready'), button('Ожидание', 'menu:waiting')],
-      [button('Закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close'), button('Назад', 'menu:main')],
+      [button('Закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close'), button('Назад', 'menu:myrepairs')],
+      [button('Главное меню', 'menu:main')],
       [button('Мои заявки', 'menu:myrepairs'), button('Отчёт за день', 'menu:day_report')],
     ]);
   }
@@ -170,7 +175,7 @@ function createBotHandlers(deps) {
     return keyboard([
       ...chunkButtons(buttons, 2),
       [button('Своя причина', 'reason:custom')],
-      [button('Назад', 'menu:new_ticket')],
+      backAndMainRow('menu:new_ticket'),
     ]);
   }
 
@@ -183,7 +188,7 @@ function createBotHandlers(deps) {
         button('5', `qty:${kind}:5`),
       ],
       [button('Ввести руками', `qty:${kind}:manual`)],
-      [button('Назад', kind === 'work' ? 'menu:works' : 'menu:parts')],
+      backAndMainRow(kind === 'work' ? 'menu:works' : 'menu:parts'),
     ]);
   }
 
@@ -194,6 +199,7 @@ function createBotHandlers(deps) {
       return keyboard([
         [button('Завершить', `operation:complete:${operationId}`)],
         [button('Назад', `operation:back:${operationId}`), button('Отменить', `operation:cancel:${operationId}`)],
+        [button('Главное меню', 'menu:main')],
       ]);
     }
     const stepMeta = OPERATION_STEP_META[operation.currentStep];
@@ -201,10 +207,12 @@ function createBotHandlers(deps) {
       return keyboard([
         [button('Подтвердить', `operation:check:${operationId}`)],
         [button('Назад', `operation:back:${operationId}`), button('Отменить', `operation:cancel:${operationId}`)],
+        [button('Главное меню', 'menu:main')],
       ]);
     }
     return keyboard([
       [button('Назад', `operation:back:${operationId}`), button('Отменить', `operation:cancel:${operationId}`)],
+      [button('Главное меню', 'menu:main')],
     ]);
   }
 
@@ -486,6 +494,7 @@ function createBotHandlers(deps) {
     return keyboard([
       ...actionRows,
       [button('Назад', 'menu:draft'), button('Отменить', `repairclose:cancel:${ticket.id}`)],
+      [button('Главное меню', 'menu:main')],
     ]);
   }
 
@@ -779,32 +788,53 @@ function createBotHandlers(deps) {
     return tickets.filter(ticket => ticket.status !== 'closed');
   }
 
-  function formatServiceForUser(authUser) {
-    const tickets = getAccessibleServiceTickets(authUser);
-    if (!tickets.length) return '✅ Открытых сервисных заявок нет.';
+  function getAssignedServiceTickets(authUser) {
+    const tickets = readServiceTickets();
+    if (authUser.userRole !== 'Механик') {
+      return tickets.filter(ticket => ticket.status !== 'closed');
+    }
+    return tickets.filter(ticket =>
+      ticket.status !== 'closed' &&
+      normalizeBotText(ticket.assignedMechanicName) === normalizeBotText(authUser.userName)
+    );
+  }
+
+  function formatServiceForUser(authUser, mode = 'accessible') {
+    const tickets = mode === 'assigned'
+      ? getAssignedServiceTickets(authUser)
+      : getAccessibleServiceTickets(authUser);
+    if (!tickets.length) {
+      return mode === 'assigned'
+        ? '✅ У вас нет назначенных сервисных заявок.'
+        : '✅ Открытых сервисных заявок нет.';
+    }
 
     const lines = tickets.slice(0, 10).map(formatTicketLine);
     return [
-      authUser.userRole === 'Механик'
+      authUser.userRole === 'Механик' && mode === 'assigned'
+        ? `🧰 Мои сервисные заявки (${tickets.length}):`
+        : authUser.userRole === 'Механик'
         ? `🔧 Доступные вам сервисные заявки (${tickets.length}):`
         : `🔧 Открытые сервисные заявки (${tickets.length}):`,
       ...lines,
       '',
-      'Подсказка: /вработу ID или /ремонт ID',
+      mode === 'assigned'
+        ? 'Подсказка: /ремонт ID'
+        : 'Подсказка: /вработу ID или /ремонт ID',
       tickets.length > 10 ? `... и ещё ${tickets.length - 10}` : '',
     ].filter(Boolean).join('\n');
   }
 
   function serviceTicketsKeyboard(authUser) {
-    const tickets = getAccessibleServiceTickets(authUser).slice(0, 6);
+    const tickets = getAssignedServiceTickets(authUser).slice(0, 6);
     if (!tickets.length) return null;
-    const buttons = tickets.flatMap(ticket => ([
-      button(`Открыть ${ticket.id}`, `ticket:open:${ticket.id}`),
-      button(`В работу ${ticket.id}`, `ticket:take:${ticket.id}`),
-    ]));
+    const buttons = tickets.map(ticket =>
+      button(`Открыть ${ticket.id}`, `ticket:open:${ticket.id}`)
+    );
     return keyboard([
       ...chunkButtons(buttons, 2),
       [button('Новая заявка', 'menu:new_ticket')],
+      [button('Главное меню', 'menu:main')],
     ]);
   }
 
@@ -1304,7 +1334,8 @@ function createBotHandlers(deps) {
     );
     return keyboard([
       ...chunkButtons(buttons, 2),
-      [button('Новый поиск', 'menu:find_equipment'), button('Назад', 'menu:main')],
+      [button('Новый поиск', 'menu:find_equipment')],
+      [button('Назад', 'menu:main')],
     ]);
   }
 
@@ -1315,7 +1346,8 @@ function createBotHandlers(deps) {
     );
     return keyboard([
       ...chunkButtons(buttons, 2),
-      [button('Новый поиск работ', 'menu:works'), button('Назад', 'menu:draft')],
+      [button('Новый поиск работ', 'menu:works')],
+      backAndMainRow('menu:draft'),
     ]);
   }
 
@@ -1326,7 +1358,8 @@ function createBotHandlers(deps) {
     );
     return keyboard([
       ...chunkButtons(buttons, 2),
-      [button('Новый поиск запчастей', 'menu:parts'), button('Назад', 'menu:draft')],
+      [button('Новый поиск запчастей', 'menu:parts')],
+      backAndMainRow('menu:draft'),
     ]);
   }
 
@@ -1841,7 +1874,7 @@ function createBotHandlers(deps) {
         senderId,
         '👤 Напишите логин (email) следующим сообщением.',
         {
-          attachments: keyboard([[button('Назад', 'menu:cancel_login')]]),
+          attachments: keyboard([backAndMainRow('menu:cancel_login')]),
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2380,7 +2413,7 @@ function createBotHandlers(deps) {
           senderId,
           '📝 Напишите свою причину ремонта следующим сообщением.',
           {
-            attachments: keyboard([[button('Назад', 'menu:new_ticket')]]),
+            attachments: keyboard([backAndMainRow('menu:new_ticket')]),
             phone,
             callbackContext,
             replaceMessage: true,
@@ -2524,7 +2557,7 @@ function createBotHandlers(deps) {
         return reply(
           senderId,
           '👤 Напишите логин (email) следующим сообщением.',
-          { attachments: keyboard([[button('Назад', 'menu:cancel_login')]]), phone, callbackContext, replaceMessage: Boolean(uiContext.replaceMessage), cleanupPrevious: !callbackContext },
+          { attachments: keyboard([backAndMainRow('menu:cancel_login')]), phone, callbackContext, replaceMessage: Boolean(uiContext.replaceMessage), cleanupPrevious: !callbackContext },
         );
       }
       const [, email, password] = parts;
@@ -2579,7 +2612,7 @@ function createBotHandlers(deps) {
         return reply(
           senderId,
           `🔐 Логин принят: ${trimmed}\nТеперь напишите пароль следующим сообщением.`,
-          { attachments: keyboard([[button('Назад', 'menu:cancel_login')]]) },
+          { attachments: keyboard([backAndMainRow('menu:cancel_login')]) },
         );
       }
 
@@ -2600,7 +2633,7 @@ function createBotHandlers(deps) {
           return reply(
             senderId,
             '❌ Неверный логин или пароль. Давайте начнём заново: напишите логин (email).',
-            { attachments: keyboard([[button('Назад', 'menu:cancel_login')]]) },
+            { attachments: keyboard([backAndMainRow('menu:cancel_login')]) },
           );
         }
         resetBotFlow(phone);
@@ -2702,7 +2735,7 @@ function createBotHandlers(deps) {
     }
 
     if ((lower === '/моизаявки' || lower === '/myrepairs' || lower === 'мои заявки') && canManageRepair) {
-      return replyWithUi(formatServiceForUser(authUser), {
+      return replyWithUi(formatServiceForUser(authUser, 'assigned'), {
         attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
       });
     }

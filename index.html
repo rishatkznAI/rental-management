@@ -10,17 +10,18 @@
       <meta http-equiv="Expires" content="0" />
       <title>Система управления арендой</title>
       <script>
-        // GitHub Pages SPA redirect: /404.html sends ?p=/path&q=...
+        // GitHub Pages SPA redirect: /404.html sends ?p=/path&q=query
         // Convert it back to a normal browser URL before React Router starts.
         (function(l) {
-          if (l.search && l.search[1] === '/') {
-            var decoded = l.search
-              .slice(1)
-              .split('&')
-              .map(function(s) { return s.replace(/~and~/g, '&'); })
-              .join('?');
-            window.history.replaceState(null, null, l.pathname.slice(0, -1) + decoded + l.hash);
-          }
+          if (!l.search) return;
+          var params = new URLSearchParams(l.search);
+          var p = params.get('p');
+          if (!p) return;
+
+          var q = params.get('q');
+          var pathname = p.replace(/~and~/g, '&');
+          var search = q ? ('?' + q.replace(/~and~/g, '&')) : '';
+          window.history.replaceState(null, null, l.pathname + pathname + search + l.hash);
         })(window.location);
 
         // ── Принудительный сброс кеша браузера ──────────────────────────────
@@ -30,7 +31,7 @@
         // при каждом открытии вкладки.
         (function() {
           var CACHE_KEY = '__app_cache_v';
-          var BUILD_TS  = '20260417_170000';
+          var BUILD_TS  = '20260417_173000';
           var stored    = localStorage.getItem(CACHE_KEY);
           if (stored !== BUILD_TS) {
             localStorage.setItem(CACHE_KEY, BUILD_TS);

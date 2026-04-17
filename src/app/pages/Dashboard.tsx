@@ -8,7 +8,7 @@ import {
   ShieldAlert, Clock, Ban, ArrowRight, ChevronDown, ChevronUp,
   PackageX, ClipboardX, Zap,
 } from 'lucide-react';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
 import { useQueryClient } from '@tanstack/react-query';

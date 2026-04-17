@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router';
+import { createHashRouter } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import Dashboard from './pages/Dashboard';
 import Planner from './pages/Planner';
@@ -24,12 +24,9 @@ import ServiceVehicleDetail from './pages/ServiceVehicleDetail';
 import ManagerReport from './pages/ManagerReport';
 import ErrorPage from './pages/ErrorPage';
 
-const basename = import.meta.env.BASE_URL || '/';
-
-// Auth guard lives inside Layout (useEffect + navigate) — not as a render-time
-// <Navigate> component. This eliminates the pathless PrivateRoute intermediary
-// that conflicted with React 18 concurrent rendering and prevented Outlet updates.
-export const router = createBrowserRouter([
+// GitHub Pages is a static host, so hash routing is the most reliable way to
+// avoid broken deep links and stale page shells on refresh/navigation.
+export const router = createHashRouter([
   {
     path: '/login',
     Component: Login,
@@ -63,4 +60,4 @@ export const router = createBrowserRouter([
       { path: 'manager-report',       Component: ManagerReport        },
     ],
   },
-], { basename });
+]);

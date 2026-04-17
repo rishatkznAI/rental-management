@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { ArrowLeft } from 'lucide-react';

@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router';
+import { createHashRouter } from 'react-router';
 import { Layout } from './components/layout/Layout';
 import { PrivateRoute } from './components/auth/PrivateRoute';
 import Dashboard from './pages/Dashboard';
@@ -25,14 +25,9 @@ import ServiceVehicleDetail from './pages/ServiceVehicleDetail';
 import ManagerReport from './pages/ManagerReport';
 import ErrorPage from './pages/ErrorPage';
 
-// React Router v7 requires basename WITHOUT trailing slash
-// Vite's BASE_URL includes a trailing slash (e.g. '/rental-management/')
-const rawBase = import.meta.env.BASE_URL || '/';
-const basename = rawBase.endsWith('/') && rawBase !== '/'
-  ? rawBase.slice(0, -1)
-  : rawBase;
-
-export const router = createBrowserRouter([
+// Hash router: no basename / 404-redirect tricks needed — works on GitHub Pages out of the box.
+// URLs look like: /rental-management/#/service-vehicles
+export const router = createHashRouter([
   {
     path: '/login',
     Component: Login,
@@ -63,12 +58,12 @@ export const router = createBrowserRouter([
           { path: 'documents', Component: Documents },
           { path: 'payments', Component: Payments },
           { path: 'reports', Component: Reports },
-          { path: 'settings',                      Component: Settings          },
-          { path: 'service-vehicles',              Component: ServiceVehicles      },
-          { path: 'service-vehicles/:id',          Component: ServiceVehicleDetail },
-          { path: 'manager-report',                Component: ManagerReport        },
+          { path: 'settings',             Component: Settings          },
+          { path: 'service-vehicles',     Component: ServiceVehicles      },
+          { path: 'service-vehicles/:id', Component: ServiceVehicleDetail },
+          { path: 'manager-report',       Component: ManagerReport        },
         ],
       },
     ],
   },
-], { basename });
+]);

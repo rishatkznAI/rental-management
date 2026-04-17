@@ -69,12 +69,13 @@ export function NotificationCenter() {
   const [rentalsResult, serviceResult, equipmentResult, paymentsResult, shippingPhotosResult] = results;
 
   const notifications = React.useMemo(() => {
+    const toArr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
     const items = buildAppNotifications({
-      rentals: rentalsResult.data ?? [],
-      serviceTickets: serviceResult.data ?? [],
-      equipment: equipmentResult.data ?? [],
-      payments: paymentsResult.data ?? [],
-      shippingPhotos: shippingPhotosResult.data ?? [],
+      rentals: toArr(rentalsResult.data),
+      serviceTickets: toArr(serviceResult.data),
+      equipment: toArr(equipmentResult.data),
+      payments: toArr(paymentsResult.data),
+      shippingPhotos: toArr(shippingPhotosResult.data),
     });
 
     return items.filter(item => {

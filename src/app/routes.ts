@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { createHashRouter } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { PrivateRoute } from './components/auth/PrivateRoute';
 import Dashboard from './pages/Dashboard';
@@ -30,7 +30,7 @@ const basename = rawBase.endsWith('/') && rawBase !== '/'
   ? rawBase.slice(0, -1)
   : rawBase;
 
-export const router = createBrowserRouter([
+export const router = createHashRouter([
   {
     path: '/login',
     Component: Login,

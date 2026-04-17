@@ -385,8 +385,8 @@ export default function ServiceDetail() {
     : '';
   const activeMechanics = mechanics.filter(item => item.status === 'active');
   const repairResult = ticket ? buildRepairResult(ticket, repairWorkItems, repairPartItems) : null;
-  const repairPhotos = ticket.repairPhotos ?? { before: [], after: [] };
-  const closeChecklistEntries = repairCloseChecklistEntries(ticket, repairWorkItems, repairPartItems);
+  const repairPhotos = ticket?.repairPhotos ?? { before: [], after: [] };
+  const closeChecklistEntries = ticket ? repairCloseChecklistEntries(ticket, repairWorkItems, repairPartItems) : [];
 
   // ── actions ────────────────────────────────────────────────────────────────
 
@@ -1085,6 +1085,31 @@ export default function ServiceDetail() {
               </p>
             </CardContent>
           </Card>
+
+          {(repairPhotos.before.length > 0 || repairPhotos.after.length > 0) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Camera className="h-4 w-4" />
+                  Фото ремонта
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <RepairPhotoGroup
+                  title="Фото ДО"
+                  photos={repairPhotos.before}
+                  uploadedAt={repairPhotos.beforeUploadedAt}
+                  uploadedBy={repairPhotos.beforeUploadedBy}
+                />
+                <RepairPhotoGroup
+                  title="Фото ПОСЛЕ"
+                  photos={repairPhotos.after}
+                  uploadedAt={repairPhotos.afterUploadedAt}
+                  uploadedBy={repairPhotos.afterUploadedBy}
+                />
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* ── Right column (1/3) ──────────────────────────────────────────── */}
@@ -1232,6 +1257,33 @@ export default function ServiceDetail() {
                 )
               }
               {ticket.closedAt && <Field label="Фактически закрыта" value={formatDate(ticket.closedAt)} />}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <CheckCircle className="h-4 w-4" />
+                Чек-лист закрытия
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {closeChecklistEntries.map(item => (
+                <div
+                  key={item.key}
+                  className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+                    item.done
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300'
+                      : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                  }`}
+                >
+                  <span>{item.label}</span>
+                  <Badge variant={item.done ? 'success' : 'default'}>{item.done ? 'OK' : 'Не заполнено'}</Badge>
+                </div>
+              ))}
+              <p className="pt-1 text-xs text-gray-400 dark:text-gray-500">
+                Чек-лист собирается из данных бота и фактически внесённых работ, запчастей, фото и итога ремонта.
+              </p>
             </CardContent>
           </Card>
 

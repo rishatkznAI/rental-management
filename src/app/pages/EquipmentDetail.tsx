@@ -964,7 +964,7 @@ export default function EquipmentDetail() {
                 )}
               </div>
             )}
-            {\!canEditEquipment && (
+            {!canEditEquipment && (
               <p className="px-3 py-2 text-center text-xs text-gray-400 dark:text-gray-500">
                 Фото доступно только для просмотра
               </p>

@@ -322,27 +322,6 @@ export default function Rentals() {
     () => buildRentalDebtRows(ganttRentals, payments),
     [ganttRentals, payments],
   );
-
-  // Map rentalId → paid fraction (0..1) for bar coloring
-  const rentalPaidFractions = useMemo(() => {
-    const byRentalId = new Map<string, Payment[]>();
-    payments.forEach(p => {
-      if (!p.rentalId) return;
-      if (!byRentalId.has(p.rentalId)) byRentalId.set(p.rentalId, []);
-      byRentalId.get(p.rentalId)!.push(p);
-    });
-    const map = new Map<string, number>();
-    ganttRentals.forEach(r => {
-      const ps = byRentalId.get(r.id) ?? [];
-      const paid = ps.reduce((s, p) => s + (p.paidAmount ?? p.amount ?? 0), 0);
-      const total = r.amount || 0;
-      const fraction = total > 0
-        ? Math.min(1, paid / total)
-        : r.paymentStatus === 'paid' ? 1 : 0;
-      if (fraction > 0) map.set(r.id, fraction);
-    });
-    return map;
-  }, [payments, ganttRentals]);
   const clientReceivables = useMemo(
     () => buildClientReceivables(computedClients, rentalDebtRows),
     [computedClients, rentalDebtRows],
@@ -1304,7 +1283,6 @@ export default function Rentals() {
                 scale={scale}
                 days={days}
                 today={today}
-                paymentFractions={rentalPaidFractions}
                 onBarClick={setSelectedRental}
                 onNewRental={() => handleOpenNewRental(eq.id)}
                 onReturn={(rental) => handleOpenReturn(rental)}
@@ -1598,7 +1576,6 @@ interface EquipmentRowProps {
   totalDays: number;
   dayWidth: number;
   todayOffset: number | null;
-  paymentFractions: Map<string, number>;
   viewEnd: Date;
   scale: Scale;
   days: Date[];
@@ -1612,7 +1589,7 @@ interface EquipmentRowProps {
 function EquipmentRow({
   equipment, rentals, downtimes, servicePeriods, conflictIds,
   viewStart, totalDays, dayWidth, todayOffset, viewEnd, scale, days, today,
-  onBarClick, onNewRental, onReturn, onDowntime, paymentFractions,
+  onBarClick, onNewRental, onReturn, onDowntime
 }: EquipmentRowProps) {
   const { can: canDo } = usePermissions();
   // Статус вычисляется динамически из аренд, а не из equipment.status
@@ -1784,13 +1761,11 @@ function EquipmentRow({
           const barHeight = 18;
           const topOffset = 3 + stackIndex * (barHeight + 2);
 
-          const paidFraction = paymentFractions.get(rental.id) ?? (rental.paymentStatus === 'paid' ? 1 : 0);
-
           return (
             <div
               key={rental.id}
               onClick={() => onBarClick(rental)}
-              className={`absolute z-[6] flex cursor-pointer items-center overflow-hidden rounded-md shadow transition-all hover:shadow-lg hover:brightness-110 ${barColor} ${
+              className={`absolute z-[6] flex cursor-pointer items-center rounded-md shadow transition-all hover:shadow-lg hover:brightness-110 ${barColor} ${
                 isConflict ? 'ring-2 ring-red-500 ring-offset-1 dark:ring-red-400' : ''
               }`}
               style={{
@@ -1801,23 +1776,8 @@ function EquipmentRow({
               }}
               title={`${rental.client} · ${rental.startDate} — ${rental.endDate} (${statusLabel})`}
             >
-              {/* Payment fill overlay */}
-              {paidFraction > 0 && (
-                <div
-                  className="pointer-events-none absolute inset-y-0 left-0"
-                  style={{
-                    width: `${paidFraction * 100}%`,
-                    background: paidFraction >= 1
-                      ? 'rgba(34,197,94,0.30)'   // green — fully paid
-                      : 'rgba(34,197,94,0.22)',   // green — partially paid
-                    borderRight: paidFraction < 1
-                      ? '1px dashed rgba(34,197,94,0.6)'
-                      : undefined,
-                  }}
-                />
-              )}
               {/* Bar content */}
-              <div className="relative flex min-w-0 flex-1 flex-col justify-center overflow-hidden px-2 leading-tight">
+              <div className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden px-2 leading-tight">
                 <div className="flex items-center gap-1">
                   {isConflict && (
                     <AlertTriangle className="h-3 w-3 shrink-0 text-red-200" />

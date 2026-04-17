@@ -40,6 +40,7 @@ export const router = createHashRouter([
     children: [
       {
         Component: Layout,
+        ErrorBoundary: ErrorPage,
         children: [
           { index: true, Component: Dashboard },
           { path: 'planner', Component: Planner },

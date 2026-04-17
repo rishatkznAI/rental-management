@@ -54,7 +54,6 @@ function createBotHandlers(deps) {
       [button('Мои заявки', 'menu:myrepairs'), button('Новая заявка', 'menu:new_ticket')],
       [button('Найти технику', 'menu:find_equipment'), button('Черновик', 'menu:draft')],
       [button('Отгрузка', 'menu:shipout'), button('Приёмка', 'menu:receivein')],
-      [button('Фото ДО', 'menu:repair_before'), button('Фото ПОСЛЕ', 'menu:repair_after')],
       [button('Итог', 'menu:summary'), button('Готово', 'menu:ready')],
       [button('Закрыть', 'menu:close'), button('Отчёт за день', 'menu:day_report')],
       [button('Помощь', 'menu:help')],
@@ -708,7 +707,7 @@ function createBotHandlers(deps) {
       });
     }
     const index = getOperationStepIndex(operation);
-    if (index <= 0) return operation;
+    if (index <= 0) return null;
     const previousStep = steps[index - 1];
     return saveOperationSession({
       ...operation,
@@ -1894,6 +1893,25 @@ function createBotHandlers(deps) {
         });
       }
       const previous = goToPreviousOperationStep(operation);
+      if (!previous) {
+        updateBotSession(phone, {
+          pendingAction: 'equipment_search',
+          pendingPayload: { flow: 'photo_event', photoEventType: operation.type },
+          lastEquipmentSearch: [],
+        });
+        return reply(
+          senderId,
+          operation.type === 'shipping'
+            ? '🚚 Вернулись к выбору техники для отгрузки.\n\nНапишите INV, SN, модель или производителя.'
+            : '📥 Вернулись к выбору техники для приёмки.\n\nНапишите INV, SN, модель или производителя.',
+          {
+            attachments: mechanicKeyboard(),
+            phone,
+            callbackContext,
+            replaceMessage: true,
+          },
+        );
+      }
       updateBotSession(phone, {
         pendingAction: 'operation_step',
         pendingPayload: { operationSessionId: previous.id },
@@ -1904,6 +1922,37 @@ function createBotHandlers(deps) {
         callbackContext,
         replaceMessage: true,
       });
+    }
+
+    if (normalized === 'menu:main') {
+      resetBotFlow(phone);
+      return handleCommand(senderId, phone, '/меню', {}, { callbackContext, replaceMessage: true });
+    }
+
+    if (normalized === 'menu:draft') {
+      updateBotSession(phone, {
+        pendingAction: null,
+        pendingPayload: null,
+      });
+      return handleCommand(senderId, phone, '/черновик', {}, { callbackContext, replaceMessage: true });
+    }
+
+    if (normalized === 'menu:new_ticket') {
+      updateBotSession(phone, {
+        pendingAction: 'equipment_search',
+        pendingPayload: null,
+        lastEquipmentSearch: [],
+      });
+      return reply(
+        senderId,
+        '🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.',
+        {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        },
+      );
     }
 
     if (normalized.startsWith('operation:check:')) {

@@ -277,37 +277,30 @@ export default function Rentals() {
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
 
-  const { data: ganttDataRaw } = useQuery({
+  const { data: ganttData = [] } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
   });
-  const { data: equipmentDataRaw } = useQuery({
+  const { data: equipmentData = [] } = useQuery({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
   });
-  const { data: paymentDataRaw } = useQuery({
+  const { data: paymentData = [] } = useQuery({
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
   });
-  const { data: serviceTicketsRaw } = useQuery<ServiceTicket[]>({
+  const { data: serviceTickets = [] } = useQuery<ServiceTicket[]>({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
   });
-  const { data: usersDataRaw } = useQuery<SystemUser[]>({
+  const { data: usersData = [] } = useQuery<SystemUser[]>({
     queryKey: ['users'],
     queryFn: usersService.getAll,
   });
-  const { data: clientsDataRaw } = useQuery({
+  const { data: clientsData = [] } = useQuery({
     queryKey: ['clients'],
     queryFn: clientsService.getAll,
   });
-
-  const ganttData = Array.isArray(ganttDataRaw) ? ganttDataRaw : [];
-  const equipmentData = Array.isArray(equipmentDataRaw) ? equipmentDataRaw : [];
-  const paymentData = Array.isArray(paymentDataRaw) ? paymentDataRaw : [];
-  const serviceTickets = Array.isArray(serviceTicketsRaw) ? serviceTicketsRaw : [];
-  const usersData = Array.isArray(usersDataRaw) ? usersDataRaw : [];
-  const clientsData = Array.isArray(clientsDataRaw) ? clientsDataRaw : [];
 
   useEffect(() => {
     setGanttRentals(ganttData);

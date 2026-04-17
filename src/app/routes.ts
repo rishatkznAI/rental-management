@@ -25,7 +25,12 @@ import ServiceVehicleDetail from './pages/ServiceVehicleDetail';
 import ManagerReport from './pages/ManagerReport';
 import ErrorPage from './pages/ErrorPage';
 
-const basename = import.meta.env.BASE_URL || '/';
+// React Router v7 requires basename WITHOUT trailing slash
+// Vite's BASE_URL includes a trailing slash (e.g. '/rental-management/')
+const rawBase = import.meta.env.BASE_URL || '/';
+const basename = rawBase.endsWith('/') && rawBase !== '/'
+  ? rawBase.slice(0, -1)
+  : rawBase;
 
 export const router = createBrowserRouter([
   {

@@ -10,6 +10,19 @@
       <meta http-equiv="Expires" content="0" />
       <title>Система управления арендой</title>
       <script>
+        // GitHub Pages SPA redirect: /404.html sends ?p=/path&q=...
+        // Convert it back to a normal browser URL before React Router starts.
+        (function(l) {
+          if (l.search && l.search[1] === '/') {
+            var decoded = l.search
+              .slice(1)
+              .split('&')
+              .map(function(s) { return s.replace(/~and~/g, '&'); })
+              .join('?');
+            window.history.replaceState(null, null, l.pathname.slice(0, -1) + decoded + l.hash);
+          }
+        })(window.location);
+
         // ── Принудительный сброс кеша браузера ──────────────────────────────
         // При новом деплое меняем BUILD_TS — браузер перезагружает страницу,
         // получает свежий index.html с новыми хешированными бандлами.
@@ -17,12 +30,11 @@
         // при каждом открытии вкладки.
         (function() {
           var CACHE_KEY = '__app_cache_v';
-          var BUILD_TS  = '20260417_160000';
+          var BUILD_TS  = '20260417_170000';
           var stored    = localStorage.getItem(CACHE_KEY);
           if (stored !== BUILD_TS) {
             localStorage.setItem(CACHE_KEY, BUILD_TS);
-            // Перезагружаем без добавления параметров к URL,
-            // чтобы не конфликтовать с hash-роутером.
+            // Перезагружаем, чтобы браузер подхватил свежие хешированные бандлы.
             window.location.reload();
           }
         })();

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, Link } from 'react-router';
+import { useNavigate, useParams, Link } from 'react-router/dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useClientsList } from '../hooks/useClients';
 import { useDocumentsList } from '../hooks/useDocuments';

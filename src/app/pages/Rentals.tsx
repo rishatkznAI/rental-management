@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router/dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, ChevronLeft, ChevronRight, RotateCcw, CirclePause as PauseCircle,
@@ -265,6 +266,7 @@ function hasOpenServiceTicketForEquipment(serviceTickets: ServiceTicket[], equip
 export default function Rentals() {
   const { can } = usePermissions();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const historyAuthor = user?.name || 'Система';
   const canEditRentals = can('edit', 'rentals');
@@ -1279,7 +1281,7 @@ export default function Rentals() {
                   <Button
                     size="sm"
                     className="mt-4"
-                    onClick={() => window.location.href = '/rental-management/equipment/new'}
+                    onClick={() => navigate('/equipment/new')}
                   >
                     + Добавить технику
                   </Button>

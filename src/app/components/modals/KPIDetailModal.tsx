@@ -1,7 +1,7 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X, TrendingUp, ExternalLink } from 'lucide-react';
-import { Link } from 'react-router';
+import { Link } from 'react-router/dom';
 import { Button } from '../ui/button';
 import { formatCurrency, formatDate } from '../../lib/utils';
 

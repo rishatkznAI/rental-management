@@ -1,4 +1,4 @@
-import { createHashRouter } from 'react-router';
+import { createHashRouter } from 'react-router/dom';
 import { Layout } from './components/layout/Layout';
 import { PrivateRoute } from './components/auth/PrivateRoute';
 import Dashboard from './pages/Dashboard';

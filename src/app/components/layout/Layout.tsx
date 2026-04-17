@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { Outlet, Link, useLocation } from 'react-router';
+import { Outlet, Link, useLocation } from 'react-router/dom';
 import { Sidebar } from './Sidebar';
 import { LayoutDashboard, Truck, FileText, Wrench, Users, Menu, AlertTriangle, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
 
-// Inline error boundary — keeps sidebar visible when a page crashes
 class PageErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { error: Error | null }

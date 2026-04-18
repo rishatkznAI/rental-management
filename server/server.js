@@ -41,14 +41,10 @@ const fetch   = require('node-fetch');
 const crypto  = require('crypto');
 const path    = require('path');
 const {
-  isUniqueInventoryNumber,
-  findEquipmentForRentalPayload: resolveEquipmentForRentalPayload,
   equipmentMatchesServiceTicket,
 } = require('./lib/equipment-matching');
 const {
-  getRentalDateRange,
-  findConflictingRental,
-  formatConflictError,
+  validateRentalPayload,
 } = require('./lib/rental-validation');
 const { createBotHandlers } = require('./lib/bot-commands');
 const { createMaxApiClient } = require('./lib/max-api');
@@ -57,6 +53,7 @@ const { startServer } = require('./lib/startup');
 const { registerAuthRoutes } = require('./routes/auth');
 const { registerBotRoutes } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
+const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
 const { registerSystemRoutes } = require('./routes/system');
 const {
@@ -487,82 +484,10 @@ function migrateLegacyRepairFacts() {
   };
 }
 
-function normalizeEquipmentRecord(equipment) {
-  if (!equipment) return equipment;
-  return {
-    ...equipment,
-    category: equipment.category || 'own',
-    activeInFleet: equipment.activeInFleet !== false,
-    priority: equipment.priority || 'medium',
-  };
-}
-
-function canEquipmentParticipateInRentals(equipment) {
-  const normalized = normalizeEquipmentRecord(equipment);
-  return normalized.activeInFleet && (normalized.category === 'own' || normalized.category === 'partner');
-}
-
-function findEquipmentForRentalPayload(payload) {
-  const equipmentId = payload?.equipmentId;
-  const inventoryNumber =
-    payload?.equipmentInv
-    || payload?.inventoryNumber
-    || (Array.isArray(payload?.equipment) ? payload.equipment[0] : null);
-
-  const equipment = (readData('equipment') || []).map(normalizeEquipmentRecord);
-  return resolveEquipmentForRentalPayload({ equipmentId, inventoryNumber }, equipment);
-}
-
-function validateRentalPayload(collection, payload, rentals = [], excludeRentalId = '') {
-  const equipmentList = (readData('equipment') || []).map(normalizeEquipmentRecord);
-  const equipmentId = payload?.equipmentId;
-  const inventoryNumber =
-    payload?.equipmentInv
-    || payload?.inventoryNumber
-    || (Array.isArray(payload?.equipment) ? payload.equipment[0] : null);
-
-  const equipment = resolveEquipmentForRentalPayload({ equipmentId, inventoryNumber }, equipmentList);
-  if (!equipment) {
-    if (!equipmentId && inventoryNumber && !isUniqueInventoryNumber(inventoryNumber, equipmentList)) {
-      return {
-        ok: false,
-        status: 400,
-        error: `Нельзя привязать аренду только по INV ${inventoryNumber}: номер не уникален. Выберите конкретную технику.`,
-      };
-    }
-    return { ok: false, status: 400, error: 'Техника для аренды не найдена' };
-  }
-
-  if (!canEquipmentParticipateInRentals(equipment)) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'Эта техника не может участвовать в аренде: проверьте категорию и признак активного парка',
-    };
-  }
-
-  const { startDate, endDate } = getRentalDateRange(collection, payload);
-  if ((startDate && !endDate) || (!startDate && endDate)) {
-    return { ok: false, status: 400, error: 'Для аренды нужно указать и дату начала, и дату окончания' };
-  }
-  if (startDate && endDate && new Date(startDate).getTime() > new Date(endDate).getTime()) {
-    return { ok: false, status: 400, error: 'Дата окончания аренды не может быть раньше даты начала' };
-  }
-
-  const conflict = findConflictingRental(collection, payload, rentals, equipmentList, excludeRentalId);
-  if (conflict) {
-    return { ok: false, status: 409, error: formatConflictError(conflict, collection) };
-  }
-
-  return { ok: true };
-}
-
 const apiRouter = express.Router();
 
 const COLLECTIONS = [
   'equipment',
-  'rentals',
-  'gantt_rentals',
   'service',
   'clients',
   'documents',
@@ -587,6 +512,15 @@ registerAuthRoutes(app, {
   requireAuth,
   destroySession,
 });
+
+apiRouter.use(registerRentalRoutes({
+  readData,
+  writeData,
+  requireAuth,
+  validateRentalPayload,
+  generateId,
+  idPrefixes: ID_PREFIXES,
+}));
 
 apiRouter.use(registerCrudRoutes({
   collections: COLLECTIONS,

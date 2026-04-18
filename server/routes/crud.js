@@ -48,6 +48,9 @@ function registerCrudRoutes(deps) {
   }
 
   function registerCRUD(collection) {
+    if (collection === 'rentals' || collection === 'gantt_rentals') {
+      return;
+    }
     const prefix = idPrefixes[collection] || collection;
 
     router.get(`/${collection}`, requireAuth, (req, res) => {

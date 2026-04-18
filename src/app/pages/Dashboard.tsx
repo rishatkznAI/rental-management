@@ -215,14 +215,14 @@ export default function Dashboard() {
   // ── Manager stats for current user ─────────────────────────────────────────
   // (currentUserName уже объявлен выше)
   const myRentals = currentUserName
-    ? rentals.filter(r => r.manager === currentUserName)
+    ? ganttRentals.filter(r => r.manager === currentUserName)
     : [];
   const myActiveRentals = myRentals.filter(r => r.status === 'active');
   const myMonthRentals = myRentals.filter(r => {
     const start = new Date(r.startDate);
     return start >= monthStart;
   });
-  const myMonthRevenue = myMonthRentals.reduce((sum, r) => sum + (r.price || 0), 0);
+  const myMonthRevenue = myMonthRentals.reduce((sum, r) => sum + (r.amount || 0), 0);
 
   // Debt for current manager
   const myClientDebt = currentUserName

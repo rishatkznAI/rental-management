@@ -292,6 +292,7 @@ export default function Settings() {
                   { title: 'Заявка без механика',        desc: 'Открытая сервисная заявка без назначенного исполнителя', channels: ['Центр уведомлений'] },
                   { title: 'Просроченное ТО',            desc: 'Напоминание по плановому ТО, ЧТО и ПТО', channels: ['Центр уведомлений'] },
                   { title: 'Просроченные платежи',       desc: 'Уведомление о неоплаченных и частично оплаченных платежах', channels: ['Центр уведомлений'] },
+                  { title: 'Новая аренда при долге',     desc: 'Сигнал, если аренда создаётся клиенту с действующим долгом или открытой просрочкой', channels: ['Центр уведомлений'] },
                 ].map(rule => (
                   <div key={rule.title} className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 p-4">
                     <div>

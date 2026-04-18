@@ -107,6 +107,9 @@ export interface ShippingPhoto {
   damageDescription?: string;
   operationSessionId?: string;
   checklist?: EquipmentHandoffChecklist;
+  signedBy?: string;
+  signedAt?: string;
+  signatureDataUrl?: string;
 }
 
 export type RentalStatus = 'new' | 'confirmed' | 'delivery' | 'active' | 'return_planned' | 'closed';
@@ -133,6 +136,7 @@ export interface Rental {
 
 export type ServicePriority = 'low' | 'medium' | 'high' | 'critical';
 export type ServiceStatus = 'new' | 'in_progress' | 'waiting_parts' | 'ready' | 'closed';
+export type ServiceScenario = 'repair' | 'to' | 'chto' | 'pto';
 export type ReferenceStatus = 'active' | 'inactive';
 
 export interface Mechanic {
@@ -254,6 +258,7 @@ export interface ServiceTicket {
   id: string;
   equipmentId: string;
   equipment: string;
+  serviceKind?: ServiceScenario;
   inventoryNumber?: string;
   serialNumber?: string;
   equipmentType?: string;

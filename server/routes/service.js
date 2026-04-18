@@ -14,6 +14,23 @@ function registerServiceRoutes(router, deps) {
     migrateLegacyRepairFacts,
   } = deps;
 
+  const SERVICE_SCENARIO_LABELS = {
+    repair: 'Ремонт',
+    to: 'ТО',
+    chto: 'ЧТО',
+    pto: 'ПТО',
+  };
+
+  const inferServiceKind = ticket => {
+    const kind = String(ticket?.serviceKind || '').trim().toLowerCase();
+    if (kind === 'to' || kind === 'chto' || kind === 'pto' || kind === 'repair') return kind;
+    const reason = String(ticket?.reason || '').trim().toLowerCase();
+    if (reason === 'то') return 'to';
+    if (reason === 'что') return 'chto';
+    if (reason === 'пто') return 'pto';
+    return 'repair';
+  };
+
   router.get('/service_works/active', requireAuth, (req, res) => {
     const list = (readData('service_works') || [])
       .map(normalizeServiceWorkRecord)
@@ -223,36 +240,78 @@ function registerServiceRoutes(router, deps) {
       partsByRepair.set(part.repairId, group);
     }
 
-    const rows = workItems.map(item => {
-      const ticket = ticketMap.get(item.repairId);
+    const worksByRepair = new Map();
+    for (const item of workItems) {
+      const group = worksByRepair.get(item.repairId) || [];
+      group.push(item);
+      worksByRepair.set(item.repairId, group);
+    }
+
+    const repairCostById = new Map();
+    const repairNormHoursById = new Map();
+    const partNamesByRepair = new Map();
+    for (const [repairId, repairParts] of partsByRepair.entries()) {
+      repairCostById.set(
+        repairId,
+        repairParts.reduce((sum, part) => sum + (Number(part.priceSnapshot) || 0) * (Number(part.quantity) || 0), 0),
+      );
+      partNamesByRepair.set(repairId, Array.from(new Set(repairParts.map(part => part.nameSnapshot).filter(Boolean))));
+    }
+
+    for (const item of workItems) {
+      repairNormHoursById.set(
+        item.repairId,
+        (repairNormHoursById.get(item.repairId) || 0) + (Number(item.quantity) || 0) * (Number(item.normHoursSnapshot) || 0),
+      );
+    }
+
+    const rows = tickets.flatMap(ticket => {
+      const serviceKind = inferServiceKind(ticket);
+      const ticketWorks = worksByRepair.get(ticket.id) || [];
       const eq = ticket?.equipmentId ? equipmentMap.get(ticket.equipmentId) : null;
       const mechanic = ticket?.assignedMechanicId
         ? mechanics.find(entry => entry.id === ticket.assignedMechanicId)
         : null;
-      const repairParts = partsByRepair.get(item.repairId) || [];
-      const partsCost = repairParts.reduce((sum, part) => sum + (Number(part.priceSnapshot) || 0) * (Number(part.quantity) || 0), 0);
-      const partNames = Array.from(new Set(repairParts.map(part => part.nameSnapshot).filter(Boolean)));
-      return {
+      const partNames = partNamesByRepair.get(ticket.id) || [];
+      const partsCost = repairCostById.get(ticket.id) || 0;
+      const baseRow = {
         mechanicId: ticket?.assignedMechanicId || '',
         mechanicName: mechanic?.name || ticket?.assignedMechanicName || ticket?.assignedTo || 'Не назначен',
-        repairId: item.repairId,
+        repairId: ticket.id,
+        serviceKind,
         repairStatus: ticket?.status || '',
-        createdAt: item.createdAt || ticket?.createdAt || '',
+        createdAt: ticket?.createdAt || '',
         equipmentId: ticket?.equipmentId || '',
         equipmentLabel: ticket?.equipment || [eq?.manufacturer, eq?.model].filter(Boolean).join(' ') || '—',
         equipmentType: eq?.type || ticket?.equipmentType || '',
         equipmentTypeLabel: ticket?.equipmentTypeLabel || ticket?.equipmentType || eq?.type || '',
         inventoryNumber: ticket?.inventoryNumber || eq?.inventoryNumber || '—',
         serialNumber: ticket?.serialNumber || eq?.serialNumber || '—',
-        workName: item.nameSnapshot,
-        workCategory: item.categorySnapshot || '',
         partNames,
         partNamesLabel: partNames.join(', '),
+        partsCost,
+      };
+
+      if (ticketWorks.length === 0) {
+        return [{
+          ...baseRow,
+          workName: `${SERVICE_SCENARIO_LABELS[serviceKind]} без детализации`,
+          workCategory: SERVICE_SCENARIO_LABELS[serviceKind],
+          quantity: 0,
+          normHours: 0,
+          totalNormHours: 0,
+        }];
+      }
+
+      return ticketWorks.map(item => ({
+        ...baseRow,
+        createdAt: item.createdAt || ticket?.createdAt || '',
+        workName: item.nameSnapshot,
+        workCategory: item.categorySnapshot || '',
         quantity: Number(item.quantity) || 0,
         normHours: Number(item.normHoursSnapshot) || 0,
         totalNormHours: (Number(item.quantity) || 0) * (Number(item.normHoursSnapshot) || 0),
-        partsCost,
-      };
+      }));
     });
 
     const summaryMap = new Map();
@@ -262,7 +321,7 @@ function registerServiceRoutes(router, deps) {
         summaryMap.set(key, {
           mechanicId: row.mechanicId,
           mechanicName: row.mechanicName,
-          repairsCount: 0,
+          repairIds: new Set(),
           worksCount: 0,
           totalNormHours: 0,
           partsCost: 0,
@@ -270,24 +329,107 @@ function registerServiceRoutes(router, deps) {
         });
       }
       const summary = summaryMap.get(key);
-      summary.repairsCount += 1;
+      summary.repairIds.add(row.repairId);
       summary.worksCount += row.quantity;
       summary.totalNormHours += row.totalNormHours;
-      summary.partsCost += row.partsCost;
+      if (!summary.equipmentIds.has(`parts:${row.repairId}`)) {
+        summary.partsCost += row.partsCost;
+        summary.equipmentIds.add(`parts:${row.repairId}`);
+      }
       if (row.equipmentId) summary.equipmentIds.add(row.equipmentId);
     }
 
     const summary = [...summaryMap.values()].map(item => ({
       mechanicId: item.mechanicId,
       mechanicName: item.mechanicName,
-      repairsCount: item.repairsCount,
+      repairsCount: item.repairIds.size,
       worksCount: item.worksCount,
       totalNormHours: Number(item.totalNormHours.toFixed(2)),
       partsCost: Number(item.partsCost.toFixed(2)),
-      equipmentCount: item.equipmentIds.size,
+      equipmentCount: [...item.equipmentIds].filter(value => !String(value).startsWith('parts:')).length,
     })).sort((a, b) => b.totalNormHours - a.totalNormHours);
 
-    res.json({ summary, rows });
+    const repeatFailureMap = new Map();
+    for (const ticket of tickets) {
+      const serviceKind = inferServiceKind(ticket);
+      if (serviceKind !== 'repair') continue;
+      const equipmentId = String(ticket.equipmentId || '').trim();
+      const reason = String(ticket.reason || '').trim();
+      if (!equipmentId || !reason) continue;
+      const eq = equipmentMap.get(equipmentId);
+      const repairId = ticket.id;
+      const partNames = partNamesByRepair.get(repairId) || [];
+      const workCategories = Array.from(
+        new Set(((worksByRepair.get(repairId) || []).map(item => item.categorySnapshot).filter(Boolean))),
+      );
+      const mechanicName = (() => {
+        const mechanic = ticket?.assignedMechanicId
+          ? mechanics.find(entry => entry.id === ticket.assignedMechanicId)
+          : null;
+        return mechanic?.name || ticket?.assignedMechanicName || ticket?.assignedTo || 'Не назначен';
+      })();
+      const key = `${equipmentId}::${reason.toLowerCase()}`;
+      if (!repeatFailureMap.has(key)) {
+        repeatFailureMap.set(key, {
+          equipmentId,
+          equipmentLabel: ticket?.equipment || [eq?.manufacturer, eq?.model].filter(Boolean).join(' ') || '—',
+          equipmentType: eq?.type || ticket?.equipmentType || '',
+          equipmentTypeLabel: ticket?.equipmentTypeLabel || ticket?.equipmentType || eq?.type || '',
+          inventoryNumber: ticket?.inventoryNumber || eq?.inventoryNumber || '—',
+          serialNumber: ticket?.serialNumber || eq?.serialNumber || '—',
+          reason,
+          serviceKind,
+          repairIds: new Set(),
+          repairStatuses: new Set(),
+          mechanicNames: new Set(),
+          partNames: new Set(),
+          workCategories: new Set(),
+          createdDates: [],
+          totalNormHours: 0,
+          totalPartsCost: 0,
+          firstCreatedAt: ticket.createdAt || '',
+          lastCreatedAt: ticket.createdAt || '',
+        });
+      }
+      const item = repeatFailureMap.get(key);
+      item.repairIds.add(repairId);
+      if (ticket.status) item.repairStatuses.add(ticket.status);
+      if (mechanicName) item.mechanicNames.add(mechanicName);
+      partNames.forEach(name => item.partNames.add(name));
+      workCategories.forEach(category => item.workCategories.add(category));
+      if (ticket.createdAt) item.createdDates.push(ticket.createdAt);
+      item.totalNormHours += repairNormHoursById.get(repairId) || 0;
+      item.totalPartsCost += repairCostById.get(repairId) || 0;
+      if (ticket.createdAt && (!item.firstCreatedAt || ticket.createdAt < item.firstCreatedAt)) item.firstCreatedAt = ticket.createdAt;
+      if (ticket.createdAt && (!item.lastCreatedAt || ticket.createdAt > item.lastCreatedAt)) item.lastCreatedAt = ticket.createdAt;
+    }
+
+    const repeatFailures = [...repeatFailureMap.values()]
+      .map(item => ({
+        equipmentId: item.equipmentId,
+        equipmentLabel: item.equipmentLabel,
+        equipmentType: item.equipmentType,
+        equipmentTypeLabel: item.equipmentTypeLabel,
+        inventoryNumber: item.inventoryNumber,
+        serialNumber: item.serialNumber,
+        reason: item.reason,
+        serviceKind: item.serviceKind,
+        repairsCount: item.repairIds.size,
+        totalNormHours: Number(item.totalNormHours.toFixed(2)),
+        totalPartsCost: Number(item.totalPartsCost.toFixed(2)),
+        firstCreatedAt: item.firstCreatedAt,
+        lastCreatedAt: item.lastCreatedAt,
+        repairIds: [...item.repairIds],
+        repairStatuses: [...item.repairStatuses],
+        mechanicNames: [...item.mechanicNames],
+        partNames: [...item.partNames],
+        workCategories: [...item.workCategories],
+        createdDates: item.createdDates,
+      }))
+      .filter(item => item.repairsCount >= 2)
+      .sort((a, b) => b.repairsCount - a.repairsCount || b.totalNormHours - a.totalNormHours || String(b.lastCreatedAt).localeCompare(String(a.lastCreatedAt)));
+
+    res.json({ summary, rows, repeatFailures });
   });
 
   router.post('/admin/migrate-repair-facts', requireAuth, requireWrite('service_works'), (req, res) => {

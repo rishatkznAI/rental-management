@@ -1,4 +1,5 @@
 import { api } from '../lib/api';
+import type { ServiceScenario } from '../types';
 
 export interface MechanicWorkloadSummary {
   mechanicId: string;
@@ -14,6 +15,7 @@ export interface MechanicWorkloadRow {
   mechanicId: string;
   mechanicName: string;
   repairId: string;
+  serviceKind: ServiceScenario;
   repairStatus: string;
   createdAt: string;
   equipmentId: string;
@@ -32,9 +34,32 @@ export interface MechanicWorkloadRow {
   partsCost: number;
 }
 
+export interface RepeatFailureRow {
+  equipmentId: string;
+  equipmentLabel: string;
+  equipmentType: string;
+  equipmentTypeLabel: string;
+  inventoryNumber: string;
+  serialNumber: string;
+  reason: string;
+  serviceKind: ServiceScenario;
+  repairsCount: number;
+  totalNormHours: number;
+  totalPartsCost: number;
+  firstCreatedAt: string;
+  lastCreatedAt: string;
+  repairIds: string[];
+  repairStatuses: string[];
+  mechanicNames: string[];
+  partNames: string[];
+  workCategories: string[];
+  createdDates: string[];
+}
+
 export interface MechanicsWorkloadReport {
   summary: MechanicWorkloadSummary[];
   rows: MechanicWorkloadRow[];
+  repeatFailures: RepeatFailureRow[];
 }
 
 export interface RepairFactsMigrationResult {

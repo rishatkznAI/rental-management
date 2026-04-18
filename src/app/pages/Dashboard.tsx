@@ -32,7 +32,7 @@ import { buildRentalCreationHistory } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import type { Equipment, Rental, ServiceTicket, Client, Payment, Document, EquipmentStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
-import { buildClientFinancialSnapshots } from '../lib/finance';
+import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -119,6 +119,10 @@ export default function Dashboard() {
     () => buildClientFinancialSnapshots(clients, ganttRentals, payments),
     [clients, ganttRentals, payments],
   );
+  const rentalDebtRows = useMemo(
+    () => buildRentalDebtRows(ganttRentals, payments),
+    [ganttRentals, payments],
+  );
   const computedClients = useMemo(
     () => clients.map(client => {
       const financial = clientFinancials.find(item => item.client === client.company);
@@ -175,18 +179,19 @@ export default function Dashboard() {
       }, 0);
 
   // Debt
-  const clientDebt = computedClients.reduce((sum, c) => sum + (c.debt || 0), 0);
-  const overduePayments = payments.filter(p => p.status === 'overdue');
-  const overduePaymentsTotal = overduePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
-  const totalDebt = clientDebt + overduePaymentsTotal;
+  const todayKey = today.toISOString().slice(0, 10);
+  const overduePayments = rentalDebtRows.filter(row =>
+    (row.expectedPaymentDate && row.expectedPaymentDate < todayKey) || row.endDate < todayKey,
+  );
+  const totalDebt = rentalDebtRows.reduce((sum, row) => sum + row.outstanding, 0);
 
-  // Month debt: overdue payments this month
-  const monthOverduePayments = payments.filter(p => {
-    if (p.status !== 'overdue') return false;
-    const dueDate = new Date(p.dueDate);
+  // Month debt: overdue rental debt this month
+  const monthOverduePayments = overduePayments.filter(row => {
+    const compareDate = row.expectedPaymentDate || row.endDate;
+    const dueDate = new Date(compareDate);
     return dueDate >= monthStart;
   });
-  const monthDebt = monthOverduePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const monthDebt = monthOverduePayments.reduce((sum, row) => sum + row.outstanding, 0);
 
   // Upcoming returns (next 3 days, not overdue)
   const soon3 = new Date(today);
@@ -219,13 +224,15 @@ export default function Dashboard() {
   });
   const myMonthRevenue = myMonthRentals.reduce((sum, r) => sum + (r.price || 0), 0);
 
-  // Clients of this manager's rentals
-  const myClientNames = [...new Set(myRentals.map(r => r.client))];
-  const myClients = computedClients.filter(c => myClientNames.includes(c.company));
-  const myClientDebt = myClients.reduce((sum, c) => sum + (c.debt || 0), 0);
-  const myOverduePayments = payments.filter(p =>
-    p.status === 'overdue' && myClientNames.includes(p.client)
-  );
+  // Debt for current manager
+  const myClientDebt = currentUserName
+    ? rentalDebtRows
+      .filter(row => row.manager === currentUserName)
+      .reduce((sum, row) => sum + row.outstanding, 0)
+    : 0;
+  const myOverduePayments = currentUserName
+    ? overduePayments.filter(row => row.manager === currentUserName)
+    : [];
 
   const hasManagerData = myRentals.length > 0;
 
@@ -282,7 +289,7 @@ export default function Dashboard() {
 
   // Overdue debt clients
   const overdueDebtClients = computedClients.filter(c => (c.debt ?? 0) > 0);
-  const overdueDebtCount = overdueDebtClients.length + overduePayments.length;
+  const overdueDebtCount = overduePayments.length;
 
   // ── Alert items ─────────────────────────────────────────────────────────────
   type AlertPriority = 'critical' | 'high' | 'medium';
@@ -318,17 +325,18 @@ export default function Dashboard() {
 
   // 2. Просроченные платежи (критично если > 7 дней, иначе высокий)
   overduePayments.forEach(p => {
-    const days = Math.max(0, Math.ceil((today.getTime() - new Date(p.dueDate).getTime()) / 86400000));
+    const compareDate = p.expectedPaymentDate || p.endDate;
+    const days = Math.max(0, Math.ceil((today.getTime() - new Date(compareDate).getTime()) / 86400000));
     alertItems.push({
-      id: `overdue-pay-${p.id}`,
+      id: `overdue-pay-${p.rentalId}`,
       priority: days > 7 ? 'critical' : 'high',
       icon: DollarSign,
       category: 'Неоплаченный счёт',
       title: p.client,
-      entity: p.invoiceNumber ? `Счёт ${p.invoiceNumber}` : (p.rentalId ? `Аренда ${p.rentalId}` : 'Платёж'),
-      detail: `${formatCurrency(p.amount)} · ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'} просрочки`,
-      link: '/payments',
-      linkLabel: 'К платежам',
+      entity: p.rentalId ? `Аренда ${p.rentalId}` : 'Дебиторка',
+      detail: `${formatCurrency(p.outstanding)} · ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'} просрочки`,
+      link: `/rentals/${p.rentalId}`,
+      linkLabel: 'Открыть аренду',
     });
   });
 
@@ -1009,18 +1017,24 @@ export default function Dashboard() {
                 </p>
               </div>
               <div className="rounded-lg bg-orange-50 p-3 dark:bg-orange-900/20">
-                <p className="text-xs text-gray-500 dark:text-gray-400">Дебиторка клиентов</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Моя дебиторка</p>
                 <p className="mt-1 text-xl text-orange-700 dark:text-orange-300">
                   {myClientDebt > 0 ? formatCurrency(myClientDebt) : '0 ₽'}
                 </p>
               </div>
               <div className="rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
-                <p className="text-xs text-gray-500 dark:text-gray-400">Просроч. оплаты</p>
-                <p className="mt-1 text-2xl text-red-700 dark:text-red-300">{myOverduePayments.length}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Моя просрочка</p>
+                <p className="mt-1 text-xl text-red-700 dark:text-red-300">
+                  {myOverduePayments.length > 0
+                    ? formatCurrency(myOverduePayments.reduce((sum, row) => sum + row.outstanding, 0))
+                    : '0 ₽'}
+                </p>
               </div>
               <div className="rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
-                <p className="text-xs text-gray-500 dark:text-gray-400">Всего аренд</p>
-                <p className="mt-1 text-2xl text-purple-700 dark:text-purple-300">{myRentals.length}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Общая дебиторка</p>
+                <p className="mt-1 text-xl text-purple-700 dark:text-purple-300">
+                  {totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽'}
+                </p>
               </div>
             </div>
           )}

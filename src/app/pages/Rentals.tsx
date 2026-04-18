@@ -476,9 +476,10 @@ export default function Rentals() {
   const [filterUpd, setFilterUpd] = useState('');
   const [filterPayment, setFilterPayment] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [rentalPreset, setRentalPreset] = useState<'all' | 'returns_today' | 'overdue' | 'unpaid' | 'with_service'>('all');
 
   // Derived: any filter is currently active
-  const hasActiveFilters = !!(filterModel || filterManager || filterClient || filterUpd || filterPayment || filterStatus);
+  const hasActiveFilters = !!(filterModel || filterManager || filterClient || filterUpd || filterPayment || filterStatus || rentalPreset !== 'all');
 
   // Refs
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -527,14 +528,40 @@ export default function Rentals() {
   // ── Filter rentals (always live, no gate) ────────────────────────────────────
   const filteredRentals = useMemo(() => {
     let rentals = [...ganttRentals];
+    const inventoryCounts = equipmentList.reduce<Map<string, number>>((map, item) => {
+      map.set(item.inventoryNumber, (map.get(item.inventoryNumber) || 0) + 1);
+      return map;
+    }, new Map());
     if (filterManager) rentals = rentals.filter(r => r.manager === filterManager);
     if (filterClient)  rentals = rentals.filter(r => r.client.toLowerCase().includes(filterClient.toLowerCase()));
     if (filterUpd === 'yes') rentals = rentals.filter(r => r.updSigned);
     if (filterUpd === 'no')  rentals = rentals.filter(r => !r.updSigned);
     if (filterPayment) rentals = rentals.filter(r => r.paymentStatus === filterPayment);
     if (filterStatus)  rentals = rentals.filter(r => r.status === filterStatus);
+    const todayStr = format(today, 'yyyy-MM-dd');
+    if (rentalPreset === 'returns_today') {
+      rentals = rentals.filter(r => r.endDate === todayStr && r.status !== 'returned' && r.status !== 'closed');
+    }
+    if (rentalPreset === 'overdue') {
+      rentals = rentals.filter(r => r.endDate < todayStr && r.status !== 'returned' && r.status !== 'closed');
+    }
+    if (rentalPreset === 'unpaid') {
+      rentals = rentals.filter(r => r.paymentStatus !== 'paid');
+    }
+    if (rentalPreset === 'with_service') {
+      rentals = rentals.filter(r => {
+        const inventoryIsUnique = (inventoryCounts.get(r.equipmentInv) || 0) <= 1;
+        return serviceTickets.some(ticket =>
+          OPEN_SERVICE_STATUSES.includes(ticket.status)
+          && (
+            (!!r.equipmentId && ticket.equipmentId === r.equipmentId)
+            || (!r.equipmentId && inventoryIsUnique && ticket.inventoryNumber === r.equipmentInv)
+          ),
+        );
+      });
+    }
     return rentals;
-  }, [ganttRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus]);
+  }, [equipmentList, filterManager, filterClient, filterPayment, filterStatus, filterUpd, ganttRentals, rentalPreset, serviceTickets, today]);
 
   const visibleFilteredRentals = useMemo(
     () => filteredRentals.filter(r => rentalIntersectsRange(r, viewStart, viewEnd)),
@@ -704,6 +731,7 @@ export default function Rentals() {
     setFilterUpd('');
     setFilterPayment('');
     setFilterStatus('');
+    setRentalPreset('all');
   };
 
   const handleOpenReturn = (rental?: GanttRentalData) => {
@@ -721,6 +749,14 @@ export default function Rentals() {
     setPreselectedEquipmentId(equipmentId || '');
     setShowNewRentalModal(true);
   };
+
+  const rentalPresetOptions = [
+    { value: 'all', label: 'Все' },
+    { value: 'returns_today', label: 'Возврат сегодня' },
+    { value: 'overdue', label: 'Просроченные' },
+    { value: 'unpaid', label: 'Без оплаты' },
+    { value: 'with_service', label: 'В сервисе' },
+  ] as const;
 
   // ===== New handlers for RentalDrawer =====
 
@@ -1112,6 +1148,23 @@ export default function Rentals() {
 
       {/* ===== Filters ===== */}
       <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-1.5 dark:border-gray-700 dark:bg-gray-800">
+        <div className="mr-2 flex flex-wrap items-center gap-2">
+          {rentalPresetOptions.map(option => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setRentalPreset(option.value)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                rentalPreset === option.value
+                  ? 'bg-[--color-primary] text-white'
+                  : 'border border-gray-200 bg-gray-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
         <div className="relative">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
           <input

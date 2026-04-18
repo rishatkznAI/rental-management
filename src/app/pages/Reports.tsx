@@ -18,6 +18,7 @@ import {
   buildRentalDebtRows,
   getRentalDebtOverdueDays,
 } from '../lib/finance';
+import { getServiceScenarioLabel } from '../lib/serviceScenarios';
 import type { Equipment, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
@@ -93,6 +94,7 @@ interface ServiceReportPreset {
     serviceDateFrom: string;
     serviceDateTo: string;
     serviceMechanic: string;
+    serviceScenario: string;
     serviceStatus: string;
     serviceEquipmentType: string;
     serviceWorkCategory: string;
@@ -156,6 +158,7 @@ export default function Reports() {
   const [serviceDateFrom, setServiceDateFrom] = useState('');
   const [serviceDateTo, setServiceDateTo] = useState('');
   const [serviceMechanic, setServiceMechanic] = useState('all');
+  const [serviceScenario, setServiceScenario] = useState('all');
   const [serviceStatus, setServiceStatus] = useState('all');
   const [serviceEquipmentType, setServiceEquipmentType] = useState('all');
   const [serviceWorkCategory, setServiceWorkCategory] = useState('all');
@@ -212,6 +215,11 @@ export default function Reports() {
     return statuses.sort((a, b) => formatServiceStatus(a).localeCompare(formatServiceStatus(b), 'ru'));
   }, [mechanicWorkload]);
 
+  const serviceScenarioOptions = useMemo(() => {
+    const scenarios = Array.from(new Set((mechanicWorkload?.rows ?? []).map(item => item.serviceKind).filter(Boolean)));
+    return scenarios.sort((a, b) => getServiceScenarioLabel(a).localeCompare(getServiceScenarioLabel(b), 'ru'));
+  }, [mechanicWorkload]);
+
   const serviceEquipmentTypeOptions = useMemo(() => {
     const types = Array.from(new Set((mechanicWorkload?.rows ?? []).map(item => item.equipmentTypeLabel || item.equipmentType).filter(Boolean)));
     return types.sort((a, b) => a.localeCompare(b, 'ru'));
@@ -255,6 +263,7 @@ export default function Reports() {
     const rows = mechanicWorkload?.rows ?? [];
     return rows.filter(row => {
       if (serviceMechanic !== 'all' && row.mechanicName !== serviceMechanic) return false;
+      if (serviceScenario !== 'all' && row.serviceKind !== serviceScenario) return false;
       if (serviceStatus !== 'all' && row.repairStatus !== serviceStatus) return false;
       if (serviceEquipmentType !== 'all' && (row.equipmentTypeLabel || row.equipmentType) !== serviceEquipmentType) return false;
       if (serviceWorkCategory !== 'all' && row.workCategory !== serviceWorkCategory) return false;
@@ -264,7 +273,7 @@ export default function Reports() {
       if (serviceDateTo && created && created > serviceDateTo) return false;
       return true;
     });
-  }, [mechanicWorkload, serviceDateFrom, serviceDateTo, serviceMechanic, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName]);
+  }, [mechanicWorkload, serviceDateFrom, serviceDateTo, serviceMechanic, serviceScenario, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName]);
 
   const filteredMechanicSummary = useMemo(() => {
     const map = new Map<string, {
@@ -437,6 +446,7 @@ export default function Reports() {
 
     const previousRows = (mechanicWorkload?.rows ?? []).filter(row => {
       if (serviceMechanic !== 'all' && row.mechanicName !== serviceMechanic) return false;
+      if (serviceScenario !== 'all' && row.serviceKind !== serviceScenario) return false;
       if (serviceStatus !== 'all' && row.repairStatus !== serviceStatus) return false;
       if (serviceEquipmentType !== 'all' && (row.equipmentTypeLabel || row.equipmentType) !== serviceEquipmentType) return false;
       if (serviceWorkCategory !== 'all' && row.workCategory !== serviceWorkCategory) return false;
@@ -468,11 +478,65 @@ export default function Reports() {
     serviceDateTo,
     serviceEquipmentType,
     serviceMechanic,
+    serviceScenario,
     servicePartName,
     serviceRepairCount,
     serviceStatus,
     serviceWorkCategory,
   ]);
+
+  const filteredRepeatFailures = useMemo(() => {
+    const items = mechanicWorkload?.repeatFailures ?? [];
+    return items.filter(item => {
+      const createdDates = item.createdDates.map(date => date.slice(0, 10));
+      if (serviceMechanic !== 'all' && !item.mechanicNames.includes(serviceMechanic)) return false;
+      if (serviceScenario !== 'all' && item.serviceKind !== serviceScenario) return false;
+      if (serviceStatus !== 'all' && !item.repairStatuses.includes(serviceStatus)) return false;
+      if (serviceEquipmentType !== 'all' && (item.equipmentTypeLabel || item.equipmentType) !== serviceEquipmentType) return false;
+      if (serviceWorkCategory !== 'all' && !item.workCategories.includes(serviceWorkCategory)) return false;
+      if (servicePartName !== 'all' && !item.partNames.includes(servicePartName)) return false;
+      if (serviceDateFrom && serviceDateTo && !createdDates.some(date => date >= serviceDateFrom && date <= serviceDateTo)) return false;
+      if (serviceDateFrom && !serviceDateTo && !createdDates.some(date => date >= serviceDateFrom)) return false;
+      if (serviceDateTo && !serviceDateFrom && !createdDates.some(date => date <= serviceDateTo)) return false;
+      return true;
+    });
+  }, [
+    mechanicWorkload,
+    serviceDateFrom,
+    serviceDateTo,
+    serviceEquipmentType,
+    serviceMechanic,
+    serviceScenario,
+    servicePartName,
+    serviceStatus,
+    serviceWorkCategory,
+  ]);
+
+  const serviceScenarioSummary = useMemo(() => {
+    const map = new Map<string, { scenario: string; repairIds: Set<string>; totalNormHours: number; totalPartsCost: number }>();
+    for (const row of filteredMechanicRows) {
+      if (!map.has(row.serviceKind)) {
+        map.set(row.serviceKind, {
+          scenario: row.serviceKind,
+          repairIds: new Set(),
+          totalNormHours: 0,
+          totalPartsCost: 0,
+        });
+      }
+      const item = map.get(row.serviceKind)!;
+      item.repairIds.add(row.repairId);
+      item.totalNormHours += row.totalNormHours;
+      item.totalPartsCost += row.partsCost;
+    }
+    return [...map.values()]
+      .map(item => ({
+        scenario: item.scenario,
+        repairsCount: item.repairIds.size,
+        totalNormHours: Number(item.totalNormHours.toFixed(2)),
+        totalPartsCost: Number(item.totalPartsCost.toFixed(2)),
+      }))
+      .sort((a, b) => b.repairsCount - a.repairsCount || b.totalNormHours - a.totalNormHours);
+  }, [filteredMechanicRows]);
 
   const frequentRepairAlerts = useMemo(() => {
     return equipmentServiceSummary
@@ -566,11 +630,12 @@ export default function Reports() {
     const preset: ServiceReportPreset = {
       id: `preset-${Date.now()}`,
       name: name.trim(),
-      filters: {
-        serviceDateFrom,
-        serviceDateTo,
-        serviceMechanic,
-        serviceStatus,
+        filters: {
+          serviceDateFrom,
+          serviceDateTo,
+          serviceMechanic,
+          serviceScenario,
+          serviceStatus,
         serviceEquipmentType,
         serviceWorkCategory,
         servicePartName,
@@ -578,7 +643,7 @@ export default function Reports() {
     };
     persistPresets([...servicePresets, preset]);
     setServicePresetId(preset.id);
-  }, [persistPresets, serviceDateFrom, serviceDateTo, serviceMechanic, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName, servicePresets]);
+  }, [persistPresets, serviceDateFrom, serviceDateTo, serviceMechanic, serviceScenario, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName, servicePresets]);
 
   const applyServicePreset = useCallback((presetId: string) => {
     setServicePresetId(presetId);
@@ -588,6 +653,7 @@ export default function Reports() {
     setServiceDateFrom(preset.filters.serviceDateFrom);
     setServiceDateTo(preset.filters.serviceDateTo);
     setServiceMechanic(preset.filters.serviceMechanic);
+    setServiceScenario(preset.filters.serviceScenario || 'all');
     setServiceStatus(preset.filters.serviceStatus);
     setServiceEquipmentType(preset.filters.serviceEquipmentType);
     setServiceWorkCategory(preset.filters.serviceWorkCategory);
@@ -603,6 +669,7 @@ export default function Reports() {
   const exportServiceCsv = useCallback(() => {
     const header = [
       'Механик',
+      'Сценарий',
       'Статус заявки',
       'Дата',
       'Заявка',
@@ -622,6 +689,7 @@ export default function Reports() {
       header.map(escapeCsv).join(','),
       ...filteredMechanicRows.map(row => [
         row.mechanicName,
+        getServiceScenarioLabel(row.serviceKind),
         formatServiceStatus(row.repairStatus),
         row.createdAt ? row.createdAt.slice(0, 10) : '',
         row.repairId,
@@ -670,6 +738,7 @@ export default function Reports() {
     const rowsXml = filteredMechanicRows.map(row => `
       <Row>
         <Cell><Data ss:Type="String">${escapeXml(row.mechanicName)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(getServiceScenarioLabel(row.serviceKind))}</Data></Cell>
         <Cell><Data ss:Type="String">${escapeXml(formatServiceStatus(row.repairStatus))}</Data></Cell>
         <Cell><Data ss:Type="String">${escapeXml(row.createdAt ? row.createdAt.slice(0, 10) : '')}</Data></Cell>
         <Cell><Data ss:Type="String">${escapeXml(row.repairId)}</Data></Cell>
@@ -708,6 +777,7 @@ export default function Reports() {
           <Table>
             <Row>
               <Cell><Data ss:Type="String">Механик</Data></Cell>
+              <Cell><Data ss:Type="String">Сценарий</Data></Cell>
               <Cell><Data ss:Type="String">Статус заявки</Data></Cell>
               <Cell><Data ss:Type="String">Дата</Data></Cell>
               <Cell><Data ss:Type="String">Заявка</Data></Cell>
@@ -746,7 +816,7 @@ export default function Reports() {
     downloadFile(xls, `service-report-${new Date().toISOString().slice(0, 10)}.xls`, 'application/vnd.ms-excel');
   }, [equipmentServiceSummary, filteredMechanicRows, filteredMechanicSummary]);
 
-const exportFinanceXls = useCallback(() => {
+  const exportFinanceXls = useCallback(() => {
     const clientRowsXml = financeClientSnapshots
       .filter(item => item.currentDebt > 0)
       .map(item => `
@@ -1581,7 +1651,7 @@ const exportFinanceXls = useCallback(() => {
               <CardDescription>Ограничьте отчёт по периоду, механику, статусу заявки и типу техники</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-3 md:grid-cols-8">
+              <div className="grid gap-3 md:grid-cols-9">
                 <div>
                   <p className="mb-1 text-xs text-gray-500">Дата с</p>
                   <input
@@ -1610,6 +1680,19 @@ const exportFinanceXls = useCallback(() => {
                     <option value="all">Все механики</option>
                     {serviceMechanicOptions.map(name => (
                       <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs text-gray-500">Сценарий</p>
+                  <select
+                    value={serviceScenario}
+                    onChange={e => setServiceScenario(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+                  >
+                    <option value="all">Все сценарии</option>
+                    {serviceScenarioOptions.map(scenario => (
+                      <option key={scenario} value={scenario}>{getServiceScenarioLabel(scenario)}</option>
                     ))}
                   </select>
                 </div>
@@ -1697,6 +1780,7 @@ const exportFinanceXls = useCallback(() => {
                         setServiceDateFrom('');
                         setServiceDateTo('');
                         setServiceMechanic('all');
+                        setServiceScenario('all');
                         setServiceStatus('all');
                         setServiceEquipmentType('all');
                         setServiceWorkCategory('all');
@@ -1719,7 +1803,7 @@ const exportFinanceXls = useCallback(() => {
                 <CardTitle className="text-3xl">{filteredMechanicSummary.length}</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Сотрудники с выполненными работами по новым fact-данным</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Сотрудники с заявками и выполненными работами по текущему сценарию</p>
               </CardContent>
             </Card>
             <Card>
@@ -1746,7 +1830,7 @@ const exportFinanceXls = useCallback(() => {
             </Card>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-5">
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Ремонтов в срезе</CardDescription>
@@ -1781,6 +1865,15 @@ const exportFinanceXls = useCallback(() => {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Средняя сумма запчастей по snapshot-ценам</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Повторные поломки</CardDescription>
+                <CardTitle className="text-3xl">{filteredRepeatFailures.length}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Техника с повторяющейся причиной ремонта</p>
               </CardContent>
             </Card>
           </div>
@@ -1820,6 +1913,35 @@ const exportFinanceXls = useCallback(() => {
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Сценарии сервиса</CardTitle>
+                <CardDescription>Распределение заявок, нормо-часов и запчастей по сценариям</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {serviceScenarioSummary.length > 0 ? (
+                  <div className="space-y-3">
+                    {serviceScenarioSummary.map(item => (
+                      <div key={item.scenario} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{getServiceScenarioLabel(item.scenario)}</p>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{item.repairsCount} заявок в текущем срезе</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{item.totalNormHours.toFixed(1)} н/ч</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{formatCurrency(item.totalPartsCost)} запчасти</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyChart message="Нет сервисных сценариев для текущего фильтра." />
+                )}
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>Динамика сервиса</CardTitle>
@@ -1916,6 +2038,50 @@ const exportFinanceXls = useCallback(() => {
 
           <Card>
             <CardHeader>
+              <CardTitle>Повторные поломки</CardTitle>
+              <CardDescription>Повторяющиеся причины ремонта по одной и той же технике</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {filteredRepeatFailures.length > 0 ? (
+                <div className="space-y-3">
+                  {filteredRepeatFailures.slice(0, 12).map(item => (
+                    <div key={`${item.equipmentId}-${item.reason}`} className="rounded-lg border border-rose-200 bg-rose-50 p-4 dark:border-rose-700/40 dark:bg-rose-900/20">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          {item.equipmentId ? (
+                            <Link to={`/equipment/${item.equipmentId}`} className="text-sm font-semibold text-rose-700 hover:underline dark:text-rose-300">
+                              {item.equipmentLabel}
+                            </Link>
+                          ) : (
+                            <p className="text-sm font-semibold text-rose-700 dark:text-rose-300">{item.equipmentLabel}</p>
+                          )}
+                          <p className="mt-1 text-xs text-rose-700/80 dark:text-rose-300/80">
+                            {item.equipmentTypeLabel || item.equipmentType} · INV {item.inventoryNumber} · SN {item.serialNumber}
+                          </p>
+                          <p className="mt-2 text-sm text-gray-900 dark:text-white">{item.reason}</p>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            {getServiceScenarioLabel(item.serviceKind)} · Механики: {item.mechanicNames.join(', ') || '—'}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-lg font-bold text-rose-700 dark:text-rose-300">{item.repairsCount} повторов</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{item.totalNormHours.toFixed(1)} н/ч · {formatCurrency(item.totalPartsCost)}</p>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            {item.firstCreatedAt?.slice(0, 10)} → {item.lastCreatedAt?.slice(0, 10)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyChart message="По текущим фильтрам повторных поломок не найдено." />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Детализация работ</CardTitle>
               <CardDescription>Каждая строка ремонта с техникой, механиком и нормо-часами</CardDescription>
             </CardHeader>
@@ -1926,6 +2092,7 @@ const exportFinanceXls = useCallback(() => {
                     <thead>
                       <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
                         <th className="px-3 py-2 font-medium">Механик</th>
+                        <th className="px-3 py-2 font-medium">Сценарий</th>
                         <th className="px-3 py-2 font-medium">Заявка</th>
                         <th className="px-3 py-2 font-medium">Техника</th>
                         <th className="px-3 py-2 font-medium">Работа</th>
@@ -1938,6 +2105,7 @@ const exportFinanceXls = useCallback(() => {
                       {filteredMechanicRows.map(row => (
                         <tr key={`${row.repairId}-${row.workName}-${row.createdAt}`} className="border-b border-gray-100 dark:border-gray-800">
                           <td className="px-3 py-2">{row.mechanicName}</td>
+                          <td className="px-3 py-2">{getServiceScenarioLabel(row.serviceKind)}</td>
                           <td className="px-3 py-2 font-mono text-xs">
                             <Link to={`/service/${row.repairId}`} className="text-[--color-primary] hover:underline">
                               {row.repairId}

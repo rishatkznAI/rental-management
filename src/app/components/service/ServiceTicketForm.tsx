@@ -14,6 +14,11 @@ import { getEquipmentTypeLabel } from '../../lib/equipmentClassification';
 import { appendAuditHistory, createAuditEntry } from '../../lib/entity-history';
 import { equipmentService } from '../../services/equipment.service';
 import { rentalsService } from '../../services/rentals.service';
+import {
+  getServiceScenarioLabel,
+  SERVICE_SCENARIO_DESCRIPTION_HINTS,
+  SERVICE_SCENARIO_REASON_DEFAULTS,
+} from '../../lib/serviceScenarios';
 
 type ServiceTicketFormProps = {
   initialEquipmentId?: string;
@@ -39,6 +44,7 @@ export function ServiceTicketForm({
 
   const [formData, setFormData] = useState({
     equipmentId: initialEquipmentId ?? '',
+    serviceKind: 'repair' as const,
     inventoryNumber: '',
     serialNumber: '',
     location: '',
@@ -50,6 +56,8 @@ export function ServiceTicketForm({
   });
 
   const selectedEquipment = equipmentList.find(e => e.id === formData.equipmentId);
+  const isRepairScenario = formData.serviceKind === 'repair';
+  const scenarioLabel = getServiceScenarioLabel(formData.serviceKind);
 
   useEffect(() => {
     if (!initialEquipmentId) return;
@@ -131,6 +139,22 @@ export function ServiceTicketForm({
     }));
   };
 
+  const handleScenarioChange = (nextScenario: typeof formData.serviceKind) => {
+    setFormData(prev => {
+      const shouldReplaceReason =
+        !prev.reason.trim()
+        || prev.reason.trim() === SERVICE_SCENARIO_REASON_DEFAULTS[prev.serviceKind];
+      return {
+        ...prev,
+        serviceKind: nextScenario,
+        priority: nextScenario === 'repair' ? prev.priority : 'low',
+        reason: shouldReplaceReason
+          ? SERVICE_SCENARIO_REASON_DEFAULTS[nextScenario]
+          : prev.reason,
+      };
+    });
+  };
+
   const removePhoto = (idx: number) => {
     setPhotos(prev => prev.filter((_, i) => i !== idx));
   };
@@ -151,7 +175,7 @@ export function ServiceTicketForm({
     }
 
     if (!formData.description && !formData.reason) {
-      setSubmitError('Заполните описание проблемы');
+      setSubmitError(isRepairScenario ? 'Заполните описание проблемы' : 'Заполните описание выполненного обслуживания');
       return;
     }
 
@@ -163,13 +187,14 @@ export function ServiceTicketForm({
 
     const newTicket: Omit<ServiceTicket, 'id'> = {
       equipmentId: formData.equipmentId,
+      serviceKind: formData.serviceKind,
       equipment: equipmentLabel,
       inventoryNumber: eq.inventoryNumber,
       serialNumber: eq.serialNumber,
       equipmentType: eq.type,
       equipmentTypeLabel: getEquipmentTypeLabel(eq),
       location: formData.location,
-      reason: formData.reason || formData.description,
+      reason: formData.reason || SERVICE_SCENARIO_REASON_DEFAULTS[formData.serviceKind] || formData.description,
       description: formData.description,
       priority: (formData.priority || 'medium') as ServiceTicket['priority'],
       sla: formData.priority === 'critical' ? '4 ч' : formData.priority === 'high' ? '8 ч' : '24 ч',
@@ -369,10 +394,27 @@ export function ServiceTicketForm({
 
       <Card>
         <CardHeader>
-          <CardTitle>Проблема</CardTitle>
-          <CardDescription>Укажите срочность и опишите неисправность</CardDescription>
+          <CardTitle>{isRepairScenario ? 'Ремонт' : scenarioLabel}</CardTitle>
+          <CardDescription>
+            {isRepairScenario ? 'Укажите срочность и опишите неисправность' : `Зафиксируйте сценарий ${scenarioLabel} и выполненные работы`}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Сценарий сервисной заявки
+            </label>
+            <select
+              value={formData.serviceKind}
+              onChange={(e) => handleScenarioChange(e.target.value as typeof formData.serviceKind)}
+              className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-[--color-primary] focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+            >
+              <option value="repair">Ремонт</option>
+              <option value="to">ТО</option>
+              <option value="chto">ЧТО</option>
+              <option value="pto">ПТО</option>
+            </select>
+          </div>
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
               Приоритет заявки
@@ -380,6 +422,7 @@ export function ServiceTicketForm({
             <select
               value={formData.priority}
               onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+              disabled={!isRepairScenario}
               className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-[--color-primary] focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
             >
               <option value="low">Низкий</option>
@@ -390,23 +433,23 @@ export function ServiceTicketForm({
           </div>
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Что не работает
+              {isRepairScenario ? 'Что не работает' : 'Вид обслуживания'}
             </label>
             <Input
-              placeholder="Например: Не реагирует на команды, не поднимается, ошибка на дисплее"
+              placeholder={isRepairScenario ? 'Например: Не реагирует на команды, не поднимается, ошибка на дисплее' : `Например: ${scenarioLabel}`}
               value={formData.reason}
               onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-              required
+              required={isRepairScenario}
             />
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Описание неисправности
+              {isRepairScenario ? 'Описание неисправности' : 'Описание выполненных работ'}
             </label>
             <textarea
               className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-[--color-primary] focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
               rows={3}
-              placeholder="Что произошло, когда появилась неисправность, есть ли ошибка на панели, работает ли техника частично..."
+              placeholder={SERVICE_SCENARIO_DESCRIPTION_HINTS[formData.serviceKind]}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             />

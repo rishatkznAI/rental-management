@@ -9,7 +9,7 @@ import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
   DollarSign, TrendingUp, Clock, Plus, Bot, User, Calendar,
   CheckCircle, AlertTriangle, MapPin, ChevronRight, MessageSquare,
-  Upload, Trash2, X,
+  Upload, Trash2, X, PenLine, RotateCcw,
 } from 'lucide-react';
 import {
   EQUIPMENT_STORAGE_KEY,
@@ -104,6 +104,18 @@ const PHOTO_CATEGORY_LABELS = {
   damage_photo: 'Повреждения',
 } as const;
 
+const HANDOFF_REQUIRED_PHOTO_CATEGORIES: EquipmentOperationPhotoCategory[] = [
+  'front',
+  'rear',
+  'side_1',
+  'side_2',
+  'plate',
+  'hours_photo',
+  'control_panel',
+  'basket',
+  'engine_bay',
+];
+
 function createEmptyHandoffChecklist() {
   return {
     exterior: false,
@@ -115,8 +127,45 @@ function createEmptyHandoffChecklist() {
   };
 }
 
+function createEmptyPhotoCategories(includeDamage = false): Partial<Record<EquipmentOperationPhotoCategory, string[]>> {
+  return {
+    front: [],
+    rear: [],
+    side_1: [],
+    side_2: [],
+    plate: [],
+    hours_photo: [],
+    control_panel: [],
+    basket: [],
+    engine_bay: [],
+    ...(includeDamage ? { damage_photo: [] } : {}),
+  };
+}
+
 function isChecklistComplete(checklist: ReturnType<typeof createEmptyHandoffChecklist>) {
   return Object.values(checklist).every(Boolean);
+}
+
+function isPhotoCategoryComplete(
+  categories: Partial<Record<EquipmentOperationPhotoCategory, string[]>>,
+  eventType: ShippingEventType,
+) {
+  const required = eventType === 'receiving'
+    ? [...HANDOFF_REQUIRED_PHOTO_CATEGORIES, 'damage_photo' as const]
+    : HANDOFF_REQUIRED_PHOTO_CATEGORIES;
+  return required.every(key => (categories[key] ?? []).length > 0);
+}
+
+function getMissingPhotoCategoryLabels(
+  categories: Partial<Record<EquipmentOperationPhotoCategory, string[]>>,
+  eventType: ShippingEventType,
+) {
+  const required = eventType === 'receiving'
+    ? [...HANDOFF_REQUIRED_PHOTO_CATEGORIES, 'damage_photo' as const]
+    : HANDOFF_REQUIRED_PHOTO_CATEGORIES;
+  return required
+    .filter(key => (categories[key] ?? []).length === 0)
+    .map(key => PHOTO_CATEGORY_LABELS[key]);
 }
 
 function escapeHtml(value: string) {
@@ -210,6 +259,14 @@ function printHandoffAct(event: ShippingPhoto, equipment: Equipment) {
         ${event.comment ? `<section style="margin-top:16px;"><h2 style="font-size:16px;margin:0 0 8px;">Комментарий</h2><div class="card">${escapeHtml(event.comment)}</div></section>` : ''}
         ${event.damageDescription ? `<section style="margin-top:16px;"><h2 style="font-size:16px;margin:0 0 8px;">Описание повреждений</h2><div class="card">${escapeHtml(event.damageDescription)}</div></section>` : ''}
         ${photoSections}
+        <section style="margin-top:20px;">
+          <h2 style="font-size:16px;margin:0 0 8px;">Подпись</h2>
+          <div class="card">
+            <div><strong>Подписал:</strong> ${escapeHtml(event.signedBy || event.uploadedBy)}</div>
+            <div><strong>Дата подписи:</strong> ${escapeHtml(event.signedAt ? formatDateTime(event.signedAt) : formatDate(event.date))}</div>
+            ${event.signatureDataUrl ? `<div style="margin-top:12px;"><img src="${event.signatureDataUrl}" style="max-width:240px;max-height:100px;object-fit:contain;border-bottom:1px solid #9ca3af;" /></div>` : '<div style="margin-top:12px;color:#6b7280;">Подпись не приложена</div>'}
+          </div>
+        </section>
         <script>
           window.onload = () => {
             setTimeout(() => window.print(), 200);
@@ -385,10 +442,16 @@ export default function EquipmentDetail() {
   const [showUploadPhotoForm, setShowUploadPhotoForm] = useState(false);
   const [uploadEventType, setUploadEventType] = useState<'shipping' | 'receiving'>('shipping');
   const [uploadComment, setUploadComment] = useState('');
-  const [uploadPending, setUploadPending] = useState<string[]>([]);  // base64 previews
+  const [uploadPhotoCategories, setUploadPhotoCategories] = useState<Partial<Record<EquipmentOperationPhotoCategory, string[]>>>(createEmptyPhotoCategories(false));
   const [uploadChecklist, setUploadChecklist] = useState(createEmptyHandoffChecklist);
+  const [uploadHoursValue, setUploadHoursValue] = useState('');
+  const [uploadDamageDescription, setUploadDamageDescription] = useState('');
+  const [uploadSignatureDataUrl, setUploadSignatureDataUrl] = useState('');
+  const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const mainPhotoInputRef = React.useRef<HTMLInputElement>(null);
-  const shippingPhotoInputRef = React.useRef<HTMLInputElement>(null);
+  const shippingPhotoInputRefs = React.useRef<Partial<Record<EquipmentOperationPhotoCategory, HTMLInputElement | null>>>({});
+  const signatureCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const signatureDrawingRef = React.useRef(false);
 
   // Compress image to base64 (max 800px, 70% quality)
   const compressToBase64 = (file: File): Promise<string> =>
@@ -434,14 +497,18 @@ export default function EquipmentDetail() {
   };
 
   const handleShippingPhotoFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canManageAcceptance) {
+    const category = e.target.dataset.category as EquipmentOperationPhotoCategory | undefined;
+    if (!canManageAcceptance || !category) {
       e.target.value = '';
       return;
     }
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
     const results = await Promise.all(files.map(f => compressToBase64(f)));
-    setUploadPending(prev => [...prev, ...results]);
+    setUploadPhotoCategories(prev => ({
+      ...prev,
+      [category]: [...(prev[category] ?? []), ...results],
+    }));
     e.target.value = '';
   };
 
@@ -449,28 +516,109 @@ export default function EquipmentDetail() {
 
   const openReceptionForm = (type: 'shipping' | 'receiving') => {
     setUploadEventType(type);
-    setUploadPending([]);
+    setUploadPhotoCategories(createEmptyPhotoCategories(type === 'receiving'));
     setUploadComment('');
     setUploadChecklist(createEmptyHandoffChecklist());
+    setUploadHoursValue(String(equipment?.hours ?? ''));
+    setUploadDamageDescription('');
+    setUploadSignatureDataUrl('');
     setShowUploadPhotoForm(true);
   };
 
+  const clearSignatureCanvas = React.useCallback(() => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    setUploadSignatureDataUrl('');
+  }, []);
+
+  React.useEffect(() => {
+    if (!signatureModalOpen) return;
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    canvas.width = 520;
+    canvas.height = 160;
+    clearSignatureCanvas();
+  }, [signatureModalOpen, clearSignatureCanvas]);
+
+  const getSignaturePoint = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((event.clientY - rect.top) / rect.height) * canvas.height,
+    };
+  };
+
+  const handleSignaturePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = signatureCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const point = getSignaturePoint(event);
+    signatureDrawingRef.current = true;
+    ctx.beginPath();
+    ctx.moveTo(point.x, point.y);
+  };
+
+  const handleSignaturePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!signatureDrawingRef.current) return;
+    const canvas = signatureCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const point = getSignaturePoint(event);
+    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
+  };
+
+  const handleSignaturePointerUp = () => {
+    if (!signatureDrawingRef.current) return;
+    signatureDrawingRef.current = false;
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    setUploadSignatureDataUrl(canvas.toDataURL('image/png'));
+  };
+
   const handleShippingPhotoSave = async () => {
-    if (!canManageAcceptance || !uploadPending.length || !equipment || !isChecklistComplete(uploadChecklist)) return;
+    const parsedHours = Number(uploadHoursValue);
+    const hasRequiredPhotos = isPhotoCategoryComplete(uploadPhotoCategories, uploadEventType);
+    if (
+      !canManageAcceptance ||
+      !equipment ||
+      !isChecklistComplete(uploadChecklist) ||
+      !hasRequiredPhotos ||
+      !Number.isFinite(parsedHours) ||
+      parsedHours < 0 ||
+      !uploadSignatureDataUrl ||
+      (uploadEventType === 'receiving' && !uploadDamageDescription.trim())
+    ) return;
     const authorName = user?.name || 'Сотрудник';
     const todayStr = new Date().toISOString().split('T')[0];
     const nowIso = new Date().toISOString();
+    const flatPhotos = Object.values(uploadPhotoCategories).flat();
     const newEvent: ShippingPhoto = {
       id: `sp-${Date.now()}`,
       equipmentId: equipment.id,
       date: todayStr,
       type: uploadEventType,
       uploadedBy: authorName,
-      photos: uploadPending,
+      photos: flatPhotos,
       comment: uploadComment || undefined,
       rentalId: activeOrCreatedRental?.id,
       source: 'manual',
       checklist: uploadChecklist,
+      photoCategories: uploadPhotoCategories,
+      hoursValue: parsedHours,
+      damageDescription: uploadEventType === 'receiving' ? uploadDamageDescription.trim() : undefined,
+      signedBy: authorName,
+      signedAt: nowIso,
+      signatureDataUrl: uploadSignatureDataUrl,
     };
 
     const updatedPhotos = [...allShippingPhotos, newEvent];
@@ -485,10 +633,11 @@ export default function EquipmentDetail() {
             status: 'rented' as const,
             currentClient: activeOrCreatedRental?.client || eq.currentClient,
             returnDate: activeOrCreatedRental?.endDate || eq.returnDate,
+            hours: parsedHours,
           },
           createAuditEntry(
             authorName,
-            `Техника отгружена в аренду${activeOrCreatedRental?.client ? ` клиенту ${activeOrCreatedRental.client}` : ''}. Добавлен фотоотчёт отправки (${uploadPending.length} фото)`,
+            `Техника отгружена в аренду${activeOrCreatedRental?.client ? ` клиенту ${activeOrCreatedRental.client}` : ''}. Добавлен акт отправки (${flatPhotos.length} фото, ${parsedHours} м/ч)`,
           ),
         );
       }
@@ -499,10 +648,11 @@ export default function EquipmentDetail() {
           status: 'in_service' as const,
           currentClient: undefined,
           returnDate: undefined,
+          hours: parsedHours,
         },
         createAuditEntry(
           authorName,
-          `Техника принята с аренды и переведена в сервис. Добавлен фотоотчёт приёмки (${uploadPending.length} фото)`,
+          `Техника принята с аренды и переведена в сервис. Добавлен акт приёмки (${flatPhotos.length} фото, ${parsedHours} м/ч${uploadDamageDescription.trim() ? ', повреждения зафиксированы' : ''})`,
         ),
       );
     });
@@ -553,8 +703,8 @@ export default function EquipmentDetail() {
           location: equipment.location,
           reason: 'Приёмка с аренды',
           description: uploadComment?.trim()
-            ? `Техника принята с аренды. Комментарий механика: ${uploadComment.trim()}`
-            : 'Техника принята с аренды, требуется осмотр и дефектовка после возврата.',
+            ? `Техника принята с аренды. Комментарий механика: ${uploadComment.trim()}${uploadDamageDescription.trim() ? ` Повреждения: ${uploadDamageDescription.trim()}` : ''}`
+            : `Техника принята с аренды, требуется осмотр и дефектовка после возврата.${uploadDamageDescription.trim() ? ` Повреждения: ${uploadDamageDescription.trim()}` : ''}`,
           priority: 'medium',
           sla: '24 ч',
           assignedTo: undefined,
@@ -582,7 +732,7 @@ export default function EquipmentDetail() {
           ],
           parts: [],
           createdAt: nowIso,
-          photos: uploadPending,
+          photos: flatPhotos,
         });
         await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all });
         await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.byEquipment(equipment.id) });
@@ -602,9 +752,12 @@ export default function EquipmentDetail() {
       }
     }
 
-    setUploadPending([]);
+    setUploadPhotoCategories(createEmptyPhotoCategories(uploadEventType === 'receiving'));
     setUploadComment('');
     setUploadChecklist(createEmptyHandoffChecklist());
+    setUploadHoursValue('');
+    setUploadDamageDescription('');
+    setUploadSignatureDataUrl('');
     setShowUploadPhotoForm(false);
   };
 
@@ -1616,24 +1769,29 @@ export default function EquipmentDetail() {
 
         {/* ══ PHOTOS TAB ══ */}
         <TabsContent value="photos">
-          {/* Hidden file input for shipping photos */}
-          <input
-            ref={shippingPhotoInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={handleShippingPhotoFilePick}
-          />
+          {Object.keys(PHOTO_CATEGORY_LABELS).map(key => (
+            <input
+              key={key}
+              ref={node => {
+                shippingPhotoInputRefs.current[key as EquipmentOperationPhotoCategory] = node;
+              }}
+              type="file"
+              accept="image/*"
+              multiple
+              data-category={key}
+              className="hidden"
+              onChange={handleShippingPhotoFilePick}
+            />
+          ))}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <CardTitle>Фото отгрузок и приёмки</CardTitle>
                   <CardDescription>{shippingPhotos.length} событий</CardDescription>
                 </div>
                 {canManageAcceptance && (
-                  <div className="flex items-center gap-2">
+                  <div className="hidden sm:flex items-center gap-2">
                     <Button size="sm" variant="secondary" onClick={() => openReceptionForm('shipping')}>
                       <Upload className="h-4 w-4" />
                       Отправить в аренду
@@ -1651,6 +1809,24 @@ export default function EquipmentDetail() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {canManageAcceptance && (
+                <div className="grid gap-2 sm:hidden">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => openReceptionForm('shipping')}>
+                      <Upload className="h-4 w-4" />
+                      Отгрузка
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => openReceptionForm('receiving')}>
+                      <Camera className="h-4 w-4" />
+                      Приёмка
+                    </Button>
+                  </div>
+                  <Button size="sm" variant="secondary" onClick={() => setShowUploadPhotoForm(v => !v)}>
+                    <Plus className="h-4 w-4" />
+                    Загрузить фото/акт
+                  </Button>
+                </div>
+              )}
               {(latestShippingEvent || latestReceivingEvent) && (
                 <div className="grid gap-4 lg:grid-cols-2">
                   {[latestShippingEvent, latestReceivingEvent].filter(Boolean).map(event => {
@@ -1740,7 +1916,15 @@ export default function EquipmentDetail() {
                       {uploadEventType === 'shipping' ? 'Отправка техники в аренду' : 'Приёмка техники с аренды'}
                     </span>
                     <button
-                      onClick={() => { setShowUploadPhotoForm(false); setUploadPending([]); setUploadComment(''); setUploadChecklist(createEmptyHandoffChecklist()); }}
+                      onClick={() => {
+                        setShowUploadPhotoForm(false);
+                        setUploadPhotoCategories(createEmptyPhotoCategories(uploadEventType === 'receiving'));
+                        setUploadComment('');
+                        setUploadChecklist(createEmptyHandoffChecklist());
+                        setUploadHoursValue('');
+                        setUploadDamageDescription('');
+                        setUploadSignatureDataUrl('');
+                      }}
                       className="rounded p-1 text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-800"
                     >
                       <X className="h-4 w-4" />
@@ -1752,7 +1936,12 @@ export default function EquipmentDetail() {
                     {(['shipping', 'receiving'] as const).map(t => (
                       <button
                         key={t}
-                        onClick={() => { setUploadEventType(t); setUploadChecklist(createEmptyHandoffChecklist()); }}
+                        onClick={() => {
+                          setUploadEventType(t);
+                          setUploadChecklist(createEmptyHandoffChecklist());
+                          setUploadPhotoCategories(createEmptyPhotoCategories(t === 'receiving'));
+                          setUploadDamageDescription('');
+                        }}
                         className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                           uploadEventType === t
                             ? 'bg-blue-600 text-white'
@@ -1776,6 +1965,43 @@ export default function EquipmentDetail() {
                     </div>
                   )}
 
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Моточасы
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        placeholder="Введите моточасы"
+                        value={uploadHoursValue}
+                        onChange={e => setUploadHoursValue(e.target.value)}
+                        className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Подпись механика
+                      </label>
+                      <div className="flex gap-2">
+                        <Button type="button" size="sm" variant="secondary" onClick={() => setSignatureModalOpen(true)}>
+                          <PenLine className="h-4 w-4" />
+                          {uploadSignatureDataUrl ? 'Обновить подпись' : 'Добавить подпись'}
+                        </Button>
+                        {uploadSignatureDataUrl && (
+                          <Button type="button" size="sm" variant="secondary" onClick={() => setUploadSignatureDataUrl('')}>
+                            <RotateCcw className="h-4 w-4" />
+                            Сбросить
+                          </Button>
+                        )}
+                      </div>
+                      {!uploadSignatureDataUrl && (
+                        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Подпись обязательна для акта.</p>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Comment */}
                   <input
                     type="text"
@@ -1784,6 +2010,16 @@ export default function EquipmentDetail() {
                     onChange={e => setUploadComment(e.target.value)}
                     className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+
+                  {uploadEventType === 'receiving' && (
+                    <textarea
+                      placeholder="Опишите выявленные повреждения"
+                      value={uploadDamageDescription}
+                      onChange={e => setUploadDamageDescription(e.target.value)}
+                      rows={3}
+                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  )}
 
                   {/* Checklist */}
                   <div className="rounded-md border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/30">
@@ -1821,44 +2057,70 @@ export default function EquipmentDetail() {
                     )}
                   </div>
 
-                  {/* File picker */}
-                  <div>
-                    <button
-                      onClick={() => shippingPhotoInputRef.current?.click()}
-                      className="flex items-center gap-2 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-3 text-sm text-gray-500 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:border-blue-500 dark:hover:text-blue-400 transition-colors w-full justify-center"
-                    >
-                      <Camera className="h-4 w-4" />
-                      Выбрать фотографии (можно несколько)
-                    </button>
-                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                      Фото сжимаются до 800px и хранятся в браузере. Рекомендуется &lt;5 фото за раз.
-                    </p>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {Object.entries(PHOTO_CATEGORY_LABELS)
+                      .filter(([key]) => uploadEventType === 'receiving' || key !== 'damage_photo')
+                      .map(([key, label]) => {
+                        const categoryKey = key as EquipmentOperationPhotoCategory;
+                        const photos = uploadPhotoCategories[categoryKey] ?? [];
+                        return (
+                          <div key={key} className="rounded-md border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/30">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div>
+                                <div className="text-sm font-medium text-gray-900 dark:text-white">{label}</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400">{photos.length > 0 ? `${photos.length} фото` : 'Фото не добавлены'}</div>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => shippingPhotoInputRefs.current[categoryKey]?.click()}
+                              >
+                                <Camera className="h-4 w-4" />
+                                Добавить
+                              </Button>
+                            </div>
+                            {photos.length > 0 && (
+                              <div className="flex gap-2 overflow-x-auto pb-1">
+                                {photos.map((src, i) => (
+                                  <div key={`${key}-${i}`} className="relative shrink-0">
+                                    <img src={src} alt={`${label} ${i + 1}`} className="h-20 w-28 rounded-md border border-gray-200 dark:border-gray-700 object-cover" />
+                                    <button
+                                      type="button"
+                                      onClick={() => setUploadPhotoCategories(prev => ({
+                                        ...prev,
+                                        [categoryKey]: (prev[categoryKey] ?? []).filter((_, idx) => idx !== i),
+                                      }))}
+                                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                   </div>
 
-                  {/* Pending previews */}
-                  {uploadPending.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-gray-600 dark:text-gray-400">Выбрано: {uploadPending.length} фото</span>
-                        <button onClick={() => setUploadPending([])} className="text-xs text-red-500 hover:underline">Очистить</button>
-                      </div>
-                      <div className="flex gap-2 overflow-x-auto pb-1">
-                        {uploadPending.map((src, i) => (
-                          <div key={i} className="relative shrink-0">
-                            <img src={src} alt={`Preview ${i + 1}`} className="h-20 w-28 rounded-md border border-gray-200 dark:border-gray-700 object-cover" />
-                            <button
-                              onClick={() => setUploadPending(prev => prev.filter((_, idx) => idx !== i))}
-                              className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
+                  {getMissingPhotoCategoryLabels(uploadPhotoCategories, uploadEventType).length > 0 && (
+                    <div className="rounded-md border border-amber-200 bg-white/70 px-3 py-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                      Для акта не хватает фото: {getMissingPhotoCategoryLabels(uploadPhotoCategories, uploadEventType).join(', ')}.
                     </div>
                   )}
 
-                  <Button size="sm" onClick={handleShippingPhotoSave} disabled={!uploadPending.length || !isChecklistComplete(uploadChecklist)}>
+                  <Button
+                    size="sm"
+                    onClick={handleShippingPhotoSave}
+                    disabled={
+                      !isChecklistComplete(uploadChecklist)
+                      || !isPhotoCategoryComplete(uploadPhotoCategories, uploadEventType)
+                      || !uploadSignatureDataUrl
+                      || !uploadHoursValue
+                      || (uploadEventType === 'receiving' && !uploadDamageDescription.trim())
+                    }
+                  >
                     <Upload className="h-4 w-4" />
                     Сохранить событие
                   </Button>

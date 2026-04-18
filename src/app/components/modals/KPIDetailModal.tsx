@@ -239,9 +239,11 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                     <div key={p.id} className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
                       <div>
                         <p className="font-medium text-gray-900 dark:text-white">{p.client}</p>
-                        <p className="text-sm text-red-600">{p.invoiceNumber} · Срок: {formatDate(p.dueDate)}</p>
+                        <p className="text-sm text-red-600">
+                          {p.invoiceNumber || `Аренда ${p.rentalId}`} · Срок: {formatDate(p.dueDate || p.expectedPaymentDate || p.endDate)}
+                        </p>
                       </div>
-                      <p className="font-semibold text-red-600">{formatCurrency(p.amount)}</p>
+                      <p className="font-semibold text-red-600">{formatCurrency(p.outstanding ?? p.amount)}</p>
                     </div>
                   ))}
                 </div>
@@ -268,10 +270,10 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                       <div>
                         <p className="font-medium text-gray-900 dark:text-white">{p.client}</p>
                         <p className="text-sm text-red-600">
-                          {p.invoiceNumber} · Срок: {formatDate(p.dueDate)}
+                          {p.invoiceNumber || `Аренда ${p.rentalId}`} · Срок: {formatDate(p.dueDate || p.expectedPaymentDate || p.endDate)}
                         </p>
                       </div>
-                      <p className="font-semibold text-red-600">{formatCurrency(p.amount)}</p>
+                      <p className="font-semibold text-red-600">{formatCurrency(p.outstanding ?? p.amount)}</p>
                     </div>
                   ))}
                 </div>

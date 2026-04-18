@@ -45,6 +45,18 @@ export default function RentalNew() {
     [rawEq],
   );
   const ganttRents = useMemo(() => ganttRentals, [ganttRentals]);
+  const uniqueInventoryNumbers = useMemo(() => {
+    const counts = new Map<string, number>();
+    allEq.forEach(item => {
+      if (!item.inventoryNumber) return;
+      counts.set(item.inventoryNumber, (counts.get(item.inventoryNumber) || 0) + 1);
+    });
+    return new Set(
+      [...counts.entries()]
+        .filter(([, count]) => count === 1)
+        .map(([inventoryNumber]) => inventoryNumber),
+    );
+  }, [allEq]);
 
   useEffect(() => {
     if (!can('create', 'rentals')) navigate('/rentals', { replace: true });
@@ -72,11 +84,11 @@ export default function RentalNew() {
     const av: typeof allEq = [];
     const bz: typeof allEq = [];
     allEq.forEach(eq => {
-      if (isEquipmentBusy(eq, startDate, endDate, ganttRents)) bz.push(eq);
+      if (isEquipmentBusy(eq, startDate, endDate, ganttRents, '', uniqueInventoryNumbers.has(eq.inventoryNumber))) bz.push(eq);
       else av.push(eq);
     });
     return { availableEq: av, busyEq: bz };
-  }, [startDate, endDate, allEq, ganttRents]);
+  }, [startDate, endDate, allEq, ganttRents, uniqueInventoryNumbers]);
 
   const selectedEquipment = allEq.find(e => e.id === equipmentId);
   const selectedClient = clients.find(item => item.company === client);

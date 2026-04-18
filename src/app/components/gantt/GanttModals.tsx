@@ -50,6 +50,7 @@ function isEquipmentBusy(
   startDate: string,
   endDate: string,
   rentals: GanttRentalData[],
+  allowInventoryFallback = true,
 ): boolean {
   if (!startDate || !endDate) return false;
   const newStart = new Date(startDate).getTime();
@@ -57,7 +58,7 @@ function isEquipmentBusy(
   return rentals.some(r => {
     const matchesEquipment = r.equipmentId
       ? r.equipmentId === equipment.id
-      : r.equipmentInv === equipment.inventoryNumber;
+      : allowInventoryFallback && r.equipmentInv === equipment.inventoryNumber;
     if (!matchesEquipment) return false;
     if (r.status === 'returned' || r.status === 'closed') return false;
     const rStart = new Date(r.startDate).getTime();
@@ -448,6 +449,18 @@ export function NewRentalModal({
     () => clientFinancials.find(item => item.client === client),
     [clientFinancials, client],
   );
+  const uniqueInventoryNumbers = useMemo(() => {
+    const counts = new Map<string, number>();
+    (equipmentListProp ?? fetchedEquipment).forEach(item => {
+      if (!item.inventoryNumber) return;
+      counts.set(item.inventoryNumber, (counts.get(item.inventoryNumber) || 0) + 1);
+    });
+    return new Set(
+      [...counts.entries()]
+        .filter(([, count]) => count === 1)
+        .map(([inventoryNumber]) => inventoryNumber),
+    );
+  }, [equipmentListProp, fetchedEquipment]);
 
   /**
    * Фильтрация техники:
@@ -466,14 +479,14 @@ export function NewRentalModal({
     const available: Equipment[] = [];
     const busy: Equipment[] = [];
     all.forEach(eq => {
-      if (isEquipmentBusy(eq, startDate, endDate, existingRentals)) {
+      if (isEquipmentBusy(eq, startDate, endDate, existingRentals, uniqueInventoryNumbers.has(eq.inventoryNumber))) {
         busy.push(eq);
       } else {
         available.push(eq);
       }
     });
     return { availableEquipment: available, busyEquipment: busy };
-  }, [startDate, endDate, existingRentals, equipmentListProp, fetchedEquipment]);
+  }, [startDate, endDate, existingRentals, equipmentListProp, fetchedEquipment, uniqueInventoryNumbers]);
 
   const selectedEquipment = useMemo(
     () => [...availableEquipment, ...busyEquipment].find(eq => eq.id === equipmentId)
@@ -492,8 +505,16 @@ export function NewRentalModal({
   // Перепроверяем конфликт при смене дат
   React.useEffect(() => {
     if (!selectedEquipment) { setConflictWarn(false); return; }
-    setConflictWarn(isEquipmentBusy(selectedEquipment, startDate, endDate, existingRentals));
-  }, [startDate, endDate, selectedEquipment, existingRentals]);
+    setConflictWarn(
+      isEquipmentBusy(
+        selectedEquipment,
+        startDate,
+        endDate,
+        existingRentals,
+        uniqueInventoryNumbers.has(selectedEquipment.inventoryNumber),
+      ),
+    );
+  }, [startDate, endDate, selectedEquipment, existingRentals, uniqueInventoryNumbers]);
 
   // Находим конкретную аренду, вызывающую конфликт (для отображения деталей)
   const conflictingRental = useMemo(() => {
@@ -503,12 +524,12 @@ export function NewRentalModal({
     return existingRentals.find(r => {
       const matchesEquipment = r.equipmentId
         ? r.equipmentId === selectedEquipment.id
-        : r.equipmentInv === selectedEquipment.inventoryNumber;
+        : uniqueInventoryNumbers.has(selectedEquipment.inventoryNumber) && r.equipmentInv === selectedEquipment.inventoryNumber;
       if (!matchesEquipment) return false;
       if (r.status === 'returned' || r.status === 'closed') return false;
       return s <= new Date(r.endDate).getTime() && e >= new Date(r.startDate).getTime();
     }) ?? null;
-  }, [conflictWarn, selectedEquipment, startDate, endDate, existingRentals]);
+  }, [conflictWarn, selectedEquipment, startDate, endDate, existingRentals, uniqueInventoryNumbers]);
 
   const rentalDays = useMemo(() => getRentalDays(startDate, endDate), [startDate, endDate]);
   const totalAmount = useMemo(

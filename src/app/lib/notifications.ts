@@ -1,5 +1,6 @@
 import type { GanttRentalData } from '../mock-data';
 import type { Equipment, Payment, ServiceTicket, ShippingPhoto } from '../types';
+import { buildRentalDebtRows } from './finance';
 import { formatCurrency, formatDate } from './utils';
 
 export type NotificationSection = 'rentals' | 'service' | 'equipment' | 'payments';
@@ -149,6 +150,35 @@ export function buildAppNotifications({
         link: '/payments',
         linkLabel: 'К платежам',
         date: payment.dueDate,
+      });
+    });
+
+  const rentalDebtRows = buildRentalDebtRows(rentals, payments);
+  rentals
+    .filter(item => item.status === 'created')
+    .forEach(item => {
+      const clientDebtRows = rentalDebtRows.filter(
+        row => row.client === item.client && row.rentalId !== item.id && row.outstanding > 0,
+      );
+      if (!clientDebtRows.length) return;
+
+      const currentDebt = clientDebtRows.reduce((sum, row) => sum + row.outstanding, 0);
+      const overdueRentals = clientDebtRows.filter(row => getRentalDebtOverdueDays(row, todayStr) > 0).length;
+
+      notifications.push({
+        id: `new-rental-debt-${item.id}`,
+        section: 'payments',
+        priority: overdueRentals > 0 ? 'critical' : 'high',
+        category: 'Новая аренда при долге',
+        title: item.client,
+        entity: item.equipmentInv,
+        detail:
+          overdueRentals > 0
+            ? `Открыта новая аренда при долге ${formatCurrency(currentDebt)} · просроченных аренд: ${overdueRentals}`
+            : `Открыта новая аренда при действующем долге ${formatCurrency(currentDebt)}`,
+        link: '/rentals',
+        linkLabel: 'Проверить аренду',
+        date: item.startDate,
       });
     });
 

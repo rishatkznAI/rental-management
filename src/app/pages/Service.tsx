@@ -16,6 +16,7 @@ import { usePermissions } from '../lib/permissions';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
 import type { ServiceTicket } from '../types';
+import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
 
 export default function Service() {
   const { can } = usePermissions();
@@ -23,6 +24,8 @@ export default function Service() {
   const [search, setSearch] = React.useState('');
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
+  const [scenarioFilter, setScenarioFilter] = React.useState<string>('all');
+  const [preset, setPreset] = React.useState<'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'maintenance'>('all');
 
   const filteredTickets = ticketList.filter(ticket => {
     const matchesSearch = search === '' ||
@@ -32,9 +35,32 @@ export default function Service() {
 
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
     const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
+    const matchesScenario = scenarioFilter === 'all' || inferServiceKind(ticket) === scenarioFilter;
+    const matchesPreset =
+      preset === 'all'
+      || (preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
+      || (preset === 'urgent' && ['high', 'critical'].includes(ticket.priority))
+      || (preset === 'waiting_parts' && ticket.status === 'waiting_parts')
+      || (preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
 
-    return matchesSearch && matchesPriority && matchesStatus;
+    return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesPreset;
   });
+
+  const presetOptions = [
+    { value: 'all', label: 'Все' },
+    { value: 'unassigned', label: 'Без механика' },
+    { value: 'urgent', label: 'Срочные' },
+    { value: 'waiting_parts', label: 'Ждут запчасти' },
+    { value: 'maintenance', label: 'ТО / ЧТО / ПТО' },
+  ] as const;
+
+  const resetFilters = () => {
+    setSearch('');
+    setPriorityFilter('all');
+    setStatusFilter('all');
+    setScenarioFilter('all');
+    setPreset('all');
+  };
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -52,6 +78,32 @@ export default function Service() {
               <span className="sm:hidden">Создать</span>
             </Button>
           </Link>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {presetOptions.map(option => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setPreset(option.value)}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              preset === option.value
+                ? 'bg-[--color-primary] text-white'
+                : 'border border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-600 dark:hover:text-blue-300'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+        {(search || priorityFilter !== 'all' || statusFilter !== 'all' || scenarioFilter !== 'all' || preset !== 'all') && (
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="rounded-full border border-transparent px-3 py-1.5 text-xs font-medium text-red-500 hover:border-red-200 hover:bg-red-50 dark:hover:border-red-900/50 dark:hover:bg-red-950/20"
+          >
+            Сбросить фильтры
+          </button>
         )}
       </div>
 
@@ -93,6 +145,18 @@ export default function Service() {
             <SelectItem value="closed">Закрыто</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={scenarioFilter} onValueChange={setScenarioFilter}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Все сценарии" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все сценарии</SelectItem>
+            <SelectItem value="repair">Ремонт</SelectItem>
+            <SelectItem value="to">ТО</SelectItem>
+            <SelectItem value="chto">ЧТО</SelectItem>
+            <SelectItem value="pto">ПТО</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Mobile: card list */}
@@ -114,6 +178,9 @@ export default function Service() {
                   <span className="font-semibold text-[--color-primary] text-sm">{ticket.id}</span>
                   {getServiceStatusBadge(ticket.status)}
                   {getServicePriorityBadge(ticket.priority)}
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-200">
+                    {getServiceScenarioLabel(ticket)}
+                  </span>
                 </div>
                 <p className="text-sm text-gray-700 dark:text-gray-200 mt-1 font-medium truncate">{ticket.equipment}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">{ticket.reason}</p>
@@ -137,6 +204,7 @@ export default function Service() {
               <TableHead>ID заявки</TableHead>
               <TableHead>Техника</TableHead>
               <TableHead>Причина</TableHead>
+              <TableHead>Сценарий</TableHead>
               <TableHead>Приоритет</TableHead>
               <TableHead>SLA</TableHead>
               <TableHead>Назначен</TableHead>
@@ -162,6 +230,9 @@ export default function Service() {
                 <TableCell>
                   <p className="text-sm">{ticket.reason}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{ticket.description}</p>
+                </TableCell>
+                <TableCell>
+                  <p className="text-sm">{getServiceScenarioLabel(ticket)}</p>
                 </TableCell>
                 <TableCell>
                   {getServicePriorityBadge(ticket.priority)}

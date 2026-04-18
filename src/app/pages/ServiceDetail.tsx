@@ -42,6 +42,7 @@ import { serviceTicketsService } from '../services/service-tickets.service';
 import { sparePartsService } from '../services/spare-parts.service';
 import { serviceVehiclesService } from '../services/service-vehicles.service';
 import { getEquipmentTypeLabel } from '../lib/equipmentClassification';
+import { getServiceScenarioLabel, inferServiceKind, isRepairScenario } from '../lib/serviceScenarios';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -147,6 +148,7 @@ function buildRepairResult(ticket: ServiceTicket, workItems: RepairWorkItem[], p
 function normalizeTicket(ticket: ServiceTicket): ServiceTicket {
   return {
     ...ticket,
+    serviceKind: inferServiceKind(ticket),
     assignedMechanicName: ticket.assignedMechanicName ?? ticket.assignedTo,
     createdByUserName: ticket.createdByUserName ?? ticket.createdBy,
     createdBy: ticket.createdByUserName ?? ticket.createdBy,
@@ -387,6 +389,8 @@ export default function ServiceDetail() {
   const repairResult = ticket ? buildRepairResult(ticket, repairWorkItems, repairPartItems) : null;
   const repairPhotos = ticket?.repairPhotos ?? { before: [], after: [] };
   const closeChecklistEntries = ticket ? repairCloseChecklistEntries(ticket, repairWorkItems, repairPartItems) : [];
+  const scenarioIsRepair = ticket ? isRepairScenario(ticket) : true;
+  const serviceScenarioLabel = ticket ? getServiceScenarioLabel(ticket) : '';
 
   // ── actions ────────────────────────────────────────────────────────────────
 
@@ -451,7 +455,16 @@ export default function ServiceDetail() {
           nextStatus = hasActiveRental ? 'rented' : 'available';
         }
 
-        return { ...item, status: nextStatus as EquipmentStatus };
+        const base = { ...item, status: nextStatus as EquipmentStatus };
+        if (newStatus === 'closed' && item.id === ticket.equipmentId) {
+          if (ticket.serviceKind === 'chto') {
+            return { ...base, maintenanceCHTO: now.slice(0, 10) };
+          }
+          if (ticket.serviceKind === 'pto') {
+            return { ...base, maintenancePTO: now.slice(0, 10) };
+          }
+        }
+        return base;
       });
 
       await equipmentService.bulkReplace(updatedEquipment);
@@ -627,27 +640,29 @@ export default function ServiceDetail() {
 
   if (canEdit && ticket.status === 'new') {
     actions.push(
-      <Button key="start" className="w-full sm:w-auto" onClick={() => changeStatus('in_progress', 'Заявка взята в работу')}>
+      <Button key="start" className="w-full sm:w-auto" onClick={() => changeStatus('in_progress', scenarioIsRepair ? 'Заявка взята в работу' : `${serviceScenarioLabel} взято в работу`)}>
         <Play className="h-4 w-4" />
-        Взять в работу
+        {scenarioIsRepair ? 'Взять в работу' : 'Начать выполнение'}
       </Button>
     );
   }
-  if (canEdit && ticket.status === 'in_progress') {
+  if (canEdit && ticket.status === 'in_progress' && scenarioIsRepair) {
     actions.push(
       <Button key="parts" variant="secondary" className="w-full sm:w-auto" onClick={() => changeStatus('waiting_parts', 'Заявка переведена в статус «Ожидание запчастей»')}>
         <Package className="h-4 w-4" />
         Ожидание запчастей
       </Button>
     );
+  }
+  if (canEdit && ticket.status === 'in_progress') {
     actions.push(
-      <Button key="ready" className="w-full sm:w-auto" onClick={() => changeStatus('ready', 'Работы завершены, заявка готова к закрытию')}>
+      <Button key="ready" className="w-full sm:w-auto" onClick={() => changeStatus('ready', scenarioIsRepair ? 'Работы завершены, заявка готова к закрытию' : `${serviceScenarioLabel} выполнено, запись готова к закрытию`)}>
         <CheckCircle className="h-4 w-4" />
-        Работы завершены
+        {scenarioIsRepair ? 'Работы завершены' : 'Обслуживание выполнено'}
       </Button>
     );
   }
-  if (canEdit && ticket.status === 'waiting_parts') {
+  if (canEdit && ticket.status === 'waiting_parts' && scenarioIsRepair) {
     actions.push(
       <Button key="resume" variant="secondary" className="w-full sm:w-auto" onClick={() => changeStatus('in_progress', 'Запчасти получены, возобновлена работа')}>
         <Play className="h-4 w-4" />
@@ -657,9 +672,9 @@ export default function ServiceDetail() {
   }
   if (canEdit && ticket.status === 'ready') {
     actions.push(
-      <Button key="close" className="w-full sm:w-auto" onClick={() => changeStatus('closed', 'Заявка закрыта')}>
+      <Button key="close" className="w-full sm:w-auto" onClick={() => changeStatus('closed', scenarioIsRepair ? 'Заявка закрыта' : `${serviceScenarioLabel} зафиксировано и закрыто`)}>
         <CheckCircle className="h-4 w-4" />
-        Закрыть заявку
+        {scenarioIsRepair ? 'Закрыть заявку' : 'Закрыть запись'}
       </Button>
     );
   }
@@ -684,7 +699,7 @@ export default function ServiceDetail() {
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
+    <div className="space-y-4 p-4 pb-24 sm:space-y-6 sm:p-6 sm:pb-6 md:p-8">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="flex items-start gap-3">
@@ -702,7 +717,7 @@ export default function ServiceDetail() {
         </div>
         {/* Action buttons */}
         {actions.length > 0 && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <div className="hidden sm:flex sm:flex-row sm:flex-wrap gap-2">
             {actions}
           </div>
         )}
@@ -722,8 +737,9 @@ export default function ServiceDetail() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <Field label="ID заявки" value={ticket.id} mono />
-                <Field label="Статус" value={STATUS_LABELS[ticket.status]} />
+              <Field label="ID заявки" value={ticket.id} mono />
+              <Field label="Сценарий" value={serviceScenarioLabel} />
+              <Field label="Статус" value={STATUS_LABELS[ticket.status]} />
                 <Field label="Приоритет" value={PRIORITY_LABELS[ticket.priority] ?? ticket.priority} />
                 <Field label="SLA" value={ticket.sla} />
                 <Field label="Дата создания" value={formatDate(ticket.createdAt)} />
@@ -775,14 +791,18 @@ export default function ServiceDetail() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Причина обращения</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">
+                  {scenarioIsRepair ? 'Причина обращения' : 'Сценарий обслуживания'}
+                </p>
                 <p className="text-sm font-medium text-gray-900 dark:text-white">{ticket.reason}</p>
               </div>
               {ticket.description && ticket.description !== ticket.reason && (
                 <>
                   <Divider />
                   <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Описание неисправности</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">
+                      {scenarioIsRepair ? 'Описание неисправности' : 'Описание выполненных работ'}
+                    </p>
                     <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{ticket.description}</p>
                   </div>
                 </>
@@ -792,12 +812,14 @@ export default function ServiceDetail() {
                   <Divider />
                   <div className="space-y-4">
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Результат работ</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">
+                        {scenarioIsRepair ? 'Результат работ' : 'Результат обслуживания'}
+                      </p>
                       <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                        {repairResult.summary || 'Результат в текстовом виде не указан'}
+                        {repairResult.summary || (scenarioIsRepair ? 'Результат в текстовом виде не указан' : 'Описание выполненного обслуживания не указано')}
                       </p>
                     </div>
-                    {repairResult.worksPerformed.length > 0 && (
+                    {scenarioIsRepair && repairResult.worksPerformed.length > 0 && (
                       <div>
                         <p className="mb-2 text-xs text-gray-500 uppercase tracking-wide">Выполненные работы</p>
                         <div className="space-y-2">
@@ -826,7 +848,7 @@ export default function ServiceDetail() {
                         </div>
                       </div>
                     )}
-                    {repairResult.partsUsed.length > 0 && (
+                    {scenarioIsRepair && repairResult.partsUsed.length > 0 && (
                       <div>
                         <p className="mb-2 text-xs text-gray-500 uppercase tracking-wide">Использованные запчасти</p>
                         <div className="space-y-2">
@@ -864,13 +886,15 @@ export default function ServiceDetail() {
                   <div className="space-y-4">
                     <div className="flex gap-2 items-end">
                       <div className="flex-1">
-                        <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Итог ремонта</label>
+                        <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">
+                          {scenarioIsRepair ? 'Итог ремонта' : `Итог ${serviceScenarioLabel}`}
+                        </label>
                         <textarea
                           className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-[--color-primary] focus:outline-none focus:ring-1 focus:ring-[--color-primary]"
                           rows={2}
                           value={resultSummary}
                           onChange={e => setResultSummary(e.target.value)}
-                          placeholder="Краткий итог работ и состояние техники после ремонта"
+                          placeholder={scenarioIsRepair ? 'Краткий итог работ и состояние техники после ремонта' : `Краткий итог выполнения сценария ${serviceScenarioLabel}`}
                         />
                       </div>
                       <div className="flex gap-1.5">
@@ -880,6 +904,8 @@ export default function ServiceDetail() {
                     {repairFormError && (
                       <p className="text-sm text-red-500">{repairFormError}</p>
                     )}
+                    {scenarioIsRepair ? (
+                    <>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_auto]">
                       <div>
                         <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить работу</label>
@@ -938,6 +964,12 @@ export default function ServiceDetail() {
                         </Button>
                       </div>
                     </div>
+                    </>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                        Для сценария {serviceScenarioLabel} сохраняется итог обслуживания и история, без ремонтных работ и расхода запчастей.
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -1332,6 +1364,58 @@ export default function ServiceDetail() {
           )}
         </div>
       </div>
+      {canEdit && (
+        <div className="fixed inset-x-0 bottom-16 z-10 border-t border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:hidden">
+          <div className="grid grid-cols-2 gap-2">
+            {ticket.status === 'new' && (
+              <Button onClick={() => changeStatus('in_progress', scenarioIsRepair ? 'Заявка взята в работу' : `${serviceScenarioLabel} взято в работу`)}>
+                <Play className="h-4 w-4" />
+                {scenarioIsRepair ? 'В работу' : 'Начать'}
+              </Button>
+            )}
+            {ticket.status === 'in_progress' && (
+              <Button onClick={() => changeStatus('ready', scenarioIsRepair ? 'Работы завершены, заявка готова к закрытию' : `${serviceScenarioLabel} выполнено, запись готова к закрытию`)}>
+                <CheckCircle className="h-4 w-4" />
+                {scenarioIsRepair ? 'Готово' : 'Выполнено'}
+              </Button>
+            )}
+            {ticket.status === 'in_progress' && scenarioIsRepair && (
+              <Button
+                variant="secondary"
+                onClick={() => changeStatus('waiting_parts', 'Заявка переведена в статус «Ожидание запчастей»')}
+              >
+                <Package className="h-4 w-4" />
+                Ждёт З/Ч
+              </Button>
+            )}
+            {ticket.status === 'waiting_parts' && scenarioIsRepair && (
+              <Button
+                variant="secondary"
+                onClick={() => changeStatus('in_progress', 'Запчасти получены, возобновлена работа')}
+              >
+                <Play className="h-4 w-4" />
+                З/Ч пришли
+              </Button>
+            )}
+            {ticket.status === 'ready' && (
+              <Button onClick={() => changeStatus('closed', scenarioIsRepair ? 'Заявка закрыта' : `${serviceScenarioLabel} зафиксировано и закрыто`)}>
+                <CheckCircle className="h-4 w-4" />
+                Закрыть
+              </Button>
+            )}
+            {ticket.status !== 'closed' && (
+              <Button
+                variant="secondary"
+                className="border-red-200 text-red-600 hover:bg-red-50"
+                onClick={() => changeStatus('closed', 'Заявка отменена / закрыта без выполнения')}
+              >
+                <XCircle className="h-4 w-4" />
+                Отменить
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

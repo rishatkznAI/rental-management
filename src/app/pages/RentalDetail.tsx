@@ -9,6 +9,7 @@ import { RENTAL_KEYS, useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
+import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -17,13 +18,24 @@ import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
+import {
   ArrowLeft, Edit, FileText, DollarSign, User, Calendar,
-  Truck, Clock, MessageSquare, Wrench, AlertTriangle, CircleCheck, Save, X,
+  Truck, Clock, MessageSquare, Wrench, AlertTriangle, CircleCheck, Save, X, RefreshCw, Plus,
 } from 'lucide-react';
 import { rentalsService } from '../services/rentals.service';
+import { documentsService } from '../services/documents.service';
+import { paymentsService } from '../services/payments.service';
+import { equipmentService } from '../services/equipment.service';
 import { appendRentalHistory, buildRentalUpdateHistory } from '../lib/rental-history';
+import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
-import type { Equipment, RentalStatus } from '../types';
+import type { DocumentType, Equipment, PaymentStatus, RentalStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
 const statusLabels: Record<RentalStatus, string> = {
@@ -86,6 +98,13 @@ function managerInitials(name: string): string {
   return trimmed.split(/\s+/).map(part => part[0] || '').join('').slice(0, 2).toUpperCase();
 }
 
+function nextDocumentNumber(type: DocumentType, rentalId: string, existingCount: number) {
+  const suffix = String(existingCount + 1).padStart(2, '0');
+  if (type === 'contract') return `DOG-${rentalId}-${suffix}`;
+  if (type === 'act') return `ACT-${rentalId}-${suffix}`;
+  return `INV-${rentalId}-${suffix}`;
+}
+
 export default function RentalDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -103,11 +122,35 @@ export default function RentalDetail() {
   const rental = rentals.find(r => r.id === id);
   const canEditRentals = can('edit', 'rentals');
   const canEditRentalDates = user?.role === 'Администратор';
+  const canCreateDocuments = can('create', 'documents');
+  const canCreatePayments = can('create', 'payments');
+  const canRestoreRentals = user?.role === 'Администратор';
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveInfo, setSaveInfo] = useState('');
   const [formState, setFormState] = useState<RentalFormState | null>(null);
+  const [documentDialogOpen, setDocumentDialogOpen] = useState(false);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [isSubmittingDocument, setIsSubmittingDocument] = useState(false);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [documentForm, setDocumentForm] = useState({
+    type: 'invoice' as DocumentType,
+    number: '',
+    date: new Date().toISOString().slice(0, 10),
+    amount: '0',
+    status: 'draft' as const,
+  });
+  const [paymentForm, setPaymentForm] = useState({
+    invoiceNumber: '',
+    amount: '0',
+    paidAmount: '0',
+    dueDate: new Date().toISOString().slice(0, 10),
+    paidDate: new Date().toISOString().slice(0, 10),
+    status: 'pending' as PaymentStatus,
+    comment: '',
+  });
 
   useEffect(() => {
     if (!rental) return;
@@ -145,14 +188,33 @@ export default function RentalDetail() {
       : (rental?.equipment || []).map(inv => uniqueEquipmentByInventory.get(inv)).filter(Boolean) as Equipment[]),
     [equipmentList, rental?.equipment, uniqueEquipmentByInventory],
   );
+  const safelyMatchesResolvedEquipment = React.useCallback((entry: GanttRentalData) => {
+    return resolvedRentalEquipment.some(eq => {
+      if (entry.equipmentId) {
+        return entry.equipmentId === eq.id;
+      }
+      return (inventoryCounts.get(eq.inventoryNumber) || 0) === 1 && entry.equipmentInv === eq.inventoryNumber;
+    });
+  }, [inventoryCounts, resolvedRentalEquipment]);
 
   const selectedClient = clients.find(c => c.company === ((isEditing ? formState?.client : rental?.client) || ''));
   const relatedDocs = documents.filter(d => d.rental === rental?.id);
+  const relatedInvoices = relatedDocs.filter(doc => doc.type === 'invoice');
   const relatedPayments = payments.filter(p => p.rentalId === rental?.id);
   const paidAmount = relatedPayments.reduce((sum, p) => sum + (p.paidAmount ?? (p.status === 'paid' ? p.amount : 0)), 0);
   const relatedService = serviceTickets.filter(ticket =>
     resolvedRentalEquipment.some(eq => eq.id === ticket.equipmentId),
   );
+  const paymentsByInvoice = useMemo(() => {
+    const map = new Map<string, typeof relatedPayments>();
+    relatedPayments.forEach(payment => {
+      const key = payment.invoiceNumber || 'Без счёта';
+      const list = map.get(key) ?? [];
+      list.push(payment);
+      map.set(key, list);
+    });
+    return map;
+  }, [relatedPayments]);
 
   const historyAuthor = user?.name || 'Система';
 
@@ -222,13 +284,63 @@ export default function RentalDetail() {
       if (!rental) return false;
       if (entry.client !== rental.client) return false;
       if (entry.startDate !== rental.startDate || entry.endDate !== rental.plannedReturnDate) return false;
-      return resolvedRentalEquipment.some(eq => (
-        entry.equipmentId ? entry.equipmentId === eq.id : entry.equipmentInv === eq.inventoryNumber
-      ));
+      return safelyMatchesResolvedEquipment(entry);
     });
-  }, [ganttRentals, rental, resolvedRentalEquipment]);
+  }, [ganttRentals, rental, safelyMatchesResolvedEquipment]);
 
   const linkedGanttRental = linkedGanttCandidates.length === 1 ? linkedGanttCandidates[0] : null;
+  const canRestoreThisRental = canRestoreRentals && (
+    rental.status === 'closed' ||
+    !!rental.actualReturnDate ||
+    linkedGanttRental?.status === 'returned' ||
+    linkedGanttRental?.status === 'closed'
+  );
+
+  const financeTimeline = useMemo(() => {
+    if (!linkedGanttRental) return [];
+
+    const invoiceDocs = relatedInvoices.map(invoice => {
+      const invoicePayments = paymentsByInvoice.get(invoice.number) ?? [];
+      const invoicePaid = invoicePayments.reduce((sum, payment) => sum + (payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0)), 0);
+      return {
+        key: `invoice-${invoice.id}`,
+        label: invoice.number,
+        date: invoice.date,
+        documentStatus: invoice.status,
+        documentAmount: invoice.amount ?? 0,
+        dueDate: invoicePayments[0]?.dueDate || linkedGanttRental.expectedPaymentDate || linkedGanttRental.endDate,
+        paidAmount: invoicePaid,
+        payments: invoicePayments,
+      };
+    });
+
+    const orphanPayments = relatedPayments
+      .filter(payment => !relatedInvoices.some(invoice => invoice.number === payment.invoiceNumber))
+      .map(payment => ({
+        key: `payment-${payment.id}`,
+        label: payment.invoiceNumber || `Платёж ${payment.id}`,
+        date: payment.dueDate,
+        documentStatus: 'sent' as const,
+        documentAmount: payment.amount,
+        dueDate: payment.dueDate,
+        paidAmount: payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0),
+        payments: [payment],
+      }));
+
+    const rows = [...invoiceDocs, ...orphanPayments];
+    if (rows.length > 0) return rows;
+
+    return [{
+      key: `rental-${linkedGanttRental.id}`,
+      label: linkedGanttRental.id,
+      date: linkedGanttRental.startDate,
+      documentStatus: 'draft' as const,
+      documentAmount: linkedGanttRental.amount ?? rental.price ?? 0,
+      dueDate: linkedGanttRental.expectedPaymentDate || linkedGanttRental.endDate,
+      paidAmount,
+      payments: relatedPayments,
+    }];
+  }, [linkedGanttRental, paidAmount, paymentsByInvoice, relatedInvoices, relatedPayments, rental.price]);
 
   const conflictingRental = useMemo(() => {
     if (!isEditing || !formState) return null;
@@ -239,15 +351,13 @@ export default function RentalDetail() {
     return ganttRentals.find(entry => {
       if (linkedGanttRental && entry.id === linkedGanttRental.id) return false;
       if (entry.status === 'returned' || entry.status === 'closed') return false;
-      const matchesEquipment = resolvedRentalEquipment.some(eq => (
-        entry.equipmentId ? entry.equipmentId === eq.id : entry.equipmentInv === eq.inventoryNumber
-      ));
+      const matchesEquipment = safelyMatchesResolvedEquipment(entry);
       if (!matchesEquipment) return false;
       const entryStart = new Date(entry.startDate).getTime();
       const entryEnd = new Date(entry.endDate).getTime();
       return newStart <= entryEnd && newEnd >= entryStart;
     }) || null;
-  }, [formState.plannedReturnDate, formState.startDate, ganttRentals, isEditing, linkedGanttRental, resolvedRentalEquipment]);
+  }, [formState.plannedReturnDate, formState.startDate, ganttRentals, isEditing, linkedGanttRental, safelyMatchesResolvedEquipment]);
 
   const updateField = (field: keyof RentalFormState, value: string) => {
     setFormState(prev => prev ? { ...prev, [field]: value } : prev);
@@ -364,6 +474,173 @@ export default function RentalDetail() {
     }
   };
 
+  useEffect(() => {
+    if (!rental) return;
+    const existingCount = documents.filter(doc => doc.rental === rental.id).length;
+    setDocumentForm({
+      type: 'invoice',
+      number: nextDocumentNumber('invoice', rental.id, existingCount),
+      date: new Date().toISOString().slice(0, 10),
+      amount: String(rental.price || 0),
+      status: 'draft',
+    });
+    const lastInvoiceNumber = documents
+      .filter(doc => doc.rental === rental.id && doc.type === 'invoice')
+      .sort((a, b) => b.date.localeCompare(a.date))[0]?.number || `INV-${rental.id}`;
+    const suggestedAmount = Math.max((rental.price || 0) - paidAmount, 0);
+    setPaymentForm({
+      invoiceNumber: lastInvoiceNumber,
+      amount: String(suggestedAmount),
+      paidAmount: String(suggestedAmount),
+      dueDate: linkedGanttRental?.expectedPaymentDate || rental.plannedReturnDate,
+      paidDate: new Date().toISOString().slice(0, 10),
+      status: 'pending',
+      comment: '',
+    });
+  }, [documents, linkedGanttRental?.expectedPaymentDate, paidAmount, rental]);
+
+  const syncPaymentStatus = React.useCallback(async (nextPayments: typeof relatedPayments) => {
+    if (!linkedGanttRental) return;
+    const totalPaidForRental = nextPayments.reduce((sum, payment) => {
+      return sum + (payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0));
+    }, 0);
+    let paymentStatus: GanttRentalData['paymentStatus'] = 'unpaid';
+    if (totalPaidForRental >= (linkedGanttRental.amount || rental.price || 0)) paymentStatus = 'paid';
+    else if (totalPaidForRental > 0) paymentStatus = 'partial';
+    await rentalsService.updateGanttEntry(linkedGanttRental.id, {
+      ...appendRentalHistory(
+        { ...linkedGanttRental, paymentStatus },
+        createRentalHistoryEntry(historyAuthor, `Статус оплаты обновлён автоматически: ${paymentStatus === 'paid' ? 'Оплачено' : paymentStatus === 'partial' ? 'Частично' : 'Не оплачено'}`),
+      ),
+    });
+  }, [historyAuthor, linkedGanttRental, rental.price, relatedPayments]);
+
+  const handleCreateDocument = async () => {
+    if (!rental || !canCreateDocuments) return;
+    const amount = Number(documentForm.amount);
+    if (!documentForm.number.trim()) {
+      setSaveError('Укажите номер документа.');
+      return;
+    }
+    if (Number.isNaN(amount) || amount < 0) {
+      setSaveError('Сумма документа должна быть числом не меньше 0.');
+      return;
+    }
+    setIsSubmittingDocument(true);
+    setSaveError('');
+    try {
+      await documentsService.create({
+        type: documentForm.type,
+        number: documentForm.number.trim(),
+        client: rental.client,
+        date: documentForm.date,
+        amount,
+        status: documentForm.status,
+        rental: rental.id,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['documents'] });
+      setDocumentDialogOpen(false);
+      setSaveInfo(`${documentForm.type === 'invoice' ? 'Счёт' : documentForm.type === 'act' ? 'Акт' : 'Договор'} создан и привязан к аренде.`);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Не удалось создать документ.');
+    } finally {
+      setIsSubmittingDocument(false);
+    }
+  };
+
+  const handleCreatePayment = async () => {
+    if (!rental || !canCreatePayments) return;
+    const amount = Number(paymentForm.amount);
+    const paidAmount = Number(paymentForm.paidAmount);
+    if (!paymentForm.invoiceNumber.trim()) {
+      setSaveError('Укажите номер счёта для платежа.');
+      return;
+    }
+    if (Number.isNaN(amount) || amount <= 0) {
+      setSaveError('Сумма платежа должна быть больше 0.');
+      return;
+    }
+    if (Number.isNaN(paidAmount) || paidAmount < 0) {
+      setSaveError('Оплаченная сумма должна быть числом не меньше 0.');
+      return;
+    }
+    setIsSubmittingPayment(true);
+    setSaveError('');
+    try {
+      const nextStatus: PaymentStatus = paymentForm.status === 'pending'
+        ? (paidAmount > 0 ? (paidAmount >= amount ? 'paid' : 'partial') : 'pending')
+        : paymentForm.status;
+      const created = await paymentsService.create({
+        invoiceNumber: paymentForm.invoiceNumber.trim(),
+        rentalId: rental.id,
+        client: rental.client,
+        amount,
+        paidAmount: nextStatus === 'paid' || nextStatus === 'partial' ? paidAmount : undefined,
+        dueDate: paymentForm.dueDate,
+        paidDate: nextStatus === 'paid' || nextStatus === 'partial' ? paymentForm.paidDate || undefined : undefined,
+        status: nextStatus,
+        comment: paymentForm.comment.trim() || undefined,
+      });
+      await syncPaymentStatus([...relatedPayments, created]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['payments'] }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+      ]);
+      setPaymentDialogOpen(false);
+      setSaveInfo('Платёж зарегистрирован и привязан к аренде.');
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Не удалось зарегистрировать платёж.');
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  const handleRestoreRental = async () => {
+    if (!rental || !canRestoreThisRental || !resolvedRentalEquipment[0]) return;
+    setIsRestoring(true);
+    setSaveError('');
+    setSaveInfo('');
+    try {
+      await rentalsService.update(rental.id, {
+        status: 'active',
+        actualReturnDate: undefined,
+      });
+      if (linkedGanttRental) {
+        const restoredGantt: GanttRentalData = {
+          ...linkedGanttRental,
+          status: 'active',
+        };
+        await rentalsService.updateGanttEntry(linkedGanttRental.id, appendRentalHistory(
+          restoredGantt,
+          createRentalHistoryEntry(historyAuthor, 'Аренда восстановлена из карточки аренды'),
+        ));
+      }
+      const eq = resolvedRentalEquipment[0];
+      await equipmentService.update(eq.id, appendAuditHistory(
+        {
+          ...eq,
+          status: 'rented',
+          currentClient: rental.client,
+          returnDate: rental.plannedReturnDate,
+        },
+        createAuditEntry(historyAuthor, `Аренда ${rental.id} восстановлена из карточки аренды`),
+      ));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail(rental.id) }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        queryClient.invalidateQueries({ queryKey: ['documents'] }),
+        queryClient.invalidateQueries({ queryKey: ['payments'] }),
+        queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+      ]);
+      setSaveInfo('Аренда восстановлена. Техника снова возвращена в активную аренду.');
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Не удалось восстановить аренду.');
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
   const displayPlannedReturn = isEditing ? (formState?.plannedReturnDate || '') : (rental?.plannedReturnDate || '');
   const displayManager = isEditing ? (formState?.manager || '') : (rental?.manager || '');
 
@@ -414,7 +691,13 @@ export default function RentalDetail() {
               Редактировать
             </Button>
           ) : null}
-          <Button variant="secondary">
+          {canRestoreThisRental && (
+            <Button variant="secondary" onClick={() => void handleRestoreRental()} disabled={isRestoring}>
+              <RefreshCw className={`h-4 w-4 ${isRestoring ? 'animate-spin' : ''}`} />
+              {isRestoring ? 'Восстановление...' : 'Восстановить аренду'}
+            </Button>
+          )}
+          <Button variant="secondary" onClick={() => navigate('/documents')}>
             <FileText className="h-4 w-4" />
             Документы
           </Button>
@@ -754,6 +1037,164 @@ export default function RentalDetail() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Быстрые действия</CardTitle>
+              <CardDescription>Счёт, акт, договор и регистрация оплаты без ухода с карточки аренды</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <Button
+                  variant="secondary"
+                  disabled={!canCreateDocuments}
+                  onClick={() => {
+                    setDocumentForm(prev => ({
+                      ...prev,
+                      type: 'invoice',
+                      number: nextDocumentNumber('invoice', rental.id, relatedDocs.length),
+                      amount: String(Math.max(remainingBalance, 0)),
+                    }));
+                    setDocumentDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Новый счёт
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!canCreateDocuments}
+                  onClick={() => {
+                    setDocumentForm(prev => ({
+                      ...prev,
+                      type: 'act',
+                      number: nextDocumentNumber('act', rental.id, relatedDocs.length),
+                      amount: String(rental.price || 0),
+                    }));
+                    setDocumentDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Новый акт
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!canCreateDocuments}
+                  onClick={() => {
+                    setDocumentForm(prev => ({
+                      ...prev,
+                      type: 'contract',
+                      number: nextDocumentNumber('contract', rental.id, relatedDocs.length),
+                      amount: String(rental.price || 0),
+                    }));
+                    setDocumentDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Новый договор
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!canCreatePayments}
+                  onClick={() => setPaymentDialogOpen(true)}
+                >
+                  <DollarSign className="h-4 w-4" />
+                  Зарегистрировать оплату
+                </Button>
+              </div>
+              {(!canCreateDocuments || !canCreatePayments) && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Доступ к финансовым действиям зависит от вашей роли.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-[--color-primary]" />
+                Счёт и оплата
+              </CardTitle>
+              <CardDescription>
+                Связка аренды, счёта и фактических платежей в одной карточке
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {financeTimeline.length > 0 ? (
+                financeTimeline.map(item => {
+                  const outstanding = Math.max(0, (item.documentAmount || 0) - item.paidAmount);
+                  const overdue = item.dueDate ? item.dueDate < new Date().toISOString().slice(0, 10) && outstanding > 0 : false;
+                  return (
+                    <div key={item.key} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-white">{item.label}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {formatDate(item.date)}{item.dueDate ? ` · ожидаемая оплата ${formatDate(item.dueDate)}` : ''}
+                          </p>
+                        </div>
+                        <Badge variant={
+                          outstanding <= 0
+                            ? 'success'
+                            : overdue
+                              ? 'error'
+                              : item.paidAmount > 0
+                                ? 'warning'
+                                : 'default'
+                        }>
+                          {outstanding <= 0 ? 'Оплачено' : overdue ? 'Просрочено' : item.paidAmount > 0 ? 'Частично' : 'Ожидает оплаты'}
+                        </Badge>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">Сумма счёта</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{formatCurrency(item.documentAmount || 0)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">Оплачено</p>
+                          <p className="font-medium text-green-600">{formatCurrency(item.paidAmount)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">Остаток</p>
+                          <p className={`font-medium ${outstanding > 0 ? 'text-orange-600' : 'text-gray-900 dark:text-white'}`}>
+                            {formatCurrency(outstanding)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {item.payments.length > 0 ? (
+                        <div className="mt-3 space-y-2">
+                          {item.payments.map(payment => (
+                            <div key={payment.id} className="rounded-md bg-gray-50 px-3 py-2 text-sm dark:bg-gray-900/40">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-gray-700 dark:text-gray-300">
+                                  {payment.paidDate ? `Оплата ${formatDate(payment.paidDate)}` : `Платёж со сроком ${formatDate(payment.dueDate)}`}
+                                </span>
+                                <span className="font-medium text-gray-900 dark:text-white">
+                                  {formatCurrency(payment.paidAmount ?? payment.amount)}
+                                </span>
+                              </div>
+                              {payment.comment && (
+                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{payment.comment}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                          Платежи по этому счёту ещё не зарегистрированы.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-gray-400 dark:text-gray-500">Нет связанных счетов и оплат</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <User className="h-5 w-5 text-[--color-primary]" />
                 Менеджер и статус
@@ -862,6 +1303,163 @@ export default function RentalDetail() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={documentDialogOpen} onOpenChange={setDocumentDialogOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Создать документ по аренде</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Тип</p>
+                <Select
+                  value={documentForm.type}
+                  onValueChange={(value) => setDocumentForm(prev => ({
+                    ...prev,
+                    type: value as DocumentType,
+                    number: nextDocumentNumber(value as DocumentType, rental.id, relatedDocs.length),
+                  }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="invoice">Счёт</SelectItem>
+                    <SelectItem value="act">Акт</SelectItem>
+                    <SelectItem value="contract">Договор</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Статус</p>
+                <Select
+                  value={documentForm.status}
+                  onValueChange={(value) => setDocumentForm(prev => ({ ...prev, status: value as 'draft' | 'sent' | 'signed' }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="draft">Черновик</SelectItem>
+                    <SelectItem value="sent">Отправлен</SelectItem>
+                    <SelectItem value="signed">Подписан</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Номер документа</p>
+              <Input
+                value={documentForm.number}
+                onChange={(e) => setDocumentForm(prev => ({ ...prev, number: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Дата</p>
+                <Input
+                  type="date"
+                  value={documentForm.date}
+                  onChange={(e) => setDocumentForm(prev => ({ ...prev, date: e.target.value }))}
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Сумма</p>
+                <Input
+                  type="number"
+                  min="0"
+                  value={documentForm.amount}
+                  onChange={(e) => setDocumentForm(prev => ({ ...prev, amount: e.target.value }))}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setDocumentDialogOpen(false)}>Отмена</Button>
+            <Button onClick={() => void handleCreateDocument()} disabled={isSubmittingDocument}>
+              {isSubmittingDocument ? 'Создание...' : 'Создать документ'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Зарегистрировать оплату</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Номер счёта</p>
+              <Input
+                value={paymentForm.invoiceNumber}
+                onChange={(e) => setPaymentForm(prev => ({ ...prev, invoiceNumber: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Сумма счёта</p>
+                <Input
+                  type="number"
+                  min="0"
+                  value={paymentForm.amount}
+                  onChange={(e) => setPaymentForm(prev => ({ ...prev, amount: e.target.value }))}
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Оплачено</p>
+                <Input
+                  type="number"
+                  min="0"
+                  value={paymentForm.paidAmount}
+                  onChange={(e) => setPaymentForm(prev => ({ ...prev, paidAmount: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Срок оплаты</p>
+                <Input
+                  type="date"
+                  value={paymentForm.dueDate}
+                  onChange={(e) => setPaymentForm(prev => ({ ...prev, dueDate: e.target.value }))}
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Дата оплаты</p>
+                <Input
+                  type="date"
+                  value={paymentForm.paidDate}
+                  onChange={(e) => setPaymentForm(prev => ({ ...prev, paidDate: e.target.value }))}
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Статус</p>
+                <Select
+                  value={paymentForm.status}
+                  onValueChange={(value) => setPaymentForm(prev => ({ ...prev, status: value as PaymentStatus }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Ожидает</SelectItem>
+                    <SelectItem value="paid">Оплачено</SelectItem>
+                    <SelectItem value="partial">Частично</SelectItem>
+                    <SelectItem value="overdue">Просрочено</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Textarea
+              value={paymentForm.comment}
+              onChange={(e) => setPaymentForm(prev => ({ ...prev, comment: e.target.value }))}
+              placeholder="Комментарий к оплате"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setPaymentDialogOpen(false)}>Отмена</Button>
+            <Button onClick={() => void handleCreatePayment()} disabled={isSubmittingPayment}>
+              {isSubmittingPayment ? 'Сохранение...' : 'Сохранить платёж'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

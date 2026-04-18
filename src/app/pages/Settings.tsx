@@ -49,6 +49,9 @@ import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { usePermissions } from '../lib/permissions';
+import { useAuth } from '../contexts/AuthContext';
+import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
+import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import type {
   Equipment,
   EquipmentCategory,
@@ -64,7 +67,9 @@ import type {
   ReferenceStatus,
   ServiceWork,
   SparePart,
+  Rental,
 } from '../types';
+import type { GanttRentalData } from '../mock-data';
 
 // ── Вспомогательные ───────────────────────────────────────────────────────────
 
@@ -642,17 +647,68 @@ const SERVICE_STATUS_IMPORT_MAP: Record<string, ServiceStatus> = {
   closed: 'closed',
 };
 
+type RentalImportPreviewStatus = 'ready' | 'conflict' | 'error' | 'duplicate';
+
+interface RentalImportPreviewRow {
+  line: number;
+  client: string;
+  equipmentLabel: string;
+  startDate: string;
+  endDate: string;
+  status: RentalImportPreviewStatus;
+  message: string;
+  ganttPayload?: Omit<GanttRentalData, 'id'>;
+  classicPayload?: Omit<Rental, 'id'>;
+  equipmentId?: string;
+}
+
+const GANTT_STATUS_IMPORT_MAP: Record<string, GanttRentalData['status']> = {
+  active: 'active',
+  created: 'created',
+  returned: 'returned',
+  closed: 'closed',
+  'в аренде': 'active',
+  'активна': 'active',
+  'создана': 'created',
+  'бронь': 'created',
+  'возвращена': 'returned',
+  'закрыта': 'closed',
+};
+
+const RENTAL_STATUS_FROM_GANTT: Record<GanttRentalData['status'], Rental['status']> = {
+  active: 'active',
+  created: 'new',
+  returned: 'return_planned',
+  closed: 'closed',
+};
+
+const PAYMENT_STATUS_IMPORT_MAP: Record<string, GanttRentalData['paymentStatus']> = {
+  paid: 'paid',
+  unpaid: 'unpaid',
+  partial: 'partial',
+  'оплачено': 'paid',
+  'не оплачено': 'unpaid',
+  'частично': 'partial',
+};
+
 function DataManagementSection({ canManageData }: { canManageData: boolean }) {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: equipment = [] } = useQuery({ queryKey: EQUIPMENT_KEYS.all, queryFn: equipmentService.getAll });
+  const { data: classicRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.all, queryFn: rentalsService.getAll });
+  const { data: ganttRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.gantt, queryFn: rentalsService.getGanttData });
   const { data: clients = [] } = useQuery({ queryKey: ['clients'], queryFn: clientsService.getAll });
   const { data: serviceTickets = [] } = useQuery({ queryKey: SERVICE_TICKET_KEYS.all, queryFn: serviceTicketsService.getAll });
   const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
   const [isMigratingRepairFacts, setIsMigratingRepairFacts] = React.useState(false);
+  const [rentalPreview, setRentalPreview] = React.useState<RentalImportPreviewRow[]>([]);
+  const [rentalPreviewOpen, setRentalPreviewOpen] = React.useState(false);
+  const [rentalImportFileName, setRentalImportFileName] = React.useState('');
   const equipmentFileInputRef = React.useRef<HTMLInputElement>(null);
   const clientsFileInputRef = React.useRef<HTMLInputElement>(null);
   const serviceFileInputRef = React.useRef<HTMLInputElement>(null);
+  const rentalsFileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleEquipmentExport = React.useCallback(() => {
     const escapeCSV = (value: string | number | null | undefined) =>
@@ -708,6 +764,345 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
   const handleServiceImportClick = React.useCallback(() => {
     serviceFileInputRef.current?.click();
   }, []);
+
+  const handleRentalsImportClick = React.useCallback(() => {
+    rentalsFileInputRef.current?.click();
+  }, []);
+
+  const handleRentalsExport = React.useCallback(() => {
+    const escapeCSV = (value: string | number | boolean | null | undefined) =>
+      `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+    const rows = ganttRentals.map(item => {
+      const classic = classicRentals.find(entry =>
+        entry.client === item.client &&
+        entry.startDate === item.startDate &&
+        entry.plannedReturnDate === item.endDate &&
+        entry.equipment.includes(item.equipmentInv),
+      );
+      const eq = equipment.find(entry => entry.id === item.equipmentId)
+        || equipment.find(entry => entry.inventoryNumber === item.equipmentInv);
+      const note = item.comments?.find(comment => comment.type !== 'system')?.text || classic?.comments || '';
+      return [
+        item.client,
+        classic?.contact || '',
+        item.equipmentInv,
+        eq?.serialNumber || '',
+        item.equipmentId || '',
+        item.startDate,
+        item.endDate,
+        classic?.rate || '',
+        item.amount ?? classic?.price ?? 0,
+        item.manager || classic?.manager || '',
+        item.status,
+        item.expectedPaymentDate || '',
+        item.paymentStatus,
+        item.updSigned ? 'Да' : 'Нет',
+        note,
+      ];
+    });
+
+    const csv = [
+      ['Клиент', 'Контакт', 'Инв. номер', 'Серийный номер', 'ID техники', 'Дата начала', 'Дата окончания', 'Ставка', 'Сумма', 'Менеджер', 'Статус', 'Ожидаемая оплата', 'Статус оплаты', 'УПД подписан', 'Комментарий']
+        .map(escapeCSV).join(','),
+      ...rows.map(row => row.map(escapeCSV).join(',')),
+    ].join('\n');
+
+    downloadCSV(csv, `rentals-${new Date().toISOString().slice(0, 10)}.csv`);
+    setMessage({ type: 'success', text: `Экспортировано ${ganttRentals.length} аренд` });
+  }, [classicRentals, equipment, ganttRentals]);
+
+  const handleRentalsImport = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setMessage(null);
+    setIsImporting(true);
+
+    try {
+      const text = await file.text();
+      const rows = csvToRows(text);
+      if (rows.length < 2) throw new Error('Файл пустой или не содержит строк для импорта');
+
+      const inventoryCounts = new Map<string, number>();
+      equipment.forEach(item => {
+        if (!item.inventoryNumber) return;
+        inventoryCounts.set(item.inventoryNumber, (inventoryCounts.get(item.inventoryNumber) || 0) + 1);
+      });
+      const existingQueue = [...ganttRentals];
+      const preview: RentalImportPreviewRow[] = rows.slice(1).map((columns, index) => {
+        const line = index + 2;
+        const [
+          client,
+          contact,
+          inventoryNumber,
+          serialNumber,
+          equipmentId,
+          startDate,
+          endDate,
+          rate,
+          amountRaw,
+          manager,
+          statusRaw,
+          expectedPaymentDate,
+          paymentStatusRaw,
+          updSignedRaw,
+          comment,
+        ] = columns;
+
+        const status = GANTT_STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'created';
+        const paymentStatus = PAYMENT_STATUS_IMPORT_MAP[(paymentStatusRaw || '').toLowerCase()] ?? 'unpaid';
+        const amount = Number(amountRaw);
+
+        const clientRecord = clients.find(item => item.company === client);
+        if (!client || !clientRecord) {
+          return {
+            line,
+            client: client || '—',
+            equipmentLabel: inventoryNumber || serialNumber || equipmentId || '—',
+            startDate,
+            endDate,
+            status: 'error',
+            message: 'Клиент не найден в базе',
+          };
+        }
+
+        const equipmentCandidates = equipment.filter(item => {
+          if (equipmentId) return item.id === equipmentId;
+          if (serialNumber) return item.serialNumber === serialNumber;
+          if (inventoryNumber) {
+            return item.inventoryNumber === inventoryNumber
+              && (inventoryCounts.get(inventoryNumber) || 0) === 1;
+          }
+          return false;
+        });
+
+        if (equipmentId && equipmentCandidates.length === 0) {
+          return {
+            line,
+            client,
+            equipmentLabel: equipmentId,
+            startDate,
+            endDate,
+            status: 'error',
+            message: 'Техника по equipmentId не найдена',
+          };
+        }
+
+        if (!equipmentId && inventoryNumber && (inventoryCounts.get(inventoryNumber) || 0) > 1 && !serialNumber) {
+          return {
+            line,
+            client,
+            equipmentLabel: inventoryNumber,
+            startDate,
+            endDate,
+            status: 'conflict',
+            message: 'Инвентарный номер неуникален, укажите serialNumber или equipmentId',
+          };
+        }
+
+        if (equipmentCandidates.length !== 1) {
+          return {
+            line,
+            client,
+            equipmentLabel: inventoryNumber || serialNumber || equipmentId || '—',
+            startDate,
+            endDate,
+            status: 'error',
+            message: 'Не удалось однозначно определить технику',
+          };
+        }
+
+        if (!startDate || !endDate || Number.isNaN(new Date(startDate).getTime()) || Number.isNaN(new Date(endDate).getTime())) {
+          return {
+            line,
+            client,
+            equipmentLabel: `${equipmentCandidates[0].inventoryNumber} · ${equipmentCandidates[0].model}`,
+            startDate,
+            endDate,
+            status: 'error',
+            message: 'Некорректные даты аренды',
+          };
+        }
+
+        if (new Date(startDate).getTime() > new Date(endDate).getTime()) {
+          return {
+            line,
+            client,
+            equipmentLabel: `${equipmentCandidates[0].inventoryNumber} · ${equipmentCandidates[0].model}`,
+            startDate,
+            endDate,
+            status: 'error',
+            message: 'Дата окончания раньше даты начала',
+          };
+        }
+
+        if (!Number.isFinite(amount) || amount < 0) {
+          return {
+            line,
+            client,
+            equipmentLabel: `${equipmentCandidates[0].inventoryNumber} · ${equipmentCandidates[0].model}`,
+            startDate,
+            endDate,
+            status: 'error',
+            message: 'Некорректная сумма аренды',
+          };
+        }
+
+        const duplicate = existingQueue.find(item =>
+          item.client === client &&
+          item.equipmentId === equipmentCandidates[0].id &&
+          item.startDate === startDate &&
+          item.endDate === endDate,
+        );
+
+        if (duplicate) {
+          return {
+            line,
+            client,
+            equipmentLabel: `${equipmentCandidates[0].inventoryNumber} · ${equipmentCandidates[0].model}`,
+            startDate,
+            endDate,
+            status: 'duplicate',
+            message: `Такая аренда уже существует (${duplicate.id})`,
+          };
+        }
+
+        const overlap = existingQueue.find(item =>
+          item.equipmentId === equipmentCandidates[0].id &&
+          item.status !== 'returned' &&
+          item.status !== 'closed' &&
+          new Date(startDate).getTime() <= new Date(item.endDate).getTime() &&
+          new Date(endDate).getTime() >= new Date(item.startDate).getTime(),
+        );
+
+        if (overlap) {
+          return {
+            line,
+            client,
+            equipmentLabel: `${equipmentCandidates[0].inventoryNumber} · ${equipmentCandidates[0].model}`,
+            startDate,
+            endDate,
+            status: 'conflict',
+            message: `Пересечение с арендой ${overlap.id} (${overlap.startDate} — ${overlap.endDate})`,
+          };
+        }
+
+        const ganttPayload: Omit<GanttRentalData, 'id'> = {
+          client,
+          clientShort: client.slice(0, 20),
+          equipmentId: equipmentCandidates[0].id,
+          equipmentInv: equipmentCandidates[0].inventoryNumber,
+          startDate,
+          endDate,
+          manager: manager || '',
+          managerInitials: (manager || '').split(/\s+/).map(part => part[0] || '').join('').slice(0, 2).toUpperCase(),
+          status,
+          paymentStatus,
+          updSigned: ['да', 'yes', 'true', '1'].includes((updSignedRaw || '').toLowerCase()),
+          expectedPaymentDate: expectedPaymentDate || undefined,
+          amount,
+          comments: [
+            buildRentalCreationHistory({ client, startDate, endDate, status }, user?.name || 'Импорт'),
+            ...(comment ? [createRentalHistoryEntry(user?.name || 'Импорт', comment, 'comment')] : []),
+          ],
+        };
+
+        const classicPayload: Omit<Rental, 'id'> = {
+          client,
+          contact: contact || clientRecord.contact || '',
+          startDate,
+          plannedReturnDate: endDate,
+          actualReturnDate: undefined,
+          equipment: [equipmentCandidates[0].inventoryNumber],
+          rate: rate || `${amount} ₽`,
+          price: amount,
+          discount: 0,
+          deliveryAddress: '',
+          manager: manager || '',
+          status: RENTAL_STATUS_FROM_GANTT[status],
+          comments: comment || undefined,
+        };
+
+        existingQueue.push({ ...ganttPayload, id: `preview-${line}` });
+
+        return {
+          line,
+          client,
+          equipmentLabel: `${equipmentCandidates[0].inventoryNumber} · ${equipmentCandidates[0].model}`,
+          startDate,
+          endDate,
+          status: 'ready',
+          message: 'Готово к импорту',
+          ganttPayload,
+          classicPayload,
+          equipmentId: equipmentCandidates[0].id,
+        };
+      });
+
+      setRentalImportFileName(file.name);
+      setRentalPreview(preview);
+      setRentalPreviewOpen(true);
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось подготовить импорт аренд' });
+    } finally {
+      setIsImporting(false);
+    }
+  }, [clients, equipment, ganttRentals, user?.name]);
+
+  const applyRentalImport = React.useCallback(async () => {
+    const validRows = rentalPreview.filter(item => item.status === 'ready' && item.ganttPayload && item.classicPayload);
+    if (validRows.length === 0) {
+      setMessage({ type: 'error', text: 'Нет валидных строк для импорта аренд' });
+      setRentalPreviewOpen(false);
+      return;
+    }
+
+    const nextGanttRentals = [...ganttRentals];
+    const nextClassicRentals = [...classicRentals];
+    let nextEquipment = [...equipment];
+
+    validRows.forEach((row, index) => {
+      const ganttId = `GR-IMPORT-${Date.now()}-${index}`;
+      const rentalId = `R-IMPORT-${Date.now()}-${index}`;
+      nextGanttRentals.push({ ...row.ganttPayload!, id: ganttId });
+      nextClassicRentals.push({ ...row.classicPayload!, id: rentalId });
+      if (row.equipmentId) {
+        nextEquipment = nextEquipment.map(item => {
+          if (item.id !== row.equipmentId) return item;
+          const nextStatus: EquipmentStatus = row.ganttPayload!.status === 'active' ? 'rented' : 'reserved';
+          return appendAuditHistory(
+            {
+              ...item,
+              status: nextStatus,
+              currentClient: row.ganttPayload!.status === 'active' ? row.client : item.currentClient,
+              returnDate: row.ganttPayload!.status === 'active' ? row.endDate : item.returnDate,
+            },
+            createAuditEntry(user?.name || 'Импорт', `Импорт аренды ${ganttId} из CSV`),
+          );
+        });
+      }
+    });
+
+    try {
+      await Promise.all([
+        rentalsService.bulkReplaceGantt(nextGanttRentals),
+        rentalsService.bulkReplace(nextClassicRentals),
+        equipmentService.bulkReplace(nextEquipment),
+      ]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+      ]);
+      setRentalPreviewOpen(false);
+      setRentalPreview([]);
+      setMessage({ type: 'success', text: `Импорт аренд завершён: добавлено ${validRows.length} записей` });
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось выполнить импорт аренд' });
+    }
+  }, [classicRentals, equipment, ganttRentals, queryClient, rentalPreview, user?.name]);
 
   const handleEquipmentImport = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1167,6 +1562,14 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           onChange={handleServiceImport}
           disabled={!canManageData || isImporting}
         />
+        <input
+          ref={rentalsFileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={handleRentalsImport}
+          disabled={!canManageData || isImporting}
+        />
 
         <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1213,6 +1616,27 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
         <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
+              <p className="font-medium text-gray-900 dark:text-white">Аренды</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Экспорт и импорт аренд с предпросмотром конфликтов. Сейчас в системе {ganttRentals.length} записей планировщика.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={handleRentalsExport} disabled={!canManageData}>
+                <Download className="h-4 w-4" />
+                Экспорт
+              </Button>
+              <Button variant="secondary" size="sm" onClick={handleRentalsImportClick} disabled={!canManageData || isImporting}>
+                <Upload className="h-4 w-4" />
+                {isImporting ? 'Импорт...' : 'Импорт'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
               <p className="font-medium text-gray-900 dark:text-white">Сервис</p>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 Экспорт и импорт сервисных заявок. Сейчас в системе {serviceTickets.length} записей.
@@ -1248,6 +1672,76 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           </div>
         </div>
       </CardContent>
+
+      <Dialog open={rentalPreviewOpen} onOpenChange={setRentalPreviewOpen}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Предпросмотр импорта аренд {rentalImportFileName ? `· ${rentalImportFileName}` : ''}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Всего строк</p>
+              <p className="text-lg font-semibold">{rentalPreview.length}</p>
+            </div>
+            <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20 px-3 py-2">
+              <p className="text-xs text-green-700 dark:text-green-300">Готово к импорту</p>
+              <p className="text-lg font-semibold">{rentalPreview.filter(item => item.status === 'ready').length}</p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 px-3 py-2">
+              <p className="text-xs text-amber-700 dark:text-amber-300">Конфликт/дубликат</p>
+              <p className="text-lg font-semibold">{rentalPreview.filter(item => item.status === 'conflict' || item.status === 'duplicate').length}</p>
+            </div>
+            <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20 px-3 py-2">
+              <p className="text-xs text-red-700 dark:text-red-300">Ошибки</p>
+              <p className="text-lg font-semibold">{rentalPreview.filter(item => item.status === 'error').length}</p>
+            </div>
+          </div>
+          <div className="max-h-[420px] overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Строка</TableHead>
+                  <TableHead>Клиент</TableHead>
+                  <TableHead>Техника</TableHead>
+                  <TableHead>Период</TableHead>
+                  <TableHead>Статус</TableHead>
+                  <TableHead>Комментарий</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rentalPreview.map(row => (
+                  <TableRow key={`${row.line}-${row.client}-${row.equipmentLabel}`}>
+                    <TableCell>{row.line}</TableCell>
+                    <TableCell>{row.client}</TableCell>
+                    <TableCell>{row.equipmentLabel}</TableCell>
+                    <TableCell>{row.startDate} — {row.endDate}</TableCell>
+                    <TableCell>
+                      <Badge variant={
+                        row.status === 'ready'
+                          ? 'success'
+                          : row.status === 'duplicate'
+                            ? 'secondary'
+                            : row.status === 'conflict'
+                              ? 'warning'
+                              : 'danger'
+                      }>
+                        {row.status === 'ready' ? 'Готово' : row.status === 'duplicate' ? 'Дубликат' : row.status === 'conflict' ? 'Конфликт' : 'Ошибка'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-500 dark:text-gray-400">{row.message}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setRentalPreviewOpen(false)}>Отмена</Button>
+            <Button onClick={() => void applyRentalImport()} disabled={rentalPreview.filter(item => item.status === 'ready').length === 0}>
+              Импортировать валидные строки
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

@@ -35,13 +35,13 @@ function registerCrudRoutes(deps) {
     const role = req.user?.userRole;
     if (method === 'POST') {
       if (role !== 'Администратор' && role !== 'Офис-менеджер') {
-        return 'Forbidden: only admins and office managers can create rentals';
+        return 'Недостаточно прав: создавать аренду могут только администратор и офис-менеджер.';
       }
       return null;
     }
 
     if (role !== 'Администратор') {
-      return 'Forbidden: only admins can modify rentals';
+      return 'Недостаточно прав: изменять, удалять и восстанавливать аренду может только администратор.';
     }
 
     return null;
@@ -138,7 +138,7 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
       }
       if (officeManagerCanOnlyCreateRental(req, collection, 'PATCH')) {
-        return res.status(403).json({ ok: false, error: 'Forbidden: office managers can only create rentals' });
+        return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
       }
       const data = readData(collection) || [];
       const idx = data.findIndex(entry => entry.id === req.params.id);
@@ -195,7 +195,7 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
       }
       if (officeManagerCanOnlyCreateRental(req, collection, 'DELETE')) {
-        return res.status(403).json({ ok: false, error: 'Forbidden: office managers can only create rentals' });
+        return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
       }
       const data = readData(collection) || [];
       const idx = data.findIndex(entry => entry.id === req.params.id);
@@ -216,7 +216,7 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
       }
       if (officeManagerCanOnlyCreateRental(req, collection, 'PUT')) {
-        return res.status(403).json({ ok: false, error: 'Forbidden: office managers can only create rentals' });
+        return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
       }
       const body = req.body;
       const list = Array.isArray(body) ? body : body.data;

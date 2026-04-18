@@ -218,6 +218,23 @@ export default function RentalDetail() {
 
   const historyAuthor = user?.name || 'Система';
 
+  const linkedGanttCandidates = useMemo(() => {
+    return ganttRentals.filter(entry => {
+      if (!rental) return false;
+      if (entry.client !== rental.client) return false;
+      if (entry.startDate !== rental.startDate || entry.endDate !== rental.plannedReturnDate) return false;
+      return safelyMatchesResolvedEquipment(entry);
+    });
+  }, [ganttRentals, rental, safelyMatchesResolvedEquipment]);
+
+  const linkedGanttRental = linkedGanttCandidates.length === 1 ? linkedGanttCandidates[0] : null;
+  const canRestoreThisRental = !!rental && canRestoreRentals && (
+    rental.status === 'closed' ||
+    !!rental.actualReturnDate ||
+    linkedGanttRental?.status === 'returned' ||
+    linkedGanttRental?.status === 'closed'
+  );
+
   const comments = [
     ...(rental?.comments ? [{
       date: rental.startDate,
@@ -279,23 +296,6 @@ export default function RentalDetail() {
   const remainingBalance = (rental?.price || 0) - (rental?.discount || 0) - paidAmount;
   const nextRemainingBalance = nextTotal - nextDiscount - paidAmount;
 
-  const linkedGanttCandidates = useMemo(() => {
-    return ganttRentals.filter(entry => {
-      if (!rental) return false;
-      if (entry.client !== rental.client) return false;
-      if (entry.startDate !== rental.startDate || entry.endDate !== rental.plannedReturnDate) return false;
-      return safelyMatchesResolvedEquipment(entry);
-    });
-  }, [ganttRentals, rental, safelyMatchesResolvedEquipment]);
-
-  const linkedGanttRental = linkedGanttCandidates.length === 1 ? linkedGanttCandidates[0] : null;
-  const canRestoreThisRental = canRestoreRentals && (
-    rental.status === 'closed' ||
-    !!rental.actualReturnDate ||
-    linkedGanttRental?.status === 'returned' ||
-    linkedGanttRental?.status === 'closed'
-  );
-
   const financeTimeline = useMemo(() => {
     if (!linkedGanttRental) return [];
 
@@ -340,7 +340,7 @@ export default function RentalDetail() {
       paidAmount,
       payments: relatedPayments,
     }];
-  }, [linkedGanttRental, paidAmount, paymentsByInvoice, relatedInvoices, relatedPayments, rental.price]);
+  }, [linkedGanttRental, paidAmount, paymentsByInvoice, relatedInvoices, relatedPayments, rental?.price]);
 
   const conflictingRental = useMemo(() => {
     if (!isEditing || !formState) return null;
@@ -357,7 +357,7 @@ export default function RentalDetail() {
       const entryEnd = new Date(entry.endDate).getTime();
       return newStart <= entryEnd && newEnd >= entryStart;
     }) || null;
-  }, [formState.plannedReturnDate, formState.startDate, ganttRentals, isEditing, linkedGanttRental, safelyMatchesResolvedEquipment]);
+  }, [formState?.plannedReturnDate, formState?.startDate, ganttRentals, isEditing, linkedGanttRental, safelyMatchesResolvedEquipment]);
 
   const updateField = (field: keyof RentalFormState, value: string) => {
     setFormState(prev => prev ? { ...prev, [field]: value } : prev);
@@ -513,7 +513,7 @@ export default function RentalDetail() {
         createRentalHistoryEntry(historyAuthor, `Статус оплаты обновлён автоматически: ${paymentStatus === 'paid' ? 'Оплачено' : paymentStatus === 'partial' ? 'Частично' : 'Не оплачено'}`),
       ),
     });
-  }, [historyAuthor, linkedGanttRental, rental.price, relatedPayments]);
+  }, [historyAuthor, linkedGanttRental, rental?.price]);
 
   const handleCreateDocument = async () => {
     if (!rental || !canCreateDocuments) return;

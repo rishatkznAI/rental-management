@@ -33,6 +33,10 @@ Thumbs.db
 # Local helper scripts
 *.command
 
+# Playwright
+playwright-report/
+test-results/
+
 # Local server state
 server/.env
 server/data/*.json

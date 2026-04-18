@@ -104,14 +104,16 @@ export function NotificationCenter() {
     });
   }, [notifications]);
 
-  const unreadCount = notifications.filter(item => !readIds.includes(item.id)).length;
+  const unreadNotifications = React.useMemo(
+    () => notifications.filter(item => !readIds.includes(item.id)),
+    [notifications, readIds],
+  );
+
+  const unreadCount = unreadNotifications.length;
   const criticalCount = notifications.filter(item => item.priority === 'critical').length;
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
-    if (nextOpen && notifications.length > 0) {
-      setReadIds(prev => Array.from(new Set([...prev, ...notifications.map(item => item.id)])));
-    }
   };
 
   return (
@@ -148,12 +150,12 @@ export function NotificationCenter() {
         <div className="flex-1 overflow-y-auto px-4 pb-4">
           <div className="sticky top-0 z-10 flex items-center justify-between bg-background py-3">
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              Всего: {notifications.length}
+              Непрочитанных: {unreadNotifications.length} {notifications.length !== unreadNotifications.length ? `· Всего: ${notifications.length}` : ''}
             </div>
-            {notifications.length > 0 && (
+            {unreadNotifications.length > 0 && (
               <button
                 type="button"
-                onClick={() => setReadIds(prev => Array.from(new Set([...prev, ...notifications.map(item => item.id)])))}
+                onClick={() => setReadIds(prev => Array.from(new Set([...prev, ...unreadNotifications.map(item => item.id)])))}
                 className="text-sm font-medium text-[--color-primary] hover:underline"
               >
                 Отметить прочитанным
@@ -161,13 +163,13 @@ export function NotificationCenter() {
             )}
           </div>
 
-          {notifications.length === 0 ? (
+          {unreadNotifications.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              Сейчас критичных уведомлений нет
+              Все уведомления прочитаны
             </div>
           ) : (
             <div className="space-y-3">
-              {notifications.map(notification => {
+              {unreadNotifications.map(notification => {
                 const Icon = getIcon(notification);
                 return (
                   <div

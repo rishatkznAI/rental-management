@@ -32,10 +32,40 @@ export interface ClientFinancialSnapshot extends ClientReceivableRow {
   lastRentalDate?: string;
 }
 
+export interface ManagerReceivableRow {
+  manager: string;
+  currentDebt: number;
+  overdueDebt: number;
+  unpaidRentals: number;
+  overdueRentals: number;
+  clientsCount: number;
+}
+
+export interface OverdueBucketRow {
+  key: string;
+  label: string;
+  rentals: number;
+  debt: number;
+}
+
 function getEffectivePaidAmount(payment: Payment): number {
   if (typeof payment.paidAmount === 'number') return payment.paidAmount;
   if (payment.status === 'paid') return payment.amount;
   return 0;
+}
+
+function getOverdueDate(row: Pick<RentalDebtRow, 'expectedPaymentDate' | 'endDate'>): string {
+  return row.expectedPaymentDate || row.endDate;
+}
+
+export function getRentalDebtOverdueDays(
+  row: Pick<RentalDebtRow, 'expectedPaymentDate' | 'endDate' | 'outstanding'>,
+  today = new Date().toISOString().slice(0, 10),
+): number {
+  if (row.outstanding <= 0) return 0;
+  const dueDate = getOverdueDate(row);
+  if (!dueDate || dueDate >= today) return 0;
+  return Math.max(0, Math.floor((new Date(today).getTime() - new Date(dueDate).getTime()) / 86400000));
 }
 
 export function buildRentalDebtRows(
@@ -133,6 +163,68 @@ export function buildClientFinancialSnapshots(
       };
     })
     .sort((a, b) => b.currentDebt - a.currentDebt || a.client.localeCompare(b.client, 'ru'));
+}
+
+export function buildManagerReceivables(
+  rentalDebtRows: RentalDebtRow[],
+  today = new Date().toISOString().slice(0, 10),
+): ManagerReceivableRow[] {
+  const map = new Map<string, ManagerReceivableRow & { clients: Set<string> }>();
+
+  rentalDebtRows.forEach(row => {
+    const key = row.manager || 'Не назначен';
+    const overdueDays = getRentalDebtOverdueDays(row, today);
+    const item = map.get(key) ?? {
+      manager: key,
+      currentDebt: 0,
+      overdueDebt: 0,
+      unpaidRentals: 0,
+      overdueRentals: 0,
+      clientsCount: 0,
+      clients: new Set<string>(),
+    };
+    item.currentDebt += row.outstanding;
+    item.unpaidRentals += 1;
+    if (overdueDays > 0) {
+      item.overdueRentals += 1;
+      item.overdueDebt += row.outstanding;
+    }
+    item.clients.add(row.client);
+    item.clientsCount = item.clients.size;
+    map.set(key, item);
+  });
+
+  return Array.from(map.values())
+    .map(({ clients, ...rest }) => rest)
+    .sort((a, b) => b.currentDebt - a.currentDebt || a.manager.localeCompare(b.manager, 'ru'));
+}
+
+export function buildOverdueBuckets(
+  rentalDebtRows: RentalDebtRow[],
+  today = new Date().toISOString().slice(0, 10),
+): OverdueBucketRow[] {
+  const buckets: OverdueBucketRow[] = [
+    { key: '1_7', label: '1-7 дней', rentals: 0, debt: 0 },
+    { key: '8_14', label: '8-14 дней', rentals: 0, debt: 0 },
+    { key: '15_30', label: '15-30 дней', rentals: 0, debt: 0 },
+    { key: '31_60', label: '31-60 дней', rentals: 0, debt: 0 },
+    { key: '61_plus', label: '61+ дней', rentals: 0, debt: 0 },
+  ];
+
+  rentalDebtRows.forEach(row => {
+    const overdueDays = getRentalDebtOverdueDays(row, today);
+    if (overdueDays <= 0) return;
+    const bucket =
+      overdueDays <= 7 ? buckets[0] :
+      overdueDays <= 14 ? buckets[1] :
+      overdueDays <= 30 ? buckets[2] :
+      overdueDays <= 60 ? buckets[3] :
+      buckets[4];
+    bucket.rentals += 1;
+    bucket.debt += row.outstanding;
+  });
+
+  return buckets;
 }
 
 export function mergeClientsWithFinancials(

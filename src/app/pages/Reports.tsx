@@ -11,7 +11,13 @@ import { RefreshCw, Truck, BarChart2, Wrench, TrendingUp, Download } from 'lucid
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import { formatCurrency } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
-import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
+import {
+  buildClientFinancialSnapshots,
+  buildManagerReceivables,
+  buildOverdueBuckets,
+  buildRentalDebtRows,
+  getRentalDebtOverdueDays,
+} from '../lib/finance';
 import type { Equipment, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
@@ -229,12 +235,21 @@ export default function Reports() {
     () => buildClientFinancialSnapshots(clients, ganttRentals, payments),
     [clients, ganttRentals, payments],
   );
+  const financeManagerSnapshots = useMemo(
+    () => buildManagerReceivables(financeDebtRows),
+    [financeDebtRows],
+  );
+  const financeOverdueBuckets = useMemo(
+    () => buildOverdueBuckets(financeDebtRows),
+    [financeDebtRows],
+  );
   const financeTotals = useMemo(() => ({
     debt: financeClientSnapshots.reduce((sum, item) => sum + item.currentDebt, 0),
     overdueClients: financeClientSnapshots.filter(item => item.overdueRentals > 0).length,
     exceededClients: financeClientSnapshots.filter(item => item.exceededLimit).length,
     unpaidRentals: financeDebtRows.length,
-  }), [financeClientSnapshots, financeDebtRows]);
+    overdueDebt: financeManagerSnapshots.reduce((sum, item) => sum + item.overdueDebt, 0),
+  }), [financeClientSnapshots, financeDebtRows, financeManagerSnapshots]);
 
   const filteredMechanicRows = useMemo(() => {
     const rows = mechanicWorkload?.rows ?? [];
@@ -731,6 +746,207 @@ export default function Reports() {
     downloadFile(xls, `service-report-${new Date().toISOString().slice(0, 10)}.xls`, 'application/vnd.ms-excel');
   }, [equipmentServiceSummary, filteredMechanicRows, filteredMechanicSummary]);
 
+const exportFinanceXls = useCallback(() => {
+    const clientRowsXml = financeClientSnapshots
+      .filter(item => item.currentDebt > 0)
+      .map(item => `
+        <Row>
+          <Cell><Data ss:Type="String">${escapeXml(item.client)}</Data></Cell>
+          <Cell><Data ss:Type="Number">${escapeXml(item.currentDebt.toFixed(2))}</Data></Cell>
+          <Cell><Data ss:Type="Number">${escapeXml(item.unpaidRentals)}</Data></Cell>
+          <Cell><Data ss:Type="Number">${escapeXml(item.overdueRentals)}</Data></Cell>
+          <Cell><Data ss:Type="Number">${escapeXml(item.creditLimit.toFixed(2))}</Data></Cell>
+          <Cell><Data ss:Type="String">${escapeXml(item.exceededLimit ? 'Да' : 'Нет')}</Data></Cell>
+        </Row>
+      `).join('');
+
+    const managerRowsXml = financeManagerSnapshots.map(item => `
+      <Row>
+        <Cell><Data ss:Type="String">${escapeXml(item.manager)}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.currentDebt.toFixed(2))}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.overdueDebt.toFixed(2))}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.unpaidRentals)}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.overdueRentals)}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.clientsCount)}</Data></Cell>
+      </Row>
+    `).join('');
+
+    const overdueRowsXml = financeOverdueBuckets.map(item => `
+      <Row>
+        <Cell><Data ss:Type="String">${escapeXml(item.label)}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.rentals)}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.debt.toFixed(2))}</Data></Cell>
+      </Row>
+    `).join('');
+
+    const debtRowsXml = financeDebtRows.map(row => `
+      <Row>
+        <Cell><Data ss:Type="String">${escapeXml(row.client)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(row.manager)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(row.equipmentInv)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(row.startDate)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(row.endDate)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(row.expectedPaymentDate || '')}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(getRentalDebtOverdueDays(row))}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(row.amount.toFixed(2))}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(row.paidAmount.toFixed(2))}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(row.outstanding.toFixed(2))}</Data></Cell>
+      </Row>
+    `).join('');
+
+    const xls = `<?xml version="1.0"?>
+      <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+        xmlns:o="urn:schemas-microsoft-com:office:office"
+        xmlns:x="urn:schemas-microsoft-com:office:excel"
+        xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+        <Worksheet ss:Name="Клиенты">
+          <Table>
+            <Row>
+              <Cell><Data ss:Type="String">Клиент</Data></Cell>
+              <Cell><Data ss:Type="String">Долг</Data></Cell>
+              <Cell><Data ss:Type="String">Неоплаченные аренды</Data></Cell>
+              <Cell><Data ss:Type="String">Просроченные аренды</Data></Cell>
+              <Cell><Data ss:Type="String">Кредитный лимит</Data></Cell>
+              <Cell><Data ss:Type="String">Превышен лимит</Data></Cell>
+            </Row>
+            ${clientRowsXml}
+          </Table>
+        </Worksheet>
+        <Worksheet ss:Name="Менеджеры">
+          <Table>
+            <Row>
+              <Cell><Data ss:Type="String">Менеджер</Data></Cell>
+              <Cell><Data ss:Type="String">Долг</Data></Cell>
+              <Cell><Data ss:Type="String">Просроченный долг</Data></Cell>
+              <Cell><Data ss:Type="String">Неоплаченные аренды</Data></Cell>
+              <Cell><Data ss:Type="String">Просроченные аренды</Data></Cell>
+              <Cell><Data ss:Type="String">Клиенты с долгом</Data></Cell>
+            </Row>
+            ${managerRowsXml}
+          </Table>
+        </Worksheet>
+        <Worksheet ss:Name="Просрочка">
+          <Table>
+            <Row>
+              <Cell><Data ss:Type="String">Период просрочки</Data></Cell>
+              <Cell><Data ss:Type="String">Аренды</Data></Cell>
+              <Cell><Data ss:Type="String">Сумма долга</Data></Cell>
+            </Row>
+            ${overdueRowsXml}
+          </Table>
+        </Worksheet>
+        <Worksheet ss:Name="Аренды">
+          <Table>
+            <Row>
+              <Cell><Data ss:Type="String">Клиент</Data></Cell>
+              <Cell><Data ss:Type="String">Менеджер</Data></Cell>
+              <Cell><Data ss:Type="String">Техника</Data></Cell>
+              <Cell><Data ss:Type="String">Начало</Data></Cell>
+              <Cell><Data ss:Type="String">Окончание</Data></Cell>
+              <Cell><Data ss:Type="String">Ожидаемая оплата</Data></Cell>
+              <Cell><Data ss:Type="String">Дней просрочки</Data></Cell>
+              <Cell><Data ss:Type="String">Сумма</Data></Cell>
+              <Cell><Data ss:Type="String">Оплачено</Data></Cell>
+              <Cell><Data ss:Type="String">Остаток</Data></Cell>
+            </Row>
+            ${debtRowsXml}
+          </Table>
+        </Worksheet>
+      </Workbook>`;
+
+    downloadFile(xls, `finance-report-${new Date().toISOString().slice(0, 10)}.xls`, 'application/vnd.ms-excel');
+  }, [financeClientSnapshots, financeDebtRows, financeManagerSnapshots, financeOverdueBuckets]);
+
+  const exportFinancePdf = useCallback(() => {
+    const popup = window.open('', '_blank', 'width=1100,height=800');
+    if (!popup) return;
+
+    const clientRows = financeClientSnapshots
+      .filter(item => item.currentDebt > 0)
+      .map(item => `
+        <tr>
+          <td>${escapeXml(item.client)}</td>
+          <td>${escapeXml(formatCurrency(item.currentDebt))}</td>
+          <td>${escapeXml(item.unpaidRentals)}</td>
+          <td>${escapeXml(item.overdueRentals)}</td>
+          <td>${escapeXml(item.creditLimit > 0 ? formatCurrency(item.creditLimit) : '—')}</td>
+          <td>${escapeXml(item.exceededLimit ? 'Да' : 'Нет')}</td>
+        </tr>
+      `).join('');
+
+    const managerRows = financeManagerSnapshots.map(item => `
+      <tr>
+        <td>${escapeXml(item.manager)}</td>
+        <td>${escapeXml(formatCurrency(item.currentDebt))}</td>
+        <td>${escapeXml(formatCurrency(item.overdueDebt))}</td>
+        <td>${escapeXml(item.unpaidRentals)}</td>
+        <td>${escapeXml(item.overdueRentals)}</td>
+        <td>${escapeXml(item.clientsCount)}</td>
+      </tr>
+    `).join('');
+
+    const overdueRows = financeOverdueBuckets.map(item => `
+      <tr>
+        <td>${escapeXml(item.label)}</td>
+        <td>${escapeXml(item.rentals)}</td>
+        <td>${escapeXml(formatCurrency(item.debt))}</td>
+      </tr>
+    `).join('');
+
+    const detailRows = financeDebtRows.slice(0, 25).map(row => `
+      <tr>
+        <td>${escapeXml(row.client)}</td>
+        <td>${escapeXml(row.manager)}</td>
+        <td>${escapeXml(row.equipmentInv)}</td>
+        <td>${escapeXml(row.expectedPaymentDate || row.endDate)}</td>
+        <td>${escapeXml(getRentalDebtOverdueDays(row))}</td>
+        <td>${escapeXml(formatCurrency(row.outstanding))}</td>
+      </tr>
+    `).join('');
+
+    popup.document.write(`
+      <!doctype html>
+      <html lang="ru">
+        <head>
+          <meta charset="utf-8" />
+          <title>Финансовый отчёт</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
+            h1, h2 { margin: 0 0 12px; }
+            .meta { margin-bottom: 20px; color: #6b7280; }
+            .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+            .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; }
+            .card-label { color: #6b7280; font-size: 12px; margin-bottom: 6px; }
+            .card-value { font-size: 22px; font-weight: 700; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; font-size: 12px; }
+            th { background: #f3f4f6; }
+          </style>
+        </head>
+        <body>
+          <h1>Финансовый отчёт</h1>
+          <div class="meta">Сформировано ${escapeXml(new Date().toLocaleString('ru-RU'))}</div>
+          <div class="cards">
+            <div class="card"><div class="card-label">Общая дебиторка</div><div class="card-value">${escapeXml(formatCurrency(financeTotals.debt))}</div></div>
+            <div class="card"><div class="card-label">Просроченный долг</div><div class="card-value">${escapeXml(formatCurrency(financeTotals.overdueDebt))}</div></div>
+            <div class="card"><div class="card-label">Неоплаченные аренды</div><div class="card-value">${escapeXml(financeTotals.unpaidRentals)}</div></div>
+            <div class="card"><div class="card-label">Клиенты с просрочкой</div><div class="card-value">${escapeXml(financeTotals.overdueClients)}</div></div>
+          </div>
+          <h2>Дебиторка по клиентам</h2>
+          <table><thead><tr><th>Клиент</th><th>Долг</th><th>Неоплаченные аренды</th><th>Просроченные</th><th>Лимит</th><th>Превышен</th></tr></thead><tbody>${clientRows}</tbody></table>
+          <h2>Дебиторка по менеджерам</h2>
+          <table><thead><tr><th>Менеджер</th><th>Долг</th><th>Просроченный долг</th><th>Неоплаченные аренды</th><th>Просроченные</th><th>Клиенты</th></tr></thead><tbody>${managerRows}</tbody></table>
+          <h2>Возраст просрочки</h2>
+          <table><thead><tr><th>Период</th><th>Аренды</th><th>Сумма долга</th></tr></thead><tbody>${overdueRows}</tbody></table>
+          <h2>Крупнейшие долги по арендам</h2>
+          <table><thead><tr><th>Клиент</th><th>Менеджер</th><th>Техника</th><th>Срок оплаты</th><th>Дней просрочки</th><th>Остаток</th></tr></thead><tbody>${detailRows}</tbody></table>
+          <script>window.onload = () => { window.print(); };</script>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+  }, [financeClientSnapshots, financeDebtRows, financeManagerSnapshots, financeOverdueBuckets, financeTotals]);
+
   const refresh = useCallback(() => {
     setIsRefreshing(true);
     Promise.all([
@@ -1144,6 +1360,17 @@ export default function Reports() {
         </TabsContent>
 
         <TabsContent value="finance" className="space-y-4 sm:space-y-6">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button variant="secondary" onClick={exportFinanceXls} disabled={financeDebtRows.length === 0}>
+              <Download className="mr-2 h-4 w-4" />
+              Excel
+            </Button>
+            <Button variant="secondary" onClick={exportFinancePdf} disabled={financeDebtRows.length === 0}>
+              <Download className="mr-2 h-4 w-4" />
+              PDF
+            </Button>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="pb-2">
@@ -1165,8 +1392,8 @@ export default function Reports() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Превышен лимит</CardDescription>
-                <CardTitle className="text-3xl">{financeTotals.exceededClients}</CardTitle>
+                <CardDescription>Просроченный долг</CardDescription>
+                <CardTitle className="text-3xl">{formatCurrency(financeTotals.overdueDebt)}</CardTitle>
               </CardHeader>
             </Card>
           </div>
@@ -1260,6 +1487,81 @@ export default function Reports() {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Дебиторка по менеджерам</CardTitle>
+                <CardDescription>Кто ведёт долг, просрочку и сколько клиентов в риске</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {financeManagerSnapshots.length === 0 ? (
+                  <EmptyChart message="Нет данных по менеджерской дебиторке." />
+                ) : (
+                  <div className="space-y-3">
+                    {financeManagerSnapshots.map(item => (
+                      <div
+                        key={item.manager}
+                        className={`rounded-lg border px-4 py-3 ${
+                          item.overdueDebt > 0
+                            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+                            : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-medium text-gray-900 dark:text-white">{item.manager}</p>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              Клиентов с долгом: {item.clientsCount} · неоплаченных аренд: {item.unpaidRentals}
+                              {item.overdueRentals > 0 && ` · просроченных: ${item.overdueRentals}`}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(item.currentDebt)}</p>
+                            <p className={`mt-1 text-xs ${item.overdueDebt > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                              Просрочка: {formatCurrency(item.overdueDebt)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Возраст просрочки</CardTitle>
+                <CardDescription>Сколько аренд и долга в каждом интервале просрочки</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {financeOverdueBuckets.every(item => item.rentals === 0) ? (
+                  <EmptyChart message="Нет просроченных аренд по срокам оплаты." />
+                ) : (
+                  <div className="space-y-3">
+                    {financeOverdueBuckets.map(item => (
+                      <div key={item.key} className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-900/40">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-medium text-gray-900 dark:text-white">{item.label}</p>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              Просроченных аренд: {item.rentals}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className={`font-semibold ${item.debt > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                              {formatCurrency(item.debt)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </CardContent>

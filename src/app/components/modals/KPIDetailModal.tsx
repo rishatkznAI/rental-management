@@ -66,7 +66,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 {data.activeRentals?.slice(0, 10).map((rental: any) => (
                   <Link
                     key={rental.id}
-                    to={`/rentals/${rental.id}`}
+                    to={rental.link || `/rentals/${rental.id}`}
                     onClick={() => onOpenChange(false)}
                     className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                   >
@@ -106,7 +106,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                   {data.overdueRentals.map((rental: any) => (
                     <Link
                       key={rental.id}
-                      to={`/rentals/${rental.id}`}
+                      to={rental.link || `/rentals/${rental.id}`}
                       onClick={() => onOpenChange(false)}
                       className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 transition-colors hover:border-red-400 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:hover:border-red-600 dark:hover:bg-red-900/40"
                     >

@@ -139,6 +139,9 @@ export default function Dashboard() {
   const viewRentals = isManagerRole && currentUserName
     ? rentals.filter(r => r.manager === currentUserName)
     : rentals;
+  const viewPlannerRentals = isManagerRole && currentUserName
+    ? ganttRentals.filter(r => r.manager === currentUserName)
+    : ganttRentals;
 
   // Utilization
   const totalEquipment = equipment.length;
@@ -149,14 +152,11 @@ export default function Dashboard() {
     ? 0
     : Math.round(safeDiv(rentedEquipment, activeEquipment > 0 ? activeEquipment : totalEquipment) * 100);
 
-  // Active rentals (фильтруются по ролям: менеджер видит только свои)
-  const activeRentalsList = viewRentals.filter(r =>
-    r.status === 'active' || r.status === 'delivery' || r.status === 'confirmed'
-  );
+  // Dashboard operational KPIs should use planner rentals as the source of truth.
+  const activeRentalsList = viewPlannerRentals.filter(r => r.status === 'active');
 
-  // Overdue returns: active/delivery rentals with plannedReturnDate in the past
-  const overdueRentalsList = viewRentals.filter(r =>
-    (r.status === 'active' || r.status === 'delivery') && isOverdue(r.plannedReturnDate)
+  const overdueRentalsList = viewPlannerRentals.filter(r =>
+    r.status === 'active' && isOverdue(r.endDate)
   );
 
   // Equipment in service
@@ -196,9 +196,9 @@ export default function Dashboard() {
   // Upcoming returns (next 3 days, not overdue)
   const soon3 = new Date(today);
   soon3.setDate(soon3.getDate() + 3);
-  const upcomingReturns = viewRentals.filter(r => {
+  const upcomingReturns = viewPlannerRentals.filter(r => {
     if (r.status !== 'active') return false;
-    const ret = new Date(r.plannedReturnDate);
+    const ret = new Date(r.endDate);
     return ret >= today && ret <= soon3;
   });
 
@@ -208,7 +208,7 @@ export default function Dashboard() {
   );
 
   // Recent rentals (last 10, sorted newest first)
-  const recentRentals = [...viewRentals]
+  const recentRentals = [...viewPlannerRentals]
     .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())
     .slice(0, 5);
 
@@ -248,15 +248,15 @@ export default function Dashboard() {
   // Rentals ending today
   const tomorrowStart = new Date(today);
   tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-  const rentalsEndingToday = viewRentals.filter(r => {
-    const ret = new Date(r.plannedReturnDate);
-    return (r.status === 'active' || r.status === 'delivery') && ret >= today && ret < tomorrowStart;
+  const rentalsEndingToday = viewPlannerRentals.filter(r => {
+    const ret = new Date(r.endDate);
+    return r.status === 'active' && ret >= today && ret < tomorrowStart;
   });
 
   // Max overdue days
   const maxOverdueDays = overdueRentalsList.length > 0
     ? Math.max(...overdueRentalsList.map(r => {
-        const diffMs = today.getTime() - new Date(r.plannedReturnDate).getTime();
+        const diffMs = today.getTime() - new Date(r.endDate).getTime();
         return Math.max(1, Math.ceil(diffMs / 86400000));
       }))
     : 0;
@@ -309,17 +309,17 @@ export default function Dashboard() {
 
   // 1. Просроченные возвраты (критично)
   overdueRentalsList.forEach(r => {
-    const days = Math.max(1, Math.ceil((today.getTime() - new Date(r.plannedReturnDate).getTime()) / 86400000));
+    const days = Math.max(1, Math.ceil((today.getTime() - new Date(r.endDate).getTime()) / 86400000));
     alertItems.push({
       id: `overdue-return-${r.id}`,
       priority: 'critical',
       icon: Calendar,
       category: 'Просроченный возврат',
       title: r.client,
-      entity: r.equipment?.slice(0, 2).join(', ') || r.id,
+      entity: r.equipmentInv || r.id,
       detail: `Просрочка ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'}`,
-      link: `/rentals/${r.id}`,
-      linkLabel: 'Открыть аренду',
+      link: '/rentals',
+      linkLabel: 'Открыть планировщик',
     });
   });
 
@@ -358,9 +358,9 @@ export default function Dashboard() {
   // 4. Техника не готова к выдаче (аренды стартующие сегодня/завтра, но техника в сервисе)
   const soon2 = new Date(today);
   soon2.setDate(soon2.getDate() + 2);
-  const startingSoonRentals = viewRentals.filter(r => {
+  const startingSoonRentals = viewPlannerRentals.filter(r => {
     const s = new Date(r.startDate);
-    return (r.status === 'confirmed' || r.status === 'new') && s >= today && s <= soon2;
+    return r.status === 'created' && s >= today && s <= soon2;
   });
   startingSoonRentals.forEach(r => {
     const blockedEq = (r.equipment || [])
@@ -498,14 +498,28 @@ export default function Dashboard() {
   // ── KPI data objects for modal ──────────────────────────────────────────────
   const kpiData = {
     utilization: { totalEquipment, rentedEquipment, availableEquipment, utilization },
-    activeRentals: { activeRentals: activeRentalsList },
-    overdueReturns: { overdueRentals: overdueRentalsList },
+    activeRentals: {
+      activeRentals: activeRentalsList.map(rental => ({
+        ...rental,
+        equipment: [rental.equipmentInv],
+        plannedReturnDate: rental.endDate,
+        price: rental.amount,
+        link: '/rentals',
+      })),
+    },
+    overdueReturns: {
+      overdueRentals: overdueRentalsList.map(rental => ({
+        ...rental,
+        plannedReturnDate: rental.endDate,
+        link: '/rentals',
+      })),
+    },
     inService: { equipmentInService: equipmentInServiceList },
     weekRevenue: {
       weekRevenue: Math.round(weekRevenue),
       activeRentalsCount: activeRentalsList.length,
       averagePrice: activeRentalsList.length > 0
-        ? Math.round(activeRentalsList.reduce((s, r) => s + (r.price || 0), 0) / activeRentalsList.length)
+        ? Math.round(activeRentalsList.reduce((s, r) => s + (r.amount || 0), 0) / activeRentalsList.length)
         : 0,
     },
     totalDebt: {
@@ -1333,7 +1347,7 @@ export default function Dashboard() {
                   return (
                     <Link
                       key={rental.id}
-                      to={`/rentals/${rental.id}`}
+                      to="/rentals"
                       className="flex items-center justify-between rounded-lg border border-transparent px-2 py-3 transition-colors hover:border-gray-200 hover:bg-gray-50 dark:hover:border-gray-700 dark:hover:bg-gray-700/50 -mx-2"
                     >
                       <div className="flex-1 min-w-0">
@@ -1342,12 +1356,12 @@ export default function Dashboard() {
                           <span className={`text-xs px-1.5 py-0.5 rounded-full ${rs.color}`}>{rs.label}</span>
                         </div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-                          {rental.id} · {formatDate(rental.startDate)} — {formatDate(rental.plannedReturnDate)}
+                          {rental.id} · {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
                         </p>
                       </div>
                       <div className="ml-3 shrink-0 text-right">
                         <p className="font-semibold text-sm text-gray-900 dark:text-white">
-                          {rental.price > 0 ? formatCurrency(rental.price) : '—'}
+                          {rental.amount > 0 ? formatCurrency(rental.amount) : '—'}
                         </p>
                         <span className="text-xs text-[--color-primary]">→</span>
                       </div>

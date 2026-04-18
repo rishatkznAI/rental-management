@@ -8,7 +8,21 @@ import { formatCurrency, formatDate } from '../../lib/utils';
 interface KPIDetailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  kpiType: 'utilization' | 'activeRentals' | 'overdueReturns' | 'inService' | 'weekRevenue' | 'totalDebt' | 'monthDebt' | null;
+  kpiType:
+    | 'utilization'
+    | 'activeRentals'
+    | 'returnsTodayTomorrow'
+    | 'overdueReturns'
+    | 'idleEquipment'
+    | 'openService'
+    | 'unassignedService'
+    | 'waitingParts'
+    | 'repeatFailures'
+    | 'serviceInDays'
+    | 'weekRevenue'
+    | 'totalDebt'
+    | 'monthDebt'
+    | null;
   data: any;
 }
 
@@ -139,30 +153,132 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           )
         };
 
-      case 'inService':
+      case 'returnsTodayTomorrow':
         return {
-          title: 'Техника в сервисе',
-          description: 'Оборудование, находящееся на обслуживании',
+          title: 'Возвраты сегодня и завтра',
+          description: 'Ближайшие возвраты по активным арендам. Нажмите для перехода в планировщик.',
+          details: (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Сегодня</p>
+                  <p className="text-2xl font-bold text-yellow-600">{data.todayRentals?.length || 0}</p>
+                </div>
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Завтра</p>
+                  <p className="text-2xl font-bold text-blue-600">{data.tomorrowRentals?.length || 0}</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Сегодня:</p>
+                {data.todayRentals?.length ? data.todayRentals.map((rental: any) => (
+                  <Link
+                    key={`today-${rental.id}`}
+                    to={rental.link || '/rentals'}
+                    onClick={() => onOpenChange(false)}
+                    className="flex items-center justify-between rounded-lg border border-yellow-200 bg-yellow-50 p-3 transition-colors hover:border-yellow-400 hover:bg-yellow-100 dark:border-yellow-800 dark:bg-yellow-900/20 dark:hover:bg-yellow-900/40"
+                  >
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">{rental.client}</p>
+                      <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                        Возврат {formatDate(rental.plannedReturnDate)} · {rental.equipmentInv}
+                      </p>
+                    </div>
+                    <ExternalLink className="h-4 w-4 text-yellow-600" />
+                  </Link>
+                )) : (
+                  <p className="text-sm text-gray-400">На сегодня возвратов нет</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Завтра:</p>
+                {data.tomorrowRentals?.length ? data.tomorrowRentals.map((rental: any) => (
+                  <Link
+                    key={`tomorrow-${rental.id}`}
+                    to={rental.link || '/rentals'}
+                    onClick={() => onOpenChange(false)}
+                    className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-3 transition-colors hover:border-blue-400 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:hover:bg-blue-900/40"
+                  >
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">{rental.client}</p>
+                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                        Возврат {formatDate(rental.plannedReturnDate)} · {rental.equipmentInv}
+                      </p>
+                    </div>
+                    <ExternalLink className="h-4 w-4 text-blue-600" />
+                  </Link>
+                )) : (
+                  <p className="text-sm text-gray-400">На завтра возвратов нет</p>
+                )}
+              </div>
+            </div>
+          )
+        };
+
+      case 'idleEquipment':
+        return {
+          title: 'Техника в простое',
+          description: 'Техника, которая не занята в аренде и не зарезервирована.',
+          details: (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Свободно</p>
+                  <p className="text-2xl font-bold text-green-600">{data.availableCount || 0}</p>
+                </div>
+                <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Неактивно</p>
+                  <p className="text-2xl font-bold text-gray-700 dark:text-gray-200">{data.inactiveCount || 0}</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {data.idleEquipment?.length ? data.idleEquipment.map((equipment: any) => (
+                  <Link
+                    key={equipment.id}
+                    to={`/equipment/${equipment.id}`}
+                    onClick={() => onOpenChange(false)}
+                    className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
+                  >
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">{equipment.manufacturer} {equipment.model}</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {equipment.inventoryNumber} · {equipment.status === 'inactive' ? 'Неактивна' : 'Свободна'}
+                      </p>
+                    </div>
+                    <ExternalLink className="h-4 w-4 text-[--color-primary]" />
+                  </Link>
+                )) : (
+                  <p className="text-sm text-gray-400">В простое техники нет</p>
+                )}
+              </div>
+            </div>
+          )
+        };
+
+      case 'openService':
+        return {
+          title: 'Открытые сервисные заявки',
+          description: 'Все незакрытые заявки сервиса. Нажмите для перехода к карточке заявки.',
           details: (
             <div className="space-y-3">
               <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Единиц в сервисе</p>
-                <p className="text-3xl font-bold text-orange-600">{data.equipmentInService?.length || 0}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Открытых заявок</p>
+                <p className="text-3xl font-bold text-orange-600">{data.openTickets?.length || 0}</p>
               </div>
-              {data.equipmentInService && data.equipmentInService.length > 0 && (
+              {data.openTickets && data.openTickets.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Список техники:</p>
-                  {data.equipmentInService.map((equipment: any) => (
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Список заявок:</p>
+                  {data.openTickets.map((ticket: any) => (
                     <Link
-                      key={equipment.id}
-                      to={`/equipment/${equipment.id}`}
+                      key={ticket.id}
+                      to={`/service/${ticket.id}`}
                       onClick={() => onOpenChange(false)}
                       className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                     >
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{equipment.model}</p>
+                        <p className="font-medium text-gray-900 dark:text-white">{ticket.equipment}</p>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
-                          {equipment.inventoryNumber} · Серийный: {equipment.serialNumber}
+                          {ticket.reason} · {ticket.assignedMechanicName || ticket.assignedTo || 'Без механика'}
                         </p>
                       </div>
                       <ExternalLink className="h-4 w-4 text-[--color-primary]" />
@@ -170,6 +286,145 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                   ))}
                 </div>
               )}
+            </div>
+          )
+        };
+
+      case 'unassignedService':
+        return {
+          title: 'Заявки без механика',
+          description: 'Открытые заявки, которым ещё не назначен исполнитель.',
+          details: (
+            <div className="space-y-3">
+              <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-gray-400">Без механика</p>
+                <p className="text-3xl font-bold text-red-600">{data.unassignedTickets?.length || 0}</p>
+              </div>
+              {data.unassignedTickets?.length ? data.unassignedTickets.map((ticket: any) => (
+                <Link
+                  key={ticket.id}
+                  to={`/service/${ticket.id}`}
+                  onClick={() => onOpenChange(false)}
+                  className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 transition-colors hover:border-red-400 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:hover:bg-red-900/40"
+                >
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">{ticket.equipment}</p>
+                    <p className="text-sm text-red-700 dark:text-red-300">{ticket.reason}</p>
+                  </div>
+                  <ExternalLink className="h-4 w-4 text-red-600" />
+                </Link>
+              )) : (
+                <p className="text-sm text-green-600 dark:text-green-400">Все заявки распределены</p>
+              )}
+            </div>
+          )
+        };
+
+      case 'waitingParts':
+        return {
+          title: 'Заявки, ожидающие запчасти',
+          description: 'Заявки в статусе ожидания запчастей.',
+          details: (
+            <div className="space-y-3">
+              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-gray-400">Ждут запчасти</p>
+                <p className="text-3xl font-bold text-yellow-600">{data.waitingTickets?.length || 0}</p>
+              </div>
+              {data.waitingTickets?.length ? data.waitingTickets.map((ticket: any) => (
+                <Link
+                  key={ticket.id}
+                  to={`/service/${ticket.id}`}
+                  onClick={() => onOpenChange(false)}
+                  className="flex items-center justify-between rounded-lg border border-yellow-200 bg-yellow-50 p-3 transition-colors hover:border-yellow-400 hover:bg-yellow-100 dark:border-yellow-800 dark:bg-yellow-900/20 dark:hover:bg-yellow-900/40"
+                >
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">{ticket.equipment}</p>
+                    <p className="text-sm text-yellow-700 dark:text-yellow-300">{ticket.reason}</p>
+                  </div>
+                  <ExternalLink className="h-4 w-4 text-yellow-600" />
+                </Link>
+              )) : (
+                <p className="text-sm text-green-600 dark:text-green-400">Ожидания запчастей нет</p>
+              )}
+            </div>
+          )
+        };
+
+      case 'repeatFailures':
+        return {
+          title: 'Повторные поломки',
+          description: 'Техника с повторяющейся причиной обращения в сервис.',
+          details: (
+            <div className="space-y-3">
+              <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-gray-400">Повторных случаев</p>
+                <p className="text-3xl font-bold text-red-600">{data.repeatFailures?.length || 0}</p>
+              </div>
+              {data.repeatFailures?.length ? data.repeatFailures.map((row: any) => (
+                <Link
+                  key={`${row.equipmentId}-${row.reason}`}
+                  to={row.equipmentId ? `/equipment/${row.equipmentId}` : '/reports'}
+                  onClick={() => onOpenChange(false)}
+                  className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 transition-colors hover:border-red-400 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:hover:bg-red-900/40"
+                >
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">{row.equipmentLabel}</p>
+                    <p className="text-sm text-red-700 dark:text-red-300">
+                      {row.reason} · {row.repairsCount} ремонтов
+                    </p>
+                  </div>
+                  <ExternalLink className="h-4 w-4 text-red-600" />
+                </Link>
+              )) : (
+                <p className="text-sm text-green-600 dark:text-green-400">Повторные поломки не найдены</p>
+              )}
+            </div>
+          )
+        };
+
+      case 'serviceInDays':
+        return {
+          title: 'Техника в сервисе по дням',
+          description: 'Открытые сервисные заявки с длительностью нахождения техники в сервисе.',
+          details: (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Техника в сервисе</p>
+                  <p className="text-2xl font-bold text-orange-600">{data.equipmentInService?.length || 0}</p>
+                </div>
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Средний срок</p>
+                  <p className="text-2xl font-bold text-blue-600">{data.averageDays || 0} дн.</p>
+                </div>
+                <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Максимум</p>
+                  <p className="text-2xl font-bold text-red-600">{data.maxDays || 0} дн.</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {data.rows?.length ? data.rows.map((row: any) => (
+                  <Link
+                    key={row.id}
+                    to={`/service/${row.id}`}
+                    onClick={() => onOpenChange(false)}
+                    className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
+                  >
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">{row.equipmentLabel}</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {row.reason} · {row.inventoryLabel || row.inventoryNumber}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-orange-600">{row.daysInService} дн.</span>
+                      <ExternalLink className="h-4 w-4 text-[--color-primary]" />
+                    </div>
+                  </Link>
+                )) : (
+                  <p className="text-sm text-green-600 dark:text-green-400">Открытых сервисных заявок нет</p>
+                )}
+              </div>
             </div>
           )
         };

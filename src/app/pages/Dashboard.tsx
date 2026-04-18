@@ -97,8 +97,20 @@ export default function Dashboard() {
   }, [equipmentList]);
 
   const [selectedKPI, setSelectedKPI] = useState<
-    'utilization' | 'activeRentals' | 'overdueReturns' | 'inService' |
-    'weekRevenue' | 'totalDebt' | 'monthDebt' | null
+    | 'utilization'
+    | 'activeRentals'
+    | 'returnsTodayTomorrow'
+    | 'overdueReturns'
+    | 'idleEquipment'
+    | 'openService'
+    | 'unassignedService'
+    | 'waitingParts'
+    | 'repeatFailures'
+    | 'serviceInDays'
+    | 'weekRevenue'
+    | 'totalDebt'
+    | 'monthDebt'
+    | null
   >(null);
   const [showServiceModal, setShowServiceModal] = useState(false);
   const [showAllAlerts, setShowAllAlerts] = useState(false);
@@ -248,9 +260,15 @@ export default function Dashboard() {
   // Rentals ending today
   const tomorrowStart = new Date(today);
   tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const dayAfterTomorrowStart = new Date(today);
+  dayAfterTomorrowStart.setDate(dayAfterTomorrowStart.getDate() + 2);
   const rentalsEndingToday = viewPlannerRentals.filter(r => {
     const ret = new Date(r.endDate);
     return r.status === 'active' && ret >= today && ret < tomorrowStart;
+  });
+  const rentalsEndingTomorrow = viewPlannerRentals.filter(r => {
+    const ret = new Date(r.endDate);
+    return r.status === 'active' && ret >= tomorrowStart && ret < dayAfterTomorrowStart;
   });
 
   // Max overdue days
@@ -263,6 +281,33 @@ export default function Dashboard() {
 
   // Service tickets waiting for parts
   const ticketsWaitingParts = tickets.filter(t => t.status === 'waiting_parts');
+  const openServiceTickets = tickets.filter(t => t.status !== 'closed');
+  const unassignedServiceTickets = openServiceTickets.filter(
+    t => !t.assignedMechanicId && !t.assignedMechanicName && !t.assignedTo,
+  );
+  const repeatFailureRows = (mechanicWorkload?.repeatFailures ?? []).filter(item => item.repairsCount > 1);
+  const idleEquipmentList = equipment.filter(e => e.status === 'available' || e.status === 'inactive');
+  const serviceInDaysRows = openServiceTickets
+    .map(ticket => {
+      const createdAt = new Date(ticket.createdAt);
+      const daysInService = Math.max(1, Math.ceil((today.getTime() - createdAt.getTime()) / 86400000));
+      const linkedEquipment =
+        (ticket.equipmentId && equipmentById.get(ticket.equipmentId)) ||
+        (ticket.inventoryNumber && uniqueEquipmentByInventory.get(ticket.inventoryNumber)) ||
+        null;
+      return {
+        ...ticket,
+        daysInService,
+        equipmentLinkId: linkedEquipment?.id || ticket.equipmentId || '',
+        equipmentLabel: linkedEquipment ? `${linkedEquipment.manufacturer} ${linkedEquipment.model}` : ticket.equipment,
+        inventoryLabel: linkedEquipment?.inventoryNumber || ticket.inventoryNumber || '',
+      };
+    })
+    .sort((a, b) => b.daysInService - a.daysInService);
+  const averageServiceDays = serviceInDaysRows.length > 0
+    ? Math.round(serviceInDaysRows.reduce((sum, row) => sum + row.daysInService, 0) / serviceInDaysRows.length)
+    : 0;
+  const maxServiceDays = serviceInDaysRows.length > 0 ? serviceInDaysRows[0].daysInService : 0;
 
   // Equipment in service with critical tickets (blocking rentals)
   const criticalInService = equipmentInServiceList.filter(e =>
@@ -507,6 +552,18 @@ export default function Dashboard() {
         link: '/rentals',
       })),
     },
+    returnsTodayTomorrow: {
+      todayRentals: rentalsEndingToday.map(rental => ({
+        ...rental,
+        plannedReturnDate: rental.endDate,
+        link: '/rentals',
+      })),
+      tomorrowRentals: rentalsEndingTomorrow.map(rental => ({
+        ...rental,
+        plannedReturnDate: rental.endDate,
+        link: '/rentals',
+      })),
+    },
     overdueReturns: {
       overdueRentals: overdueRentalsList.map(rental => ({
         ...rental,
@@ -514,7 +571,29 @@ export default function Dashboard() {
         link: '/rentals',
       })),
     },
-    inService: { equipmentInService: equipmentInServiceList },
+    idleEquipment: {
+      idleEquipment: idleEquipmentList,
+      availableCount: availableEquipment,
+      inactiveCount: inactiveEquipment,
+    },
+    openService: {
+      openTickets: openServiceTickets,
+    },
+    unassignedService: {
+      unassignedTickets: unassignedServiceTickets,
+    },
+    waitingParts: {
+      waitingTickets: ticketsWaitingParts,
+    },
+    repeatFailures: {
+      repeatFailures: repeatFailureRows,
+    },
+    serviceInDays: {
+      equipmentInService: equipmentInServiceList,
+      rows: serviceInDaysRows,
+      averageDays: averageServiceDays,
+      maxDays: maxServiceDays,
+    },
     weekRevenue: {
       weekRevenue: Math.round(weekRevenue),
       activeRentalsCount: activeRentalsList.length,
@@ -682,8 +761,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── KPI Row 1 — Операционные показатели ──────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      {/* ── KPI Row 1 — Аренда ──────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
 
         {/* 1. Утилизация парка */}
         <Card
@@ -696,7 +775,7 @@ export default function Dashboard() {
         >
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center justify-between">
-              <span>Утилизация парка</span>
+              <span>Загрузка парка</span>
               <TrendingUp className="h-3.5 w-3.5 text-gray-400" />
             </CardDescription>
             <CardTitle className={`text-3xl font-bold ${
@@ -775,7 +854,41 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* 3. Просроченные возвраты — КРИТИЧНАЯ */}
+        {/* 3. Возвраты сегодня/завтра */}
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-lg ${
+            rentalsEndingToday.length > 0
+              ? 'border-yellow-200 dark:border-yellow-800'
+              : ''
+          }`}
+          onClick={() => setSelectedKPI('returnsTodayTomorrow')}
+        >
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center justify-between">
+              <span>Возвраты сегодня/завтра</span>
+              <Clock className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${
+              rentalsEndingToday.length > 0 ? 'text-yellow-600 dark:text-yellow-400' : ''
+            }`}>
+              {rentalsEndingToday.length + rentalsEndingTomorrow.length}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Сегодня: {rentalsEndingToday.length} · Завтра: {rentalsEndingTomorrow.length}
+            </p>
+            {rentalsEndingToday.length > 0 ? (
+              <p className="text-xs font-medium text-yellow-600 dark:text-yellow-400">
+                Нужен контроль возврата сегодня
+              </p>
+            ) : (
+              <p className="text-xs text-gray-400">Ближайшие возвраты под контролем</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 4. Просроченные возвраты — КРИТИЧНАЯ */}
         <Card
           className={`cursor-pointer transition-all hover:shadow-lg ${
             overdueRentalsList.length > 0
@@ -814,52 +927,131 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* 4. Техника в сервисе */}
+        {/* 5. Техника в простое */}
         <Card
-          className={`cursor-pointer transition-all hover:shadow-lg ${
-            equipmentInServiceList.length > 0 ? 'border-orange-200 dark:border-orange-800' : ''
-          }`}
-          onClick={() => setSelectedKPI('inService')}
+          className="cursor-pointer transition-all hover:shadow-lg"
+          onClick={() => setSelectedKPI('idleEquipment')}
         >
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center justify-between">
-              <span>Техника в сервисе</span>
-              <Wrench className="h-3.5 w-3.5 text-gray-400" />
+              <span>Техника в простое</span>
+              <Truck className="h-3.5 w-3.5 text-gray-400" />
             </CardDescription>
             <CardTitle className={`text-3xl font-bold ${
-              equipmentInServiceList.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white'
+              idleEquipmentList.length > 0 ? 'text-gray-900 dark:text-white' : 'text-gray-400'
             }`}>
-              {equipmentInServiceList.length}
+              {idleEquipmentList.length}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1">
-            {equipmentInServiceList.length === 0 ? (
+            {idleEquipmentList.length === 0 ? (
               <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
                 <CheckCircle className="h-4 w-4 shrink-0" />
-                <span>Всё исправно</span>
+                <span>Простоя нет</span>
               </div>
             ) : (
               <>
-                {criticalInService > 0 && (
-                  <p className="text-sm font-medium text-red-600 dark:text-red-400">
-                    {criticalInService} крит. · блокируют аренду
-                  </p>
-                )}
-                {ticketsWaitingParts.length > 0 && (
-                  <p className="text-xs text-orange-600 dark:text-orange-400">
-                    {ticketsWaitingParts.length} ждут запчасти
-                  </p>
-                )}
-                {criticalInService === 0 && ticketsWaitingParts.length === 0 && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">На обслуживании</p>
-                )}
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Свободно: {availableEquipment} · Неактивно: {inactiveEquipment}
+                </p>
+                <p className="text-xs text-gray-400">Потенциал для выдачи или перераспределения</p>
               </>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {/* ── KPI Row 2 — Финансы + Парк ───────────────────────────────────────── */}
+      {/* ── KPI Row 2 — Сервис ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
+        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('openService')}>
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center justify-between">
+              <span>Открытые заявки</span>
+              <Wrench className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${openServiceTickets.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>
+              {openServiceTickets.length}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {criticalTickets.length} крит./высоких · {equipmentInServiceList.length} ед. в сервисе
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('unassignedService')}>
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center justify-between">
+              <span>Без механика</span>
+              <User className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${unassignedServiceTickets.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
+              {unassignedServiceTickets.length}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {unassignedServiceTickets.length > 0 ? (
+              <p className="text-sm text-red-600 dark:text-red-400">Требуют назначения</p>
+            ) : (
+              <p className="text-sm text-green-600 dark:text-green-400">Все заявки распределены</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('waitingParts')}>
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center justify-between">
+              <span>Ждут запчасти</span>
+              <PackageX className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${ticketsWaitingParts.length > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-400'}`}>
+              {ticketsWaitingParts.length}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {ticketsWaitingParts.length > 0 ? 'Контроль поставки обязателен' : 'Зависших заявок нет'}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('repeatFailures')}>
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center justify-between">
+              <span>Повторные поломки</span>
+              <ShieldAlert className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${repeatFailureRows.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
+              {repeatFailureRows.length}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {repeatFailureRows.length > 0 ? 'Есть техника с повтором причины' : 'Повторов не найдено'}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('serviceInDays')}>
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center justify-between">
+              <span>Техника в сервисе по дням</span>
+              <Clock className="h-3.5 w-3.5 text-gray-400" />
+            </CardDescription>
+            <CardTitle className={`text-3xl font-bold ${equipmentInServiceList.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>
+              {equipmentInServiceList.length}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Ср.: {averageServiceDays || 0} дн. · Макс.: {maxServiceDays || 0} дн.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── KPI Row 3 — Финансы + Парк ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-3">
 
         {/* 5. Выручка за месяц */}

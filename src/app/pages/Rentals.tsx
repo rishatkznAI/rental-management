@@ -11,9 +11,6 @@ import { ReturnModal, DowntimeModal, NewRentalModal } from '../components/gantt/
 import {
   mockDowntimes,
   mockServicePeriods,
-  EQUIPMENT_STORAGE_KEY,
-  GANTT_RENTALS_STORAGE_KEY,
-  PAYMENTS_STORAGE_KEY,
 } from '../mock-data';
 import type { SystemUser } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
@@ -360,7 +357,6 @@ export default function Rentals() {
 
   const persistGanttRentals = useCallback(async (list: GanttRentalData[]) => {
     setGanttRentals(list);
-    localStorage.setItem(GANTT_RENTALS_STORAGE_KEY, JSON.stringify(list));
     try {
       await rentalsService.bulkReplaceGantt(list);
       await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
@@ -371,7 +367,6 @@ export default function Rentals() {
 
   const persistEquipment = useCallback(async (list: Equipment[]) => {
     setEquipmentList(list);
-    localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(list));
     try {
       await equipmentService.bulkReplace(list);
       await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
@@ -382,7 +377,6 @@ export default function Rentals() {
 
   const persistPayments = useCallback(async (list: Payment[]) => {
     setPayments(list);
-    localStorage.setItem(PAYMENTS_STORAGE_KEY, JSON.stringify(list));
     try {
       await paymentsService.bulkReplace(list);
       await queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all });

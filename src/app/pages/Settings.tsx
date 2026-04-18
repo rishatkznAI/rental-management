@@ -24,7 +24,6 @@ import {
 import { Input } from '../components/ui/input';
 import {
   type Owner,
-  RENTALS_STORAGE_KEY,
 } from '../mock-data';
 // Пользовательское хранилище вынесено в отдельный модуль
 import {
@@ -1760,23 +1759,9 @@ interface DataCounts {
   equipment: number;
 }
 
-function getDataCounts(): DataCounts {
-  const classicRaw = localStorage.getItem(RENTALS_STORAGE_KEY);
-  const classicList = classicRaw ? (() => { try { return JSON.parse(classicRaw); } catch { return []; } })() : [];
-  return {
-    ganttRentals:  0,
-    classicRentals: classicList.length,
-    serviceTickets: 0,
-    clients:        0,
-    payments:       0,
-    documents:      0,
-    shippingPhotos: 0,
-    equipment:      0,
-  };
-}
-
 function DataResetSection() {
   const queryClient = useQueryClient();
+  const { data: classicRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.all, queryFn: rentalsService.getAll });
   const { data: ganttRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.gantt, queryFn: rentalsService.getGanttData });
   const { data: serviceTickets = [] } = useQuery({ queryKey: SERVICE_TICKET_KEYS.all, queryFn: serviceTicketsService.getAll });
   const { data: clients = [] } = useQuery({ queryKey: ['clients'], queryFn: clientsService.getAll });
@@ -1790,11 +1775,9 @@ function DataResetSection() {
   const [resetting, setResetting]     = React.useState(false);
 
   const counts = React.useMemo<DataCounts>(() => {
-    const classicRaw = localStorage.getItem(RENTALS_STORAGE_KEY);
-    const classicList = classicRaw ? (() => { try { return JSON.parse(classicRaw); } catch { return []; } })() : [];
     return {
       ganttRentals: ganttRentals.length,
-      classicRentals: classicList.length,
+      classicRentals: classicRentals.length,
       serviceTickets: serviceTickets.length,
       clients: clients.length,
       payments: payments.length,
@@ -1802,7 +1785,7 @@ function DataResetSection() {
       shippingPhotos: shippingPhotos.length,
       equipment: equipment.length,
     };
-  }, [ganttRentals, serviceTickets, clients, payments, documents, shippingPhotos, equipment]);
+  }, [classicRentals, ganttRentals, serviceTickets, clients, payments, documents, shippingPhotos, equipment]);
 
   const totalToDelete =
     counts.ganttRentals + counts.classicRentals + counts.serviceTickets +
@@ -1820,6 +1803,7 @@ function DataResetSection() {
     setResetting(true);
     try {
       await Promise.all([
+        rentalsService.bulkReplace([]),
         rentalsService.bulkReplaceGantt([]),
         serviceTicketsService.bulkReplace([]),
         clientsService.bulkReplace([]),
@@ -1827,23 +1811,15 @@ function DataResetSection() {
         documentsService.bulkReplace([]),
         equipmentService.bulkReplaceShippingPhotos([]),
       ]);
-      localStorage.removeItem(RENTALS_STORAGE_KEY);
 
       const resetEquipment = equipment.map(eq => {
         const { currentClient: _cc, returnDate: _rd, ...rest } = eq;
         return { ...rest, status: 'available' as const };
       });
       await equipmentService.bulkReplace(resetEquipment);
-      localStorage.setItem(RENTALS_STORAGE_KEY, JSON.stringify([]));
-      localStorage.setItem('app_shipping_photos', JSON.stringify([]));
-      localStorage.setItem('app_gantt_rentals', JSON.stringify([]));
-      localStorage.setItem('app_service_tickets', JSON.stringify([]));
-      localStorage.setItem('app_clients', JSON.stringify([]));
-      localStorage.setItem('app_payments', JSON.stringify([]));
-      localStorage.setItem('app_documents', JSON.stringify([]));
-      localStorage.setItem('app_equipment', JSON.stringify(resetEquipment));
 
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
         queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: ['clients'] }),

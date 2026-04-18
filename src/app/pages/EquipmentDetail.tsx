@@ -12,8 +12,6 @@ import {
   Upload, Trash2, X, PenLine, RotateCcw,
 } from 'lucide-react';
 import {
-  EQUIPMENT_STORAGE_KEY,
-  SHIPPING_PHOTOS_KEY,
 } from '../mock-data';
 import type { ShippingPhoto, ServiceTicket, Payment } from '../types';
 import { formatDate, formatDateTime, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
@@ -420,14 +418,12 @@ export default function EquipmentDetail() {
 
   const persistEquipment = React.useCallback(async (list: Equipment[]) => {
     setAllEquipment(list);
-    localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(list));
     await equipmentService.bulkReplace(list);
     await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
   }, [queryClient]);
 
   const persistShippingPhotos = React.useCallback(async (list: ShippingPhoto[]) => {
     setAllShippingPhotos(list);
-    localStorage.setItem(SHIPPING_PHOTOS_KEY, JSON.stringify(list));
     await equipmentService.bulkReplaceShippingPhotos(list);
     await queryClient.invalidateQueries({ queryKey: ['shippingPhotos', id] });
   }, [id, queryClient]);

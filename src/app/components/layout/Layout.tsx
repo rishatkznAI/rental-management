@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { LayoutDashboard, Truck, FileText, Wrench, Users, Menu } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -86,7 +86,7 @@ export function Layout() {
         'sm:ml-64',
         'pt-14 pb-16 sm:pt-0 sm:pb-0',
       )}>
-        <Outlet />
+        <Outlet key={location.pathname} />
       </main>
 
       {/* Mobile bottom navigation */}
@@ -98,9 +98,10 @@ export function Layout() {
               location.pathname === item.href ||
               (item.href !== '/' && location.pathname.startsWith(item.href));
             return (
-              <Link
+              <button
                 key={item.href}
-                to={item.href}
+                type="button"
+                onClick={() => navigate(item.href)}
                 className={cn(
                   'flex flex-col items-center justify-center gap-0.5 py-2 px-1 text-[10px] font-medium transition-colors',
                   isActive
@@ -110,7 +111,7 @@ export function Layout() {
               >
                 <Icon className={cn('h-5 w-5', isActive && 'text-[--color-primary]')} />
                 <span className="leading-none">{item.name}</span>
-              </Link>
+              </button>
             );
           })}
         </div>

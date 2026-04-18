@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Truck,
@@ -123,12 +123,15 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               (item.href !== '/' && location.pathname.startsWith(item.href + '/'));
 
             return (
-              <Link
+              <button
                 key={item.name}
-                to={item.href}
-                onClick={handleNavClick}
+                type="button"
+                onClick={() => {
+                  navigate(item.href);
+                  handleNavClick();
+                }}
                 className={cn(
-                  'relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                  'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors',
                   isActive
                     ? 'text-[--color-primary] bg-blue-50 dark:bg-blue-900/20'
                     : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -139,7 +142,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 {isActive && (
                   <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-[--color-primary] rounded-full" />
                 )}
-              </Link>
+              </button>
             );
           })}
         </nav>

@@ -9,6 +9,7 @@
  *  Механик          — только Техника (просмотр) + Сервис (полный CRUD)
  */
 
+import { useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 // ── Типы ─────────────────────────────────────────────────────────────────────
@@ -136,25 +137,25 @@ const SECTION_PATHS: Array<[Section, string]> = [
 export function usePermissions() {
   const { user } = useAuth();
   const role = user?.role ?? '';
-  const perms: RolePermissions = PERMISSIONS[role] ?? {};
+  const perms: RolePermissions = useMemo(() => PERMISSIONS[role] ?? {}, [role]);
 
   /** Проверяет, разрешено ли конкретное действие в разделе */
-  function can(action: Action, section: Section): boolean {
+  const can = useCallback((action: Action, section: Section): boolean => {
     return perms[section]?.includes(action) ?? false;
-  }
+  }, [perms]);
 
   /** Shorthand — может ли пользователь видеть раздел */
-  function canView(section: Section): boolean {
+  const canView = useCallback((section: Section): boolean => {
     return can('view', section);
-  }
+  }, [can]);
 
   /** Первый разрешённый URL для редиректа (если текущий запрещён) */
-  function defaultPath(): string {
+  const defaultPath = useCallback((): string => {
     for (const [section, path] of SECTION_PATHS) {
       if (canView(section)) return path;
     }
     return '/login';
-  }
+  }, [canView]);
 
-  return { can, canView, defaultPath };
+  return useMemo(() => ({ can, canView, defaultPath }), [can, canView, defaultPath]);
 }

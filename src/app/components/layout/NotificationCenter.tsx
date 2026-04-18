@@ -98,7 +98,10 @@ export function NotificationCenter() {
   }, [readIds]);
 
   React.useEffect(() => {
-    setReadIds(prev => prev.filter(id => notifications.some(item => item.id === id)));
+    setReadIds(prev => {
+      const next = prev.filter(id => notifications.some(item => item.id === id));
+      return next.length === prev.length && next.every((id, index) => id === prev[index]) ? prev : next;
+    });
   }, [notifications]);
 
   const unreadCount = notifications.filter(item => !readIds.includes(item.id)).length;
@@ -107,7 +110,7 @@ export function NotificationCenter() {
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (nextOpen && notifications.length > 0) {
-      setReadIds(Array.from(new Set([...readIds, ...notifications.map(item => item.id)])));
+      setReadIds(prev => Array.from(new Set([...prev, ...notifications.map(item => item.id)])));
     }
   };
 
@@ -150,7 +153,7 @@ export function NotificationCenter() {
             {notifications.length > 0 && (
               <button
                 type="button"
-                onClick={() => setReadIds(Array.from(new Set([...readIds, ...notifications.map(item => item.id)])))}
+                onClick={() => setReadIds(prev => Array.from(new Set([...prev, ...notifications.map(item => item.id)])))}
                 className="text-sm font-medium text-[--color-primary] hover:underline"
               >
                 Отметить прочитанным

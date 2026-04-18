@@ -6,6 +6,7 @@ function registerRentalRoutes(deps) {
     writeData,
     requireAuth,
     validateRentalPayload,
+    mergeRentalHistory,
     generateId,
     idPrefixes,
   } = deps;
@@ -55,7 +56,10 @@ function registerRentalRoutes(deps) {
         return res.status(validation.status).json({ ok: false, error: validation.error });
       }
 
-      const newItem = { ...req.body, id: req.body.id || generateId(prefix) };
+      let newItem = { ...req.body, id: req.body.id || generateId(prefix) };
+      if (collection === 'gantt_rentals') {
+        newItem = mergeRentalHistory(null, newItem, req.user.userName);
+      }
       data.push(newItem);
       writeData(collection, data);
       return res.status(201).json(newItem);
@@ -71,12 +75,15 @@ function registerRentalRoutes(deps) {
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
 
-      const nextItem = { ...data[idx], ...req.body, id: data[idx].id };
+      let nextItem = { ...data[idx], ...req.body, id: data[idx].id };
       const validation = validateRentalPayload(collection, nextItem, data, readData('equipment') || [], data[idx].id);
       if (!validation.ok) {
         return res.status(validation.status).json({ ok: false, error: validation.error });
       }
 
+      if (collection === 'gantt_rentals') {
+        nextItem = mergeRentalHistory(data[idx], nextItem, req.user.userName);
+      }
       data[idx] = nextItem;
       writeData(collection, data);
       return res.json(data[idx]);

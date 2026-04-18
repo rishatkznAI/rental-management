@@ -14,6 +14,7 @@ function registerCrudRoutes(deps) {
     normalizeServiceWorkRecord,
     normalizeSparePartRecord,
     validateRentalPayload,
+    mergeEntityHistory,
     requireNonEmptyString,
     generateId,
     nowIso,
@@ -124,6 +125,9 @@ function registerCrudRoutes(deps) {
         if (collection === 'spare_parts') {
           newItem = normalizeSparePartRecord({ ...newItem, updatedAt: nowIso() });
         }
+        if (collection === 'clients' || collection === 'equipment') {
+          newItem = mergeEntityHistory(collection, null, newItem, req.user.userName);
+        }
         data.push(newItem);
         writeData(collection, data);
         if (collection === 'users') {
@@ -180,7 +184,10 @@ function registerCrudRoutes(deps) {
             updatedAt: nowIso(),
           });
         } else {
-          data[idx] = { ...data[idx], ...req.body, id: data[idx].id };
+          const nextItem = { ...data[idx], ...req.body, id: data[idx].id };
+          data[idx] = collection === 'clients' || collection === 'equipment'
+            ? mergeEntityHistory(collection, data[idx], nextItem, req.user.userName)
+            : nextItem;
         }
         writeData(collection, data);
         if (collection === 'users') {

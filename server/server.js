@@ -46,6 +46,18 @@ const {
 const {
   validateRentalPayload,
 } = require('./lib/rental-validation');
+const {
+  buildRentalDebtRows,
+  buildClientReceivables,
+  buildClientFinancialSnapshots,
+  buildManagerReceivables,
+  buildOverdueBuckets,
+  buildFinanceReport,
+} = require('./lib/finance-core');
+const {
+  mergeEntityHistory,
+  mergeRentalHistory,
+} = require('./lib/audit-history');
 const { createBotHandlers } = require('./lib/bot-commands');
 const { createMaxApiClient } = require('./lib/max-api');
 const { createServiceCore } = require('./lib/service-core');
@@ -53,6 +65,7 @@ const { startServer } = require('./lib/startup');
 const { registerAuthRoutes } = require('./routes/auth');
 const { registerBotRoutes } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
+const { registerFinanceRoutes } = require('./routes/finance');
 const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
 const { registerSystemRoutes } = require('./routes/system');
@@ -518,9 +531,21 @@ apiRouter.use(registerRentalRoutes({
   writeData,
   requireAuth,
   validateRentalPayload,
+  mergeRentalHistory,
   generateId,
   idPrefixes: ID_PREFIXES,
 }));
+
+registerFinanceRoutes(apiRouter, {
+  requireAuth,
+  readData,
+  buildRentalDebtRows,
+  buildClientReceivables,
+  buildClientFinancialSnapshots,
+  buildManagerReceivables,
+  buildOverdueBuckets,
+  buildFinanceReport,
+});
 
 apiRouter.use(registerCrudRoutes({
   collections: COLLECTIONS,
@@ -535,6 +560,7 @@ apiRouter.use(registerCrudRoutes({
   normalizeServiceWorkRecord,
   normalizeSparePartRecord,
   validateRentalPayload,
+  mergeEntityHistory,
   requireNonEmptyString,
   generateId,
   nowIso,

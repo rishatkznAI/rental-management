@@ -114,6 +114,7 @@ export interface DowntimePeriod {
 
 export interface ServicePeriod {
   id: string;
+  equipmentId?: string;
   equipmentInv: string;
   startDate: string;
   endDate: string;

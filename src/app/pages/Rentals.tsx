@@ -524,24 +524,6 @@ export default function Rentals() {
     return groups;
   }, [days]);
 
-  const servicePeriods = useMemo<ServicePeriod[]>(() => {
-    return serviceTickets
-      .filter(ticket => OPEN_SERVICE_STATUSES.includes(ticket.status))
-      .map(ticket => ({
-        id: ticket.id,
-        equipmentInv:
-          ticket.inventoryNumber
-          || equipmentList.find(item => item.id === ticket.equipmentId)?.inventoryNumber
-          || '',
-        startDate: (ticket.createdAt || new Date().toISOString()).slice(0, 10),
-        endDate: ticket.closedAt
-          ? ticket.closedAt.slice(0, 10)
-          : addDays(today, 1).toISOString().slice(0, 10),
-        description: ticket.reason || 'Ремонт',
-      }))
-      .filter(period => !!period.equipmentInv);
-  }, [equipmentList, serviceTickets, today]);
-
   // ── Filter rentals (always live, no gate) ────────────────────────────────────
   const filteredRentals = useMemo(() => {
     let rentals = [...ganttRentals];
@@ -588,6 +570,32 @@ export default function Rentals() {
     });
     return map;
   }, [inventoryGroups]);
+
+  const servicePeriods = useMemo<ServicePeriod[]>(() => {
+    return serviceTickets
+      .filter(ticket => OPEN_SERVICE_STATUSES.includes(ticket.status))
+      .map(ticket => {
+        const matchedEquipment = ticket.equipmentId
+          ? equipmentList.find(item => item.id === ticket.equipmentId)
+          : null;
+        const fallbackInventory = ticket.inventoryNumber || matchedEquipment?.inventoryNumber || '';
+        const fallbackEquipmentId = fallbackInventory && !ambiguousInventoryNumbers.has(fallbackInventory)
+          ? canonicalEquipmentIdByInventory.get(fallbackInventory)
+          : undefined;
+
+        return {
+          id: ticket.id,
+          equipmentId: ticket.equipmentId || fallbackEquipmentId,
+          equipmentInv: fallbackInventory,
+          startDate: (ticket.createdAt || new Date().toISOString()).slice(0, 10),
+          endDate: ticket.closedAt
+            ? ticket.closedAt.slice(0, 10)
+            : addDays(today, 1).toISOString().slice(0, 10),
+          description: ticket.reason || 'Ремонт',
+        };
+      })
+      .filter(period => !!period.equipmentId || !!period.equipmentInv);
+  }, [ambiguousInventoryNumbers, canonicalEquipmentIdByInventory, equipmentList, serviceTickets, today]);
 
   const matchesEquipmentRow = useCallback((rental: GanttRentalData, equipment: Equipment) => {
     if (rental.equipmentId) {
@@ -1294,7 +1302,11 @@ export default function Rentals() {
                 equipment={eq}
                 rentals={filteredRentals.filter(r => matchesEquipmentRow(r, eq))}
                 downtimes={mockDowntimes.filter(d => d.equipmentInv === eq.inventoryNumber)}
-                servicePeriods={servicePeriods.filter(s => s.equipmentInv === eq.inventoryNumber)}
+                servicePeriods={servicePeriods.filter(s =>
+                  s.equipmentId
+                    ? s.equipmentId === eq.id
+                    : s.equipmentInv === eq.inventoryNumber && !ambiguousInventoryNumbers.has(eq.inventoryNumber)
+                )}
                 conflictIds={conflictSets.get(eq.id) || new Set()}
                 viewStart={viewStart}
                 totalDays={totalDays}

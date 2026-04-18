@@ -1,0 +1,478 @@
+function createBotFormatters(deps) {
+  const {
+    readData,
+    readServiceTickets,
+    serviceStatusLabel,
+    button,
+    keyboard,
+    chunkButtons,
+    backAndMainRow,
+    currentRepairKeyboard,
+    MAINTENANCE_REASON_LABELS,
+    REPAIR_CLOSE_CHECKLIST_ORDER,
+  } = deps;
+
+  function createEmptyRepairPhotos() {
+    return {
+      before: [],
+      after: [],
+      beforeUploadedAt: null,
+      beforeUploadedBy: '',
+      afterUploadedAt: null,
+      afterUploadedBy: '',
+    };
+  }
+
+  function normalizeRepairPhotos(ticket) {
+    return {
+      ...createEmptyRepairPhotos(),
+      ...(ticket?.repairPhotos || {}),
+      before: Array.isArray(ticket?.repairPhotos?.before) ? ticket.repairPhotos.before : [],
+      after: Array.isArray(ticket?.repairPhotos?.after) ? ticket.repairPhotos.after : [],
+    };
+  }
+
+  function buildRepairCloseChecklistStatus(ticket, overrides = {}) {
+    const workItems = (readData('repair_work_items') || []).filter(item => item.repairId === ticket.id);
+    const repairPhotos = normalizeRepairPhotos(ticket);
+    const summary = String(ticket.resultData?.summary || ticket.result || '').trim();
+    const base = {
+      faultEliminated: false,
+      worksRecorded: false,
+      partsRecordedOrNotRequired: false,
+      beforePhotosAttached: false,
+      afterPhotosAttached: false,
+      summaryFilled: false,
+    };
+
+    return {
+      ...base,
+      ...(ticket.closeChecklist || {}),
+      ...overrides,
+      worksRecorded: Boolean(workItems.length),
+      beforePhotosAttached: repairPhotos.before.length > 0,
+      afterPhotosAttached: repairPhotos.after.length > 0,
+      summaryFilled: Boolean(summary),
+    };
+  }
+
+  function normalizeBotText(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function botSearchMatches(haystack, query) {
+    const text = normalizeBotText(haystack);
+    const normalizedQuery = normalizeBotText(query);
+    if (!normalizedQuery) return true;
+    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    return tokens.every(token => {
+      if (text.includes(token)) return true;
+      if (token.length >= 5 && text.includes(token.slice(0, -1))) return true;
+      if (token.length >= 6 && text.includes(token.slice(0, -2))) return true;
+      return false;
+    });
+  }
+
+  function formatBotDate(value) {
+    if (!value) return '—';
+    const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return String(value);
+    return `${match[3]}.${match[2]}.${match[1]}`;
+  }
+
+  function formatEquipmentForBot(item) {
+    const typeLabel =
+      item.type === 'scissor' ? 'ножничный'
+        : item.type === 'articulated' ? 'коленчатый'
+        : item.type === 'telescopic' ? 'телескопический'
+        : 'подъёмник';
+
+    return [
+      item.inventoryNumber || 'без INV',
+      `${item.manufacturer || ''} ${item.model || ''}`.trim(),
+      item.serialNumber ? `SN ${item.serialNumber}` : '',
+      typeLabel,
+    ].filter(Boolean).join(' · ');
+  }
+
+  function formatTicketLine(ticket) {
+    const assigned = ticket.assignedMechanicName ? ` · ${ticket.assignedMechanicName}` : '';
+    return `• ${ticket.id} · ${serviceStatusLabel(ticket.status)} · ${ticket.equipment}\n  ${ticket.reason}${assigned}`;
+  }
+
+  function formatCurrentRepairDraft(ticket) {
+    const workItems = (readData('repair_work_items') || []).filter(item => item.repairId === ticket.id);
+    const partItems = (readData('repair_part_items') || []).filter(item => item.repairId === ticket.id);
+    const summary = ticket.resultData?.summary || ticket.result || 'не заполнен';
+    const repairPhotos = normalizeRepairPhotos(ticket);
+    const closeChecklist = buildRepairCloseChecklistStatus(ticket);
+    const worksText = workItems.length
+      ? workItems.map((item, index) => `${index + 1}. ${item.nameSnapshot} × ${item.quantity}`).join('\n')
+      : 'нет';
+    const partsText = partItems.length
+      ? partItems.map((item, index) => `${index + 1}. ${item.nameSnapshot} × ${item.quantity} (${Number(item.priceSnapshot || 0).toLocaleString('ru-RU')} ₽)`).join('\n')
+      : 'нет';
+
+    return [
+      `🧾 Текущий отчет по ${ticket.id}`,
+      `${ticket.equipment}`,
+      `Статус: ${serviceStatusLabel(ticket.status)}`,
+      `Итог: ${summary}`,
+      `Фото ДО: ${repairPhotos.before.length}`,
+      `Фото ПОСЛЕ: ${repairPhotos.after.length}`,
+      `Чек-лист закрытия: ${REPAIR_CLOSE_CHECKLIST_ORDER.filter(key => closeChecklist[key]).length}/${REPAIR_CLOSE_CHECKLIST_ORDER.length}`,
+      '',
+      `Работы:\n${worksText}`,
+      '',
+      `Запчасти:\n${partsText}`,
+    ].join('\n');
+  }
+
+  function getAccessibleServiceTickets(authUser) {
+    const tickets = readServiceTickets();
+    if (authUser.userRole === 'Механик') {
+      return tickets.filter(ticket =>
+        ticket.status !== 'closed' &&
+        (
+          !ticket.assignedMechanicName ||
+          normalizeBotText(ticket.assignedMechanicName) === normalizeBotText(authUser.userName)
+        )
+      );
+    }
+    return tickets.filter(ticket => ticket.status !== 'closed');
+  }
+
+  function getAssignedServiceTickets(authUser) {
+    const tickets = readServiceTickets();
+    if (authUser.userRole !== 'Механик') {
+      return tickets.filter(ticket => ticket.status !== 'closed');
+    }
+    return tickets.filter(ticket =>
+      ticket.status !== 'closed' &&
+      normalizeBotText(ticket.assignedMechanicName) === normalizeBotText(authUser.userName)
+    );
+  }
+
+  function formatServiceForUser(authUser, mode = 'accessible') {
+    const tickets = mode === 'assigned'
+      ? getAssignedServiceTickets(authUser)
+      : getAccessibleServiceTickets(authUser);
+    if (!tickets.length) {
+      return mode === 'assigned'
+        ? '✅ У вас нет назначенных сервисных заявок.'
+        : '✅ Открытых сервисных заявок нет.';
+    }
+
+    const lines = tickets.slice(0, 10).map(formatTicketLine);
+    return [
+      authUser.userRole === 'Механик' && mode === 'assigned'
+        ? `🧰 Мои сервисные заявки (${tickets.length}):`
+        : authUser.userRole === 'Механик'
+        ? `🔧 Доступные вам сервисные заявки (${tickets.length}):`
+        : `🔧 Открытые сервисные заявки (${tickets.length}):`,
+      ...lines,
+      '',
+      mode === 'assigned'
+        ? 'Подсказка: /ремонт ID'
+        : 'Подсказка: /вработу ID или /ремонт ID',
+      tickets.length > 10 ? `... и ещё ${tickets.length - 10}` : '',
+    ].filter(Boolean).join('\n');
+  }
+
+  function serviceTicketsKeyboard(authUser) {
+    const tickets = getAssignedServiceTickets(authUser).slice(0, 6);
+    if (!tickets.length) return null;
+    const buttons = tickets.map(ticket =>
+      button(`Открыть ${ticket.id}`, `ticket:open:${ticket.id}`),
+    );
+    return keyboard([
+      ...chunkButtons(buttons, 2),
+      [button('Новая заявка', 'menu:new_ticket')],
+      [button('Главное меню', 'menu:main')],
+    ]);
+  }
+
+  function equipmentActionKeyboard(equipmentId) {
+    return keyboard([
+      [button('История', `equipmentmenu:history:${equipmentId}`), button('Ремонт', `equipmentmenu:repair:${equipmentId}`)],
+      [button('ТО', `equipmentmenu:maintenance:${equipmentId}:to`), button('ЧТО', `equipmentmenu:maintenance:${equipmentId}:chto`)],
+      [button('ПТО', `equipmentmenu:maintenance:${equipmentId}:pto`)],
+      [button('Назад', 'menu:new_ticket'), button('Главное меню', 'menu:main')],
+    ]);
+  }
+
+  function searchServiceWorks(query) {
+    const works = (readData('service_works') || []).filter(item => item.isActive !== false);
+    if (!normalizeBotText(query)) return works.slice(0, 7);
+    return works.filter(item =>
+      botSearchMatches(item.name, query) ||
+      botSearchMatches(item.category, query) ||
+      botSearchMatches(item.description, query)
+    ).slice(0, 7);
+  }
+
+  function searchSpareParts(query) {
+    const parts = (readData('spare_parts') || []).filter(item => item.isActive !== false);
+    if (!normalizeBotText(query)) return parts.slice(0, 7);
+    return parts.filter(item =>
+      botSearchMatches(item.name, query) ||
+      botSearchMatches(item.article, query) ||
+      botSearchMatches(item.category, query) ||
+      botSearchMatches(item.manufacturer, query)
+    ).slice(0, 7);
+  }
+
+  function searchEquipmentForBot(query) {
+    const equipment = readData('equipment') || [];
+    if (!normalizeBotText(query)) return equipment.slice(0, 7);
+    return equipment.filter(item =>
+      botSearchMatches(item.inventoryNumber, query) ||
+      botSearchMatches(item.serialNumber, query) ||
+      botSearchMatches(item.manufacturer, query) ||
+      botSearchMatches(item.model, query) ||
+      botSearchMatches(item.location, query)
+    ).slice(0, 7);
+  }
+
+  function extractPhotoUrlsFromMessage(messageMeta) {
+    const attachments = messageMeta?.attachments
+      || messageMeta?.body?.attachments
+      || [];
+    const list = Array.isArray(attachments) ? attachments : [];
+    const urls = [];
+
+    for (const item of list) {
+      const maybe =
+        item?.url ||
+        item?.payload?.url ||
+        item?.photo?.url ||
+        item?.image?.url ||
+        item?.file?.url ||
+        item?.preview_url ||
+        item?.payload?.photo?.url;
+      if (typeof maybe === 'string' && maybe.trim()) {
+        urls.push(maybe.trim());
+      }
+    }
+
+    return urls;
+  }
+
+  function formatRentals(rentals, managerName, role) {
+    const filtered = role === 'Менеджер по аренде'
+      ? rentals.filter(r => r.manager === managerName && (r.status === 'active' || r.status === 'created'))
+      : rentals.filter(r => r.status === 'active' || r.status === 'created');
+
+    if (!filtered.length) return '📋 Активных аренд нет.';
+
+    const lines = filtered.slice(0, 10).map(rental => {
+      const end = rental.endDate ? `до ${rental.endDate}` : '';
+      return `• ${rental.equipmentInv} → ${rental.client} ${end}`.trim();
+    });
+
+    const header = role === 'Менеджер по аренде'
+      ? `📋 Ваши активные аренды (${filtered.length}):`
+      : `📋 Все активные аренды (${filtered.length}):`;
+
+    return [header, ...lines, filtered.length > 10 ? `... и ещё ${filtered.length - 10}` : '']
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  function formatEquipment(equipment) {
+    const free = equipment.filter(item => item.status === 'available');
+    if (!free.length) return '🚧 Свободной техники нет.';
+
+    const lines = free.slice(0, 10).map(item =>
+      `• ${item.inventoryNumber} — ${item.model} (${item.type === 'scissor' ? 'Ножничный' : item.type === 'articulated' ? 'Коленчатый' : 'Телескопический'})`,
+    );
+
+    return [`🟢 Свободная техника (${free.length}):`, ...lines,
+      free.length > 10 ? `... и ещё ${free.length - 10}` : ''].filter(Boolean).join('\n');
+  }
+
+  function formatEquipmentActionMenu(equipment) {
+    return [
+      '🚜 Выбрана техника:',
+      formatEquipmentForBot(equipment),
+      '',
+      'Выберите действие:',
+      '• История — посмотреть карточку и последние события',
+      '• Ремонт — создать заявку с причиной текстом',
+      '• ТО / ЧТО / ПТО — зафиксировать выполненное обслуживание',
+    ].join('\n');
+  }
+
+  function formatEquipmentHistoryForBot(equipment) {
+    const tickets = readServiceTickets()
+      .filter(ticket => ticket.equipmentId === equipment.id)
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    const historyEntries = [...(equipment.history || [])]
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+      .slice(0, 8);
+
+    const lines = [
+      '📚 История техники',
+      formatEquipmentForBot(equipment),
+      '',
+      `Статус: ${equipment.status || '—'}`,
+      `Моточасы: ${equipment.hours ?? '—'}`,
+      `След. ТО: ${formatBotDate(equipment.nextMaintenance)}`,
+      `ЧТО: ${formatBotDate(equipment.maintenanceCHTO)}`,
+      `ПТО: ${formatBotDate(equipment.maintenancePTO)}`,
+    ];
+
+    if (tickets.length) {
+      lines.push('', 'Последние заявки:');
+      tickets.slice(0, 3).forEach(ticket => {
+        lines.push(`• ${ticket.id} · ${serviceStatusLabel(ticket.status)} · ${ticket.reason}`);
+      });
+    }
+
+    if (historyEntries.length) {
+      lines.push('', 'Последние события:');
+      historyEntries.forEach(entry => {
+        lines.push(`• ${formatBotDate(entry.date)} · ${entry.author}: ${entry.text}`);
+      });
+    } else {
+      lines.push('', 'История техники пока пустая.');
+    }
+
+    return lines.join('\n');
+  }
+
+  function equipmentSearchKeyboard(matches) {
+    if (!matches.length) return null;
+    const buttons = matches.slice(0, 6).map((item, index) =>
+      button(`${index + 1}. ${item.inventoryNumber || item.model || 'Техника'}`, `equipment:choose:${item.id}`),
+    );
+    return keyboard([
+      ...chunkButtons(buttons, 2),
+      [button('Новый поиск', 'menu:find_equipment')],
+      [button('Назад', 'menu:main')],
+    ]);
+  }
+
+  function workSearchKeyboard(matches) {
+    if (!matches.length) return null;
+    const buttons = matches.slice(0, 6).map((item, index) =>
+      button(`${index + 1}. ${item.name}`, `work:choose:${item.id}`),
+    );
+    return keyboard([
+      ...chunkButtons(buttons, 2),
+      [button('Новый поиск работ', 'menu:works')],
+      backAndMainRow('menu:draft'),
+    ]);
+  }
+
+  function partSearchKeyboard(matches) {
+    if (!matches.length) return null;
+    const buttons = matches.slice(0, 6).map((item, index) =>
+      button(`${index + 1}. ${item.name}`, `part:choose:${item.id}`),
+    );
+    return keyboard([
+      ...chunkButtons(buttons, 2),
+      [button('Новый поиск запчастей', 'menu:parts')],
+      backAndMainRow('menu:draft'),
+    ]);
+  }
+
+  function formatService(tickets) {
+    const open = tickets.filter(item => item.status !== 'closed');
+    if (!open.length) return '✅ Открытых заявок нет.';
+
+    const priorityIcon = { critical: '🔴', high: '🟠', medium: '🟡', low: '⚪' };
+    const lines = open.slice(0, 10).map(item => {
+      const icon = priorityIcon[item.priority] || '⚪';
+      return `${icon} ${item.id} — ${item.equipment}: ${item.reason}`;
+    });
+
+    return [`🔧 Открытые сервисные заявки (${open.length}):`, ...lines,
+      open.length > 10 ? `... и ещё ${open.length - 10}` : ''].filter(Boolean).join('\n');
+  }
+
+  function getHelpText(role) {
+    const isMechanic = role === 'Механик' || role === 'Администратор';
+    const mechanicLines = [
+      '/моизаявки — мои сервисные заявки',
+      '/новаязаявка — создать новую заявку',
+      '/найтитехнику — найти технику для заявки',
+      '/отгрузка — оформить отгрузку',
+      '/приёмка — оформить приёмку',
+      '/черновик — текущий отчёт по ремонту',
+      '/итог — итог ремонта',
+      '/работы — поиск и добавление работ',
+      '/запчасти — поиск и добавление запчастей',
+      '/фотодо — загрузить фото до ремонта',
+      '/фотопосле — загрузить фото после ремонта',
+      '/готово — перевести заявку в статус «Готово»',
+      '/закрыть — закрыть заявку',
+      '/мойдень — отчёт механика за день',
+    ];
+
+    const commonLines = [
+      '/аренды — активные аренды',
+      '/техника — свободная техника',
+      '/сервис — открытые сервисные заявки',
+      '/меню — главное меню',
+      '/помощь — этот список',
+    ];
+
+    return [
+      '📘 Доступные команды:',
+      '',
+      ...(isMechanic ? mechanicLines : []),
+      ...commonLines,
+      '',
+      'Полный список команд доступен по кнопке «Помощь».',
+    ].join('\n');
+  }
+
+  function getMainMenuText(authUser) {
+    if (authUser.userRole === 'Механик' || authUser.userRole === 'Администратор') {
+      return [
+        `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
+        '',
+        'Выберите действие кнопками ниже.',
+      ].join('\n');
+    }
+
+    return [
+      `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
+      '',
+      'Доступны быстрые команды по аренде, технике и сервису.',
+    ].join('\n');
+  }
+
+  return {
+    normalizeBotText,
+    botSearchMatches,
+    formatBotDate,
+    formatEquipmentForBot,
+    formatTicketLine,
+    formatCurrentRepairDraft,
+    getAccessibleServiceTickets,
+    getAssignedServiceTickets,
+    formatServiceForUser,
+    serviceTicketsKeyboard,
+    equipmentActionKeyboard,
+    searchServiceWorks,
+    searchSpareParts,
+    searchEquipmentForBot,
+    extractPhotoUrlsFromMessage,
+    formatRentals,
+    formatEquipment,
+    formatEquipmentActionMenu,
+    formatEquipmentHistoryForBot,
+    equipmentSearchKeyboard,
+    workSearchKeyboard,
+    partSearchKeyboard,
+    formatService,
+    getHelpText,
+    getMainMenuText,
+  };
+}
+
+module.exports = {
+  createBotFormatters,
+};

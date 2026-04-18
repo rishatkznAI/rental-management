@@ -36,6 +36,10 @@ function diffInDays(from: Date, to: Date): number {
   return Math.round((to.getTime() - from.getTime()) / MS_PER_DAY);
 }
 
+function isReturnControlStatus(status: GanttRentalData['status']): boolean {
+  return status === 'active' || status === 'returned';
+}
+
 export function buildAppNotifications({
   rentals,
   serviceTickets,
@@ -76,7 +80,7 @@ export function buildAppNotifications({
     });
 
   rentals
-    .filter(item => item.status === 'active' && item.endDate < todayStr)
+    .filter(item => isReturnControlStatus(item.status) && item.endDate < todayStr)
     .forEach(item => {
       const overdueDays = Math.max(1, diffInDays(toDateOnly(item.endDate), today));
       notifications.push({
@@ -94,12 +98,12 @@ export function buildAppNotifications({
     });
 
   rentals
-    .filter(item => (item.status === 'active' || item.status === 'created') && item.endDate === todayStr)
+    .filter(item => (item.status === 'active' || item.status === 'created' || item.status === 'returned') && item.endDate <= todayStr)
     .forEach(item => {
       const hasReceiving = shippingPhotos.some(photo =>
         photo.type === 'receiving' &&
         (photo.rentalId === item.id || (item.equipmentId && photo.equipmentId === item.equipmentId)) &&
-        photo.date.slice(0, 10) >= todayStr,
+        photo.date.slice(0, 10) >= item.endDate,
       );
       if (hasReceiving) return;
       notifications.push({

@@ -48,6 +48,10 @@ function isOverdue(plannedReturnDate: string): boolean {
   return new Date(plannedReturnDate) < startOfDay(new Date());
 }
 
+function isOpenRentalStatus(status: GanttRentalData['status']): boolean {
+  return status === 'active' || status === 'returned';
+}
+
 function daysAgo(n: number): Date {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -168,7 +172,7 @@ export default function Dashboard() {
   const activeRentalsList = viewPlannerRentals.filter(r => r.status === 'active');
 
   const overdueRentalsList = viewPlannerRentals.filter(r =>
-    r.status === 'active' && isOverdue(r.endDate)
+    isOpenRentalStatus(r.status) && isOverdue(r.endDate)
   );
 
   // Equipment in service

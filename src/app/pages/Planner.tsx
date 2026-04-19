@@ -139,6 +139,16 @@ function formatDate(iso: string): string {
   }
 }
 
+function getQuickCountTone(value: number, warningFrom = 1, criticalFrom = 3) {
+  if (value >= criticalFrom) {
+    return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300';
+  }
+  if (value >= warningFrom) {
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
+  }
+  return 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300';
+}
+
 function matchesDateRange(row: PlannerRow, filters: Filters): boolean {
   const { dateRange, customFrom, customTo } = filters;
   if (dateRange === 'all') return true;
@@ -356,6 +366,12 @@ export default function Planner() {
     return n;
   }, [filters]);
 
+  const quickFilterCounts = useMemo(() => ({
+    today: rows.filter(row => matchesDateRange(row, { ...DEFAULT_FILTERS, dateRange: 'today' })).length,
+    week: rows.filter(row => matchesDateRange(row, { ...DEFAULT_FILTERS, dateRange: 'week' })).length,
+    risks: rows.filter(row => row.risk).length,
+  }), [rows]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* ── Заголовок ── */}
@@ -561,7 +577,7 @@ export default function Planner() {
         </div>
       )}
 
-      {/* ── Таблица ── */}
+      {/* ── Контент ── */}
       <div className="flex-1 overflow-auto px-6 pb-6">
         {isLoading ? (
           <div className="flex items-center justify-center h-48 text-gray-400">
@@ -579,7 +595,106 @@ export default function Planner() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+          <>
+            <div className="space-y-3 sm:hidden">
+              {filtered.map(row => {
+                const { label: daysLabel, className: daysClass } = formatDaysUntil(row.daysUntil);
+
+                return (
+                  <div
+                    key={row.id}
+                    className={cn(
+                      'rounded-xl border bg-white p-4 shadow-sm dark:bg-gray-900',
+                      row.risk ? 'border-red-200 dark:border-red-800' : 'border-gray-200 dark:border-gray-700',
+                      row.prepStatus === 'shipped' && 'opacity-70',
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          {row.equipmentLabel || '—'}
+                        </div>
+                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {row.inventoryNumber || '—'}{row.serialNumber ? ` · ${row.serialNumber}` : ''}
+                        </div>
+                      </div>
+                      <span className={cn('rounded px-2 py-0.5 text-xs font-medium', PRIORITY_COLORS[row.priority])}>
+                        {PRIORITY_LABELS[row.priority]}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
+                        <div className="text-gray-400 dark:text-gray-500">Дата отгрузки</div>
+                        <div className="mt-1 font-medium text-gray-900 dark:text-gray-100">
+                          {formatDate(row.startDate)}
+                        </div>
+                        <div className={cn('mt-0.5', daysClass)}>{daysLabel}</div>
+                      </div>
+                      <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
+                        <div className="text-gray-400 dark:text-gray-500">Статус техники</div>
+                        <div className="mt-1">
+                          {row.equipmentStatus ? (
+                            <span className={cn(
+                              'inline-flex rounded px-2 py-0.5 text-xs font-medium',
+                              EQUIPMENT_STATUS_COLORS[row.equipmentStatus] || 'bg-gray-100 text-gray-600',
+                            )}>
+                              {EQUIPMENT_STATUS_LABELS[row.equipmentStatus] || row.equipmentStatus}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 space-y-2 text-xs">
+                      <div>
+                        <span className="text-gray-400 dark:text-gray-500">Клиент</span>
+                        <div className="mt-0.5 font-medium text-gray-900 dark:text-gray-100">{row.client || '—'}</div>
+                        {row.deliveryAddress && (
+                          <div className="mt-0.5 text-gray-500 dark:text-gray-400">{row.deliveryAddress}</div>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-gray-400 dark:text-gray-500">Менеджер</span>
+                        <div className="mt-0.5 text-gray-900 dark:text-gray-100">{row.manager || '—'}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <PrepStatusBadge
+                        rowId={row.id}
+                        value={row.prepStatus}
+                        canEdit={canEdit}
+                        onSave={handlePrepStatusSave}
+                      />
+                      {row.risk ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                          <AlertTriangle className="h-3 w-3" />
+                          Риск
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500 dark:bg-gray-700 dark:text-gray-300">
+                          Без риска
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-3">
+                      <CommentCell
+                        rowId={row.id}
+                        value={row.comment}
+                        canEdit={canEdit}
+                        onSave={handleCommentSave}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 sm:block">
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -755,7 +870,88 @@ export default function Planner() {
               </tbody>
             </table>
           </div>
+          </>
         )}
+      </div>
+
+      <div className="sticky bottom-0 z-20 border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:hidden">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => setFilters(f => ({ ...f, dateRange: 'today' }))}
+            className={cn(
+              'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+              filters.dateRange === 'today'
+                ? 'bg-blue-600 text-white'
+                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700',
+            )}
+          >
+            Сегодня
+            <span className={cn(
+              'ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+              filters.dateRange === 'today' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.today, 1, 4),
+            )}>
+              {quickFilterCounts.today}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilters(f => ({ ...f, dateRange: 'week' }))}
+            className={cn(
+              'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+              filters.dateRange === 'week'
+                ? 'bg-blue-600 text-white'
+                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700',
+            )}
+          >
+            7 дней
+            <span className={cn(
+              'ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+              filters.dateRange === 'week' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.week, 3, 8),
+            )}>
+              {quickFilterCounts.week}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilters(f => ({ ...f, riskOnly: !f.riskOnly }))}
+            className={cn(
+              'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+              filters.riskOnly
+                ? 'bg-red-600 text-white'
+                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700',
+            )}
+          >
+            Только риски
+            <span className={cn(
+              'ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+              filters.riskOnly ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.risks, 1, 3),
+            )}>
+              {quickFilterCounts.risks}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowFilters(v => !v)}
+            className={cn(
+              'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+              showFilters || activeFilterCount > 0
+                ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-300 dark:bg-blue-900/20 dark:text-blue-300 dark:ring-blue-700'
+                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700',
+            )}
+          >
+            Фильтры
+          </button>
+          {activeFilterCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilters(DEFAULT_FILTERS)}
+              className="shrink-0 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30"
+            >
+              Сбросить
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

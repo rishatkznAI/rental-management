@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -6,7 +6,7 @@ import {
   Plus, TrendingUp, AlertTriangle, Wrench, DollarSign, Calendar,
   User, Target, FileText, CreditCard, RefreshCw, CheckCircle, Truck,
   ShieldAlert, Clock, Ban, ArrowRight, ChevronDown, ChevronUp,
-  PackageX, ClipboardX, Zap,
+  PackageX, ClipboardX, Zap, X,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { formatCurrency, formatDate } from '../lib/utils';
@@ -58,12 +58,17 @@ function daysAgo(n: number): Date {
   return startOfDay(d);
 }
 
+function getOnboardingStorageKey(userId: string): string {
+  return `dashboard_onboarding_dismissed:${userId}`;
+}
+
 // ─── main component ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const qc = useQueryClient();
+  const [onboardingDismissed, setOnboardingDismissed] = useState<boolean | null>(null);
 
   // All data via react-query (auto-refetches on window focus by default)
   const { data: equipment = [] }  = useEquipmentList();
@@ -148,6 +153,29 @@ export default function Dashboard() {
     }),
     [clients, clientFinancials],
   );
+
+  useEffect(() => {
+    if (!user?.id) {
+      setOnboardingDismissed(true);
+      return;
+    }
+
+    try {
+      setOnboardingDismissed(localStorage.getItem(getOnboardingStorageKey(user.id)) === '1');
+    } catch {
+      setOnboardingDismissed(false);
+    }
+  }, [user?.id]);
+
+  const dismissOnboarding = useCallback(() => {
+    if (!user?.id) return;
+    try {
+      localStorage.setItem(getOnboardingStorageKey(user.id), '1');
+    } catch {
+      // ignore storage write failures
+    }
+    setOnboardingDismissed(true);
+  }, [user?.id]);
 
   // Менеджер по аренде видит только свои аренды в KPI
   const isManagerRole = user?.role === 'Менеджер по аренде';
@@ -251,6 +279,46 @@ export default function Dashboard() {
     : [];
 
   const hasManagerData = myRentals.length > 0;
+
+  const onboardingSteps = useMemo(() => {
+    const canCreateEquipment = can('create', 'equipment');
+    const canCreateClients = can('create', 'clients');
+    const canCreateRentals = can('create', 'rentals');
+
+    return [
+      {
+        id: 'equipment',
+        title: 'Добавьте технику',
+        description: 'Создайте первую единицу техники, чтобы она появилась в парке и стала доступна для аренды.',
+        completed: equipment.length > 0,
+        href: canCreateEquipment ? '/equipment/new' : '/equipment',
+        actionLabel: canCreateEquipment ? 'Создать технику' : 'Открыть парк',
+        icon: Truck,
+      },
+      {
+        id: 'clients',
+        title: 'Создайте клиента',
+        description: 'Добавьте клиента с контактами и лимитом, чтобы оформлять аренды без ручных обходов.',
+        completed: clients.length > 0,
+        href: canCreateClients ? '/clients/new' : '/clients',
+        actionLabel: canCreateClients ? 'Создать клиента' : 'Открыть клиентов',
+        icon: User,
+      },
+      {
+        id: 'rentals',
+        title: 'Оформите аренду',
+        description: 'Свяжите технику и клиента в первой аренде, чтобы запустить рабочий цикл приложения.',
+        completed: ganttRentals.length > 0 || rentals.length > 0,
+        href: canCreateRentals ? '/rentals/new' : '/rentals',
+        actionLabel: canCreateRentals ? 'Создать аренду' : 'Открыть аренды',
+        icon: FileText,
+      },
+    ] as const;
+  }, [can, clients.length, equipment.length, ganttRentals.length, rentals.length]);
+
+  const completedOnboardingSteps = onboardingSteps.filter(step => step.completed).length;
+  const nextOnboardingStep = onboardingSteps.find(step => !step.completed) ?? onboardingSteps[onboardingSteps.length - 1];
+  const showOnboarding = onboardingDismissed === false;
 
   // ── Extended KPIs ───────────────────────────────────────────────────────────
   const UTILIZATION_TARGET = 85;
@@ -764,6 +832,120 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {showOnboarding && (
+        <Card className="border-blue-200 bg-gradient-to-r from-blue-50 via-white to-cyan-50 dark:border-blue-900 dark:from-blue-950/40 dark:via-gray-900 dark:to-cyan-950/30">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant="info">Быстрый старт</Badge>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {completedOnboardingSteps} из {onboardingSteps.length} шагов
+                  </span>
+                </div>
+                <CardTitle className="text-xl">
+                  Первый вход: пройдите короткий onboarding
+                </CardTitle>
+                <CardDescription className="max-w-3xl text-sm">
+                  Начните с трёх базовых шагов: создайте технику, добавьте клиента и оформите первую аренду. После этого дашборд, планировщик и отчёты начнут работать в полном сценарии.
+                </CardDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={dismissOnboarding}
+                aria-label="Скрыть быстрый старт"
+                className="self-start"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950/70">
+              <div
+                className="h-full rounded-full bg-[--color-primary] transition-all"
+                style={{ width: `${Math.round((completedOnboardingSteps / onboardingSteps.length) * 100)}%` }}
+              />
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-3">
+              {onboardingSteps.map((step, index) => {
+                const Icon = step.icon;
+                const isNext = nextOnboardingStep.id === step.id && !step.completed;
+
+                return (
+                  <div
+                    key={step.id}
+                    className={`rounded-xl border p-4 transition-colors ${
+                      step.completed
+                        ? 'border-green-200 bg-green-50/80 dark:border-green-900 dark:bg-green-950/20'
+                        : isNext
+                        ? 'border-blue-200 bg-blue-50/80 dark:border-blue-900 dark:bg-blue-950/20'
+                        : 'border-gray-200 bg-white/80 dark:border-gray-700 dark:bg-gray-800/80'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                          step.completed
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                            : isNext
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                        }`}>
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Шаг {index + 1}
+                          </p>
+                          <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                            {step.title}
+                          </h3>
+                        </div>
+                      </div>
+                      {step.completed ? (
+                        <Badge variant="success">Готово</Badge>
+                      ) : isNext ? (
+                        <Badge>Сейчас</Badge>
+                      ) : (
+                        <Badge>Далее</Badge>
+                      )}
+                    </div>
+                    <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+                      {step.description}
+                    </p>
+                    <div className="mt-4">
+                      <Button asChild size="sm" variant={step.completed ? 'secondary' : 'default'}>
+                        <Link to={step.href}>
+                          {step.actionLabel}
+                          <ArrowRight className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-2 rounded-lg border border-dashed border-blue-200 bg-white/70 p-4 text-sm dark:border-blue-900 dark:bg-gray-900/40 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-gray-600 dark:text-gray-300">
+                {completedOnboardingSteps === onboardingSteps.length
+                  ? 'База уже готова. Можно переходить к работе с дашбордом, планировщиком и отчётами.'
+                  : `Следующий шаг: ${nextOnboardingStep.title.toLowerCase()}. После него onboarding автоматически покажет следующий этап.`}
+              </p>
+              <Button asChild size="sm" variant="outline">
+                <Link to={nextOnboardingStep.href}>
+                  Перейти к шагу
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── KPI Row 1 — Аренда ──────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">

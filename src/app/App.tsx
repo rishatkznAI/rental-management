@@ -24,7 +24,14 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <ThemeProvider>
-            <RouterProvider router={router} />
+            <RouterProvider
+              router={router}
+              fallbackElement={
+                <div className="flex min-h-screen items-center justify-center text-sm text-gray-500">
+                  Загрузка...
+                </div>
+              }
+            />
             <Toaster position="top-right" />
           </ThemeProvider>
         </AuthProvider>

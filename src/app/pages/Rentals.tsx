@@ -45,6 +45,8 @@ import { ru } from 'date-fns/locale';
 
 // ========== Constants & Types ==========
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
+type CompactView = 'cards' | 'timeline';
+const RENTALS_COMPACT_VIEW_STORAGE_KEY = 'rentals_compact_view';
 
 const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
   week: { dayWidth: 120, label: 'Неделя' },
@@ -115,6 +117,20 @@ function compareEquipmentForPlanner(a: Equipment, b: Equipment) {
   const byHeight = getPlannerSortHeight(a) - getPlannerSortHeight(b);
   if (byHeight !== 0) return byHeight;
   return compareEquipmentByPriority(a, b);
+}
+
+function getCompactViewStorageKey(userId?: string) {
+  return `${RENTALS_COMPACT_VIEW_STORAGE_KEY}:${userId || 'guest'}`;
+}
+
+function getQuickCountTone(value: number, warningFrom = 1, criticalFrom = 3) {
+  if (value >= criticalFrom) {
+    return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300';
+  }
+  if (value >= warningFrom) {
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
+  }
+  return 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300';
 }
 
 // ========== Helpers ==========
@@ -453,6 +469,7 @@ export default function Rentals() {
   const [preselectedEquipmentInv, setPreselectedEquipmentInv] = useState('');
   const [preselectedEquipmentId, setPreselectedEquipmentId] = useState('');
   const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
+  const [compactView, setCompactView] = useState<CompactView>('cards');
 
   const appendEquipmentHistoryEntry = useCallback(
     (equipment: Equipment, text: string) =>
@@ -477,6 +494,46 @@ export default function Rentals() {
 
   // Refs
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const storageKey = getCompactViewStorageKey(user?.id);
+    const savedView = window.localStorage.getItem(storageKey);
+    if (savedView === 'cards' || savedView === 'timeline') {
+      setCompactView(savedView);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(min-width: 640px) and (max-width: 1023px)');
+    const syncCompactView = () => {
+      if (mediaQuery.matches) {
+        setCompactView(prev => (prev === 'timeline' ? prev : 'cards'));
+        return;
+      }
+      if (window.innerWidth < 640) {
+        setCompactView('cards');
+        return;
+      }
+      setCompactView('timeline');
+    };
+
+    syncCompactView();
+    mediaQuery.addEventListener('change', syncCompactView);
+    window.addEventListener('resize', syncCompactView);
+    return () => {
+      mediaQuery.removeEventListener('change', syncCompactView);
+      window.removeEventListener('resize', syncCompactView);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(getCompactViewStorageKey(user?.id), compactView);
+  }, [compactView, user?.id]);
 
   // ===== Computed =====
   const customRange = useMemo(() => {
@@ -751,6 +808,48 @@ export default function Rentals() {
     { value: 'unpaid', label: 'Без оплаты' },
     { value: 'with_service', label: 'В сервисе' },
   ] as const;
+
+  const quickFilterCounts = useMemo(() => {
+    const todayStr = format(today, 'yyyy-MM-dd');
+    return {
+      returnsToday: ganttRentals.filter(
+        rental => rental.endDate === todayStr && rental.status !== 'returned' && rental.status !== 'closed',
+      ).length,
+      unpaid: ganttRentals.filter(rental => rental.paymentStatus !== 'paid').length,
+      overdue: ganttRentals.filter(
+        rental => rental.endDate < todayStr && rental.status !== 'returned' && rental.status !== 'closed',
+      ).length,
+    };
+  }, [ganttRentals, today]);
+
+  const mobileEquipmentCards = useMemo(() => {
+    return filteredEquipment.map(equipment => {
+      const rentalsForEquipment = filteredRentals
+        .filter(rental => matchesEquipmentRow(rental, equipment))
+        .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+      const downtimesForEquipment = mockDowntimes.filter(item => item.equipmentInv === equipment.inventoryNumber);
+      const serviceForEquipment = servicePeriods.filter(item =>
+        item.equipmentId
+          ? item.equipmentId === equipment.id
+          : item.equipmentInv === equipment.inventoryNumber && !ambiguousInventoryNumbers.has(equipment.inventoryNumber),
+      );
+      const activeRental = rentalsForEquipment.find(rental => rental.status === 'active');
+      const reservedRental = rentalsForEquipment.find(rental => rental.status === 'created');
+      const primaryRental = activeRental ?? reservedRental ?? rentalsForEquipment[0] ?? null;
+      const effectiveStatus = computeEffectiveStatus(equipment, rentalsForEquipment, today, { start: viewStart, end: viewEnd });
+      const statusMeta = EQ_STATUS_LABELS[effectiveStatus] || EQ_STATUS_LABELS.available;
+
+      return {
+        equipment,
+        rentalsForEquipment,
+        downtimesForEquipment,
+        serviceForEquipment,
+        primaryRental,
+        statusMeta,
+        conflictCount: conflictSets.get(equipment.id)?.size ?? 0,
+      };
+    });
+  }, [ambiguousInventoryNumbers, conflictSets, filteredEquipment, filteredRentals, matchesEquipmentRow, servicePeriods, today, viewEnd, viewStart]);
 
   // ===== New handlers for RentalDrawer =====
 
@@ -1140,6 +1239,39 @@ export default function Rentals() {
         </div>
       </div>
 
+      <div className="hidden items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800 sm:flex lg:hidden">
+        <div>
+          <div className="text-sm font-medium text-gray-900 dark:text-white">Режим просмотра</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            На планшете можно быстро переключаться между карточками и таймлайном
+          </div>
+        </div>
+        <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-gray-600 dark:bg-gray-700">
+          <button
+            type="button"
+            onClick={() => setCompactView('cards')}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              compactView === 'cards'
+                ? 'bg-[--color-primary] text-white'
+                : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600'
+            }`}
+          >
+            Карточки
+          </button>
+          <button
+            type="button"
+            onClick={() => setCompactView('timeline')}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              compactView === 'timeline'
+                ? 'bg-[--color-primary] text-white'
+                : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600'
+            }`}
+          >
+            Таймлайн
+          </button>
+        </div>
+      </div>
+
       {/* ===== Filters ===== */}
       <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-1.5 dark:border-gray-700 dark:bg-gray-800">
         <div className="mr-2 flex flex-wrap items-center gap-2">
@@ -1250,8 +1382,172 @@ export default function Rentals() {
         </div>
       )}
 
+      {/* ===== Mobile Compact View ===== */}
+      <div className={`flex-1 overflow-auto lg:hidden ${compactView === 'cards' ? 'block sm:block' : 'block sm:hidden'}`}>
+        {filteredEquipment.length === 0 ? (
+          equipmentList.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+              <div className="mb-2 text-2xl">🏗️</div>
+              <div className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                В реестре нет техники
+              </div>
+              <div className="mt-1 max-w-xs text-xs text-gray-400 dark:text-gray-500">
+                Добавьте технику в разделе «Техника», и она появится здесь для планирования аренды.
+              </div>
+              {can('create', 'equipment') && (
+                <Button
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => window.location.href = '/rental-management/equipment/new'}
+                >
+                  + Добавить технику
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+              <div className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                Нет техники по заданным фильтрам
+              </div>
+              <Button size="sm" variant="ghost" onClick={resetFilters} className="mt-2">
+                Сбросить фильтры
+              </Button>
+            </div>
+          )
+        ) : (
+          <div className="space-y-3 p-4">
+            {mobileEquipmentCards.map(({ equipment, primaryRental, rentalsForEquipment, serviceForEquipment, downtimesForEquipment, statusMeta, conflictCount }) => (
+              <div
+                key={equipment.id}
+                className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[11px] text-gray-500 dark:text-gray-400">
+                        {equipment.inventoryNumber}
+                      </span>
+                      <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${statusMeta.color}`}>
+                        {statusMeta.label}
+                      </span>
+                    </div>
+                    <h3 className="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">
+                      {equipment.model}
+                    </h3>
+                    <p className="mt-1 text-[11px] uppercase tracking-[0.04em] text-gray-500 dark:text-gray-400">
+                      SN {equipment.serialNumber || 'не указан'} · {TYPE_LABELS[equipment.type]}
+                    </p>
+                  </div>
+                  <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${PRIORITY_STYLES[equipment.priority]}`}>
+                    {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-900/60">
+                    <div className="text-gray-400 dark:text-gray-500">Аренд</div>
+                    <div className="mt-1 font-medium text-gray-900 dark:text-white">{rentalsForEquipment.length}</div>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-900/60">
+                    <div className="text-gray-400 dark:text-gray-500">Конфликты</div>
+                    <div className={`mt-1 font-medium ${conflictCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                      {conflictCount}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-900/60">
+                    <div className="text-gray-400 dark:text-gray-500">Сервис</div>
+                    <div className={`mt-1 flex items-center gap-1 font-medium ${serviceForEquipment.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                      <Wrench className="h-3.5 w-3.5" />
+                      {serviceForEquipment.length}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-900/60">
+                    <div className="text-gray-400 dark:text-gray-500">Простой</div>
+                    <div className="mt-1 font-medium text-gray-900 dark:text-white">{downtimesForEquipment.length}</div>
+                  </div>
+                </div>
+
+                {primaryRental ? (
+                  <div className="mt-3 rounded-lg border border-gray-200 px-3 py-3 dark:border-gray-700">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-gray-900 dark:text-white">
+                          {primaryRental.client}
+                        </div>
+                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {format(new Date(primaryRental.startDate), 'd MMM', { locale: ru })} — {format(new Date(primaryRental.endDate), 'd MMM', { locale: ru })}
+                        </div>
+                      </div>
+                      <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-medium ${
+                        primaryRental.status === 'active'
+                          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                          : primaryRental.status === 'created'
+                          ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+                          : primaryRental.status === 'returned'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                      }`}>
+                        {RENTAL_STATUS_LABEL[primaryRental.status]}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${
+                        primaryRental.paymentStatus === 'paid'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                          : primaryRental.paymentStatus === 'partial'
+                          ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
+                          : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                      }`}>
+                        <CreditCard className="h-3 w-3" />
+                        {primaryRental.paymentStatus === 'paid' ? 'Оплачено' : primaryRental.paymentStatus === 'partial' ? 'Частично' : 'Без оплаты'}
+                      </span>
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${
+                        primaryRental.updSigned
+                          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                      }`}>
+                        {primaryRental.updSigned ? <CircleCheck className="h-3 w-3" /> : <CircleAlert className="h-3 w-3" />}
+                        {primaryRental.updSigned ? 'УПД подписан' : 'УПД не подписан'}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    По выбранному периоду аренды для этой техники не найдены.
+                  </div>
+                )}
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {primaryRental && (
+                    <Button size="sm" variant="secondary" onClick={() => setSelectedRental(primaryRental)}>
+                      Открыть аренду
+                    </Button>
+                  )}
+                  {can('create', 'rentals') && (
+                    <Button size="sm" onClick={() => handleOpenNewRental(equipment.id)}>
+                      <Plus className="h-3.5 w-3.5" />
+                      Новая аренда
+                    </Button>
+                  )}
+                  {primaryRental?.status === 'active' && (
+                    <Button size="sm" variant="secondary" onClick={() => handleOpenReturn(primaryRental)}>
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Возврат
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* ===== Gantt Grid ===== */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-auto">
+      <div
+        ref={scrollContainerRef}
+        className={`hidden flex-1 overflow-auto ${compactView === 'timeline' ? 'sm:block' : 'sm:hidden'} lg:block`}
+      >
         <div style={{ width: LEFT_PANEL_WIDTH + timelineWidth, minHeight: '100%' }}>
           {/* ===== Timeline Header (sticky top) ===== */}
           <div className="sticky top-0 z-20 flex border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
@@ -1370,6 +1666,70 @@ export default function Rentals() {
                 onDowntime={() => handleOpenDowntime(eq.inventoryNumber)}
               />
             ))
+          )}
+        </div>
+      </div>
+
+      <div className="sticky bottom-0 z-20 border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-gray-700 dark:bg-gray-800/95 sm:hidden">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => navigateTime('today')}
+            className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+          >
+            Сегодня
+          </button>
+          <button
+            type="button"
+            onClick={() => setRentalPreset('returns_today')}
+            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              rentalPreset === 'returns_today'
+                ? 'bg-[--color-primary] text-white'
+                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            Возвраты
+            <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${rentalPreset === 'returns_today' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.returnsToday, 1, 3)}`}>
+              {quickFilterCounts.returnsToday}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setRentalPreset('unpaid')}
+            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              rentalPreset === 'unpaid'
+                ? 'bg-[--color-primary] text-white'
+                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            Без оплаты
+            <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${rentalPreset === 'unpaid' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.unpaid, 1, 5)}`}>
+              {quickFilterCounts.unpaid}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setRentalPreset('overdue')}
+            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              rentalPreset === 'overdue'
+                ? 'bg-[--color-primary] text-white'
+                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            Просроченные
+            <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${rentalPreset === 'overdue' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.overdue, 1, 2)}`}>
+              {quickFilterCounts.overdue}
+            </span>
+          </button>
+          {hasActiveFilters && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={resetFilters}
+              className="h-8 shrink-0 rounded-full px-3 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+            >
+              Сбросить
+            </Button>
           )}
         </div>
       </div>

@@ -1,35 +1,20 @@
 import { createHashRouter } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
-import Dashboard from './pages/Dashboard';
-import Planner from './pages/Planner';
-import Equipment from './pages/Equipment';
-import EquipmentNew from './pages/EquipmentNew';
-import EquipmentDetail from './pages/EquipmentDetail';
-import Rentals from './pages/Rentals';
-import RentalNew from './pages/RentalNew';
-import RentalDetail from './pages/RentalDetail';
-import Service from './pages/Service';
-import ServiceNew from './pages/ServiceNew';
-import ServiceDetail from './pages/ServiceDetail';
-import Clients from './pages/Clients';
-import ClientNew from './pages/ClientNew';
-import ClientDetail from './pages/ClientDetail';
-import Documents from './pages/Documents';
-import Payments from './pages/Payments';
-import Reports from './pages/Reports';
-import Settings from './pages/Settings';
-import Login from './pages/Login';
-import ServiceVehicles from './pages/ServiceVehicles';
-import ServiceVehicleDetail from './pages/ServiceVehicleDetail';
-import ManagerReport from './pages/ManagerReport';
 import ErrorPage from './pages/ErrorPage';
+
+function lazyPage(path: string) {
+  return async () => {
+    const module = await import(path);
+    return { Component: module.default };
+  };
+}
 
 // GitHub Pages is a static host, so hash routing is the most reliable way to
 // avoid broken deep links and stale page shells on refresh/navigation.
 export const router = createHashRouter([
   {
     path: '/login',
-    Component: Login,
+    lazy: lazyPage('./pages/Login'),
     ErrorBoundary: ErrorPage,
   },
   {
@@ -37,27 +22,27 @@ export const router = createHashRouter([
     Component: Layout,
     ErrorBoundary: ErrorPage,
     children: [
-      { index: true, Component: Dashboard },
-      { path: 'planner', Component: Planner },
-      { path: 'equipment', Component: Equipment },
-      { path: 'equipment/new', Component: EquipmentNew },
-      { path: 'equipment/:id', Component: EquipmentDetail },
-      { path: 'rentals', Component: Rentals },
-      { path: 'rentals/new', Component: RentalNew },
-      { path: 'rentals/:id', Component: RentalDetail },
-      { path: 'service', Component: Service },
-      { path: 'service/new', Component: ServiceNew },
-      { path: 'service/:id', Component: ServiceDetail },
-      { path: 'clients', Component: Clients },
-      { path: 'clients/new', Component: ClientNew },
-      { path: 'clients/:id', Component: ClientDetail },
-      { path: 'documents', Component: Documents },
-      { path: 'payments', Component: Payments },
-      { path: 'reports', Component: Reports },
-      { path: 'settings',             Component: Settings          },
-      { path: 'service-vehicles',     Component: ServiceVehicles      },
-      { path: 'service-vehicles/:id', Component: ServiceVehicleDetail },
-      { path: 'manager-report',       Component: ManagerReport        },
+      { index: true, lazy: lazyPage('./pages/Dashboard') },
+      { path: 'planner', lazy: lazyPage('./pages/Planner') },
+      { path: 'equipment', lazy: lazyPage('./pages/Equipment') },
+      { path: 'equipment/new', lazy: lazyPage('./pages/EquipmentNew') },
+      { path: 'equipment/:id', lazy: lazyPage('./pages/EquipmentDetail') },
+      { path: 'rentals', lazy: lazyPage('./pages/Rentals') },
+      { path: 'rentals/new', lazy: lazyPage('./pages/RentalNew') },
+      { path: 'rentals/:id', lazy: lazyPage('./pages/RentalDetail') },
+      { path: 'service', lazy: lazyPage('./pages/Service') },
+      { path: 'service/new', lazy: lazyPage('./pages/ServiceNew') },
+      { path: 'service/:id', lazy: lazyPage('./pages/ServiceDetail') },
+      { path: 'clients', lazy: lazyPage('./pages/Clients') },
+      { path: 'clients/new', lazy: lazyPage('./pages/ClientNew') },
+      { path: 'clients/:id', lazy: lazyPage('./pages/ClientDetail') },
+      { path: 'documents', lazy: lazyPage('./pages/Documents') },
+      { path: 'payments', lazy: lazyPage('./pages/Payments') },
+      { path: 'reports', lazy: lazyPage('./pages/Reports') },
+      { path: 'settings', lazy: lazyPage('./pages/Settings') },
+      { path: 'service-vehicles', lazy: lazyPage('./pages/ServiceVehicles') },
+      { path: 'service-vehicles/:id', lazy: lazyPage('./pages/ServiceVehicleDetail') },
+      { path: 'manager-report', lazy: lazyPage('./pages/ManagerReport') },
     ],
   },
 ]);

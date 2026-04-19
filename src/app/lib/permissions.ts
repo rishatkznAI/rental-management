@@ -91,7 +91,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
 
 /**
  * Возвращает требуемое действие для «create»-маршрутов.
- * Используется в PrivateRoute для блокировки по действию (не только по разделу).
+ * Используется в охране маршрутов для блокировки по действию (не только по разделу).
  */
 export function pathToRequiredAction(pathname: string): { section: Section; action: Action } | null {
   if (pathname === '/equipment/new') return { section: 'equipment', action: 'create' };

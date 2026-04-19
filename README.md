@@ -25,9 +25,17 @@ npm install
 npm run dev
 ```
 
-## Production
+## Scripts
 
-- Frontend is deployed via GitHub Pages workflow in [`.github/workflows/deploy.yml`](/Users/rishat/Downloads/Review%20attached%20requirements/.github/workflows/deploy.yml)
+- `npm run dev` — start the frontend locally
+- `npm run build` — build the frontend
+- `npm test` — run the Node test suite from `tests/`
+- `npm run test:e2e` — run Playwright end-to-end tests
+
+## Deployment
+
+- Frontend supports static deployment (`vite build`) and includes `public/404.html` for SPA routing on GitHub Pages
+- `vercel.json` keeps Vercel rewrites compatible with the hash-router shell
 - Backend is deployed separately on Railway
 - Production frontend uses `VITE_API_URL` to talk to the deployed backend
   

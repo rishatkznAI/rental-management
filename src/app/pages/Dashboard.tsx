@@ -324,6 +324,11 @@ export default function Dashboard() {
     : [];
   const myReadyServiceTickets = myAssignedServiceTickets.filter(ticket => ticket.status === 'ready');
   const myWaitingPartsTickets = myAssignedServiceTickets.filter(ticket => ticket.status === 'waiting_parts');
+  const ticketsWaitingParts = tickets.filter(t => t.status === 'waiting_parts');
+  const openServiceTickets = tickets.filter(t => t.status !== 'closed');
+  const unassignedServiceTickets = openServiceTickets.filter(
+    t => !t.assignedMechanicId && !t.assignedMechanicName && !t.assignedTo,
+  );
   const officeUnsignedDocuments = documents.filter(doc =>
     (doc.type === 'contract' || doc.type === 'act') && doc.status !== 'signed',
   );
@@ -341,6 +346,7 @@ export default function Dashboard() {
     const ret = new Date(rental.endDate);
     return (ret >= today && ret < tomorrowStart) || (ret >= tomorrowStart && ret < dayAfterTomorrowStart);
   }).length;
+  const overdueDebtClients = computedClients.filter(c => (c.debt ?? 0) > 0);
   const roleDashboardCards = useMemo<RoleFocusCard[]>(() => {
     if (user?.role === 'Менеджер по аренде') {
       return [
@@ -613,11 +619,6 @@ export default function Dashboard() {
     : 0;
 
   // Service tickets waiting for parts
-  const ticketsWaitingParts = tickets.filter(t => t.status === 'waiting_parts');
-  const openServiceTickets = tickets.filter(t => t.status !== 'closed');
-  const unassignedServiceTickets = openServiceTickets.filter(
-    t => !t.assignedMechanicId && !t.assignedMechanicName && !t.assignedTo,
-  );
   const repeatFailureRows = (mechanicWorkload?.repeatFailures ?? []).filter(item => item.repairsCount > 1);
   const idleEquipmentList = equipment.filter(e => e.status === 'available' || e.status === 'inactive');
   const serviceInDaysRows = openServiceTickets
@@ -665,8 +666,6 @@ export default function Dashboard() {
   // Monthly plan (0 = not configured, shows no target bar)
   const MONTHLY_PLAN = 0;
 
-  // Overdue debt clients
-  const overdueDebtClients = computedClients.filter(c => (c.debt ?? 0) > 0);
   const overdueDebtCount = overduePayments.length;
 
   // ── Alert items ─────────────────────────────────────────────────────────────

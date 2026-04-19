@@ -1266,9 +1266,9 @@ export default function Rentals() {
     <div className="flex h-[calc(100vh-56px-64px)] sm:h-[calc(100vh)] flex-col overflow-hidden bg-slate-50 dark:bg-[#0f1726]">
       {/* ===== Toolbar ===== */}
       <div className="border-b border-gray-200 bg-white/95 backdrop-blur dark:border-gray-700 dark:bg-gray-800/95">
-        <div className="space-y-4 px-4 py-4">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="space-y-3">
+        <div className="space-y-3 px-4 py-3">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div className="space-y-2">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
                   Аренды
@@ -1281,34 +1281,14 @@ export default function Rentals() {
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <div className="rounded-xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Техника</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
-                    {shownEquipment}
-                    <span className="ml-1 text-xs font-medium text-gray-400 dark:text-gray-500">из {totalEquipment}</span>
-                  </div>
-                </div>
-                <div className="rounded-xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Аренды</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
-                    {shownRentals}
-                    <span className="ml-1 text-xs font-medium text-gray-400 dark:text-gray-500">из {totalRentals}</span>
-                  </div>
-                </div>
-                <div className="rounded-xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Риски</div>
-                  <div className="mt-1 flex flex-wrap gap-2 text-xs">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">
-                      <AlertTriangle className="h-3 w-3" />
-                      {quickFilterCounts.overdue} просроч.
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                      <CreditCard className="h-3 w-3" />
-                      {quickFilterCounts.unpaid} без оплаты
-                    </span>
-                  </div>
-                </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                <span>{shownEquipment} ед. техники</span>
+                <span className="text-gray-300 dark:text-gray-600">•</span>
+                <span>{shownRentals} аренд</span>
+                <span className="text-gray-300 dark:text-gray-600">•</span>
+                <span className="text-amber-600 dark:text-amber-400">{quickFilterCounts.unpaid} без оплаты</span>
+                <span className="text-gray-300 dark:text-gray-600">•</span>
+                <span className="text-red-600 dark:text-red-400">{quickFilterCounts.overdue} просроч.</span>
               </div>
             </div>
 
@@ -1330,8 +1310,8 @@ export default function Rentals() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
-            <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center">
+          <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:justify-between">
+            <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
               <div className="flex rounded-2xl border border-gray-200 bg-slate-50 p-1 dark:border-gray-700 dark:bg-gray-900/60">
                 {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
                   <button
@@ -1428,10 +1408,10 @@ export default function Rentals() {
 
       {/* ===== Filters ===== */}
       <div className="border-b border-gray-200 bg-white/92 backdrop-blur dark:border-gray-700 dark:bg-gray-800/92">
-        <div className="px-4 py-3">
-          <div className="space-y-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800/70">
-            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
+        <div className="px-4 py-2">
+          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+              <div className="flex flex-wrap items-center gap-2 xl:min-w-0">
                 {rentalPresetOptions.map(option => {
                   const count = option.value === 'returns_today'
                     ? quickFilterCounts.returnsToday
@@ -1467,31 +1447,23 @@ export default function Rentals() {
                 })}
               </div>
 
-              <div className="text-xs text-gray-400 dark:text-gray-500">
-                {hasActiveFilters
-                  ? `${shownEquipment} из ${totalEquipment} ед. · ${shownRentals} из ${totalRentals} аренд`
-                  : `${totalEquipment} ед. · ${totalRentals} аренд`}
-              </div>
-            </div>
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Модель / INV / SN"
+                    value={filterModel}
+                    onChange={e => setFilterModel(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                  />
+                </div>
 
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Модель / INV / SN"
-                  value={filterModel}
-                  onChange={e => setFilterModel(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 xl:justify-end">
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() => setShowFiltersDialog(true)}
-                  className="h-10 rounded-xl px-4 text-sm"
+                  className="h-10 shrink-0 rounded-xl px-4 text-sm"
                 >
                   <SlidersHorizontal className="h-4 w-4" />
                   Фильтры
@@ -1503,61 +1475,60 @@ export default function Rentals() {
                 </Button>
 
                 {hasActiveFilters ? (
-                  <Button size="sm" variant="ghost" onClick={resetFilters} className="h-10 rounded-xl px-4 text-sm text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20">
+                  <Button size="sm" variant="ghost" onClick={resetFilters} className="h-10 shrink-0 rounded-xl px-3 text-sm text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20">
                     Сбросить
                   </Button>
                 ) : null}
               </div>
             </div>
 
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 text-xs dark:border-gray-700">
+              <div className="flex flex-wrap items-center gap-3 text-gray-500 dark:text-gray-400">
+                <span>{overviewCounts.available} свободно</span>
+                <span className="text-gray-300 dark:text-gray-600">•</span>
+                <span>{overviewCounts.rented} занято</span>
+                <span className="text-gray-300 dark:text-gray-600">•</span>
+                <span>{overviewCounts.inService} в сервисе</span>
+                <span className="text-gray-300 dark:text-gray-600">•</span>
+                <span>{overviewCounts.overdue} просрочено</span>
+              </div>
+
+              <div className="text-gray-400 dark:text-gray-500">
+                {hasActiveFilters
+                  ? `${shownEquipment} из ${totalEquipment} ед. · ${shownRentals} из ${totalRentals} аренд`
+                  : `${totalEquipment} ед. · ${totalRentals} аренд`}
+              </div>
+            </div>
+
             {hasAdvancedFilters && (
-              <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
+              <div className="mt-2 flex flex-wrap gap-2">
                 {filterManager && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
                     Менеджер: {filterManager}
                   </span>
                 )}
                 {filterClient && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
                     Клиент: {filterClient}
                   </span>
                 )}
                 {filterUpd && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
                     УПД: {filterUpd === 'yes' ? 'подписан' : 'не подписан'}
                   </span>
                 )}
                 {filterPayment && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
                     Оплата: {PAYMENT_STATUS_FILTERS.find(item => item.value === filterPayment)?.label || filterPayment}
                   </span>
                 )}
                 {filterStatus && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
                     Статус: {RENTAL_STATUS_FILTERS.find(item => item.value === filterStatus)?.label || filterStatus}
                   </span>
                 )}
               </div>
             )}
-
-            <div className="grid gap-2 border-t border-gray-100 pt-3 dark:border-gray-700 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl bg-slate-50/80 px-3 py-2 dark:bg-gray-900/45">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Свободно</div>
-                <div className="mt-1 text-base font-semibold text-green-600 dark:text-green-400">{overviewCounts.available}</div>
-              </div>
-              <div className="rounded-xl bg-slate-50/80 px-3 py-2 dark:bg-gray-900/45">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Задействовано</div>
-                <div className="mt-1 text-base font-semibold text-blue-600 dark:text-blue-400">{overviewCounts.rented}</div>
-              </div>
-              <div className="rounded-xl bg-slate-50/80 px-3 py-2 dark:bg-gray-900/45">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">В сервисе</div>
-                <div className="mt-1 text-base font-semibold text-red-600 dark:text-red-400">{overviewCounts.inService}</div>
-              </div>
-              <div className="rounded-xl bg-slate-50/80 px-3 py-2 dark:bg-gray-900/45">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Просрочено</div>
-                <div className="mt-1 text-base font-semibold text-amber-600 dark:text-amber-400">{overviewCounts.overdue}</div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -1999,10 +1970,10 @@ export default function Rentals() {
                     </div>
                   </div>
                   <div
-                    className="flex items-center px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-gray-400 dark:text-gray-500"
+                    className="flex items-center px-3 py-2 text-[10px] text-gray-400 dark:text-gray-500"
                     style={{ width: timelineWidth }}
                   >
-                    Группа техники: {group.label}
+                    {group.items.length} единиц
                   </div>
                 </button>
 
@@ -2478,30 +2449,25 @@ function EquipmentRow({
         style={{ width: LEFT_PANEL_WIDTH }}
       >
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${eqStatus.color}`}>
-              {eqStatus.label}
-            </span>
-            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${PRIORITY_STYLES[equipment.priority]}`}>
-              {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
-            </span>
-          </div>
-          <div className="mt-1 flex items-baseline gap-1.5">
+          <div className="flex items-baseline gap-1.5">
+            <span className="truncate text-[13px] font-semibold text-gray-900 dark:text-white">{equipment.model}</span>
             <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500">{equipment.inventoryNumber}</span>
-            <span className="truncate text-[12px] font-semibold text-gray-900 dark:text-white">{equipment.model}</span>
           </div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400">
             <span className="truncate uppercase tracking-[0.08em]">SN {equipment.serialNumber || 'не указан'}</span>
             <span className="text-gray-300 dark:text-gray-600">•</span>
             <span className="truncate">{equipment.location || 'Локация не указана'}</span>
           </div>
-          <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-gray-400 dark:text-gray-500">
-            <span className="truncate">{TYPE_LABELS[equipment.type]}</span>
-            {hasActiveRental ? (
-              <span className="font-medium text-blue-600 dark:text-blue-400">занята</span>
-            ) : (
-              <span className="font-medium text-green-600 dark:text-green-400">свободна</span>
-            )}
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${eqStatus.color}`}>
+              {eqStatus.label}
+            </span>
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${PRIORITY_STYLES[equipment.priority]}`}>
+              {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
+            </span>
+            <span className={`text-[10px] font-medium ${hasActiveRental ? 'text-blue-600 dark:text-blue-400' : 'text-green-600 dark:text-green-400'}`}>
+              {hasActiveRental ? 'занята' : 'свободна'}
+            </span>
           </div>
         </div>
         {/* Quick actions */}

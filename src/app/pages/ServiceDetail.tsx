@@ -146,13 +146,35 @@ function buildRepairResult(ticket: ServiceTicket, workItems: RepairWorkItem[], p
 }
 
 function normalizeTicket(ticket: ServiceTicket): ServiceTicket {
+  const normalizedResult = {
+    summary: ticket.resultData?.summary ?? ticket.result ?? '',
+    worksPerformed: Array.isArray(ticket.resultData?.worksPerformed) ? ticket.resultData!.worksPerformed : [],
+    partsUsed: Array.isArray(ticket.resultData?.partsUsed) ? ticket.resultData!.partsUsed : (Array.isArray(ticket.parts) ? ticket.parts : []),
+  };
+
   return {
     ...ticket,
+    equipment: ticket.equipment ?? 'Не указано',
+    reason: ticket.reason ?? '',
+    description: ticket.description ?? '',
+    sla: ticket.sla ?? '',
     serviceKind: inferServiceKind(ticket),
     assignedMechanicName: ticket.assignedMechanicName ?? ticket.assignedTo,
     createdByUserName: ticket.createdByUserName ?? ticket.createdBy,
     createdBy: ticket.createdByUserName ?? ticket.createdBy,
-    result: getRepairSummary(ticket),
+    result: normalizedResult.summary,
+    resultData: normalizedResult,
+    workLog: Array.isArray(ticket.workLog) ? ticket.workLog : [],
+    parts: Array.isArray(ticket.parts) ? ticket.parts : [],
+    photos: Array.isArray(ticket.photos) ? ticket.photos : [],
+    repairPhotos: {
+      before: Array.isArray(ticket.repairPhotos?.before) ? ticket.repairPhotos!.before : [],
+      after: Array.isArray(ticket.repairPhotos?.after) ? ticket.repairPhotos!.after : [],
+      beforeUploadedAt: ticket.repairPhotos?.beforeUploadedAt,
+      beforeUploadedBy: ticket.repairPhotos?.beforeUploadedBy,
+      afterUploadedAt: ticket.repairPhotos?.afterUploadedAt,
+      afterUploadedBy: ticket.repairPhotos?.afterUploadedBy,
+    },
   };
 }
 

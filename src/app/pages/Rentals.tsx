@@ -488,9 +488,11 @@ export default function Rentals() {
   const [filterPayment, setFilterPayment] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [rentalPreset, setRentalPreset] = useState<'all' | 'returns_today' | 'overdue' | 'unpaid' | 'with_service'>('all');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   // Derived: any filter is currently active
   const hasActiveFilters = !!(filterModel || filterManager || filterClient || filterUpd || filterPayment || filterStatus || rentalPreset !== 'all');
+  const hasAdvancedFilters = !!(filterManager || filterClient || filterUpd || filterPayment || filterStatus);
 
   // Refs
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -711,6 +713,23 @@ export default function Rentals() {
     return [...eq].sort(compareEquipmentForPlanner);
   }, [equipmentList, filterModel, visibleFilteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus, matchesEquipmentRow]);
 
+  const filteredEquipmentGroups = useMemo(() => {
+    const grouped = new Map<EquipmentType, Equipment[]>();
+    filteredEquipment.forEach(item => {
+      const bucket = grouped.get(item.type) ?? [];
+      bucket.push(item);
+      grouped.set(item.type, bucket);
+    });
+
+    return (['scissor', 'articulated', 'telescopic'] as EquipmentType[])
+      .map(type => ({
+        type,
+        label: TYPE_LABELS[type],
+        items: grouped.get(type) ?? [],
+      }))
+      .filter(group => group.items.length > 0);
+  }, [filteredEquipment]);
+
   // Conflict detection for all equipment
   const conflictSets = useMemo(() => {
       const map = new Map<string, Set<string>>();
@@ -727,6 +746,25 @@ export default function Rentals() {
   const totalRentals = ganttRentals.length;
   const shownEquipment = filteredEquipment.length;
   const shownRentals = filteredRentals.length;
+  const overviewCounts = useMemo(() => {
+    let available = 0;
+    let rented = 0;
+    let inService = 0;
+    let overdue = 0;
+
+    filteredEquipment.forEach(equipment => {
+      const rentalsForEquipment = filteredRentals.filter(rental => matchesEquipmentRow(rental, equipment));
+      const effectiveStatus = computeEffectiveStatus(equipment, rentalsForEquipment, today, { start: viewStart, end: viewEnd });
+      if (effectiveStatus === 'available') available += 1;
+      if (effectiveStatus === 'rented' || effectiveStatus === 'reserved') rented += 1;
+      if (effectiveStatus === 'in_service') inService += 1;
+      if (rentalsForEquipment.some(rental => rental.endDate < format(today, 'yyyy-MM-dd') && rental.status !== 'returned' && rental.status !== 'closed')) {
+        overdue += 1;
+      }
+    });
+
+    return { available, rented, inService, overdue };
+  }, [filteredEquipment, filteredRentals, matchesEquipmentRow, today, viewEnd, viewStart]);
 
   // ===== Handlers =====
   const navigateTime = useCallback((direction: 'prev' | 'next' | 'today') => {
@@ -821,6 +859,12 @@ export default function Rentals() {
       ).length,
     };
   }, [ganttRentals, today]);
+
+  useEffect(() => {
+    if (hasAdvancedFilters) {
+      setShowAdvancedFilters(true);
+    }
+  }, [hasAdvancedFilters]);
 
   const mobileEquipmentCards = useMemo(() => {
     return filteredEquipment.map(equipment => {
@@ -1368,7 +1412,7 @@ export default function Rentals() {
               </div>
             </div>
 
-            <div className="grid gap-3 2xl:grid-cols-[minmax(0,1.1fr)_220px_220px_140px_minmax(260px,auto)_170px_auto]">
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto_auto]">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <input
@@ -1380,71 +1424,109 @@ export default function Rentals() {
                 />
               </div>
 
-              <select
-                value={filterManager}
-                onChange={e => setFilterManager(e.target.value)}
-                className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-              >
-                <option value="">Менеджер</option>
-                {managersList.map(u => (
-                  <option key={u.id} value={u.name}>{u.name}</option>
-                ))}
-              </select>
-
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Клиент"
-                  value={filterClient}
-                  onChange={e => setFilterClient(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                />
-              </div>
-
-              <select
-                value={filterUpd}
-                onChange={e => setFilterUpd(e.target.value)}
-                className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-              >
-                <option value="">УПД</option>
-                <option value="yes">Подписан</option>
-                <option value="no">Не подписан</option>
-              </select>
-
-              <div className="flex overflow-hidden rounded-xl border border-gray-200 dark:border-gray-600">
-                {PAYMENT_STATUS_FILTERS.map(f => (
-                  <button
-                    key={f.value}
-                    onClick={() => setFilterPayment(f.value)}
-                    className={`px-3 py-2 text-sm transition-colors first:flex-1 last:flex-1 ${
-                      filterPayment === f.value
-                        ? 'bg-[--color-primary] text-white'
-                        : 'bg-slate-50 text-gray-600 hover:bg-gray-100 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:bg-gray-700'
-                    }`}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-
-              <select
-                value={filterStatus}
-                onChange={e => setFilterStatus(e.target.value)}
-                className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-              >
-                {RENTAL_STATUS_FILTERS.map(f => (
-                  <option key={f.value} value={f.value}>{f.label}</option>
-                ))}
-              </select>
-
-              {hasActiveFilters ? (
-                <Button size="sm" variant="ghost" onClick={resetFilters} className="h-10 rounded-xl px-4 text-sm text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20">
-                  Сбросить
+              <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setShowAdvancedFilters(prev => !prev)}
+                  className="h-10 rounded-xl px-4 text-sm"
+                >
+                  {showAdvancedFilters ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  Доп. фильтры
+                  {hasAdvancedFilters && (
+                    <span className="ml-1 rounded-full bg-[--color-primary]/10 px-2 py-0.5 text-[11px] font-semibold text-[--color-primary]">
+                      active
+                    </span>
+                  )}
                 </Button>
-              ) : (
-                <div />
-              )}
+
+                {hasActiveFilters ? (
+                  <Button size="sm" variant="ghost" onClick={resetFilters} className="h-10 rounded-xl px-4 text-sm text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20">
+                    Сбросить
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            {showAdvancedFilters && (
+              <div className="grid gap-3 border-t border-gray-100 pt-3 dark:border-gray-700 2xl:grid-cols-[220px_220px_140px_minmax(260px,auto)_170px]">
+                <select
+                  value={filterManager}
+                  onChange={e => setFilterManager(e.target.value)}
+                  className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                >
+                  <option value="">Менеджер</option>
+                  {managersList.map(u => (
+                    <option key={u.id} value={u.name}>{u.name}</option>
+                  ))}
+                </select>
+
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Клиент"
+                    value={filterClient}
+                    onChange={e => setFilterClient(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                  />
+                </div>
+
+                <select
+                  value={filterUpd}
+                  onChange={e => setFilterUpd(e.target.value)}
+                  className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                >
+                  <option value="">УПД</option>
+                  <option value="yes">Подписан</option>
+                  <option value="no">Не подписан</option>
+                </select>
+
+                <div className="flex overflow-hidden rounded-xl border border-gray-200 dark:border-gray-600">
+                  {PAYMENT_STATUS_FILTERS.map(f => (
+                    <button
+                      key={f.value}
+                      onClick={() => setFilterPayment(f.value)}
+                      className={`px-3 py-2 text-sm transition-colors first:flex-1 last:flex-1 ${
+                        filterPayment === f.value
+                          ? 'bg-[--color-primary] text-white'
+                          : 'bg-slate-50 text-gray-600 hover:bg-gray-100 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                <select
+                  value={filterStatus}
+                  onChange={e => setFilterStatus(e.target.value)}
+                  className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                >
+                  {RENTAL_STATUS_FILTERS.map(f => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="grid gap-2 border-t border-gray-100 pt-3 dark:border-gray-700 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-900/55">
+                <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Свободно</div>
+                <div className="mt-1 text-base font-semibold text-green-600 dark:text-green-400">{overviewCounts.available}</div>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-900/55">
+                <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Задействовано</div>
+                <div className="mt-1 text-base font-semibold text-blue-600 dark:text-blue-400">{overviewCounts.rented}</div>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-900/55">
+                <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">В сервисе</div>
+                <div className="mt-1 text-base font-semibold text-red-600 dark:text-red-400">{overviewCounts.inService}</div>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-900/55">
+                <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Просрочено</div>
+                <div className="mt-1 text-base font-semibold text-amber-600 dark:text-amber-400">{overviewCounts.overdue}</div>
+              </div>
             </div>
           </div>
         </div>
@@ -1491,8 +1573,21 @@ export default function Rentals() {
             </div>
           )
         ) : (
-          <div className="space-y-3 p-4">
-            {mobileEquipmentCards.map(({ equipment, primaryRental, rentalsForEquipment, serviceForEquipment, downtimesForEquipment, statusMeta, conflictCount }) => (
+          <div className="space-y-4 p-4">
+            {filteredEquipmentGroups.map(group => (
+              <div key={group.type} className="space-y-3">
+                <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white/80 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">Тип техники</div>
+                    <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{group.label}</div>
+                  </div>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                    {group.items.length}
+                  </span>
+                </div>
+                {mobileEquipmentCards
+                  .filter(card => card.equipment.type === group.type)
+                  .map(({ equipment, primaryRental, rentalsForEquipment, serviceForEquipment, downtimesForEquipment, statusMeta, conflictCount }) => (
               <div
                 key={equipment.id}
                 className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
@@ -1614,6 +1709,8 @@ export default function Rentals() {
                   )}
                 </div>
               </div>
+                ))}
+              </div>
             ))}
           </div>
         )}
@@ -1723,32 +1820,56 @@ export default function Rentals() {
               </div>
             )
           ) : (
-            filteredEquipment.map(eq => (
-              <EquipmentRow
-                key={eq.id}
-                equipment={eq}
-                rentals={filteredRentals.filter(r => matchesEquipmentRow(r, eq))}
-                downtimes={mockDowntimes.filter(d => d.equipmentInv === eq.inventoryNumber)}
-                servicePeriods={servicePeriods.filter(s =>
-                  s.equipmentId
-                    ? s.equipmentId === eq.id
-                    : s.equipmentInv === eq.inventoryNumber && !ambiguousInventoryNumbers.has(eq.inventoryNumber)
-                )}
-                conflictIds={conflictSets.get(eq.id) || new Set()}
-                viewStart={viewStart}
-                totalDays={totalDays}
-                dayWidth={dayWidth}
-                todayOffset={todayOffset}
-                viewEnd={viewEnd}
-                scale={scale}
-                days={days}
-                today={today}
-                paymentFractions={rentalPaidFractions}
-                onBarClick={setSelectedRental}
-                onNewRental={() => handleOpenNewRental(eq.id)}
-                onReturn={(rental) => handleOpenReturn(rental)}
-                onDowntime={() => handleOpenDowntime(eq.inventoryNumber)}
-              />
+            filteredEquipmentGroups.map(group => (
+              <React.Fragment key={group.type}>
+                <div className="flex border-b border-gray-200/70 bg-slate-50/85 dark:border-gray-700 dark:bg-gray-900/55">
+                  <div
+                    className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200/70 bg-slate-50/95 px-4 py-2 backdrop-blur dark:border-gray-700 dark:bg-gray-900/90"
+                    style={{ width: LEFT_PANEL_WIDTH }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-900 dark:text-white">{group.label}</span>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 shadow-sm dark:bg-gray-800 dark:text-gray-300">
+                        {group.items.length}
+                      </span>
+                    </div>
+                  </div>
+                  <div
+                    className="flex items-center px-3 py-2 text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500"
+                    style={{ width: timelineWidth }}
+                  >
+                    {group.label}
+                  </div>
+                </div>
+
+                {group.items.map(eq => (
+                  <EquipmentRow
+                    key={eq.id}
+                    equipment={eq}
+                    rentals={filteredRentals.filter(r => matchesEquipmentRow(r, eq))}
+                    downtimes={mockDowntimes.filter(d => d.equipmentInv === eq.inventoryNumber)}
+                    servicePeriods={servicePeriods.filter(s =>
+                      s.equipmentId
+                        ? s.equipmentId === eq.id
+                        : s.equipmentInv === eq.inventoryNumber && !ambiguousInventoryNumbers.has(eq.inventoryNumber)
+                    )}
+                    conflictIds={conflictSets.get(eq.id) || new Set()}
+                    viewStart={viewStart}
+                    totalDays={totalDays}
+                    dayWidth={dayWidth}
+                    todayOffset={todayOffset}
+                    viewEnd={viewEnd}
+                    scale={scale}
+                    days={days}
+                    today={today}
+                    paymentFractions={rentalPaidFractions}
+                    onBarClick={setSelectedRental}
+                    onNewRental={() => handleOpenNewRental(eq.id)}
+                    onReturn={(rental) => handleOpenReturn(rental)}
+                    onDowntime={() => handleOpenDowntime(eq.inventoryNumber)}
+                  />
+                ))}
+              </React.Fragment>
             ))
           )}
         </div>

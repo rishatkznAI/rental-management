@@ -66,7 +66,7 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
 };
 
 const LEFT_PANEL_WIDTH = 236;
-const ROW_HEIGHT = 52;
+const ROW_HEIGHT = 60;
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
   scissor: 'Ножничный',
@@ -2459,6 +2459,13 @@ function EquipmentRow({
   const eqStatus = EQ_STATUS_LABELS[effectiveStatus] || EQ_STATUS_LABELS.available;
   const hasActiveRental = rentals.some(r => r.status === 'active');
   const timelineWidth = totalDays * dayWidth;
+  const hasServiceBars = servicePeriods.length > 0;
+  const hasDowntimeBars = downtimes.length > 0;
+  const hasOverlayBars = hasServiceBars || hasDowntimeBars;
+  const overlayBarHeight = rentals.length > 0 ? 20 : 26;
+  const overlayBarTop = rentals.length > 0 ? 6 : Math.round((ROW_HEIGHT - overlayBarHeight) / 2);
+  const rentalBarHeight = hasOverlayBars ? 22 : 28;
+  const rentalStackGap = 2;
 
   return (
     <div
@@ -2572,8 +2579,8 @@ function EquipmentRow({
               style={{
                 left: pos.left + 2,
                 width: pos.width,
-                top: 6,
-                height: 18,
+                top: overlayBarTop,
+                height: overlayBarHeight,
                 background: 'linear-gradient(90deg, rgba(254,226,226,0.92), rgba(254,242,242,0.82))',
                 border: '1px solid rgba(220,38,38,0.28)',
                 boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)',
@@ -2603,8 +2610,8 @@ function EquipmentRow({
               style={{
                 left: pos.left + 2,
                 width: pos.width,
-                top: ROW_HEIGHT - 24,
-                height: 18,
+                top: overlayBarTop,
+                height: overlayBarHeight,
                 background: 'linear-gradient(90deg, rgba(254,243,199,0.94), rgba(255,251,235,0.84))',
                 border: '1px solid rgba(217,119,6,0.24)',
                 boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)',
@@ -2649,8 +2656,12 @@ function EquipmentRow({
             return s1 < e2 && s2 < e1;
           });
           const stackIndex = overlapping.length;
-          const barHeight = 24;
-          const topOffset = 6 + stackIndex * (barHeight + 3);
+          const barHeight = rentalBarHeight;
+          const topOffset = hasOverlayBars
+            ? Math.max(6, ROW_HEIGHT - 6 - barHeight - stackIndex * (barHeight + rentalStackGap))
+            : rentals.length === 1
+              ? Math.round((ROW_HEIGHT - barHeight) / 2)
+              : 6 + stackIndex * (barHeight + rentalStackGap);
 
           const paidFraction = paymentFractions.get(rental.id) ?? (rental.paymentStatus === 'paid' ? 1 : 0);
 

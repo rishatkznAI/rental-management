@@ -133,6 +133,21 @@ function getQuickCountTone(value: number, warningFrom = 1, criticalFrom = 3) {
   return 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300';
 }
 
+function safeRentalDateLabel(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return format(date, 'd MMM', { locale: ru });
+}
+
+function safeRentalDateRangeLabel(start?: string, end?: string) {
+  return `${safeRentalDateLabel(start)} — ${safeRentalDateLabel(end)}`;
+}
+
+function safeRentalCompactDate(value?: string) {
+  return typeof value === 'string' && value.length >= 10 ? value.slice(5, 10) : '—';
+}
+
 // ========== Helpers ==========
 function getVisibleRange(baseDate: Date, scale: Scale, customRange?: { start: Date; end: Date }) {
   if (scale === 'custom' && customRange) {
@@ -586,7 +601,7 @@ export default function Rentals() {
       return map;
     }, new Map());
     if (filterManager) rentals = rentals.filter(r => r.manager === filterManager);
-    if (filterClient)  rentals = rentals.filter(r => r.client.toLowerCase().includes(filterClient.toLowerCase()));
+    if (filterClient)  rentals = rentals.filter(r => (r.client || '').toLowerCase().includes(filterClient.toLowerCase()));
     if (filterUpd === 'yes') rentals = rentals.filter(r => r.updSigned);
     if (filterUpd === 'no')  rentals = rentals.filter(r => !r.updSigned);
     if (filterPayment) rentals = rentals.filter(r => r.paymentStatus === filterPayment);
@@ -701,9 +716,9 @@ export default function Rentals() {
     if (filterModel) {
       const q = filterModel.toLowerCase();
       eq = eq.filter(e =>
-        e.model.toLowerCase().includes(q) ||
-        e.inventoryNumber.toLowerCase().includes(q) ||
-        e.serialNumber.toLowerCase().includes(q)
+        (e.model || '').toLowerCase().includes(q) ||
+        (e.inventoryNumber || '').toLowerCase().includes(q) ||
+        (e.serialNumber || '').toLowerCase().includes(q)
       );
     }
     const hasRentalFilter = !!(filterManager || filterClient || filterUpd || filterPayment || filterStatus);
@@ -1646,7 +1661,7 @@ export default function Rentals() {
                           {primaryRental.client}
                         </div>
                         <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                          {format(new Date(primaryRental.startDate), 'd MMM', { locale: ru })} — {format(new Date(primaryRental.endDate), 'd MMM', { locale: ru })}
+                          {safeRentalDateRangeLabel(primaryRental.startDate, primaryRental.endDate)}
                         </div>
                       </div>
                       <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-medium ${
@@ -2510,7 +2525,7 @@ function EquipmentRow({
                 top: topOffset,
                 height: barHeight,
               }}
-              title={`${rental.client} · ${rental.startDate} — ${rental.endDate} (${statusLabel})`}
+              title={`${rental.client || 'Без клиента'} · ${safeRentalCompactDate(rental.startDate)} — ${safeRentalCompactDate(rental.endDate)} (${statusLabel})`}
             >
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
 
@@ -2542,7 +2557,7 @@ function EquipmentRow({
                   )}
                   {pos.width > 40 && (
                     <span className="truncate text-[10px] font-medium text-white">
-                      {rental.clientShort || rental.client}
+                      {rental.clientShort || rental.client || 'Без клиента'}
                     </span>
                   )}
                 </div>
@@ -2557,7 +2572,7 @@ function EquipmentRow({
                       </span>
                     )}
                     {pos.width > 165 && (
-                      <span>· {rental.startDate.slice(5)} → {rental.endDate.slice(5)}</span>
+                      <span>· {safeRentalCompactDate(rental.startDate)} → {safeRentalCompactDate(rental.endDate)}</span>
                     )}
                     {pos.width > 220 && rental.managerInitials && (
                       <span>· {rental.managerInitials}</span>

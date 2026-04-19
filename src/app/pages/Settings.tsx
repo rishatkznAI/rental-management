@@ -21,6 +21,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '../components/ui/sheet';
 import { Input } from '../components/ui/input';
 import {
   type Owner,
@@ -2235,136 +2243,419 @@ function ServiceWorkCatalogReferenceList() {
     queryFn: serviceWorksService.getAll,
   });
   const [search, setSearch] = React.useState('');
-  const [draft, setDraft] = React.useState({ name: '', category: '', description: '', normHours: '', ratePerHour: '', sortOrder: '0' });
-  const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [editing, setEditing] = React.useState({ name: '', category: '', description: '', normHours: '', ratePerHour: '', sortOrder: '0' });
+  const [statusFilter, setStatusFilter] = React.useState<'all' | 'active' | 'inactive'>('all');
+  const [categoryFilter, setCategoryFilter] = React.useState('all');
+  const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [sheetMode, setSheetMode] = React.useState<'create' | 'edit'>('create');
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+  const [bulkCategory, setBulkCategory] = React.useState('');
+  const [formError, setFormError] = React.useState('');
+  const emptyForm = React.useMemo(() => ({
+    name: '',
+    category: '',
+    description: '',
+    normHours: '',
+    ratePerHour: '',
+    sortOrder: '0',
+  }), []);
+  const [form, setForm] = React.useState(emptyForm);
+
+  const categories = React.useMemo(
+    () => [...new Set(worksData.map(item => item.category?.trim()).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, 'ru')),
+    [worksData],
+  );
+
+  const counts = React.useMemo(() => ({
+    total: worksData.length,
+    active: worksData.filter(item => item.isActive).length,
+    inactive: worksData.filter(item => !item.isActive).length,
+  }), [worksData]);
+  const allFilteredSelected = filtered.length > 0 && filtered.every(item => selectedIds.includes(item.id));
+  const selectedCount = selectedIds.length;
 
   const filtered = React.useMemo(() => {
     const query = search.trim().toLowerCase();
-    return worksData.filter(item => !query || [item.name, item.category, item.description].filter(Boolean).join(' ').toLowerCase().includes(query));
-  }, [search, worksData]);
+    return worksData
+      .filter(item => {
+        if (statusFilter === 'active' && !item.isActive) return false;
+        if (statusFilter === 'inactive' && item.isActive) return false;
+        if (categoryFilter !== 'all' && (item.category || '') !== categoryFilter) return false;
+        return !query || [item.name, item.category, item.description].filter(Boolean).join(' ').toLowerCase().includes(query);
+      })
+      .sort((a, b) => {
+        if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+        return a.name.localeCompare(b.name, 'ru');
+      });
+  }, [categoryFilter, search, statusFilter, worksData]);
 
   const reload = async () => {
     await queryClient.invalidateQueries({ queryKey: ['serviceWorks'] });
     await queryClient.invalidateQueries({ queryKey: ['serviceWorks', 'active'] });
   };
 
-  const createWork = async () => {
-    if (!draft.name.trim()) return;
-    const normHours = Number(draft.normHours);
-    const ratePerHour = Number(draft.ratePerHour) || 0;
-    const sortOrder = Number(draft.sortOrder);
-    if (!Number.isFinite(normHours) || normHours < 0) return;
-    await serviceWorksService.create({
-      name: draft.name.trim(),
-      category: draft.category.trim() || undefined,
-      description: draft.description.trim() || undefined,
+  const openCreate = () => {
+    setSheetMode('create');
+    setSelectedId(null);
+    setForm(emptyForm);
+    setFormError('');
+    setSheetOpen(true);
+  };
+
+  const openEdit = (item: ServiceWork) => {
+    setSheetMode('edit');
+    setSelectedId(item.id);
+    setForm({
+      name: item.name,
+      category: item.category || '',
+      description: item.description || '',
+      normHours: String(item.normHours),
+      ratePerHour: item.ratePerHour ? String(item.ratePerHour) : '',
+      sortOrder: String(item.sortOrder),
+    });
+    setFormError('');
+    setSheetOpen(true);
+  };
+
+  const submitForm = async () => {
+    const normHours = Number(form.normHours);
+    const ratePerHour = Number(form.ratePerHour) || 0;
+    const sortOrder = Number(form.sortOrder);
+    if (!form.name.trim()) {
+      setFormError('Введите название работы');
+      return;
+    }
+    if (!Number.isFinite(normHours) || normHours < 0) {
+      setFormError('Нормо-часы должны быть числом 0 или больше');
+      return;
+    }
+    const payload = {
+      name: form.name.trim(),
+      category: form.category.trim() || undefined,
+      description: form.description.trim() || undefined,
       normHours,
       ratePerHour: Math.max(0, ratePerHour),
-      isActive: true,
       sortOrder: Number.isFinite(sortOrder) ? sortOrder : 0,
-    });
-    setDraft({ name: '', category: '', description: '', normHours: '', ratePerHour: '', sortOrder: '0' });
+    };
+    if (sheetMode === 'create') {
+      await serviceWorksService.create({
+        ...payload,
+        isActive: true,
+      });
+    } else if (selectedId) {
+      await serviceWorksService.update(selectedId, payload);
+    }
+    setSheetOpen(false);
+    setForm(emptyForm);
     await reload();
   };
 
-  const saveEdit = async (id: string) => {
-    const normHours = Number(editing.normHours);
-    const ratePerHour = Number(editing.ratePerHour) || 0;
-    const sortOrder = Number(editing.sortOrder);
-    if (!editing.name.trim() || !Number.isFinite(normHours) || normHours < 0) return;
-    await serviceWorksService.update(id, {
-      name: editing.name.trim(),
-      category: editing.category.trim() || undefined,
-      description: editing.description.trim() || undefined,
-      normHours,
-      ratePerHour: Math.max(0, ratePerHour),
-      sortOrder: Number.isFinite(sortOrder) ? sortOrder : 0,
-    });
-    setEditingId(null);
+  const toggleStatus = async (item: ServiceWork) => {
+    await serviceWorksService.update(item.id, { isActive: !item.isActive });
+    await reload();
+  };
+
+  const toggleSelected = (id: string, checked: boolean) => {
+    setSelectedIds(prev => checked ? [...new Set([...prev, id])] : prev.filter(item => item !== id));
+  };
+
+  const toggleSelectAllFiltered = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(prev => [...new Set([...prev, ...filtered.map(item => item.id)])]);
+      return;
+    }
+    const filteredIds = new Set(filtered.map(item => item.id));
+    setSelectedIds(prev => prev.filter(id => !filteredIds.has(id)));
+  };
+
+  const runBulkUpdate = async (changes: Partial<ServiceWork>) => {
+    if (selectedIds.length === 0) return;
+    const ids = [...selectedIds];
+    await Promise.all(ids.map(id => serviceWorksService.update(id, changes)));
+    setSelectedIds([]);
+    setBulkCategory('');
     await reload();
   };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Работы</CardTitle>
-        <CardDescription>Справочник работ с нормо-часами для ремонтов и аналитики механиков</CardDescription>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle>Работы</CardTitle>
+            <CardDescription>Каталог работ с нормо-часами для ремонтов и аналитики механиков</CardDescription>
+          </div>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" />
+            Добавить работу
+          </Button>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <Input placeholder="Поиск по работам" value={search} onChange={e => setSearch(e.target.value)} />
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
+          <Input placeholder="Поиск по названию, категории или описанию" value={search} onChange={e => setSearch(e.target.value)} />
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Все категории" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все категории</SelectItem>
+              {categories.map(category => (
+                <SelectItem key={category} value={category}>{category}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        {filtered.map(item => (
-          <div key={item.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-            {editingId === item.id ? (
-              <div className="space-y-2">
-                <Input value={editing.name} onChange={e => setEditing(prev => ({ ...prev, name: e.target.value }))} placeholder="Название работы" />
-                <Input value={editing.category} onChange={e => setEditing(prev => ({ ...prev, category: e.target.value }))} placeholder="Категория" />
-                <Input value={editing.description} onChange={e => setEditing(prev => ({ ...prev, description: e.target.value }))} placeholder="Описание" />
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <Input type="number" min="0" step="0.1" value={editing.normHours} onChange={e => setEditing(prev => ({ ...prev, normHours: e.target.value }))} placeholder="Нормо-часы" />
-                  <Input type="number" min="0" step="100" value={editing.ratePerHour} onChange={e => setEditing(prev => ({ ...prev, ratePerHour: e.target.value }))} placeholder="Ставка ₽/н·ч" />
-                  <Input type="number" min="0" step="1" value={editing.sortOrder} onChange={e => setEditing(prev => ({ ...prev, sortOrder: e.target.value }))} placeholder="Порядок сортировки" />
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => void saveEdit(item.id)}>Сохранить</Button>
-                  <Button size="sm" variant="secondary" onClick={() => setEditingId(null)}>Отмена</Button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: 'all', label: 'Все', count: counts.total },
+              { id: 'active', label: 'Активные', count: counts.active },
+              { id: 'inactive', label: 'Отключенные', count: counts.inactive },
+            ].map(filter => (
+              <Button
+                key={filter.id}
+                size="sm"
+                variant={statusFilter === filter.id ? 'default' : 'secondary'}
+                onClick={() => setStatusFilter(filter.id as 'all' | 'active' | 'inactive')}
+              >
+                {filter.label}
+                <span className="ml-2 rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-semibold text-current dark:bg-white/10">
+                  {filter.count}
+                </span>
+              </Button>
+            ))}
+          </div>
+          <p className="text-sm text-gray-500">
+            Найдено: <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>
+          </p>
+        </div>
+
+        {selectedCount > 0 && (
+          <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40 xl:flex-row xl:items-center xl:justify-between">
+            <p className="text-sm">
+              Выбрано работ: <span className="font-semibold">{selectedCount}</span>
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+              <Button size="sm" variant="secondary" onClick={() => void runBulkUpdate({ isActive: true })}>
+                Включить
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => void runBulkUpdate({ isActive: false })}>
+                Отключить
+              </Button>
+              <Input
+                className="sm:w-[220px]"
+                placeholder="Новая категория"
+                value={bulkCategory}
+                onChange={e => setBulkCategory(e.target.value)}
+              />
+              <Button
+                size="sm"
+                onClick={() => void runBulkUpdate({ category: bulkCategory.trim() || undefined })}
+              >
+                Сменить категорию
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setSelectedIds([]); setBulkCategory(''); }}>
+                Сбросить выбор
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="hidden overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 lg:block">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[48px]">
+                  <input
+                    type="checkbox"
+                    aria-label="Выбрать все работы"
+                    checked={allFilteredSelected}
+                    onChange={e => toggleSelectAllFiltered(e.target.checked)}
+                  />
+                </TableHead>
+                <TableHead>Работа</TableHead>
+                <TableHead>Категория</TableHead>
+                <TableHead className="w-[120px]">Нормо-часы</TableHead>
+                <TableHead className="w-[150px]">Ставка</TableHead>
+                <TableHead className="w-[110px]">Порядок</TableHead>
+                <TableHead className="w-[120px]">Статус</TableHead>
+                <TableHead className="w-[180px] text-right">Действия</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map(item => (
+                <TableRow
+                  key={item.id}
+                  className="cursor-pointer"
+                  onClick={() => openEdit(item)}
+                >
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      aria-label={`Выбрать работу ${item.name}`}
+                      checked={selectedIds.includes(item.id)}
+                      onClick={event => event.stopPropagation()}
+                      onChange={e => toggleSelected(item.id, e.target.checked)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <p className="font-medium">{item.name}</p>
+                      {item.description && (
+                        <p className="line-clamp-2 text-xs text-gray-500">{item.description}</p>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>{item.category || 'Без категории'}</TableCell>
+                  <TableCell>{item.normHours} н/ч</TableCell>
+                  <TableCell>
+                    {item.ratePerHour > 0 ? `${item.ratePerHour.toLocaleString('ru-RU')} ₽/н·ч` : 'Не задана'}
+                  </TableCell>
+                  <TableCell>{item.sortOrder}</TableCell>
+                  <TableCell>
+                    <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>
+                      {statusLabel(item.isActive ? 'active' : 'inactive')}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openEdit(item);
+                        }}
+                      >
+                        Редактировать
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void toggleStatus(item);
+                        }}
+                      >
+                        {item.isActive ? 'Отключить' : 'Включить'}
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div className="space-y-3 lg:hidden">
+          {filtered.map(item => (
+            <div
+              key={item.id}
+              className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"
+              onClick={() => openEdit(item)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    aria-label={`Выбрать работу ${item.name}`}
+                    className="mt-1"
+                    checked={selectedIds.includes(item.id)}
+                    onClick={event => event.stopPropagation()}
+                    onChange={e => toggleSelected(item.id, e.target.checked)}
+                  />
                   <div>
-                    <p className="text-sm font-medium">{item.name}</p>
-                    <p className="text-xs text-gray-500">{item.category || 'Без категории'} · {item.normHours} н/ч{item.ratePerHour > 0 ? ` · ${item.ratePerHour.toLocaleString('ru-RU')} ₽/н·ч` : ''} · сортировка {item.sortOrder}</p>
-                    {item.description && <p className="mt-1 text-xs text-gray-500">{item.description}</p>}
+                  <p className="text-sm font-medium">{item.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {item.category || 'Без категории'} · {item.normHours} н/ч
+                    {item.ratePerHour > 0 ? ` · ${item.ratePerHour.toLocaleString('ru-RU')} ₽/н·ч` : ''}
+                  </p>
+                  {item.description && <p className="mt-1 text-xs text-gray-500">{item.description}</p>}
                   </div>
-                  <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>{statusLabel(item.isActive ? 'active' : 'inactive')}</Badge>
                 </div>
-                <div className="mt-3 flex gap-2">
+                <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>
+                  {statusLabel(item.isActive ? 'active' : 'inactive')}
+                </Badge>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => openEdit(item)}>
+                  Редактировать
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void toggleStatus(item)}>
+                  {item.isActive ? 'Отключить' : 'Включить'}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {filtered.length === 0 && (
+          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center dark:border-gray-700">
+            <p className="text-sm font-medium text-gray-900 dark:text-white">Работы не найдены</p>
+            <p className="mt-1 text-sm text-gray-500">Измени поиск или фильтры, либо добавь новую работу в каталог.</p>
+          </div>
+        )}
+      </CardContent>
+
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-xl">
+          <SheetHeader className="border-b border-gray-200 pb-4 dark:border-gray-800">
+            <SheetTitle>{sheetMode === 'create' ? 'Новая работа' : 'Редактирование работы'}</SheetTitle>
+            <SheetDescription>
+              Карточка открывается отдельно, чтобы каталог оставался компактным даже при сотнях записей.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="space-y-4 py-4">
+            <Field label="Название работы">
+              <Input value={form.name} onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))} placeholder="Например: Замена гидронасоса" />
+            </Field>
+            <Field label="Категория">
+              <Input value={form.category} onChange={e => setForm(prev => ({ ...prev, category: e.target.value }))} placeholder="Например: Гидравлика" />
+            </Field>
+            <Field label="Описание">
+              <Input value={form.description} onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))} placeholder="Кратко опиши состав работ" />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Нормо-часы">
+                <Input type="number" min="0" step="0.1" value={form.normHours} onChange={e => setForm(prev => ({ ...prev, normHours: e.target.value }))} placeholder="0.8" />
+              </Field>
+              <Field label="Ставка ₽/н·ч">
+                <Input type="number" min="0" step="100" value={form.ratePerHour} onChange={e => setForm(prev => ({ ...prev, ratePerHour: e.target.value }))} placeholder="2500" />
+              </Field>
+              <Field label="Порядок">
+                <Input type="number" min="0" step="1" value={form.sortOrder} onChange={e => setForm(prev => ({ ...prev, sortOrder: e.target.value }))} placeholder="0" />
+              </Field>
+            </div>
+            {sheetMode === 'edit' && selectedId && (
+              <div className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">Статус записи</p>
+                    <p className="text-gray-500">Работу можно временно скрыть из справочника, не удаляя её.</p>
+                  </div>
                   <Button
-                    size="sm"
                     variant="secondary"
                     onClick={() => {
-                      setEditingId(item.id);
-                      setEditing({
-                        name: item.name,
-                        category: item.category || '',
-                        description: item.description || '',
-                        normHours: String(item.normHours),
-                        ratePerHour: item.ratePerHour ? String(item.ratePerHour) : '',
-                        sortOrder: String(item.sortOrder),
-                      });
+                      const current = worksData.find(item => item.id === selectedId);
+                      if (!current) return;
+                      void toggleStatus(current);
                     }}
                   >
-                    Редактировать
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => void serviceWorksService.update(item.id, { isActive: !item.isActive }).then(reload)}>
-                    {item.isActive ? 'Деактивировать' : 'Активировать'}
+                    {(worksData.find(item => item.id === selectedId)?.isActive ?? true) ? 'Отключить' : 'Включить'}
                   </Button>
                 </div>
-              </>
+              </div>
             )}
+            {formError && <p className="text-sm text-red-600">{formError}</p>}
           </div>
-        ))}
-
-        <div className="rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-700">
-          <p className="mb-2 text-sm font-medium">Добавить работу</p>
-          <div className="space-y-2">
-            <Input placeholder="Название работы" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
-            <Input placeholder="Категория" value={draft.category} onChange={e => setDraft(prev => ({ ...prev, category: e.target.value }))} />
-            <Input placeholder="Описание" value={draft.description} onChange={e => setDraft(prev => ({ ...prev, description: e.target.value }))} />
-            <div className="grid gap-2 sm:grid-cols-3">
-              <Input type="number" min="0" step="0.1" placeholder="Нормо-часы" value={draft.normHours} onChange={e => setDraft(prev => ({ ...prev, normHours: e.target.value }))} />
-              <Input type="number" min="0" step="100" placeholder="Ставка ₽/н·ч" value={draft.ratePerHour} onChange={e => setDraft(prev => ({ ...prev, ratePerHour: e.target.value }))} />
-              <Input type="number" min="0" step="1" placeholder="Порядок сортировки" value={draft.sortOrder} onChange={e => setDraft(prev => ({ ...prev, sortOrder: e.target.value }))} />
-            </div>
-            <Button size="sm" onClick={() => void createWork()}>
-              Добавить
-            </Button>
-          </div>
-        </div>
-      </CardContent>
+          <SheetFooter className="border-t border-gray-200 pt-4 dark:border-gray-800">
+            <Button variant="secondary" onClick={() => setSheetOpen(false)}>Отмена</Button>
+            <Button onClick={() => void submitForm()}>{sheetMode === 'create' ? 'Добавить' : 'Сохранить'}</Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </Card>
   );
 }
@@ -2376,142 +2667,434 @@ function SparePartsReferenceList() {
     queryFn: sparePartsService.getAll,
   });
   const [search, setSearch] = React.useState('');
-  const [draft, setDraft] = React.useState({ name: '', article: '', unit: 'шт', defaultPrice: '', category: '', manufacturer: '' });
-  const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [editing, setEditing] = React.useState({ name: '', article: '', unit: 'шт', defaultPrice: '', category: '', manufacturer: '' });
+  const [statusFilter, setStatusFilter] = React.useState<'all' | 'active' | 'inactive'>('all');
+  const [categoryFilter, setCategoryFilter] = React.useState('all');
+  const [manufacturerFilter, setManufacturerFilter] = React.useState('all');
+  const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [sheetMode, setSheetMode] = React.useState<'create' | 'edit'>('create');
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+  const [bulkCategory, setBulkCategory] = React.useState('');
+  const [formError, setFormError] = React.useState('');
+  const emptyForm = React.useMemo(() => ({
+    name: '',
+    article: '',
+    unit: 'шт',
+    defaultPrice: '',
+    category: '',
+    manufacturer: '',
+  }), []);
+  const [form, setForm] = React.useState(emptyForm);
+
+  const categories = React.useMemo(
+    () => [...new Set(partsData.map(item => item.category?.trim()).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, 'ru')),
+    [partsData],
+  );
+  const manufacturers = React.useMemo(
+    () => [...new Set(partsData.map(item => item.manufacturer?.trim()).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, 'ru')),
+    [partsData],
+  );
+  const counts = React.useMemo(() => ({
+    total: partsData.length,
+    active: partsData.filter(item => item.isActive).length,
+    inactive: partsData.filter(item => !item.isActive).length,
+  }), [partsData]);
+  const allFilteredSelected = filtered.length > 0 && filtered.every(item => selectedIds.includes(item.id));
+  const selectedCount = selectedIds.length;
 
   const filtered = React.useMemo(() => {
     const query = search.trim().toLowerCase();
-    return partsData.filter(item => !query || [item.name, item.article, item.category, item.manufacturer].filter(Boolean).join(' ').toLowerCase().includes(query));
-  }, [partsData, search]);
+    return partsData
+      .filter(item => {
+        if (statusFilter === 'active' && !item.isActive) return false;
+        if (statusFilter === 'inactive' && item.isActive) return false;
+        if (categoryFilter !== 'all' && (item.category || '') !== categoryFilter) return false;
+        if (manufacturerFilter !== 'all' && (item.manufacturer || '') !== manufacturerFilter) return false;
+        return !query || [item.name, item.article, item.category, item.manufacturer].filter(Boolean).join(' ').toLowerCase().includes(query);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  }, [categoryFilter, manufacturerFilter, partsData, search, statusFilter]);
 
   const reload = async () => {
     await queryClient.invalidateQueries({ queryKey: ['spareParts'] });
     await queryClient.invalidateQueries({ queryKey: ['spareParts', 'active'] });
   };
 
-  const createPart = async () => {
-    if (!draft.name.trim() || !draft.unit.trim()) return;
-    const defaultPrice = Number(draft.defaultPrice);
-    if (!Number.isFinite(defaultPrice) || defaultPrice < 0) return;
-    await sparePartsService.create({
-      name: draft.name.trim(),
-      article: draft.article.trim() || undefined,
-      sku: draft.article.trim() || undefined,
-      unit: draft.unit.trim(),
-      defaultPrice,
-      category: draft.category.trim() || undefined,
-      manufacturer: draft.manufacturer.trim() || undefined,
-      isActive: true,
+  const openCreate = () => {
+    setSheetMode('create');
+    setSelectedId(null);
+    setForm(emptyForm);
+    setFormError('');
+    setSheetOpen(true);
+  };
+
+  const openEdit = (item: SparePart) => {
+    setSheetMode('edit');
+    setSelectedId(item.id);
+    setForm({
+      name: item.name,
+      article: item.article || '',
+      unit: item.unit,
+      defaultPrice: String(item.defaultPrice),
+      category: item.category || '',
+      manufacturer: item.manufacturer || '',
     });
-    setDraft({ name: '', article: '', unit: 'шт', defaultPrice: '', category: '', manufacturer: '' });
+    setFormError('');
+    setSheetOpen(true);
+  };
+
+  const submitForm = async () => {
+    const defaultPrice = Number(form.defaultPrice);
+    if (!form.name.trim()) {
+      setFormError('Введите название запчасти');
+      return;
+    }
+    if (!form.unit.trim()) {
+      setFormError('Укажите единицу измерения');
+      return;
+    }
+    if (!Number.isFinite(defaultPrice) || defaultPrice < 0) {
+      setFormError('Базовая цена должна быть числом 0 или больше');
+      return;
+    }
+    const payload = {
+      name: form.name.trim(),
+      article: form.article.trim() || undefined,
+      sku: form.article.trim() || undefined,
+      unit: form.unit.trim(),
+      defaultPrice,
+      category: form.category.trim() || undefined,
+      manufacturer: form.manufacturer.trim() || undefined,
+    };
+    if (sheetMode === 'create') {
+      await sparePartsService.create({
+        ...payload,
+        isActive: true,
+      });
+    } else if (selectedId) {
+      await sparePartsService.update(selectedId, payload);
+    }
+    setSheetOpen(false);
+    setForm(emptyForm);
     await reload();
   };
 
-  const saveEdit = async (id: string) => {
-    const defaultPrice = Number(editing.defaultPrice);
-    if (!editing.name.trim() || !editing.unit.trim() || !Number.isFinite(defaultPrice) || defaultPrice < 0) return;
-    await sparePartsService.update(id, {
-      name: editing.name.trim(),
-      article: editing.article.trim() || undefined,
-      sku: editing.article.trim() || undefined,
-      unit: editing.unit.trim(),
-      defaultPrice,
-      category: editing.category.trim() || undefined,
-      manufacturer: editing.manufacturer.trim() || undefined,
-    });
-    setEditingId(null);
+  const toggleStatus = async (item: SparePart) => {
+    await sparePartsService.update(item.id, { isActive: !item.isActive });
+    await reload();
+  };
+
+  const toggleSelected = (id: string, checked: boolean) => {
+    setSelectedIds(prev => checked ? [...new Set([...prev, id])] : prev.filter(item => item !== id));
+  };
+
+  const toggleSelectAllFiltered = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(prev => [...new Set([...prev, ...filtered.map(item => item.id)])]);
+      return;
+    }
+    const filteredIds = new Set(filtered.map(item => item.id));
+    setSelectedIds(prev => prev.filter(id => !filteredIds.has(id)));
+  };
+
+  const runBulkUpdate = async (changes: Partial<SparePart>) => {
+    if (selectedIds.length === 0) return;
+    const ids = [...selectedIds];
+    await Promise.all(ids.map(id => sparePartsService.update(id, changes)));
+    setSelectedIds([]);
+    setBulkCategory('');
     await reload();
   };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Запчасти</CardTitle>
-        <CardDescription>Справочник запчастей для ремонтов с хранением артикула, единицы и базовой цены</CardDescription>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle>Запчасти</CardTitle>
+            <CardDescription>Каталог запчастей для ремонтов с хранением артикула, единицы и базовой цены</CardDescription>
+          </div>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" />
+            Добавить запчасть
+          </Button>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <Input placeholder="Поиск по запчастям" value={search} onChange={e => setSearch(e.target.value)} />
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_220px]">
+          <Input placeholder="Поиск по названию, артикулу, категории или производителю" value={search} onChange={e => setSearch(e.target.value)} />
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Все категории" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все категории</SelectItem>
+              {categories.map(category => (
+                <SelectItem key={category} value={category}>{category}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={manufacturerFilter} onValueChange={setManufacturerFilter}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Все производители" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все производители</SelectItem>
+              {manufacturers.map(manufacturer => (
+                <SelectItem key={manufacturer} value={manufacturer}>{manufacturer}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        {filtered.map(item => (
-          <div key={item.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-            {editingId === item.id ? (
-              <div className="space-y-2">
-                <Input value={editing.name} onChange={e => setEditing(prev => ({ ...prev, name: e.target.value }))} placeholder="Название запчасти" />
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Input value={editing.article} onChange={e => setEditing(prev => ({ ...prev, article: e.target.value }))} placeholder="Артикул" />
-                  <Input value={editing.unit} onChange={e => setEditing(prev => ({ ...prev, unit: e.target.value }))} placeholder="Ед. измерения" />
-                </div>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <Input type="number" min="0" value={editing.defaultPrice} onChange={e => setEditing(prev => ({ ...prev, defaultPrice: e.target.value }))} placeholder="Базовая цена" />
-                  <Input value={editing.category} onChange={e => setEditing(prev => ({ ...prev, category: e.target.value }))} placeholder="Категория" />
-                  <Input value={editing.manufacturer} onChange={e => setEditing(prev => ({ ...prev, manufacturer: e.target.value }))} placeholder="Производитель" />
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => void saveEdit(item.id)}>Сохранить</Button>
-                  <Button size="sm" variant="secondary" onClick={() => setEditingId(null)}>Отмена</Button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: 'all', label: 'Все', count: counts.total },
+              { id: 'active', label: 'Активные', count: counts.active },
+              { id: 'inactive', label: 'Отключенные', count: counts.inactive },
+            ].map(filter => (
+              <Button
+                key={filter.id}
+                size="sm"
+                variant={statusFilter === filter.id ? 'default' : 'secondary'}
+                onClick={() => setStatusFilter(filter.id as 'all' | 'active' | 'inactive')}
+              >
+                {filter.label}
+                <span className="ml-2 rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-semibold text-current dark:bg-white/10">
+                  {filter.count}
+                </span>
+              </Button>
+            ))}
+          </div>
+          <p className="text-sm text-gray-500">
+            Найдено: <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>
+          </p>
+        </div>
+
+        {selectedCount > 0 && (
+          <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40 xl:flex-row xl:items-center xl:justify-between">
+            <p className="text-sm">
+              Выбрано запчастей: <span className="font-semibold">{selectedCount}</span>
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+              <Button size="sm" variant="secondary" onClick={() => void runBulkUpdate({ isActive: true })}>
+                Включить
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => void runBulkUpdate({ isActive: false })}>
+                Отключить
+              </Button>
+              <Input
+                className="sm:w-[220px]"
+                placeholder="Новая категория"
+                value={bulkCategory}
+                onChange={e => setBulkCategory(e.target.value)}
+              />
+              <Button
+                size="sm"
+                onClick={() => void runBulkUpdate({ category: bulkCategory.trim() || undefined })}
+              >
+                Сменить категорию
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setSelectedIds([]); setBulkCategory(''); }}>
+                Сбросить выбор
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="hidden overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 lg:block">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[48px]">
+                  <input
+                    type="checkbox"
+                    aria-label="Выбрать все запчасти"
+                    checked={allFilteredSelected}
+                    onChange={e => toggleSelectAllFiltered(e.target.checked)}
+                  />
+                </TableHead>
+                <TableHead>Запчасть</TableHead>
+                <TableHead>Артикул</TableHead>
+                <TableHead>Категория</TableHead>
+                <TableHead>Производитель</TableHead>
+                <TableHead className="w-[130px]">Цена</TableHead>
+                <TableHead className="w-[110px]">Статус</TableHead>
+                <TableHead className="w-[180px] text-right">Действия</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map(item => (
+                <TableRow
+                  key={item.id}
+                  className="cursor-pointer"
+                  onClick={() => openEdit(item)}
+                >
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      aria-label={`Выбрать запчасть ${item.name}`}
+                      checked={selectedIds.includes(item.id)}
+                      onClick={event => event.stopPropagation()}
+                      onChange={e => toggleSelected(item.id, e.target.checked)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <p className="font-medium">{item.name}</p>
+                      <p className="text-xs text-gray-500">{item.unit}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>{item.article || 'Без артикула'}</TableCell>
+                  <TableCell>{item.category || 'Без категории'}</TableCell>
+                  <TableCell>{item.manufacturer || 'Не указан'}</TableCell>
+                  <TableCell>{`${item.defaultPrice.toLocaleString('ru-RU')} ₽/${item.unit}`}</TableCell>
+                  <TableCell>
+                    <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>
+                      {statusLabel(item.isActive ? 'active' : 'inactive')}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openEdit(item);
+                        }}
+                      >
+                        Редактировать
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void toggleStatus(item);
+                        }}
+                      >
+                        {item.isActive ? 'Отключить' : 'Включить'}
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div className="space-y-3 lg:hidden">
+          {filtered.map(item => (
+            <div
+              key={item.id}
+              className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"
+              onClick={() => openEdit(item)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    aria-label={`Выбрать запчасть ${item.name}`}
+                    className="mt-1"
+                    checked={selectedIds.includes(item.id)}
+                    onClick={event => event.stopPropagation()}
+                    onChange={e => toggleSelected(item.id, e.target.checked)}
+                  />
                   <div>
-                    <p className="text-sm font-medium">{item.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {item.article || 'Без артикула'} · {item.defaultPrice.toLocaleString('ru-RU')} ₽/{item.unit}
-                    </p>
-                    {(item.category || item.manufacturer) && (
-                      <p className="mt-1 text-xs text-gray-500">{[item.category, item.manufacturer].filter(Boolean).join(' · ')}</p>
-                    )}
+                  <p className="text-sm font-medium">{item.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {item.article || 'Без артикула'} · {item.defaultPrice.toLocaleString('ru-RU')} ₽/{item.unit}
+                  </p>
+                  {(item.category || item.manufacturer) && (
+                    <p className="mt-1 text-xs text-gray-500">{[item.category, item.manufacturer].filter(Boolean).join(' · ')}</p>
+                  )}
                   </div>
-                  <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>{statusLabel(item.isActive ? 'active' : 'inactive')}</Badge>
                 </div>
-                <div className="mt-3 flex gap-2">
+                <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>
+                  {statusLabel(item.isActive ? 'active' : 'inactive')}
+                </Badge>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => openEdit(item)}>
+                  Редактировать
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void toggleStatus(item)}>
+                  {item.isActive ? 'Отключить' : 'Включить'}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {filtered.length === 0 && (
+          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center dark:border-gray-700">
+            <p className="text-sm font-medium text-gray-900 dark:text-white">Запчасти не найдены</p>
+            <p className="mt-1 text-sm text-gray-500">Измени поиск или фильтры, либо добавь новую позицию в каталог.</p>
+          </div>
+        )}
+      </CardContent>
+
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-xl">
+          <SheetHeader className="border-b border-gray-200 pb-4 dark:border-gray-800">
+            <SheetTitle>{sheetMode === 'create' ? 'Новая запчасть' : 'Редактирование запчасти'}</SheetTitle>
+            <SheetDescription>
+              Добавление и редактирование вынесены в отдельную панель, чтобы каталог не превращался в длинную форму.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="space-y-4 py-4">
+            <Field label="Название запчасти">
+              <Input value={form.name} onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))} placeholder="Например: Гидравлический насос" />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Артикул">
+                <Input value={form.article} onChange={e => setForm(prev => ({ ...prev, article: e.target.value }))} placeholder="SKU / артикул" />
+              </Field>
+              <Field label="Единица измерения">
+                <Input value={form.unit} onChange={e => setForm(prev => ({ ...prev, unit: e.target.value }))} placeholder="шт" />
+              </Field>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Базовая цена">
+                <Input type="number" min="0" value={form.defaultPrice} onChange={e => setForm(prev => ({ ...prev, defaultPrice: e.target.value }))} placeholder="0" />
+              </Field>
+              <Field label="Категория">
+                <Input value={form.category} onChange={e => setForm(prev => ({ ...prev, category: e.target.value }))} placeholder="Например: Гидравлика" />
+              </Field>
+              <Field label="Производитель">
+                <Input value={form.manufacturer} onChange={e => setForm(prev => ({ ...prev, manufacturer: e.target.value }))} placeholder="Parker" />
+              </Field>
+            </div>
+            {sheetMode === 'edit' && selectedId && (
+              <div className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">Статус записи</p>
+                    <p className="text-gray-500">Запчасть можно отключить, чтобы скрыть её из активного каталога.</p>
+                  </div>
                   <Button
-                    size="sm"
                     variant="secondary"
                     onClick={() => {
-                      setEditingId(item.id);
-                      setEditing({
-                        name: item.name,
-                        article: item.article || '',
-                        unit: item.unit,
-                        defaultPrice: String(item.defaultPrice),
-                        category: item.category || '',
-                        manufacturer: item.manufacturer || '',
-                      });
+                      const current = partsData.find(item => item.id === selectedId);
+                      if (!current) return;
+                      void toggleStatus(current);
                     }}
                   >
-                    Редактировать
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => void sparePartsService.update(item.id, { isActive: !item.isActive }).then(reload)}>
-                    {item.isActive ? 'Деактивировать' : 'Активировать'}
+                    {(partsData.find(item => item.id === selectedId)?.isActive ?? true) ? 'Отключить' : 'Включить'}
                   </Button>
                 </div>
-              </>
+              </div>
             )}
+            {formError && <p className="text-sm text-red-600">{formError}</p>}
           </div>
-        ))}
-
-        <div className="rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-700">
-          <p className="mb-2 text-sm font-medium">Добавить запчасть</p>
-          <div className="space-y-2">
-            <Input placeholder="Название запчасти" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input placeholder="Артикул" value={draft.article} onChange={e => setDraft(prev => ({ ...prev, article: e.target.value }))} />
-              <Input placeholder="Ед. измерения" value={draft.unit} onChange={e => setDraft(prev => ({ ...prev, unit: e.target.value }))} />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <Input type="number" min="0" placeholder="Базовая цена" value={draft.defaultPrice} onChange={e => setDraft(prev => ({ ...prev, defaultPrice: e.target.value }))} />
-              <Input placeholder="Категория" value={draft.category} onChange={e => setDraft(prev => ({ ...prev, category: e.target.value }))} />
-              <Input placeholder="Производитель" value={draft.manufacturer} onChange={e => setDraft(prev => ({ ...prev, manufacturer: e.target.value }))} />
-            </div>
-            <Button size="sm" onClick={() => void createPart()}>
-              Добавить
-            </Button>
-          </div>
-        </div>
-      </CardContent>
+          <SheetFooter className="border-t border-gray-200 pt-4 dark:border-gray-800">
+            <Button variant="secondary" onClick={() => setSheetOpen(false)}>Отмена</Button>
+            <Button onClick={() => void submitForm()}>{sheetMode === 'create' ? 'Добавить' : 'Сохранить'}</Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </Card>
   );
 }

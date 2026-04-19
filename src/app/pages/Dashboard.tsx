@@ -146,6 +146,11 @@ export default function Dashboard() {
   const [showClientModal, setShowClientModal] = useState(false);
   const [showRentalModal, setShowRentalModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const dashboardCardClass = 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/60';
+  const dashboardCardHeaderClass = 'space-y-2 px-5 pt-5 pb-3';
+  const dashboardCardContentClass = 'space-y-2 px-5 pb-5';
+  const dashboardSectionClass = 'space-y-4';
+  const dashboardSectionHeaderClass = 'flex flex-col gap-1.5';
 
   const refresh = useCallback(() => {
     setRefreshing(true);
@@ -1274,418 +1279,341 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* ── KPI Row 1 — Аренда ──────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
+      {/* ── Priority Actions ─────────────────────────────────────────────────── */}
+      <section className={dashboardSectionClass}>
+        <div className={dashboardSectionHeaderClass}>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+            Критично сейчас
+          </p>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Срочные зоны внимания</h2>
+        </div>
 
-        {/* 1. Утилизация парка */}
-        <Card
-          className={`cursor-pointer transition-all hover:shadow-lg ${
-            totalEquipment > 0 && utilization < 50
-              ? 'border-orange-200 dark:border-orange-800'
-              : ''
-          }`}
-          onClick={() => setSelectedKPI('utilization')}
-        >
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Загрузка парка</span>
-              <TrendingUp className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${
-              totalEquipment === 0 ? 'text-gray-400' :
-              utilization >= UTILIZATION_TARGET ? 'text-green-600 dark:text-green-400' :
-              utilization >= UTILIZATION_TARGET - 15 ? 'text-yellow-600 dark:text-yellow-400' :
-              'text-orange-600 dark:text-orange-400'
-            }`}>
-              {totalEquipment === 0 ? '—' : `${utilization}%`}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {totalEquipment === 0 ? (
-              <p className="text-sm text-gray-400">Техника не добавлена</p>
-            ) : (
-              <>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {rentedEquipment} из {activeEquipment} ед. в работе
-                </p>
-                <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
-                  <div
-                    className="h-full rounded-full bg-[--color-primary] transition-all"
-                    style={{ width: `${utilization}%` }}
-                  />
-                  <div
-                    className="absolute top-0 h-full w-0.5 bg-gray-400 dark:bg-gray-500"
-                    style={{ left: `${UTILIZATION_TARGET}%` }}
-                    title={`Цель: ${UTILIZATION_TARGET}%`}
-                  />
-                </div>
-                <p className={`text-xs font-medium ${
-                  utilizationDeviation >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'
-                }`}>
-                  {utilizationDeviation >= 0 ? `+${utilizationDeviation}%` : `${utilizationDeviation}%`} к цели {UTILIZATION_TARGET}%
-                </p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* 2. Активные аренды */}
-        <Card
-          className="cursor-pointer transition-all hover:shadow-lg"
-          onClick={() => setSelectedKPI('activeRentals')}
-        >
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Активные аренды</span>
-              <Calendar className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${activeRentalsList.length === 0 ? 'text-gray-400' : ''}`}>
-              {activeRentalsList.length === 0 ? '0' : activeRentalsList.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {activeRentalsList.length === 0 ? (
-              <p className="text-sm text-gray-400">Нет активных аренд</p>
-            ) : (
-              <>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {rentedOrReservedEquipment} ед. техники задействовано
-                </p>
-                {rentalsEndingToday.length > 0 ? (
-                  <p className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                    ⚠ {rentalsEndingToday.length} возврат{rentalsEndingToday.length === 1 ? '' : 'а'} сегодня
+        <div className="grid gap-3 lg:grid-cols-3">
+          <Card
+            className={`cursor-pointer border transition-all hover:shadow-lg ${
+              overdueRentalsList.length > 0
+                ? 'border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20'
+                : dashboardCardClass
+            }`}
+            onClick={() => setSelectedKPI('overdueReturns')}
+          >
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span className={overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : ''}>Просроченные возвраты</span>
+                <AlertTriangle className={`h-4 w-4 ${overdueRentalsList.length > 0 ? 'text-red-500' : 'text-gray-400'}`} />
+              </CardDescription>
+              <CardTitle className={`text-4xl font-bold ${overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                {overdueRentalsList.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              {overdueRentalsList.length > 0 ? (
+                <>
+                  <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                    Макс. просрочка: {maxOverdueDays} {maxOverdueDays === 1 ? 'день' : maxOverdueDays < 5 ? 'дня' : 'дней'}
                   </p>
-                ) : upcomingReturns.length > 0 ? (
-                  <p className="text-xs text-yellow-600 dark:text-yellow-400">
-                    {upcomingReturns.length} завершений за 3 дня
+                  <p className="text-sm text-red-500 dark:text-red-400">Приоритет на сегодня для менеджеров и офиса.</p>
+                </>
+              ) : (
+                <p className="text-sm text-green-600 dark:text-green-400">Возвраты идут по плану, просрочек нет.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card
+            className={`cursor-pointer border transition-all hover:shadow-lg ${
+              unassignedServiceTickets.length > 0
+                ? 'border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20'
+                : dashboardCardClass
+            }`}
+            onClick={() => setSelectedKPI('unassignedService')}
+          >
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span className={unassignedServiceTickets.length > 0 ? 'text-amber-700 dark:text-amber-400' : ''}>Заявки без механика</span>
+                <User className={`h-4 w-4 ${unassignedServiceTickets.length > 0 ? 'text-amber-500' : 'text-gray-400'}`} />
+              </CardDescription>
+              <CardTitle className={`text-4xl font-bold ${unassignedServiceTickets.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-900 dark:text-white'}`}>
+                {unassignedServiceTickets.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                {openServiceTickets.length} открытых заявок · {criticalTickets.length} крит./высоких
+              </p>
+              <p className={`text-sm ${unassignedServiceTickets.length > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-green-600 dark:text-green-400'}`}>
+                {unassignedServiceTickets.length > 0 ? 'Нужно назначить исполнителей и снять узкое место.' : 'Все заявки уже распределены.'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card
+            className={`cursor-pointer border transition-all hover:shadow-lg ${
+              totalDebt > 0
+                ? 'border-orange-300 bg-orange-50/50 dark:border-orange-800 dark:bg-orange-950/20'
+                : dashboardCardClass
+            }`}
+            onClick={() => setSelectedKPI('totalDebt')}
+          >
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span className={totalDebt > 0 ? 'text-orange-700 dark:text-orange-400' : ''}>Просроченная дебиторка</span>
+                <CreditCard className={`h-4 w-4 ${totalDebt > 0 ? 'text-orange-500' : 'text-gray-400'}`} />
+              </CardDescription>
+              <CardTitle className={`text-4xl font-bold ${
+                totalDebt > 100_000 ? 'text-red-600 dark:text-red-400' :
+                totalDebt > 0 ? 'text-orange-600 dark:text-orange-400' :
+                'text-gray-900 dark:text-white'
+              }`}>
+                {totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                {overdueDebtClients.length} {formatCountLabel(overdueDebtClients.length, 'клиент', 'клиента', 'клиентов')} с долгом
+              </p>
+              <p className={`text-sm ${totalDebt > 0 ? 'text-orange-700 dark:text-orange-300' : 'text-green-600 dark:text-green-400'}`}>
+                {totalDebt > 0 ? 'Нужно подтвердить оплаты и отработать просрочку.' : 'Критичной задолженности сейчас нет.'}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      {/* ── Operational Layer ───────────────────────────────────────────────── */}
+      <section className={dashboardSectionClass}>
+        <div className={dashboardSectionHeaderClass}>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+            Операционная работа
+          </p>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Что происходит в аренде и сервисе</h2>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('utilization')}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Загрузка парка</span>
+                <TrendingUp className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className={`text-3xl font-bold ${
+                totalEquipment === 0 ? 'text-gray-400' :
+                utilization >= UTILIZATION_TARGET ? 'text-green-600 dark:text-green-400' :
+                utilization >= UTILIZATION_TARGET - 15 ? 'text-amber-600 dark:text-amber-400' :
+                'text-orange-600 dark:text-orange-400'
+              }`}>
+                {totalEquipment === 0 ? '—' : `${utilization}%`}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              {totalEquipment === 0 ? (
+                <p className="text-sm text-gray-400">Техника не добавлена</p>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{rentedEquipment} из {activeEquipment} ед. в работе</p>
+                  <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                    <div className="h-full rounded-full bg-[--color-primary] transition-all" style={{ width: `${utilization}%` }} />
+                    <div className="absolute top-0 h-full w-0.5 bg-gray-400 dark:bg-gray-500" style={{ left: `${UTILIZATION_TARGET}%` }} />
+                  </div>
+                  <p className={`text-xs font-medium ${utilizationDeviation >= 0 ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'}`}>
+                    {utilizationDeviation >= 0 ? `+${utilizationDeviation}%` : `${utilizationDeviation}%`} к цели {UTILIZATION_TARGET}%
                   </p>
-                ) : (
-                  <p className="text-xs text-gray-400">Возвратов сегодня нет</p>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
+                </>
+              )}
+            </CardContent>
+          </Card>
 
-        {/* 3. Возвраты сегодня/завтра */}
-        <Card
-          className={`cursor-pointer transition-all hover:shadow-lg ${
-            rentalsEndingToday.length > 0
-              ? 'border-yellow-200 dark:border-yellow-800'
-              : ''
-          }`}
-          onClick={() => setSelectedKPI('returnsTodayTomorrow')}
-        >
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Возвраты сегодня/завтра</span>
-              <Clock className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${
-              rentalsEndingToday.length > 0 ? 'text-yellow-600 dark:text-yellow-400' : ''
-            }`}>
-              {rentalsEndingToday.length + rentalsEndingTomorrow.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Сегодня: {rentalsEndingToday.length} · Завтра: {rentalsEndingTomorrow.length}
-            </p>
-            {rentalsEndingToday.length > 0 ? (
-              <p className="text-xs font-medium text-yellow-600 dark:text-yellow-400">
-                Нужен контроль возврата сегодня
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('activeRentals')}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Активные аренды</span>
+                <Calendar className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className="text-3xl font-bold text-gray-900 dark:text-white">{activeRentalsList.length}</CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{rentedOrReservedEquipment} ед. техники задействовано</p>
+              <p className="text-xs text-gray-400">{upcomingReturns.length > 0 ? `${upcomingReturns.length} завершений за 3 дня` : 'На ближайшие дни резких пиков нет'}</p>
+            </CardContent>
+          </Card>
+
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('returnsTodayTomorrow')}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Возвраты сегодня и завтра</span>
+                <Clock className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className={`text-3xl font-bold ${rentalsEndingToday.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-900 dark:text-white'}`}>
+                {rentalsEndingToday.length + rentalsEndingTomorrow.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Сегодня: {rentalsEndingToday.length} · Завтра: {rentalsEndingTomorrow.length}</p>
+              <p className={`text-xs ${rentalsEndingToday.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'}`}>
+                {rentalsEndingToday.length > 0 ? 'Есть возвраты, которые лучше закрыть в первую очередь.' : 'Ближайшие возвраты идут без перегруза.'}
               </p>
-            ) : (
-              <p className="text-xs text-gray-400">Ближайшие возвраты под контролем</p>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        {/* 4. Просроченные возвраты — КРИТИЧНАЯ */}
-        <Card
-          className={`cursor-pointer transition-all hover:shadow-lg ${
-            overdueRentalsList.length > 0
-              ? 'border-red-300 dark:border-red-700 bg-red-50/40 dark:bg-red-950/20'
-              : ''
-          }`}
-          onClick={() => setSelectedKPI('overdueReturns')}
-        >
-          <CardHeader className="pb-2">
-            <CardDescription className={`flex items-center justify-between ${
-              overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : ''
-            }`}>
-              <span>Просроченные возвраты</span>
-              <AlertTriangle className={`h-3.5 w-3.5 ${overdueRentalsList.length > 0 ? 'text-red-500' : 'text-gray-400'}`} />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${
-              overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'
-            }`}>
-              {overdueRentalsList.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {overdueRentalsList.length > 0 ? (
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-red-700 dark:text-red-300">
-                  Макс. просрочка: {maxOverdueDays}&nbsp;{maxOverdueDays === 1 ? 'день' : maxOverdueDays < 5 ? 'дня' : 'дней'}
-                </p>
-                <p className="text-xs text-red-500 dark:text-red-400">Требует немедленного внимания</p>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                <CheckCircle className="h-4 w-4 shrink-0" />
-                <span>Нет просрочек</span>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('openService')}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Открытые заявки</span>
+                <Wrench className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className={`text-3xl font-bold ${openServiceTickets.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>
+                {openServiceTickets.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{criticalTickets.length} крит./высоких · {equipmentInServiceList.length} ед. в сервисе</p>
+            </CardContent>
+          </Card>
 
-        {/* 5. Техника в простое */}
-        <Card
-          className="cursor-pointer transition-all hover:shadow-lg"
-          onClick={() => setSelectedKPI('idleEquipment')}
-        >
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Техника в простое</span>
-              <Truck className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${
-              idleEquipmentList.length > 0 ? 'text-gray-900 dark:text-white' : 'text-gray-400'
-            }`}>
-              {idleEquipmentList.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {idleEquipmentList.length === 0 ? (
-              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                <CheckCircle className="h-4 w-4 shrink-0" />
-                <span>Простоя нет</span>
-              </div>
-            ) : (
-              <>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('waitingParts')}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Ждут запчасти</span>
+                <PackageX className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className={`text-3xl font-bold ${ticketsWaitingParts.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'}`}>
+                {ticketsWaitingParts.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{ticketsWaitingParts.length > 0 ? 'Нужен контроль поставки и сроков.' : 'Зависших заявок по запчастям нет.'}</p>
+            </CardContent>
+          </Card>
+
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('serviceInDays')}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Техника в сервисе по дням</span>
+                <Clock className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className={`text-3xl font-bold ${equipmentInServiceList.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>
+                {equipmentInServiceList.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Ср.: {averageServiceDays || 0} дн. · Макс.: {maxServiceDays || 0} дн.</p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      {/* ── Summary Layer ───────────────────────────────────────────────────── */}
+      <section className={dashboardSectionClass}>
+        <div className={dashboardSectionHeaderClass}>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+            Сводка
+          </p>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Спокойные показатели для общей картины</h2>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('weekRevenue')}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Выручка за {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</span>
+                <DollarSign className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className={`text-2xl font-bold ${dashMonthRevenue === 0 ? 'text-gray-400' : 'text-gray-900 dark:text-white'}`}>
+                {dashMonthRevenue > 0 ? formatCurrency(Math.round(dashMonthRevenue)) : 'Нет данных'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              {MONTHLY_PLAN > 0 ? (
+                <>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                    <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${Math.min(100, Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100))}%` }} />
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">План {formatCurrency(MONTHLY_PLAN)} · {Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100)}%</p>
+                </>
+              ) : (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Свободно: {availableEquipment} · Неактивно: {inactiveEquipment}
+                  {monthRentals.length > 0 ? `${monthRentals.length} аренд в этом месяце` : 'Нет аренд в этом месяце'}
                 </p>
-                <p className="text-xs text-gray-400">Потенциал для выдачи или перераспределения</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* ── KPI Row 2 — Сервис ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
-        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('openService')}>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Открытые заявки</span>
-              <Wrench className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${openServiceTickets.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>
-              {openServiceTickets.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {criticalTickets.length} крит./высоких · {equipmentInServiceList.length} ед. в сервисе
-            </p>
-          </CardContent>
-        </Card>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('idleEquipment')}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Техника в простое</span>
+                <Truck className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className={`text-3xl font-bold ${idleEquipmentList.length > 0 ? 'text-gray-900 dark:text-white' : 'text-gray-400'}`}>
+                {idleEquipmentList.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              {idleEquipmentList.length === 0 ? (
+                <p className="text-sm text-green-600 dark:text-green-400">Простоя нет.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Свободно: {availableEquipment} · Неактивно: {inactiveEquipment}</p>
+                  <p className="text-xs text-gray-400">Резерв для выдачи и перераспределения.</p>
+                </>
+              )}
+            </CardContent>
+          </Card>
 
-        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('unassignedService')}>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Без механика</span>
-              <User className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${unassignedServiceTickets.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
-              {unassignedServiceTickets.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {unassignedServiceTickets.length > 0 ? (
-              <p className="text-sm text-red-600 dark:text-red-400">Требуют назначения</p>
-            ) : (
-              <p className="text-sm text-green-600 dark:text-green-400">Все заявки распределены</p>
-            )}
-          </CardContent>
-        </Card>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('repeatFailures')}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Повторные поломки</span>
+                <ShieldAlert className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className={`text-3xl font-bold ${repeatFailureRows.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
+                {repeatFailureRows.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{repeatFailureRows.length > 0 ? 'Есть техника с повтором причины.' : 'Повторов не найдено.'}</p>
+            </CardContent>
+          </Card>
 
-        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('waitingParts')}>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Ждут запчасти</span>
-              <PackageX className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${ticketsWaitingParts.length > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-400'}`}>
-              {ticketsWaitingParts.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {ticketsWaitingParts.length > 0 ? 'Контроль поставки обязателен' : 'Зависших заявок нет'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('repeatFailures')}>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Повторные поломки</span>
-              <ShieldAlert className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${repeatFailureRows.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}`}>
-              {repeatFailureRows.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {repeatFailureRows.length > 0 ? 'Есть техника с повтором причины' : 'Повторов не найдено'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedKPI('serviceInDays')}>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Техника в сервисе по дням</span>
-              <Clock className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-3xl font-bold ${equipmentInServiceList.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>
-              {equipmentInServiceList.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Ср.: {averageServiceDays || 0} дн. · Макс.: {maxServiceDays || 0} дн.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ── KPI Row 3 — Финансы + Парк ───────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-3">
-
-        {/* 5. Выручка за месяц */}
-        <Card
-          className="cursor-pointer transition-all hover:shadow-lg"
-          onClick={() => setSelectedKPI('weekRevenue')}
-        >
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>
-                Выручка за {new Date().toLocaleDateString('ru-RU', { month: 'long' })}
-              </span>
-              <DollarSign className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className={`text-2xl font-bold ${dashMonthRevenue === 0 ? 'text-gray-400' : ''}`}>
-              {dashMonthRevenue > 0 ? formatCurrency(Math.round(dashMonthRevenue)) : 'Нет данных'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {MONTHLY_PLAN > 0 ? (
-              <>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
-                  <div
-                    className="h-full rounded-full bg-green-500 transition-all"
-                    style={{ width: `${Math.min(100, Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100))}%` }}
-                  />
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  план {formatCurrency(MONTHLY_PLAN)} · {Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100)}%
-                </p>
-              </>
-            ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {monthRentals.length > 0
-                  ? `${monthRentals.length} аренд в этом месяце`
-                  : 'Нет аренд в этом месяце'}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* 6. Просроченная дебиторка */}
-        <Card
-          className={`cursor-pointer transition-all hover:shadow-lg ${
-            totalDebt > 0 ? 'border-orange-200 dark:border-orange-800' : ''
-          }`}
-          onClick={() => setSelectedKPI('totalDebt')}
-        >
-          <CardHeader className="pb-2">
-            <CardDescription className={`flex items-center justify-between ${
-              totalDebt > 0 ? 'text-orange-600 dark:text-orange-400' : ''
-            }`}>
-              <span>Просроченная дебиторка</span>
-              <CreditCard className={`h-3.5 w-3.5 ${totalDebt > 0 ? 'text-orange-500' : 'text-gray-400'}`} />
-            </CardDescription>
-            <CardTitle className={`text-2xl font-bold ${
-              totalDebt > 100_000 ? 'text-red-600 dark:text-red-400' :
-              totalDebt > 0 ? 'text-orange-600 dark:text-orange-400' : ''
-            }`}>
-              {totalDebt > 0 ? formatCurrency(totalDebt) : 'Нет'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {totalDebt === 0 ? (
-              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                <CheckCircle className="h-4 w-4 shrink-0" />
-                <span>Нет задолженности</span>
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {overdueDebtCount}&nbsp;{overdueDebtCount === 1 ? 'клиент' : overdueDebtCount < 5 ? 'клиента' : 'клиентов'} с задолженностью
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* 7. Статус парка */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Статус парка</span>
-              <Truck className="h-3.5 w-3.5 text-gray-400" />
-            </CardDescription>
-            <CardTitle className="text-3xl font-bold">{totalEquipment}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {totalEquipment === 0 ? (
-              <p className="text-sm text-gray-400">Техника не добавлена</p>
-            ) : (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-500 dark:text-gray-400">Свободно</span>
-                  <span className="font-semibold text-green-600 dark:text-green-400">{availableEquipment}</span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-500 dark:text-gray-400">В аренде</span>
-                  <span className="font-semibold text-blue-600 dark:text-blue-400">{rentedEquipment}</span>
-                </div>
-                {reservedEquipment > 0 && (
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500 dark:text-gray-400">Резерв</span>
-                    <span className="font-semibold text-yellow-600 dark:text-yellow-400">{reservedEquipment}</span>
+          <Card className={dashboardCardClass}>
+            <CardHeader className={dashboardCardHeaderClass}>
+              <CardDescription className="flex items-center justify-between">
+                <span>Статус парка</span>
+                <Truck className="h-3.5 w-3.5 text-gray-400" />
+              </CardDescription>
+              <CardTitle className="text-3xl font-bold text-gray-900 dark:text-white">{totalEquipment}</CardTitle>
+            </CardHeader>
+            <CardContent className={dashboardCardContentClass}>
+              {totalEquipment === 0 ? (
+                <p className="text-sm text-gray-400">Техника не добавлена</p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500 dark:text-gray-400">Свободно</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">{availableEquipment}</span>
                   </div>
-                )}
-                {equipmentInServiceList.length > 0 && (
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500 dark:text-gray-400">В сервисе</span>
-                    <span className="font-semibold text-orange-600 dark:text-orange-400">{equipmentInServiceList.length}</span>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500 dark:text-gray-400">В аренде</span>
+                    <span className="font-semibold text-blue-600 dark:text-blue-400">{rentedEquipment}</span>
                   </div>
-                )}
-                {inactiveEquipment > 0 && (
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500 dark:text-gray-400">Простой</span>
-                    <span className="font-semibold text-gray-500">{inactiveEquipment}</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  {reservedEquipment > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">Резерв</span>
+                      <span className="font-semibold text-amber-600 dark:text-amber-400">{reservedEquipment}</span>
+                    </div>
+                  )}
+                  {equipmentInServiceList.length > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">В сервисе</span>
+                      <span className="font-semibold text-orange-600 dark:text-orange-400">{equipmentInServiceList.length}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
       {/* ── Manager Stats ─────────────────────────────────────────────────────── */}
       <Card>

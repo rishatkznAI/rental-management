@@ -1,11 +1,19 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Plus, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, RotateCcw, CirclePause as PauseCircle,
+  Plus, ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightSmall, SlidersHorizontal, RotateCcw, CirclePause as PauseCircle,
   Search, CircleCheck, CircleAlert, CreditCard,
   AlertTriangle, Wrench
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
 import { RentalDrawer } from '../components/gantt/RentalDrawer';
 import { ReturnModal, DowntimeModal, NewRentalModal } from '../components/gantt/GanttModals';
 import {
@@ -47,6 +55,7 @@ import { ru } from 'date-fns/locale';
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
 type CompactView = 'cards' | 'timeline';
 const RENTALS_COMPACT_VIEW_STORAGE_KEY = 'rentals_compact_view';
+const RENTALS_COLLAPSED_GROUPS_STORAGE_KEY = 'rentals_collapsed_groups';
 
 const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
   week: { dayWidth: 120, label: 'Неделя' },
@@ -56,7 +65,7 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
   custom: { dayWidth: 28, label: 'Период' },
 };
 
-const LEFT_PANEL_WIDTH = 248;
+const LEFT_PANEL_WIDTH = 236;
 const ROW_HEIGHT = 44;
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
@@ -121,6 +130,10 @@ function compareEquipmentForPlanner(a: Equipment, b: Equipment) {
 
 function getCompactViewStorageKey(userId?: string) {
   return `${RENTALS_COMPACT_VIEW_STORAGE_KEY}:${userId || 'guest'}`;
+}
+
+function getCollapsedGroupsStorageKey(userId?: string) {
+  return `${RENTALS_COLLAPSED_GROUPS_STORAGE_KEY}:${userId || 'guest'}`;
 }
 
 function getQuickCountTone(value: number, warningFrom = 1, criticalFrom = 3) {
@@ -503,11 +516,17 @@ export default function Rentals() {
   const [filterPayment, setFilterPayment] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [rentalPreset, setRentalPreset] = useState<'all' | 'returns_today' | 'overdue' | 'unpaid' | 'with_service'>('all');
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showFiltersDialog, setShowFiltersDialog] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<EquipmentType, boolean>>({
+    scissor: false,
+    articulated: false,
+    telescopic: false,
+  });
 
   // Derived: any filter is currently active
   const hasActiveFilters = !!(filterModel || filterManager || filterClient || filterUpd || filterPayment || filterStatus || rentalPreset !== 'all');
   const hasAdvancedFilters = !!(filterManager || filterClient || filterUpd || filterPayment || filterStatus);
+  const activeFilterCount = [filterManager, filterClient, filterUpd, filterPayment, filterStatus].filter(Boolean).length;
 
   // Refs
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -519,6 +538,25 @@ export default function Rentals() {
     const savedView = window.localStorage.getItem(storageKey);
     if (savedView === 'cards' || savedView === 'timeline') {
       setCompactView(savedView);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const savedGroups = window.localStorage.getItem(getCollapsedGroupsStorageKey(user?.id));
+    if (!savedGroups) return;
+
+    try {
+      const parsed = JSON.parse(savedGroups) as Partial<Record<EquipmentType, boolean>>;
+      setCollapsedGroups(prev => ({
+        ...prev,
+        scissor: typeof parsed.scissor === 'boolean' ? parsed.scissor : prev.scissor,
+        articulated: typeof parsed.articulated === 'boolean' ? parsed.articulated : prev.articulated,
+        telescopic: typeof parsed.telescopic === 'boolean' ? parsed.telescopic : prev.telescopic,
+      }));
+    } catch {
+      // Ignore corrupted local settings and fall back to defaults.
     }
   }, [user?.id]);
 
@@ -551,6 +589,14 @@ export default function Rentals() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(getCompactViewStorageKey(user?.id), compactView);
   }, [compactView, user?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      getCollapsedGroupsStorageKey(user?.id),
+      JSON.stringify(collapsedGroups),
+    );
+  }, [collapsedGroups, user?.id]);
 
   // ===== Computed =====
   const customRange = useMemo(() => {
@@ -838,6 +884,13 @@ export default function Rentals() {
     setRentalPreset('all');
   };
 
+  const toggleGroupCollapsed = useCallback((type: EquipmentType) => {
+    setCollapsedGroups(prev => ({
+      ...prev,
+      [type]: !prev[type],
+    }));
+  }, []);
+
   const handleOpenReturn = (rental?: GanttRentalData) => {
     if (!canEditRentals) return;
     setReturnRental(rental || null);
@@ -874,12 +927,6 @@ export default function Rentals() {
       ).length,
     };
   }, [ganttRentals, today]);
-
-  useEffect(() => {
-    if (hasAdvancedFilters) {
-      setShowAdvancedFilters(true);
-    }
-  }, [hasAdvancedFilters]);
 
   const mobileEquipmentCards = useMemo(() => {
     return filteredEquipment.map(equipment => {
@@ -1427,7 +1474,7 @@ export default function Rentals() {
               </div>
             </div>
 
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <input
@@ -1443,14 +1490,14 @@ export default function Rentals() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => setShowAdvancedFilters(prev => !prev)}
+                  onClick={() => setShowFiltersDialog(true)}
                   className="h-10 rounded-xl px-4 text-sm"
                 >
-                  {showAdvancedFilters ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  Доп. фильтры
-                  {hasAdvancedFilters && (
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Фильтры
+                  {activeFilterCount > 0 && (
                     <span className="ml-1 rounded-full bg-[--color-primary]/10 px-2 py-0.5 text-[11px] font-semibold text-[--color-primary]">
-                      active
+                      {activeFilterCount}
                     </span>
                   )}
                 </Button>
@@ -1463,82 +1510,50 @@ export default function Rentals() {
               </div>
             </div>
 
-            {showAdvancedFilters && (
-              <div className="grid gap-3 border-t border-gray-100 pt-3 dark:border-gray-700 2xl:grid-cols-[220px_220px_140px_minmax(260px,auto)_170px]">
-                <select
-                  value={filterManager}
-                  onChange={e => setFilterManager(e.target.value)}
-                  className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                >
-                  <option value="">Менеджер</option>
-                  {managersList.map(u => (
-                    <option key={u.id} value={u.name}>{u.name}</option>
-                  ))}
-                </select>
-
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Клиент"
-                    value={filterClient}
-                    onChange={e => setFilterClient(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                  />
-                </div>
-
-                <select
-                  value={filterUpd}
-                  onChange={e => setFilterUpd(e.target.value)}
-                  className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                >
-                  <option value="">УПД</option>
-                  <option value="yes">Подписан</option>
-                  <option value="no">Не подписан</option>
-                </select>
-
-                <div className="flex overflow-hidden rounded-xl border border-gray-200 dark:border-gray-600">
-                  {PAYMENT_STATUS_FILTERS.map(f => (
-                    <button
-                      key={f.value}
-                      onClick={() => setFilterPayment(f.value)}
-                      className={`px-3 py-2 text-sm transition-colors first:flex-1 last:flex-1 ${
-                        filterPayment === f.value
-                          ? 'bg-[--color-primary] text-white'
-                          : 'bg-slate-50 text-gray-600 hover:bg-gray-100 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:bg-gray-700'
-                      }`}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-
-                <select
-                  value={filterStatus}
-                  onChange={e => setFilterStatus(e.target.value)}
-                  className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                >
-                  {RENTAL_STATUS_FILTERS.map(f => (
-                    <option key={f.value} value={f.value}>{f.label}</option>
-                  ))}
-                </select>
+            {hasAdvancedFilters && (
+              <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
+                {filterManager && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                    Менеджер: {filterManager}
+                  </span>
+                )}
+                {filterClient && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                    Клиент: {filterClient}
+                  </span>
+                )}
+                {filterUpd && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                    УПД: {filterUpd === 'yes' ? 'подписан' : 'не подписан'}
+                  </span>
+                )}
+                {filterPayment && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                    Оплата: {PAYMENT_STATUS_FILTERS.find(item => item.value === filterPayment)?.label || filterPayment}
+                  </span>
+                )}
+                {filterStatus && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                    Статус: {RENTAL_STATUS_FILTERS.find(item => item.value === filterStatus)?.label || filterStatus}
+                  </span>
+                )}
               </div>
             )}
 
             <div className="grid gap-2 border-t border-gray-100 pt-3 dark:border-gray-700 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-900/55">
+              <div className="rounded-xl bg-slate-50/80 px-3 py-2 dark:bg-gray-900/45">
                 <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Свободно</div>
                 <div className="mt-1 text-base font-semibold text-green-600 dark:text-green-400">{overviewCounts.available}</div>
               </div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-900/55">
+              <div className="rounded-xl bg-slate-50/80 px-3 py-2 dark:bg-gray-900/45">
                 <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Задействовано</div>
                 <div className="mt-1 text-base font-semibold text-blue-600 dark:text-blue-400">{overviewCounts.rented}</div>
               </div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-900/55">
+              <div className="rounded-xl bg-slate-50/80 px-3 py-2 dark:bg-gray-900/45">
                 <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">В сервисе</div>
                 <div className="mt-1 text-base font-semibold text-red-600 dark:text-red-400">{overviewCounts.inService}</div>
               </div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-900/55">
+              <div className="rounded-xl bg-slate-50/80 px-3 py-2 dark:bg-gray-900/45">
                 <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Просрочено</div>
                 <div className="mt-1 text-base font-semibold text-amber-600 dark:text-amber-400">{overviewCounts.overdue}</div>
               </div>
@@ -1546,6 +1561,120 @@ export default function Rentals() {
           </div>
         </div>
       </div>
+
+      <Dialog open={showFiltersDialog} onOpenChange={setShowFiltersDialog}>
+        <DialogContent className="sm:max-w-[760px]">
+          <DialogHeader>
+            <DialogTitle>Фильтры аренды</DialogTitle>
+            <DialogDescription>
+              Настрой отображение парка, не отнимая место у таймлайна.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Быстрый режим</div>
+              <div className="flex flex-wrap gap-2">
+                {rentalPresetOptions.map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setRentalPreset(option.value)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                      rentalPreset === option.value
+                        ? 'bg-[--color-primary] text-white shadow-sm'
+                        : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Менеджер</div>
+                <select
+                  value={filterManager}
+                  onChange={e => setFilterManager(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                >
+                  <option value="">Все менеджеры</option>
+                  {managersList.map(u => (
+                    <option key={u.id} value={u.name}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Клиент</div>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Название клиента"
+                    value={filterClient}
+                    onChange={e => setFilterClient(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">УПД</div>
+                <select
+                  value={filterUpd}
+                  onChange={e => setFilterUpd(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                >
+                  <option value="">Любой статус</option>
+                  <option value="yes">Подписан</option>
+                  <option value="no">Не подписан</option>
+                </select>
+              </div>
+
+              <div>
+                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Статус аренды</div>
+                <select
+                  value={filterStatus}
+                  onChange={e => setFilterStatus(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                >
+                  {RENTAL_STATUS_FILTERS.map(f => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Оплата</div>
+              <div className="grid gap-2 sm:grid-cols-4">
+                {PAYMENT_STATUS_FILTERS.map(f => (
+                  <button
+                    key={f.value}
+                    type="button"
+                    onClick={() => setFilterPayment(f.value)}
+                    className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
+                      filterPayment === f.value
+                        ? 'border-[--color-primary] bg-[--color-primary] text-white'
+                        : 'border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="secondary" onClick={resetFilters}>Сбросить</Button>
+            <Button onClick={() => setShowFiltersDialog(false)}>Готово</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {ambiguousLegacyRentals.length > 0 && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
@@ -1591,16 +1720,27 @@ export default function Rentals() {
           <div className="space-y-4 p-4">
             {filteredEquipmentGroups.map(group => (
               <div key={group.type} className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white/80 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+                <button
+                  type="button"
+                  onClick={() => toggleGroupCollapsed(group.type)}
+                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-left transition-colors hover:border-blue-200 hover:bg-white dark:border-gray-700 dark:bg-gray-800/70 dark:hover:border-blue-500/40 dark:hover:bg-gray-800"
+                >
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">Тип техники</div>
                     <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{group.label}</div>
                   </div>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                    {group.items.length}
-                  </span>
-                </div>
-                {mobileEquipmentCards
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                      {group.items.length}
+                    </span>
+                    {collapsedGroups[group.type] ? (
+                      <ChevronRightSmall className="h-4 w-4 text-gray-400" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-gray-400" />
+                    )}
+                  </div>
+                </button>
+                {!collapsedGroups[group.type] && mobileEquipmentCards
                   .filter(card => card.equipment.type === group.type)
                   .map(({ equipment, primaryRental, rentalsForEquipment, serviceForEquipment, downtimesForEquipment, statusMeta, conflictCount }) => (
               <div
@@ -1837,12 +1977,21 @@ export default function Rentals() {
           ) : (
             filteredEquipmentGroups.map(group => (
               <React.Fragment key={group.type}>
-                <div className="flex border-b border-gray-200/70 bg-slate-50/85 dark:border-gray-700 dark:bg-gray-900/55">
+                <button
+                  type="button"
+                  onClick={() => toggleGroupCollapsed(group.type)}
+                  className="flex w-full border-b border-gray-200/70 bg-slate-50/55 text-left transition-colors hover:bg-slate-50/75 dark:border-gray-700 dark:bg-gray-900/38 dark:hover:bg-gray-900/55"
+                >
                   <div
-                    className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200/70 bg-slate-50/95 px-4 py-2 backdrop-blur dark:border-gray-700 dark:bg-gray-900/90"
+                    className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200/70 bg-slate-50/80 px-4 py-2 backdrop-blur dark:border-gray-700 dark:bg-gray-900/82"
                     style={{ width: LEFT_PANEL_WIDTH }}
                   >
                     <div className="flex items-center gap-2">
+                      {collapsedGroups[group.type] ? (
+                        <ChevronRightSmall className="h-4 w-4 text-gray-400" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-gray-400" />
+                      )}
                       <span className="text-sm font-semibold text-gray-900 dark:text-white">{group.label}</span>
                       <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 shadow-sm dark:bg-gray-800 dark:text-gray-300">
                         {group.items.length}
@@ -1850,16 +1999,17 @@ export default function Rentals() {
                     </div>
                   </div>
                   <div
-                    className="flex items-center px-3 py-2 text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500"
+                    className="flex items-center px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-gray-400 dark:text-gray-500"
                     style={{ width: timelineWidth }}
                   >
-                    {group.label}
+                    Группа техники: {group.label}
                   </div>
-                </div>
+                </button>
 
-                {group.items.map(eq => (
+                {!collapsedGroups[group.type] && group.items.map((eq, idx) => (
                   <EquipmentRow
                     key={eq.id}
+                    rowIndex={idx}
                     equipment={eq}
                     rentals={filteredRentals.filter(r => matchesEquipmentRow(r, eq))}
                     downtimes={mockDowntimes.filter(d => d.equipmentInv === eq.inventoryNumber)}
@@ -2283,6 +2433,7 @@ export default function Rentals() {
 
 // ========== Equipment Row Component ==========
 interface EquipmentRowProps {
+  rowIndex: number;
   equipment: Equipment;
   rentals: GanttRentalData[];
   downtimes: DowntimePeriod[];
@@ -2304,6 +2455,7 @@ interface EquipmentRowProps {
 }
 
 function EquipmentRow({
+  rowIndex,
   equipment, rentals, downtimes, servicePeriods, conflictIds,
   viewStart, totalDays, dayWidth, todayOffset, viewEnd, scale, days, today,
   onBarClick, onNewRental, onReturn, onDowntime, paymentFractions,
@@ -2316,10 +2468,13 @@ function EquipmentRow({
   const timelineWidth = totalDays * dayWidth;
 
   return (
-    <div className="group flex border-b border-gray-100 dark:border-gray-800" style={{ minHeight: ROW_HEIGHT }}>
+    <div
+      className={`group flex border-b border-gray-100 dark:border-gray-800 ${rowIndex % 2 === 0 ? 'bg-white/[0.02] dark:bg-transparent' : 'bg-slate-50/30 dark:bg-gray-950/10'}`}
+      style={{ minHeight: ROW_HEIGHT }}
+    >
       {/* Left panel */}
       <div
-        className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200 bg-white/96 px-3 backdrop-blur transition-colors group-hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800/96 dark:group-hover:bg-gray-800"
+        className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200 bg-white/94 px-3 backdrop-blur transition-colors group-hover:bg-slate-50/85 dark:border-gray-700 dark:bg-gray-800/92 dark:group-hover:bg-gray-800"
         style={{ width: LEFT_PANEL_WIDTH }}
       >
         <div className="min-w-0 flex-1">
@@ -2338,11 +2493,10 @@ function EquipmentRow({
           <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400">
             <span className="truncate uppercase tracking-[0.08em]">SN {equipment.serialNumber || 'не указан'}</span>
             <span className="text-gray-300 dark:text-gray-600">•</span>
-            <span className="truncate">{TYPE_LABELS[equipment.type]}</span>
-          </div>
-          <div className="mt-1 h-px w-full bg-gray-100 dark:bg-gray-700" />
-          <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-gray-400 dark:text-gray-500">
             <span className="truncate">{equipment.location || 'Локация не указана'}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-gray-400 dark:text-gray-500">
+            <span className="truncate">{TYPE_LABELS[equipment.type]}</span>
             {hasActiveRental ? (
               <span className="font-medium text-blue-600 dark:text-blue-400">занята</span>
             ) : (
@@ -2392,9 +2546,9 @@ function EquipmentRow({
           return (
             <div
               key={idx}
-              className={`absolute top-0 h-full border-r border-gray-200/35 dark:border-gray-700/35 ${
-                weekend ? 'bg-gray-100/20 dark:bg-gray-800/14' : ''
-              } ${isToday ? 'bg-blue-50/35 dark:bg-blue-900/12' : ''}`}
+              className={`absolute top-0 h-full border-r border-gray-200/30 dark:border-gray-700/30 ${
+                weekend ? 'bg-gray-100/14 dark:bg-gray-800/10' : ''
+              } ${isToday ? 'bg-blue-50/28 dark:bg-blue-900/10' : ''}`}
               style={{ left: idx * dayWidth, width: dayWidth }}
             />
           );

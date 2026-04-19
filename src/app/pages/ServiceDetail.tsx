@@ -137,6 +137,28 @@ function partItemsToResult(items: RepairPartItem[]): ServicePartUsage[] {
   }));
 }
 
+function normalizePartUsage(part: Partial<ServicePartUsage> | undefined): ServicePartUsage {
+  return {
+    catalogId: part?.catalogId,
+    name: part?.name ?? 'Без названия',
+    sku: part?.sku,
+    qty: Number.isFinite(part?.qty) ? Number(part!.qty) : 0,
+    cost: Number.isFinite(part?.cost) ? Number(part!.cost) : 0,
+  };
+}
+
+function normalizeWorkPerformed(work: Partial<ServiceWorkPerformed> | undefined): ServiceWorkPerformed {
+  return {
+    catalogId: work?.catalogId ?? '',
+    name: work?.name ?? 'Без названия',
+    normHours: Number.isFinite(work?.normHours) ? Number(work!.normHours) : 0,
+    qty: Number.isFinite(work?.qty) ? Number(work!.qty) : 0,
+    totalNormHours: Number.isFinite(work?.totalNormHours) ? Number(work!.totalNormHours) : 0,
+    ratePerHour: Number.isFinite(work?.ratePerHour) ? Number(work!.ratePerHour) : 0,
+    totalCost: Number.isFinite(work?.totalCost) ? Number(work!.totalCost) : 0,
+  };
+}
+
 function buildRepairResult(ticket: ServiceTicket, workItems: RepairWorkItem[], partItems: RepairPartItem[]): ServiceRepairResult {
   return {
     summary: getRepairSummary(ticket),
@@ -148,8 +170,12 @@ function buildRepairResult(ticket: ServiceTicket, workItems: RepairWorkItem[], p
 function normalizeTicket(ticket: ServiceTicket): ServiceTicket {
   const normalizedResult = {
     summary: ticket.resultData?.summary ?? ticket.result ?? '',
-    worksPerformed: Array.isArray(ticket.resultData?.worksPerformed) ? ticket.resultData!.worksPerformed : [],
-    partsUsed: Array.isArray(ticket.resultData?.partsUsed) ? ticket.resultData!.partsUsed : (Array.isArray(ticket.parts) ? ticket.parts : []),
+    worksPerformed: Array.isArray(ticket.resultData?.worksPerformed)
+      ? ticket.resultData!.worksPerformed.map(normalizeWorkPerformed)
+      : [],
+    partsUsed: Array.isArray(ticket.resultData?.partsUsed)
+      ? ticket.resultData!.partsUsed.map(normalizePartUsage)
+      : (Array.isArray(ticket.parts) ? ticket.parts.map(normalizePartUsage) : []),
   };
 
   return {
@@ -164,7 +190,14 @@ function normalizeTicket(ticket: ServiceTicket): ServiceTicket {
     createdBy: ticket.createdByUserName ?? ticket.createdBy,
     result: normalizedResult.summary,
     resultData: normalizedResult,
-    workLog: Array.isArray(ticket.workLog) ? ticket.workLog : [],
+    workLog: Array.isArray(ticket.workLog)
+      ? ticket.workLog.map(entry => ({
+          date: entry?.date ?? new Date(0).toISOString(),
+          text: entry?.text ?? '',
+          author: entry?.author ?? 'Система',
+          type: entry?.type,
+        }))
+      : [],
     parts: Array.isArray(ticket.parts) ? ticket.parts : [],
     photos: Array.isArray(ticket.photos) ? ticket.photos : [],
     repairPhotos: {

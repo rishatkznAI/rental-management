@@ -35,7 +35,7 @@ import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
-import { canEquipmentParticipateInRentals, compareEquipmentByPriority, EQUIPMENT_PRIORITY_LABELS } from '../lib/equipmentClassification';
+import { canEquipmentParticipateInRentals, compareEquipmentByPriority } from '../lib/equipmentClassification';
 import { buildClientReceivables, buildRentalDebtRows, mergeClientsWithFinancials } from '../lib/finance';
 import {
   appendRentalHistory,
@@ -54,8 +54,10 @@ import { ru } from 'date-fns/locale';
 // ========== Constants & Types ==========
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
 type CompactView = 'cards' | 'timeline';
+type DensityMode = 'comfortable' | 'compact';
 const RENTALS_COMPACT_VIEW_STORAGE_KEY = 'rentals_compact_view';
 const RENTALS_COLLAPSED_GROUPS_STORAGE_KEY = 'rentals_collapsed_groups';
+const RENTALS_DENSITY_MODE_STORAGE_KEY = 'rentals_density_mode';
 
 const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
   week: { dayWidth: 120, label: 'Неделя' },
@@ -66,20 +68,12 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
 };
 
 const LEFT_PANEL_WIDTH = 236;
-const ROW_HEIGHT = 60;
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
   scissor: 'Ножничный',
   articulated: 'Коленчатый',
   telescopic: 'Телескопический',
 };
-
-const PRIORITY_STYLES = {
-  critical: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
-  high: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
-  medium: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-  low: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
-} as const;
 
 const EQ_STATUS_LABELS: Record<string, { label: string; color: string }> = {
   available: { label: 'Свободна', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
@@ -128,12 +122,20 @@ function compareEquipmentForPlanner(a: Equipment, b: Equipment) {
   return compareEquipmentByPriority(a, b);
 }
 
+function withUserScopedStorageKey(prefix: string, userId?: string) {
+  return `${prefix}:${userId || 'guest'}`;
+}
+
 function getCompactViewStorageKey(userId?: string) {
-  return `${RENTALS_COMPACT_VIEW_STORAGE_KEY}:${userId || 'guest'}`;
+  return withUserScopedStorageKey(RENTALS_COMPACT_VIEW_STORAGE_KEY, userId);
 }
 
 function getCollapsedGroupsStorageKey(userId?: string) {
-  return `${RENTALS_COLLAPSED_GROUPS_STORAGE_KEY}:${userId || 'guest'}`;
+  return withUserScopedStorageKey(RENTALS_COLLAPSED_GROUPS_STORAGE_KEY, userId);
+}
+
+function getDensityModeStorageKey(userId?: string) {
+  return withUserScopedStorageKey(RENTALS_DENSITY_MODE_STORAGE_KEY, userId);
 }
 
 function getQuickCountTone(value: number, warningFrom = 1, criticalFrom = 3) {
@@ -500,6 +502,7 @@ export default function Rentals() {
   const [preselectedEquipmentId, setPreselectedEquipmentId] = useState('');
   const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
   const [compactView, setCompactView] = useState<CompactView>('cards');
+  const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
 
   const appendEquipmentHistoryEntry = useCallback(
     (equipment: Equipment, text: string) =>
@@ -565,6 +568,15 @@ export default function Rentals() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    const savedDensityMode = window.localStorage.getItem(getDensityModeStorageKey(user?.id));
+    if (savedDensityMode === 'comfortable' || savedDensityMode === 'compact') {
+      setDensityMode(savedDensityMode);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
     const mediaQuery = window.matchMedia('(min-width: 640px) and (max-width: 1023px)');
     const syncCompactView = () => {
       if (mediaQuery.matches) {
@@ -600,6 +612,11 @@ export default function Rentals() {
     );
   }, [collapsedGroups, user?.id]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(getDensityModeStorageKey(user?.id), densityMode);
+  }, [densityMode, user?.id]);
+
   // ===== Computed =====
   const customRange = useMemo(() => {
     const parsedStart = startOfDay(new Date(customRangeStart));
@@ -616,6 +633,7 @@ export default function Rentals() {
   );
   const dayWidth = SCALE_CONFIG[scale].dayWidth;
   const timelineWidth = totalDays * dayWidth;
+  const rowHeight = densityMode === 'compact' ? 50 : 64;
 
   // Generate day columns
   const days = useMemo(() => {
@@ -1480,6 +1498,31 @@ export default function Rentals() {
                   />
                 </div>
 
+                <div className="flex shrink-0 rounded-xl border border-gray-200/80 bg-white/75 p-1 dark:border-white/10 dark:bg-white/6">
+                  <button
+                    type="button"
+                    onClick={() => setDensityMode('comfortable')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                      densityMode === 'comfortable'
+                        ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                        : 'text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white'
+                    }`}
+                  >
+                    Обычный
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDensityMode('compact')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                      densityMode === 'compact'
+                        ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                        : 'text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white'
+                    }`}
+                  >
+                    Компактно
+                  </button>
+                </div>
+
                 <Button
                   size="sm"
                   variant="secondary"
@@ -1757,9 +1800,6 @@ export default function Rentals() {
                       SN {equipment.serialNumber || 'не указан'} · {TYPE_LABELS[equipment.type]}
                     </p>
                   </div>
-                  <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${PRIORITY_STYLES[equipment.priority]}`}>
-                    {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
-                  </span>
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
@@ -1910,9 +1950,9 @@ export default function Rentals() {
                   return (
                     <div
                       key={idx}
-                      className={`flex shrink-0 flex-col items-center justify-center border-r border-gray-100/60 py-1.5 dark:border-white/8 ${
+                      className={`flex shrink-0 flex-col items-center justify-center border-r border-gray-100/60 dark:border-white/8 ${
                         isToday ? 'bg-blue-50/55 dark:bg-blue-500/12' : weekend ? 'bg-gray-50/45 dark:bg-white/[0.03]' : ''
-                      }`}
+                      } ${densityMode === 'compact' ? 'py-1' : 'py-1.5'}`}
                       style={{ width: dayWidth }}
                     >
                       {scale === 'week' || (scale === 'custom' && totalDays <= 31) ? (
@@ -1976,7 +2016,7 @@ export default function Rentals() {
                   className="flex w-full border-b border-white/50 bg-white/54 text-left transition-colors hover:bg-white/70 dark:border-white/8 dark:bg-slate-900/46 dark:hover:bg-slate-900/62"
                 >
                   <div
-                    className="sticky left-0 z-10 flex shrink-0 items-center border-r border-white/50 bg-white/72 px-4 py-2.5 backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/72"
+                    className={`sticky left-0 z-10 flex shrink-0 items-center border-r border-white/50 bg-white/72 px-4 backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/72 ${densityMode === 'compact' ? 'py-1.5' : 'py-2.5'}`}
                     style={{ width: LEFT_PANEL_WIDTH }}
                   >
                     <div className="flex items-center gap-2">
@@ -1992,7 +2032,7 @@ export default function Rentals() {
                     </div>
                   </div>
                   <div
-                    className="flex items-center px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500"
+                    className={`flex items-center px-3 text-[10px] uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500 ${densityMode === 'compact' ? 'py-1.5' : 'py-2'}`}
                     style={{ width: timelineWidth }}
                   >
                     {group.label} · {group.items.length} ед.
@@ -2015,6 +2055,8 @@ export default function Rentals() {
                     viewStart={viewStart}
                     totalDays={totalDays}
                     dayWidth={dayWidth}
+                    densityMode={densityMode}
+                    rowHeight={rowHeight}
                     todayOffset={todayOffset}
                     viewEnd={viewEnd}
                     scale={scale}
@@ -2435,6 +2477,8 @@ interface EquipmentRowProps {
   viewStart: Date;
   totalDays: number;
   dayWidth: number;
+  densityMode: DensityMode;
+  rowHeight: number;
   todayOffset: number | null;
   paymentFractions: Map<string, number>;
   viewEnd: Date;
@@ -2450,27 +2494,34 @@ interface EquipmentRowProps {
 function EquipmentRow({
   rowIndex,
   equipment, rentals, downtimes, servicePeriods, conflictIds,
-  viewStart, totalDays, dayWidth, todayOffset, viewEnd, scale, days, today,
+  viewStart, totalDays, dayWidth, densityMode, rowHeight, todayOffset, viewEnd, scale, days, today,
   onBarClick, onNewRental, onReturn, onDowntime, paymentFractions,
 }: EquipmentRowProps) {
   const { can: canDo } = usePermissions();
+  const isCompact = densityMode === 'compact';
   // Статус вычисляется динамически из аренд, а не из equipment.status
   const effectiveStatus = computeEffectiveStatus(equipment, rentals, today, { start: viewStart, end: viewEnd });
   const eqStatus = EQ_STATUS_LABELS[effectiveStatus] || EQ_STATUS_LABELS.available;
-  const hasActiveRental = rentals.some(r => r.status === 'active');
+  const activeRental = rentals.find(r => r.status === 'active');
   const timelineWidth = totalDays * dayWidth;
   const hasServiceBars = servicePeriods.length > 0;
   const hasDowntimeBars = downtimes.length > 0;
   const hasOverlayBars = hasServiceBars || hasDowntimeBars;
-  const overlayBarHeight = rentals.length > 0 ? 20 : 26;
-  const overlayBarTop = rentals.length > 0 ? 6 : Math.round((ROW_HEIGHT - overlayBarHeight) / 2);
-  const rentalBarHeight = hasOverlayBars ? 22 : 28;
-  const rentalStackGap = 2;
+  const overlayBarHeight = rentals.length > 0
+    ? (isCompact ? 16 : 20)
+    : (isCompact ? 22 : 28);
+  const overlayBarTop = rentals.length > 0
+    ? (isCompact ? 4 : 6)
+    : Math.round((rowHeight - overlayBarHeight) / 2);
+  const rentalBarHeight = hasOverlayBars
+    ? (isCompact ? 18 : 22)
+    : (isCompact ? 24 : 30);
+  const rentalStackGap = isCompact ? 1 : 2;
 
   return (
     <div
       className={`group flex border-b border-white/40 dark:border-white/6 ${rowIndex % 2 === 0 ? 'bg-white/[0.03] dark:bg-white/[0.01]' : 'bg-slate-50/34 dark:bg-white/[0.015]'}`}
-      style={{ minHeight: ROW_HEIGHT }}
+      style={{ minHeight: rowHeight }}
     >
       {/* Left panel */}
       <div
@@ -2478,24 +2529,16 @@ function EquipmentRow({
         style={{ width: LEFT_PANEL_WIDTH }}
       >
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-1.5">
-            <span className="truncate text-[13px] font-semibold text-gray-900 dark:text-white">{equipment.model}</span>
-            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-500 dark:bg-white/8 dark:text-gray-400">{equipment.inventoryNumber}</span>
+          <div className={`flex items-baseline ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
+            <span className={`truncate font-semibold text-gray-900 dark:text-white ${isCompact ? 'text-[12px]' : 'text-[13px]'}`}>{equipment.model}</span>
+            <span className={`rounded-full bg-slate-100 font-mono text-gray-500 dark:bg-white/8 dark:text-gray-400 ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'}`}>{equipment.inventoryNumber}</span>
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400">
+          <div className={`mt-0.5 flex items-center text-gray-500 dark:text-gray-400 ${isCompact ? 'gap-1 text-[9px]' : 'gap-1.5 text-[10px]'}`}>
             <span className="truncate uppercase tracking-[0.08em]">SN {equipment.serialNumber || 'не указан'}</span>
-            <span className="text-gray-300 dark:text-gray-600">•</span>
-            <span className="truncate">{equipment.location || 'Локация не указана'}</span>
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${eqStatus.color}`}>
+          <div className={`mt-1 flex flex-wrap items-center ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
+            <span className={`inline-flex rounded-full font-medium ${eqStatus.color} ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'}`}>
               {eqStatus.label}
-            </span>
-            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${PRIORITY_STYLES[equipment.priority]}`}>
-              {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
-            </span>
-            <span className={`text-[10px] font-medium ${hasActiveRental ? 'text-blue-600 dark:text-blue-400' : 'text-green-600 dark:text-green-400'}`}>
-              {hasActiveRental ? 'занята' : 'свободна'}
             </span>
           </div>
         </div>
@@ -2510,11 +2553,10 @@ function EquipmentRow({
               <Plus className="h-3 w-3" />
             </button>
           )}
-          {hasActiveRental && (
+          {activeRental && (
             <button
               onClick={() => {
-                const active = rentals.find(r => r.status === 'active');
-                if (active) onReturn(active);
+                if (activeRental) onReturn(activeRental);
               }}
               className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/30 dark:hover:text-green-400"
               title="Возврат техники"
@@ -2533,7 +2575,7 @@ function EquipmentRow({
       </div>
 
       {/* Timeline area */}
-      <div className="relative" style={{ width: timelineWidth, height: ROW_HEIGHT }}>
+      <div className="relative" style={{ width: timelineWidth, height: rowHeight }}>
         {/* Day grid lines */}
         {days.map((day, idx) => {
           const weekend = isWeekend(day);
@@ -2637,17 +2679,6 @@ function EquipmentRow({
           const isConflict = conflictIds.has(rental.id);
           const barColor = RENTAL_BAR_COLORS[rental.status];
           const statusLabel = RENTAL_STATUS_LABEL[rental.status];
-          const paymentLabel = rental.paymentStatus === 'paid'
-            ? 'Оплачено'
-            : rental.paymentStatus === 'partial'
-              ? 'Частично'
-              : 'Без оплаты';
-          const paymentTone = rental.paymentStatus === 'paid'
-            ? 'bg-emerald-400/20 text-emerald-100'
-            : rental.paymentStatus === 'partial'
-              ? 'bg-amber-400/20 text-amber-100'
-              : 'bg-red-400/20 text-red-100';
-
           // Stack bars vertically if there are overlaps (simple: use index-based offset)
           const overlapping = rentals.filter((r2, j) => {
             if (j >= rIdx) return false;
@@ -2658,12 +2689,14 @@ function EquipmentRow({
           const stackIndex = overlapping.length;
           const barHeight = rentalBarHeight;
           const topOffset = hasOverlayBars
-            ? Math.max(6, ROW_HEIGHT - 6 - barHeight - stackIndex * (barHeight + rentalStackGap))
+            ? Math.max(isCompact ? 4 : 6, rowHeight - (isCompact ? 4 : 6) - barHeight - stackIndex * (barHeight + rentalStackGap))
             : rentals.length === 1
-              ? Math.round((ROW_HEIGHT - barHeight) / 2)
-              : 6 + stackIndex * (barHeight + rentalStackGap);
+              ? Math.round((rowHeight - barHeight) / 2)
+              : (isCompact ? 4 : 6) + stackIndex * (barHeight + rentalStackGap);
 
           const paidFraction = paymentFractions.get(rental.id) ?? (rental.paymentStatus === 'paid' ? 1 : 0);
+          const showUpdAlert = !rental.updSigned;
+          const showPaymentAlert = rental.paymentStatus !== 'paid';
 
           return (
             <div
@@ -2678,7 +2711,11 @@ function EquipmentRow({
                 top: topOffset,
                 height: barHeight,
               }}
-              title={`${rental.client || 'Без клиента'} · ${safeRentalCompactDate(rental.startDate)} — ${safeRentalCompactDate(rental.endDate)} (${statusLabel})`}
+              title={`${rental.client || 'Без клиента'} · ${safeRentalCompactDate(rental.startDate)} — ${safeRentalCompactDate(rental.endDate)} · ${statusLabel}${
+                showUpdAlert ? ' · УПД не подписан' : ''
+              }${
+                showPaymentAlert ? ` · ${rental.paymentStatus === 'partial' ? 'Частично оплачено' : 'Не оплачено'}` : ''
+              }`}
             >
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
 
@@ -2698,56 +2735,35 @@ function EquipmentRow({
                 />
               )}
               {/* Bar content */}
-              <div className="relative flex min-w-0 flex-1 flex-col justify-center overflow-hidden px-2 leading-tight">
-                <div className="flex items-center gap-1">
+              <div className={`relative flex min-w-0 flex-1 items-center overflow-hidden leading-tight ${isCompact ? 'px-1.5' : 'px-2'}`}>
+                <div className={`flex min-w-0 items-center ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
                   {isConflict && (
                     <AlertTriangle className="h-3 w-3 shrink-0 text-red-200" />
                   )}
                   {pos.width > 58 && (
-                    <span className="shrink-0 rounded-full bg-black/12 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.08em] text-white/90">
+                    <span className={`shrink-0 rounded-full bg-black/12 font-semibold uppercase tracking-[0.08em] text-white/90 ${isCompact ? 'px-1 py-0.5 text-[7px]' : 'px-1.5 py-0.5 text-[8px]'}`}>
                       {statusLabel}
                     </span>
                   )}
                   {pos.width > 40 && (
-                    <span className="truncate text-[10px] font-medium text-white">
+                    <span className={`truncate font-medium text-white ${isCompact ? 'text-[9px]' : 'text-[10px]'}`}>
                       {rental.clientShort || rental.client || 'Без клиента'}
                     </span>
                   )}
                 </div>
-                {pos.width > 110 && (
-                  <div className="flex items-center gap-1 text-[8px] text-white/70">
-                    <span className={`rounded-full px-1.5 py-0.5 font-medium ${paymentTone}`}>
-                      {paymentLabel}
-                    </span>
-                    {pos.width > 145 && (
-                      <span className="rounded-full bg-white/10 px-1.5 py-0.5 font-medium text-white/80">
-                        {rental.updSigned ? 'УПД подписан' : 'УПД нет'}
-                      </span>
-                    )}
-                    {pos.width > 165 && (
-                      <span>· {safeRentalCompactDate(rental.startDate)} → {safeRentalCompactDate(rental.endDate)}</span>
-                    )}
-                    {pos.width > 220 && rental.managerInitials && (
-                      <span>· {rental.managerInitials}</span>
-                    )}
-                  </div>
-                )}
               </div>
               {/* Right icons */}
-              <div className="mr-1.5 flex shrink-0 items-center gap-0.5">
-                {pos.width > 70 && (
+              <div className={`mr-1.5 flex shrink-0 items-center ${isCompact ? 'gap-0.5' : 'gap-1'}`}>
+                {pos.width > 72 && (
                   <>
-                    {rental.updSigned ? (
-                      <CircleCheck className="h-3.5 w-3.5 text-emerald-200" title="УПД подписан" />
-                    ) : (
+                    {showUpdAlert && (
                       <CircleAlert className="h-3.5 w-3.5 text-amber-200" title="УПД не подписан" />
                     )}
-                    {rental.paymentStatus === 'paid' ? (
-                      <CreditCard className="h-3.5 w-3.5 text-emerald-200" title="Оплачено" />
-                    ) : rental.paymentStatus === 'partial' ? (
-                      <CreditCard className="h-3.5 w-3.5 text-amber-200" title="Частично оплачено" />
-                    ) : (
-                      <CreditCard className="h-3.5 w-3.5 text-red-200" title="Не оплачено" />
+                    {showPaymentAlert && (
+                      <CreditCard
+                        className={`h-3.5 w-3.5 ${rental.paymentStatus === 'partial' ? 'text-amber-200' : 'text-red-200'}`}
+                        title={rental.paymentStatus === 'partial' ? 'Частично оплачено' : 'Не оплачено'}
+                      />
                     )}
                   </>
                 )}

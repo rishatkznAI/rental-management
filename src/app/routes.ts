@@ -2,9 +2,15 @@ import { createHashRouter } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import ErrorPage from './pages/ErrorPage';
 
+const pageModules = import.meta.glob('./pages/*.tsx');
+
 function lazyPage(path: string) {
   return async () => {
-    const module = await import(path);
+    const importer = pageModules[`${path}.tsx`];
+    if (!importer) {
+      throw new Error(`Unknown route module: ${path}`);
+    }
+    const module = await importer();
     return { Component: module.default };
   };
 }

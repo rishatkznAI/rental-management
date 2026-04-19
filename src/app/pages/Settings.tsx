@@ -2271,8 +2271,6 @@ function ServiceWorkCatalogReferenceList() {
     active: worksData.filter(item => item.isActive).length,
     inactive: worksData.filter(item => !item.isActive).length,
   }), [worksData]);
-  const allFilteredSelected = filtered.length > 0 && filtered.every(item => selectedIds.includes(item.id));
-  const selectedCount = selectedIds.length;
 
   const filtered = React.useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -2288,6 +2286,8 @@ function ServiceWorkCatalogReferenceList() {
         return a.name.localeCompare(b.name, 'ru');
       });
   }, [categoryFilter, search, statusFilter, worksData]);
+  const allFilteredSelected = filtered.length > 0 && filtered.every(item => selectedIds.includes(item.id));
+  const selectedCount = selectedIds.length;
 
   const reload = async () => {
     await queryClient.invalidateQueries({ queryKey: ['serviceWorks'] });
@@ -2699,8 +2699,6 @@ function SparePartsReferenceList() {
     active: partsData.filter(item => item.isActive).length,
     inactive: partsData.filter(item => !item.isActive).length,
   }), [partsData]);
-  const allFilteredSelected = filtered.length > 0 && filtered.every(item => selectedIds.includes(item.id));
-  const selectedCount = selectedIds.length;
 
   const filtered = React.useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -2714,6 +2712,8 @@ function SparePartsReferenceList() {
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   }, [categoryFilter, manufacturerFilter, partsData, search, statusFilter]);
+  const allFilteredSelected = filtered.length > 0 && filtered.every(item => selectedIds.includes(item.id));
+  const selectedCount = selectedIds.length;
 
   const reload = async () => {
     await queryClient.invalidateQueries({ queryKey: ['spareParts'] });

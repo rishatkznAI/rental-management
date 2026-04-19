@@ -19,7 +19,7 @@ import { useCreateEquipment } from '../hooks/useEquipment';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { createAuditEntry } from '../lib/entity-history';
-import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS } from '../lib/equipmentClassification';
+import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS } from '../lib/equipmentClassification';
 
 // ─── Вспомогательные компоненты ────────────────────────────────────────────
 
@@ -175,6 +175,11 @@ export default function EquipmentNew() {
     category: 'own',
     priority: 'medium',
     activeInFleet: 'yes',
+    isForSale: 'no',
+    salePdiStatus: 'not_started',
+    salePrice1: '',
+    salePrice2: '',
+    salePrice3: '',
     subleasePrice: '',
     location: '',
     status: 'available',
@@ -210,6 +215,11 @@ export default function EquipmentNew() {
       category:              form.category as 'own' | 'sold' | 'client' | 'partner',
       priority:              form.priority as 'low' | 'medium' | 'high' | 'critical',
       activeInFleet:         form.activeInFleet === 'yes',
+      isForSale:             form.isForSale === 'yes',
+      salePdiStatus:         form.isForSale === 'yes' ? form.salePdiStatus as 'not_started' | 'in_progress' | 'ready' : undefined,
+      salePrice1:            form.isForSale === 'yes' && form.salePrice1 ? Number(form.salePrice1) : undefined,
+      salePrice2:            form.isForSale === 'yes' && form.salePrice2 ? Number(form.salePrice2) : undefined,
+      salePrice3:            form.isForSale === 'yes' && form.salePrice3 ? Number(form.salePrice3) : undefined,
       subleasePrice:         form.subleasePrice ? Number(form.subleasePrice) : undefined,
       plannedMonthlyRevenue: Number(form.plannedMonthlyRevenue) || 0,
       nextMaintenance:       new Date().toISOString().split('T')[0],
@@ -604,6 +614,79 @@ export default function EquipmentNew() {
             <FieldHint>
               Ориентир для расчёта утилизации парка. Не влияет на фактическую выручку по аренде.
             </FieldHint>
+          </CardContent>
+        </Card>
+
+        {/* ─── 4.1 · Продажа ─── */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Tag className="h-4 w-4 text-gray-400" />
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                4.1 · Продажа
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <SelectField
+              label="Техника выставлена на продажу"
+              value={form.isForSale}
+              onValueChange={v => update('isForSale', v)}
+              options={[
+                { value: 'no', label: 'Нет, только аренда' },
+                { value: 'yes', label: 'Да, техника доступна к продаже' },
+              ]}
+              hint="Если включено, единица появится во вкладке «На продажу» и в разделе «Продажи»."
+            />
+
+            {form.isForSale === 'yes' && (
+              <>
+                <SelectField
+                  label="Статус PDI"
+                  value={form.salePdiStatus}
+                  onValueChange={v => update('salePdiStatus', v)}
+                  options={[
+                    { value: 'not_started', label: EQUIPMENT_SALE_PDI_LABELS.not_started },
+                    { value: 'in_progress', label: EQUIPMENT_SALE_PDI_LABELS.in_progress },
+                    { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
+                  ]}
+                  hint="PDI нужен, чтобы менеджер понимал готовность единицы к продаже и передаче клиенту."
+                />
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div>
+                    <Input
+                      label="Цена 1, ₽"
+                      type="number"
+                      placeholder="Например, 4 950 000"
+                      value={form.salePrice1}
+                      onChange={e => update('salePrice1', e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Input
+                      label="Цена 2, ₽"
+                      type="number"
+                      placeholder="Например, 4 750 000"
+                      value={form.salePrice2}
+                      onChange={e => update('salePrice2', e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Input
+                      label="Цена 3, ₽"
+                      type="number"
+                      placeholder="Например, 4 550 000"
+                      value={form.salePrice3}
+                      onChange={e => update('salePrice3', e.target.value)}
+                    />
+                  </div>
+                </div>
+                <FieldHint>
+                  Можно использовать три уровня цены как рекомендованную, переговорную и минимально допустимую.
+                </FieldHint>
+              </>
+            )}
           </CardContent>
         </Card>
 

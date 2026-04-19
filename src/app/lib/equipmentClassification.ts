@@ -1,4 +1,4 @@
-import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentType } from '../types';
+import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentSalePdiStatus, EquipmentType } from '../types';
 
 export const EQUIPMENT_CATEGORY_LABELS: Record<EquipmentCategory, string> = {
   own: 'Собственная',
@@ -26,16 +26,24 @@ export const EQUIPMENT_PRIORITY_ORDER: Record<EquipmentPriority, number> = {
   low: 3,
 };
 
-export function normalizeEquipment<T extends Partial<Equipment>>(equipment: T): T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority'> {
+export const EQUIPMENT_SALE_PDI_LABELS: Record<EquipmentSalePdiStatus, string> = {
+  not_started: 'PDI не начат',
+  in_progress: 'PDI в работе',
+  ready: 'PDI готов',
+};
+
+export function normalizeEquipment<T extends Partial<Equipment>>(equipment: T): T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority' | 'isForSale' | 'salePdiStatus'> {
   return {
     ...equipment,
     category: equipment.category ?? 'own',
     activeInFleet: equipment.activeInFleet ?? true,
     priority: equipment.priority ?? 'medium',
+    isForSale: equipment.isForSale ?? false,
+    salePdiStatus: equipment.salePdiStatus ?? 'not_started',
   };
 }
 
-export function normalizeEquipmentList<T extends Partial<Equipment>>(list: T[]): Array<T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority'>> {
+export function normalizeEquipmentList<T extends Partial<Equipment>>(list: T[]): Array<T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority' | 'isForSale' | 'salePdiStatus'>> {
   return list.map(normalizeEquipment);
 }
 

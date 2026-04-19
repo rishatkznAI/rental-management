@@ -17,6 +17,7 @@ import {
   CalendarClock,
   Car,
   Search,
+  BadgeDollarSign,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -33,6 +34,7 @@ import type { Client, Equipment, Rental, ServiceTicket } from '../../types';
 const navigation: { name: string; href: string; icon: React.ElementType; section: Section }[] = [
   { name: 'Дашборд',      href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
   { name: 'Техника',      href: '/equipment', icon: Truck,           section: 'equipment'  },
+  { name: 'Продажи',      href: '/sales',     icon: BadgeDollarSign, section: 'sales'      },
   { name: 'Аренды',       href: '/rentals',   icon: FileText,        section: 'rentals'    },
   { name: 'Планировщик',  href: '/planner',   icon: CalendarClock,   section: 'planner'    },
   { name: 'Сервис',       href: '/service',          icon: Wrench,        section: 'service'          },

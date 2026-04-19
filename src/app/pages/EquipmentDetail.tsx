@@ -20,8 +20,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../components/ui/select';
-import type { Equipment, EquipmentOwnerType, RepairEventType } from '../types';
-import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS } from '../lib/equipmentClassification';
+import type { Equipment, EquipmentOwnerType, EquipmentSalePdiStatus, RepairEventType } from '../types';
+import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS } from '../lib/equipmentClassification';
 import type { GanttRentalData } from '../mock-data';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -869,6 +869,11 @@ export default function EquipmentDetail() {
               <Badge variant={equipment.owner === 'own' ? 'success' : equipment.owner === 'investor' ? 'info' : 'warning'}>
                 {ownerLabels[equipment.owner]}
               </Badge>
+              {equipment.isForSale && (
+                <Badge variant="warning">
+                  На продажу
+                </Badge>
+              )}
               {criticalTickets.length > 0 && (
                 <Badge variant="error">
                   {criticalTickets.length} заявок требует внимания
@@ -1171,6 +1176,23 @@ export default function EquipmentDetail() {
                   {activeRental?.amount && (
                     <InfoField label="Сумма аренды" value={formatCurrency(activeRental.amount)} />
                   )}
+                </div>
+              </div>
+            )}
+
+            {equipment.isForSale && (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/20">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Продажа</p>
+                    <p className="text-xs text-amber-700/80 dark:text-amber-300/80">Коммерческий контур и готовность PDI</p>
+                  </div>
+                  {getSalePdiBadge(equipment.salePdiStatus)}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <InfoField label="Цена 1" value={formatCurrency(equipment.salePrice1 ?? 0)} />
+                  <InfoField label="Цена 2" value={formatCurrency(equipment.salePrice2 ?? 0)} />
+                  <InfoField label="Цена 3" value={formatCurrency(equipment.salePrice3 ?? 0)} />
                 </div>
               </div>
             )}
@@ -2330,6 +2352,11 @@ export default function EquipmentDetail() {
               category: 'категория',
               priority: 'приоритет',
               activeInFleet: 'активный парк',
+              isForSale: 'на продаже',
+              salePdiStatus: 'статус PDI',
+              salePrice1: 'цена 1',
+              salePrice2: 'цена 2',
+              salePrice3: 'цена 3',
               subleasePrice: 'стоимость субаренды',
               location: 'локация',
               status: 'статус',
@@ -2497,6 +2524,15 @@ function FieldSelect({
       </SelectContent>
     </Select>
   );
+}
+
+function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
+  const variants: Record<EquipmentSalePdiStatus, 'default' | 'warning' | 'success'> = {
+    not_started: 'default',
+    in_progress: 'warning',
+    ready: 'success',
+  };
+  return <Badge variant={variants[status]}>{EQUIPMENT_SALE_PDI_LABELS[status]}</Badge>;
 }
 
 // ── Main modal ────────────────────────────────────────────────────────────────
@@ -2786,6 +2822,64 @@ function EditEquipmentModal({
                     placeholder="Например: Казань, склад 1"
                   />
                 </FormField>
+              </FormSection>
+
+              <div className="border-t border-gray-100 dark:border-gray-800" />
+
+              <FormSection title="Продажа" icon={<DollarSign className="h-3.5 w-3.5" />}>
+                <FormField label="Техника выставлена на продажу" hint="Если включено, единица появится в разделе продаж и в sale-представлениях">
+                  <FieldSelect
+                    value={form.isForSale ? 'yes' : 'no'}
+                    onValueChange={(v) => set('isForSale', v === 'yes')}
+                    options={[
+                      { value: 'no', label: 'Нет' },
+                      { value: 'yes', label: 'Да' },
+                    ]}
+                  />
+                </FormField>
+
+                {form.isForSale && (
+                  <>
+                    <FormField label="Статус PDI" hint="Готовность техники к продаже и передаче клиенту">
+                      <FieldSelect
+                        value={form.salePdiStatus || 'not_started'}
+                        onValueChange={setStr('salePdiStatus')}
+                        options={[
+                          { value: 'not_started', label: EQUIPMENT_SALE_PDI_LABELS.not_started },
+                          { value: 'in_progress', label: EQUIPMENT_SALE_PDI_LABELS.in_progress },
+                          { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
+                        ]}
+                      />
+                    </FormField>
+
+                    <FormField label="Цена 1" unit="₽" hint="Основная прайс-лист цена">
+                      <FieldInput
+                        type="number"
+                        value={String(form.salePrice1 || '')}
+                        onChange={setNum('salePrice1')}
+                        placeholder="Например: 4950000"
+                      />
+                    </FormField>
+
+                    <FormField label="Цена 2" unit="₽" hint="Цена для переговоров">
+                      <FieldInput
+                        type="number"
+                        value={String(form.salePrice2 || '')}
+                        onChange={setNum('salePrice2')}
+                        placeholder="Например: 4750000"
+                      />
+                    </FormField>
+
+                    <FormField label="Цена 3" unit="₽" hint="Минимально допустимая цена">
+                      <FieldInput
+                        type="number"
+                        value={String(form.salePrice3 || '')}
+                        onChange={setNum('salePrice3')}
+                        placeholder="Например: 4550000"
+                      />
+                    </FormField>
+                  </>
+                )}
               </FormSection>
 
               <div className="border-t border-gray-100 dark:border-gray-800" />

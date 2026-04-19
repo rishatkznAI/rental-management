@@ -33,6 +33,7 @@ export const router = createHashRouter([
       { path: 'equipment', lazy: lazyPage('./pages/Equipment') },
       { path: 'equipment/new', lazy: lazyPage('./pages/EquipmentNew') },
       { path: 'equipment/:id', lazy: lazyPage('./pages/EquipmentDetail') },
+      { path: 'sales', lazy: lazyPage('./pages/Sales') },
       { path: 'rentals', lazy: lazyPage('./pages/Rentals') },
       { path: 'rentals/new', lazy: lazyPage('./pages/RentalNew') },
       { path: 'rentals/:id', lazy: lazyPage('./pages/RentalDetail') },

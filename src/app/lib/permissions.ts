@@ -17,6 +17,7 @@ import { useAuth } from '../contexts/AuthContext';
 export type Section =
   | 'dashboard'
   | 'equipment'
+  | 'sales'
   | 'rentals'
   | 'planner'
   | 'service'
@@ -41,6 +42,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Администратор': {
     dashboard:        ALL,
     equipment:        ALL,
+    sales:            ALL,
     rentals:          ALL,
     planner:          ALL,
     service:          ALL,
@@ -54,6 +56,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Менеджер по аренде': {
     dashboard:        VIEW,        // только своё
     equipment:        VIEW,
+    sales:            VIEW,
     rentals:          VIEW,
     planner:          VIEW,
     service:          VIEW_CREATE,
@@ -67,6 +70,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Офис-менеджер': {
     // dashboard: нет
     equipment:        ALL,
+    sales:            VIEW,
     rentals:          VIEW_CREATE,
     planner:          ALL,
     service:          ALL,
@@ -104,6 +108,7 @@ export function pathToRequiredAction(pathname: string): { section: Section; acti
 export function pathToSection(pathname: string): Section | null {
   if (pathname === '/')                       return 'dashboard';
   if (pathname.startsWith('/equipment'))      return 'equipment';
+  if (pathname.startsWith('/sales'))          return 'sales';
   if (pathname.startsWith('/rentals'))        return 'rentals';
   if (pathname.startsWith('/planner'))        return 'planner';
   if (pathname.startsWith('/service-vehicles')) return 'service_vehicles';
@@ -121,6 +126,7 @@ export function pathToSection(pathname: string): Section | null {
 const SECTION_PATHS: Array<[Section, string]> = [
   ['dashboard',  '/'],
   ['equipment',  '/equipment'],
+  ['sales',      '/sales'],
   ['rentals',    '/rentals'],
   ['planner',          '/planner'],
   ['service',          '/service'],

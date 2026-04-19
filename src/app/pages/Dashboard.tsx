@@ -62,6 +62,26 @@ function getOnboardingStorageKey(userId: string): string {
   return `dashboard_onboarding_dismissed:${userId}`;
 }
 
+function formatCountLabel(value: number, one: string, few: string, many: string) {
+  const abs = Math.abs(value) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return many;
+  if (last > 1 && last < 5) return few;
+  if (last === 1) return one;
+  return many;
+}
+
+type RoleFocusCard = {
+  id: string;
+  title: string;
+  value: string;
+  hint: string;
+  href: string;
+  cta: string;
+  tone?: 'default' | 'warning' | 'danger' | 'success';
+  icon: React.ElementType;
+};
+
 // ─── main component ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -136,6 +156,10 @@ export default function Dashboard() {
   const today = startOfDay(new Date());
   const weekAgo = daysAgo(7);
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const tomorrowStart = new Date(today);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const dayAfterTomorrowStart = new Date(today);
+  dayAfterTomorrowStart.setDate(dayAfterTomorrowStart.getDate() + 2);
   const clientFinancials = useMemo(
     () => buildClientFinancialSnapshots(clients, ganttRentals, payments),
     [clients, ganttRentals, payments],
@@ -277,6 +301,247 @@ export default function Dashboard() {
   const myOverduePayments = currentUserName
     ? overduePayments.filter(row => row.manager === currentUserName)
     : [];
+  const myReturnsToday = myActiveRentals.filter(rental => {
+    const ret = new Date(rental.endDate);
+    return ret >= today && ret < tomorrowStart;
+  });
+  const myReturnsTomorrow = myActiveRentals.filter(rental => {
+    const ret = new Date(rental.endDate);
+    return ret >= tomorrowStart && ret < dayAfterTomorrowStart;
+  });
+  const myUnsignedDocuments = currentUserName
+    ? documents.filter(doc =>
+        doc.manager === currentUserName
+        && (doc.type === 'contract' || doc.type === 'act')
+        && doc.status !== 'signed',
+      )
+    : [];
+  const myAssignedServiceTickets = currentUserName
+    ? tickets.filter(ticket =>
+        ticket.status !== 'closed'
+        && (ticket.assignedMechanicName === currentUserName || ticket.assignedTo === currentUserName)
+      )
+    : [];
+  const myReadyServiceTickets = myAssignedServiceTickets.filter(ticket => ticket.status === 'ready');
+  const myWaitingPartsTickets = myAssignedServiceTickets.filter(ticket => ticket.status === 'waiting_parts');
+  const officeUnsignedDocuments = documents.filter(doc =>
+    (doc.type === 'contract' || doc.type === 'act') && doc.status !== 'signed',
+  );
+  const officeUpcomingPayments = rentalDebtRows.filter(row => {
+    if (!row.outstanding) return false;
+    const compareDate = row.expectedPaymentDate || row.endDate;
+    if (!compareDate) return false;
+    const dueDate = new Date(compareDate);
+    const soonDate = new Date(today);
+    soonDate.setDate(soonDate.getDate() + 3);
+    return dueDate >= today && dueDate <= soonDate;
+  });
+  const officeReturnsQueue = viewPlannerRentals.filter(rental => {
+    if (rental.status !== 'active') return false;
+    const ret = new Date(rental.endDate);
+    return (ret >= today && ret < tomorrowStart) || (ret >= tomorrowStart && ret < dayAfterTomorrowStart);
+  }).length;
+  const roleDashboardCards = useMemo<RoleFocusCard[]>(() => {
+    if (user?.role === 'Менеджер по аренде') {
+      return [
+        {
+          id: 'manager-active',
+          title: 'Мои активные аренды',
+          value: String(myActiveRentals.length),
+          hint: myActiveRentals.length > 0
+            ? `${myActiveRentals.length} ${formatCountLabel(myActiveRentals.length, 'сделка', 'сделки', 'сделок')} в работе`
+            : 'Сейчас нет активных аренд',
+          href: '/rentals',
+          cta: 'Открыть аренды',
+          tone: myActiveRentals.length > 0 ? 'default' : 'success',
+          icon: Calendar,
+        },
+        {
+          id: 'manager-returns',
+          title: 'Мои возвраты',
+          value: `${myReturnsToday.length}/${myReturnsTomorrow.length}`,
+          hint: `Сегодня ${myReturnsToday.length}, завтра ${myReturnsTomorrow.length}`,
+          href: '/rentals',
+          cta: 'Контролировать возвраты',
+          tone: myReturnsToday.length > 0 ? 'warning' : 'default',
+          icon: Clock,
+        },
+        {
+          id: 'manager-debt',
+          title: 'Долг моих клиентов',
+          value: myClientDebt > 0 ? formatCurrency(myClientDebt) : '0 ₽',
+          hint: myOverduePayments.length > 0
+            ? `${myOverduePayments.length} ${formatCountLabel(myOverduePayments.length, 'просрочка', 'просрочки', 'просрочек')} требует внимания`
+            : 'Просрочек по моим клиентам нет',
+          href: '/payments',
+          cta: 'Перейти к оплатам',
+          tone: myClientDebt > 0 ? 'warning' : 'success',
+          icon: CreditCard,
+        },
+        {
+          id: 'manager-docs',
+          title: 'Документы по моим сделкам',
+          value: String(myUnsignedDocuments.length),
+          hint: myUnsignedDocuments.length > 0
+            ? 'Есть договоры и УПД без подписи'
+            : 'Все ключевые документы подписаны',
+          href: '/documents',
+          cta: 'Проверить документы',
+          tone: myUnsignedDocuments.length > 0 ? 'warning' : 'success',
+          icon: FileText,
+        },
+      ];
+    }
+
+    if (user?.role === 'Механик') {
+      return [
+        {
+          id: 'service-assigned',
+          title: 'Мои заявки',
+          value: String(myAssignedServiceTickets.length),
+          hint: myAssignedServiceTickets.length > 0
+            ? `${myAssignedServiceTickets.length} ${formatCountLabel(myAssignedServiceTickets.length, 'заявка', 'заявки', 'заявок')} в работе`
+            : 'Сейчас нет назначенных заявок',
+          href: '/service',
+          cta: 'Открыть сервис',
+          tone: myAssignedServiceTickets.length > 0 ? 'default' : 'success',
+          icon: Wrench,
+        },
+        {
+          id: 'service-ready',
+          title: 'Готово к закрытию',
+          value: String(myReadyServiceTickets.length),
+          hint: myReadyServiceTickets.length > 0
+            ? 'Можно завершать и закрывать работы'
+            : 'Нет готовых заявок',
+          href: '/service',
+          cta: 'Закрыть заявки',
+          tone: myReadyServiceTickets.length > 0 ? 'warning' : 'success',
+          icon: CheckCircle,
+        },
+        {
+          id: 'service-parts',
+          title: 'Ждут запчасти',
+          value: String(myWaitingPartsTickets.length),
+          hint: myWaitingPartsTickets.length > 0
+            ? 'Нужен контроль поставки или замена решения'
+            : 'Зависших по запчастям нет',
+          href: '/service',
+          cta: 'Проверить заявки',
+          tone: myWaitingPartsTickets.length > 0 ? 'danger' : 'success',
+          icon: PackageX,
+        },
+        {
+          id: 'service-unassigned',
+          title: 'Очередь без механика',
+          value: String(unassignedServiceTickets.length),
+          hint: unassignedServiceTickets.length > 0
+            ? 'Есть заявки, которые ещё не распределены'
+            : 'Новые заявки уже назначены',
+          href: '/service',
+          cta: 'Посмотреть очередь',
+          tone: unassignedServiceTickets.length > 0 ? 'warning' : 'default',
+          icon: User,
+        },
+      ];
+    }
+
+    if (user?.role === 'Офис-менеджер') {
+      return [
+        {
+          id: 'office-docs',
+          title: 'Документы без подписи',
+          value: String(officeUnsignedDocuments.length),
+          hint: officeUnsignedDocuments.length > 0
+            ? 'Нужно дожать подписание договоров и актов'
+            : 'Все ключевые документы подписаны',
+          href: '/documents',
+          cta: 'Открыть документы',
+          tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
+          icon: ClipboardX,
+        },
+        {
+          id: 'office-payments',
+          title: 'Платежи на 3 дня',
+          value: String(officeUpcomingPayments.length),
+          hint: officeUpcomingPayments.length > 0
+            ? 'Нужно подтвердить поступления и напомнить клиентам'
+            : 'Ближайших платежей нет',
+          href: '/payments',
+          cta: 'Проверить оплаты',
+          tone: officeUpcomingPayments.length > 0 ? 'warning' : 'success',
+          icon: DollarSign,
+        },
+        {
+          id: 'office-returns',
+          title: 'Возвраты под документы',
+          value: String(officeReturnsQueue),
+          hint: officeReturnsQueue > 0
+            ? 'Сегодня и завтра нужно подготовить акты и закрывающие'
+            : 'Срочных возвратов нет',
+          href: '/rentals',
+          cta: 'Открыть возвраты',
+          tone: officeReturnsQueue > 0 ? 'default' : 'success',
+          icon: RotateCcw,
+        },
+        {
+          id: 'office-debt',
+          title: 'Просроченная дебиторка',
+          value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽',
+          hint: overdueDebtClients.length > 0
+            ? `${overdueDebtClients.length} ${formatCountLabel(overdueDebtClients.length, 'клиент', 'клиента', 'клиентов')} с долгом`
+            : 'Просроченной дебиторки нет',
+          href: '/payments',
+          cta: 'Работать с долгом',
+          tone: totalDebt > 0 ? 'danger' : 'success',
+          icon: ShieldAlert,
+        },
+      ];
+    }
+
+    return [];
+  }, [
+    myActiveRentals.length,
+    myAssignedServiceTickets.length,
+    myClientDebt,
+    myOverduePayments.length,
+    myReadyServiceTickets.length,
+    myReturnsToday.length,
+    myReturnsTomorrow.length,
+    myUnsignedDocuments.length,
+    myWaitingPartsTickets.length,
+    officeReturnsQueue,
+    officeUnsignedDocuments.length,
+    officeUpcomingPayments.length,
+    overdueDebtClients.length,
+    totalDebt,
+    unassignedServiceTickets.length,
+    user?.role,
+  ]);
+  const roleDashboardMeta = useMemo(() => {
+    if (user?.role === 'Менеджер по аренде') {
+      return {
+        badge: 'Роль: аренда',
+        title: 'Мой дашборд менеджера аренды',
+        description: 'Здесь закреплены ваши сделки, возвраты, оплаты и документы. Это стартовая точка для ежедневной работы.',
+      };
+    }
+    if (user?.role === 'Механик') {
+      return {
+        badge: 'Роль: сервис',
+        title: 'Мой сервисный дашборд',
+        description: 'Сначала видны мои заявки, готовые работы, ожидание запчастей и неразобранная очередь.',
+      };
+    }
+    if (user?.role === 'Офис-менеджер') {
+      return {
+        badge: 'Роль: офис',
+        title: 'Мой офисный дашборд',
+        description: 'Сверху закреплены документы, оплаты, возвраты и дебиторка, чтобы не искать их по разделам.',
+      };
+    }
+    return null;
+  }, [user?.role]);
 
   const hasManagerData = myRentals.length > 0;
 
@@ -330,10 +595,6 @@ export default function Dashboard() {
   const inactiveEquipment = equipment.filter(e => e.status === 'inactive').length;
 
   // Rentals ending today
-  const tomorrowStart = new Date(today);
-  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-  const dayAfterTomorrowStart = new Date(today);
-  dayAfterTomorrowStart.setDate(dayAfterTomorrowStart.getDate() + 2);
   const rentalsEndingToday = viewPlannerRentals.filter(r => {
     const ret = new Date(r.endDate);
     return r.status === 'active' && ret >= today && ret < tomorrowStart;
@@ -942,6 +1203,73 @@ export default function Dashboard() {
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {roleDashboardMeta && roleDashboardCards.length > 0 && (
+        <Card className="border-gray-200 bg-white/90 dark:border-gray-700 dark:bg-gray-900/70">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div className="space-y-2">
+                <Badge variant="secondary">{roleDashboardMeta.badge}</Badge>
+                <CardTitle className="text-xl">{roleDashboardMeta.title}</CardTitle>
+                <CardDescription className="max-w-3xl text-sm">
+                  {roleDashboardMeta.description}
+                </CardDescription>
+              </div>
+              <Button asChild variant="ghost" size="sm" className="self-start lg:self-center">
+                <Link to={user?.role === 'Механик' ? '/service' : user?.role === 'Офис-менеджер' ? '/documents' : '/rentals'}>
+                  Открыть основной раздел
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 lg:grid-cols-4">
+              {roleDashboardCards.map(item => {
+                const Icon = item.icon;
+                const toneClass =
+                  item.tone === 'danger'
+                    ? 'border-red-200 bg-red-50/70 dark:border-red-900 dark:bg-red-950/20'
+                    : item.tone === 'warning'
+                    ? 'border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/20'
+                    : item.tone === 'success'
+                    ? 'border-green-200 bg-green-50/70 dark:border-green-900 dark:bg-green-950/20'
+                    : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/80';
+
+                const iconClass =
+                  item.tone === 'danger'
+                    ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                    : item.tone === 'warning'
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                    : item.tone === 'success'
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
+
+                return (
+                  <div key={item.id} className={`rounded-xl border p-4 ${toneClass}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className={`flex h-10 w-10 items-center justify-center rounded-full ${iconClass}`}>
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <Button asChild size="sm" variant="ghost" className="h-8 px-2">
+                        <Link to={item.href}>
+                          {item.cta}
+                          <ArrowRight className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </div>
+                    <div className="mt-4">
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-300">{item.title}</p>
+                      <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{item.value}</p>
+                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{item.hint}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>

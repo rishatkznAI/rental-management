@@ -56,7 +56,7 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
   custom: { dayWidth: 28, label: 'Период' },
 };
 
-const LEFT_PANEL_WIDTH = 212;
+const LEFT_PANEL_WIDTH = 248;
 const ROW_HEIGHT = 44;
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
@@ -81,10 +81,10 @@ const EQ_STATUS_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 const RENTAL_BAR_COLORS: Record<GanttRentalData['status'], string> = {
-  active: 'bg-blue-600 dark:bg-blue-500 border-l-4 border-l-blue-800',
-  created: 'bg-slate-500 dark:bg-slate-400 border-l-4 border-l-slate-700',
-  returned: 'bg-emerald-600 dark:bg-emerald-500 border-l-4 border-l-emerald-800',
-  closed: 'bg-gray-400 dark:bg-gray-500 border-l-4 border-l-gray-600',
+  active: 'border border-blue-500/60 bg-gradient-to-r from-blue-600 to-blue-500 text-white dark:border-blue-400/40 dark:from-blue-600 dark:to-blue-500',
+  created: 'border border-slate-500/60 bg-gradient-to-r from-slate-500 to-slate-400 text-white dark:border-slate-400/40 dark:from-slate-500 dark:to-slate-400',
+  returned: 'border border-emerald-500/60 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white dark:border-emerald-400/40 dark:from-emerald-600 dark:to-emerald-500',
+  closed: 'border border-gray-400/60 bg-gradient-to-r from-gray-400 to-gray-300 text-white dark:border-gray-500/40 dark:from-gray-500 dark:to-gray-400',
 };
 
 const RENTAL_STATUS_LABEL: Record<GanttRentalData['status'], string> = {
@@ -1157,85 +1157,133 @@ export default function Rentals() {
   }, [today, viewStart, totalDays, dayWidth]);
 
   return (
-    <div className="flex h-[calc(100vh-56px-64px)] sm:h-[calc(100vh)] flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-[calc(100vh-56px-64px)] sm:h-[calc(100vh)] flex-col overflow-hidden bg-slate-50 dark:bg-[#0f1726]">
       {/* ===== Toolbar ===== */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800">
-        <h1 className="mr-2 text-xl text-gray-900 dark:text-white">Планировщик аренды</h1>
+      <div className="border-b border-gray-200 bg-white/95 backdrop-blur dark:border-gray-700 dark:bg-gray-800/95">
+        <div className="space-y-4 px-4 py-4">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="space-y-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
+                  Аренды
+                </p>
+                <h1 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">
+                  Планировщик аренды
+                </h1>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Управление выдачей, возвратами и загрузкой техники в одном таймлайне.
+                </p>
+              </div>
 
-        {/* Scale Switcher */}
-        <div className="flex rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700">
-          {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
-            <button
-              key={s}
-              onClick={() => setScale(s)}
-              className={`px-3 py-1.5 text-xs transition-colors ${
-                scale === s
-                  ? 'bg-[--color-primary] text-white'
-                  : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600'
-              } ${s === 'week' ? 'rounded-l-lg' : s === 'year' ? 'rounded-r-lg' : ''}`}
-            >
-              {SCALE_CONFIG[s].label}
-            </button>
-          ))}
-        </div>
+              <div className="flex flex-wrap gap-2">
+                <div className="rounded-xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Техника</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                    {shownEquipment}
+                    <span className="ml-1 text-xs font-medium text-gray-400 dark:text-gray-500">из {totalEquipment}</span>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Аренды</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                    {shownRentals}
+                    <span className="ml-1 text-xs font-medium text-gray-400 dark:text-gray-500">из {totalRentals}</span>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">Риски</div>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                      <AlertTriangle className="h-3 w-3" />
+                      {quickFilterCounts.overdue} просроч.
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                      <CreditCard className="h-3 w-3" />
+                      {quickFilterCounts.unpaid} без оплаты
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-        <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 dark:border-gray-600 dark:bg-gray-700">
-          <input
-            type="date"
-            value={customRangeStart}
-            onChange={e => setCustomRangeStart(e.target.value)}
-            className="h-7 rounded border border-gray-200 bg-white px-2 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-          />
-          <span className="text-xs text-gray-400">—</span>
-          <input
-            type="date"
-            value={customRangeEnd}
-            onChange={e => setCustomRangeEnd(e.target.value)}
-            className="h-7 rounded border border-gray-200 bg-white px-2 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-          />
-          <button
-            onClick={applyCustomRange}
-            disabled={!customRange}
-            className="rounded-md bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-600 dark:text-gray-100 dark:hover:bg-gray-500"
-          >
-            Период
-          </button>
-        </div>
+            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+              {can('create', 'rentals') && (
+                <Button size="sm" className="h-10 rounded-xl px-4" onClick={() => handleOpenNewRental()}>
+                  <Plus className="h-4 w-4" />
+                  Новая аренда
+                </Button>
+              )}
+              <Button size="sm" variant="secondary" className="h-10 rounded-xl px-4" onClick={() => handleOpenReturn()}>
+                <RotateCcw className="h-4 w-4" />
+                Возврат техники
+              </Button>
+              <Button size="sm" variant="secondary" className="h-10 rounded-xl px-4" onClick={() => handleOpenDowntime()}>
+                <PauseCircle className="h-4 w-4" />
+                Отметить простой
+              </Button>
+            </div>
+          </div>
 
-        {/* Nav */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => navigateTime('today')}
-            className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            Сегодня
-          </button>
-          <button onClick={() => navigateTime('prev')} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button onClick={() => navigateTime('next')} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">
-            <ChevronRight className="h-4 w-4" />
-          </button>
-          <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
-            {rangeLabel}
-          </span>
-        </div>
+          <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+            <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center">
+              <div className="flex rounded-2xl border border-gray-200 bg-slate-50 p-1 dark:border-gray-700 dark:bg-gray-900/60">
+                {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setScale(s)}
+                    className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
+                      scale === s
+                        ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-white'
+                        : 'text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white'
+                    }`}
+                  >
+                    {SCALE_CONFIG[s].label}
+                  </button>
+                ))}
+              </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          {can('create', 'rentals') && (
-            <Button size="sm" onClick={() => handleOpenNewRental()}>
-              <Plus className="h-3.5 w-3.5" />
-              Новая аренда
-            </Button>
-          )}
-          <Button size="sm" variant="secondary" onClick={() => handleOpenReturn()}>
-            <RotateCcw className="h-3.5 w-3.5" />
-            Возврат техники
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => handleOpenDowntime()}>
-            <PauseCircle className="h-3.5 w-3.5" />
-            Отметить простой
-          </Button>
+              <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+                <input
+                  type="date"
+                  value={customRangeStart}
+                  onChange={e => setCustomRangeStart(e.target.value)}
+                  className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                />
+                <span className="text-sm text-gray-400">—</span>
+                <input
+                  type="date"
+                  value={customRangeEnd}
+                  onChange={e => setCustomRangeEnd(e.target.value)}
+                  className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                />
+                <button
+                  onClick={applyCustomRange}
+                  disabled={!customRange}
+                  className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-700 dark:hover:bg-gray-600"
+                >
+                  Период
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+              <button
+                onClick={() => navigateTime('today')}
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Сегодня
+              </button>
+              <button onClick={() => navigateTime('prev')} className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-white hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button onClick={() => navigateTime('next')} className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-white hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <div className="pl-1 text-sm font-medium text-gray-500 dark:text-gray-400">
+                {rangeLabel}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1273,105 +1321,133 @@ export default function Rentals() {
       </div>
 
       {/* ===== Filters ===== */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-1.5 dark:border-gray-700 dark:bg-gray-800">
-        <div className="mr-2 flex flex-wrap items-center gap-2">
-          {rentalPresetOptions.map(option => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setRentalPreset(option.value)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                rentalPreset === option.value
-                  ? 'bg-[--color-primary] text-white'
-                  : 'border border-gray-200 bg-gray-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
+      <div className="border-b border-gray-200 bg-white/92 backdrop-blur dark:border-gray-700 dark:bg-gray-800/92">
+        <div className="px-4 py-3">
+          <div className="space-y-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                {rentalPresetOptions.map(option => {
+                  const count = option.value === 'returns_today'
+                    ? quickFilterCounts.returnsToday
+                    : option.value === 'overdue'
+                      ? quickFilterCounts.overdue
+                      : option.value === 'unpaid'
+                        ? quickFilterCounts.unpaid
+                        : null;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setRentalPreset(option.value)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                        rentalPreset === option.value
+                          ? 'bg-[--color-primary] text-white shadow-sm'
+                          : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                      }`}
+                    >
+                      {option.label}
+                      {count !== null && (
+                        <span className={`ml-2 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                          rentalPreset === option.value
+                            ? 'bg-white/20 text-white'
+                            : getQuickCountTone(count, 1, option.value === 'unpaid' ? 5 : 3)
+                        }`}>
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="text-xs text-gray-400 dark:text-gray-500">
+                {hasActiveFilters
+                  ? `${shownEquipment} из ${totalEquipment} ед. · ${shownRentals} из ${totalRentals} аренд`
+                  : `${totalEquipment} ед. · ${totalRentals} аренд`}
+              </div>
+            </div>
+
+            <div className="grid gap-3 2xl:grid-cols-[minmax(0,1.1fr)_220px_220px_140px_minmax(260px,auto)_170px_auto]">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Модель / INV / SN"
+                  value={filterModel}
+                  onChange={e => setFilterModel(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                />
+              </div>
+
+              <select
+                value={filterManager}
+                onChange={e => setFilterManager(e.target.value)}
+                className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+              >
+                <option value="">Менеджер</option>
+                {managersList.map(u => (
+                  <option key={u.id} value={u.name}>{u.name}</option>
+                ))}
+              </select>
+
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Клиент"
+                  value={filterClient}
+                  onChange={e => setFilterClient(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                />
+              </div>
+
+              <select
+                value={filterUpd}
+                onChange={e => setFilterUpd(e.target.value)}
+                className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+              >
+                <option value="">УПД</option>
+                <option value="yes">Подписан</option>
+                <option value="no">Не подписан</option>
+              </select>
+
+              <div className="flex overflow-hidden rounded-xl border border-gray-200 dark:border-gray-600">
+                {PAYMENT_STATUS_FILTERS.map(f => (
+                  <button
+                    key={f.value}
+                    onClick={() => setFilterPayment(f.value)}
+                    className={`px-3 py-2 text-sm transition-colors first:flex-1 last:flex-1 ${
+                      filterPayment === f.value
+                        ? 'bg-[--color-primary] text-white'
+                        : 'bg-slate-50 text-gray-600 hover:bg-gray-100 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              <select
+                value={filterStatus}
+                onChange={e => setFilterStatus(e.target.value)}
+                className="h-10 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+              >
+                {RENTAL_STATUS_FILTERS.map(f => (
+                  <option key={f.value} value={f.value}>{f.label}</option>
+                ))}
+              </select>
+
+              {hasActiveFilters ? (
+                <Button size="sm" variant="ghost" onClick={resetFilters} className="h-10 rounded-xl px-4 text-sm text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20">
+                  Сбросить
+                </Button>
+              ) : (
+                <div />
+              )}
+            </div>
+          </div>
         </div>
-
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Модель / INV / SN"
-            value={filterModel}
-            onChange={e => setFilterModel(e.target.value)}
-            className="h-8 w-36 rounded-lg border border-gray-200 bg-gray-50 pl-7 pr-2 text-xs focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-          />
-        </div>
-
-        <select
-          value={filterManager}
-          onChange={e => setFilterManager(e.target.value)}
-          className="h-8 rounded-lg border border-gray-200 bg-gray-50 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-        >
-          <option value="">Менеджер</option>
-          {managersList.map(u => (
-            <option key={u.id} value={u.name}>{u.name}</option>
-          ))}
-        </select>
-
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Клиент"
-            value={filterClient}
-            onChange={e => setFilterClient(e.target.value)}
-            className="h-8 w-32 rounded-lg border border-gray-200 bg-gray-50 pl-7 pr-2 text-xs focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-          />
-        </div>
-
-        <select
-          value={filterUpd}
-          onChange={e => setFilterUpd(e.target.value)}
-          className="h-8 rounded-lg border border-gray-200 bg-gray-50 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-        >
-          <option value="">УПД</option>
-          <option value="yes">Подписан</option>
-          <option value="no">Не подписан</option>
-        </select>
-
-        {/* Payment segmented */}
-        <div className="flex rounded-lg border border-gray-200 dark:border-gray-600">
-          {PAYMENT_STATUS_FILTERS.map(f => (
-            <button
-              key={f.value}
-              onClick={() => setFilterPayment(f.value)}
-              className={`px-2 py-1 text-xs transition-colors first:rounded-l-lg last:rounded-r-lg ${
-                filterPayment === f.value
-                  ? 'bg-[--color-primary] text-white'
-                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100 dark:bg-gray-700 dark:text-gray-300'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        <select
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value)}
-          className="h-8 rounded-lg border border-gray-200 bg-gray-50 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-        >
-          {RENTAL_STATUS_FILTERS.map(f => (
-            <option key={f.value} value={f.value}>{f.label}</option>
-          ))}
-        </select>
-
-        {hasActiveFilters && (
-          <Button size="sm" variant="ghost" onClick={resetFilters} className="h-8 px-3 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20">
-            × Сбросить фильтры
-          </Button>
-        )}
-
-        <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">
-          {hasActiveFilters
-            ? `${shownEquipment} из ${totalEquipment} ед. · ${shownRentals} из ${totalRentals} аренд`
-            : `${totalEquipment} ед. · ${totalRentals} аренд`}
-        </span>
       </div>
 
       {ambiguousLegacyRentals.length > 0 && (
@@ -1550,13 +1626,21 @@ export default function Rentals() {
       >
         <div style={{ width: LEFT_PANEL_WIDTH + timelineWidth, minHeight: '100%' }}>
           {/* ===== Timeline Header (sticky top) ===== */}
-          <div className="sticky top-0 z-20 flex border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+          <div className="sticky top-0 z-20 flex border-b border-gray-200 bg-white/96 backdrop-blur dark:border-gray-700 dark:bg-gray-800/96">
             {/* Left header */}
             <div
-              className="sticky left-0 z-30 flex shrink-0 items-center border-r border-gray-200 bg-white px-3 dark:border-gray-700 dark:bg-gray-800"
+              className="sticky left-0 z-30 flex shrink-0 items-center border-r border-gray-200 bg-white/98 px-4 dark:border-gray-700 dark:bg-gray-800/98"
               style={{ width: LEFT_PANEL_WIDTH }}
             >
-              <span className="text-xs text-gray-500 dark:text-gray-400">Техника ({shownEquipment})</span>
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">
+                  Техника
+                </div>
+                <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                  {shownEquipment}
+                  <span className="ml-1 text-xs font-normal text-gray-400 dark:text-gray-500">единиц в списке</span>
+                </div>
+              </div>
             </div>
 
             {/* Month row + Day row combined */}
@@ -1566,7 +1650,7 @@ export default function Rentals() {
                 {monthGroups.map((mg, idx) => (
                   <div
                     key={idx}
-                    className="border-r border-gray-100 px-2 py-1 text-xs capitalize text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                    className="border-r border-gray-100/60 px-2 py-1 text-xs capitalize text-gray-400 dark:border-gray-700/45 dark:text-gray-500"
                     style={{ width: mg.count * dayWidth }}
                   >
                     {mg.month}
@@ -1581,8 +1665,8 @@ export default function Rentals() {
                   return (
                     <div
                       key={idx}
-                      className={`flex shrink-0 flex-col items-center justify-center border-r border-gray-100 py-1 dark:border-gray-700 ${
-                        isToday ? 'bg-blue-50 dark:bg-blue-900/20' : weekend ? 'bg-gray-50/80 dark:bg-gray-800/50' : ''
+                      className={`flex shrink-0 flex-col items-center justify-center border-r border-gray-100/60 py-1 dark:border-gray-700/45 ${
+                        isToday ? 'bg-blue-50/45 dark:bg-blue-900/12' : weekend ? 'bg-gray-50/35 dark:bg-gray-800/22' : ''
                       }`}
                       style={{ width: dayWidth }}
                     >
@@ -2099,35 +2183,43 @@ function EquipmentRow({
     <div className="group flex border-b border-gray-100 dark:border-gray-800" style={{ minHeight: ROW_HEIGHT }}>
       {/* Left panel */}
       <div
-        className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200 bg-white px-2 dark:border-gray-700 dark:bg-gray-800"
+        className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200 bg-white/96 px-3 backdrop-blur transition-colors group-hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800/96 dark:group-hover:bg-gray-800"
         style={{ width: LEFT_PANEL_WIDTH }}
       >
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-1">
-            <span className="font-mono text-[10px] text-gray-500 dark:text-gray-400">{equipment.inventoryNumber}</span>
-            <span className="truncate text-[11px] font-medium text-gray-900 dark:text-white">{equipment.model}</span>
-          </div>
-          <div className="mt-0.5 truncate text-[8px] uppercase tracking-[0.04em] text-gray-500 dark:text-gray-400">
-            SN {equipment.serialNumber || 'не указан'}
-          </div>
-          <div className="mt-0.5 flex items-center gap-1 flex-wrap">
-            <span className={`inline-flex rounded px-1 py-0 text-[8px] leading-4 ${eqStatus.color}`}>
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${eqStatus.color}`}>
               {eqStatus.label}
             </span>
-            <span className={`inline-flex rounded px-1 py-0 text-[8px] leading-4 ${PRIORITY_STYLES[equipment.priority]}`}>
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${PRIORITY_STYLES[equipment.priority]}`}>
               {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
             </span>
-            <span className="truncate text-[8px] uppercase tracking-[0.04em] text-gray-400 dark:text-gray-500">
-              {TYPE_LABELS[equipment.type]}
-            </span>
+          </div>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500">{equipment.inventoryNumber}</span>
+            <span className="truncate text-[12px] font-semibold text-gray-900 dark:text-white">{equipment.model}</span>
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400">
+            <span className="truncate uppercase tracking-[0.08em]">SN {equipment.serialNumber || 'не указан'}</span>
+            <span className="text-gray-300 dark:text-gray-600">•</span>
+            <span className="truncate">{TYPE_LABELS[equipment.type]}</span>
+          </div>
+          <div className="mt-1 h-px w-full bg-gray-100 dark:bg-gray-700" />
+          <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-gray-400 dark:text-gray-500">
+            <span className="truncate">{equipment.location || 'Локация не указана'}</span>
+            {hasActiveRental ? (
+              <span className="font-medium text-blue-600 dark:text-blue-400">занята</span>
+            ) : (
+              <span className="font-medium text-green-600 dark:text-green-400">свободна</span>
+            )}
           </div>
         </div>
         {/* Quick actions */}
-        <div className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="ml-2 flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {canDo('create', 'rentals') && (
             <button
               onClick={onNewRental}
-              className="rounded p-0.5 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
+              className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
               title="Создать аренду"
             >
               <Plus className="h-3 w-3" />
@@ -2139,7 +2231,7 @@ function EquipmentRow({
                 const active = rentals.find(r => r.status === 'active');
                 if (active) onReturn(active);
               }}
-              className="rounded p-0.5 text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/30 dark:hover:text-green-400"
+              className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/30 dark:hover:text-green-400"
               title="Возврат техники"
             >
               <RotateCcw className="h-3 w-3" />
@@ -2147,7 +2239,7 @@ function EquipmentRow({
           )}
           <button
             onClick={onDowntime}
-            className="rounded p-0.5 text-gray-400 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/30 dark:hover:text-amber-400"
+            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/30 dark:hover:text-amber-400"
             title="Отметить простой"
           >
             <PauseCircle className="h-3 w-3" />
@@ -2164,9 +2256,9 @@ function EquipmentRow({
           return (
             <div
               key={idx}
-              className={`absolute top-0 h-full border-r border-gray-200/60 dark:border-gray-700/50 ${
-                weekend ? 'bg-gray-100/60 dark:bg-gray-800/40' : ''
-              } ${isToday ? 'bg-blue-50/70 dark:bg-blue-900/20' : ''}`}
+              className={`absolute top-0 h-full border-r border-gray-200/35 dark:border-gray-700/35 ${
+                weekend ? 'bg-gray-100/20 dark:bg-gray-800/14' : ''
+              } ${isToday ? 'bg-blue-50/35 dark:bg-blue-900/12' : ''}`}
               style={{ left: idx * dayWidth, width: dayWidth }}
             />
           );
@@ -2198,19 +2290,26 @@ function EquipmentRow({
           return (
             <div
               key={sp.id}
-              className="absolute z-[5] flex items-center rounded px-1.5 text-[10px] text-red-700 dark:text-red-300"
+              className="absolute z-[7] flex items-center overflow-hidden rounded-md px-1.5 text-[10px] font-medium text-red-700 shadow-sm dark:text-red-200"
               style={{
-                left: pos.left,
+                left: pos.left + 2,
                 width: pos.width,
-                top: 3,
-                height: ROW_HEIGHT - 6,
-                background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(220,38,38,0.16) 4px, rgba(220,38,38,0.16) 8px)',
-                border: '1px solid rgba(220,38,38,0.45)',
+                top: 5,
+                height: 14,
+                background: 'linear-gradient(90deg, rgba(254,226,226,0.92), rgba(254,242,242,0.82))',
+                border: '1px solid rgba(220,38,38,0.28)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)',
               }}
               title={`Ремонт / сервис: ${sp.description}`}
             >
-              <Wrench className="mr-1 h-3 w-3 shrink-0" />
-              {pos.width > 60 && <span className="truncate">{sp.description}</span>}
+              <div className="absolute inset-y-0 left-0 w-1 bg-red-500/85 dark:bg-red-400/85" />
+              <Wrench className="mr-1 ml-1 h-3 w-3 shrink-0" />
+              {pos.width > 64 && (
+                <span className="truncate">
+                  <span className="mr-1 uppercase tracking-[0.08em] text-red-500/90 dark:text-red-300/90">Сервис</span>
+                  {sp.description}
+                </span>
+              )}
             </div>
           );
         })}
@@ -2222,19 +2321,26 @@ function EquipmentRow({
           return (
             <div
               key={dt.id}
-              className="absolute z-[5] flex items-center rounded px-1.5 text-[10px] text-amber-700 dark:text-amber-300"
+              className="absolute z-[7] flex items-center overflow-hidden rounded-md px-1.5 text-[10px] font-medium text-amber-800 shadow-sm dark:text-amber-200"
               style={{
-                left: pos.left,
+                left: pos.left + 2,
                 width: pos.width,
-                top: 3,
-                height: ROW_HEIGHT - 6,
-                background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(217,175,37,0.15) 4px, rgba(217,175,37,0.15) 8px)',
-                border: '1px dashed rgba(217,175,37,0.6)',
+                top: ROW_HEIGHT - 19,
+                height: 14,
+                background: 'linear-gradient(90deg, rgba(254,243,199,0.94), rgba(255,251,235,0.84))',
+                border: '1px solid rgba(217,119,6,0.24)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)',
               }}
               title={`Простой: ${dt.reason}`}
             >
-              <PauseCircle className="mr-1 h-3 w-3 shrink-0" />
-              {pos.width > 70 && <span className="truncate">Простой{dt.reason ? `: ${dt.reason}` : ''}</span>}
+              <div className="absolute inset-y-0 left-0 w-1 bg-amber-500/85 dark:bg-amber-400/85" />
+              <PauseCircle className="mr-1 ml-1 h-3 w-3 shrink-0" />
+              {pos.width > 72 && (
+                <span className="truncate">
+                  <span className="mr-1 uppercase tracking-[0.08em] text-amber-600/90 dark:text-amber-300/90">Простой</span>
+                  {dt.reason || 'без причины'}
+                </span>
+              )}
             </div>
           );
         })}
@@ -2246,6 +2352,16 @@ function EquipmentRow({
           const isConflict = conflictIds.has(rental.id);
           const barColor = RENTAL_BAR_COLORS[rental.status];
           const statusLabel = RENTAL_STATUS_LABEL[rental.status];
+          const paymentLabel = rental.paymentStatus === 'paid'
+            ? 'Оплачено'
+            : rental.paymentStatus === 'partial'
+              ? 'Частично'
+              : 'Без оплаты';
+          const paymentTone = rental.paymentStatus === 'paid'
+            ? 'bg-emerald-400/20 text-emerald-100'
+            : rental.paymentStatus === 'partial'
+              ? 'bg-amber-400/20 text-amber-100'
+              : 'bg-red-400/20 text-red-100';
 
           // Stack bars vertically if there are overlaps (simple: use index-based offset)
           const overlapping = rentals.filter((r2, j) => {
@@ -2264,7 +2380,7 @@ function EquipmentRow({
             <div
               key={rental.id}
               onClick={() => onBarClick(rental)}
-              className={`absolute z-[6] flex cursor-pointer items-center overflow-hidden rounded-md shadow transition-all hover:shadow-lg hover:brightness-110 ${barColor} ${
+              className={`absolute z-[6] flex cursor-pointer items-center overflow-hidden rounded-lg shadow-sm transition-all hover:shadow-lg hover:-translate-y-[1px] ${barColor} ${
                 isConflict ? 'ring-2 ring-red-500 ring-offset-1 dark:ring-red-400' : ''
               }`}
               style={{
@@ -2275,6 +2391,8 @@ function EquipmentRow({
               }}
               title={`${rental.client} · ${rental.startDate} — ${rental.endDate} (${statusLabel})`}
             >
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
+
               {/* Payment fill overlay */}
               {paidFraction > 0 && (
                 <div
@@ -2282,10 +2400,10 @@ function EquipmentRow({
                   style={{
                     width: `${paidFraction * 100}%`,
                     background: paidFraction >= 1
-                      ? 'rgba(34,197,94,0.30)'   // green — fully paid
-                      : 'rgba(34,197,94,0.22)',   // green — partially paid
+                      ? 'rgba(255,255,255,0.16)'
+                      : 'rgba(255,255,255,0.10)',
                     borderRight: paidFraction < 1
-                      ? '1px dashed rgba(34,197,94,0.6)'
+                      ? '1px dashed rgba(255,255,255,0.35)'
                       : undefined,
                   }}
                 />
@@ -2296,6 +2414,11 @@ function EquipmentRow({
                   {isConflict && (
                     <AlertTriangle className="h-3 w-3 shrink-0 text-red-200" />
                   )}
+                  {pos.width > 58 && (
+                    <span className="shrink-0 rounded-full bg-black/12 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.08em] text-white/90">
+                      {statusLabel}
+                    </span>
+                  )}
                   {pos.width > 40 && (
                     <span className="truncate text-[10px] font-medium text-white">
                       {rental.clientShort || rental.client}
@@ -2304,7 +2427,14 @@ function EquipmentRow({
                 </div>
                 {pos.width > 110 && (
                   <div className="flex items-center gap-1 text-[8px] text-white/70">
-                    <span>{statusLabel}</span>
+                    <span className={`rounded-full px-1.5 py-0.5 font-medium ${paymentTone}`}>
+                      {paymentLabel}
+                    </span>
+                    {pos.width > 145 && (
+                      <span className="rounded-full bg-white/10 px-1.5 py-0.5 font-medium text-white/80">
+                        {rental.updSigned ? 'УПД подписан' : 'УПД нет'}
+                      </span>
+                    )}
                     {pos.width > 165 && (
                       <span>· {rental.startDate.slice(5)} → {rental.endDate.slice(5)}</span>
                     )}
@@ -2319,16 +2449,16 @@ function EquipmentRow({
                 {pos.width > 70 && (
                   <>
                     {rental.updSigned ? (
-                      <CircleCheck className="h-3.5 w-3.5 text-green-300" title="УПД подписан" />
+                      <CircleCheck className="h-3.5 w-3.5 text-emerald-200" title="УПД подписан" />
                     ) : (
-                      <CircleAlert className="h-3.5 w-3.5 text-red-300" title="УПД не подписан" />
+                      <CircleAlert className="h-3.5 w-3.5 text-amber-200" title="УПД не подписан" />
                     )}
                     {rental.paymentStatus === 'paid' ? (
-                      <CreditCard className="h-3.5 w-3.5 text-green-300" title="Оплачено" />
+                      <CreditCard className="h-3.5 w-3.5 text-emerald-200" title="Оплачено" />
                     ) : rental.paymentStatus === 'partial' ? (
-                      <CreditCard className="h-3.5 w-3.5 text-yellow-300" title="Частично оплачено" />
+                      <CreditCard className="h-3.5 w-3.5 text-amber-200" title="Частично оплачено" />
                     ) : (
-                      <CreditCard className="h-3.5 w-3.5 text-red-300" title="Не оплачено" />
+                      <CreditCard className="h-3.5 w-3.5 text-red-200" title="Не оплачено" />
                     )}
                   </>
                 )}

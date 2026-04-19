@@ -66,7 +66,7 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
 };
 
 const LEFT_PANEL_WIDTH = 236;
-const ROW_HEIGHT = 44;
+const ROW_HEIGHT = 52;
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
   scissor: 'Ножничный',
@@ -1329,66 +1329,6 @@ export default function Rentals() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:justify-between">
-            <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
-              <div className="flex rounded-[22px] border border-gray-200/80 bg-white/72 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
-                {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
-                  <button
-                    key={s}
-                    onClick={() => setScale(s)}
-                    className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
-                      scale === s
-                        ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-800 dark:text-white'
-                        : 'text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white'
-                    }`}
-                  >
-                    {SCALE_CONFIG[s].label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 rounded-[22px] border border-gray-200/80 bg-white/72 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
-                <input
-                  type="date"
-                  value={customRangeStart}
-                  onChange={e => setCustomRangeStart(e.target.value)}
-                  className="h-9 rounded-xl border border-gray-200 bg-white/92 px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-800/88 dark:text-white"
-                />
-                <span className="text-sm text-gray-400">—</span>
-                <input
-                  type="date"
-                  value={customRangeEnd}
-                  onChange={e => setCustomRangeEnd(e.target.value)}
-                  className="h-9 rounded-xl border border-gray-200 bg-white/92 px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-800/88 dark:text-white"
-                />
-                <button
-                  onClick={applyCustomRange}
-                  disabled={!customRange}
-                  className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800 dark:hover:bg-slate-700"
-                >
-                  Период
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 rounded-[22px] border border-gray-200/80 bg-white/72 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
-              <button
-                onClick={() => navigateTime('today')}
-                className="rounded-xl border border-gray-200 bg-white/92 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-white/10 dark:bg-slate-800/88 dark:text-gray-200 dark:hover:bg-slate-700"
-              >
-                Сегодня
-              </button>
-              <button onClick={() => navigateTime('prev')} className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-white hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white">
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <button onClick={() => navigateTime('next')} className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-white hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white">
-                <ChevronRight className="h-4 w-4" />
-              </button>
-              <div className="pl-1 text-sm font-medium text-gray-500 dark:text-gray-400">
-                {rangeLabel}
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -1429,7 +1369,69 @@ export default function Rentals() {
       <div className="relative z-10 border-b border-white/40 bg-white/72 backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/46">
         <div className="px-4 py-2">
           <div className="rounded-[24px] border border-gray-200/80 bg-white/76 px-4 py-3 shadow-[0_24px_50px_-38px_rgba(15,23,42,0.9)] dark:border-white/10 dark:bg-white/6">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex rounded-[18px] border border-gray-200/80 bg-white/72 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
+                    {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setScale(s)}
+                        className={`rounded-xl px-3 py-1.5 text-sm font-medium transition-colors ${
+                          scale === s
+                            ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                            : 'text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white'
+                        }`}
+                      >
+                        {SCALE_CONFIG[s].label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 rounded-[18px] border border-gray-200/80 bg-white/72 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
+                    <input
+                      type="date"
+                      value={customRangeStart}
+                      onChange={e => setCustomRangeStart(e.target.value)}
+                      className="h-8 rounded-xl border border-gray-200 bg-white/92 px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-800/88 dark:text-white"
+                    />
+                    <span className="text-sm text-gray-400">—</span>
+                    <input
+                      type="date"
+                      value={customRangeEnd}
+                      onChange={e => setCustomRangeEnd(e.target.value)}
+                      className="h-8 rounded-xl border border-gray-200 bg-white/92 px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-800/88 dark:text-white"
+                    />
+                    <button
+                      onClick={applyCustomRange}
+                      disabled={!customRange}
+                      className="rounded-xl bg-gray-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800 dark:hover:bg-slate-700"
+                    >
+                      Период
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 rounded-[18px] border border-gray-200/80 bg-white/72 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
+                  <button
+                    onClick={() => navigateTime('today')}
+                    className="rounded-xl border border-gray-200 bg-white/92 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-white/10 dark:bg-slate-800/88 dark:text-gray-200 dark:hover:bg-slate-700"
+                  >
+                    Сегодня
+                  </button>
+                  <button onClick={() => navigateTime('prev')} className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-white hover:text-gray-800 dark:hover:bg-slate-800 dark:hover:text-white">
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button onClick={() => navigateTime('next')} className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-white hover:text-gray-800 dark:hover:bg-slate-800 dark:hover:text-white">
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                  <div className="pl-1 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    {rangeLabel}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
               <div className="flex flex-wrap items-center gap-2 xl:min-w-0">
                 {rentalPresetOptions.map(option => {
                   const count = option.value === 'returns_today'
@@ -1499,6 +1501,7 @@ export default function Rentals() {
                   </Button>
                 ) : null}
               </div>
+            </div>
             </div>
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100/90 pt-3 text-xs dark:border-white/8">
@@ -2569,8 +2572,8 @@ function EquipmentRow({
               style={{
                 left: pos.left + 2,
                 width: pos.width,
-                top: 5,
-                height: 14,
+                top: 6,
+                height: 18,
                 background: 'linear-gradient(90deg, rgba(254,226,226,0.92), rgba(254,242,242,0.82))',
                 border: '1px solid rgba(220,38,38,0.28)',
                 boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)',
@@ -2600,8 +2603,8 @@ function EquipmentRow({
               style={{
                 left: pos.left + 2,
                 width: pos.width,
-                top: ROW_HEIGHT - 19,
-                height: 14,
+                top: ROW_HEIGHT - 24,
+                height: 18,
                 background: 'linear-gradient(90deg, rgba(254,243,199,0.94), rgba(255,251,235,0.84))',
                 border: '1px solid rgba(217,119,6,0.24)',
                 boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)',
@@ -2646,8 +2649,8 @@ function EquipmentRow({
             return s1 < e2 && s2 < e1;
           });
           const stackIndex = overlapping.length;
-          const barHeight = 18;
-          const topOffset = 3 + stackIndex * (barHeight + 2);
+          const barHeight = 24;
+          const topOffset = 6 + stackIndex * (barHeight + 3);
 
           const paidFraction = paymentFractions.get(rental.id) ?? (rental.paymentStatus === 'paid' ? 1 : 0);
 

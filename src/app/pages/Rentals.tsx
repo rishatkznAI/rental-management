@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Plus, ChevronLeft, ChevronRight, RotateCcw, CirclePause as PauseCircle,
+  Plus, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, RotateCcw, CirclePause as PauseCircle,
   Search, CircleCheck, CircleAlert, CreditCard,
   AlertTriangle, Wrench
 } from 'lucide-react';

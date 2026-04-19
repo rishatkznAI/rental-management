@@ -486,10 +486,12 @@ export default function Rentals() {
     }
   }, [today, ganttRentals, equipmentList, persistEquipment, persistGanttRentals, serviceTickets]);
 
-  const [scale, setScale] = useState<Scale>('week');
+  const currentMonthStart = useMemo(() => startOfMonth(today), [today]);
+  const currentMonthEnd = useMemo(() => endOfMonth(today), [today]);
+  const [scale, setScale] = useState<Scale>('month');
   const [baseDate, setBaseDate] = useState(today);
-  const [customRangeStart, setCustomRangeStart] = useState(format(today, 'yyyy-MM-dd'));
-  const [customRangeEnd, setCustomRangeEnd] = useState(format(addDays(today, 29), 'yyyy-MM-dd'));
+  const [customRangeStart, setCustomRangeStart] = useState(format(currentMonthStart, 'yyyy-MM-dd'));
+  const [customRangeEnd, setCustomRangeEnd] = useState(format(currentMonthEnd, 'yyyy-MM-dd'));
   const [selectedRental, setSelectedRental] = useState<GanttRentalData | null>(null);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showDowntimeModal, setShowDowntimeModal] = useState(false);
@@ -832,8 +834,8 @@ export default function Rentals() {
     if (direction === 'today') {
       setBaseDate(today);
       if (scale === 'custom') {
-        const start = format(today, 'yyyy-MM-dd');
-        const end = format(addDays(today, 29), 'yyyy-MM-dd');
+        const start = format(currentMonthStart, 'yyyy-MM-dd');
+        const end = format(currentMonthEnd, 'yyyy-MM-dd');
         setCustomRangeStart(start);
         setCustomRangeEnd(end);
       }
@@ -862,7 +864,7 @@ export default function Rentals() {
     setCustomRangeStart(format(shiftedStart, 'yyyy-MM-dd'));
     setCustomRangeEnd(format(shiftedEnd, 'yyyy-MM-dd'));
     setBaseDate(shiftedStart);
-  }, [customRange, scale, today]);
+  }, [currentMonthEnd, currentMonthStart, customRange, scale, today]);
 
   const applyCustomRange = useCallback(() => {
     if (!customRange) return;
@@ -1263,9 +1265,17 @@ export default function Rentals() {
   }, [today, viewStart, totalDays, dayWidth]);
 
   return (
-    <div className="flex h-[calc(100vh-56px-64px)] sm:h-[calc(100vh)] flex-col overflow-hidden bg-slate-50 dark:bg-[#0f1726]">
+    <div className="relative flex h-[calc(100vh-56px-64px)] sm:h-[calc(100vh)] flex-col overflow-hidden bg-slate-50 dark:bg-[#0b1220]">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-64 opacity-80"
+        style={{
+          background:
+            'radial-gradient(60% 80% at 20% 0%, rgba(37,99,235,0.18), transparent 70%), radial-gradient(55% 75% at 85% 10%, rgba(14,165,233,0.12), transparent 72%)',
+        }}
+      />
       {/* ===== Toolbar ===== */}
-      <div className="border-b border-gray-200 bg-white/95 backdrop-blur dark:border-gray-700 dark:bg-gray-800/95">
+      <div className="relative z-10 border-b border-white/50 bg-white/78 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.65)] backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/58 dark:shadow-[0_18px_50px_-30px_rgba(2,6,23,0.95)]">
         <div className="space-y-3 px-4 py-3">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="space-y-2">
@@ -1281,29 +1291,38 @@ export default function Rentals() {
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-                <span>{shownEquipment} ед. техники</span>
-                <span className="text-gray-300 dark:text-gray-600">•</span>
-                <span>{shownRentals} аренд</span>
-                <span className="text-gray-300 dark:text-gray-600">•</span>
-                <span className="text-amber-600 dark:text-amber-400">{quickFilterCounts.unpaid} без оплаты</span>
-                <span className="text-gray-300 dark:text-gray-600">•</span>
-                <span className="text-red-600 dark:text-red-400">{quickFilterCounts.overdue} просроч.</span>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white/70 px-2.5 py-1 text-gray-600 dark:border-white/10 dark:bg-white/5 dark:text-gray-300">
+                  <span className="font-semibold text-gray-900 dark:text-white">{shownEquipment}</span>
+                  ед. техники
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white/70 px-2.5 py-1 text-gray-600 dark:border-white/10 dark:bg-white/5 dark:text-gray-300">
+                  <span className="font-semibold text-gray-900 dark:text-white">{shownRentals}</span>
+                  аренд
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/80 px-2.5 py-1 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                  <CreditCard className="h-3.5 w-3.5" />
+                  {quickFilterCounts.unpaid} без оплаты
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-red-200/80 bg-red-50/80 px-2.5 py-1 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {quickFilterCounts.overdue} просроч.
+                </span>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 xl:justify-end">
               {can('create', 'rentals') && (
-                <Button size="sm" className="h-10 rounded-xl px-4" onClick={() => handleOpenNewRental()}>
+                <Button size="sm" className="h-10 rounded-xl bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] px-4 shadow-[0_14px_30px_-18px_rgba(37,99,235,0.95)]" onClick={() => handleOpenNewRental()}>
                   <Plus className="h-4 w-4" />
                   Новая аренда
                 </Button>
               )}
-              <Button size="sm" variant="secondary" className="h-10 rounded-xl px-4" onClick={() => handleOpenReturn()}>
+              <Button size="sm" variant="secondary" className="h-10 rounded-xl border border-gray-200/80 bg-white/72 px-4 dark:border-white/10 dark:bg-white/6" onClick={() => handleOpenReturn()}>
                 <RotateCcw className="h-4 w-4" />
                 Возврат техники
               </Button>
-              <Button size="sm" variant="secondary" className="h-10 rounded-xl px-4" onClick={() => handleOpenDowntime()}>
+              <Button size="sm" variant="secondary" className="h-10 rounded-xl border border-gray-200/80 bg-white/72 px-4 dark:border-white/10 dark:bg-white/6" onClick={() => handleOpenDowntime()}>
                 <PauseCircle className="h-4 w-4" />
                 Отметить простой
               </Button>
@@ -1312,14 +1331,14 @@ export default function Rentals() {
 
           <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:justify-between">
             <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
-              <div className="flex rounded-2xl border border-gray-200 bg-slate-50 p-1 dark:border-gray-700 dark:bg-gray-900/60">
+              <div className="flex rounded-[22px] border border-gray-200/80 bg-white/72 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
                 {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
                   <button
                     key={s}
                     onClick={() => setScale(s)}
                     className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
                       scale === s
-                        ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-white'
+                        ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-800 dark:text-white'
                         : 'text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white'
                     }`}
                   >
@@ -1328,34 +1347,34 @@ export default function Rentals() {
                 ))}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+              <div className="flex flex-wrap items-center gap-2 rounded-[22px] border border-gray-200/80 bg-white/72 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
                 <input
                   type="date"
                   value={customRangeStart}
                   onChange={e => setCustomRangeStart(e.target.value)}
-                  className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                  className="h-9 rounded-xl border border-gray-200 bg-white/92 px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-800/88 dark:text-white"
                 />
                 <span className="text-sm text-gray-400">—</span>
                 <input
                   type="date"
                   value={customRangeEnd}
                   onChange={e => setCustomRangeEnd(e.target.value)}
-                  className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                  className="h-9 rounded-xl border border-gray-200 bg-white/92 px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-800/88 dark:text-white"
                 />
                 <button
                   onClick={applyCustomRange}
                   disabled={!customRange}
-                  className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-700 dark:hover:bg-gray-600"
+                  className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800 dark:hover:bg-slate-700"
                 >
                   Период
                 </button>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-slate-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+            <div className="flex flex-wrap items-center gap-2 rounded-[22px] border border-gray-200/80 bg-white/72 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
               <button
                 onClick={() => navigateTime('today')}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                className="rounded-xl border border-gray-200 bg-white/92 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-white/10 dark:bg-slate-800/88 dark:text-gray-200 dark:hover:bg-slate-700"
               >
                 Сегодня
               </button>
@@ -1407,9 +1426,9 @@ export default function Rentals() {
       </div>
 
       {/* ===== Filters ===== */}
-      <div className="border-b border-gray-200 bg-white/92 backdrop-blur dark:border-gray-700 dark:bg-gray-800/92">
+      <div className="relative z-10 border-b border-white/40 bg-white/72 backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/46">
         <div className="px-4 py-2">
-          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800/70">
+          <div className="rounded-[24px] border border-gray-200/80 bg-white/76 px-4 py-3 shadow-[0_24px_50px_-38px_rgba(15,23,42,0.9)] dark:border-white/10 dark:bg-white/6">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
               <div className="flex flex-wrap items-center gap-2 xl:min-w-0">
                 {rentalPresetOptions.map(option => {
@@ -1428,8 +1447,8 @@ export default function Rentals() {
                       onClick={() => setRentalPreset(option.value)}
                       className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                         rentalPreset === option.value
-                          ? 'bg-[--color-primary] text-white shadow-sm'
-                          : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                          ? 'bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] text-white shadow-[0_12px_26px_-18px_rgba(37,99,235,0.9)]'
+                          : 'border border-gray-200/80 bg-white/70 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-white/10 dark:bg-white/5 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
                       }`}
                     >
                       {option.label}
@@ -1455,7 +1474,7 @@ export default function Rentals() {
                     placeholder="Модель / INV / SN"
                     value={filterModel}
                     onChange={e => setFilterModel(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                    className="h-10 w-full rounded-xl border border-gray-200/80 bg-white/75 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-900/42 dark:text-white"
                   />
                 </div>
 
@@ -1463,7 +1482,7 @@ export default function Rentals() {
                   size="sm"
                   variant="secondary"
                   onClick={() => setShowFiltersDialog(true)}
-                  className="h-10 shrink-0 rounded-xl px-4 text-sm"
+                  className="h-10 shrink-0 rounded-xl border border-gray-200/80 bg-white/75 px-4 text-sm dark:border-white/10 dark:bg-white/6"
                 >
                   <SlidersHorizontal className="h-4 w-4" />
                   Фильтры
@@ -1482,7 +1501,7 @@ export default function Rentals() {
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 text-xs dark:border-gray-700">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100/90 pt-3 text-xs dark:border-white/8">
               <div className="flex flex-wrap items-center gap-3 text-gray-500 dark:text-gray-400">
                 <span>{overviewCounts.available} свободно</span>
                 <span className="text-gray-300 dark:text-gray-600">•</span>
@@ -1503,27 +1522,27 @@ export default function Rentals() {
             {hasAdvancedFilters && (
               <div className="mt-2 flex flex-wrap gap-2">
                 {filterManager && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                     Менеджер: {filterManager}
                   </span>
                 )}
                 {filterClient && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                     Клиент: {filterClient}
                   </span>
                 )}
                 {filterUpd && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                     УПД: {filterUpd === 'yes' ? 'подписан' : 'не подписан'}
                   </span>
                 )}
                 {filterPayment && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                     Оплата: {PAYMENT_STATUS_FILTERS.find(item => item.value === filterPayment)?.label || filterPayment}
                   </span>
                 )}
                 {filterStatus && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                     Статус: {RENTAL_STATUS_FILTERS.find(item => item.value === filterStatus)?.label || filterStatus}
                   </span>
                 )}
@@ -1849,14 +1868,14 @@ export default function Rentals() {
       >
         <div style={{ width: LEFT_PANEL_WIDTH + timelineWidth, minHeight: '100%' }}>
           {/* ===== Timeline Header (sticky top) ===== */}
-          <div className="sticky top-0 z-20 flex border-b border-gray-200 bg-white/96 backdrop-blur dark:border-gray-700 dark:bg-gray-800/96">
+          <div className="sticky top-0 z-20 flex border-b border-white/50 bg-white/84 shadow-[0_18px_36px_-32px_rgba(15,23,42,0.9)] backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/62">
             {/* Left header */}
             <div
-              className="sticky left-0 z-30 flex shrink-0 items-center border-r border-gray-200 bg-white/98 px-4 dark:border-gray-700 dark:bg-gray-800/98"
+              className="sticky left-0 z-30 flex shrink-0 items-center border-r border-white/50 bg-white/92 px-4 dark:border-white/8 dark:bg-slate-900/72"
               style={{ width: LEFT_PANEL_WIDTH }}
             >
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gray-400 dark:text-gray-500">
                   Техника
                 </div>
                 <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
@@ -1869,11 +1888,11 @@ export default function Rentals() {
             {/* Month row + Day row combined */}
             <div className="flex flex-col" style={{ width: timelineWidth }}>
               {/* Month row */}
-              <div className="flex border-b border-gray-100 dark:border-gray-700">
+              <div className="flex border-b border-gray-100/90 dark:border-white/8">
                 {monthGroups.map((mg, idx) => (
                   <div
                     key={idx}
-                    className="border-r border-gray-100/60 px-2 py-1 text-xs capitalize text-gray-400 dark:border-gray-700/45 dark:text-gray-500"
+                    className="border-r border-gray-100/60 px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-gray-400 dark:border-white/8 dark:text-gray-500"
                     style={{ width: mg.count * dayWidth }}
                   >
                     {mg.month}
@@ -1888,17 +1907,17 @@ export default function Rentals() {
                   return (
                     <div
                       key={idx}
-                      className={`flex shrink-0 flex-col items-center justify-center border-r border-gray-100/60 py-1 dark:border-gray-700/45 ${
-                        isToday ? 'bg-blue-50/45 dark:bg-blue-900/12' : weekend ? 'bg-gray-50/35 dark:bg-gray-800/22' : ''
+                      className={`flex shrink-0 flex-col items-center justify-center border-r border-gray-100/60 py-1.5 dark:border-white/8 ${
+                        isToday ? 'bg-blue-50/55 dark:bg-blue-500/12' : weekend ? 'bg-gray-50/45 dark:bg-white/[0.03]' : ''
                       }`}
                       style={{ width: dayWidth }}
                     >
                       {scale === 'week' || (scale === 'custom' && totalDays <= 31) ? (
                         <>
-                          <span className={`text-[10px] ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'}`}>
+                          <span className={`text-[10px] ${isToday ? 'font-semibold text-blue-600 dark:text-blue-300' : 'text-gray-400'}`}>
                             {format(day, 'EEEEEE', { locale: ru })}
                           </span>
-                          <span className={`text-xs ${isToday ? 'text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'}`}>
+                          <span className={`text-xs ${isToday ? 'font-semibold text-blue-700 dark:text-blue-200' : 'text-gray-600 dark:text-gray-400'}`}>
                             {format(day, 'd')}
                           </span>
                         </>
@@ -1951,10 +1970,10 @@ export default function Rentals() {
                 <button
                   type="button"
                   onClick={() => toggleGroupCollapsed(group.type)}
-                  className="flex w-full border-b border-gray-200/70 bg-slate-50/55 text-left transition-colors hover:bg-slate-50/75 dark:border-gray-700 dark:bg-gray-900/38 dark:hover:bg-gray-900/55"
+                  className="flex w-full border-b border-white/50 bg-white/54 text-left transition-colors hover:bg-white/70 dark:border-white/8 dark:bg-slate-900/46 dark:hover:bg-slate-900/62"
                 >
                   <div
-                    className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200/70 bg-slate-50/80 px-4 py-2 backdrop-blur dark:border-gray-700 dark:bg-gray-900/82"
+                    className="sticky left-0 z-10 flex shrink-0 items-center border-r border-white/50 bg-white/72 px-4 py-2.5 backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/72"
                     style={{ width: LEFT_PANEL_WIDTH }}
                   >
                     <div className="flex items-center gap-2">
@@ -1964,16 +1983,16 @@ export default function Rentals() {
                         <ChevronDown className="h-4 w-4 text-gray-400" />
                       )}
                       <span className="text-sm font-semibold text-gray-900 dark:text-white">{group.label}</span>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 shadow-sm dark:bg-gray-800 dark:text-gray-300">
+                      <span className="rounded-full border border-gray-200/80 bg-white/80 px-2 py-0.5 text-[11px] font-medium text-gray-500 shadow-sm dark:border-white/10 dark:bg-white/8 dark:text-gray-300">
                         {group.items.length}
                       </span>
                     </div>
                   </div>
                   <div
-                    className="flex items-center px-3 py-2 text-[10px] text-gray-400 dark:text-gray-500"
+                    className="flex items-center px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500"
                     style={{ width: timelineWidth }}
                   >
-                    {group.items.length} единиц
+                    {group.label} · {group.items.length} ед.
                   </div>
                 </button>
 
@@ -2440,18 +2459,18 @@ function EquipmentRow({
 
   return (
     <div
-      className={`group flex border-b border-gray-100 dark:border-gray-800 ${rowIndex % 2 === 0 ? 'bg-white/[0.02] dark:bg-transparent' : 'bg-slate-50/30 dark:bg-gray-950/10'}`}
+      className={`group flex border-b border-white/40 dark:border-white/6 ${rowIndex % 2 === 0 ? 'bg-white/[0.03] dark:bg-white/[0.01]' : 'bg-slate-50/34 dark:bg-white/[0.015]'}`}
       style={{ minHeight: ROW_HEIGHT }}
     >
       {/* Left panel */}
       <div
-        className="sticky left-0 z-10 flex shrink-0 items-center border-r border-gray-200 bg-white/94 px-3 backdrop-blur transition-colors group-hover:bg-slate-50/85 dark:border-gray-700 dark:bg-gray-800/92 dark:group-hover:bg-gray-800"
+        className="sticky left-0 z-10 flex shrink-0 items-center border-r border-white/45 bg-white/90 px-3 backdrop-blur-xl transition-colors group-hover:bg-white dark:border-white/8 dark:bg-slate-900/68 dark:group-hover:bg-slate-900/82"
         style={{ width: LEFT_PANEL_WIDTH }}
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             <span className="truncate text-[13px] font-semibold text-gray-900 dark:text-white">{equipment.model}</span>
-            <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500">{equipment.inventoryNumber}</span>
+            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-500 dark:bg-white/8 dark:text-gray-400">{equipment.inventoryNumber}</span>
           </div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400">
             <span className="truncate uppercase tracking-[0.08em]">SN {equipment.serialNumber || 'не указан'}</span>

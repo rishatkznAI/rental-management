@@ -42,6 +42,7 @@ import {
 import { usersService } from '../services/users.service';
 import { ownersService } from '../services/owners.service';
 import { mechanicsService } from '../services/mechanics.service';
+import { deliveryCarriersService, type DeliveryCarrierConnection } from '../services/delivery-carriers.service';
 import { serviceWorksService } from '../services/service-works.service';
 import { sparePartsService } from '../services/spare-parts.service';
 import { equipmentService } from '../services/equipment.service';
@@ -51,6 +52,7 @@ import { serviceTicketsService } from '../services/service-tickets.service';
 import { clientsService } from '../services/clients.service';
 import { paymentsService } from '../services/payments.service';
 import { documentsService } from '../services/documents.service';
+import { deliveriesService } from '../services/deliveries.service';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
@@ -71,6 +73,7 @@ import type {
   ServiceTicket,
   ServiceStatus,
   Mechanic,
+  DeliveryCarrier,
   ReferenceStatus,
   ServiceWork,
   SparePart,
@@ -278,6 +281,7 @@ export default function Settings() {
             <ReferenceList title="Причины простоя" items={['Плановое ТО', 'Ремонт', 'Ожидание запчастей', 'Калибровка']} />
             <OwnersReferenceList />
             <MechanicsReferenceList />
+            <DeliveryCarriersReferenceList />
             <ServiceWorkCatalogReferenceList />
             <SparePartsReferenceList />
           </div>
@@ -1759,6 +1763,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
 interface DataCounts {
   ganttRentals: number;
   classicRentals: number;
+  deliveries: number;
   serviceTickets: number;
   clients: number;
   payments: number;
@@ -1775,6 +1780,7 @@ function DataResetSection() {
   const { data: clients = [] } = useQuery({ queryKey: ['clients'], queryFn: clientsService.getAll });
   const { data: payments = [] } = useQuery({ queryKey: PAYMENT_KEYS.all, queryFn: paymentsService.getAll });
   const { data: documents = [] } = useQuery({ queryKey: ['documents'], queryFn: documentsService.getAll });
+  const { data: deliveries = [] } = useQuery({ queryKey: ['deliveries'], queryFn: deliveriesService.getAll });
   const { data: shippingPhotos = [] } = useQuery({ queryKey: ['shippingPhotos', 'all'], queryFn: equipmentService.getAllShippingPhotos });
   const { data: equipment = [] } = useQuery({ queryKey: EQUIPMENT_KEYS.all, queryFn: equipmentService.getAll });
   const [dialogOpen, setDialogOpen]   = React.useState(false);
@@ -1786,6 +1792,7 @@ function DataResetSection() {
     return {
       ganttRentals: ganttRentals.length,
       classicRentals: classicRentals.length,
+      deliveries: deliveries.length,
       serviceTickets: serviceTickets.length,
       clients: clients.length,
       payments: payments.length,
@@ -1793,10 +1800,10 @@ function DataResetSection() {
       shippingPhotos: shippingPhotos.length,
       equipment: equipment.length,
     };
-  }, [classicRentals, ganttRentals, serviceTickets, clients, payments, documents, shippingPhotos, equipment]);
+  }, [classicRentals, ganttRentals, deliveries, serviceTickets, clients, payments, documents, shippingPhotos, equipment]);
 
   const totalToDelete =
-    counts.ganttRentals + counts.classicRentals + counts.serviceTickets +
+    counts.ganttRentals + counts.classicRentals + counts.deliveries + counts.serviceTickets +
     counts.clients + counts.payments + counts.documents + counts.shippingPhotos;
 
   const canConfirm = confirmText.trim().toLowerCase() === 'сброс';
@@ -1813,6 +1820,7 @@ function DataResetSection() {
       await Promise.all([
         rentalsService.bulkReplace([]),
         rentalsService.bulkReplaceGantt([]),
+        Promise.all(deliveries.map(item => deliveriesService.delete(item.id))),
         serviceTicketsService.bulkReplace([]),
         clientsService.bulkReplace([]),
         paymentsService.bulkReplace([]),
@@ -1829,6 +1837,7 @@ function DataResetSection() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        queryClient.invalidateQueries({ queryKey: ['deliveries'] }),
         queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: ['clients'] }),
         queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
@@ -1845,6 +1854,7 @@ function DataResetSection() {
   const deletableRows: { label: string; count: number; key: string }[] = [
     { key: 'ganttRentals',  label: 'Аренды (планировщик)',     count: counts.ganttRentals },
     { key: 'classicRentals',label: 'Аренды (классические)',    count: counts.classicRentals },
+    { key: 'deliveries',    label: 'Доставки',                 count: counts.deliveries },
     { key: 'serviceTickets',label: 'Сервисные заявки',         count: counts.serviceTickets },
     { key: 'clients',       label: 'Клиенты',                  count: counts.clients },
     { key: 'payments',      label: 'Платежи',                  count: counts.payments },
@@ -2225,6 +2235,197 @@ function MechanicsReferenceList() {
                   { id: `mech-${Date.now()}`, name: draft.name.trim(), phone: draft.phone.trim() || undefined, notes: draft.notes.trim() || undefined, status: 'active' },
                 ]);
                 setDraft({ name: '', phone: '', notes: '' });
+              }}
+            >
+              Добавить
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DeliveryCarriersReferenceList() {
+  const queryClient = useQueryClient();
+  const { data: carriersData = [] } = useQuery<DeliveryCarrier[]>({
+    queryKey: ['deliveryCarriers'],
+    queryFn: deliveryCarriersService.getAll,
+  });
+  const { data: connections = [] } = useQuery<DeliveryCarrierConnection[]>({
+    queryKey: ['deliveryCarrierConnections'],
+    queryFn: deliveryCarriersService.getConnections,
+  });
+  const [carriers, setCarriers] = React.useState<DeliveryCarrier[]>([]);
+  const [showOnlyConnected, setShowOnlyConnected] = React.useState(false);
+  const [draft, setDraft] = React.useState({ name: '', company: '', inn: '', phone: '', notes: '', maxCarrierKey: '' });
+
+  React.useEffect(() => {
+    setCarriers(
+      carriersData.map((item) => ({
+        ...item,
+        status: item.status === 'inactive' ? 'inactive' : 'active',
+        key: item.key || item.id,
+        maxConnected: Boolean(item.maxConnected),
+      })),
+    );
+  }, [carriersData]);
+
+  const persist = async (next: DeliveryCarrier[]) => {
+    setCarriers(next);
+    await deliveryCarriersService.bulkReplace(next.map((item) => ({
+      id: item.id,
+      key: item.id,
+      name: item.name,
+      company: item.company,
+      inn: item.inn,
+      phone: item.phone,
+      notes: item.notes,
+      status: item.status,
+      maxCarrierKey: item.maxCarrierKey || null,
+    } as DeliveryCarrier)));
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['deliveryCarriers'] }),
+      queryClient.invalidateQueries({ queryKey: ['delivery-carriers'] }),
+    ]);
+  };
+
+  const visibleCarriers = React.useMemo(() => {
+    if (!showOnlyConnected) return carriers;
+    return carriers.filter((carrier) => carrier.maxCarrierKey && connections.some((entry) => entry.key === carrier.maxCarrierKey));
+  }, [carriers, connections, showOnlyConnected]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>Перевозчики</CardTitle>
+            <CardDescription>Отдельный справочник логистических подрядчиков для вкладки «Доставка»</CardDescription>
+          </div>
+          <Button
+            size="sm"
+            variant={showOnlyConnected ? 'default' : 'secondary'}
+            onClick={() => setShowOnlyConnected((prev) => !prev)}
+          >
+            {showOnlyConnected ? 'Показать всех' : 'Только MAX'}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {visibleCarriers.map((carrier) => {
+          const linkedConnection = carrier.maxCarrierKey
+            ? connections.find((item) => item.key === carrier.maxCarrierKey)
+            : null;
+          const isConnected = Boolean(linkedConnection);
+
+          return (
+            <div key={carrier.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{carrier.name}</p>
+                  {(carrier.company || carrier.inn) && (
+                    <p className="text-xs text-gray-500">
+                      {carrier.company || 'Без компании'}
+                      {carrier.inn ? ` · ИНН ${carrier.inn}` : ''}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant={statusVariant(carrier.status)}>{statusLabel(carrier.status)}</Badge>
+                    <Badge variant={isConnected ? 'success' : 'warning'}>
+                      {isConnected ? 'MAX подключён' : 'Без MAX'}
+                    </Badge>
+                  </div>
+                  {carrier.phone && <p className="text-xs text-gray-500">{carrier.phone}</p>}
+                  {carrier.notes && <p className="text-xs text-gray-500">{carrier.notes}</p>}
+                  {linkedConnection && (
+                    <p className="text-xs text-blue-600 dark:text-blue-300">
+                      Привязка MAX: {linkedConnection.name}
+                      {linkedConnection.email ? ` · ${linkedConnection.email}` : ''}
+                    </p>
+                  )}
+                </div>
+                <div className="w-full max-w-[260px] space-y-2">
+                  <select
+                    value={carrier.maxCarrierKey || '__none__'}
+                    onChange={(e) => {
+                      const value = e.target.value === '__none__' ? null : e.target.value;
+                      void persist(carriers.map((item) =>
+                        item.id === carrier.id
+                          ? { ...item, maxCarrierKey: value, maxConnected: Boolean(value && connections.some((entry) => entry.key === value)) }
+                          : item,
+                      ));
+                    }}
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                  >
+                    <option value="__none__">Без привязки к MAX</option>
+                    {connections.map((connection) => (
+                      <option key={connection.key} value={connection.key}>
+                        {connection.name}{connection.email ? ` · ${connection.email}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void persist(carriers.map((item) => item.id === carrier.id ? { ...item, status: item.status === 'active' ? 'inactive' : 'active' } : item))}
+                    >
+                      {carrier.status === 'active' ? 'Отключить' : 'Включить'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void persist(carriers.filter((item) => item.id !== carrier.id))}
+                    >
+                      Удалить
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        <div className="rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-700">
+          <p className="mb-2 text-sm font-medium">Добавить перевозчика</p>
+          <div className="space-y-2">
+            <Input placeholder="Название перевозчика" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
+            <Input placeholder="Компания" value={draft.company} onChange={e => setDraft(prev => ({ ...prev, company: e.target.value }))} />
+            <Input placeholder="ИНН" value={draft.inn} onChange={e => setDraft(prev => ({ ...prev, inn: e.target.value }))} />
+            <Input placeholder="Телефон" value={draft.phone} onChange={e => setDraft(prev => ({ ...prev, phone: e.target.value }))} />
+            <Input placeholder="Примечание" value={draft.notes} onChange={e => setDraft(prev => ({ ...prev, notes: e.target.value }))} />
+            <select
+              value={draft.maxCarrierKey || '__none__'}
+              onChange={(e) => setDraft((prev) => ({ ...prev, maxCarrierKey: e.target.value === '__none__' ? '' : e.target.value }))}
+              className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+            >
+              <option value="__none__">Привязать позже</option>
+              {connections.map((connection) => (
+                <option key={connection.key} value={connection.key}>
+                  {connection.name}{connection.email ? ` · ${connection.email}` : ''}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!draft.name.trim()) return;
+                const nextId = `carrier-${Date.now()}`;
+                const next: DeliveryCarrier = {
+                  id: nextId,
+                  key: nextId,
+                  name: draft.name.trim(),
+                  company: draft.company.trim() || undefined,
+                  inn: draft.inn.trim() || undefined,
+                  phone: draft.phone.trim() || undefined,
+                  notes: draft.notes.trim() || undefined,
+                  status: 'active',
+                  maxCarrierKey: draft.maxCarrierKey || null,
+                  maxConnected: Boolean(draft.maxCarrierKey && connections.some((entry) => entry.key === draft.maxCarrierKey)),
+                };
+                void persist([...carriers, next]);
+                setDraft({ name: '', company: '', inn: '', phone: '', notes: '', maxCarrierKey: '' });
               }}
             >
               Добавить

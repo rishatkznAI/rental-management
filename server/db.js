@@ -16,6 +16,8 @@ const JSON_COLLECTIONS = [
   'clients',
   'documents',
   'payments',
+  'deliveries',
+  'delivery_carriers',
   'users',
   'shipping_photos',
   'equipment_operation_sessions',

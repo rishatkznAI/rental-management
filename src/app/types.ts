@@ -348,6 +348,67 @@ export interface Payment {
   comment?: string;
 }
 
+// ── Доставка ──────────────────────────────────────────────────────────────────
+
+export type DeliveryType = 'shipping' | 'receiving';
+export type DeliveryStatus = 'new' | 'sent' | 'accepted' | 'completed' | 'cancelled';
+
+export interface Delivery {
+  id: string;
+  type: DeliveryType;
+  status: DeliveryStatus;
+  transportDate: string;
+  neededBy?: string | null;
+  origin: string;
+  destination: string;
+  cargo: string;
+  contactName: string;
+  contactPhone: string;
+  cost: number;
+  comment?: string;
+  client: string;
+  clientId?: string | null;
+  manager: string;
+  carrierKey?: string | null;
+  carrierName?: string | null;
+  carrierPhone?: string | null;
+  carrierChatId?: number | null;
+  carrierUserId?: number | null;
+  ganttRentalId?: string | null;
+  classicRentalId?: string | null;
+  equipmentId?: string | null;
+  equipmentInv?: string | null;
+  equipmentLabel?: string | null;
+  botSentAt?: string | null;
+  botSendError?: string | null;
+  carrierInvoiceReceived?: boolean;
+  carrierInvoiceReceivedAt?: string | null;
+  clientPaymentVerified?: boolean;
+  clientPaymentVerifiedAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+export interface DeliveryCarrier {
+  id: string;
+  name: string;
+  company?: string;
+  inn?: string;
+  phone?: string;
+  notes?: string;
+  status: ReferenceStatus;
+  key: string;
+  maxCarrierKey?: string | null;
+  maxUserName?: string | null;
+  email?: string;
+  role?: string;
+  maxConnected: boolean;
+  chatId?: number | null;
+  userId?: number | null;
+}
+
 // ── Служебные машины ──────────────────────────────────────────────────────────
 
 export type VehicleStatus = 'active' | 'repair' | 'unavailable' | 'reserve';
@@ -456,4 +517,6 @@ export interface PlannerRow {
   risk: boolean;
   comment: string;
   rentalStatus: RentalStatus;
+  sourceType?: 'rental' | 'delivery';
+  operationType?: 'rental' | DeliveryType;
 }

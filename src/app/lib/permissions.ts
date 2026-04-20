@@ -18,6 +18,7 @@ export type Section =
   | 'dashboard'
   | 'equipment'
   | 'sales'
+  | 'deliveries'
   | 'rentals'
   | 'planner'
   | 'service'
@@ -43,6 +44,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard:        ALL,
     equipment:        ALL,
     sales:            ALL,
+    deliveries:       ALL,
     rentals:          ALL,
     planner:          ALL,
     service:          ALL,
@@ -57,6 +59,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard:        VIEW,        // только своё
     equipment:        VIEW,
     sales:            VIEW,
+    deliveries:       ['view', 'create', 'edit'],
     rentals:          VIEW,
     planner:          VIEW,
     service:          VIEW_CREATE,
@@ -71,6 +74,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     // dashboard: нет
     equipment:        ALL,
     sales:            VIEW,
+    deliveries:       ALL,
     rentals:          VIEW_CREATE,
     planner:          ALL,
     service:          ALL,
@@ -99,6 +103,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
  */
 export function pathToRequiredAction(pathname: string): { section: Section; action: Action } | null {
   if (pathname === '/equipment/new') return { section: 'equipment', action: 'create' };
+  if (pathname === '/deliveries/new') return { section: 'deliveries', action: 'create' };
   if (pathname === '/rentals/new')   return { section: 'rentals',   action: 'create' };
   if (pathname === '/clients/new')   return { section: 'clients',   action: 'create' };
   if (pathname === '/service/new')   return { section: 'service',   action: 'create' };
@@ -109,6 +114,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname === '/')                       return 'dashboard';
   if (pathname.startsWith('/equipment'))      return 'equipment';
   if (pathname.startsWith('/sales'))          return 'sales';
+  if (pathname.startsWith('/deliveries'))     return 'deliveries';
   if (pathname.startsWith('/rentals'))        return 'rentals';
   if (pathname.startsWith('/planner'))        return 'planner';
   if (pathname.startsWith('/service-vehicles')) return 'service_vehicles';
@@ -127,6 +133,7 @@ const SECTION_PATHS: Array<[Section, string]> = [
   ['dashboard',  '/'],
   ['equipment',  '/equipment'],
   ['sales',      '/sales'],
+  ['deliveries', '/deliveries'],
   ['rentals',    '/rentals'],
   ['planner',          '/planner'],
   ['service',          '/service'],

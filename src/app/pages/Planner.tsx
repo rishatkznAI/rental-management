@@ -84,6 +84,18 @@ const EQUIPMENT_STATUS_COLORS: Record<string, string> = {
   inactive:   'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
 };
 
+const OPERATION_LABELS: Record<NonNullable<PlannerRow['operationType']>, string> = {
+  rental: 'Аренда',
+  shipping: 'Отгрузка',
+  receiving: 'Приёмка',
+};
+
+const OPERATION_COLORS: Record<NonNullable<PlannerRow['operationType']>, string> = {
+  rental: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
+  shipping: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  receiving: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+};
+
 const ALL_PREP_STATUSES = Object.keys(PREP_STATUS_LABELS) as PrepStatus[];
 const ALL_PRIORITIES = Object.keys(PRIORITY_LABELS) as PlannerPriority[];
 
@@ -590,7 +602,7 @@ export default function Planner() {
             <p className="text-sm font-medium">Нет записей</p>
             <p className="text-xs mt-1">
               {rows.length === 0
-                ? 'Нет активных аренд с будущей датой отгрузки'
+                ? 'Нет будущих операций по отгрузке и приёмке'
                 : 'Попробуйте изменить фильтры'}
             </p>
           </div>
@@ -625,12 +637,17 @@ export default function Planner() {
 
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                       <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
-                        <div className="text-gray-400 dark:text-gray-500">Дата отгрузки</div>
-                        <div className="mt-1 font-medium text-gray-900 dark:text-gray-100">
-                          {formatDate(row.startDate)}
+                          <div className="text-gray-400 dark:text-gray-500">Дата операции</div>
+                          <div className="mt-1 font-medium text-gray-900 dark:text-gray-100">
+                            {formatDate(row.startDate)}
+                          </div>
+                          <div className={cn('mt-0.5', daysClass)}>{daysLabel}</div>
+                          {row.operationType && (
+                            <span className={cn('mt-2 inline-flex rounded px-2 py-0.5 text-xs font-medium', OPERATION_COLORS[row.operationType])}>
+                              {OPERATION_LABELS[row.operationType]}
+                            </span>
+                          )}
                         </div>
-                        <div className={cn('mt-0.5', daysClass)}>{daysLabel}</div>
-                      </div>
                       <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
                         <div className="text-gray-400 dark:text-gray-500">Статус техники</div>
                         <div className="mt-1">
@@ -699,7 +716,7 @@ export default function Planner() {
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                    Дата отгрузки
+                    Дата операции
                   </th>
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
                     Техника
@@ -753,6 +770,11 @@ export default function Planner() {
                         <div className={cn('text-xs', daysClass)}>
                           {daysLabel}
                         </div>
+                        {row.operationType && (
+                          <span className={cn('mt-1 inline-flex rounded px-2 py-0.5 text-[11px] font-medium', OPERATION_COLORS[row.operationType])}>
+                            {OPERATION_LABELS[row.operationType]}
+                          </span>
+                        )}
                       </td>
 
                       {/* Техника */}

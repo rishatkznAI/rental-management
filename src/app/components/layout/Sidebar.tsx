@@ -18,6 +18,7 @@ import {
   Car,
   Search,
   BadgeDollarSign,
+  Route,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -35,6 +36,7 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Дашборд',      href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
   { name: 'Техника',      href: '/equipment', icon: Truck,           section: 'equipment'  },
   { name: 'Продажи',      href: '/sales',     icon: BadgeDollarSign, section: 'sales'      },
+  { name: 'Доставка',     href: '/deliveries',icon: Route,           section: 'deliveries' },
   { name: 'Аренды',       href: '/rentals',   icon: FileText,        section: 'rentals'    },
   { name: 'Планировщик',  href: '/planner',   icon: CalendarClock,   section: 'planner'    },
   { name: 'Сервис',       href: '/service',          icon: Wrench,        section: 'service'          },

@@ -65,6 +65,7 @@ const { startServer } = require('./lib/startup');
 const { registerAuthRoutes } = require('./routes/auth');
 const { registerBotRoutes } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
+const { registerDeliveryRoutes } = require('./routes/deliveries');
 const { registerFinanceRoutes } = require('./routes/finance');
 const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
@@ -197,6 +198,8 @@ const WRITE_PERMISSIONS = {
   equipment:      ['Администратор', 'Офис-менеджер'],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  delivery_carriers: ['Администратор'],
   service:        ['Администратор', 'Механик'],
   clients:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   documents:      ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
@@ -275,6 +278,8 @@ const ID_PREFIXES = {
   clients:        'C',
   documents:      'D',
   payments:       'P',
+  deliveries:     'DL',
+  delivery_carriers: 'DC',
   users:          'U',
   shipping_photos:'SP',
   owners:         'OW',
@@ -505,6 +510,7 @@ const COLLECTIONS = [
   'clients',
   'documents',
   'payments',
+  'delivery_carriers',
   'users',
   'shipping_photos',
   'owners',
@@ -545,6 +551,18 @@ registerFinanceRoutes(apiRouter, {
   buildManagerReceivables,
   buildOverdueBuckets,
   buildFinanceReport,
+});
+
+registerDeliveryRoutes(apiRouter, {
+  readData,
+  writeData,
+  requireAuth,
+  requireWrite,
+  sendMessage,
+  getBotUsers,
+  nowIso,
+  generateId,
+  idPrefixes: ID_PREFIXES,
 });
 
 apiRouter.use(registerCrudRoutes({
@@ -655,6 +673,7 @@ apiRouter.get('/planner', requireAuth, (req, res) => {
     const includeShipped = req.query.include_shipped === '1';
 
     const rentals      = readData('rentals') || [];
+    const deliveries   = readData('deliveries') || [];
     const equipment    = readData('equipment') || [];
     const plannerItems = readData('planner_items') || [];
 
@@ -743,8 +762,69 @@ apiRouter.get('/planner', requireAuth, (req, res) => {
           risk,
           comment:         overlay?.comment || '',
           rentalStatus:    rental.status,
+          sourceType:      'rental',
+          operationType:   'rental',
         });
       }
+    }
+
+    for (const delivery of deliveries) {
+      if (!delivery.transportDate) continue;
+      if (delivery.status === 'cancelled') continue;
+
+      const eq = delivery.equipmentId
+        ? eqById.get(delivery.equipmentId) || null
+        : (delivery.equipmentInv ? eqByInv.get(delivery.equipmentInv) || null : null);
+      const equipmentRef = eq?.inventoryNumber || delivery.equipmentInv || delivery.cargo || delivery.id;
+      const rowId = `delivery:${delivery.id}__${equipmentRef}`;
+      const overlay = overlayMap.get(rowId) || null;
+
+      const startDate = new Date(delivery.transportDate);
+      startDate.setHours(0, 0, 0, 0);
+      const daysUntil = Math.round((startDate - today) / (1000 * 60 * 60 * 24));
+
+      let autoPriority;
+      if (daysUntil <= 1) autoPriority = 'high';
+      else if (daysUntil <= 3) autoPriority = 'medium';
+      else autoPriority = 'low';
+
+      const isCompleted = delivery.status === 'completed';
+      const autoRisk = !isCompleted && daysUntil <= 1;
+      const priority = overlay?.priorityOverride || autoPriority;
+      const risk = overlay?.riskOverride !== null && overlay?.riskOverride !== undefined
+        ? overlay.riskOverride
+        : autoRisk;
+
+      const defaultPrepStatus = isCompleted
+        ? (delivery.type === 'shipping' ? 'shipped' : 'ready')
+        : (delivery.type === 'shipping' ? 'planned' : 'inspection');
+      const prepStatus = overlay?.prepStatus || defaultPrepStatus;
+
+      if (!includeShipped && prepStatus === 'shipped') continue;
+
+      rows.push({
+        id: rowId,
+        rentalId: `delivery:${delivery.id}`,
+        equipmentId: eq?.id || delivery.equipmentId || null,
+        equipmentRef,
+        startDate: delivery.transportDate,
+        daysUntil,
+        equipmentLabel: delivery.equipmentLabel || (eq ? `${eq.manufacturer || ''} ${eq.model || ''}`.trim() : delivery.cargo),
+        inventoryNumber: equipmentRef,
+        serialNumber: eq?.serialNumber || null,
+        equipmentType: eq?.type || null,
+        client: delivery.client || '',
+        deliveryAddress: `${delivery.origin} → ${delivery.destination}`,
+        manager: delivery.manager || '',
+        equipmentStatus: eq?.status || null,
+        prepStatus,
+        priority,
+        risk,
+        comment: overlay?.comment || `${delivery.type === 'shipping' ? 'Отгрузка' : 'Приёмка'} · ${delivery.cargo}`,
+        rentalStatus: delivery.type === 'shipping' ? 'delivery' : 'return_planned',
+        sourceType: 'delivery',
+        operationType: delivery.type,
+      });
     }
 
     // Сортируем: сначала по дате (раньше = выше), потом по приоритету

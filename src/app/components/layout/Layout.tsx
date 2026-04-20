@@ -58,7 +58,7 @@ export function Layout() {
   if (shouldRedirectBySection || shouldRedirectByAction) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Desktop sidebar */}
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
@@ -71,17 +71,17 @@ export function Layout() {
       )}
 
       {/* Mobile top bar */}
-      <header className="fixed top-0 left-0 right-0 z-20 flex h-14 items-center justify-between border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 sm:hidden">
+      <header className="fixed top-0 left-0 right-0 z-20 flex h-14 items-center justify-between border-b border-border/80 bg-sidebar/95 px-4 backdrop-blur-xl sm:hidden">
         <button
           onClick={() => setSidebarOpen(true)}
-          className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          className="rounded-lg p-2 transition-colors hover:bg-accent"
           aria-label="Открыть меню"
         >
-          <Menu className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+          <Menu className="h-5 w-5 text-sidebar-foreground" />
         </button>
         <div className="flex items-center gap-2">
-          <Truck className="h-6 w-6 text-[--color-primary]" />
-          <span className="text-base font-bold text-gray-900 dark:text-white">Подъёмники</span>
+          <Truck className="h-6 w-6 text-primary" />
+          <span className="app-shell-title text-base font-extrabold text-sidebar-foreground">Подъёмники</span>
         </div>
         <NotificationCenter />
       </header>
@@ -91,12 +91,13 @@ export function Layout() {
         'min-h-screen',
         'sm:ml-64',
         'pt-14 pb-16 sm:pt-0 sm:pb-0',
+        'relative',
       )}>
         <Outlet key={location.pathname} />
       </main>
 
       {/* Mobile bottom navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sm:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-border/80 bg-sidebar/95 backdrop-blur-xl sm:hidden">
         <div className="grid grid-cols-5">
           {BOTTOM_NAV.map((item) => {
             const Icon = item.icon;
@@ -111,11 +112,11 @@ export function Layout() {
                 className={cn(
                   'flex flex-col items-center justify-center gap-0.5 py-2 px-1 text-[10px] font-medium transition-colors',
                   isActive
-                    ? 'text-[--color-primary]'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    ? 'text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
                 )}
               >
-                <Icon className={cn('h-5 w-5', isActive && 'text-[--color-primary]')} />
+                <Icon className={cn('h-5 w-5', isActive && 'text-primary')} />
                 <span className="leading-none">{item.name}</span>
               </button>
             );

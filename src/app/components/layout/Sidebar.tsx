@@ -50,6 +50,16 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Настройки',    href: '/settings',  icon: Settings,        section: 'settings'   },
 ];
 
+const NAV_GROUPS: Array<{
+  title: string;
+  items: Section[];
+}> = [
+  { title: 'Главное', items: ['dashboard', 'equipment', 'sales', 'deliveries', 'rentals'] },
+  { title: 'Операции', items: ['planner', 'service', 'service_vehicles'] },
+  { title: 'Данные', items: ['clients', 'documents', 'payments'] },
+  { title: 'Прочее', items: ['bots', 'reports', 'settings'] },
+];
+
 function getInitials(name: string): string {
   return name
     .split(' ')
@@ -132,6 +142,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const deferredSearch = useDeferredValue(search);
   const normalizedSearch = normalizeSearch(deferredSearch);
 
+  const navBadges = useMemo(() => ({
+    equipment: equipment.length,
+    rentals: rentals.length,
+    service: serviceTickets.filter(item => item.status !== 'closed').length,
+    documents: 0,
+    payments: 0,
+  }), [equipment.length, rentals.length, serviceTickets]);
+
   const handleLogout = () => {
     logout();
     navigate('/login', { replace: true });
@@ -141,9 +159,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     // Close mobile sidebar on navigation
     onClose();
   };
-
-  // Показываем только те разделы, к которым у пользователя есть доступ
-  const visibleNav = navigation.filter(item => canView(item.section));
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -280,53 +295,57 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     handleNavClick();
   };
 
+  const groupedNav = NAV_GROUPS.map(group => ({
+    ...group,
+    items: navigation.filter(item => group.items.includes(item.section) && canView(item.section)),
+  })).filter(group => group.items.length > 0);
+
   return (
     <aside
       className={cn(
-        // Base styles
         'fixed left-0 top-0 z-40 h-screen w-64',
-        'border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800',
+        'border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[0_36px_60px_-34px_rgba(0,0,0,0.7)] backdrop-blur-xl',
         'transition-transform duration-300 ease-in-out',
-        // Desktop: always visible
         'sm:translate-x-0',
-        // Mobile: slide in/out
         isOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0',
       )}
     >
       <div className="flex h-full flex-col">
-        {/* Logo */}
-        <div className="flex h-16 items-center justify-between border-b border-gray-200 dark:border-gray-700 px-6">
-          <div className="flex items-center">
-            <Truck className="h-8 w-8 text-[--color-primary]" />
-            <span className="ml-2 text-lg font-bold text-gray-900 dark:text-white">Подъёмники</span>
+        <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-[0_12px_30px_-16px_rgba(212,247,74,0.95)]">
+            <Truck className="h-5 w-5" />
           </div>
-          <div className="flex items-center gap-1">
-            <NotificationCenter />
+          <div className="min-w-0">
+            <div className="app-shell-title text-[15px] font-extrabold text-sidebar-foreground">Подъёмники</div>
+          </div>
+          <div className="ml-auto flex items-center gap-1">
+            <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/60">
+              <NotificationCenter />
+            </div>
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
               aria-label="Переключить тему"
             >
               {theme === 'light' ? (
-                <Moon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                <Moon className="h-4 w-4" />
               ) : (
-                <Sun className="h-5 w-5 text-gray-400" />
+                <Sun className="h-4 w-4" />
               )}
             </button>
-            {/* Close button — mobile only */}
             <button
               onClick={onClose}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors sm:hidden"
+              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:hidden"
               aria-label="Закрыть меню"
             >
-              <X className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700" ref={searchRef}>
+        <div className="px-3 py-3" ref={searchRef}>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -334,21 +353,21 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 if (normalizedSearch.length > 0) setIsSearchOpen(true);
               }}
               placeholder="Поиск: техника, клиенты, аренды, сервис"
-              className="h-10 pl-9 pr-3 text-sm"
+              className="h-10 rounded-xl border-sidebar-border bg-sidebar-accent pl-9 pr-3 text-sm text-sidebar-foreground placeholder:text-muted-foreground"
             />
           </div>
 
           {isSearchOpen && (
-            <div className="mt-2 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
+            <div className="mt-2 rounded-2xl border border-sidebar-border bg-card shadow-[0_24px_45px_-30px_rgba(0,0,0,0.85)]">
               {searchResults.length === 0 ? (
-                <div className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400">
+                <div className="px-4 py-4 text-sm text-muted-foreground">
                   Ничего не найдено. Попробуйте номер техники, клиента, ID аренды или сервисной заявки.
                 </div>
               ) : (
                 <div className="max-h-96 overflow-y-auto py-2">
                   {groupedResults.map(([group, items]) => (
                     <div key={group}>
-                      <div className="px-4 py-1 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                      <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                         {group}
                       </div>
                       <div className="space-y-1 px-2 pb-2">
@@ -359,16 +378,16 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                               key={result.id}
                               type="button"
                               onClick={() => handleSearchNavigate(result.href)}
-                              className="flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700"
+                              className="flex w-full items-start gap-3 rounded-xl px-2 py-2 text-left hover:bg-sidebar-accent"
                             >
-                              <div className="mt-0.5 rounded-md bg-gray-100 p-2 text-gray-500 dark:bg-gray-700 dark:text-gray-300">
+                              <div className="mt-0.5 rounded-lg bg-sidebar-accent p-2 text-muted-foreground">
                                 <Icon className="h-4 w-4" />
                               </div>
                               <div className="min-w-0">
-                                <div className="truncate text-sm font-medium text-gray-900 dark:text-white">
+                                <div className="truncate text-sm font-medium text-sidebar-foreground">
                                   {highlightMatch(result.title, normalizedSearch)}
                                 </div>
-                                <div className="line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
+                                <div className="line-clamp-2 text-xs text-muted-foreground">
                                   {highlightMatch(result.subtitle, normalizedSearch)}
                                 </div>
                               </div>
@@ -384,60 +403,89 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           )}
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-          {visibleNav.map((item) => {
-            const Icon = item.icon;
-            const isActive =
-              location.pathname === item.href ||
-              (item.href !== '/' && location.pathname.startsWith(item.href + '/'));
+        <nav className="flex-1 overflow-y-auto px-2 pb-2">
+          {groupedNav.map(group => (
+            <div key={group.title} className="mb-2">
+              <div className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                {group.title}
+              </div>
+              <div className="space-y-1">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive =
+                    location.pathname === item.href ||
+                    (item.href !== '/' && location.pathname.startsWith(item.href + '/'));
+                  const badgeValue = navBadges[item.section as keyof typeof navBadges];
 
-            return (
-              <button
-                key={item.name}
-                type="button"
-                onClick={() => {
-                  navigate(item.href);
-                  handleNavClick();
-                }}
-                className={cn(
-                  'relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors',
-                  isActive
-                    ? 'text-[--color-primary] bg-blue-50 dark:bg-blue-900/20'
-                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                )}
-              >
-                <Icon className="h-5 w-5 shrink-0" />
-                {item.name}
-                {isActive && (
-                  <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-[--color-primary] rounded-full" />
-                )}
-              </button>
-            );
-          })}
+                  return (
+                    <button
+                      key={item.name}
+                      type="button"
+                      onClick={() => {
+                        navigate(item.href);
+                        handleNavClick();
+                      }}
+                      className={cn(
+                        'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] transition-colors',
+                        isActive
+                          ? 'bg-primary text-primary-foreground shadow-[0_16px_30px_-22px_rgba(212,247,74,0.95)]'
+                          : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="flex-1">{item.name}</span>
+                      {typeof badgeValue === 'number' && badgeValue > 0 ? (
+                        <span className={cn(
+                          'rounded-full px-2 py-0.5 text-[10px] font-medium',
+                          isActive
+                            ? 'bg-black/15 text-primary-foreground'
+                            : item.section === 'service'
+                              ? 'bg-orange-500/12 text-orange-400'
+                              : 'bg-emerald-500/12 text-emerald-400',
+                        )}>
+                          {badgeValue > 99 ? '99+' : badgeValue}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
-        {/* User info + logout */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[--color-primary] text-white font-medium text-sm">
+        <div className="border-t border-sidebar-border px-3 pb-3 pt-2">
+          <div className="mb-2 flex items-center gap-2 rounded-xl border border-sidebar-border bg-sidebar-accent/80 px-3 py-2 text-sm text-muted-foreground">
+            {theme === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            <span>{theme === 'dark' ? 'Тёмный режим' : 'Светлый режим'}</span>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="ml-auto rounded-full border border-sidebar-border bg-accent px-2 py-0.5 text-[11px] text-sidebar-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
+            >
+              {theme === 'dark' ? 'On' : 'Off'}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 px-3 py-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
               {user ? getInitials(user.name) : '?'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+              <p className="truncate text-sm font-medium text-sidebar-foreground">
                 {user?.name ?? '—'}
               </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              <p className="truncate text-xs text-muted-foreground">
                 {user?.role ?? 'Пользователь'}
               </p>
             </div>
             <button
               onClick={handleLogout}
-              className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-sidebar-foreground"
               aria-label="Выйти"
               title="Выйти"
             >
-              <LogOut className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+              <LogOut className="h-4 w-4" />
             </button>
           </div>
         </div>

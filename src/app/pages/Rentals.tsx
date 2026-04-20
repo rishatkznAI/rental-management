@@ -1291,46 +1291,46 @@ export default function Rentals() {
   }, [today, viewStart, totalDays, dayWidth]);
 
   return (
-    <div className="relative flex h-[calc(100vh-56px-64px)] sm:h-[calc(100vh)] flex-col overflow-hidden bg-slate-50 dark:bg-[#0b1220]">
+    <div className="relative flex h-[calc(100vh-56px-64px)] sm:h-[calc(100vh)] flex-col overflow-hidden bg-background">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-64 opacity-80"
         style={{
           background:
-            'radial-gradient(60% 80% at 20% 0%, rgba(37,99,235,0.18), transparent 70%), radial-gradient(55% 75% at 85% 10%, rgba(14,165,233,0.12), transparent 72%)',
+            'radial-gradient(55% 80% at 16% 0%, rgba(212,247,74,0.14), transparent 68%), radial-gradient(52% 74% at 86% 10%, rgba(66,232,176,0.1), transparent 72%)',
         }}
       />
       {/* ===== Toolbar ===== */}
-      <div className="relative z-10 border-b border-white/50 bg-white/78 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.65)] backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/58 dark:shadow-[0_18px_50px_-30px_rgba(2,6,23,0.95)]">
+      <div className="relative z-10 border-b border-border/80 bg-card/80 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.65)] backdrop-blur-xl">
         <div className="space-y-3 px-4 py-3">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="space-y-2">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                   Аренды
                 </p>
-                <h1 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">
+                <h1 className="app-shell-title mt-1 text-3xl font-extrabold tracking-tight text-foreground">
                   Планировщик аренды
                 </h1>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                <p className="mt-1 text-sm text-muted-foreground">
                   Управление выдачей, возвратами и загрузкой техники в одном таймлайне.
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white/70 px-2.5 py-1 text-gray-600 dark:border-white/10 dark:bg-white/5 dark:text-gray-300">
-                  <span className="font-semibold text-gray-900 dark:text-white">{shownEquipment}</span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/80 px-2.5 py-1 text-muted-foreground">
+                  <span className="font-semibold text-foreground">{shownEquipment}</span>
                   ед. техники
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white/70 px-2.5 py-1 text-gray-600 dark:border-white/10 dark:bg-white/5 dark:text-gray-300">
-                  <span className="font-semibold text-gray-900 dark:text-white">{shownRentals}</span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/80 px-2.5 py-1 text-muted-foreground">
+                  <span className="font-semibold text-foreground">{shownRentals}</span>
                   аренд
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/80 px-2.5 py-1 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/15 bg-blue-500/10 px-2.5 py-1 text-blue-300">
                   <CreditCard className="h-3.5 w-3.5" />
                   {quickFilterCounts.unpaid} без оплаты
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-red-200/80 bg-red-50/80 px-2.5 py-1 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                <span className="inline-flex items-center gap-1 rounded-full border border-red-500/15 bg-red-500/10 px-2.5 py-1 text-red-300">
                   <AlertTriangle className="h-3.5 w-3.5" />
                   {quickFilterCounts.overdue} просроч.
                 </span>
@@ -1339,16 +1339,16 @@ export default function Rentals() {
 
             <div className="flex flex-wrap items-center gap-2 xl:justify-end">
               {can('create', 'rentals') && (
-                <Button size="sm" className="h-10 rounded-xl bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] px-4 shadow-[0_14px_30px_-18px_rgba(37,99,235,0.95)]" onClick={() => handleOpenNewRental()}>
+                <Button size="sm" className="app-button-primary h-10 rounded-xl px-4 shadow-[0_14px_30px_-18px_rgba(212,247,74,0.75)]" onClick={() => handleOpenNewRental()}>
                   <Plus className="h-4 w-4" />
                   Новая аренда
                 </Button>
               )}
-              <Button size="sm" variant="secondary" className="h-10 rounded-xl border border-gray-200/80 bg-white/72 px-4 dark:border-white/10 dark:bg-white/6" onClick={() => handleOpenReturn()}>
+              <Button size="sm" variant="secondary" className="app-button-outline h-10 rounded-xl px-4" onClick={() => handleOpenReturn()}>
                 <RotateCcw className="h-4 w-4" />
                 Возврат техники
               </Button>
-              <Button size="sm" variant="secondary" className="h-10 rounded-xl border border-gray-200/80 bg-white/72 px-4 dark:border-white/10 dark:bg-white/6" onClick={() => handleOpenDowntime()}>
+              <Button size="sm" variant="secondary" className="app-button-ghost h-10 rounded-xl px-4" onClick={() => handleOpenDowntime()}>
                 <PauseCircle className="h-4 w-4" />
                 Отметить простой
               </Button>
@@ -1392,21 +1392,21 @@ export default function Rentals() {
       </div>
 
       {/* ===== Filters ===== */}
-      <div className="relative z-10 border-b border-white/40 bg-white/72 backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/46">
+      <div className="relative z-10 border-b border-border/80 bg-card/70 backdrop-blur-xl">
         <div className="px-4 py-2">
-          <div className="rounded-[24px] border border-gray-200/80 bg-white/76 px-4 py-3 shadow-[0_24px_50px_-38px_rgba(15,23,42,0.9)] dark:border-white/10 dark:bg-white/6">
+          <div className="rounded-[24px] border border-border bg-card/80 px-4 py-3 shadow-[0_24px_50px_-38px_rgba(15,23,42,0.9)]">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex rounded-[18px] border border-gray-200/80 bg-white/72 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
+                  <div className="flex rounded-[18px] border border-border bg-secondary/80 p-1">
                     {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
                       <button
                         key={s}
                         onClick={() => setScale(s)}
                         className={`rounded-xl px-3 py-1.5 text-sm font-medium transition-colors ${
                           scale === s
-                            ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-800 dark:text-white'
-                            : 'text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white'
+                            ? 'bg-accent text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
                         }`}
                       >
                         {SCALE_CONFIG[s].label}
@@ -1414,44 +1414,44 @@ export default function Rentals() {
                     ))}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 rounded-[18px] border border-gray-200/80 bg-white/72 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
+                  <div className="flex flex-wrap items-center gap-2 rounded-[18px] border border-border bg-secondary/80 px-2.5 py-1.5">
                     <input
                       type="date"
                       value={customRangeStart}
                       onChange={e => setCustomRangeStart(e.target.value)}
-                      className="h-8 rounded-xl border border-gray-200 bg-white/92 px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-800/88 dark:text-white"
+                      className="h-8 rounded-xl border border-border bg-input-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
-                    <span className="text-sm text-gray-400">—</span>
+                    <span className="text-sm text-muted-foreground">—</span>
                     <input
                       type="date"
                       value={customRangeEnd}
                       onChange={e => setCustomRangeEnd(e.target.value)}
-                      className="h-8 rounded-xl border border-gray-200 bg-white/92 px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-800/88 dark:text-white"
+                      className="h-8 rounded-xl border border-border bg-input-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                     <button
                       onClick={applyCustomRange}
                       disabled={!customRange}
-                      className="rounded-xl bg-gray-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800 dark:hover:bg-slate-700"
+                      className="rounded-xl bg-accent px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Период
                     </button>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 rounded-[18px] border border-gray-200/80 bg-white/72 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-white/10 dark:bg-white/6">
+                <div className="flex flex-wrap items-center gap-2 rounded-[18px] border border-border bg-secondary/80 px-2.5 py-1.5">
                   <button
                     onClick={() => navigateTime('today')}
-                    className="rounded-xl border border-gray-200 bg-white/92 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-white/10 dark:bg-slate-800/88 dark:text-gray-200 dark:hover:bg-slate-700"
+                    className="rounded-xl border border-border bg-input-background px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
                   >
                     Сегодня
                   </button>
-                  <button onClick={() => navigateTime('prev')} className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-white hover:text-gray-800 dark:hover:bg-slate-800 dark:hover:text-white">
+                  <button onClick={() => navigateTime('prev')} className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                     <ChevronLeft className="h-4 w-4" />
                   </button>
-                  <button onClick={() => navigateTime('next')} className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-white hover:text-gray-800 dark:hover:bg-slate-800 dark:hover:text-white">
+                  <button onClick={() => navigateTime('next')} className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                     <ChevronRight className="h-4 w-4" />
                   </button>
-                  <div className="pl-1 text-sm font-medium text-gray-500 dark:text-gray-400">
+                  <div className="pl-1 text-sm font-medium text-muted-foreground">
                     {rangeLabel}
                   </div>
                 </div>
@@ -1475,8 +1475,8 @@ export default function Rentals() {
                       onClick={() => setRentalPreset(option.value)}
                       className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                         rentalPreset === option.value
-                          ? 'bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] text-white shadow-[0_12px_26px_-18px_rgba(37,99,235,0.9)]'
-                          : 'border border-gray-200/80 bg-white/70 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-white/10 dark:bg-white/5 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                          ? 'bg-primary text-primary-foreground shadow-[0_12px_26px_-18px_rgba(212,247,74,0.8)]'
+                          : 'border border-border bg-secondary/70 text-muted-foreground hover:border-primary/40 hover:text-foreground'
                       }`}
                     >
                       {option.label}

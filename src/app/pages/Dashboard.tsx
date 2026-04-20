@@ -170,7 +170,7 @@ export default function Dashboard() {
   const [officeUpdManagerFilter, setOfficeUpdManagerFilter] = useState('');
   const [managerBreakdownName, setManagerBreakdownName] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const dashboardCardClass = 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/60';
+  const dashboardCardClass = 'app-panel border-border/80 bg-card/95';
   const dashboardCardHeaderClass = 'space-y-2 px-5 pt-5 pb-3';
   const dashboardCardContentClass = 'space-y-2 px-5 pb-5';
   const dashboardSectionClass = 'space-y-4';
@@ -1250,57 +1250,59 @@ export default function Dashboard() {
   // ── render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
+    <div className="space-y-5 p-4 sm:space-y-6 sm:p-6 md:p-8">
 
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Дашборд</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Обновлено: {new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={refresh} disabled={refreshing}>
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Обновить</span>
-          </Button>
-          {can('create', 'rentals') && (
-            <Button size="sm" onClick={() => setShowRentalModal(true)}>
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Новая аренда</span>
-              <span className="sm:hidden">Аренда</span>
+      <div className="app-panel overflow-hidden">
+        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Главное</div>
+            <h1 className="app-shell-title mt-1 text-3xl font-extrabold text-foreground sm:text-4xl">Дашборд</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Обновлено: {new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" className="app-button-ghost rounded-xl px-4" onClick={refresh} disabled={refreshing}>
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Обновить</span>
             </Button>
-          )}
-          {can('create', 'service') && (
-            <Button size="sm" variant="secondary" onClick={() => setShowServiceModal(true)}>
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Заявка в сервис</span>
-              <span className="sm:hidden">Сервис</span>
-            </Button>
-          )}
-          {can('create', 'clients') && (
-            <Button size="sm" variant="secondary" onClick={() => setShowClientModal(true)}>
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Новый клиент</span>
-              <span className="sm:hidden">Клиент</span>
-            </Button>
-          )}
+            {can('create', 'rentals') && (
+              <Button size="sm" className="app-button-outline rounded-xl px-4" onClick={() => setShowRentalModal(true)}>
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Новая аренда</span>
+                <span className="sm:hidden">Аренда</span>
+              </Button>
+            )}
+            {can('create', 'service') && (
+              <Button size="sm" variant="secondary" className="app-button-outline rounded-xl px-4" onClick={() => setShowServiceModal(true)}>
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Заявка в сервис</span>
+                <span className="sm:hidden">Сервис</span>
+              </Button>
+            )}
+            {can('create', 'clients') && (
+              <Button size="sm" className="app-button-primary rounded-xl px-4" onClick={() => setShowClientModal(true)}>
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Новый клиент</span>
+                <span className="sm:hidden">Клиент</span>
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
       {roleDashboardMeta && roleDashboardCards.length > 0 && (
-        <Card className="border-gray-200 bg-white/90 dark:border-gray-700 dark:bg-gray-900/70">
+        <Card className={dashboardCardClass}>
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <div className="space-y-2">
-                <Badge variant="secondary">{roleDashboardMeta.badge}</Badge>
-                <CardTitle className="text-xl">{roleDashboardMeta.title}</CardTitle>
-                <CardDescription className="max-w-3xl text-sm">
+                <Badge variant="default" className="bg-primary/12 text-primary dark:bg-primary/12 dark:text-primary">{roleDashboardMeta.badge}</Badge>
+                <CardTitle className="app-shell-title text-xl font-extrabold">{roleDashboardMeta.title}</CardTitle>
+                <CardDescription className="max-w-3xl text-sm text-muted-foreground">
                   {roleDashboardMeta.description}
                 </CardDescription>
               </div>
-              <Button asChild variant="ghost" size="sm" className="self-start lg:self-center">
+              <Button asChild variant="ghost" size="sm" className="self-start rounded-xl text-muted-foreground hover:text-foreground lg:self-center">
                 <Link to={user?.role === 'Механик' ? '/service' : user?.role === 'Офис-менеджер' ? '/documents' : '/rentals'}>
                   Открыть основной раздел
                   <ArrowRight className="h-4 w-4" />
@@ -1314,35 +1316,35 @@ export default function Dashboard() {
                 const Icon = item.icon;
                 const toneClass =
                   item.tone === 'danger'
-                    ? 'border-red-200 bg-red-50/70 dark:border-red-900 dark:bg-red-950/20'
+                    ? 'border-red-500/20 bg-red-500/8'
                     : item.tone === 'warning'
-                    ? 'border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/20'
+                    ? 'border-orange-400/20 bg-orange-400/8'
                     : item.tone === 'success'
-                    ? 'border-green-200 bg-green-50/70 dark:border-green-900 dark:bg-green-950/20'
-                    : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/80';
+                    ? 'border-emerald-400/20 bg-emerald-400/8'
+                    : 'border-border bg-secondary/70';
 
                 const iconClass =
                   item.tone === 'danger'
-                    ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                    ? 'bg-red-500/12 text-red-400'
                     : item.tone === 'warning'
-                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                    ? 'bg-orange-400/12 text-orange-300'
                     : item.tone === 'success'
-                    ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
+                    ? 'bg-emerald-400/12 text-emerald-300'
+                    : 'bg-primary/12 text-primary';
 
                 return (
-                  <div key={item.id} className={`rounded-xl border p-4 ${toneClass}`}>
+                  <div key={item.id} className={`rounded-2xl border p-4 ${toneClass}`}>
                     <div className="flex items-start justify-between gap-3">
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-full ${iconClass}`}>
+                      <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconClass}`}>
                         <Icon className="h-5 w-5" />
                       </div>
                       {item.onClick ? (
-                        <Button size="sm" variant="ghost" className="h-8 px-2" onClick={item.onClick}>
+                        <Button size="sm" variant="ghost" className="h-8 rounded-lg px-2 text-muted-foreground" onClick={item.onClick}>
                           {item.cta}
                           <ArrowRight className="h-4 w-4" />
                         </Button>
                       ) : (
-                        <Button asChild size="sm" variant="ghost" className="h-8 px-2">
+                        <Button asChild size="sm" variant="ghost" className="h-8 rounded-lg px-2 text-muted-foreground">
                           <Link to={item.href}>
                             {item.cta}
                             <ArrowRight className="h-4 w-4" />
@@ -1351,9 +1353,9 @@ export default function Dashboard() {
                       )}
                     </div>
                     <div className="mt-4">
-                      <p className="text-sm font-medium text-gray-600 dark:text-gray-300">{item.title}</p>
-                      <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{item.value}</p>
-                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{item.hint}</p>
+                      <p className="text-sm font-medium text-muted-foreground">{item.title}</p>
+                      <p className="mt-1 text-2xl font-bold text-foreground">{item.value}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">{item.hint}</p>
                     </div>
                   </div>
                 );
@@ -1363,13 +1365,15 @@ export default function Dashboard() {
         </Card>
       )}
 
+      {/* Header old block removed */}
+
       {isAdminRole && (
         <section className={dashboardSectionClass}>
           <div className={dashboardSectionHeaderClass}>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
               Команда
             </p>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Результаты по каждому менеджеру и механику</h2>
+            <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Результаты по каждому менеджеру и механику</h2>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
@@ -1505,7 +1509,7 @@ export default function Dashboard() {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
             Критично сейчас
           </p>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Срочные зоны внимания</h2>
+          <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Срочные зоны внимания</h2>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-3">
@@ -1608,7 +1612,7 @@ export default function Dashboard() {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
             Операционная работа
           </p>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Что происходит в аренде и сервисе</h2>
+          <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Что происходит в аренде и сервисе</h2>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -1730,7 +1734,7 @@ export default function Dashboard() {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
             Сводка
           </p>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Спокойные показатели для общей картины</h2>
+          <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Спокойные показатели для общей картины</h2>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

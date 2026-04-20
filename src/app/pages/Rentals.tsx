@@ -319,6 +319,7 @@ export default function Rentals() {
   const canEditRentalDates = user?.role === 'Администратор';
   const canRestoreRentals = user?.role === 'Администратор';
   const today = useMemo(() => startOfDay(new Date()), []);
+  const todayStr = format(today, 'yyyy-MM-dd');
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>([]);
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -2513,6 +2514,7 @@ function EquipmentRow({
 }: EquipmentRowProps) {
   const { can: canDo } = usePermissions();
   const isCompact = densityMode === 'compact';
+  const todayStr = format(today, 'yyyy-MM-dd');
   // Статус вычисляется динамически из аренд, а не из equipment.status
   const effectiveStatus = computeEffectiveStatus(equipment, rentals, today, { start: viewStart, end: viewEnd });
   const eqStatus = EQ_STATUS_LABELS[effectiveStatus] || EQ_STATUS_LABELS.available;

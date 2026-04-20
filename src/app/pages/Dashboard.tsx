@@ -582,7 +582,7 @@ export default function Dashboard() {
         items: items.sort((left, right) => new Date(right.endDate).getTime() - new Date(left.endDate).getTime()),
       }))
       .sort((left, right) => right.items.length - left.items.length || left.clientName.localeCompare(right.clientName, 'ru'));
-  }, [officePendingUpdManagerFilter, officePendingUpdRentals]);
+  }, [officeUpdManagerFilter, officePendingUpdRentals]);
 
   const officeSignedUpdGroups = useMemo(() => {
     const filteredRentals = officeUpdManagerFilter
@@ -631,7 +631,7 @@ export default function Dashboard() {
     () => officeUpdManagerFilter
       ? officePendingUpdRentals.filter(rental => rental.manager === officeUpdManagerFilter)
       : officePendingUpdRentals,
-    [officePendingUpdManagerFilter, officePendingUpdRentals],
+    [officeUpdManagerFilter, officePendingUpdRentals],
   );
   const officeFilteredSignedUpdRentals = useMemo(
     () => officeUpdManagerFilter

@@ -601,13 +601,60 @@ function createBotHandlers(deps) {
     });
   }
 
+  async function promptWorkSearch(senderId, phone, ticket, uiContext = {}) {
+    updateBotSession(phone, {
+      pendingAction: 'work_search',
+      activeRepairId: ticket.id,
+      pendingPayload: null,
+      lastWorkSearch: [],
+    });
+    return reply(
+      senderId,
+      withBotMenu(
+        [
+          '🧰 Напишите название работы или её часть.',
+          'Я найду подходящие работы в справочнике и предложу выбрать кнопку.',
+          '',
+          'Примеры:',
+          '• гидравлика',
+          '• замена масла',
+          '• диагностика',
+        ].join('\n'),
+        ['черновик', 'запчасти', 'готово'],
+      ),
+      {
+        attachments: currentRepairKeyboard(ticket.id),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      },
+    );
+  }
+
   async function handleAddWorkRequest(senderId, phone, authUser, ticket, selectionText, uiContext = {}) {
     const [firstRaw, secondRaw] = selectionText.trim().split(/\s+/);
     const session = getBotSession(phone);
     const selectedWorkId = session.pendingPayload?.selectedWorkId;
+    if (!selectedWorkId && firstRaw && Number.isNaN(Number(firstRaw))) {
+      return handleWorkSearchRequest(senderId, phone, ticket, selectionText.trim(), uiContext);
+    }
     const quantity = Number(selectedWorkId ? firstRaw : secondRaw);
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      return reply(senderId, '❌ Количество работы должно быть числом больше 0.');
+      if (selectedWorkId) {
+        return reply(
+          senderId,
+          '❌ Для выбранной работы напишите количество одним числом. Например: 2. Если хотите найти другую работу, нажмите «Новый поиск работ».',
+          {
+            attachments: currentRepairKeyboard(ticket.id),
+            phone,
+            callbackContext: uiContext.callbackContext,
+            replaceMessage: Boolean(uiContext.callbackContext),
+            cleanupPrevious: !uiContext.callbackContext,
+          },
+        );
+      }
+      return reply(senderId, '❌ Формат такой: НОМЕР КОЛИЧЕСТВО. Например: 1 2. Или просто напишите новый поисковый запрос.');
     }
     let work = null;
 
@@ -1904,7 +1951,7 @@ function createBotHandlers(deps) {
       }
       const query = trimmed.slice('/работы'.length).trim();
       if (!query) {
-        return handleWorkSearchRequest(senderId, phone, ticket, '', uiContext);
+        return promptWorkSearch(senderId, phone, ticket, uiContext);
       }
       return handleWorkSearchRequest(senderId, phone, ticket, query, uiContext);
     }

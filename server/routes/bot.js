@@ -1,3 +1,208 @@
+const express = require('express');
+
+function trimText(value, maxLength = 160) {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1)}…`
+    : normalized;
+}
+
+function toFiniteNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function pendingActionLabel(action) {
+  const map = {
+    login_email: 'Ожидает логин',
+    login_password: 'Ожидает пароль',
+    equipment_search: 'Поиск техники',
+    ticket_reason: 'Причина заявки',
+    work_search: 'Поиск работ',
+    work_pick: 'Добавление работы',
+    part_search: 'Поиск запчастей',
+    part_pick: 'Добавление запчасти',
+    summary: 'Итог ремонта',
+    maintenance_summary: 'Комментарий по ТО',
+    operation_step: 'Шаг отгрузки/приёмки',
+    repair_photo_before: 'Фото до ремонта',
+    repair_photo_after: 'Фото после ремонта',
+    repair_close_checklist: 'Чек-лист закрытия',
+  };
+  return map[action] || (action ? trimText(action, 80) : null);
+}
+
+function byDateDesc(left, right) {
+  const leftTime = left ? Date.parse(left) : 0;
+  const rightTime = right ? Date.parse(right) : 0;
+  return rightTime - leftTime;
+}
+
+function requireBotAdmin(req, res, next) {
+  if (req.user?.userRole !== 'Администратор') {
+    return res.status(403).json({ ok: false, error: 'Раздел бота доступен только администратору.' });
+  }
+  return next();
+}
+
+function buildBotConnections(botId, botUsers = {}, botSessions = {}, activity = []) {
+  const latestActivityByPhone = new Map();
+  const authorizationByPhone = new Map();
+
+  (Array.isArray(activity) ? activity : []).forEach(entry => {
+    if (entry?.botId !== botId || !entry.phone) return;
+    if (!latestActivityByPhone.has(entry.phone)) {
+      latestActivityByPhone.set(entry.phone, entry);
+    }
+    if (entry.eventType === 'authorization' && !authorizationByPhone.has(entry.phone)) {
+      authorizationByPhone.set(entry.phone, entry);
+    }
+  });
+
+  return Object.entries(botUsers || {})
+    .map(([phone, user]) => {
+      const session = botSessions?.[phone] || {};
+      const latestActivity = latestActivityByPhone.get(phone);
+      const authorization = authorizationByPhone.get(phone);
+
+      return {
+        id: `${botId}:${phone}`,
+        botId,
+        phone,
+        maxUserId: user?.maxUserId ?? toFiniteNumber(phone) ?? toFiniteNumber(user?.replyTarget?.user_id),
+        userId: user?.userId || null,
+        userName: user?.userName || null,
+        userRole: user?.userRole || null,
+        email: user?.email || null,
+        replyTarget: user?.replyTarget || null,
+        connectedAt: user?.connectedAt || authorization?.createdAt || null,
+        lastSeenAt: user?.lastSeenAt || session?.updatedAt || latestActivity?.createdAt || null,
+        pendingAction: session?.pendingAction || null,
+        pendingActionLabel: pendingActionLabel(session?.pendingAction),
+        activeRepairId: session?.activeRepairId || null,
+        sessionUpdatedAt: session?.updatedAt || null,
+      };
+    })
+    .sort((left, right) => byDateDesc(left.lastSeenAt || left.connectedAt, right.lastSeenAt || right.connectedAt));
+}
+
+function buildBotActivity(botId, botUsers = {}, activity = []) {
+  return (Array.isArray(activity) ? activity : [])
+    .filter(entry => entry?.botId === botId)
+    .map(entry => {
+      const linkedUser = botUsers?.[entry.phone] || {};
+      return {
+        id: entry.id,
+        botId,
+        phone: entry.phone || null,
+        maxUserId: entry.maxUserId ?? toFiniteNumber(entry.phone) ?? linkedUser.maxUserId ?? null,
+        userId: entry.userId || linkedUser.userId || null,
+        userName: entry.userName || linkedUser.userName || null,
+        userRole: entry.userRole || linkedUser.userRole || null,
+        email: entry.email || linkedUser.email || null,
+        eventType: entry.eventType || 'message',
+        action: trimText(entry.action || 'Действие без описания'),
+        details: entry.details ? trimText(entry.details, 220) : null,
+        createdAt: entry.createdAt || null,
+      };
+    })
+    .sort((left, right) => byDateDesc(left.createdAt, right.createdAt));
+}
+
+function buildBotSummary({
+  botId,
+  name,
+  provider,
+  description,
+  botToken,
+  webhookUrl,
+  connections,
+  activity,
+}) {
+  const actions24h = activity.filter(entry => {
+    if (!entry.createdAt) return false;
+    return Date.now() - Date.parse(entry.createdAt) <= 24 * 60 * 60 * 1000;
+  }).length;
+  const pendingCount = connections.filter(item => Boolean(item.pendingAction)).length;
+  const lastActivityAt = activity[0]?.createdAt || connections[0]?.lastSeenAt || null;
+
+  return {
+    id: botId,
+    name,
+    provider,
+    description,
+    status: botToken ? 'online' : 'offline',
+    webhookConfigured: Boolean(webhookUrl),
+    totalConnections: connections.length,
+    pendingConnections: pendingCount,
+    totalActivity: activity.length,
+    activity24h: actions24h,
+    lastActivityAt,
+    connectionsPreview: connections.slice(0, 5),
+    recentActivity: activity.slice(0, 8),
+  };
+}
+
+function registerBotApiRoutes(router, deps) {
+  const {
+    requireAuth,
+    readData,
+    getBotUsers,
+    getBotSessions,
+    botToken,
+    webhookUrl,
+  } = deps;
+
+  const botRouter = express.Router();
+  const BOT_ID = 'max';
+  const BOT_NAME = 'MAX бот';
+
+  function readBotActivity() {
+    return readData('bot_activity') || [];
+  }
+
+  function buildPayload() {
+    const botUsers = getBotUsers() || {};
+    const botSessions = getBotSessions() || {};
+    const activity = buildBotActivity(BOT_ID, botUsers, readBotActivity());
+    const connections = buildBotConnections(BOT_ID, botUsers, botSessions, activity);
+    const summary = buildBotSummary({
+      botId: BOT_ID,
+      name: BOT_NAME,
+      provider: 'MAX',
+      description: 'Операционный бот для MAX: авторизация сотрудников, сервисные сценарии и рабочие действия в чате.',
+      botToken,
+      webhookUrl,
+      connections,
+      activity,
+    });
+
+    return { summary, connections, activity };
+  }
+
+  botRouter.get('/bots', requireAuth, requireBotAdmin, (_req, res) => {
+    const { summary } = buildPayload();
+    return res.json([summary]);
+  });
+
+  botRouter.get('/bots/:botId', requireAuth, requireBotAdmin, (req, res) => {
+    if (req.params.botId !== BOT_ID) {
+      return res.status(404).json({ ok: false, error: 'Бот не найден.' });
+    }
+
+    const { summary, connections, activity } = buildPayload();
+
+    return res.json({
+      bot: summary,
+      connections,
+      activity,
+    });
+  });
+
+  router.use(botRouter);
+}
+
 function registerBotRoutes(app, deps) {
   const {
     handleCommand,
@@ -89,5 +294,6 @@ function registerBotRoutes(app, deps) {
 }
 
 module.exports = {
+  registerBotApiRoutes,
   registerBotRoutes,
 };

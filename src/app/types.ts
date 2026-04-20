@@ -348,6 +348,71 @@ export interface Payment {
   comment?: string;
 }
 
+// ── Боты ──────────────────────────────────────────────────────────────────────
+
+export type BotStatus = 'online' | 'offline';
+export type BotActivityType = 'session_started' | 'authorization' | 'command' | 'message' | 'callback';
+
+export interface BotReplyTarget {
+  chat_id?: number | null;
+  user_id?: number | null;
+}
+
+export interface BotConnection {
+  id: string;
+  botId: string;
+  phone: string;
+  maxUserId: number | null;
+  userId: string | null;
+  userName: string | null;
+  userRole: string | null;
+  email: string | null;
+  replyTarget: BotReplyTarget | null;
+  connectedAt: string | null;
+  lastSeenAt: string | null;
+  pendingAction: string | null;
+  pendingActionLabel: string | null;
+  activeRepairId: string | null;
+  sessionUpdatedAt: string | null;
+}
+
+export interface BotActivityEntry {
+  id: string;
+  botId: string;
+  phone: string | null;
+  maxUserId: number | null;
+  userId: string | null;
+  userName: string | null;
+  userRole: string | null;
+  email: string | null;
+  eventType: BotActivityType;
+  action: string;
+  details: string | null;
+  createdAt: string | null;
+}
+
+export interface BotSummary {
+  id: string;
+  name: string;
+  provider: string;
+  description: string;
+  status: BotStatus;
+  webhookConfigured: boolean;
+  totalConnections: number;
+  pendingConnections: number;
+  totalActivity: number;
+  activity24h: number;
+  lastActivityAt: string | null;
+  connectionsPreview: BotConnection[];
+  recentActivity: BotActivityEntry[];
+}
+
+export interface BotDetailResponse {
+  bot: BotSummary;
+  connections: BotConnection[];
+  activity: BotActivityEntry[];
+}
+
 // ── Доставка ──────────────────────────────────────────────────────────────────
 
 export type DeliveryType = 'shipping' | 'receiving';

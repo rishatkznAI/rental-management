@@ -31,6 +31,7 @@ const JSON_COLLECTIONS = [
   'spare_parts_catalog',
   'bot_users',
   'bot_sessions',
+  'bot_activity',
   'snapshot',
 ];
 

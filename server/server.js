@@ -63,7 +63,7 @@ const { createMaxApiClient } = require('./lib/max-api');
 const { createServiceCore } = require('./lib/service-core');
 const { startServer } = require('./lib/startup');
 const { registerAuthRoutes } = require('./routes/auth');
-const { registerBotRoutes } = require('./routes/bot');
+const { registerBotApiRoutes, registerBotRoutes } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
 const { registerFinanceRoutes } = require('./routes/finance');
@@ -145,6 +145,8 @@ function getBotUsers()    { return readData('bot_users') || {}; }
 function saveBotUsers(u)  { writeData('bot_users', u); }
 function getBotSessions() { return readData('bot_sessions') || {}; }
 function saveBotSessions(s) { writeData('bot_sessions', s); }
+function getBotActivity() { return readData('bot_activity') || []; }
+function saveBotActivity(a) { writeData('bot_activity', Array.isArray(a) ? a : []); }
 function getSnapshot()    { return readData('snapshot') || {}; }
 function saveSnapshot(s)  { writeData('snapshot', s); }
 
@@ -599,8 +601,6 @@ const serviceCore = createServiceCore({
 
 const {
   serviceStatusLabel,
-  servicePriorityLabel,
-  openServiceStatuses,
   readServiceTickets,
   writeServiceTickets,
   findServiceTicketById,
@@ -628,8 +628,16 @@ registerServiceRoutes(apiRouter, {
   migrateLegacyRepairFacts,
 });
 
+registerBotApiRoutes(apiRouter, {
+  requireAuth,
+  readData,
+  getBotUsers,
+  getBotSessions,
+  botToken: BOT_TOKEN,
+  webhookUrl: WEBHOOK_URL,
+});
+
 const {
-  withBotMenu,
   handleBotStarted,
   handleCommand,
   handleCallback,
@@ -658,6 +666,200 @@ const {
   getOpenTicketByEquipment,
   serviceStatusLabel,
 });
+
+const BOT_ACTIVITY_LIMIT = 2000;
+
+function trimBotAuditText(value, maxLength = 160) {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1)}…`
+    : normalized;
+}
+
+function toBotNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function syncBotConnection(phone, senderId, previousUser = null) {
+  const phoneKey = String(phone || '');
+  if (!phoneKey) return null;
+
+  const botUsers = getBotUsers();
+  const current = botUsers[phoneKey];
+  if (!current) return null;
+
+  botUsers[phoneKey] = {
+    ...current,
+    botId: 'max',
+    phone: phoneKey,
+    maxUserId: current.maxUserId ?? toBotNumber(phoneKey) ?? toBotNumber(current.replyTarget?.user_id),
+    connectedAt: current.connectedAt || previousUser?.connectedAt || nowIso(),
+    lastSeenAt: nowIso(),
+    replyTarget: current.replyTarget || {
+      chat_id: senderId?.chat_id ?? null,
+      user_id: senderId?.user_id ?? toBotNumber(phoneKey),
+    },
+  };
+
+  saveBotUsers(botUsers);
+  return botUsers[phoneKey];
+}
+
+function appendBotActivity(entry) {
+  const activity = getBotActivity();
+  activity.push(entry);
+  saveBotActivity(activity.slice(-BOT_ACTIVITY_LIMIT));
+}
+
+function recordBotActivity({
+  phone,
+  senderId,
+  eventType,
+  action,
+  details = null,
+  user = null,
+}) {
+  const phoneKey = String(phone || '');
+  const linkedUser = user || getBotUsers()[phoneKey] || null;
+
+  appendBotActivity({
+    id: generateId('botact'),
+    botId: 'max',
+    phone: phoneKey || null,
+    maxUserId: linkedUser?.maxUserId ?? toBotNumber(phoneKey) ?? toBotNumber(senderId?.user_id),
+    userId: linkedUser?.userId || null,
+    userName: linkedUser?.userName || null,
+    userRole: linkedUser?.userRole || null,
+    email: linkedUser?.email || null,
+    eventType,
+    action: trimBotAuditText(action),
+    details: details ? trimBotAuditText(details, 220) : null,
+    createdAt: nowIso(),
+  });
+}
+
+function describeBotMessage(text, session = {}, attachments = []) {
+  const trimmed = String(text || '').trim();
+  const attachmentsCount = Array.isArray(attachments) ? attachments.length : 0;
+
+  if (session.pendingAction === 'login_password') {
+    return {
+      eventType: 'authorization',
+      action: 'Ввод пароля',
+      details: 'Содержимое скрыто из журнала',
+    };
+  }
+
+  if (session.pendingAction === 'login_email') {
+    return {
+      eventType: 'authorization',
+      action: 'Ввод логина',
+      details: null,
+    };
+  }
+
+  if (trimmed.startsWith('/start')) {
+    return {
+      eventType: 'authorization',
+      action: 'Команда /start',
+      details: 'Запрошена авторизация',
+    };
+  }
+
+  if (trimmed.startsWith('/')) {
+    const [command, ...rest] = trimmed.split(/\s+/);
+    return {
+      eventType: 'command',
+      action: `Команда ${command}`,
+      details: rest.length > 0 ? trimBotAuditText(rest.join(' '), 120) : null,
+    };
+  }
+
+  if (!trimmed && attachmentsCount > 0) {
+    return {
+      eventType: 'message',
+      action: `Отправлено вложений: ${attachmentsCount}`,
+      details: null,
+    };
+  }
+
+  return {
+    eventType: 'message',
+    action: trimBotAuditText(trimmed || 'Пустое сообщение'),
+    details: attachmentsCount > 0 ? `Вложений: ${attachmentsCount}` : null,
+  };
+}
+
+function describeBotCallback(payload) {
+  return {
+    eventType: 'callback',
+    action: trimBotAuditText(`Нажата кнопка: ${payload || 'без payload'}`),
+    details: null,
+  };
+}
+
+async function auditedHandleBotStarted(senderId, phone, payload) {
+  recordBotActivity({
+    phone,
+    senderId,
+    eventType: 'session_started',
+    action: 'Пользователь открыл бота',
+    details: payload ? `Payload: ${payload}` : null,
+  });
+  return handleBotStarted(senderId, phone, payload);
+}
+
+async function auditedHandleCommand(senderId, phone, text, messageMeta, uiContext) {
+  const phoneKey = String(phone || '');
+  const session = getBotSessions()[phoneKey] || {};
+  const beforeUser = getBotUsers()[phoneKey] || null;
+  const event = describeBotMessage(text, session, messageMeta?.attachments);
+
+  recordBotActivity({
+    phone,
+    senderId,
+    eventType: event.eventType,
+    action: event.action,
+    details: event.details,
+    user: beforeUser,
+  });
+
+  const result = await handleCommand(senderId, phone, text, messageMeta, uiContext);
+  const afterUser = syncBotConnection(phone, senderId, beforeUser);
+
+  if (afterUser?.userId && (!beforeUser || beforeUser.userId !== afterUser.userId)) {
+    recordBotActivity({
+      phone,
+      senderId,
+      eventType: 'authorization',
+      action: beforeUser ? 'Пользователь переподключил бота' : 'Пользователь подключил бота',
+      details: afterUser.userName ? `Сотрудник: ${afterUser.userName}` : null,
+      user: afterUser,
+    });
+  }
+
+  return result;
+}
+
+async function auditedHandleCallback(senderId, phone, payload, callbackContext) {
+  const beforeUser = getBotUsers()[String(phone || '')] || null;
+  const event = describeBotCallback(payload);
+
+  recordBotActivity({
+    phone,
+    senderId,
+    eventType: event.eventType,
+    action: event.action,
+    details: event.details,
+    user: beforeUser,
+  });
+
+  const result = await handleCallback(senderId, phone, payload, callbackContext);
+  syncBotConnection(phone, senderId, beforeUser);
+  return result;
+}
 
 // ── Планировщик подготовки техники к аренде ──────────────────────────────────
 
@@ -1247,9 +1449,9 @@ function applyAdminResetFromEnv() {
 }
 
 registerBotRoutes(app, {
-  handleCommand,
-  handleBotStarted,
-  handleCallback,
+  handleCommand: auditedHandleCommand,
+  handleBotStarted: auditedHandleBotStarted,
+  handleCallback: auditedHandleCallback,
   answerCallback,
   logger: console,
 });

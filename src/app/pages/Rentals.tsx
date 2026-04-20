@@ -2410,15 +2410,14 @@ export default function Rentals() {
           ganttRentals={ganttRentals}
           equipmentList={equipmentList}
         onClose={() => setShowNewRentalModal(false)}
-        onConfirm={(data) => {
+        onConfirm={async (data) => {
           // Если аренда начинается сегодня или в прошлом — сразу 'active',
           // иначе 'created' (будущая аренда / бронь)
           const todayStr = format(today, 'yyyy-MM-dd');
           const initialStatus: GanttRentalData['status'] =
             (data.startDate || '') <= todayStr ? 'active' : 'created';
 
-          const newRental: GanttRentalData = {
-            id: `GR-${Date.now()}`,
+          const newRental: Omit<GanttRentalData, 'id'> = {
             client: data.client || '',
             clientShort: (data.client || '').substring(0, 20),
             equipmentId: data.equipmentId,
@@ -2443,30 +2442,58 @@ export default function Rentals() {
               ),
             ],
           };
-          const updated = [...ganttRentals, newRental];
-          void persistGanttRentals(updated);
 
-          // Синхронизируем статус техники + клиента и дату возврата на основе initialStatus аренды
-          if (data.equipmentId) {
-            const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
-            const newEqList = equipmentList.map(e => {
-              if (e.id !== data.equipmentId) return e;
-              return appendEquipmentHistoryEntry(
-                {
-                  ...e,
-                  status: eqStatus,
-                  currentClient: initialStatus === 'active' ? newRental.client : e.currentClient,
-                  returnDate: initialStatus === 'active' ? newRental.endDate : e.returnDate,
-                },
-                initialStatus === 'active'
-                  ? `Создана и сразу активирована аренда для клиента ${newRental.client}`
-                  : `Создана бронь под клиента ${newRental.client}`,
-              );
+          try {
+            const savedRental = await rentalsService.createGanttEntry(newRental);
+
+            // Сохраняем и "классическую" аренду, чтобы она была видна в связанных разделах и карточках.
+            await rentalsService.create({
+              client: data.client || '',
+              contact: '',
+              startDate: data.startDate || '',
+              plannedReturnDate: data.endDate || '',
+              equipment: [data.equipmentInv || ''],
+              rate: data.amount && data.startDate && data.endDate
+                ? `${Math.round(data.amount / Math.max(1, getRentalDays(data.startDate, data.endDate)))} ₽/день`
+                : '0 ₽/день',
+              price: data.amount || 0,
+              discount: 0,
+              deliveryAddress: '',
+              manager: data.manager || '',
+              status: 'new',
+              comments: '',
             });
-            void persistEquipment(newEqList);
+
+            setGanttRentals((prev) => [...prev, savedRental]);
+            await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+            await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all });
+
+            // Синхронизируем статус техники + клиента и дату возврата на основе initialStatus аренды
+            if (data.equipmentId) {
+              const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
+              const newEqList = equipmentList.map(e => {
+                if (e.id !== data.equipmentId) return e;
+                return appendEquipmentHistoryEntry(
+                  {
+                    ...e,
+                    status: eqStatus,
+                    currentClient: initialStatus === 'active' ? savedRental.client : e.currentClient,
+                    returnDate: initialStatus === 'active' ? savedRental.endDate : e.returnDate,
+                  },
+                  initialStatus === 'active'
+                    ? `Создана и сразу активирована аренда для клиента ${savedRental.client}`
+                    : `Создана бронь под клиента ${savedRental.client}`,
+                );
+              });
+              await persistEquipment(newEqList);
+            }
+
+            showToast(`Аренда создана: ${savedRental.id} — ${data.client} (${data.equipmentInv})`);
+            setShowNewRentalModal(false);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Не удалось создать аренду';
+            showToast(message, 'error');
           }
-          showToast(`Аренда создана: ${newRental.id} — ${data.client} (${data.equipmentInv})`);
-          setShowNewRentalModal(false);
         }}
       />
       {/* ===== Toast notification ===== */}

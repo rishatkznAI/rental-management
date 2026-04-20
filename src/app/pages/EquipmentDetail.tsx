@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge, getEquipmentPriorityBadge, getEquipmentStatusBadge } from '../components/ui/badge';
+import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
@@ -865,66 +865,83 @@ export default function EquipmentDetail() {
   const equipmentPayments = allPayments.filter(p => p.rentalId && equipmentRentalIds.has(p.rentalId));
   const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
 
-  const tabTriggerClass =
-    'whitespace-nowrap shrink-0 border-b-2 border-transparent px-3 py-2.5 sm:px-4 sm:py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:hover:text-gray-200';
+  const tabTriggerClass = 'whitespace-nowrap';
 
   return (
-    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
-      {/* ── Header ── */}
+    <div className="equipment-detail-skin space-y-5 p-4 sm:space-y-6 sm:p-6 md:p-8">
       <div>
         <Link
           to="/equipment"
-          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
           Вернуться к списку
         </Link>
 
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">
-                {equipment.inventoryNumber}
-              </h1>
-              {getEquipmentPriorityBadge(equipment.priority)}
-              {getEquipmentStatusBadge(equipment.status)}
-              <Badge variant={equipment.owner === 'own' ? 'success' : equipment.owner === 'investor' ? 'info' : 'warning'}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className={`border-0 ${
+                equipment.priority === 'critical' || equipment.priority === 'high'
+                  ? 'bg-red-500/12 text-red-300'
+                  : equipment.priority === 'medium'
+                  ? 'bg-blue-500/12 text-blue-300'
+                  : 'bg-emerald-500/12 text-emerald-300'
+              }`}>
+                {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
+              </Badge>
+              <Badge className={`border-0 ${
+                equipment.status === 'in_service'
+                  ? 'bg-orange-500/12 text-orange-300'
+                  : equipment.status === 'rented'
+                  ? 'bg-blue-500/12 text-blue-300'
+                  : equipment.status === 'reserved'
+                  ? 'bg-yellow-500/12 text-yellow-300'
+                  : 'bg-emerald-500/12 text-emerald-300'
+              }`}>
+                {EQ_STATUS_LABELS[equipment.status]}
+              </Badge>
+              <Badge className={`border-0 ${
+                equipment.owner === 'own'
+                  ? 'bg-emerald-500/12 text-emerald-300'
+                  : equipment.owner === 'investor'
+                  ? 'bg-blue-500/12 text-blue-300'
+                  : 'bg-orange-500/12 text-orange-300'
+              }`}>
                 {ownerLabels[equipment.owner]}
               </Badge>
               {equipment.isForSale && (
-                <Badge variant="warning">
+                <Badge className="border-0 bg-orange-500/12 text-orange-300">
                   На продажу
                 </Badge>
               )}
-              {criticalTickets.length > 0 && (
-                <Badge variant="error">
-                  {criticalTickets.length} заявок требует внимания
-                </Badge>
-              )}
             </div>
-            <p className="mt-1 text-lg text-gray-500 dark:text-gray-400">
+            <h1 className="app-shell-title mt-3 text-3xl font-extrabold text-foreground sm:text-4xl">
               {equipment.manufacturer} {equipment.model}
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || 'не указан'}
             </p>
-            <div className="mt-1 flex items-center gap-1 text-sm text-gray-400 dark:text-gray-500">
+            <div className="mt-2 flex items-center gap-1 text-sm text-muted-foreground">
               <MapPin className="h-3.5 w-3.5" />
-              {equipment.location}
+              {equipment.location || 'Локация не указана'}
             </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
             {can('edit', 'equipment') && (
-              <Button variant="secondary" size="sm" onClick={() => setShowEditModal(true)}>
+              <Button variant="secondary" size="sm" className="app-button-ghost rounded-xl px-4" onClick={() => setShowEditModal(true)}>
                 Редактировать
               </Button>
             )}
             <Link to="/rentals">
-              <Button variant="secondary" size="sm">
+              <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
                 <Calendar className="h-3.5 w-3.5" />
                 Аренды
               </Button>
             </Link>
             <Link to="/service">
-              <Button variant="secondary" size="sm">
+              <Button size="sm" className="app-button-primary rounded-xl px-4">
                 <Wrench className="h-3.5 w-3.5" />
                 В сервис
               </Button>
@@ -933,135 +950,92 @@ export default function EquipmentDetail() {
         </div>
       </div>
 
-      {/* ── Quick Status Cards ── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Rental status */}
-        <div className={`rounded-xl border p-4 ${
-          equipment.status === 'rented'
-            ? 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20'
+        <div className={`rounded-2xl border p-4 ${
+          equipment.status === 'in_service'
+            ? 'border-red-500/25 bg-red-500/8'
             : equipment.status === 'reserved'
-            ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
-            : equipment.status === 'in_service'
-            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
-            : 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
+            ? 'border-orange-500/25 bg-orange-500/8'
+            : equipment.status === 'rented'
+            ? 'border-blue-500/25 bg-blue-500/8'
+            : 'border-border bg-card/95'
         }`}>
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Статус</p>
-              <p className={`mt-1 text-base font-semibold ${
-                equipment.status === 'rented' ? 'text-blue-700 dark:text-blue-300' :
-                equipment.status === 'reserved' ? 'text-amber-700 dark:text-amber-300' :
-                equipment.status === 'in_service' ? 'text-red-700 dark:text-red-300' :
-                'text-green-700 dark:text-green-300'
-              }`}>{EQ_STATUS_LABELS[equipment.status]}</p>
-              {equipment.currentClient && (
-                <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">{equipment.currentClient}</p>
-              )}
-              {equipment.returnDate && (
-                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  Возврат: {formatDate(equipment.returnDate)}
-                </p>
-              )}
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Статус</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{EQ_STATUS_LABELS[equipment.status]}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{equipment.currentClient || 'Техника без активного клиента'}</p>
             </div>
-            <Calendar className={`h-5 w-5 ${
-              equipment.status === 'rented' ? 'text-blue-400' :
-              equipment.status === 'reserved' ? 'text-amber-400' :
-              equipment.status === 'in_service' ? 'text-red-400' :
-              'text-green-400'
-            }`} />
+            <Calendar className="h-5 w-5 text-muted-foreground" />
           </div>
         </div>
 
-        {/* Next maintenance */}
-        <div className={`rounded-xl border p-4 ${
+        <div className={`rounded-2xl border p-4 ${
           daysUntilMaintenance <= 7
-            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+            ? 'border-red-500/25 bg-red-500/8'
             : daysUntilMaintenance <= 30
-            ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
-            : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50'
+            ? 'border-orange-500/25 bg-orange-500/8'
+            : 'border-border bg-card/95'
         }`}>
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Следующее ТО</p>
-              <p className={`mt-1 text-base font-semibold ${
-                daysUntilMaintenance <= 7 ? 'text-red-700 dark:text-red-300' :
-                daysUntilMaintenance <= 30 ? 'text-amber-700 dark:text-amber-300' :
-                'text-gray-900 dark:text-white'
-              }`}>{formatDate(equipment.nextMaintenance)}</p>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                {daysUntilMaintenance > 0 ? `через ${daysUntilMaintenance} дн.` : 'просрочено!'}
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Следующее ТО</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{formatDate(equipment.nextMaintenance)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {daysUntilMaintenance > 0 ? `через ${daysUntilMaintenance} дн.` : 'просрочено'}
               </p>
             </div>
-            <Wrench className={`h-5 w-5 ${
-              daysUntilMaintenance <= 7 ? 'text-red-400' :
-              daysUntilMaintenance <= 30 ? 'text-amber-400' :
-              'text-gray-400'
-            }`} />
+            <Wrench className="h-5 w-5 text-muted-foreground" />
           </div>
         </div>
 
-        {/* Monthly utilization */}
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+        <div className="rounded-2xl border border-border bg-card/95 p-4">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Утилизация · {format(today, 'MMM', { locale: ru })}</p>
-              <p className="mt-1 text-base font-semibold text-gray-900 dark:text-white">{utilizationMonth}%</p>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                {daysRentedThisMonth} из {daysInCurrentMonth} дней
-              </p>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Утилизация · {format(today, 'MMM', { locale: ru })}</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{utilizationMonth}%</p>
+              <p className="mt-1 text-xs text-muted-foreground">{daysRentedThisMonth} из {daysInCurrentMonth} дней</p>
             </div>
-            <TrendingUp className="h-5 w-5 text-purple-400" />
+            <TrendingUp className="h-5 w-5 text-blue-300" />
           </div>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-            <div className="h-full rounded-full bg-purple-500" style={{ width: `${utilizationMonth}%` }} />
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+            <div className="h-full rounded-full bg-primary" style={{ width: `${utilizationMonth}%` }} />
           </div>
         </div>
 
-        {/* Open service tickets */}
-        <div className={`rounded-xl border p-4 ${
+        <div className={`rounded-2xl border p-4 ${
           criticalTickets.length > 0
-            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+            ? 'border-red-500/25 bg-red-500/8'
             : openServiceTickets.length > 0
-            ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
-            : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50'
+            ? 'border-orange-500/25 bg-orange-500/8'
+            : 'border-border bg-card/95'
         }`}>
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Сервисные заявки</p>
-              <p className={`mt-1 text-base font-semibold ${
-                criticalTickets.length > 0 ? 'text-red-700 dark:text-red-300' :
-                openServiceTickets.length > 0 ? 'text-amber-700 dark:text-amber-300' :
-                'text-gray-900 dark:text-white'
-              }`}>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Сервисные заявки</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">
                 {openServiceTickets.length > 0 ? `${openServiceTickets.length} открыт.` : 'Нет заявок'}
               </p>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                всего {serviceHistory.length} в истории
-              </p>
+              <p className="mt-1 text-xs text-muted-foreground">всего {serviceHistory.length} в истории</p>
             </div>
-            <AlertTriangle className={`h-5 w-5 ${
-              criticalTickets.length > 0 ? 'text-red-400' :
-              openServiceTickets.length > 0 ? 'text-amber-400' :
-              'text-gray-400'
-            }`} />
+            <AlertTriangle className="h-5 w-5 text-muted-foreground" />
           </div>
         </div>
       </div>
 
-      {/* ── Maintenance / Service Alerts ── */}
       {daysUntilMaintenance <= 30 && (
-        <div className={`rounded-lg border p-4 ${
+        <div className={`rounded-2xl border px-4 py-3 ${
           daysUntilMaintenance <= 7
-            ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
-            : 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
+            ? 'border-red-500/25 bg-red-500/8'
+            : 'border-orange-500/25 bg-orange-500/8'
         }`}>
           <div className="flex items-start gap-3">
-            <CircleAlert className={`mt-0.5 h-5 w-5 shrink-0 ${daysUntilMaintenance <= 7 ? 'text-red-600' : 'text-amber-600'}`} />
+            <CircleAlert className={`mt-0.5 h-5 w-5 shrink-0 ${daysUntilMaintenance <= 7 ? 'text-red-300' : 'text-orange-300'}`} />
             <div className="flex-1">
-              <p className={`font-medium ${daysUntilMaintenance <= 7 ? 'text-red-900 dark:text-red-200' : 'text-amber-900 dark:text-amber-200'}`}>
+              <p className={`font-medium ${daysUntilMaintenance <= 7 ? 'text-red-300' : 'text-orange-300'}`}>
                 Техническое обслуживание через {daysUntilMaintenance} дней
               </p>
-              <p className={`mt-0.5 text-sm ${daysUntilMaintenance <= 7 ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}`}>
+              <p className="mt-0.5 text-sm text-muted-foreground">
                 Запланировано на {formatDate(equipment.nextMaintenance)}
               </p>
             </div>
@@ -1069,11 +1043,9 @@ export default function EquipmentDetail() {
         </div>
       )}
 
-      {/* ── Photo and Key Info ── */}
-      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-[260px_1fr]">
         <Card>
           <CardContent className="p-0">
-            {/* Hidden file input for main photo */}
             <input
               ref={mainPhotoInputRef}
               type="file"
@@ -1083,36 +1055,33 @@ export default function EquipmentDetail() {
             />
             <div className="group relative">
               {equipment.photo ? (
-                <div className="flex min-h-[18rem] items-center justify-center overflow-hidden rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
+                <div className="flex min-h-[18rem] items-center justify-center overflow-hidden rounded-2xl bg-secondary p-3">
                   <img
                     src={equipment.photo}
                     alt={equipment.model}
-                    className="max-h-[32rem] w-full cursor-zoom-in rounded-md object-contain"
+                    className="max-h-[32rem] w-full cursor-zoom-in rounded-xl object-contain"
                     onClick={() => setPreviewImage(equipment.photo ?? null)}
                   />
                 </div>
               ) : (
-                <div className="flex h-48 sm:h-64 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
-                  <ImageIcon className="h-16 w-16 text-gray-400" />
+                <div className="flex min-h-[18rem] items-center justify-center rounded-2xl bg-secondary">
+                  <ImageIcon className="h-16 w-16 text-muted-foreground" />
                 </div>
               )}
-              {/* Desktop: hover overlay */}
               {canEditEquipment && (
-                <div className="hidden sm:flex absolute inset-0 items-end justify-center rounded-lg bg-black/0 pb-3 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100">
+                <div className="absolute inset-0 hidden items-end justify-center rounded-2xl bg-black/0 pb-3 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100 sm:flex">
                   <div className="flex gap-2">
                     <button
                       onClick={() => mainPhotoInputRef.current?.click()}
-                      className="flex items-center gap-1.5 rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-800 shadow hover:bg-white"
+                      className="rounded-lg bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-900 shadow"
                     >
-                      <Upload className="h-3.5 w-3.5" />
                       {equipment.photo ? 'Заменить' : 'Загрузить'}
                     </button>
                     {equipment.photo && (
                       <button
                         onClick={handleMainPhotoDelete}
-                        className="flex items-center gap-1.5 rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-red-600 shadow hover:bg-white"
+                        className="rounded-lg bg-white/90 px-3 py-1.5 text-xs font-medium text-red-600 shadow"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
                         Удалить
                       </button>
                     )}
@@ -1120,12 +1089,11 @@ export default function EquipmentDetail() {
                 </div>
               )}
             </div>
-            {/* Mobile: always-visible photo buttons */}
             {canEditEquipment && (
               <div className="flex gap-2 px-3 py-2 sm:hidden">
                 <button
                   onClick={() => mainPhotoInputRef.current?.click()}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 active:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-2 text-xs font-medium text-foreground"
                 >
                   <Upload className="h-3.5 w-3.5" />
                   {equipment.photo ? 'Заменить фото' : 'Загрузить фото'}
@@ -1133,7 +1101,7 @@ export default function EquipmentDetail() {
                 {equipment.photo && (
                   <button
                     onClick={handleMainPhotoDelete}
-                    className="flex items-center justify-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-600 active:bg-red-100 dark:border-red-800 dark:bg-red-900/20"
+                    className="flex items-center justify-center gap-1.5 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     Удалить
@@ -1141,20 +1109,13 @@ export default function EquipmentDetail() {
                 )}
               </div>
             )}
-            {!canEditEquipment && (
-              <p className="px-3 py-2 text-center text-xs text-gray-400 dark:text-gray-500">
-                Фото доступно только для просмотра
-              </p>
-            )}
-            <p className="hidden sm:block px-3 py-1 text-center text-xs text-gray-400 dark:text-gray-500">
-              {canEditEquipment
-                ? equipment.photo ? 'Наведите для изменения фото' : 'Наведите для загрузки фото'
-                : ''}
+            <p className="px-3 py-3 text-center text-xs text-muted-foreground">
+              {equipment.photo ? 'Фото загружено' : 'Нет фотографий · нажмите чтобы добавить'}
             </p>
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <Card>
           <CardHeader>
             <CardTitle>Основные характеристики</CardTitle>
           </CardHeader>
@@ -1174,16 +1135,16 @@ export default function EquipmentDetail() {
               {equipment.loadCapacity && <InfoField label="Грузоподъёмность" value={`${equipment.loadCapacity} кг`} />}
               {equipment.dimensions && <InfoField label="Габариты" value={equipment.dimensions} />}
               {equipment.weight && <InfoField label="Масса" value={`${equipment.weight} кг`} />}
-              <InfoField label="Локация" value={equipment.location} />
+              <InfoField label="Локация" value={equipment.location || '—'} />
               <InfoField label="Владелец" value={ownerLabels[equipment.owner]} />
               {equipment.owner === 'sublease' && equipment.subleasePrice && (
                 <InfoField label="Стоимость субаренды" value={`${formatCurrency(equipment.subleasePrice)}/мес`} highlight="orange" />
               )}
+              <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} highlight={daysUntilMaintenance <= 0 ? 'red' : undefined} />
             </div>
 
-            {/* Current rental info */}
             {equipment.currentClient && (
-              <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+              <div className="mt-4 rounded-xl border border-blue-500/20 bg-blue-500/8 p-3">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <InfoField label="Текущий клиент" value={equipment.currentClient} />
                   {activeRental?.startDate && (
@@ -1203,13 +1164,21 @@ export default function EquipmentDetail() {
             )}
 
             {equipment.isForSale && (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/20">
+              <div className="mt-4 rounded-xl border border-orange-500/20 bg-orange-500/8 p-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Продажа</p>
-                    <p className="text-xs text-amber-700/80 dark:text-amber-300/80">Коммерческий контур и готовность PDI</p>
+                    <p className="text-sm font-semibold text-orange-300">Продажа</p>
+                    <p className="text-xs text-muted-foreground">Коммерческий контур и готовность PDI</p>
                   </div>
-                  {getSalePdiBadge(equipment.salePdiStatus)}
+                  <Badge className={`border-0 ${
+                    equipment.salePdiStatus === 'ready'
+                      ? 'bg-emerald-500/12 text-emerald-300'
+                      : equipment.salePdiStatus === 'in_progress'
+                      ? 'bg-orange-500/12 text-orange-300'
+                      : 'bg-secondary text-muted-foreground'
+                  }`}>
+                    {EQUIPMENT_SALE_PDI_LABELS[equipment.salePdiStatus ?? 'not_started']}
+                  </Badge>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <InfoField label="Цена 1" value={formatCurrency(equipment.salePrice1 ?? 0)} />
@@ -1219,8 +1188,7 @@ export default function EquipmentDetail() {
               </div>
             )}
 
-            {/* Maintenance dates */}
-            <div className="mt-4 grid grid-cols-1 gap-3 border-t border-gray-200 pt-4 dark:border-gray-700 sm:grid-cols-3">
+            <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-3">
               <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} />
               {equipment.maintenanceCHTO && <InfoField label="Дата ЧТО" value={formatDate(equipment.maintenanceCHTO)} />}
               {equipment.maintenancePTO && <InfoField label="Дата ПТО" value={formatDate(equipment.maintenancePTO)} />}
@@ -1231,7 +1199,7 @@ export default function EquipmentDetail() {
 
       {/* ── Tabs ── */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
+        <TabsList className="">
           <TabsTrigger value="overview" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><CheckCircle className="h-3.5 w-3.5" /> Обзор</span>
           </TabsTrigger>
@@ -1239,10 +1207,10 @@ export default function EquipmentDetail() {
             <span className="flex items-center gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Финансы</span>
           </TabsTrigger>
           <TabsTrigger value="rental-history" className={tabTriggerClass}>
-            <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Аренды {ganttRentals.length > 0 && <span className="rounded-full bg-gray-200 px-1.5 text-xs dark:bg-gray-700">{ganttRentals.length}</span>}</span>
+            <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Аренды {ganttRentals.length > 0 && <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">{ganttRentals.length}</span>}</span>
           </TabsTrigger>
           <TabsTrigger value="service-history" className={tabTriggerClass}>
-            <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Сервис {openServiceTickets.length > 0 && <span className="rounded-full bg-red-100 px-1.5 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-400">{openServiceTickets.length}</span>}</span>
+            <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Сервис {openServiceTickets.length > 0 && <span className="rounded-full bg-red-500/12 px-1.5 text-xs text-red-300">{openServiceTickets.length}</span>}</span>
           </TabsTrigger>
           <TabsTrigger value="repair-history" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Ремонты</span>
@@ -1273,31 +1241,31 @@ export default function EquipmentDetail() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/50">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Статус аренды</p>
-                    <p className="mt-1 font-medium text-gray-900 dark:text-white">{EQ_STATUS_LABELS[equipment.status]}</p>
+                  <div className="rounded-xl border border-border bg-secondary/70 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Статус аренды</p>
+                    <p className="mt-1 font-medium text-foreground">{EQ_STATUS_LABELS[equipment.status]}</p>
                   </div>
-                  <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/50">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Всего аренд</p>
-                    <p className="mt-1 font-medium text-gray-900 dark:text-white">{ganttRentals.length}</p>
+                  <div className="rounded-xl border border-border bg-secondary/70 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Всего аренд</p>
+                    <p className="mt-1 font-medium text-foreground">{ganttRentals.length}</p>
                   </div>
                   {equipment.currentClient ? (
                     <>
-                      <div className="col-span-2 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Текущий клиент</p>
-                        <p className="mt-1 font-medium text-gray-900 dark:text-white">{equipment.currentClient}</p>
+                      <div className="col-span-2 rounded-xl border border-blue-500/20 bg-blue-500/10 p-3">
+                        <p className="text-xs uppercase tracking-[0.14em] text-blue-200/80">Текущий клиент</p>
+                        <p className="mt-1 font-medium text-foreground">{equipment.currentClient}</p>
                         {equipment.returnDate && (
-                          <p className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">
+                          <p className="mt-0.5 text-xs text-blue-300">
                             Возврат: {formatDate(equipment.returnDate)}
                           </p>
                         )}
                       </div>
                     </>
                   ) : (
-                    <div className="col-span-2 rounded-lg bg-green-50 p-3 dark:bg-green-900/20">
-                      <p className="text-sm font-medium text-green-700 dark:text-green-400">Техника свободна</p>
+                    <div className="col-span-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+                      <p className="text-sm font-medium text-emerald-300">Техника свободна</p>
                       {ganttRentals.some(r => r.status === 'created' && r.startDate > format(today, 'yyyy-MM-dd')) && (
-                        <p className="mt-0.5 text-xs text-green-600 dark:text-green-500">
+                        <p className="mt-0.5 text-xs text-emerald-200/80">
                           Есть предстоящая бронь
                         </p>
                       )}
@@ -1308,13 +1276,13 @@ export default function EquipmentDetail() {
                 {/* Last 3 rentals */}
                 {ganttRentals.length > 0 && (
                   <div>
-                    <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Последние аренды:</p>
+                    <p className="mb-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">Последние аренды</p>
                     <div className="space-y-1.5">
                       {ganttRentals.slice(0, 3).map(r => (
-                        <div key={r.id} className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900/30">
+                        <div key={r.id} className="flex items-center justify-between rounded-xl border border-border bg-secondary/60 px-3 py-2">
                           <div>
-                            <span className="text-sm text-gray-900 dark:text-white">{r.client}</span>
-                            <span className="ml-2 text-xs text-gray-500">
+                            <span className="text-sm text-foreground">{r.client}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">
                               {formatDate(r.startDate)} — {formatDate(r.endDate)}
                             </span>
                           </div>
@@ -1344,30 +1312,46 @@ export default function EquipmentDetail() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className={`rounded-lg p-3 ${daysUntilMaintenance <= 7 ? 'bg-red-50 dark:bg-red-900/20' : daysUntilMaintenance <= 30 ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-gray-50 dark:bg-gray-900/50'}`}>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Следующее ТО</p>
-                    <p className={`mt-1 font-medium ${daysUntilMaintenance <= 7 ? 'text-red-700 dark:text-red-300' : daysUntilMaintenance <= 30 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-900 dark:text-white'}`}>
+                  <div className={`rounded-xl border p-3 ${
+                    daysUntilMaintenance <= 7
+                      ? 'border-red-500/20 bg-red-500/10'
+                      : daysUntilMaintenance <= 30
+                      ? 'border-orange-500/20 bg-orange-500/10'
+                      : 'border-border bg-secondary/70'
+                  }`}>
+                    <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Следующее ТО</p>
+                    <p className={`mt-1 font-medium ${
+                      daysUntilMaintenance <= 7
+                        ? 'text-red-300'
+                        : daysUntilMaintenance <= 30
+                        ? 'text-orange-300'
+                        : 'text-foreground'
+                    }`}>
                       {formatDate(equipment.nextMaintenance)}
                     </p>
-                    <p className="mt-0.5 text-xs text-gray-500">
+                    <p className="mt-0.5 text-xs text-muted-foreground">
                       {daysUntilMaintenance > 0 ? `через ${daysUntilMaintenance} дн.` : 'просрочено'}
                     </p>
                   </div>
                   {equipment.maintenanceCHTO && (
-                    <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/50">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">ЧТО</p>
-                      <p className="mt-1 font-medium text-gray-900 dark:text-white">{formatDate(equipment.maintenanceCHTO)}</p>
+                    <div className="rounded-xl border border-border bg-secondary/70 p-3">
+                      <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">ЧТО</p>
+                      <p className="mt-1 font-medium text-foreground">{formatDate(equipment.maintenanceCHTO)}</p>
                     </div>
                   )}
                   {equipment.maintenancePTO && (
-                    <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/50">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">ПТО</p>
-                      <p className="mt-1 font-medium text-gray-900 dark:text-white">{formatDate(equipment.maintenancePTO)}</p>
+                    <div className="rounded-xl border border-border bg-secondary/70 p-3">
+                      <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">ПТО</p>
+                      <p className="mt-1 font-medium text-foreground">{formatDate(equipment.maintenancePTO)}</p>
                     </div>
                   )}
-                  <div className={`rounded-lg p-3 ${openServiceTickets.length > 0 ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-gray-50 dark:bg-gray-900/50'}`}>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Открытых заявок</p>
-                    <p className={`mt-1 font-medium ${openServiceTickets.length > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-900 dark:text-white'}`}>
+                  <div className={`rounded-xl border p-3 ${
+                    openServiceTickets.length > 0
+                      ? 'border-orange-500/20 bg-orange-500/10'
+                      : 'border-border bg-secondary/70'
+                  }`}>
+                    <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Открытых заявок</p>
+                    <p className={`mt-1 font-medium ${openServiceTickets.length > 0 ? 'text-orange-300' : 'text-foreground'}`}>
                       {openServiceTickets.length}
                     </p>
                   </div>
@@ -1375,12 +1359,12 @@ export default function EquipmentDetail() {
 
                 {openServiceTickets.length > 0 && (
                   <div>
-                    <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Открытые заявки:</p>
+                    <p className="mb-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">Открытые заявки</p>
                     <div className="space-y-1.5">
                       {openServiceTickets.slice(0, 3).map(t => (
-                        <div key={t.id} className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900/30">
+                        <div key={t.id} className="flex items-center justify-between rounded-xl border border-border bg-secondary/60 px-3 py-2">
                           <div className="min-w-0 flex-1">
-                            <span className="truncate text-sm text-gray-900 dark:text-white">{t.reason}</span>
+                            <span className="truncate text-sm text-foreground">{t.reason}</span>
                           </div>
                           <Badge variant={t.priority === 'critical' ? 'error' : t.priority === 'high' ? 'warning' : 'info'}>
                             {t.priority === 'critical' ? 'Критич.' : t.priority === 'high' ? 'Высокий' : SERVICE_STATUS_LABELS[t.status]}
@@ -1404,23 +1388,23 @@ export default function EquipmentDetail() {
             </CardHeader>
             <CardContent>
               <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-                <div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Плановый доход/мес</p>
-                  <p className="mt-1 text-lg font-semibold text-blue-700 dark:text-blue-300">{formatCurrency(equipment.plannedMonthlyRevenue)}</p>
+                <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3">
+                  <p className="text-xs uppercase tracking-[0.14em] text-blue-200/80">Плановый доход/мес</p>
+                  <p className="mt-1 text-lg font-semibold text-blue-300">{formatCurrency(equipment.plannedMonthlyRevenue)}</p>
                 </div>
-                <div className="rounded-lg bg-green-50 p-3 dark:bg-green-900/20">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Факт. доход · {format(today, 'MMM', { locale: ru })}</p>
-                  <p className="mt-1 text-lg font-semibold text-green-700 dark:text-green-300">{formatCurrency(Math.round(actualMonthRevenue))}</p>
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+                  <p className="text-xs uppercase tracking-[0.14em] text-emerald-200/80">Факт. доход · {format(today, 'MMM', { locale: ru })}</p>
+                  <p className="mt-1 text-lg font-semibold text-emerald-300">{formatCurrency(Math.round(actualMonthRevenue))}</p>
                 </div>
-                <div className="rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Суммарная выручка</p>
-                  <p className="mt-1 text-lg font-semibold text-purple-700 dark:text-purple-300">{formatCurrency(totalRevenue)}</p>
-                  <p className="mt-0.5 text-xs text-gray-500">{ganttRentals.filter(r => r.status !== 'created').length} аренд</p>
+                <div className="rounded-xl border border-orange-500/20 bg-orange-500/10 p-3">
+                  <p className="text-xs uppercase tracking-[0.14em] text-orange-200/80">Суммарная выручка</p>
+                  <p className="mt-1 text-lg font-semibold text-orange-300">{formatCurrency(totalRevenue)}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{ganttRentals.filter(r => r.status !== 'created').length} аренд</p>
                 </div>
-                <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-800/50">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Утилизация месяца</p>
-                  <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{utilizationMonth}%</p>
-                  <p className="mt-0.5 text-xs text-gray-500">{daysRentedThisMonth} / {daysInCurrentMonth} дн.</p>
+                <div className="rounded-xl border border-border bg-secondary/70 p-3">
+                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Утилизация месяца</p>
+                  <p className="mt-1 text-lg font-semibold text-foreground">{utilizationMonth}%</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{daysRentedThisMonth} / {daysInCurrentMonth} дн.</p>
                 </div>
               </div>
             </CardContent>
@@ -1433,7 +1417,7 @@ export default function EquipmentDetail() {
                 <CardTitle>Примечания</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{equipment.notes}</p>
+                <p className="whitespace-pre-wrap text-sm text-muted-foreground">{equipment.notes}</p>
               </CardContent>
             </Card>
           )}
@@ -1445,18 +1429,18 @@ export default function EquipmentDetail() {
             </CardHeader>
             <CardContent>
               {(equipment.history || []).length === 0 ? (
-                <p className="text-sm text-gray-400 dark:text-gray-500">История пока пуста</p>
+                <p className="text-sm text-muted-foreground">История пока пуста</p>
               ) : (
                 <div className="space-y-3">
                   {[...(equipment.history || [])]
                     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                     .map((entry, idx) => (
-                      <div key={`${entry.date}-${idx}`} className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
-                        <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                      <div key={`${entry.date}-${idx}`} className="rounded-xl border border-border bg-secondary/60 p-3">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span className="font-medium">{entry.author}</span>
                           <span>{formatDateTime(entry.date)}</span>
                         </div>
-                        <p className="mt-1.5 text-sm text-gray-700 dark:text-gray-300">{entry.text}</p>
+                        <p className="mt-1.5 text-sm text-foreground/90">{entry.text}</p>
                       </div>
                     ))}
                 </div>
@@ -1477,39 +1461,39 @@ export default function EquipmentDetail() {
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Плановый доход/мес</p>
-                    <p className="mt-0.5 text-xl text-blue-700 dark:text-blue-300">{formatCurrency(equipment.plannedMonthlyRevenue)}</p>
+                  <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-blue-200/80">Плановый доход/мес</p>
+                    <p className="mt-0.5 text-xl text-blue-300">{formatCurrency(equipment.plannedMonthlyRevenue)}</p>
                   </div>
-                  <div className="rounded-lg bg-green-50 p-3 dark:bg-green-900/20">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Факт. доход за месяц</p>
-                    <p className="mt-0.5 text-xl text-green-700 dark:text-green-300">{formatCurrency(Math.round(actualMonthRevenue))}</p>
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-emerald-200/80">Факт. доход за месяц</p>
+                    <p className="mt-0.5 text-xl text-emerald-300">{formatCurrency(Math.round(actualMonthRevenue))}</p>
                   </div>
-                  <div className="rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Утилизация за месяц</p>
-                    <p className="mt-0.5 text-xl text-purple-700 dark:text-purple-300">{utilizationMonth}%</p>
-                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-purple-100 dark:bg-purple-900/30">
-                      <div className="h-full rounded-full bg-purple-500" style={{ width: `${utilizationMonth}%` }} />
+                  <div className="rounded-xl border border-orange-500/20 bg-orange-500/10 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-orange-200/80">Утилизация за месяц</p>
+                    <p className="mt-0.5 text-xl text-orange-300">{utilizationMonth}%</p>
+                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-orange-950/40">
+                      <div className="h-full rounded-full bg-orange-400" style={{ width: `${utilizationMonth}%` }} />
                     </div>
                   </div>
-                  <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-700">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Дней в аренде / свободно</p>
-                    <p className="mt-0.5 text-xl text-gray-900 dark:text-white">
-                      {daysRentedThisMonth} <span className="text-sm text-gray-400">/ {freeDaysThisMonth}</span>
+                  <div className="rounded-xl border border-border bg-secondary/70 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Дней в аренде / свободно</p>
+                    <p className="mt-0.5 text-xl text-foreground">
+                      {daysRentedThisMonth} <span className="text-sm text-muted-foreground">/ {freeDaysThisMonth}</span>
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <div className="mt-4 border-t border-border pt-4">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500 dark:text-gray-400">Выполнение плана</span>
-                    <span className="font-medium text-gray-900 dark:text-white">
+                    <span className="text-muted-foreground">Выполнение плана</span>
+                    <span className="font-medium text-foreground">
                       {equipment.plannedMonthlyRevenue > 0
                         ? Math.round((actualMonthRevenue / equipment.plannedMonthlyRevenue) * 100)
                         : 0}%
                     </span>
                   </div>
-                  <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                  <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-secondary">
                     <div
                       className={`h-full rounded-full ${actualMonthRevenue >= equipment.plannedMonthlyRevenue ? 'bg-green-500' : 'bg-blue-500'}`}
                       style={{ width: `${Math.min(100, equipment.plannedMonthlyRevenue > 0 ? Math.round((actualMonthRevenue / equipment.plannedMonthlyRevenue) * 100) : 0)}%` }}
@@ -1517,15 +1501,15 @@ export default function EquipmentDetail() {
                   </div>
                 </div>
 
-                <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <div className="mt-4 border-t border-border pt-4">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500 dark:text-gray-400">Суммарная выручка (все аренды)</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(totalRevenue)}</span>
+                    <span className="text-muted-foreground">Суммарная выручка (все аренды)</span>
+                    <span className="font-medium text-foreground">{formatCurrency(totalRevenue)}</span>
                   </div>
                   {totalPaidRevenue > 0 && (
                     <div className="mt-1.5 flex items-center justify-between text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">Из них оплачено</span>
-                      <span className="font-medium text-green-700 dark:text-green-400">{formatCurrency(totalPaidRevenue)}</span>
+                      <span className="text-muted-foreground">Из них оплачено</span>
+                      <span className="font-medium text-emerald-300">{formatCurrency(totalPaidRevenue)}</span>
                     </div>
                   )}
                 </div>
@@ -1541,50 +1525,50 @@ export default function EquipmentDetail() {
                 <CardDescription>Владелец: {ownerLabels[equipment.owner]}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className={`rounded-lg p-4 ${
-                  equipment.owner === 'own' ? 'bg-blue-50 dark:bg-blue-900/20' :
-                  equipment.owner === 'investor' ? 'bg-purple-50 dark:bg-purple-900/20' :
-                  'bg-orange-50 dark:bg-orange-900/20'
+                <div className={`rounded-xl border p-4 ${
+                  equipment.owner === 'own' ? 'border-blue-500/20 bg-blue-500/10' :
+                  equipment.owner === 'investor' ? 'border-cyan-500/20 bg-cyan-500/10' :
+                  'border-orange-500/20 bg-orange-500/10'
                 }`}>
                   {equipment.owner === 'own' && (
                     <div>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">Собственная техника: менеджер получает <span className="font-medium">3%</span> от результата</p>
-                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{managerComm.formula}</p>
-                      <p className="mt-1 text-2xl text-blue-700 dark:text-blue-300">{formatCurrency(managerComm.commission)}</p>
+                      <p className="text-sm text-muted-foreground">Собственная техника: менеджер получает <span className="font-medium text-foreground">3%</span> от результата</p>
+                      <p className="mt-2 text-xs text-muted-foreground">{managerComm.formula}</p>
+                      <p className="mt-1 text-2xl text-blue-300">{formatCurrency(managerComm.commission)}</p>
                     </div>
                   )}
                   {equipment.owner === 'investor' && (
                     <div>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">Техника инвестора: 100% выручки − 60%, от оставшихся 40% менеджер получает <span className="font-medium">7%</span></p>
-                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{managerComm.formula}</p>
-                      <p className="mt-1 text-2xl text-purple-700 dark:text-purple-300">{formatCurrency(managerComm.commission)}</p>
+                      <p className="text-sm text-muted-foreground">Техника инвестора: 100% выручки − 60%, от оставшихся 40% менеджер получает <span className="font-medium text-foreground">7%</span></p>
+                      <p className="mt-2 text-xs text-muted-foreground">{managerComm.formula}</p>
+                      <p className="mt-1 text-2xl text-cyan-300">{formatCurrency(managerComm.commission)}</p>
                     </div>
                   )}
                   {equipment.owner === 'sublease' && (
                     <div>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">Субаренда: финансовый результат = цена сдачи − цена взятия</p>
-                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{managerComm.formula}</p>
-                      <p className={`mt-1 text-2xl ${managerComm.commission >= 0 ? 'text-green-700 dark:text-green-300' : 'text-red-600'}`}>
+                      <p className="text-sm text-muted-foreground">Субаренда: финансовый результат = цена сдачи − цена взятия</p>
+                      <p className="mt-2 text-xs text-muted-foreground">{managerComm.formula}</p>
+                      <p className={`mt-1 text-2xl ${managerComm.commission >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
                         {formatCurrency(managerComm.commission)}
                       </p>
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-1 text-sm text-gray-500 dark:text-gray-400">
+                <div className="space-y-1 text-sm text-muted-foreground">
                   <div className="flex justify-between">
                     <span>Факт. выручка за месяц</span>
-                    <span className="text-gray-900 dark:text-white">{formatCurrency(Math.round(actualMonthRevenue))}</span>
+                    <span className="text-foreground">{formatCurrency(Math.round(actualMonthRevenue))}</span>
                   </div>
                   {equipment.owner === 'sublease' && equipment.subleasePrice && (
                     <div className="flex justify-between">
                       <span>Стоимость субаренды</span>
-                      <span className="text-orange-600">−{formatCurrency(equipment.subleasePrice)}</span>
+                      <span className="text-orange-300">−{formatCurrency(equipment.subleasePrice)}</span>
                     </div>
                   )}
-                  <div className="flex justify-between border-t border-gray-200 pt-1 dark:border-gray-700">
-                    <span className="font-medium text-gray-900 dark:text-white">Комиссия менеджера ({managerComm.rate})</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(managerComm.commission)}</span>
+                  <div className="flex justify-between border-t border-border pt-1">
+                    <span className="font-medium text-foreground">Комиссия менеджера ({managerComm.rate})</span>
+                    <span className="font-medium text-foreground">{formatCurrency(managerComm.commission)}</span>
                   </div>
                 </div>
               </CardContent>
@@ -1635,7 +1619,7 @@ export default function EquipmentDetail() {
                             <span className="font-mono text-xs text-[--color-primary]">{gr.id}</span>
                           </TableCell>
                           <TableCell>{gr.client}</TableCell>
-                          <TableCell className="text-sm text-gray-600 dark:text-gray-400">
+                          <TableCell className="text-sm text-muted-foreground">
                             {formatDate(gr.startDate)} — {formatDate(gr.endDate)}
                           </TableCell>
                           <TableCell>{days}</TableCell>
@@ -1712,7 +1696,7 @@ export default function EquipmentDetail() {
                           </Link>
                         </TableCell>
                         <TableCell className="max-w-[140px] truncate">{ticket.reason}</TableCell>
-                        <TableCell className="max-w-[200px] truncate text-sm text-gray-500 dark:text-gray-400">
+                        <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
                           {ticket.description}
                         </TableCell>
                         <TableCell>{formatDate(ticket.createdAt)}</TableCell>
@@ -1763,7 +1747,7 @@ export default function EquipmentDetail() {
               {repairRecords.length > 0 ? (
                 <div className="space-y-3">
                   {repairRecords.map(record => (
-                    <div key={record.id} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                    <div key={record.id} className="rounded-xl border border-border bg-secondary/50 p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -1772,29 +1756,29 @@ export default function EquipmentDetail() {
                               {record.status === 'completed' ? 'Выполнено' : record.status === 'in_progress' ? 'В работе' : 'Запланировано'}
                             </Badge>
                             {record.source === 'bot' && (
-                              <span className="flex items-center gap-1 text-xs text-gray-400"><Bot className="h-3 w-3" /> Из бота</span>
+                              <span className="flex items-center gap-1 text-xs text-muted-foreground"><Bot className="h-3 w-3" /> Из бота</span>
                             )}
                           </div>
-                          <p className="mt-2 text-sm text-gray-900 dark:text-white">{record.description}</p>
+                          <p className="mt-2 text-sm text-foreground">{record.description}</p>
                           {record.comment && (
-                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{record.comment}</p>
+                            <p className="mt-1 text-sm text-muted-foreground">{record.comment}</p>
                           )}
-                          <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                          <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                             <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatDate(record.date)}</span>
                             <span className="flex items-center gap-1"><User className="h-3 w-3" /> {record.mechanic}</span>
                             {record.totalNormHours > 0 && <span>{record.totalNormHours.toFixed(1)} н/ч</span>}
                           </div>
                         </div>
                         {record.cost != null && record.cost > 0 && (
-                          <p className="ml-4 font-medium text-gray-900 dark:text-white">{formatCurrency(record.cost)}</p>
+                          <p className="ml-4 font-medium text-foreground">{formatCurrency(record.cost)}</p>
                         )}
                       </div>
                     </div>
                   ))}
-                  <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+                  <div className="border-t border-border pt-3">
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">Всего затрат на ремонты</span>
-                      <span className="font-medium text-gray-900 dark:text-white">
+                      <span className="text-muted-foreground">Всего затрат на ремонты</span>
+                      <span className="font-medium text-foreground">
                         {formatCurrency(repairRecords.reduce((sum, r) => sum + (r.cost || 0), 0))}
                       </span>
                     </div>
@@ -1879,8 +1863,8 @@ export default function EquipmentDetail() {
                         key={event!.id}
                         className={`rounded-xl border p-4 ${
                           event!.type === 'shipping'
-                            ? 'border-blue-200 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-900/15'
-                            : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/15'
+                            ? 'border-blue-500/20 bg-blue-500/10'
+                            : 'border-emerald-500/20 bg-emerald-500/10'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -1889,39 +1873,39 @@ export default function EquipmentDetail() {
                               <Badge variant={event!.type === 'shipping' ? 'info' : 'success'}>
                                 {event!.type === 'shipping' ? 'Последняя отгрузка' : 'Последняя приёмка'}
                               </Badge>
-                              <span className="text-xs text-gray-500 dark:text-gray-400">{formatDate(event!.date)}</span>
+                              <span className="text-xs text-muted-foreground">{formatDate(event!.date)}</span>
                             </div>
-                            <p className="mt-2 text-sm font-medium text-gray-900 dark:text-white">
+                            <p className="mt-2 text-sm font-medium text-foreground">
                               {event!.uploadedBy}
                             </p>
-                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            <p className="mt-1 text-xs text-muted-foreground">
                               Моточасы: {event!.hoursValue ?? equipment.hours ?? '—'}
                             </p>
                           </div>
                           <button
                             onClick={() => printHandoffAct(event!, equipment)}
-                            className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-blue-600 shadow-sm hover:bg-blue-50 dark:bg-gray-900 dark:text-blue-400 dark:hover:bg-gray-800"
+                            className="rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-blue-400/40 hover:text-blue-300"
                           >
                             Акт PDF
                           </button>
                         </div>
 
                         <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                          <div className="rounded-lg bg-white/80 p-3 dark:bg-gray-900/40">
-                            <p className="text-xs text-gray-500 dark:text-gray-400">Чек-лист</p>
-                            <p className={`mt-1 font-medium ${checklistComplete ? 'text-green-700 dark:text-green-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                          <div className="rounded-xl border border-border bg-card/70 p-3">
+                            <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Чек-лист</p>
+                            <p className={`mt-1 font-medium ${checklistComplete ? 'text-emerald-300' : 'text-orange-300'}`}>
                               {checklistComplete ? 'Заполнен полностью' : 'Заполнен частично'}
                             </p>
                           </div>
-                          <div className="rounded-lg bg-white/80 p-3 dark:bg-gray-900/40">
-                            <p className="text-xs text-gray-500 dark:text-gray-400">Категории фото</p>
-                            <p className="mt-1 font-medium text-gray-900 dark:text-white">{categoryCount}</p>
+                          <div className="rounded-xl border border-border bg-card/70 p-3">
+                            <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Категории фото</p>
+                            <p className="mt-1 font-medium text-foreground">{categoryCount}</p>
                           </div>
                         </div>
 
                         {event!.damageDescription && (
-                          <div className="mt-3 rounded-lg border border-amber-200 bg-white/80 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-gray-900/40 dark:text-amber-300">
-                            <p className="text-xs uppercase tracking-wide text-amber-600 dark:text-amber-400">Повреждения</p>
+                          <div className="mt-3 rounded-xl border border-orange-500/20 bg-card/70 p-3 text-sm text-orange-200">
+                            <p className="text-xs uppercase tracking-wide text-orange-300">Повреждения</p>
                             <p className="mt-1">{event!.damageDescription}</p>
                           </div>
                         )}
@@ -1934,7 +1918,7 @@ export default function EquipmentDetail() {
                               return (
                                 <span
                                   key={key}
-                                  className="rounded-full bg-white/90 px-2.5 py-1 text-xs text-gray-700 dark:bg-gray-900/50 dark:text-gray-300"
+                                  className="rounded-full border border-border bg-card/70 px-2.5 py-1 text-xs text-muted-foreground"
                                 >
                                   {label}: {photos.length}
                                 </span>
@@ -1950,9 +1934,9 @@ export default function EquipmentDetail() {
 
               {/* Upload form */}
               {canManageAcceptance && showUploadPhotoForm && (
-                <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-3">
+                <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                    <span className="text-sm font-medium text-blue-200">
                       {uploadEventType === 'shipping' ? 'Отправка техники в аренду' : 'Приёмка техники с аренды'}
                     </span>
                     <button
@@ -1965,7 +1949,7 @@ export default function EquipmentDetail() {
                         setUploadDamageDescription('');
                         setUploadSignatureDataUrl('');
                       }}
-                      className="rounded p-1 text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-800"
+                      className="rounded p-1 text-blue-300 transition hover:bg-blue-500/10"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -1985,7 +1969,7 @@ export default function EquipmentDetail() {
                         className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                           uploadEventType === t
                             ? 'bg-blue-600 text-white'
-                            : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                            : 'border border-border bg-card text-muted-foreground hover:text-foreground'
                         }`}
                       >
                         {t === 'shipping' ? 'Отгрузка' : 'Приёмка'}
@@ -1994,20 +1978,20 @@ export default function EquipmentDetail() {
                   </div>
 
                   {uploadEventType === 'shipping' && (
-                    <div className="rounded-md border border-blue-200 bg-white/70 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300">
+                    <div className="rounded-xl border border-blue-500/20 bg-card/70 px-3 py-2 text-xs text-blue-200">
                       После сохранения фотоотчёт запишется в карточку техники. Если по технике есть бронь/аренда, она будет переведена в статус активной.
                     </div>
                   )}
 
                   {uploadEventType === 'receiving' && (
-                    <div className="rounded-md border border-amber-200 bg-white/70 px-3 py-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                    <div className="rounded-xl border border-orange-500/20 bg-card/70 px-3 py-2 text-xs text-orange-200">
                       После сохранения техника автоматически перейдёт в сервис, аренда будет отмечена как возвращённая, и будет создана сервисная заявка на осмотр после возврата.
                     </div>
                   )}
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
                         Моточасы
                       </label>
                       <input
@@ -2017,11 +2001,11 @@ export default function EquipmentDetail() {
                         placeholder="Введите моточасы"
                         value={uploadHoursValue}
                         onChange={e => setUploadHoursValue(e.target.value)}
-                        className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
                         Подпись механика
                       </label>
                       <div className="flex gap-2">
@@ -2037,7 +2021,7 @@ export default function EquipmentDetail() {
                         )}
                       </div>
                       {!uploadSignatureDataUrl && (
-                        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Подпись обязательна для акта.</p>
+                        <p className="mt-1 text-xs text-orange-300">Подпись обязательна для акта.</p>
                       )}
                     </div>
                   </div>
@@ -2048,7 +2032,7 @@ export default function EquipmentDetail() {
                     placeholder="Комментарий (необязательно)"
                     value={uploadComment}
                     onChange={e => setUploadComment(e.target.value)}
-                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                   />
 
                   {uploadEventType === 'receiving' && (
@@ -2057,13 +2041,13 @@ export default function EquipmentDetail() {
                       value={uploadDamageDescription}
                       onChange={e => setUploadDamageDescription(e.target.value)}
                       rows={3}
-                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                     />
                   )}
 
                   {/* Checklist */}
-                  <div className="rounded-md border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/30">
-                    <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">
+                  <div className="rounded-xl border border-border bg-card/70 p-3">
+                    <div className="mb-2 text-sm font-medium text-foreground">
                       Чек-лист {uploadEventType === 'shipping' ? 'отгрузки' : 'приёмки'}
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
@@ -2075,13 +2059,13 @@ export default function EquipmentDetail() {
                             key={key}
                             className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
                               checked
-                                ? 'border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300'
-                                : 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-300'
+                                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                                : 'border-border bg-secondary/70 text-muted-foreground'
                             }`}
                           >
                             <input
                               type="checkbox"
-                              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              className="mt-0.5 h-4 w-4 rounded border-border bg-card text-blue-500 focus:ring-blue-500"
                               checked={checked}
                               onChange={(e) => setUploadChecklist(prev => ({ ...prev, [checklistKey]: e.target.checked }))}
                             />
@@ -2091,7 +2075,7 @@ export default function EquipmentDetail() {
                       })}
                     </div>
                     {!isChecklistComplete(uploadChecklist) && (
-                      <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      <p className="mt-2 text-xs text-orange-300">
                         Перед сохранением нужно отметить все пункты чек-листа.
                       </p>
                     )}
@@ -2104,11 +2088,11 @@ export default function EquipmentDetail() {
                         const categoryKey = key as EquipmentOperationPhotoCategory;
                         const photos = uploadPhotoCategories[categoryKey] ?? [];
                         return (
-                          <div key={key} className="rounded-md border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/30">
+                          <div key={key} className="rounded-xl border border-border bg-card/70 p-3">
                             <div className="mb-2 flex items-center justify-between gap-2">
                               <div>
-                                <div className="text-sm font-medium text-gray-900 dark:text-white">{label}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">{photos.length > 0 ? `${photos.length} фото` : 'Фото не добавлены'}</div>
+                                <div className="text-sm font-medium text-foreground">{label}</div>
+                                <div className="text-xs text-muted-foreground">{photos.length > 0 ? `${photos.length} фото` : 'Фото не добавлены'}</div>
                               </div>
                               <Button
                                 type="button"
@@ -2124,7 +2108,7 @@ export default function EquipmentDetail() {
                               <div className="flex gap-2 overflow-x-auto pb-1">
                                 {photos.map((src, i) => (
                                   <div key={`${key}-${i}`} className="relative shrink-0">
-                                    <img src={src} alt={`${label} ${i + 1}`} className="h-20 w-28 rounded-md border border-gray-200 dark:border-gray-700 object-cover" />
+                                    <img src={src} alt={`${label} ${i + 1}`} className="h-20 w-28 rounded-md border border-border object-cover" />
                                     <button
                                       type="button"
                                       onClick={() => setUploadPhotoCategories(prev => ({
@@ -2145,7 +2129,7 @@ export default function EquipmentDetail() {
                   </div>
 
                   {getMissingPhotoCategoryLabels(uploadPhotoCategories, uploadEventType).length > 0 && (
-                    <div className="rounded-md border border-amber-200 bg-white/70 px-3 py-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                    <div className="rounded-xl border border-orange-500/20 bg-card/70 px-3 py-2 text-xs text-orange-200">
                       Для акта не хватает фото: {getMissingPhotoCategoryLabels(uploadPhotoCategories, uploadEventType).join(', ')}.
                     </div>
                   )}
@@ -2171,22 +2155,22 @@ export default function EquipmentDetail() {
               {shippingPhotos.length > 0 ? (
                 <div className="space-y-6">
                   {shippingPhotos.map(event => (
-                    <div key={event.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <div key={event.id} className="rounded-2xl border border-border bg-card/70 p-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Badge variant={event.type === 'shipping' ? 'info' : 'success'}>
                             {event.type === 'shipping' ? 'Отгрузка' : 'Приёмка (возврат)'}
                           </Badge>
-                          <span className="text-sm text-gray-500 dark:text-gray-400">{formatDate(event.date)}</span>
+                          <span className="text-sm text-muted-foreground">{formatDate(event.date)}</span>
                           {event.source === 'bot' && (
-                            <span className="flex items-center gap-1 text-xs text-gray-400"><Bot className="h-3 w-3" /> Из бота</span>
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground"><Bot className="h-3 w-3" /> Из бота</span>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500 dark:text-gray-400">Загрузил: {event.uploadedBy}</span>
+                          <span className="text-xs text-muted-foreground">Загрузил: {event.uploadedBy}</span>
                           <button
                             onClick={() => printHandoffAct(event, equipment)}
-                            className="rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                            className="rounded-xl border border-border px-2 py-1 text-xs text-blue-300 transition hover:border-blue-400/40 hover:bg-blue-500/10"
                             title="Скачать акт PDF"
                           >
                             Акт PDF
@@ -2197,7 +2181,7 @@ export default function EquipmentDetail() {
                                 const updated = allShippingPhotos.filter(p => p.id !== event.id);
                                 void persistShippingPhotos(updated);
                               }}
-                              className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-red-500"
+                              className="rounded p-1 text-muted-foreground transition hover:bg-secondary hover:text-red-300"
                               title="Удалить событие"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -2205,10 +2189,10 @@ export default function EquipmentDetail() {
                           )}
                         </div>
                       </div>
-                      {event.comment && <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">{event.comment}</p>}
+                      {event.comment && <p className="mt-2 text-sm text-muted-foreground">{event.comment}</p>}
                       {event.checklist && (
-                        <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/30">
-                          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        <div className="mt-3 rounded-xl border border-border bg-secondary/70 p-3">
+                          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             Чек-лист операции
                           </div>
                           <div className="grid gap-2 sm:grid-cols-2">
@@ -2219,12 +2203,12 @@ export default function EquipmentDetail() {
                                 <div key={key} className="flex items-center gap-2 text-sm">
                                   <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-medium ${
                                     checked
-                                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                                      : 'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                                      ? 'bg-emerald-500/15 text-emerald-300'
+                                      : 'bg-secondary text-muted-foreground'
                                   }`}>
                                     {checked ? '✓' : '•'}
                                   </span>
-                                  <span className="text-gray-700 dark:text-gray-300">{label}</span>
+                                  <span className="text-foreground/90">{label}</span>
                                 </div>
                               );
                             })}
@@ -2238,7 +2222,7 @@ export default function EquipmentDetail() {
                             if (!photos.length) return null;
                             return (
                               <div key={key}>
-                                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                                   {label}
                                 </div>
                                 <div className="flex gap-3 overflow-x-auto pb-1">
@@ -2247,7 +2231,7 @@ export default function EquipmentDetail() {
                                       key={`${key}-${idx}`}
                                       src={photo}
                                       alt={`${label} ${idx + 1}`}
-                                      className="h-32 w-48 shrink-0 rounded-lg border border-gray-200 object-cover cursor-zoom-in hover:opacity-90 dark:border-gray-700"
+                                      className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
                                       onClick={() => setPreviewImage(photo)}
                                     />
                                   ))}
@@ -2260,13 +2244,13 @@ export default function EquipmentDetail() {
                         <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
 	                          {event.photos.map((photo, idx) => (
 	                            <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
-	                              className="h-32 w-48 shrink-0 rounded-lg border border-gray-200 dark:border-gray-700 object-cover cursor-zoom-in hover:opacity-90"
+	                              className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
 	                              onClick={() => setPreviewImage(photo)}
 	                            />
 	                          ))}
 	                        </div>
                       )}
-                      <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">{event.photos.length} фото · нажмите для просмотра</p>
+                      <p className="mt-2 text-xs text-muted-foreground">{event.photos.length} фото · нажмите для просмотра</p>
                     </div>
                   ))}
                 </div>

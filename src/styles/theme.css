@@ -211,4 +211,34 @@
   .app-button-primary {
     @apply border border-transparent bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)];
   }
+
+  .equipment-detail-skin [data-slot="card"] {
+    @apply rounded-2xl border border-border bg-card text-card-foreground shadow-[0_24px_60px_-42px_rgba(15,23,42,0.9)] backdrop-blur-xl;
+  }
+
+  .equipment-detail-skin [data-slot="card-title"] {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+  }
+
+  .equipment-detail-skin [data-slot="card-description"] {
+    @apply text-muted-foreground;
+  }
+
+  .equipment-detail-skin [data-slot="tabs-list"] {
+    @apply flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b border-border bg-transparent p-0;
+  }
+
+  .equipment-detail-skin [data-slot="tabs-trigger"] {
+    @apply h-auto shrink-0 rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-muted-foreground;
+  }
+
+  .equipment-detail-skin [data-slot="tabs-trigger"][data-state="active"] {
+    @apply border-primary bg-transparent text-foreground shadow-none;
+  }
+
+  .equipment-detail-skin [data-slot="tabs-trigger"]:hover {
+    @apply text-foreground;
+  }
 }

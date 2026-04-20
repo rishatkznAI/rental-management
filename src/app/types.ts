@@ -559,7 +559,7 @@ export interface PlannerItemOverlay {
 }
 
 /**
- * Строка планировщика — результат объединения аренды + техники + оверлея.
+ * Строка планировщика — результат объединения аренд, доставок, сервисных работ и оверлея.
  * Возвращается сервером из GET /api/planner.
  */
 export interface PlannerRow {
@@ -582,6 +582,6 @@ export interface PlannerRow {
   risk: boolean;
   comment: string;
   rentalStatus: RentalStatus;
-  sourceType?: 'rental' | 'delivery';
-  operationType?: 'rental' | DeliveryType;
+  sourceType?: 'rental' | 'delivery' | 'service';
+  operationType?: 'rental' | DeliveryType | 'service';
 }

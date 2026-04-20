@@ -876,6 +876,7 @@ apiRouter.get('/planner', requireAuth, (req, res) => {
 
     const rentals      = readData('rentals') || [];
     const deliveries   = readData('deliveries') || [];
+    const serviceTickets = readData('service') || [];
     const equipment    = readData('equipment') || [];
     const plannerItems = readData('planner_items') || [];
 
@@ -1026,6 +1027,84 @@ apiRouter.get('/planner', requireAuth, (req, res) => {
         rentalStatus: delivery.type === 'shipping' ? 'delivery' : 'return_planned',
         sourceType: 'delivery',
         operationType: delivery.type,
+      });
+    }
+
+    for (const ticket of serviceTickets) {
+      if (!ticket?.plannedDate) continue;
+      if (ticket.status === 'closed') continue;
+
+      const eq = ticket.equipmentId
+        ? eqById.get(ticket.equipmentId) || null
+        : (ticket.inventoryNumber ? eqByInv.get(ticket.inventoryNumber) || null : null);
+      const equipmentRef = eq?.inventoryNumber || ticket.inventoryNumber || ticket.equipmentId || ticket.id;
+      const rowId = `service:${ticket.id}__${equipmentRef}`;
+      const overlay = overlayMap.get(rowId) || null;
+
+      const startDate = new Date(ticket.plannedDate);
+      startDate.setHours(0, 0, 0, 0);
+      const daysUntil = Math.round((startDate - today) / (1000 * 60 * 60 * 24));
+
+      const servicePriority = ticket.priority === 'critical' || ticket.priority === 'high'
+        ? 'high'
+        : ticket.priority === 'medium'
+          ? 'medium'
+          : 'low';
+      const timePriority = daysUntil <= 1 ? 'high' : daysUntil <= 3 ? 'medium' : 'low';
+      const priorityOrder = { high: 3, medium: 2, low: 1 };
+      const autoPriority = priorityOrder[servicePriority] >= priorityOrder[timePriority]
+        ? servicePriority
+        : timePriority;
+      const priority = overlay?.priorityOverride || autoPriority;
+
+      const defaultPrepStatus =
+        ticket.status === 'ready' ? 'ready'
+        : ticket.status === 'waiting_parts' ? 'on_hold'
+        : ticket.status === 'in_progress' ? 'in_repair'
+        : 'planned';
+
+      const prepStatus = overlay?.prepStatus || defaultPrepStatus;
+      if (!includeShipped && prepStatus === 'shipped') continue;
+
+      const isReady = prepStatus === 'ready';
+      const autoRisk =
+        ticket.status === 'waiting_parts' ||
+        (daysUntil <= 1 && !isReady) ||
+        (daysUntil < 0 && !isReady);
+      const risk = overlay?.riskOverride !== null && overlay?.riskOverride !== undefined
+        ? overlay.riskOverride
+        : autoRisk;
+
+      const serviceLabel = ticket.serviceKind
+        ? String(ticket.serviceKind).trim().toUpperCase()
+        : 'Сервис';
+      const reason = String(ticket.reason || '').trim();
+      const description = String(ticket.description || '').trim();
+      const workTitle = reason || description || 'Запланированная работа';
+      const comment = overlay?.comment || [ticket.id, workTitle].filter(Boolean).join(' · ');
+
+      rows.push({
+        id: rowId,
+        rentalId: `service:${ticket.id}`,
+        equipmentId: eq?.id || ticket.equipmentId || null,
+        equipmentRef,
+        startDate: ticket.plannedDate,
+        daysUntil,
+        equipmentLabel: ticket.equipment || (eq ? `${eq.manufacturer || ''} ${eq.model || ''}`.trim() : equipmentRef),
+        inventoryNumber: eq?.inventoryNumber || ticket.inventoryNumber || equipmentRef,
+        serialNumber: ticket.serialNumber || eq?.serialNumber || null,
+        equipmentType: eq?.type || null,
+        client: `${serviceLabel} · ${workTitle}`,
+        deliveryAddress: description && description !== reason ? description : (ticket.location || ''),
+        manager: ticket.assignedMechanicName || ticket.assignedTo || ticket.createdByUserName || ticket.createdBy || '',
+        equipmentStatus: eq?.status || (ticket.status === 'in_progress' || ticket.status === 'waiting_parts' ? 'in_service' : null),
+        prepStatus,
+        priority,
+        risk,
+        comment,
+        rentalStatus: 'new',
+        sourceType: 'service',
+        operationType: 'service',
       });
     }
 

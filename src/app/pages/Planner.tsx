@@ -16,6 +16,7 @@ import {
   Filter,
   RefreshCw,
   Search,
+  Wrench,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -88,12 +89,14 @@ const OPERATION_LABELS: Record<NonNullable<PlannerRow['operationType']>, string>
   rental: 'Аренда',
   shipping: 'Отгрузка',
   receiving: 'Приёмка',
+  service: 'Сервис',
 };
 
 const OPERATION_COLORS: Record<NonNullable<PlannerRow['operationType']>, string> = {
   rental: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
   shipping: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
   receiving: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  service: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
 };
 
 const ALL_PREP_STATUSES = Object.keys(PREP_STATUS_LABELS) as PrepStatus[];
@@ -191,6 +194,24 @@ function matchesSearch(row: PlannerRow, q: string): boolean {
     (row.inventoryNumber || '').toLowerCase().includes(lower) ||
     (row.serialNumber || '').toLowerCase().includes(lower)
   );
+}
+
+function isServiceRow(row: PlannerRow): boolean {
+  return row.sourceType === 'service' || row.operationType === 'service';
+}
+
+function getRowAccentClasses(row: PlannerRow) {
+  if (isServiceRow(row)) {
+    return 'border-violet-200 bg-violet-50/40 dark:border-violet-900/50 dark:bg-violet-950/10';
+  }
+  return 'border-gray-200 dark:border-gray-700';
+}
+
+function getTableRowAccentClasses(row: PlannerRow) {
+  if (isServiceRow(row)) {
+    return 'bg-violet-50/35 dark:bg-violet-950/10 hover:bg-violet-50/70 dark:hover:bg-violet-900/20';
+  }
+  return 'bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/70';
 }
 
 // ── Компонент: бейдж-дропдаун статуса подготовки ─────────────────────────────
@@ -391,7 +412,7 @@ export default function Planner() {
         <div>
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">Планировщик</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-            Очередь подготовки техники к будущим арендам
+            Очередь подготовки техники, логистики и запланированных сервисных работ
           </p>
         </div>
         <div className="flex items-center gap-2 mt-1">
@@ -602,7 +623,7 @@ export default function Planner() {
             <p className="text-sm font-medium">Нет записей</p>
             <p className="text-xs mt-1">
               {rows.length === 0
-                ? 'Нет будущих операций по отгрузке и приёмке'
+                ? 'Нет будущих операций и запланированных работ'
                 : 'Попробуйте изменить фильтры'}
             </p>
           </div>
@@ -617,12 +638,20 @@ export default function Planner() {
                     key={row.id}
                     className={cn(
                       'rounded-xl border bg-white p-4 shadow-sm dark:bg-gray-900',
-                      row.risk ? 'border-red-200 dark:border-red-800' : 'border-gray-200 dark:border-gray-700',
+                      row.risk
+                        ? 'border-red-200 dark:border-red-800'
+                        : getRowAccentClasses(row),
                       row.prepStatus === 'shipped' && 'opacity-70',
                     )}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
+                        {isServiceRow(row) && (
+                          <span className="mb-2 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-200">
+                            <Wrench className="h-3 w-3" />
+                            Запланированная работа
+                          </span>
+                        )}
                         <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                           {row.equipmentLabel || '—'}
                         </div>
@@ -725,7 +754,7 @@ export default function Planner() {
                     Инв. / SN
                   </th>
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
-                    Клиент
+                    Клиент / работа
                   </th>
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
                     Менеджер
@@ -757,8 +786,10 @@ export default function Planner() {
                     <tr
                       key={row.id}
                       className={cn(
-                        'bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/70 transition-colors',
+                        'transition-colors',
+                        getTableRowAccentClasses(row),
                         isHighRisk && 'border-l-2 border-l-red-400',
+                        !isHighRisk && isServiceRow(row) && 'border-l-2 border-l-violet-400',
                         row.prepStatus === 'shipped' && 'opacity-60',
                       )}
                     >
@@ -779,6 +810,12 @@ export default function Planner() {
 
                       {/* Техника */}
                       <td className="px-3 py-2.5">
+                        {isServiceRow(row) && (
+                          <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-200">
+                            <Wrench className="h-3 w-3" />
+                            Сервис
+                          </span>
+                        )}
                         <div className="font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
                           {row.equipmentLabel || '—'}
                         </div>

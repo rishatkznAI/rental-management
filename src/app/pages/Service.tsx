@@ -25,7 +25,17 @@ export default function Service() {
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [scenarioFilter, setScenarioFilter] = React.useState<string>('all');
+  const [mechanicFilter, setMechanicFilter] = React.useState<string>('all');
   const [preset, setPreset] = React.useState<'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'maintenance'>('all');
+
+  const mechanicOptions = React.useMemo(() => (
+    Array.from(new Set(
+      ticketList
+        .map(ticket => ticket.assignedMechanicName || ticket.assignedTo || '')
+        .map(value => value.trim())
+        .filter(Boolean),
+    )).sort((left, right) => left.localeCompare(right, 'ru'))
+  ), [ticketList]);
 
   const filteredTickets = ticketList.filter(ticket => {
     const matchesSearch = search === '' ||
@@ -36,6 +46,8 @@ export default function Service() {
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
     const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
     const matchesScenario = scenarioFilter === 'all' || inferServiceKind(ticket) === scenarioFilter;
+    const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || '';
+    const matchesMechanic = mechanicFilter === 'all' || assignedMechanic === mechanicFilter;
     const matchesPreset =
       preset === 'all'
       || (preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
@@ -43,7 +55,7 @@ export default function Service() {
       || (preset === 'waiting_parts' && ticket.status === 'waiting_parts')
       || (preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
 
-    return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesPreset;
+    return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesMechanic && matchesPreset;
   });
 
   const presetOptions = [
@@ -59,6 +71,7 @@ export default function Service() {
     setPriorityFilter('all');
     setStatusFilter('all');
     setScenarioFilter('all');
+    setMechanicFilter('all');
     setPreset('all');
   };
 
@@ -96,7 +109,7 @@ export default function Service() {
             {option.label}
           </button>
         ))}
-        {(search || priorityFilter !== 'all' || statusFilter !== 'all' || scenarioFilter !== 'all' || preset !== 'all') && (
+        {(search || priorityFilter !== 'all' || statusFilter !== 'all' || scenarioFilter !== 'all' || mechanicFilter !== 'all' || preset !== 'all') && (
           <button
             type="button"
             onClick={resetFilters}
@@ -155,6 +168,19 @@ export default function Service() {
             <SelectItem value="to">ТО</SelectItem>
             <SelectItem value="chto">ЧТО</SelectItem>
             <SelectItem value="pto">ПТО</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
+          <SelectTrigger className="w-[220px]">
+            <SelectValue placeholder="Все механики" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все механики</SelectItem>
+            {mechanicOptions.map(mechanic => (
+              <SelectItem key={mechanic} value={mechanic}>
+                {mechanic}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>

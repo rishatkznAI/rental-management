@@ -169,18 +169,11 @@ export default function Dashboard() {
   const [officeUpdUpdatingId, setOfficeUpdUpdatingId] = useState<string | null>(null);
   const [officeUpdManagerFilter, setOfficeUpdManagerFilter] = useState('');
   const [managerBreakdownName, setManagerBreakdownName] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const dashboardCardClass = 'app-panel border-border/80 bg-card/95';
   const dashboardCardHeaderClass = 'space-y-2 px-5 pt-5 pb-3';
   const dashboardCardContentClass = 'space-y-2 px-5 pb-5';
   const dashboardSectionClass = 'space-y-4';
   const dashboardSectionHeaderClass = 'flex flex-col gap-1.5';
-
-  const refresh = useCallback(() => {
-    setRefreshing(true);
-    qc.invalidateQueries();
-    setTimeout(() => setRefreshing(false), 600);
-  }, [qc]);
 
   const today = startOfDay(new Date());
   const weekAgo = daysAgo(7);
@@ -1261,33 +1254,6 @@ export default function Dashboard() {
               Обновлено: {new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" className="app-button-ghost rounded-xl px-4" onClick={refresh} disabled={refreshing}>
-              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Обновить</span>
-            </Button>
-            {can('create', 'rentals') && (
-              <Button size="sm" className="app-button-outline rounded-xl px-4" onClick={() => setShowRentalModal(true)}>
-                <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">Новая аренда</span>
-                <span className="sm:hidden">Аренда</span>
-              </Button>
-            )}
-            {can('create', 'service') && (
-              <Button size="sm" variant="secondary" className="app-button-outline rounded-xl px-4" onClick={() => setShowServiceModal(true)}>
-                <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">Заявка в сервис</span>
-                <span className="sm:hidden">Сервис</span>
-              </Button>
-            )}
-            {can('create', 'clients') && (
-              <Button size="sm" className="app-button-primary rounded-xl px-4" onClick={() => setShowClientModal(true)}>
-                <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">Новый клиент</span>
-                <span className="sm:hidden">Клиент</span>
-              </Button>
-            )}
-          </div>
         </div>
       </div>
 
@@ -1302,12 +1268,6 @@ export default function Dashboard() {
                   {roleDashboardMeta.description}
                 </CardDescription>
               </div>
-              <Button asChild variant="ghost" size="sm" className="self-start rounded-xl text-muted-foreground hover:text-foreground lg:self-center">
-                <Link to={user?.role === 'Механик' ? '/service' : user?.role === 'Офис-менеджер' ? '/documents' : '/rentals'}>
-                  Открыть основной раздел
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -1334,23 +1294,8 @@ export default function Dashboard() {
 
                 return (
                   <div key={item.id} className={`rounded-2xl border p-4 ${toneClass}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconClass}`}>
-                        <Icon className="h-5 w-5" />
-                      </div>
-                      {item.onClick ? (
-                        <Button size="sm" variant="ghost" className="h-8 rounded-lg px-2 text-muted-foreground" onClick={item.onClick}>
-                          {item.cta}
-                          <ArrowRight className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <Button asChild size="sm" variant="ghost" className="h-8 rounded-lg px-2 text-muted-foreground">
-                          <Link to={item.href}>
-                            {item.cta}
-                            <ArrowRight className="h-4 w-4" />
-                          </Link>
-                        </Button>
-                      )}
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconClass}`}>
+                      <Icon className="h-5 w-5" />
                     </div>
                     <div className="mt-4">
                       <p className="text-sm font-medium text-muted-foreground">{item.title}</p>
@@ -1403,15 +1348,6 @@ export default function Dashboard() {
                           <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                             {formatCurrency(row.monthRevenue)}
                           </p>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="mt-3"
-                            onClick={() => setManagerBreakdownName(row.name)}
-                          >
-                            Расшифровка
-                          </Button>
                         </div>
                       </div>
                       <div className="mt-3 grid gap-2 sm:grid-cols-4">
@@ -1515,12 +1451,11 @@ export default function Dashboard() {
         <div className="grid gap-3 lg:grid-cols-3">
           {shouldShowRentalAttention && (
             <Card
-              className={`cursor-pointer border transition-all hover:shadow-lg ${
+              className={`border ${
                 overdueRentalsList.length > 0
                   ? 'border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20'
                   : dashboardCardClass
               }`}
-              onClick={() => setSelectedKPI('overdueReturns')}
             >
               <CardHeader className={dashboardCardHeaderClass}>
                 <CardDescription className="flex items-center justify-between">
@@ -1547,12 +1482,11 @@ export default function Dashboard() {
           )}
 
           <Card
-            className={`cursor-pointer border transition-all hover:shadow-lg ${
+            className={`border ${
               unassignedServiceTickets.length > 0
                 ? 'border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20'
                 : dashboardCardClass
             }`}
-            onClick={() => setSelectedKPI('unassignedService')}
           >
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
@@ -1574,12 +1508,11 @@ export default function Dashboard() {
           </Card>
 
           <Card
-            className={`cursor-pointer border transition-all hover:shadow-lg ${
+            className={`border ${
               totalDebt > 0
                 ? 'border-orange-300 bg-orange-50/50 dark:border-orange-800 dark:bg-orange-950/20'
                 : dashboardCardClass
             }`}
-            onClick={() => setSelectedKPI('totalDebt')}
           >
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
@@ -1616,7 +1549,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('utilization')}>
+          <Card className={dashboardCardClass}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Загрузка парка</span>
@@ -1649,7 +1582,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('activeRentals')}>
+          <Card className={dashboardCardClass}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Активные аренды</span>
@@ -1663,7 +1596,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('returnsTodayTomorrow')}>
+          <Card className={dashboardCardClass}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Возвраты сегодня и завтра</span>
@@ -1681,7 +1614,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('openService')}>
+          <Card className={dashboardCardClass}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Открытые заявки</span>
@@ -1696,7 +1629,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('waitingParts')}>
+          <Card className={dashboardCardClass}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Ждут запчасти</span>
@@ -1711,7 +1644,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('serviceInDays')}>
+          <Card className={dashboardCardClass}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Техника в сервисе по дням</span>
@@ -1738,7 +1671,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('weekRevenue')}>
+          <Card className={dashboardCardClass}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Выручка за {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</span>
@@ -1764,7 +1697,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('idleEquipment')}>
+          <Card className={dashboardCardClass}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Техника в простое</span>
@@ -1786,7 +1719,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('repeatFailures')}>
+          <Card className={dashboardCardClass}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Повторные поломки</span>
@@ -1867,12 +1800,6 @@ export default function Dashboard() {
               <p className="text-xs text-gray-400 mt-1">
                 Аренды привязываются к менеджеру при создании.
               </p>
-              <Link to="/rentals/new" className="mt-3 inline-block">
-                <Button size="sm" variant="secondary">
-                  <Plus className="h-4 w-4" />
-                  Создать аренду
-                </Button>
-              </Link>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-6">
@@ -1931,13 +1858,7 @@ export default function Dashboard() {
                 <div key={`${item.inventoryNumber}-${item.serialNumber}`} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      {item.equipmentId ? (
-                        <Link to={`/equipment/${item.equipmentId}`} className="font-medium text-[--color-primary] hover:underline">
-                          {item.equipmentLabel}
-                        </Link>
-                      ) : (
-                        <p className="font-medium text-gray-900 dark:text-white">{item.equipmentLabel}</p>
-                      )}
+                      <p className="font-medium text-gray-900 dark:text-white">{item.equipmentLabel}</p>
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         INV {item.inventoryNumber} · SN {item.serialNumber}
                       </p>
@@ -1953,10 +1874,6 @@ export default function Dashboard() {
                   </div>
                 </div>
               ))}
-              <Link to="/reports" className="inline-flex items-center text-sm text-[--color-primary] hover:underline">
-                Открыть сервисную аналитику
-                <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
             </CardContent>
           </Card>
 
@@ -1989,10 +1906,6 @@ export default function Dashboard() {
                   </div>
                 </div>
               ))}
-              <Link to="/reports" className="inline-flex items-center text-sm text-[--color-primary] hover:underline">
-                Перейти к рейтингу моделей
-                <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
             </CardContent>
           </Card>
         </div>
@@ -2002,79 +1915,79 @@ export default function Dashboard() {
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
 
         {/* ── Alerts Panel (redesigned) ─────────────────────────────────── */}
-        <Card className={alertItems.length > 0 && criticalCount > 0
-          ? 'border-red-200 dark:border-red-800'
-          : alertItems.length > 0 && highCount > 0
-          ? 'border-orange-200 dark:border-orange-800'
-          : ''
-        }>
-          <CardHeader className="pb-3">
-            <div className="flex items-start justify-between gap-2">
-              <CardTitle className="flex items-center gap-2">
-                {alertItems.length === 0 ? (
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                ) : criticalCount > 0 ? (
-                  <AlertTriangle className="h-5 w-5 text-red-600" />
-                ) : (
-                  <AlertTriangle className="h-5 w-5 text-orange-500" />
-                )}
-                Требует внимания
-                {alertItems.length > 0 && (
-                  <span className={`ml-1 rounded-full px-2 py-0.5 text-xs font-bold ${
-                    criticalCount > 0
-                      ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                      : 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300'
-                  }`}>
-                    {alertItems.length}
-                  </span>
-                )}
-              </CardTitle>
+        <Card className={`overflow-hidden border bg-card/95 ${
+          alertItems.length > 0 && criticalCount > 0
+            ? 'border-red-500/70 shadow-[0_0_0_1px_rgba(239,68,68,0.06)]'
+            : alertItems.length > 0 && highCount > 0
+            ? 'border-orange-500/40'
+            : 'border-border/80'
+        }`}>
+          <CardHeader className="gap-3 border-b border-white/6 px-6 pt-6 pb-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <CardTitle className="flex items-center gap-3 text-[2rem] font-extrabold tracking-[-0.02em] text-foreground sm:text-[2.2rem]">
+                  {alertItems.length === 0 ? (
+                    <CheckCircle className="h-6 w-6 text-green-500" />
+                  ) : criticalCount > 0 ? (
+                    <AlertTriangle className="h-6 w-6 text-red-500" />
+                  ) : (
+                    <AlertTriangle className="h-6 w-6 text-orange-400" />
+                  )}
+                  <span className="text-2xl font-extrabold sm:text-[2rem]">Требует внимания</span>
+                  {alertItems.length > 0 && (
+                    <span className={`rounded-full px-3 py-1 text-sm font-bold leading-none ${
+                      criticalCount > 0
+                        ? 'bg-red-500/16 text-red-300'
+                        : 'bg-orange-500/16 text-orange-300'
+                    }`}>
+                      {alertItems.length}
+                    </span>
+                  )}
+                </CardTitle>
+                <CardDescription className="mt-3 text-base text-muted-foreground sm:text-[1.05rem]">
+                  {alertItems.length === 0
+                    ? 'Все операции в штатном режиме'
+                    : `${criticalCount} критичных · ${highCount} важных · ${mediumCount} обычных`}
+                </CardDescription>
+              </div>
 
-              {/* Priority counters */}
               {alertItems.length > 0 && (
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   {criticalCount > 0 && (
-                    <span className="flex items-center gap-1 rounded-md bg-red-100 dark:bg-red-900/30 px-2 py-0.5 text-xs font-semibold text-red-700 dark:text-red-300">
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-600 inline-block" />
+                    <span className="inline-flex items-center gap-2 rounded-full bg-red-500/16 px-3 py-1 text-sm font-semibold text-red-300">
+                      <span className="h-2 w-2 rounded-full bg-red-500" />
                       {criticalCount}
                     </span>
                   )}
                   {highCount > 0 && (
-                    <span className="flex items-center gap-1 rounded-md bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs font-semibold text-orange-700 dark:text-orange-300">
-                      <span className="h-1.5 w-1.5 rounded-full bg-orange-500 inline-block" />
+                    <span className="inline-flex items-center gap-2 rounded-full bg-orange-500/16 px-3 py-1 text-sm font-semibold text-orange-300">
+                      <span className="h-2 w-2 rounded-full bg-orange-400" />
                       {highCount}
                     </span>
                   )}
                   {mediumCount > 0 && (
-                    <span className="flex items-center gap-1 rounded-md bg-yellow-100 dark:bg-yellow-900/30 px-2 py-0.5 text-xs font-semibold text-yellow-700 dark:text-yellow-300">
-                      <span className="h-1.5 w-1.5 rounded-full bg-yellow-500 inline-block" />
+                    <span className="inline-flex items-center gap-2 rounded-full bg-yellow-400/14 px-3 py-1 text-sm font-semibold text-yellow-200">
+                      <span className="h-2 w-2 rounded-full bg-yellow-400" />
                       {mediumCount}
                     </span>
                   )}
                 </div>
               )}
             </div>
-            <CardDescription>
-              {alertItems.length === 0
-                ? 'Все операции в штатном режиме'
-                : `${criticalCount > 0 ? `${criticalCount} критичных · ` : ''}${highCount > 0 ? `${highCount} важных · ` : ''}${mediumCount > 0 ? `${mediumCount} обычных` : ''}`.replace(/ · $/, '')}
-            </CardDescription>
           </CardHeader>
 
-          <CardContent className="space-y-0 p-0 pb-0">
+          <CardContent className="space-y-0 px-0 pb-0">
             {alertItems.length === 0 ? (
-              /* ── Empty state ── */
-              <div className="flex flex-col items-center justify-center py-10 text-center px-6">
-                <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
+              <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+                <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-green-500/12">
                   <CheckCircle className="h-7 w-7 text-green-600" />
                 </div>
-                <p className="font-semibold text-gray-800 dark:text-gray-200">Всё под контролем</p>
-                <p className="mt-1 text-sm text-gray-400">Критических задач и рисков нет.</p>
+                <p className="font-semibold text-foreground">Всё под контролем</p>
+                <p className="mt-1 text-sm text-muted-foreground">Критических задач и рисков нет.</p>
               </div>
             ) : (
               <>
-                {/* ── Alert list ── */}
-                <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                <div className="divide-y divide-white/8">
                   {visibleAlerts.map(alert => {
                     const Icon = alert.icon;
                     const isCritical = alert.priority === 'critical';
@@ -2082,96 +1995,63 @@ export default function Dashboard() {
                     return (
                       <div
                         key={alert.id}
-                        className={`flex items-start gap-3 px-6 py-3.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
-                          isCritical ? 'border-l-2 border-red-500' :
-                          isHigh ? 'border-l-2 border-orange-400' :
-                          'border-l-2 border-yellow-400'
-                        }`}
+                        className="flex items-start justify-between gap-4 px-6 py-5"
                       >
-                        {/* Icon */}
-                        <div className={`mt-0.5 shrink-0 rounded-md p-1.5 ${
-                          isCritical ? 'bg-red-100 dark:bg-red-900/30' :
-                          isHigh ? 'bg-orange-100 dark:bg-orange-900/30' :
-                          'bg-yellow-100 dark:bg-yellow-900/20'
-                        }`}>
-                          <Icon className={`h-3.5 w-3.5 ${
-                            isCritical ? 'text-red-600 dark:text-red-400' :
-                            isHigh ? 'text-orange-600 dark:text-orange-400' :
-                            'text-yellow-600 dark:text-yellow-400'
-                          }`} />
-                        </div>
+                        <div className="flex min-w-0 items-start gap-4">
+                          <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                            isCritical ? 'bg-red-500/14 text-red-400' :
+                            isHigh ? 'bg-orange-500/14 text-orange-300' :
+                            'bg-yellow-400/14 text-yellow-300'
+                          }`}>
+                            <Icon className="h-4 w-4" />
+                          </div>
 
-                        {/* Content */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`text-[10px] font-semibold uppercase tracking-wide ${
-                              isCritical ? 'text-red-600 dark:text-red-400' :
-                              isHigh ? 'text-orange-600 dark:text-orange-400' :
-                              'text-yellow-600 dark:text-yellow-400'
+                          <div className="min-w-0">
+                            <p className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
+                              isCritical ? 'text-red-400' :
+                              isHigh ? 'text-orange-300' :
+                              'text-yellow-300'
                             }`}>
                               {alert.category}
-                            </span>
-                          </div>
-                          <p className="mt-0.5 text-sm font-medium text-gray-900 dark:text-white truncate">
-                            {alert.title}
-                          </p>
-                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                            {alert.entity && (
-                              <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                {alert.entity}
-                              </span>
-                            )}
-                            {alert.entity && alert.detail && (
-                              <span className="text-gray-300 dark:text-gray-600 text-xs">·</span>
-                            )}
-                            {alert.detail && (
-                              <span className={`text-xs font-medium ${
-                                isCritical ? 'text-red-600 dark:text-red-400' :
-                                isHigh ? 'text-orange-600 dark:text-orange-400' :
-                                'text-yellow-700 dark:text-yellow-400'
-                              }`}>
-                                {alert.detail}
-                              </span>
-                            )}
+                            </p>
+                            <p className="mt-1 truncate text-xl font-bold tracking-[-0.02em] text-foreground sm:text-2xl">
+                              {alert.title}
+                            </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground sm:text-base">
+                              {alert.entity && <span>{alert.entity}</span>}
+                              {alert.entity && alert.detail && <span className="text-white/20">·</span>}
+                              {alert.detail && (
+                                <span className={
+                                  isCritical ? 'text-red-400' :
+                                  isHigh ? 'text-orange-300' :
+                                  'text-yellow-300'
+                                }>
+                                  {alert.detail}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
-                        {/* Action link */}
-                        <Link
-                          to={alert.link}
-                          className={`shrink-0 flex items-center gap-1 text-xs font-medium transition-colors hover:underline mt-0.5 ${
-                            isCritical ? 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200' :
-                            isHigh ? 'text-orange-600 dark:text-orange-400 hover:text-orange-800 dark:hover:text-orange-200' :
-                            'text-yellow-700 dark:text-yellow-400 hover:text-yellow-900 dark:hover:text-yellow-200'
-                          }`}
-                        >
-                          {alert.linkLabel}
-                          <ArrowRight className="h-3 w-3" />
-                        </Link>
+                        <div className={`hidden shrink-0 items-center gap-2 self-center text-sm font-semibold sm:flex ${
+                          isCritical ? 'text-red-400' :
+                          isHigh ? 'text-orange-300' :
+                          'text-yellow-300'
+                        }`}>
+                          <span>{alert.linkLabel}</span>
+                          <ArrowRight className="h-4 w-4" />
+                        </div>
                       </div>
                     );
                   })}
                 </div>
 
-                {/* ── Show more / collapse ── */}
                 {alertItems.length > ALERTS_PREVIEW && (
-                  <div className="border-t border-gray-100 dark:border-gray-800 px-6 py-3">
-                    <button
-                      onClick={() => setShowAllAlerts(v => !v)}
-                      className="flex w-full items-center justify-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-                    >
-                      {showAllAlerts ? (
-                        <>
-                          <ChevronUp className="h-4 w-4" />
-                          Свернуть
-                        </>
-                      ) : (
-                        <>
-                          <ChevronDown className="h-4 w-4" />
-                          Показать ещё {alertItems.length - ALERTS_PREVIEW}
-                        </>
-                      )}
-                    </button>
+                  <div className="border-t border-white/8 px-6 py-5 text-center text-lg font-semibold text-muted-foreground">
+                    <span className="inline-flex items-center gap-2">
+                      <ChevronDown className="h-5 w-5" />
+                      Показать ещё {alertItems.length - ALERTS_PREVIEW}
+                    </span>
                   </div>
                 )}
               </>
@@ -2180,53 +2060,60 @@ export default function Dashboard() {
         </Card>
 
         {/* Recent Rentals */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
+        <Card className="overflow-hidden border-border/80 bg-card/95">
+          <CardHeader className="gap-2 px-6 pt-6 pb-5">
+            <CardTitle className="flex items-center gap-3 text-2xl font-extrabold tracking-[-0.02em] text-foreground">
+              <FileText className="h-6 w-6 text-muted-foreground" />
               Последние аренды
             </CardTitle>
-            <CardDescription>Недавно созданные договоры</CardDescription>
+            <CardDescription className="text-base text-muted-foreground">
+              Недавно созданные договоры
+            </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-0">
             {recentRentals.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
-                  <FileText className="h-6 w-6 text-gray-300" />
+              <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/5">
+                  <FileText className="h-6 w-6 text-muted-foreground" />
                 </div>
-                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Пока нет аренд</p>
-                <p className="text-xs text-gray-400 mt-0.5 mb-3">Создайте первую аренду</p>
-                <Button size="sm" variant="secondary" onClick={() => setShowRentalModal(true)}>
-                  <Plus className="h-4 w-4" />
-                  Создать аренду
-                </Button>
+                <p className="text-sm font-medium text-muted-foreground">Пока нет аренд</p>
+                <p className="mt-0.5 text-xs text-muted-foreground/80">Недавние договоры появятся здесь</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {recentRentals.map(rental => {
+              <div className="divide-y divide-white/8">
+                {recentRentals.slice(0, 5).map(rental => {
                   const rs = RENTAL_STATUS[rental.status] ?? { label: rental.status, color: 'bg-gray-100 text-gray-500' };
                   return (
-                    <Link
+                    <div
                       key={rental.id}
-                      to="/rentals"
-                      className="flex items-center justify-between rounded-lg border border-transparent px-2 py-3 transition-colors hover:border-gray-200 hover:bg-gray-50 dark:hover:border-gray-700 dark:hover:bg-gray-700/50 -mx-2"
+                      className="flex items-start justify-between gap-4 px-6 py-6"
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-medium text-gray-900 dark:text-white text-sm truncate">{rental.client}</p>
-                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${rs.color}`}>{rs.label}</span>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <p className="truncate text-xl font-bold tracking-[-0.02em] text-foreground sm:text-2xl">{rental.client}</p>
+                          <span className={`rounded-full px-3 py-1 text-sm font-semibold ${
+                            rental.status === 'active'
+                              ? 'bg-emerald-400/16 text-emerald-200'
+                              : rental.status === 'closed' || rental.status === 'completed' || rental.status === 'returned'
+                              ? 'bg-white/10 text-slate-300'
+                              : 'bg-amber-400/16 text-amber-200'
+                          }`}>
+                            {rs.label}
+                          </span>
                         </div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                        <p className="mt-2 truncate text-base text-muted-foreground">
                           {rental.id} · {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
                         </p>
                       </div>
-                      <div className="ml-3 shrink-0 text-right">
-                        <p className="font-semibold text-sm text-gray-900 dark:text-white">
-                          {rental.amount > 0 ? formatCurrency(rental.amount) : '—'}
-                        </p>
-                        <span className="text-xs text-[--color-primary]">→</span>
+                      <div className="ml-3 flex shrink-0 items-center gap-4 text-right">
+                        <div>
+                          <p className="text-2xl font-extrabold tracking-[-0.02em] text-foreground">
+                            {rental.amount > 0 ? formatCurrency(rental.amount) : '—'}
+                          </p>
+                        </div>
+                        <span className="text-xl text-foreground/80">→</span>
                       </div>
-                    </Link>
+                    </div>
                   );
                 })}
               </div>

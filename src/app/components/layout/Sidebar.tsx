@@ -455,15 +455,33 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </nav>
 
         <div className="border-t border-sidebar-border px-3 pb-3 pt-2">
-          <div className="mb-2 flex items-center gap-2 rounded-xl border border-sidebar-border bg-sidebar-accent/80 px-3 py-2 text-sm text-muted-foreground">
-            {theme === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          <div className={cn(
+            'mb-2 flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors',
+            theme === 'dark'
+              ? 'border-sidebar-border bg-sidebar-accent text-sidebar-foreground'
+              : 'border-sidebar-border bg-sidebar-accent/80 text-muted-foreground',
+          )}>
+            {theme === 'dark' ? <Moon className="h-4 w-4 text-sidebar-foreground" /> : <Sun className="h-4 w-4 text-muted-foreground" />}
             <span>{theme === 'dark' ? 'Тёмный режим' : 'Светлый режим'}</span>
             <button
               type="button"
               onClick={toggleTheme}
-              className="ml-auto rounded-full border border-sidebar-border bg-accent px-2 py-0.5 text-[11px] text-sidebar-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
+              aria-pressed={theme === 'dark'}
+              className={cn(
+                'ml-auto inline-flex h-6 w-12 items-center rounded-full border p-1 transition-all',
+                theme === 'dark'
+                  ? 'justify-end border-primary/30 bg-primary/90 text-primary-foreground shadow-[0_10px_24px_-18px_rgba(212,247,74,0.95)]'
+                  : 'justify-start border-sidebar-border bg-accent text-muted-foreground hover:border-primary/30',
+              )}
             >
-              {theme === 'dark' ? 'On' : 'Off'}
+              <span className={cn(
+                'inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none transition-colors',
+                theme === 'dark'
+                  ? 'bg-black/20 text-primary-foreground'
+                  : 'bg-muted/80 text-foreground',
+              )}>
+                {theme === 'dark' ? 'On' : 'Off'}
+              </span>
             </button>
           </div>
 

@@ -82,7 +82,10 @@ export function buildRentalDebtRows(
   return rentals
     .map(rental => {
       const relatedPayments = byRentalId.get(rental.id) ?? [];
-      const paidAmount = relatedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
+      let paidAmount = relatedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
+      if (relatedPayments.length === 0 && rental.paymentStatus === 'paid') {
+        paidAmount = rental.amount || 0;
+      }
       const outstanding = Math.max(0, (rental.amount || 0) - paidAmount);
       return {
         rentalId: rental.id,
@@ -95,7 +98,13 @@ export function buildRentalDebtRows(
         amount: rental.amount || 0,
         paidAmount,
         outstanding,
-        paymentStatus: rental.paymentStatus,
+        paymentStatus: relatedPayments.length > 0
+          ? outstanding <= 0
+            ? 'paid'
+            : paidAmount > 0
+              ? 'partial'
+              : 'unpaid'
+          : rental.paymentStatus,
         rentalStatus: rental.status,
       };
     })

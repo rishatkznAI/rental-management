@@ -32,7 +32,6 @@ interface RentalDrawerProps {
   onDelete: (rental: GanttRentalData) => void;
   onUpdate: (rental: GanttRentalData, data: Partial<GanttRentalData>) => void;
   onAddComment: (rental: GanttRentalData, text: string) => void;
-  onPaymentStatusChange: (rental: GanttRentalData, status: GanttRentalData['paymentStatus']) => void;
   onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string) => void;
   onExtend: (rental: GanttRentalData, newEndDate: string) => void;
   onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
@@ -70,7 +69,7 @@ export function RentalDrawer({
   clients = [], clientReceivables = [],
   canEditRentals, canEditRentalDates, canRestoreRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
-  onRestore, onUpdate, onAddComment, onPaymentStatusChange, onAddPayment, onExtend, onEarlyReturn, onUpdChange,
+  onRestore, onUpdate, onAddComment, onAddPayment, onExtend, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -127,8 +126,12 @@ export function RentalDrawer({
 
   // Payments for this rental
   const rentalPayments = payments.filter(p => p.rentalId === rental.id);
-  const totalPaid = rentalPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
-  const remaining = rental.amount - totalPaid;
+  const explicitPaidAmount = rentalPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
+  const totalPaid = rentalPayments.length === 0 && rental.paymentStatus === 'paid'
+    ? rental.amount
+    : explicitPaidAmount;
+  const remaining = Math.max(0, rental.amount - totalPaid);
+  const canRegisterPayment = canCreatePayments && remaining > 0;
   const clientProfile = clients.find(item => item.company === rental.client);
   const clientDebt = clientReceivables.find(item => item.client === rental.client);
 
@@ -418,13 +421,13 @@ export function RentalDrawer({
                 <CreditCard className="h-4 w-4" />
                 <span>Оплата</span>
               </div>
-              {canCreatePayments && (rental.status === 'active' || rental.status === 'created') && (
+              {canRegisterPayment && (
                 <button
                   onClick={() => setShowAddPayment(v => !v)}
                   className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
                 >
                   <Plus className="h-3 w-3" />
-                  Добавить оплату
+                  Создать платёж
                 </button>
               )}
             </div>
@@ -479,6 +482,16 @@ export function RentalDrawer({
                 </div>
               </div>
 
+              {canRegisterPayment && !showAddPayment && (
+                <button
+                  onClick={() => setShowAddPayment(true)}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/30"
+                >
+                  <Plus className="h-4 w-4" />
+                  Создать платёж на {formatCurrency(remaining)}
+                </button>
+              )}
+
               {/* Paid / Remaining */}
               {(totalPaid > 0 || rentalPayments.length > 0) && (
                 <div className="mt-3 grid grid-cols-2 gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
@@ -504,7 +517,10 @@ export function RentalDrawer({
 
               {canEditRentals && (
                 <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
-                  <div className="mb-2 text-xs text-gray-500 dark:text-gray-400">Статус оплаты</div>
+                  <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Статус оплаты</div>
+                  <p className="mb-2 text-[11px] text-gray-400 dark:text-gray-500">
+                    Если добавить платёж, статус пересчитается автоматически.
+                  </p>
                   <div className="flex flex-wrap gap-2">
                     {(['paid', 'partial', 'unpaid'] as const).map(status => (
                       <button
@@ -525,9 +541,9 @@ export function RentalDrawer({
             </div>
 
             {/* Add payment form */}
-            {canCreatePayments && showAddPayment && (
+            {canRegisterPayment && showAddPayment && (
               <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
-                <div className="mb-2 text-xs font-medium text-blue-700 dark:text-blue-400">Внести оплату</div>
+                <div className="mb-2 text-xs font-medium text-blue-700 dark:text-blue-400">Создать платёж по аренде</div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Сумма (₽) *</label>

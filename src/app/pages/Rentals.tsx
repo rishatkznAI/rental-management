@@ -1209,26 +1209,6 @@ export default function Rentals() {
     showToast('Запись добавлена в историю аренды');
   }, [canEditRentals, ganttRentals, historyAuthor, persistGanttRentals, selectedRental, showToast]);
 
-  const handlePaymentStatusChange = useCallback((rental: GanttRentalData, status: GanttRentalData['paymentStatus']) => {
-    if (!canEditRentals) return;
-    const updatedRentals = ganttRentals.map(item =>
-      item.id === rental.id
-        ? appendRentalHistory(
-            { ...item, paymentStatus: status },
-            createRentalHistoryEntry(
-              historyAuthor,
-              `Статус оплаты изменен: ${status === 'paid' ? 'Оплачено' : status === 'partial' ? 'Частично' : 'Не оплачено'}`,
-            ),
-          )
-        : item
-    );
-    void persistGanttRentals(updatedRentals);
-    if (selectedRental?.id === rental.id) {
-      setSelectedRental(updatedRentals.find(item => item.id === rental.id) || null);
-    }
-    showToast(`Статус оплаты обновлён: ${status === 'paid' ? 'Оплачено' : status === 'partial' ? 'Частично' : 'Не оплачено'}`);
-  }, [canEditRentals, ganttRentals, historyAuthor, persistGanttRentals, selectedRental, showToast]);
-
   // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
   const handleEarlyReturn = useCallback((rental: GanttRentalData, actualReturnDate: string) => {
     if (!canEditRentals || !canEditRentalDates) return;
@@ -2262,7 +2242,6 @@ export default function Rentals() {
           }}
           onUpdate={handleUpdateRental}
           onAddComment={handleAddRentalComment}
-          onPaymentStatusChange={handlePaymentStatusChange}
         />
       )}
 

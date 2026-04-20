@@ -1,8 +1,16 @@
 import { createHashRouter } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
-import ErrorPage from './pages/ErrorPage';
 
 const pageModules = import.meta.glob('./pages/*.tsx');
+
+async function loadErrorBoundary() {
+  const importer = pageModules['./pages/ErrorPage.tsx'];
+  if (!importer) {
+    throw new Error('Unknown route module: ./pages/ErrorPage');
+  }
+  const module = await importer();
+  return module.default;
+}
 
 function lazyPage(path: string) {
   return async () => {
@@ -10,8 +18,14 @@ function lazyPage(path: string) {
     if (!importer) {
       throw new Error(`Unknown route module: ${path}`);
     }
-    const module = await importer();
-    return { Component: module.default };
+    const [module, ErrorBoundary] = await Promise.all([
+      importer(),
+      loadErrorBoundary(),
+    ]);
+    return {
+      Component: module.default,
+      ErrorBoundary,
+    };
   };
 }
 
@@ -21,12 +35,13 @@ export const router = createHashRouter([
   {
     path: '/login',
     lazy: lazyPage('./pages/Login'),
-    ErrorBoundary: ErrorPage,
   },
   {
     path: '/',
-    Component: Layout,
-    ErrorBoundary: ErrorPage,
+    lazy: async () => ({
+      Component: Layout,
+      ErrorBoundary: await loadErrorBoundary(),
+    }),
     children: [
       { index: true, lazy: lazyPage('./pages/Dashboard') },
       { path: 'planner', lazy: lazyPage('./pages/Planner') },

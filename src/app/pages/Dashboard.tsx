@@ -1451,11 +1451,12 @@ export default function Dashboard() {
         <div className="grid gap-3 lg:grid-cols-3">
           {shouldShowRentalAttention && (
             <Card
-              className={`border ${
+              className={`cursor-pointer border transition-all hover:shadow-lg ${
                 overdueRentalsList.length > 0
                   ? 'border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20'
                   : dashboardCardClass
               }`}
+              onClick={() => setSelectedKPI('overdueReturns')}
             >
               <CardHeader className={dashboardCardHeaderClass}>
                 <CardDescription className="flex items-center justify-between">
@@ -1482,11 +1483,12 @@ export default function Dashboard() {
           )}
 
           <Card
-            className={`border ${
+            className={`cursor-pointer border transition-all hover:shadow-lg ${
               unassignedServiceTickets.length > 0
                 ? 'border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20'
                 : dashboardCardClass
             }`}
+            onClick={() => setSelectedKPI('unassignedService')}
           >
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
@@ -1508,11 +1510,12 @@ export default function Dashboard() {
           </Card>
 
           <Card
-            className={`border ${
+            className={`cursor-pointer border transition-all hover:shadow-lg ${
               totalDebt > 0
                 ? 'border-orange-300 bg-orange-50/50 dark:border-orange-800 dark:bg-orange-950/20'
                 : dashboardCardClass
             }`}
+            onClick={() => setSelectedKPI('totalDebt')}
           >
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
@@ -1549,7 +1552,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <Card className={dashboardCardClass}>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('utilization')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Загрузка парка</span>
@@ -1582,7 +1585,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={dashboardCardClass}>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('activeRentals')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Активные аренды</span>
@@ -1596,7 +1599,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={dashboardCardClass}>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('returnsTodayTomorrow')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Возвраты сегодня и завтра</span>
@@ -1614,7 +1617,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={dashboardCardClass}>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('openService')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Открытые заявки</span>
@@ -1629,7 +1632,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={dashboardCardClass}>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('waitingParts')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Ждут запчасти</span>
@@ -1644,7 +1647,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={dashboardCardClass}>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('serviceInDays')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Техника в сервисе по дням</span>
@@ -1671,7 +1674,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Card className={dashboardCardClass}>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('weekRevenue')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Выручка за {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</span>
@@ -1697,7 +1700,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={dashboardCardClass}>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('idleEquipment')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Техника в простое</span>
@@ -1719,7 +1722,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={dashboardCardClass}>
+          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('repeatFailures')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">
                 <span>Повторные поломки</span>
@@ -1922,57 +1925,38 @@ export default function Dashboard() {
             ? 'border-orange-500/40'
             : 'border-border/80'
         }`}>
-          <CardHeader className="gap-3 border-b border-white/6 px-6 pt-6 pb-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <CardTitle className="flex items-center gap-3 text-[2rem] font-extrabold tracking-[-0.02em] text-foreground sm:text-[2.2rem]">
-                  {alertItems.length === 0 ? (
-                    <CheckCircle className="h-6 w-6 text-green-500" />
-                  ) : criticalCount > 0 ? (
-                    <AlertTriangle className="h-6 w-6 text-red-500" />
-                  ) : (
-                    <AlertTriangle className="h-6 w-6 text-orange-400" />
-                  )}
-                  <span className="text-2xl font-extrabold sm:text-[2rem]">Требует внимания</span>
-                  {alertItems.length > 0 && (
-                    <span className={`rounded-full px-3 py-1 text-sm font-bold leading-none ${
-                      criticalCount > 0
-                        ? 'bg-red-500/16 text-red-300'
-                        : 'bg-orange-500/16 text-orange-300'
-                    }`}>
-                      {alertItems.length}
-                    </span>
-                  )}
-                </CardTitle>
-                <CardDescription className="mt-3 text-base text-muted-foreground sm:text-[1.05rem]">
-                  {alertItems.length === 0
-                    ? 'Все операции в штатном режиме'
-                    : `${criticalCount} критичных · ${highCount} важных · ${mediumCount} обычных`}
-                </CardDescription>
+          <CardHeader className="gap-4 border-b border-white/6 px-8 pt-8 pb-6">
+            <div className="space-y-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                Требует внимания
               </div>
-
-              {alertItems.length > 0 && (
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {alertItems.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-2">
                   {criticalCount > 0 && (
                     <span className="inline-flex items-center gap-2 rounded-full bg-red-500/16 px-3 py-1 text-sm font-semibold text-red-300">
                       <span className="h-2 w-2 rounded-full bg-red-500" />
-                      {criticalCount}
+                      {criticalCount} крит.
                     </span>
                   )}
                   {highCount > 0 && (
                     <span className="inline-flex items-center gap-2 rounded-full bg-orange-500/16 px-3 py-1 text-sm font-semibold text-orange-300">
                       <span className="h-2 w-2 rounded-full bg-orange-400" />
-                      {highCount}
+                      {highCount} важных
                     </span>
                   )}
                   {mediumCount > 0 && (
-                    <span className="inline-flex items-center gap-2 rounded-full bg-yellow-400/14 px-3 py-1 text-sm font-semibold text-yellow-200">
-                      <span className="h-2 w-2 rounded-full bg-yellow-400" />
-                      {mediumCount}
+                    <span className="inline-flex items-center gap-2 rounded-full bg-lime-400/14 px-3 py-1 text-sm font-semibold text-lime-300">
+                      <span className="h-2 w-2 rounded-full bg-lime-400" />
+                      {mediumCount} обычных
                     </span>
                   )}
                 </div>
-              )}
+              ) : null}
+              <CardDescription className="text-sm text-muted-foreground">
+                {alertItems.length === 0
+                  ? 'Все операции в штатном режиме'
+                  : `${criticalCount} критичных · ${highCount} важных · ${mediumCount} обычных`}
+              </CardDescription>
             </div>
           </CardHeader>
 
@@ -1989,57 +1973,43 @@ export default function Dashboard() {
               <>
                 <div className="divide-y divide-white/8">
                   {visibleAlerts.map(alert => {
-                    const Icon = alert.icon;
                     const isCritical = alert.priority === 'critical';
                     const isHigh = alert.priority === 'high';
                     return (
                       <div
                         key={alert.id}
-                        className="flex items-start justify-between gap-4 px-6 py-5"
+                        className="flex items-start justify-between gap-4 px-8 py-5"
                       >
-                        <div className="flex min-w-0 items-start gap-4">
-                          <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                            isCritical ? 'bg-red-500/14 text-red-400' :
-                            isHigh ? 'bg-orange-500/14 text-orange-300' :
-                            'bg-yellow-400/14 text-yellow-300'
+                        <div className="min-w-0">
+                          <p className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
+                            isCritical ? 'text-red-400' :
+                            isHigh ? 'text-orange-300' :
+                            'text-yellow-300'
                           }`}>
-                            <Icon className="h-4 w-4" />
-                          </div>
-
-                          <div className="min-w-0">
-                            <p className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
-                              isCritical ? 'text-red-400' :
-                              isHigh ? 'text-orange-300' :
-                              'text-yellow-300'
-                            }`}>
-                              {alert.category}
-                            </p>
-                            <p className="mt-1 truncate text-xl font-bold tracking-[-0.02em] text-foreground sm:text-2xl">
-                              {alert.title}
-                            </p>
-                            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground sm:text-base">
-                              {alert.entity && <span>{alert.entity}</span>}
-                              {alert.entity && alert.detail && <span className="text-white/20">·</span>}
-                              {alert.detail && (
-                                <span className={
-                                  isCritical ? 'text-red-400' :
-                                  isHigh ? 'text-orange-300' :
-                                  'text-yellow-300'
-                                }>
-                                  {alert.detail}
-                                </span>
-                              )}
-                            </div>
+                            {alert.category}
+                          </p>
+                          <p className="mt-1 truncate text-[17px] font-semibold text-foreground sm:text-[18px]">
+                            {alert.title}
+                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                            {alert.entity && <span>{alert.entity}</span>}
+                            {alert.entity && alert.detail && <span className="text-white/20">·</span>}
+                            {alert.detail && <span>{alert.detail}</span>}
                           </div>
                         </div>
 
-                        <div className={`hidden shrink-0 items-center gap-2 self-center text-sm font-semibold sm:flex ${
-                          isCritical ? 'text-red-400' :
-                          isHigh ? 'text-orange-300' :
-                          'text-yellow-300'
-                        }`}>
-                          <span>{alert.linkLabel}</span>
-                          <ArrowRight className="h-4 w-4" />
+                        <div className="hidden shrink-0 items-center gap-4 self-center sm:flex">
+                          <span className={`text-[15px] font-semibold ${
+                            isCritical ? 'text-orange-300' :
+                            isHigh ? 'text-orange-300' :
+                            'text-yellow-300'
+                          }`}>
+                            {(alert.detail ?? '').replace('Просрочка ', '').replace(' просрочки', '')}
+                          </span>
+                          <span className="inline-flex items-center rounded-xl border border-white/10 bg-white/6 px-4 py-2 text-sm font-medium text-muted-foreground">
+                            Открыть
+                            <ArrowRight className="ml-2 h-4 w-4" />
+                          </span>
                         </div>
                       </div>
                     );
@@ -2047,9 +2017,9 @@ export default function Dashboard() {
                 </div>
 
                 {alertItems.length > ALERTS_PREVIEW && (
-                  <div className="border-t border-white/8 px-6 py-5 text-center text-lg font-semibold text-muted-foreground">
+                  <div className="border-t border-white/8 px-8 py-5 text-center text-base font-semibold text-muted-foreground">
                     <span className="inline-flex items-center gap-2">
-                      <ChevronDown className="h-5 w-5" />
+                      <ChevronDown className="h-4 w-4" />
                       Показать ещё {alertItems.length - ALERTS_PREVIEW}
                     </span>
                   </div>
@@ -2061,12 +2031,11 @@ export default function Dashboard() {
 
         {/* Recent Rentals */}
         <Card className="overflow-hidden border-border/80 bg-card/95">
-          <CardHeader className="gap-2 px-6 pt-6 pb-5">
-            <CardTitle className="flex items-center gap-3 text-2xl font-extrabold tracking-[-0.02em] text-foreground">
-              <FileText className="h-6 w-6 text-muted-foreground" />
+          <CardHeader className="gap-2 px-8 pt-8 pb-6">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
               Последние аренды
-            </CardTitle>
-            <CardDescription className="text-base text-muted-foreground">
+            </div>
+            <CardDescription className="text-sm text-muted-foreground">
               Недавно созданные договоры
             </CardDescription>
           </CardHeader>
@@ -2086,32 +2055,27 @@ export default function Dashboard() {
                   return (
                     <div
                       key={rental.id}
-                      className="flex items-start justify-between gap-4 px-6 py-6"
+                      className="flex items-start justify-between gap-4 px-8 py-5"
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 flex-wrap">
-                          <p className="truncate text-xl font-bold tracking-[-0.02em] text-foreground sm:text-2xl">{rental.client}</p>
-                          <span className={`rounded-full px-3 py-1 text-sm font-semibold ${
-                            rental.status === 'active'
-                              ? 'bg-emerald-400/16 text-emerald-200'
-                              : rental.status === 'closed' || rental.status === 'completed' || rental.status === 'returned'
-                              ? 'bg-white/10 text-slate-300'
-                              : 'bg-amber-400/16 text-amber-200'
-                          }`}>
-                            {rs.label}
-                          </span>
-                        </div>
-                        <p className="mt-2 truncate text-base text-muted-foreground">
+                        <p className="truncate text-[17px] font-semibold text-foreground sm:text-[18px]">{rental.client}</p>
+                        <p className="mt-1 truncate text-sm text-muted-foreground">
                           {rental.id} · {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
                         </p>
                       </div>
-                      <div className="ml-3 flex shrink-0 items-center gap-4 text-right">
-                        <div>
-                          <p className="text-2xl font-extrabold tracking-[-0.02em] text-foreground">
-                            {rental.amount > 0 ? formatCurrency(rental.amount) : '—'}
-                          </p>
-                        </div>
-                        <span className="text-xl text-foreground/80">→</span>
+                      <div className="ml-3 shrink-0 text-right">
+                        <p className="text-[17px] font-semibold text-foreground sm:text-[18px]">
+                          {rental.amount > 0 ? formatCurrency(rental.amount) : '—'}
+                        </p>
+                        <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${
+                          rental.status === 'active'
+                            ? 'bg-emerald-400/16 text-emerald-200'
+                            : rental.status === 'closed' || rental.status === 'completed' || rental.status === 'returned'
+                            ? 'bg-lime-400/14 text-lime-300'
+                            : 'bg-white/10 text-slate-300'
+                        }`}>
+                          {rs.label}
+                        </span>
                       </div>
                     </div>
                   );

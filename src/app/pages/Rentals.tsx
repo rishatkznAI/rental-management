@@ -1403,112 +1403,36 @@ export default function Rentals() {
       <div className="relative z-10 border-b border-border/80 bg-card/70 backdrop-blur-xl">
         <div className="px-4 py-2">
           <div className="rounded-[24px] border border-border bg-card/80 px-4 py-3 shadow-[0_24px_50px_-38px_rgba(15,23,42,0.9)]">
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <button
+              type="button"
+              onClick={() => setShowFiltersDialog(true)}
+              className="flex w-full items-center justify-between gap-4 rounded-[20px] border border-border bg-secondary/70 px-4 py-3 text-left transition-colors hover:bg-secondary"
+            >
+              <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex rounded-[18px] border border-border bg-secondary/80 p-1">
-                    {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
-                      <button
-                        key={s}
-                        onClick={() => setScale(s)}
-                        className={`rounded-xl px-3 py-1.5 text-sm font-medium transition-colors ${
-                          scale === s
-                            ? 'bg-accent text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        {SCALE_CONFIG[s].label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 rounded-[18px] border border-border bg-secondary/80 px-2.5 py-1.5">
-                    <input
-                      type="date"
-                      value={customRangeStart}
-                      onChange={e => setCustomRangeStart(e.target.value)}
-                      className="h-8 rounded-xl border border-border bg-input-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                    <span className="text-sm text-muted-foreground">—</span>
-                    <input
-                      type="date"
-                      value={customRangeEnd}
-                      onChange={e => setCustomRangeEnd(e.target.value)}
-                      className="h-8 rounded-xl border border-border bg-input-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                    <button
-                      onClick={applyCustomRange}
-                      disabled={!customRange}
-                      className="rounded-xl bg-accent px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Период
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 rounded-[18px] border border-border bg-secondary/80 px-2.5 py-1.5">
-                  <button
-                    onClick={() => navigateTime('today')}
-                    className="rounded-xl border border-border bg-input-background px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-                  >
-                    Сегодня
-                  </button>
-                  <button onClick={() => navigateTime('prev')} className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <button onClick={() => navigateTime('next')} className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                  <div className="pl-1 text-sm font-medium text-muted-foreground">
-                    {rangeLabel}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-              <div className="flex min-w-0 flex-1 items-center gap-2 justify-end">
-                <div className="flex shrink-0 rounded-xl border border-gray-200/80 bg-white/75 p-1 dark:border-white/10 dark:bg-white/6">
-                  <button
-                    type="button"
-                    onClick={() => setDensityMode('comfortable')}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                      densityMode === 'comfortable'
-                        ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-800 dark:text-white'
-                        : 'text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white'
-                    }`}
-                  >
-                    Обычный
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDensityMode('compact')}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                      densityMode === 'compact'
-                        ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-800 dark:text-white'
-                        : 'text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white'
-                    }`}
-                  >
-                    Компактно
-                  </button>
-                </div>
-
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setShowFiltersDialog(true)}
-                  className="h-10 shrink-0 rounded-xl border border-gray-200/80 bg-white/75 px-4 text-sm dark:border-white/10 dark:bg-white/6"
-                >
-                  <SlidersHorizontal className="h-4 w-4" />
-                  Фильтры
+                  <span className="text-sm font-semibold text-foreground">Вид, период и фильтры</span>
                   {activeFilterCount > 0 && (
-                    <span className="ml-1 rounded-full bg-[--color-primary]/10 px-2 py-0.5 text-[11px] font-semibold text-[--color-primary]">
+                    <span className="rounded-full bg-[--color-primary]/12 px-2 py-0.5 text-[11px] font-semibold text-[--color-primary]">
                       {activeFilterCount}
                     </span>
                   )}
-                </Button>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground sm:text-sm">
+                  <span>{SCALE_CONFIG[scale].label}</span>
+                  <span className="text-white/20">•</span>
+                  <span>{rangeLabel}</span>
+                  <span className="text-white/20">•</span>
+                  <span>{densityMode === 'comfortable' ? 'Обычный вид' : 'Компактный вид'}</span>
+                  <span className="text-white/20">•</span>
+                  <span>{hasAdvancedFilters ? 'Фильтры настроены' : 'Без дополнительных фильтров'}</span>
+                </div>
               </div>
-            </div>
-            </div>
+
+              <div className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-foreground">
+                <SlidersHorizontal className="h-4 w-4" />
+                Настроить
+              </div>
+            </button>
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100/90 pt-3 text-xs dark:border-white/8">
               <div className="flex flex-wrap items-center gap-3 text-gray-500 dark:text-gray-400">
@@ -1574,13 +1498,101 @@ export default function Rentals() {
       <Dialog open={showFiltersDialog} onOpenChange={setShowFiltersDialog}>
         <DialogContent className="sm:max-w-[760px]">
           <DialogHeader>
-            <DialogTitle>Фильтры аренды</DialogTitle>
+            <DialogTitle>Вид, период и фильтры</DialogTitle>
             <DialogDescription>
-              Настрой отображение парка, не отнимая место у таймлайна.
+              Здесь собраны даты, режим отображения и фильтры парка в одном окне.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5">
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Масштаб таймлайна</div>
+              <div className="flex flex-wrap gap-2">
+                {(['week', 'month', 'quarter', 'year'] as Scale[]).map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setScale(s)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                      scale === s
+                        ? 'bg-[--color-primary] text-white shadow-sm'
+                        : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                    }`}
+                  >
+                    {SCALE_CONFIG[s].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-[1fr_auto]">
+              <div>
+                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Произвольный период</div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="date"
+                    value={customRangeStart}
+                    onChange={e => setCustomRangeStart(e.target.value)}
+                    className="h-11 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                  />
+                  <span className="hidden text-sm text-gray-400 sm:inline">—</span>
+                  <input
+                    type="date"
+                    value={customRangeEnd}
+                    onChange={e => setCustomRangeEnd(e.target.value)}
+                    className="h-11 rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                  />
+                  <Button onClick={applyCustomRange} disabled={!customRange} className="sm:min-w-[110px]">
+                    Период
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Навигация</div>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="secondary" onClick={() => navigateTime('today')}>
+                    Сегодня
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => navigateTime('prev')} className="h-11 w-11 rounded-xl">
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => navigateTime('next')} className="h-11 w-11 rounded-xl">
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">{rangeLabel}</div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Плотность строк</div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDensityMode('comfortable')}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    densityMode === 'comfortable'
+                      ? 'bg-[--color-primary] text-white shadow-sm'
+                      : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                  }`}
+                >
+                  Обычный
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDensityMode('compact')}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    densityMode === 'compact'
+                      ? 'bg-[--color-primary] text-white shadow-sm'
+                      : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                  }`}
+                >
+                  Компактно
+                </button>
+              </div>
+            </div>
+
             <div>
               <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Поиск по технике</div>
               <div className="relative">
@@ -2069,29 +2081,26 @@ export default function Rentals() {
       </div>
 
       <div className="sticky bottom-0 z-20 border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-gray-700 dark:bg-gray-800/95 sm:hidden">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <button
-            type="button"
-            onClick={() => navigateTime('today')}
-            className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-          >
-            Сегодня
-          </button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setShowFiltersDialog(true)}
-            className="h-8 shrink-0 rounded-full px-3 text-xs"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-            Фильтры
-            {activeFilterCount > 0 && (
-              <span className="rounded-full bg-[--color-primary]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[--color-primary]">
-                {activeFilterCount}
-              </span>
-            )}
-          </Button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowFiltersDialog(true)}
+          className="flex w-full items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-left transition-colors hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:hover:bg-gray-600"
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">Вид и период</span>
+              {activeFilterCount > 0 && (
+                <span className="rounded-full bg-[--color-primary]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[--color-primary]">
+                  {activeFilterCount}
+                </span>
+              )}
+            </div>
+            <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-300">
+              {SCALE_CONFIG[scale].label} · {rangeLabel} · {densityMode === 'comfortable' ? 'Обычный' : 'Компактный'}
+            </div>
+          </div>
+          <SlidersHorizontal className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-300" />
+        </button>
       </div>
 
       {/* ===== Drawer ===== */}

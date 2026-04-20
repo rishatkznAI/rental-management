@@ -17,6 +17,7 @@ import { canEquipmentParticipateInRentals } from '../../lib/equipmentClassificat
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../../lib/utils';
 import { buildClientFinancialSnapshots } from '../../lib/finance';
 import { EquipmentCombobox } from '../ui/EquipmentCombobox';
+import { ClientCombobox } from '../ui/ClientCombobox';
 
 // ─── Локальные хелперы ──────────────────────────────────────────────────────
 
@@ -564,14 +565,12 @@ export function NewRentalModal({
                 Клиентов нет — добавьте в разделе «Клиенты»
               </p>
             ) : (
-              <select value={client} onChange={e => setClient(e.target.value)} className={selectClass}>
-                <option value="">Выберите клиента</option>
-                {allClients.map(c => (
-                  <option key={c.id} value={c.company}>
-                    {c.company}
-                  </option>
-                ))}
-              </select>
+              <ClientCombobox
+                clients={allClients}
+                value={client}
+                onChange={setClient}
+                placeholder="Введите клиента и выберите из базы…"
+              />
             )}
           </div>
 

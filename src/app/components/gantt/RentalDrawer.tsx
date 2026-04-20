@@ -12,6 +12,7 @@ import { findConflictingRental } from '../../lib/rental-conflicts';
 import type { GanttRentalData } from '../../mock-data';
 import type { Client, Equipment, Payment } from '../../types';
 import type { ClientReceivableRow } from '../../lib/finance';
+import type { SystemUser } from '../../lib/userStorage';
 
 interface RentalDrawerProps {
   rental: GanttRentalData | null;
@@ -20,8 +21,10 @@ interface RentalDrawerProps {
   payments: Payment[];
   clients?: Client[];
   clientReceivables?: ClientReceivableRow[];
+  managers?: SystemUser[];
   canEditRentals: boolean;
   canEditRentalDates: boolean;
+  canReassignManager: boolean;
   canRestoreRentals: boolean;
   canDeleteRentals: boolean;
   canCreatePayments: boolean;
@@ -66,8 +69,8 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
 
 export function RentalDrawer({
   rental, equipment, allRentals, payments,
-  clients = [], clientReceivables = [],
-  canEditRentals, canEditRentalDates, canRestoreRentals, canDeleteRentals, canCreatePayments,
+  clients = [], clientReceivables = [], managers = [],
+  canEditRentals, canEditRentalDates, canReassignManager, canRestoreRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
   onRestore, onUpdate, onAddComment, onAddPayment, onExtend, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
@@ -83,6 +86,7 @@ export function RentalDrawer({
   const [showCommentForm, setShowCommentForm] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [commentError, setCommentError] = useState('');
+  const [managerEditMode, setManagerEditMode] = useState(false);
 
   // Add payment form state
   const [showAddPayment, setShowAddPayment] = useState(false);
@@ -122,7 +126,10 @@ export function RentalDrawer({
     setShowCommentForm(false);
     setCommentText('');
     setCommentError('');
+    setManagerEditMode(false);
   }, [rental]);
+
+  const activeManagers = managers.filter(item => item.status === 'Активен');
 
   // Payments for this rental
   const rentalPayments = payments.filter(p => p.rentalId === rental.id);
@@ -132,6 +139,11 @@ export function RentalDrawer({
     : explicitPaidAmount;
   const remaining = Math.max(0, rental.amount - totalPaid);
   const canRegisterPayment = canCreatePayments && remaining > 0;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const isReturnOverdue = rental.status === 'active' && rental.endDate < todayKey;
+  const overdueDays = isReturnOverdue
+    ? Math.max(1, Math.ceil((new Date(todayKey).getTime() - new Date(rental.endDate).getTime()) / 86400000))
+    : 0;
   const clientProfile = clients.find(item => item.company === rental.client);
   const clientDebt = clientReceivables.find(item => item.client === rental.client);
 
@@ -263,6 +275,26 @@ export function RentalDrawer({
     setShowCommentForm(false);
   };
 
+  const handleManagerSave = () => {
+    if (!canReassignManager) return;
+    const nextManager = editManager.trim();
+    if (!nextManager || nextManager === rental.manager) {
+      setManagerEditMode(false);
+      setEditManager(rental.manager);
+      return;
+    }
+    onUpdate(rental, {
+      manager: nextManager,
+      managerInitials: nextManager
+        .split(/\s+/)
+        .map(word => word[0] || '')
+        .join('')
+        .slice(0, 2)
+        .toUpperCase(),
+    });
+    setManagerEditMode(false);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       {/* Overlay */}
@@ -276,11 +308,19 @@ export function RentalDrawer({
             <div className="flex items-center gap-2">
               <h2 className="truncate text-lg text-gray-900 dark:text-white">{rental.client}</h2>
               <Badge variant={statusVariants[rental.status]}>{statusLabels[rental.status]}</Badge>
+              {isReturnOverdue && (
+                <Badge variant="warning">
+                  Срок истёк · {overdueDays} дн.
+                </Badge>
+              )}
             </div>
             <div className="mt-1 flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
               <span className="font-mono">{rental.id}</span>
               <span>·</span>
-              <span>{rental.equipmentInv} {equipment?.model}</span>
+              <span>
+                {rental.equipmentInv} {equipment?.model}
+                {equipment?.serialNumber ? ` · SN ${equipment.serialNumber}` : ''}
+              </span>
             </div>
           </div>
           <button
@@ -293,6 +333,22 @@ export function RentalDrawer({
 
         {/* Content */}
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
+          {isReturnOverdue && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20">
+              <div className="flex items-start gap-2">
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                    Срок аренды истёк, но возврат не оформлен
+                  </p>
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                    Просрочка {overdueDays} {overdueDays === 1 ? 'день' : overdueDays < 5 ? 'дня' : 'дней'}. Эту аренду нужно либо продлить, либо оформить возврат техники.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {canEditRentals && (
             <section>
               <button
@@ -821,17 +877,60 @@ export function RentalDrawer({
 
           {/* Manager */}
           <section>
-            <div className="mb-2 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <User className="h-4 w-4" />
-              <span>Ответственный менеджер</span>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                <User className="h-4 w-4" />
+                <span>Ответственный менеджер</span>
+              </div>
+              {canReassignManager && !managerEditMode && (
+                <button
+                  onClick={() => setManagerEditMode(true)}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                >
+                  <Edit className="h-3 w-3" />
+                  Изменить
+                </button>
+              )}
             </div>
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
-              <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                  {rental.managerInitials}
+              {managerEditMode && canReassignManager ? (
+                <div className="space-y-3">
+                  <select
+                    value={editManager}
+                    onChange={event => setEditManager(event.target.value)}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                  >
+                    <option value="">Выберите менеджера</option>
+                    {activeManagers.map(managerItem => (
+                      <option key={managerItem.id} value={managerItem.name}>
+                        {managerItem.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={handleManagerSave} disabled={!editManager.trim()}>
+                      Сохранить
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setManagerEditMode(false);
+                        setEditManager(rental.manager);
+                      }}
+                    >
+                      Отмена
+                    </Button>
+                  </div>
                 </div>
-                <span className="text-sm text-gray-900 dark:text-white">{rental.manager}</span>
-              </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                    {rental.managerInitials}
+                  </div>
+                  <span className="text-sm text-gray-900 dark:text-white">{rental.manager}</span>
+                </div>
+              )}
             </div>
           </section>
 

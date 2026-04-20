@@ -50,6 +50,7 @@ import {
   startOfDay, startOfMonth, startOfQuarter, startOfWeek, startOfYear
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { calculateRentalAmount, getRentalDays } from '../lib/utils';
 
 // ========== Constants & Types ==========
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
@@ -433,16 +434,16 @@ export default function Rentals() {
     }
   }, [queryClient, showToast]);
 
-  // Очистка «призрачных» аренд при загрузке страницы:
-  // - 'created' с прошедшей endDate → 'closed'  (не активированные черновики)
-  // - 'active'  с прошедшей endDate → 'returned' (техника вернулась, но возврат не оформили вручную)
+  // Очистка только «призрачных» черновиков:
+  // - 'created' с прошедшей endDate → 'closed'
+  // Просроченные активные аренды НЕ меняем автоматически:
+  // они должны остаться активными и попасть в сценарий «требует внимания».
   React.useEffect(() => {
     const todayStr = format(today, 'yyyy-MM-dd');
     const current = ganttRentals;
 
     const needsCleanup = current.some(r =>
-      (r.status === 'created' && r.endDate < todayStr) ||
-      (r.status === 'active'  && r.endDate < todayStr),
+      r.status === 'created' && r.endDate < todayStr,
     );
 
     if (!needsCleanup) return;
@@ -450,8 +451,6 @@ export default function Rentals() {
     const cleaned = current.map(r => {
       if (r.status === 'created' && r.endDate < todayStr)
         return { ...r, status: 'closed' as const };
-      if (r.status === 'active' && r.endDate < todayStr)
-        return { ...r, status: 'returned' as const };
       return r;
     });
     void persistGanttRentals(cleaned);
@@ -1032,13 +1031,39 @@ export default function Rentals() {
   // Extend rental: update endDate, update equipment returnDate
   const handleExtend = useCallback((rental: GanttRentalData, newEndDate: string) => {
     if (!canEditRentals || !canEditRentalDates) return;
+    const previousDays = getRentalDays(rental.startDate, rental.endDate);
+    const nextDays = getRentalDays(rental.startDate, newEndDate);
+    const inferredDailyRate = previousDays > 0 ? (rental.amount || 0) / previousDays : 0;
+    const nextAmount = inferredDailyRate > 0
+      ? Math.round(calculateRentalAmount(inferredDailyRate, rental.startDate, newEndDate))
+      : rental.amount || 0;
+    const rentalPayments = payments.filter(payment => payment.rentalId === rental.id);
+    const paidAmount = rentalPayments.length === 0 && rental.paymentStatus === 'paid'
+      ? rental.amount || 0
+      : rentalPayments.reduce((sum, payment) => {
+          if (typeof payment.paidAmount === 'number') return sum + payment.paidAmount;
+          if (payment.status === 'paid') return sum + (payment.amount || 0);
+          return sum;
+        }, 0);
+    const nextPaymentStatus: GanttRentalData['paymentStatus'] =
+      paidAmount >= nextAmount
+        ? 'paid'
+        : paidAmount > 0
+          ? 'partial'
+          : 'unpaid';
+
     const updatedRentals = ganttRentals.map(r =>
       r.id === rental.id
         ? appendRentalHistory(
-            { ...r, endDate: newEndDate },
+            {
+              ...r,
+              endDate: newEndDate,
+              amount: nextAmount,
+              paymentStatus: nextPaymentStatus,
+            },
             createRentalHistoryEntry(
               historyAuthor,
-              `Продлена аренда: ${r.endDate} → ${newEndDate}`,
+              `Продлена аренда: ${r.endDate} → ${newEndDate}${nextAmount !== (r.amount || 0) ? ` · сумма ${formatCurrency(r.amount || 0)} → ${formatCurrency(nextAmount)}` : ''}${nextPaymentStatus !== r.paymentStatus ? ` · статус оплаты: ${nextPaymentStatus === 'paid' ? 'Оплачено' : nextPaymentStatus === 'partial' ? 'Частично' : 'Не оплачено'}` : ''}`,
             ),
           )
         : r
@@ -1060,7 +1085,7 @@ export default function Rentals() {
     if (selectedRental?.id === rental.id) {
       setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
     }
-  }, [appendEquipmentHistoryEntry, canEditRentals, canEditRentalDates, ganttRentals, equipmentList, historyAuthor, matchesEquipmentRow, selectedRental]);
+  }, [appendEquipmentHistoryEntry, canEditRentals, canEditRentalDates, ganttRentals, equipmentList, historyAuthor, matchesEquipmentRow, payments, selectedRental]);
 
   // Update UPD signed status + optional date
   const handleUpdChange = useCallback((rental: GanttRentalData, updSigned: boolean, updDate?: string) => {
@@ -1810,6 +1835,12 @@ export default function Rentals() {
 
                 {primaryRental ? (
                   <div className="mt-3 rounded-lg border border-gray-200 px-3 py-3 dark:border-gray-700">
+                    {primaryRental.status === 'active' && primaryRental.endDate < todayStr && (
+                      <div className="mb-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                        <CircleAlert className="h-3 w-3" />
+                        Срок истёк, возврат не оформлен
+                      </div>
+                    )}
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-gray-900 dark:text-white">
@@ -2130,8 +2161,10 @@ export default function Rentals() {
           payments={payments}
           clients={computedClients}
           clientReceivables={clientReceivables}
+          managers={managersList}
           canEditRentals={canEditRentals}
           canEditRentalDates={canEditRentalDates}
+          canReassignManager={user?.role === 'Администратор'}
           canRestoreRentals={canRestoreRentals}
           canDeleteRentals={canDeleteRentals}
           canCreatePayments={canCreatePayments}
@@ -2679,6 +2712,7 @@ function EquipmentRow({
           const paidFraction = paymentFractions.get(rental.id) ?? (rental.paymentStatus === 'paid' ? 1 : 0);
           const showUpdAlert = !rental.updSigned;
           const showPaymentAlert = rental.paymentStatus !== 'paid';
+          const showOverdueAlert = rental.status === 'active' && rental.endDate < todayStr;
 
           return (
             <div
@@ -2694,6 +2728,8 @@ function EquipmentRow({
                 height: barHeight,
               }}
               title={`${rental.client || 'Без клиента'} · ${safeRentalCompactDate(rental.startDate)} — ${safeRentalCompactDate(rental.endDate)} · ${statusLabel}${
+                showOverdueAlert ? ' · Срок истёк, возврат не оформлен' : ''
+              }${
                 showUpdAlert ? ' · УПД не подписан' : ''
               }${
                 showPaymentAlert ? ` · ${rental.paymentStatus === 'partial' ? 'Частично оплачено' : 'Не оплачено'}` : ''
@@ -2722,6 +2758,11 @@ function EquipmentRow({
                   {isConflict && (
                     <AlertTriangle className="h-3 w-3 shrink-0 text-red-200" />
                   )}
+                  {showOverdueAlert && pos.width > 58 && (
+                    <span className={`shrink-0 rounded-full bg-amber-200/90 font-semibold uppercase tracking-[0.08em] text-amber-900 ${isCompact ? 'px-1 py-0.5 text-[7px]' : 'px-1.5 py-0.5 text-[8px]'}`}>
+                      Просрочено
+                    </span>
+                  )}
                   {pos.width > 58 && (
                     <span className={`shrink-0 rounded-full bg-black/12 font-semibold uppercase tracking-[0.08em] text-white/90 ${isCompact ? 'px-1 py-0.5 text-[7px]' : 'px-1.5 py-0.5 text-[8px]'}`}>
                       {statusLabel}
@@ -2738,6 +2779,9 @@ function EquipmentRow({
               <div className={`mr-1.5 flex shrink-0 items-center ${isCompact ? 'gap-0.5' : 'gap-1'}`}>
                 {pos.width > 72 && (
                   <>
+                    {showOverdueAlert && (
+                      <CircleAlert className="h-3.5 w-3.5 text-amber-200" title="Срок истёк, возврат не оформлен" />
+                    )}
                     {showUpdAlert && (
                       <CircleAlert className="h-3.5 w-3.5 text-amber-200" title="УПД не подписан" />
                     )}

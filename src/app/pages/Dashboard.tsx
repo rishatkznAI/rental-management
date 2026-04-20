@@ -3,6 +3,13 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
+import {
   Plus, TrendingUp, AlertTriangle, Wrench, DollarSign, Calendar,
   User, Target, FileText, CreditCard, RefreshCw, CheckCircle, Truck,
   ShieldAlert, Clock, Ban, ArrowRight, ChevronDown, ChevronUp,
@@ -28,7 +35,7 @@ import { NewClientModal } from '../components/modals/NewClientModal';
 import { NewRentalModal } from '../components/gantt/GanttModals';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
-import { buildRentalCreationHistory } from '../lib/rental-history';
+import { appendRentalHistory, buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import type { Equipment, Rental, ServiceTicket, Client, Payment, Document, EquipmentStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
@@ -74,6 +81,7 @@ type RoleFocusCard = {
   hint: string;
   href: string;
   cta: string;
+  onClick?: () => void;
   tone?: 'default' | 'warning' | 'danger' | 'success';
   icon: React.ElementType;
 };
@@ -140,6 +148,9 @@ export default function Dashboard() {
   const [showAllAlerts, setShowAllAlerts] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
   const [showRentalModal, setShowRentalModal] = useState(false);
+  const [showOfficeUpdModal, setShowOfficeUpdModal] = useState(false);
+  const [officeUpdUpdatingId, setOfficeUpdUpdatingId] = useState<string | null>(null);
+  const [officeUpdManagerFilter, setOfficeUpdManagerFilter] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const dashboardCardClass = 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/60';
   const dashboardCardHeaderClass = 'space-y-2 px-5 pt-5 pb-3';
@@ -182,6 +193,7 @@ export default function Dashboard() {
   const isManagerRole = user?.role === 'Менеджер по аренде';
   const isAdminRole = user?.role === 'Администратор';
   const currentUserName = user?.name ?? '';
+  const shouldShowRentalAttention = user?.role !== 'Механик';
   const viewRentals = isManagerRole && currentUserName
     ? rentals.filter(r => r.manager === currentUserName)
     : rentals;
@@ -324,6 +336,28 @@ export default function Dashboard() {
     const ret = new Date(rental.endDate);
     return (ret >= today && ret < tomorrowStart) || (ret >= tomorrowStart && ret < dayAfterTomorrowStart);
   }).length;
+  const officeCompletedRentals = useMemo(
+    () => viewPlannerRentals
+      .filter(rental => rental.status === 'returned' || rental.status === 'closed')
+      .sort((left, right) => new Date(right.endDate).getTime() - new Date(left.endDate).getTime()),
+    [viewPlannerRentals],
+  );
+  const officePendingUpdRentals = useMemo(
+    () => officeCompletedRentals.filter(rental => !rental.updSigned),
+    [officeCompletedRentals],
+  );
+  const officeSignedUpdRentals = useMemo(
+    () => officeCompletedRentals.filter(rental => rental.updSigned),
+    [officeCompletedRentals],
+  );
+  const officeCompletedClientCount = useMemo(
+    () => new Set(officeCompletedRentals.map(rental => rental.client).filter(Boolean)).size,
+    [officeCompletedRentals],
+  );
+  const officePendingUpdClientCount = useMemo(
+    () => new Set(officePendingUpdRentals.map(rental => rental.client).filter(Boolean)).size,
+    [officePendingUpdRentals],
+  );
   const overdueDebtClients = computedClients.filter(c => (c.debt ?? 0) > 0);
   const roleDashboardCards = useMemo<RoleFocusCard[]>(() => {
     if (user?.role === 'Менеджер по аренде') {
@@ -457,16 +491,19 @@ export default function Dashboard() {
           icon: DollarSign,
         },
         {
-          id: 'office-returns',
-          title: 'Возвраты под документы',
-          value: String(officeReturnsQueue),
-          hint: officeReturnsQueue > 0
-            ? 'Сегодня и завтра нужно подготовить акты и закрывающие'
-            : 'Срочных возвратов нет',
+          id: 'office-upd',
+          title: 'Завершённые аренды без УПД',
+          value: String(officePendingUpdRentals.length),
+          hint: officePendingUpdRentals.length > 0
+            ? `${officePendingUpdClientCount} ${formatCountLabel(officePendingUpdClientCount, 'клиент', 'клиента', 'клиентов')} ждут УПД`
+            : officeCompletedRentals.length > 0
+              ? `УПД отмечены по ${officeCompletedRentals.length} завершённым арендам`
+              : 'Завершённых аренд под УПД пока нет',
           href: '/rentals',
-          cta: 'Открыть возвраты',
-          tone: officeReturnsQueue > 0 ? 'default' : 'success',
-          icon: RotateCcw,
+          cta: 'Контролировать УПД',
+          onClick: () => setShowOfficeUpdModal(true),
+          tone: officePendingUpdRentals.length > 0 ? 'warning' : 'success',
+          icon: FileText,
         },
         {
           id: 'office-debt',
@@ -494,6 +531,9 @@ export default function Dashboard() {
     myReturnsTomorrow.length,
     myUnsignedDocuments.length,
     myWaitingPartsTickets.length,
+    officeCompletedRentals.length,
+    officePendingUpdClientCount,
+    officePendingUpdRentals.length,
     officeReturnsQueue,
     officeUnsignedDocuments.length,
     officeUpcomingPayments.length,
@@ -521,11 +561,124 @@ export default function Dashboard() {
       return {
         badge: 'Роль: офис',
         title: 'Мой офисный дашборд',
-        description: 'Сверху закреплены документы, оплаты, возвраты и дебиторка, чтобы не искать их по разделам.',
+        description: 'Сверху закреплены документы, оплаты, завершённые аренды под УПД и дебиторка, чтобы офис видел, кому уже пора выпускать закрывающие.',
       };
     }
     return null;
   }, [user?.role]);
+
+  const officePendingUpdGroups = useMemo(() => {
+    const filteredRentals = officeUpdManagerFilter
+      ? officePendingUpdRentals.filter(rental => rental.manager === officeUpdManagerFilter)
+      : officePendingUpdRentals;
+    const groups = new Map<string, GanttRentalData[]>();
+    filteredRentals.forEach(rental => {
+      const key = rental.client || 'Без клиента';
+      groups.set(key, [...(groups.get(key) || []), rental]);
+    });
+    return Array.from(groups.entries())
+      .map(([clientName, items]) => ({
+        clientName,
+        items: items.sort((left, right) => new Date(right.endDate).getTime() - new Date(left.endDate).getTime()),
+      }))
+      .sort((left, right) => right.items.length - left.items.length || left.clientName.localeCompare(right.clientName, 'ru'));
+  }, [officePendingUpdManagerFilter, officePendingUpdRentals]);
+
+  const officeSignedUpdGroups = useMemo(() => {
+    const filteredRentals = officeUpdManagerFilter
+      ? officeSignedUpdRentals.filter(rental => rental.manager === officeUpdManagerFilter)
+      : officeSignedUpdRentals;
+    const groups = new Map<string, GanttRentalData[]>();
+    filteredRentals.forEach(rental => {
+      const key = rental.client || 'Без клиента';
+      groups.set(key, [...(groups.get(key) || []), rental]);
+    });
+    return Array.from(groups.entries())
+      .map(([clientName, items]) => ({
+        clientName,
+        items: items.sort((left, right) => new Date(right.updDate || right.endDate).getTime() - new Date(left.updDate || left.endDate).getTime()),
+      }))
+      .sort((left, right) => right.items.length - left.items.length || left.clientName.localeCompare(right.clientName, 'ru'));
+  }, [officeSignedUpdRentals, officeUpdManagerFilter]);
+
+  const officeUpdManagerRows = useMemo(() => {
+    const managerNames = Array.from(new Set(officeCompletedRentals.map(rental => rental.manager).filter(Boolean)))
+      .sort((left, right) => left.localeCompare(right, 'ru'));
+    return managerNames.map(name => {
+      const managerCompleted = officeCompletedRentals.filter(rental => rental.manager === name);
+      const managerPending = managerCompleted.filter(rental => !rental.updSigned);
+      const managerSigned = managerCompleted.filter(rental => rental.updSigned);
+      return {
+        name,
+        completedCount: managerCompleted.length,
+        pendingCount: managerPending.length,
+        signedCount: managerSigned.length,
+      };
+    }).sort((left, right) =>
+      right.pendingCount - left.pendingCount
+      || right.completedCount - left.completedCount
+      || left.name.localeCompare(right.name, 'ru')
+    );
+  }, [officeCompletedRentals]);
+
+  const officeFilteredCompletedRentals = useMemo(
+    () => officeUpdManagerFilter
+      ? officeCompletedRentals.filter(rental => rental.manager === officeUpdManagerFilter)
+      : officeCompletedRentals,
+    [officeCompletedRentals, officeUpdManagerFilter],
+  );
+  const officeFilteredPendingUpdRentals = useMemo(
+    () => officeUpdManagerFilter
+      ? officePendingUpdRentals.filter(rental => rental.manager === officeUpdManagerFilter)
+      : officePendingUpdRentals,
+    [officePendingUpdManagerFilter, officePendingUpdRentals],
+  );
+  const officeFilteredSignedUpdRentals = useMemo(
+    () => officeUpdManagerFilter
+      ? officeSignedUpdRentals.filter(rental => rental.manager === officeUpdManagerFilter)
+      : officeSignedUpdRentals,
+    [officeSignedUpdRentals, officeUpdManagerFilter],
+  );
+  const officeFilteredClientCount = useMemo(
+    () => new Set(officeFilteredCompletedRentals.map(rental => rental.client).filter(Boolean)).size,
+    [officeFilteredCompletedRentals],
+  );
+
+  useEffect(() => {
+    if (!officeUpdManagerFilter) return;
+    if (!officeUpdManagerRows.some(row => row.name === officeUpdManagerFilter)) {
+      setOfficeUpdManagerFilter('');
+    }
+  }, [officeUpdManagerFilter, officeUpdManagerRows]);
+
+  const handleOfficeUpdToggle = useCallback(async (rental: GanttRentalData, nextSigned: boolean) => {
+    setOfficeUpdUpdatingId(rental.id);
+    const signedDate = nextSigned ? new Date().toISOString().slice(0, 10) : undefined;
+    const updatedRentals = ganttRentals.map(item =>
+      item.id === rental.id
+        ? appendRentalHistory(
+            {
+              ...item,
+              updSigned: nextSigned,
+              updDate: nextSigned ? (signedDate || item.updDate) : undefined,
+            },
+            createRentalHistoryEntry(
+              user?.name || 'Система',
+              nextSigned
+                ? `УПД отмечен из офисного дашборда${signedDate ? ` (${signedDate})` : ''}`
+                : 'Отметка УПД снята из офисного дашборда',
+            ),
+          )
+        : item,
+    );
+
+    try {
+      await rentalsService.bulkReplaceGantt(updatedRentals);
+      await qc.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+    } finally {
+      setOfficeUpdUpdatingId(null);
+    }
+  }, [ganttRentals, qc, user?.name]);
 
   const hasManagerData = myRentals.length > 0;
   const adminManagerRows = useMemo(() => {
@@ -697,20 +850,22 @@ export default function Dashboard() {
   const alertItems: AlertItem[] = [];
 
   // 1. Просроченные возвраты (критично)
-  overdueRentalsList.forEach(r => {
-    const days = Math.max(1, Math.ceil((today.getTime() - new Date(r.endDate).getTime()) / 86400000));
-    alertItems.push({
-      id: `overdue-return-${r.id}`,
-      priority: 'critical',
-      icon: Calendar,
-      category: 'Просроченный возврат',
-      title: r.client,
-      entity: r.equipmentInv || r.id,
-      detail: `Просрочка ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'}`,
-      link: '/rentals',
-      linkLabel: 'Открыть планировщик',
+  if (shouldShowRentalAttention) {
+    overdueRentalsList.forEach(r => {
+      const days = Math.max(1, Math.ceil((today.getTime() - new Date(r.endDate).getTime()) / 86400000));
+      alertItems.push({
+        id: `overdue-return-${r.id}`,
+        priority: 'critical',
+        icon: Calendar,
+        category: 'Просроченный возврат',
+        title: r.client,
+        entity: r.equipmentInv || r.id,
+        detail: `Просрочка ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'}`,
+        link: '/rentals',
+        linkLabel: 'Открыть планировщик',
+      });
     });
-  });
+  }
 
   // 2. Просроченные платежи (критично если > 7 дней, иначе высокий)
   overduePayments.forEach(p => {
@@ -1152,12 +1307,19 @@ export default function Dashboard() {
                       <div className={`flex h-10 w-10 items-center justify-center rounded-full ${iconClass}`}>
                         <Icon className="h-5 w-5" />
                       </div>
-                      <Button asChild size="sm" variant="ghost" className="h-8 px-2">
-                        <Link to={item.href}>
+                      {item.onClick ? (
+                        <Button size="sm" variant="ghost" className="h-8 px-2" onClick={item.onClick}>
                           {item.cta}
                           <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      </Button>
+                        </Button>
+                      ) : (
+                        <Button asChild size="sm" variant="ghost" className="h-8 px-2">
+                          <Link to={item.href}>
+                            {item.cta}
+                            <ArrowRight className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                      )}
                     </div>
                     <div className="mt-4">
                       <p className="text-sm font-medium text-gray-600 dark:text-gray-300">{item.title}</p>
@@ -1309,36 +1471,38 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-3 lg:grid-cols-3">
-          <Card
-            className={`cursor-pointer border transition-all hover:shadow-lg ${
-              overdueRentalsList.length > 0
-                ? 'border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20'
-                : dashboardCardClass
-            }`}
-            onClick={() => setSelectedKPI('overdueReturns')}
-          >
-            <CardHeader className={dashboardCardHeaderClass}>
-              <CardDescription className="flex items-center justify-between">
-                <span className={overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : ''}>Просроченные возвраты</span>
-                <AlertTriangle className={`h-4 w-4 ${overdueRentalsList.length > 0 ? 'text-red-500' : 'text-gray-400'}`} />
-              </CardDescription>
-              <CardTitle className={`text-4xl font-bold ${overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
-                {overdueRentalsList.length}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className={dashboardCardContentClass}>
-              {overdueRentalsList.length > 0 ? (
-                <>
-                  <p className="text-sm font-medium text-red-700 dark:text-red-300">
-                    Макс. просрочка: {maxOverdueDays} {maxOverdueDays === 1 ? 'день' : maxOverdueDays < 5 ? 'дня' : 'дней'}
-                  </p>
-                  <p className="text-sm text-red-500 dark:text-red-400">Приоритет на сегодня для менеджеров и офиса.</p>
-                </>
-              ) : (
-                <p className="text-sm text-green-600 dark:text-green-400">Возвраты идут по плану, просрочек нет.</p>
-              )}
-            </CardContent>
-          </Card>
+          {shouldShowRentalAttention && (
+            <Card
+              className={`cursor-pointer border transition-all hover:shadow-lg ${
+                overdueRentalsList.length > 0
+                  ? 'border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20'
+                  : dashboardCardClass
+              }`}
+              onClick={() => setSelectedKPI('overdueReturns')}
+            >
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription className="flex items-center justify-between">
+                  <span className={overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : ''}>Просроченные возвраты</span>
+                  <AlertTriangle className={`h-4 w-4 ${overdueRentalsList.length > 0 ? 'text-red-500' : 'text-gray-400'}`} />
+                </CardDescription>
+                <CardTitle className={`text-4xl font-bold ${overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                  {overdueRentalsList.length}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className={dashboardCardContentClass}>
+                {overdueRentalsList.length > 0 ? (
+                  <>
+                    <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                      Макс. просрочка: {maxOverdueDays} {maxOverdueDays === 1 ? 'день' : maxOverdueDays < 5 ? 'дня' : 'дней'}
+                    </p>
+                    <p className="text-sm text-red-500 dark:text-red-400">Приоритет на сегодня для менеджеров, офиса и руководителя.</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-green-600 dark:text-green-400">Возвраты идут по плану, просрочек нет.</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card
             className={`cursor-pointer border transition-all hover:shadow-lg ${
@@ -2038,6 +2202,231 @@ export default function Dashboard() {
       />
       <ServiceRequestModal open={showServiceModal} onOpenChange={setShowServiceModal} />
       <NewClientModal open={showClientModal} onOpenChange={setShowClientModal} />
+      <Dialog
+        open={showOfficeUpdModal}
+        onOpenChange={(open) => {
+          setShowOfficeUpdModal(open);
+          if (!open) setOfficeUpdManagerFilter('');
+        }}
+      >
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Контроль УПД по завершённым арендам</DialogTitle>
+            <DialogDescription>
+              Здесь офис видит, у каких клиентов аренда уже завершилась, по каким сделкам УПД ещё не отмечен, и может сразу поставить отметку.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/20">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">Нужно оформить УПД</p>
+              <p className="mt-1 text-2xl font-bold text-amber-700 dark:text-amber-300">{officeFilteredPendingUpdRentals.length}</p>
+              <p className="mt-1 text-sm text-amber-700/80 dark:text-amber-400/80">
+                {officeUpdManagerFilter
+                  ? officeUpdManagerFilter
+                  : `${officePendingUpdClientCount} ${formatCountLabel(officePendingUpdClientCount, 'клиент', 'клиента', 'клиентов')}`}
+              </p>
+            </div>
+            <div className="rounded-xl border border-green-200 bg-green-50/70 px-4 py-3 dark:border-green-900 dark:bg-green-950/20">
+              <p className="text-xs font-semibold uppercase tracking-wide text-green-700 dark:text-green-400">УПД уже отмечен</p>
+              <p className="mt-1 text-2xl font-bold text-green-700 dark:text-green-300">{officeFilteredSignedUpdRentals.length}</p>
+              <p className="mt-1 text-sm text-green-700/80 dark:text-green-400/80">
+                {officeUpdManagerFilter ? 'По выбранному менеджеру' : 'Контроль по завершённым арендам'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/70">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Завершено всего</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{officeFilteredCompletedRentals.length}</p>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {officeFilteredClientCount} {formatCountLabel(officeFilteredClientCount, 'клиент', 'клиента', 'клиентов')}
+              </p>
+            </div>
+          </div>
+
+          {officeUpdManagerRows.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Быстрый фильтр по менеджеру</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Помогает сразу увидеть, у кого зависли УПД чаще всего.</p>
+                </div>
+                {officeUpdManagerFilter && (
+                  <Button size="sm" variant="ghost" onClick={() => setOfficeUpdManagerFilter('')}>
+                    Сбросить
+                  </Button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOfficeUpdManagerFilter('')}
+                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
+                    officeUpdManagerFilter === ''
+                      ? 'border-[--color-primary] bg-[--color-primary]/10 text-[--color-primary]'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
+                  }`}
+                >
+                  <span>Все менеджеры</span>
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    {officePendingUpdRentals.length}
+                  </span>
+                </button>
+                {officeUpdManagerRows.map(row => (
+                  <button
+                    key={row.name}
+                    type="button"
+                    onClick={() => setOfficeUpdManagerFilter(row.name)}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
+                      officeUpdManagerFilter === row.name
+                        ? 'border-[--color-primary] bg-[--color-primary]/10 text-[--color-primary]'
+                        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
+                    }`}
+                  >
+                    <span>{row.name}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${
+                      row.pendingCount > 0
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                        : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                    }`}>
+                      {row.pendingCount}/{row.completedCount}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="max-h-[65vh] space-y-6 overflow-y-auto pr-1">
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Нужно сделать УПД</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Это завершённые аренды, по которым офису пора подготовить и отметить УПД.</p>
+                </div>
+                <Badge variant={officeFilteredPendingUpdRentals.length > 0 ? 'warning' : 'success'}>
+                  {officeFilteredPendingUpdRentals.length}
+                </Badge>
+              </div>
+
+              {officePendingUpdGroups.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-green-200 bg-green-50/60 px-4 py-5 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/20 dark:text-green-300">
+                  {officeUpdManagerFilter
+                    ? `У менеджера ${officeUpdManagerFilter} сейчас нет хвоста по УПД.`
+                    : 'По завершённым арендам сейчас нет хвоста по УПД.'}
+                </div>
+              ) : (
+                officePendingUpdGroups.map(group => (
+                  <div key={`pending-${group.clientName}`} className="rounded-xl border border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                      <div>
+                        <p className="font-semibold text-gray-900 dark:text-white">{group.clientName}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {group.items.length} {formatCountLabel(group.items.length, 'завершённая аренда', 'завершённые аренды', 'завершённых аренд')}
+                        </p>
+                      </div>
+                      <Badge variant="warning">УПД не отмечен</Badge>
+                    </div>
+                    <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {group.items.map(rental => (
+                        <div key={rental.id} className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium text-gray-900 dark:text-white">{rental.id}</p>
+                              <Badge variant="outline">{rental.equipmentInv || 'Без INV'}</Badge>
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                              Менеджер: {rental.manager || 'Не указан'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => void handleOfficeUpdToggle(rental, true)}
+                              disabled={officeUpdUpdatingId === rental.id}
+                            >
+                              <CheckCircle className="h-4 w-4" />
+                              {officeUpdUpdatingId === rental.id ? 'Сохраняю…' : 'УПД сделан'}
+                            </Button>
+                            <Button asChild size="sm" variant="secondary">
+                              <Link to="/rentals">Открыть аренду</Link>
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Уже отмечено</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Чтобы офис видел, что закрывающие уже выпущены и отмечены в системе.</p>
+                </div>
+                <Badge variant="success">{officeFilteredSignedUpdRentals.length}</Badge>
+              </div>
+
+              {officeSignedUpdGroups.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  {officeUpdManagerFilter
+                    ? `У менеджера ${officeUpdManagerFilter} пока нет завершённых аренд с отмеченным УПД.`
+                    : 'Пока нет завершённых аренд с отмеченным УПД.'}
+                </div>
+              ) : (
+                officeSignedUpdGroups.map(group => (
+                  <div key={`signed-${group.clientName}`} className="rounded-xl border border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                      <div>
+                        <p className="font-semibold text-gray-900 dark:text-white">{group.clientName}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {group.items.length} {formatCountLabel(group.items.length, 'аренда с УПД', 'аренды с УПД', 'аренд с УПД')}
+                        </p>
+                      </div>
+                      <Badge variant="success">УПД отмечен</Badge>
+                    </div>
+                    <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {group.items.map(rental => (
+                        <div key={rental.id} className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium text-gray-900 dark:text-white">{rental.id}</p>
+                              <Badge variant="outline">{rental.equipmentInv || 'Без INV'}</Badge>
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                              УПД отмечен: {rental.updDate ? formatDate(rental.updDate) : 'дата не указана'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => void handleOfficeUpdToggle(rental, false)}
+                              disabled={officeUpdUpdatingId === rental.id}
+                            >
+                              {officeUpdUpdatingId === rental.id ? 'Сохраняю…' : 'Снять отметку'}
+                            </Button>
+                            <Button asChild size="sm" variant="ghost">
+                              <Link to="/rentals">Открыть аренду</Link>
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </section>
+          </div>
+        </DialogContent>
+      </Dialog>
       <NewRentalModal
         open={showRentalModal}
         ganttRentals={ganttRentals}

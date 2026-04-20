@@ -27,11 +27,19 @@ export async function loginAsAdmin(page: Page) {
   await expect(page.getByRole('heading', { name: 'Дашборд' })).toBeVisible();
 }
 
+async function expectAuthenticatedShell(page: Page) {
+  await expect(async () => {
+    const currentUrl = page.url();
+    const isStillOnLogin = currentUrl.includes('#/login');
+    const rentalsNavVisible = await page.locator('aside').getByRole('button', { name: 'Аренды' }).isVisible().catch(() => false);
+    const logoutVisible = await page.getByRole('button', { name: 'Выйти' }).isVisible().catch(() => false);
+
+    expect(isStillOnLogin).toBeFalsy();
+    expect(rentalsNavVisible || logoutVisible).toBeTruthy();
+  }).toPass();
+}
+
 export async function loginAsRentalManager(page: Page) {
   await login(page, RENTAL_MANAGER_CREDENTIALS);
-  await expect(async () => {
-    const dashboardVisible = await page.getByRole('heading', { name: 'Дашборд' }).isVisible().catch(() => false);
-    const equipmentVisible = await page.getByRole('heading', { name: 'Техника' }).isVisible().catch(() => false);
-    expect(dashboardVisible || equipmentVisible).toBeTruthy();
-  }).toPass();
+  await expectAuthenticatedShell(page);
 }

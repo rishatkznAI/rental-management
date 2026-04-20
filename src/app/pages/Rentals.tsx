@@ -2559,7 +2559,8 @@ function EquipmentRow({
                 if (activeRental) onReturn(activeRental);
               }}
               className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/30 dark:hover:text-green-400"
-              title="Возврат техники"
+              title="Оформить возврат по строке"
+              aria-label="Оформить возврат по строке"
             >
               <RotateCcw className="h-3 w-3" />
             </button>

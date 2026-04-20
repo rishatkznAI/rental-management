@@ -22,6 +22,12 @@ export function Layout() {
 
   const { isAuthenticated, isLoading } = useAuth();
   const { can, canView, defaultPath } = usePermissions();
+  const section = pathToSection(location.pathname);
+  const requiredAction = pathToRequiredAction(location.pathname);
+  const shouldRedirectBySection = Boolean(section && !canView(section));
+  const shouldRedirectByAction = Boolean(
+    requiredAction && !can(requiredAction.action, requiredAction.section),
+  );
 
   // Auth + permission guard via useEffect — avoids render-time <Navigate> which
   // conflicts with React 18 concurrent rendering and breaks Outlet updates.
@@ -33,23 +39,23 @@ export function Layout() {
       return;
     }
 
-    const section = pathToSection(location.pathname);
-    if (section && !canView(section)) {
+    if (shouldRedirectBySection) {
       navigate(defaultPath(), { replace: true });
       return;
     }
 
-    const required = pathToRequiredAction(location.pathname);
-    if (required && !can(required.action, required.section)) {
-      navigate(`/${required.section}`, { replace: true });
+    if (requiredAction && shouldRedirectByAction) {
+      navigate(`/${requiredAction.section}`, { replace: true });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, isAuthenticated, location.pathname]);
+  }, [defaultPath, isAuthenticated, isLoading, location.pathname, navigate, requiredAction, shouldRedirectByAction, shouldRedirectBySection]);
 
   // While checking auth — render nothing
   if (isLoading) return null;
   // Not authenticated yet — useEffect will redirect; render nothing in the meantime
   if (!isAuthenticated) return null;
+  // Do not mount a forbidden screen even for one render tick.
+  if (shouldRedirectBySection || shouldRedirectByAction) return null;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">

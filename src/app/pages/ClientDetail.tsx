@@ -49,6 +49,10 @@ function debtLabel(debt: number) {
   return 'Высокая задолженность';
 }
 
+function normalizeClientName(value?: string | null) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function Divider() {
   return <hr className="border-gray-100 dark:border-gray-800" />;
 }
@@ -105,8 +109,9 @@ export default function ClientDetail() {
   const { data: allRentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
-  const clientRentals = allRentals.filter(r => client && r.client === client.company);
-  const activeRentals = clientRentals.filter(r => r.status === 'active');
+  const clientNameKey = normalizeClientName(client?.company);
+  const clientRentals = ganttRentals.filter(r => clientNameKey && normalizeClientName(r.client) === clientNameKey);
+  const activeRentals = clientRentals.filter(r => r.status === 'active' || r.status === 'created');
 
   const { data: allDocs = [] } = useDocumentsList();
   const clientDocs = allDocs.filter(d => client && d.client === client.company);
@@ -429,7 +434,7 @@ export default function ClientDetail() {
                       <div
                         key={rental.id}
                         className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:border-blue-400 cursor-pointer transition-colors"
-                        onClick={() => navigate(`/rentals/${rental.id}`)}
+                        onClick={() => navigate('/rentals')}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
@@ -437,14 +442,14 @@ export default function ClientDetail() {
                               <p className="font-medium text-gray-900 dark:text-white text-sm">{rental.id}</p>
                               <Badge variant={rs.variant}>{rs.label}</Badge>
                             </div>
-                            <p className="text-xs text-gray-500 truncate">{rental.equipment.join(', ')}</p>
+                            <p className="text-xs text-gray-500 truncate">{rental.equipmentInv || '—'}</p>
                             <p className="text-xs text-gray-400 mt-0.5">
-                              {formatDate(rental.startDate)} — {formatDate(rental.plannedReturnDate)}
+                              {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
                             </p>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-semibold text-sm text-gray-900 dark:text-white">{formatCurrency(rental.price)}</p>
-                            <p className="text-xs text-gray-500">{rental.rate}</p>
+                            <p className="font-semibold text-sm text-gray-900 dark:text-white">{formatCurrency(rental.amount || 0)}</p>
+                            <p className="text-xs text-gray-500">{rental.manager || '—'}</p>
                           </div>
                         </div>
                       </div>
@@ -599,8 +604,8 @@ export default function ClientDetail() {
                   </p>
                 </div>
                 {activeRentals.slice(0, 2).map(r => (
-                  <p key={r.id} className="text-xs text-blue-600 cursor-pointer hover:underline" onClick={() => navigate(`/rentals/${r.id}`)}>
-                    {r.id} · {r.equipment[0]}
+                  <p key={r.id} className="text-xs text-blue-600 cursor-pointer hover:underline" onClick={() => navigate('/rentals')}>
+                    {r.id} · {r.equipmentInv || '—'}
                   </p>
                 ))}
               </CardContent>

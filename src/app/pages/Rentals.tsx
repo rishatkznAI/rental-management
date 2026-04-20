@@ -198,9 +198,11 @@ function getVisibleRange(baseDate: Date, scale: Scale, customRange?: { start: Da
 function barPosition(
   barStart: Date, barEnd: Date, viewStart: Date, totalDays: number, dayWidth: number
 ) {
-  const clampedStart = dateMax([barStart, viewStart]);
+  const normalizedStart = startOfDay(barStart);
+  const normalizedEndExclusive = addDays(startOfDay(barEnd), 1);
+  const clampedStart = dateMax([normalizedStart, viewStart]);
   const viewEnd = addDays(viewStart, totalDays);
-  const clampedEnd = dateMin([barEnd, viewEnd]);
+  const clampedEnd = dateMin([normalizedEndExclusive, viewEnd]);
   if (clampedStart >= clampedEnd) return null;
 
   const leftDays = differenceInDays(clampedStart, viewStart);

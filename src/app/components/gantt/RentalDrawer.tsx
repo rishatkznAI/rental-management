@@ -428,7 +428,7 @@ export function RentalDrawer({
                   </div>
                   {!canEditRentalDates && (
                     <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                      Изменять даты аренды может только администратор.
+                      Изменять даты аренды могут только администратор и офис-менеджер.
                     </p>
                   )}
                   {editError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{editError}</p>}

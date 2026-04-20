@@ -316,7 +316,7 @@ export default function Rentals() {
   const canEditRentals = can('edit', 'rentals');
   const canDeleteRentals = can('delete', 'rentals');
   const canCreatePayments = can('create', 'payments');
-  const canEditRentalDates = user?.role === 'Администратор';
+  const canEditRentalDates = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
   const canRestoreRentals = user?.role === 'Администратор';
   const today = useMemo(() => startOfDay(new Date()), []);
   const todayStr = format(today, 'yyyy-MM-dd');

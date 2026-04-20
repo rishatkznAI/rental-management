@@ -1023,7 +1023,7 @@ export function RentalDrawer({
             Создать простой
           </Button>
 
-          {canDeleteRentals && rental.status === 'created' && (
+          {canDeleteRentals && (
             <div className="ml-auto flex items-center gap-2">
               {confirmDelete ? (
                 <>

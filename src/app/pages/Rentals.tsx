@@ -2247,34 +2247,84 @@ export default function Rentals() {
           }}
           onDelete={(rental) => {
             if (!canDeleteRentals) return;
-            const updated = ganttRentals.filter(r => r.id !== rental.id);
-            void persistGanttRentals(updated);
-            // Если после удаления нет других активных аренд — техника снова свободна, очищаем клиента и дату
-            const currentEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
-            const hasOtherActive = updated.some(
-              r =>
-                !!currentEquipment
-                && matchesEquipmentRow(r, currentEquipment)
-                && r.status !== 'returned'
-                && r.status !== 'closed',
-            );
-            if (!hasOtherActive) {
-              const newEqList = equipmentList.map(e =>
-                matchesEquipmentRow(rental, e)
-                  ? appendEquipmentHistoryEntry(
-                      {
-                        ...e,
-                        status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
-                        currentClient: undefined,
-                        returnDate: undefined,
-                      },
-                      'Аренда удалена, техника переведена в свободный статус',
+            void (async () => {
+              const updatedRentals = ganttRentals.filter(item => item.id !== rental.id);
+              const updatedPayments = payments.filter(item => item.rentalId !== rental.id);
+              const currentEquipment = equipmentList.find(item => matchesEquipmentRow(rental, item));
+
+              try {
+                await rentalsService.deleteGanttEntry(rental.id);
+
+                const classicRentals = await rentalsService.getAll();
+                const linkedClassicRentals = classicRentals.filter(item =>
+                  item.client === rental.client
+                  && item.startDate === rental.startDate
+                  && item.plannedReturnDate === rental.endDate
+                  && item.equipment.includes(rental.equipmentInv),
+                );
+
+                if (linkedClassicRentals.length > 0) {
+                  await Promise.all(linkedClassicRentals.map(item => rentalsService.delete(item.id)));
+                }
+
+                if (updatedPayments.length !== payments.length) {
+                  await paymentsService.bulkReplace(updatedPayments);
+                }
+
+                setGanttRentals(updatedRentals);
+                setPayments(updatedPayments);
+
+                await Promise.all([
+                  queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+                  queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+                  queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+                ]);
+
+                if (currentEquipment) {
+                  const nextEquipmentRental = updatedRentals
+                    .filter(item =>
+                      matchesEquipmentRow(item, currentEquipment)
+                      && item.status !== 'returned'
+                      && item.status !== 'closed',
                     )
-                  : e,
-              );
-              void persistEquipment(newEqList);
-            }
-            setSelectedRental(null);
+                    .sort((a, b) => a.startDate.localeCompare(b.startDate))[0];
+
+                  const nextStatus: EquipmentStatus = nextEquipmentRental
+                    ? (nextEquipmentRental.status === 'active' ? 'rented' : 'reserved')
+                    : (hasOpenServiceTicketForEquipment(serviceTickets, currentEquipment) ? 'in_service' : 'available');
+
+                  const historyText = `Аренда ${rental.id} удалена администратором`;
+                  const newEqList = equipmentList.map(item =>
+                    item.id === currentEquipment.id
+                      ? appendEquipmentHistoryEntry(
+                          {
+                            ...item,
+                            status: nextStatus,
+                            currentClient: nextEquipmentRental?.client,
+                            returnDate: nextEquipmentRental?.endDate,
+                          },
+                          historyText,
+                        )
+                      : item,
+                  );
+
+                  setEquipmentList(newEqList);
+                  await equipmentService.bulkReplace(newEqList);
+                  await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
+                }
+
+                setSelectedRental(null);
+                showToast('Аренда удалена', 'success');
+              } catch {
+                await Promise.all([
+                  queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+                  queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+                  queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+                  queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+                ]);
+                showToast('Не удалось удалить аренду', 'error');
+              }
+            })();
           }}
           onUpdate={handleUpdateRental}
           onAddComment={handleAddRentalComment}

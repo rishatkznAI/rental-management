@@ -308,6 +308,7 @@ export default function ServiceDetail() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const canEdit = can('edit', 'service');
+  const canDeleteService = user?.role === 'Администратор' && can('delete', 'service');
 
   const { data: fetchedTicket } = useServiceTicketById(id ?? '');
   const { data: equipmentList = [] } = useQuery<Equipment[]>({
@@ -358,6 +359,8 @@ export default function ServiceDetail() {
   const [selectedPartQty, setSelectedPartQty] = useState('1');
   const [selectedPartCost, setSelectedPartCost] = useState('');
   const [repairFormError, setRepairFormError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // ── Photo upload state ──
   const [photoPending, setPhotoPending] = useState<string[]>([]);
@@ -584,6 +587,85 @@ export default function ServiceDetail() {
     setNewPlannedDate('');
   };
 
+  const handleDeleteTicket = useCallback(async () => {
+    if (!ticket || !canDeleteService) return;
+
+    setDeleteError(null);
+    const deletedTicket = ticket;
+
+    try {
+      await serviceTicketsService.delete(deletedTicket.id);
+
+      if (deletedTicket.equipmentId || deletedTicket.inventoryNumber || deletedTicket.serialNumber) {
+        const [allTickets, allEquipment, allGanttRentals] = await Promise.all([
+          serviceTicketsService.getAll(),
+          equipmentService.getAll(),
+          rentalsService.getGanttData(),
+        ]);
+
+        const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'ready'];
+        const inventoryIsUnique = deletedTicket.inventoryNumber
+          ? allEquipment.filter(item => item.inventoryNumber === deletedTicket.inventoryNumber).length === 1
+          : false;
+
+        const updatedEquipment = allEquipment.map(item => {
+          const matches =
+            (deletedTicket.equipmentId && item.id === deletedTicket.equipmentId)
+            || (deletedTicket.serialNumber && item.serialNumber === deletedTicket.serialNumber)
+            || (deletedTicket.inventoryNumber && inventoryIsUnique && item.inventoryNumber === deletedTicket.inventoryNumber);
+
+          if (!matches) return item;
+
+          const hasRemainingOpen = allTickets.some(existing =>
+            openStatuses.includes(existing.status)
+            && (
+              (deletedTicket.equipmentId && existing.equipmentId === deletedTicket.equipmentId)
+              || (deletedTicket.serialNumber && existing.serialNumber === deletedTicket.serialNumber)
+              || (deletedTicket.inventoryNumber && inventoryIsUnique && existing.inventoryNumber === deletedTicket.inventoryNumber)
+            ),
+          );
+
+          const activeRental = allGanttRentals
+            .filter(rental =>
+              (
+                (deletedTicket.equipmentId && rental.equipmentId === deletedTicket.equipmentId)
+                || (!rental.equipmentId && deletedTicket.inventoryNumber && inventoryIsUnique && rental.equipmentInv === deletedTicket.inventoryNumber)
+              )
+              && rental.status !== 'returned'
+              && rental.status !== 'closed',
+            )
+            .sort((a, b) => a.startDate.localeCompare(b.startDate))[0];
+
+          const nextStatus: EquipmentStatus = hasRemainingOpen
+            ? 'in_service'
+            : activeRental
+              ? (activeRental.status === 'active' ? 'rented' : 'reserved')
+              : 'available';
+
+          return {
+            ...item,
+            status: nextStatus,
+            currentClient: activeRental?.client,
+            returnDate: activeRental?.endDate,
+          };
+        });
+
+        await equipmentService.bulkReplace(updatedEquipment);
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+      ]);
+
+      navigate('/service');
+    } catch {
+      setDeleteError('Не удалось удалить сервисную заявку. Попробуйте ещё раз.');
+      setConfirmDelete(false);
+    }
+  }, [canDeleteService, navigate, queryClient, ticket]);
+
   const addWorkPerformed = async () => {
     if (!ticket || !canEdit || !selectedWorkId) return;
     const work = workCatalog.find(item => item.id === selectedWorkId);
@@ -742,6 +824,42 @@ export default function ServiceDetail() {
       </Button>
     );
   }
+  if (canDeleteService) {
+    if (confirmDelete) {
+      actions.push(
+        <div key="delete-confirm" className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <span className="text-xs text-red-500">Удалить заявку безвозвратно?</span>
+          <Button
+            variant="destructive"
+            className="w-full sm:w-auto"
+            onClick={() => { void handleDeleteTicket(); }}
+          >
+            <Trash2 className="h-4 w-4" />
+            Да, удалить
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full sm:w-auto"
+            onClick={() => setConfirmDelete(false)}
+          >
+            Отмена
+          </Button>
+        </div>,
+      );
+    } else {
+      actions.push(
+        <Button
+          key="delete"
+          variant="ghost"
+          className="w-full text-red-600 hover:bg-red-50 hover:text-red-700 sm:w-auto"
+          onClick={() => setConfirmDelete(true)}
+        >
+          <Trash2 className="h-4 w-4" />
+          Удалить заявку
+        </Button>,
+      );
+    }
+  }
 
   // ── log icon ──────────────────────────────────────────────────────────────
 
@@ -777,6 +895,11 @@ export default function ServiceDetail() {
           </div>
         )}
       </div>
+      {deleteError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+          {deleteError}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ── Left column (2/3) ───────────────────────────────────────────── */}

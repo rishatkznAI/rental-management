@@ -75,7 +75,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     equipment:        ALL,
     sales:            VIEW,
     deliveries:       ALL,
-    rentals:          VIEW_CREATE,
+    rentals:          ['view', 'create', 'edit'],
     planner:          ALL,
     service:          ALL,
     service_vehicles: ALL,

@@ -180,6 +180,7 @@ export default function Dashboard() {
 
   // Менеджер по аренде видит только свои аренды в KPI
   const isManagerRole = user?.role === 'Менеджер по аренде';
+  const isAdminRole = user?.role === 'Администратор';
   const currentUserName = user?.name ?? '';
   const viewRentals = isManagerRole && currentUserName
     ? rentals.filter(r => r.manager === currentUserName)
@@ -527,6 +528,80 @@ export default function Dashboard() {
   }, [user?.role]);
 
   const hasManagerData = myRentals.length > 0;
+  const adminManagerRows = useMemo(() => {
+    const names = Array.from(new Set([
+      ...ganttRentals.map(item => item.manager).filter(Boolean),
+      ...rentalDebtRows.map(item => item.manager).filter(Boolean),
+      ...documents.map(item => item.manager).filter(Boolean),
+    ])).sort((a, b) => a.localeCompare(b, 'ru'));
+
+    return names.map(name => {
+      const managerRentals = ganttRentals.filter(item => item.manager === name);
+      const managerActiveRentals = managerRentals.filter(item => item.status === 'active');
+      const managerMonthRentals = managerRentals.filter(item => new Date(item.startDate) >= monthStart);
+      const managerDebtRows = rentalDebtRows.filter(item => item.manager === name);
+      const managerOverdueRows = overduePayments.filter(item => item.manager === name);
+      const managerUnsignedDocs = documents.filter(item =>
+        item.manager === name && (item.type === 'contract' || item.type === 'act') && item.status !== 'signed',
+      );
+      const managerReturnsSoon = managerActiveRentals.filter(item => {
+        const ret = new Date(item.endDate);
+        return (ret >= today && ret < tomorrowStart) || (ret >= tomorrowStart && ret < dayAfterTomorrowStart);
+      }).length;
+
+      return {
+        name,
+        activeRentals: managerActiveRentals.length,
+        monthRentals: managerMonthRentals.length,
+        monthRevenue: managerMonthRentals.reduce((sum, item) => sum + (item.amount || 0), 0),
+        currentDebt: managerDebtRows.reduce((sum, item) => sum + item.outstanding, 0),
+        overdueDebt: managerOverdueRows.reduce((sum, item) => sum + item.outstanding, 0),
+        returnsSoon: managerReturnsSoon,
+        unsignedDocs: managerUnsignedDocs.length,
+      };
+    }).sort((a, b) =>
+      b.activeRentals - a.activeRentals
+      || b.monthRevenue - a.monthRevenue
+      || b.currentDebt - a.currentDebt
+      || a.name.localeCompare(b.name, 'ru')
+    );
+  }, [dayAfterTomorrowStart, documents, ganttRentals, monthStart, overduePayments, rentalDebtRows, today, tomorrowStart]);
+
+  const adminMechanicRows = useMemo(() => {
+    const workloadSummary = mechanicWorkload?.summary ?? [];
+    const names = Array.from(new Set([
+      ...workloadSummary.map(item => item.mechanicName).filter(Boolean),
+      ...tickets.map(item => item.assignedMechanicName || item.assignedTo).filter(Boolean),
+    ])).sort((a, b) => a.localeCompare(b, 'ru'));
+
+    return names.map(name => {
+      const summary = workloadSummary.find(item => item.mechanicName === name);
+      const assignedTickets = tickets.filter(item =>
+        item.status !== 'closed' && (item.assignedMechanicName === name || item.assignedTo === name),
+      );
+      const readyTickets = assignedTickets.filter(item => item.status === 'ready').length;
+      const waitingPartsTickets = assignedTickets.filter(item => item.status === 'waiting_parts').length;
+      const criticalTicketsCount = assignedTickets.filter(item => item.priority === 'critical' || item.priority === 'high').length;
+
+      return {
+        name,
+        openTickets: assignedTickets.length,
+        readyTickets,
+        waitingPartsTickets,
+        criticalTickets: criticalTicketsCount,
+        repairsCount: summary?.repairsCount ?? 0,
+        worksCount: summary?.worksCount ?? 0,
+        totalNormHours: summary?.totalNormHours ?? 0,
+        partsCost: summary?.partsCost ?? 0,
+        equipmentCount: summary?.equipmentCount ?? 0,
+      };
+    }).sort((a, b) =>
+      b.openTickets - a.openTickets
+      || b.repairsCount - a.repairsCount
+      || b.totalNormHours - a.totalNormHours
+      || a.name.localeCompare(b.name, 'ru')
+    );
+  }, [mechanicWorkload, tickets]);
 
   // ── Extended KPIs ───────────────────────────────────────────────────────────
   const UTILIZATION_TARGET = 85;
@@ -1097,6 +1172,133 @@ export default function Dashboard() {
         </Card>
       )}
 
+      {isAdminRole && (
+        <section className={dashboardSectionClass}>
+          <div className={dashboardSectionHeaderClass}>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+              Команда
+            </p>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Результаты по каждому менеджеру и механику</h2>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card className={dashboardCardClass}>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2">
+                  <User className="h-5 w-5 text-[--color-primary]" />
+                  Менеджеры аренды
+                </CardTitle>
+                <CardDescription>Активные сделки, выручка месяца, долг и документы по каждому менеджеру.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {adminManagerRows.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Данных по менеджерам пока нет.</p>
+                ) : (
+                  adminManagerRows.map(row => (
+                    <div key={row.name} className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="font-semibold text-gray-900 dark:text-white">{row.name}</p>
+                          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                            Активных аренд: {row.activeRentals} · Новых за месяц: {row.monthRentals}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs uppercase tracking-wide text-gray-400">Выручка месяца</p>
+                          <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                            {formatCurrency(row.monthRevenue)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/80">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">Долг</p>
+                          <p className={`mt-1 text-sm font-semibold ${row.currentDebt > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400'}`}>
+                            {formatCurrency(row.currentDebt)}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/80">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">Просрочка</p>
+                          <p className={`mt-1 text-sm font-semibold ${row.overdueDebt > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-300'}`}>
+                            {formatCurrency(row.overdueDebt)}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/80">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">Возвраты 2 дня</p>
+                          <p className={`mt-1 text-sm font-semibold ${row.returnsSoon > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-300'}`}>
+                            {row.returnsSoon}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/80">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">Документы</p>
+                          <p className={`mt-1 text-sm font-semibold ${row.unsignedDocs > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-300'}`}>
+                            {row.unsignedDocs} без подписи
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className={dashboardCardClass}>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2">
+                  <Wrench className="h-5 w-5 text-[--color-primary]" />
+                  Механики
+                </CardTitle>
+                <CardDescription>Текущая нагрузка, готовые заявки, ожидание запчастей и сервисная выработка.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {adminMechanicRows.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Данных по механикам пока нет.</p>
+                ) : (
+                  adminMechanicRows.map(row => (
+                    <div key={row.name} className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="font-semibold text-gray-900 dark:text-white">{row.name}</p>
+                          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                            Открытых заявок: {row.openTickets} · Готово: {row.readyTickets} · Ждут запчасти: {row.waitingPartsTickets}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs uppercase tracking-wide text-gray-400">Выработка</p>
+                          <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                            {row.totalNormHours.toFixed(1)} н/ч
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/80">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">Ремонты</p>
+                          <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{row.repairsCount}</p>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/80">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">Работы</p>
+                          <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{row.worksCount}</p>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/80">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">Критичные</p>
+                          <p className={`mt-1 text-sm font-semibold ${row.criticalTickets > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-300'}`}>
+                            {row.criticalTickets}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/80">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">Запчасти</p>
+                          <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(row.partsCost)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+      )}
+
       {/* ── Priority Actions ─────────────────────────────────────────────────── */}
       <section className={dashboardSectionClass}>
         <div className={dashboardSectionHeaderClass}>
@@ -1434,6 +1636,7 @@ export default function Dashboard() {
       </section>
 
       {/* ── Manager Stats ─────────────────────────────────────────────────────── */}
+      {!isAdminRole && (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -1505,6 +1708,7 @@ export default function Dashboard() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {(dashboardEquipmentRisk.length > 0 || dashboardModelRisk.length > 0) && (
         <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">

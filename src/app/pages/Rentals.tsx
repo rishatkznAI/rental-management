@@ -532,8 +532,16 @@ export default function Rentals() {
 
   // Derived: any filter is currently active
   const hasActiveFilters = !!(filterModel || filterManager || filterClient || filterUpd || filterPayment || filterStatus || rentalPreset !== 'all');
-  const hasAdvancedFilters = !!(filterManager || filterClient || filterUpd || filterPayment || filterStatus);
-  const activeFilterCount = [filterManager, filterClient, filterUpd, filterPayment, filterStatus].filter(Boolean).length;
+  const hasAdvancedFilters = !!(filterModel || filterManager || filterClient || filterUpd || filterPayment || filterStatus || rentalPreset !== 'all');
+  const activeFilterCount = [
+    filterModel,
+    filterManager,
+    filterClient,
+    filterUpd,
+    filterPayment,
+    filterStatus,
+    rentalPreset !== 'all' ? rentalPreset : '',
+  ].filter(Boolean).length;
 
   // Refs
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -1458,54 +1466,7 @@ export default function Rentals() {
               </div>
 
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-              <div className="flex flex-wrap items-center gap-2 xl:min-w-0">
-                {rentalPresetOptions.map(option => {
-                  const count = option.value === 'returns_today'
-                    ? quickFilterCounts.returnsToday
-                    : option.value === 'overdue'
-                      ? quickFilterCounts.overdue
-                      : option.value === 'unpaid'
-                        ? quickFilterCounts.unpaid
-                        : null;
-
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setRentalPreset(option.value)}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                        rentalPreset === option.value
-                          ? 'bg-primary text-primary-foreground shadow-[0_12px_26px_-18px_rgba(212,247,74,0.8)]'
-                          : 'border border-border bg-secondary/70 text-muted-foreground hover:border-primary/40 hover:text-foreground'
-                      }`}
-                    >
-                      {option.label}
-                      {count !== null && (
-                        <span className={`ml-2 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                          rentalPreset === option.value
-                            ? 'bg-white/20 text-white'
-                            : getQuickCountTone(count, 1, option.value === 'unpaid' ? 5 : 3)
-                        }`}>
-                          {count}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <div className="relative min-w-0 flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Модель / INV / SN"
-                    value={filterModel}
-                    onChange={e => setFilterModel(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-gray-200/80 bg-white/75 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-white/10 dark:bg-slate-900/42 dark:text-white"
-                  />
-                </div>
-
+              <div className="flex min-w-0 flex-1 items-center gap-2 justify-end">
                 <div className="flex shrink-0 rounded-xl border border-gray-200/80 bg-white/75 p-1 dark:border-white/10 dark:bg-white/6">
                   <button
                     type="button"
@@ -1545,12 +1506,6 @@ export default function Rentals() {
                     </span>
                   )}
                 </Button>
-
-                {hasActiveFilters ? (
-                  <Button size="sm" variant="ghost" onClick={resetFilters} className="h-10 shrink-0 rounded-xl px-3 text-sm text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20">
-                    Сбросить
-                  </Button>
-                ) : null}
               </div>
             </div>
             </div>
@@ -1575,6 +1530,16 @@ export default function Rentals() {
 
             {hasAdvancedFilters && (
               <div className="mt-2 flex flex-wrap gap-2">
+                {filterModel && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                    Поиск: {filterModel}
+                  </span>
+                )}
+                {rentalPreset !== 'all' && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                    Режим: {rentalPresetOptions.find(item => item.value === rentalPreset)?.label || rentalPreset}
+                  </span>
+                )}
                 {filterManager && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                     Менеджер: {filterManager}
@@ -1616,6 +1581,20 @@ export default function Rentals() {
           </DialogHeader>
 
           <div className="space-y-5">
+            <div>
+              <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Поиск по технике</div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Модель / INV / SN"
+                  value={filterModel}
+                  onChange={e => setFilterModel(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
               <div className="text-sm font-medium text-gray-900 dark:text-white">Быстрый режим</div>
               <div className="flex flex-wrap gap-2">
@@ -2098,58 +2077,20 @@ export default function Rentals() {
           >
             Сегодня
           </button>
-          <button
-            type="button"
-            onClick={() => setRentalPreset('returns_today')}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              rentalPreset === 'returns_today'
-                ? 'bg-[--color-primary] text-white'
-                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
-            }`}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setShowFiltersDialog(true)}
+            className="h-8 shrink-0 rounded-full px-3 text-xs"
           >
-            Возвраты
-            <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${rentalPreset === 'returns_today' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.returnsToday, 1, 3)}`}>
-              {quickFilterCounts.returnsToday}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setRentalPreset('unpaid')}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              rentalPreset === 'unpaid'
-                ? 'bg-[--color-primary] text-white'
-                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
-            }`}
-          >
-            Без оплаты
-            <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${rentalPreset === 'unpaid' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.unpaid, 1, 5)}`}>
-              {quickFilterCounts.unpaid}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setRentalPreset('overdue')}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              rentalPreset === 'overdue'
-                ? 'bg-[--color-primary] text-white'
-                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
-            }`}
-          >
-            Просроченные
-            <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${rentalPreset === 'overdue' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.overdue, 1, 2)}`}>
-              {quickFilterCounts.overdue}
-            </span>
-          </button>
-          {hasActiveFilters && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={resetFilters}
-              className="h-8 shrink-0 rounded-full px-3 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-            >
-              Сбросить
-            </Button>
-          )}
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Фильтры
+            {activeFilterCount > 0 && (
+              <span className="rounded-full bg-[--color-primary]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[--color-primary]">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
         </div>
       </div>
 

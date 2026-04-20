@@ -1,8 +1,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { MoreVertical, Plus, RotateCcw, Search } from 'lucide-react';
+import { MoreVertical, Plus, Search } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { usePermissions } from '../lib/permissions';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData } from '../hooks/useRentals';
@@ -143,30 +144,6 @@ function matchesTabType(equipment: EquipmentEntity, activeTab: EquipmentTab) {
   return true;
 }
 
-function FilterSelect({
-  value,
-  onChange,
-  options,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="h-10 rounded-xl border border-border bg-secondary/80 px-3 text-sm text-foreground outline-none transition focus:border-primary/40"
-    >
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 function EquipmentMobileCard({
   equipment,
   isSaleTab,
@@ -243,6 +220,7 @@ export default function Equipment() {
   const [fleetFilter, setFleetFilter] = React.useState<string>('all');
   const [ownerFilter, setOwnerFilter] = React.useState<string>('all');
   const [locationFilter, setLocationFilter] = React.useState<string>('all');
+  const [showFilters, setShowFilters] = React.useState(false);
 
   const enrichedEquipmentList = React.useMemo(
     () => normalizeEquipmentList(enrichEquipment(equipmentList, ganttRentals)),
@@ -305,6 +283,16 @@ export default function Equipment() {
     service: enrichedEquipmentList.filter((item) => matchesTabType(item, 'service')).length,
     all: enrichedEquipmentList.length,
   }), [enrichedEquipmentList]);
+  const activeFilterCount = [
+    search.trim() !== '',
+    categoryFilter !== 'all',
+    fleetFilter !== 'all',
+    statusFilter !== 'all',
+    typeFilter !== 'all',
+    ownerFilter !== 'all',
+    driveFilter !== 'all',
+    locationFilter !== 'all',
+  ].filter(Boolean).length;
 
   const resetFilters = () => {
     setSearch('');
@@ -374,101 +362,90 @@ export default function Equipment() {
         </div>
 
         <div className="px-5 py-4 sm:px-6">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-3 xl:flex-row">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  placeholder={isSaleTab ? 'Поиск по модели, инв. №, SN, локации…' : 'Поиск по инв. №, модели, SN, клиенту…'}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-secondary/80 pl-10 pr-3 text-sm text-foreground outline-none transition focus:border-primary/40"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-secondary/80 px-4 text-sm text-muted-foreground transition hover:text-foreground"
-              >
-                <RotateCcw className="h-4 w-4" />
-                Сбросить
-              </button>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
-              <FilterSelect
-                value={categoryFilter}
-                onChange={setCategoryFilter}
-                options={[
-                  { value: 'all', label: 'Все категории' },
-                  { value: 'own', label: EQUIPMENT_CATEGORY_LABELS.own },
-                  { value: 'sold', label: EQUIPMENT_CATEGORY_LABELS.sold },
-                  { value: 'client', label: EQUIPMENT_CATEGORY_LABELS.client },
-                  { value: 'partner', label: EQUIPMENT_CATEGORY_LABELS.partner },
-                ]}
-              />
-              <FilterSelect
-                value={fleetFilter}
-                onChange={setFleetFilter}
-                options={[
-                  { value: 'all', label: 'Любое участие в парке' },
-                  { value: 'true', label: `Активный парк — ${ACTIVE_FLEET_LABELS.yes}` },
-                  { value: 'false', label: `Активный парк — ${ACTIVE_FLEET_LABELS.no}` },
-                ]}
-              />
-              <FilterSelect
-                value={statusFilter}
-                onChange={setStatusFilter}
-                options={[
-                  { value: 'all', label: 'Все статусы' },
-                  { value: 'available', label: 'Свободен' },
-                  { value: 'rented', label: 'В аренде' },
-                  { value: 'reserved', label: 'Бронь' },
-                  { value: 'in_service', label: 'В сервисе' },
-                  { value: 'inactive', label: 'Списан' },
-                ]}
-              />
-              <FilterSelect
-                value={typeFilter}
-                onChange={setTypeFilter}
-                options={[
-                  { value: 'all', label: 'Все типы' },
-                  { value: 'scissor', label: 'Ножничный' },
-                  { value: 'articulated', label: 'Коленчатый' },
-                  { value: 'telescopic', label: 'Телескопический' },
-                ]}
-              />
-              <FilterSelect
-                value={ownerFilter}
-                onChange={setOwnerFilter}
-                options={[
-                  { value: 'all', label: 'Все собственники' },
-                  { value: 'own', label: 'Собственная' },
-                  { value: 'investor', label: 'Инвестор' },
-                  { value: 'sublease', label: 'Субаренда' },
-                ]}
-              />
-              <FilterSelect
-                value={driveFilter}
-                onChange={setDriveFilter}
-                options={[
-                  { value: 'all', label: 'Все приводы' },
-                  { value: 'diesel', label: 'Дизель' },
-                  { value: 'electric', label: 'Электро' },
-                ]}
-              />
-              <FilterSelect
-                value={locationFilter}
-                onChange={setLocationFilter}
-                options={[
-                  { value: 'all', label: 'Все локации' },
-                  ...locationOptions.map((location) => ({ value: location, label: location })),
-                ]}
-              />
-            </div>
+          <div className="flex justify-end">
+            <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
           </div>
         </div>
       </section>
+
+      <FilterDialog
+        open={showFilters}
+        onOpenChange={setShowFilters}
+        title="Фильтры техники"
+        description="Настрой выборку парка по поиску, статусу, типу, собственнику и локации."
+        onReset={resetFilters}
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <FilterField label="Поиск" className="md:col-span-2 xl:col-span-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                placeholder={isSaleTab ? 'Поиск по модели, инв. №, SN, локации…' : 'Поиск по инв. №, модели, SN, клиенту…'}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="app-filter-input pl-10"
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Категория">
+            <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="app-filter-input">
+              <option value="all">Все категории</option>
+              <option value="own">{EQUIPMENT_CATEGORY_LABELS.own}</option>
+              <option value="sold">{EQUIPMENT_CATEGORY_LABELS.sold}</option>
+              <option value="client">{EQUIPMENT_CATEGORY_LABELS.client}</option>
+              <option value="partner">{EQUIPMENT_CATEGORY_LABELS.partner}</option>
+            </select>
+          </FilterField>
+          <FilterField label="Активный парк">
+            <select value={fleetFilter} onChange={(event) => setFleetFilter(event.target.value)} className="app-filter-input">
+              <option value="all">Любое участие в парке</option>
+              <option value="true">{`Активный парк — ${ACTIVE_FLEET_LABELS.yes}`}</option>
+              <option value="false">{`Активный парк — ${ACTIVE_FLEET_LABELS.no}`}</option>
+            </select>
+          </FilterField>
+          <FilterField label="Статус">
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="app-filter-input">
+              <option value="all">Все статусы</option>
+              <option value="available">Свободен</option>
+              <option value="rented">В аренде</option>
+              <option value="reserved">Бронь</option>
+              <option value="in_service">В сервисе</option>
+              <option value="inactive">Списан</option>
+            </select>
+          </FilterField>
+          <FilterField label="Тип">
+            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="app-filter-input">
+              <option value="all">Все типы</option>
+              <option value="scissor">Ножничный</option>
+              <option value="articulated">Коленчатый</option>
+              <option value="telescopic">Телескопический</option>
+            </select>
+          </FilterField>
+          <FilterField label="Собственник">
+            <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} className="app-filter-input">
+              <option value="all">Все собственники</option>
+              <option value="own">Собственная</option>
+              <option value="investor">Инвестор</option>
+              <option value="sublease">Субаренда</option>
+            </select>
+          </FilterField>
+          <FilterField label="Привод">
+            <select value={driveFilter} onChange={(event) => setDriveFilter(event.target.value)} className="app-filter-input">
+              <option value="all">Все приводы</option>
+              <option value="diesel">Дизель</option>
+              <option value="electric">Электро</option>
+            </select>
+          </FilterField>
+          <FilterField label="Локация">
+            <select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)} className="app-filter-input">
+              <option value="all">Все локации</option>
+              {locationOptions.map((location) => (
+                <option key={location} value={location}>{location}</option>
+              ))}
+            </select>
+          </FilterField>
+        </div>
+      </FilterDialog>
 
       <div className="space-y-3 sm:hidden">
         {totalVisible === 0 ? <EmptyState /> : filteredEquipment.map((equipment) => (

@@ -4,6 +4,7 @@ import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import { Search, Plus } from 'lucide-react';
+import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { Link } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { useClientsList } from '../hooks/useClients';
@@ -19,6 +20,7 @@ export default function Clients() {
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
   const [search, setSearch] = React.useState('');
+  const [showFilters, setShowFilters] = React.useState(false);
 
   const computedClients = React.useMemo(
     () => mergeClientsWithFinancials(clientList, ganttRentals, payments),
@@ -33,6 +35,8 @@ export default function Clients() {
 
     return matchesSearch;
   });
+
+  const activeFilterCount = search.trim() ? 1 : 0;
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -53,18 +57,29 @@ export default function Clients() {
         )}
       </div>
 
-      {/* Search */}
-      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-          <Input
-            placeholder="Поиск по названию, ИНН, контакту..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
+      <div className="flex justify-end">
+        <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
       </div>
+
+      <FilterDialog
+        open={showFilters}
+        onOpenChange={setShowFilters}
+        title="Фильтры клиентов"
+        description="Поиск по названию компании, ИНН или контактному лицу."
+        onReset={() => setSearch('')}
+      >
+        <FilterField label="Поиск">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Поиск по названию, ИНН, контакту..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="app-filter-input pl-10"
+            />
+          </div>
+        </FilterField>
+      </FilterDialog>
 
       {/* Mobile: card list */}
       <div className="sm:hidden space-y-3">

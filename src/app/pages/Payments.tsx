@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Select } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getPaymentStatusBadge } from '../components/ui/badge';
 import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown } from 'lucide-react';
+import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { usePermissions } from '../lib/permissions';
 import { usePaymentsList, useCreatePayment } from '../hooks/usePayments';
 import { useClientsList } from '../hooks/useClients';
@@ -268,6 +268,7 @@ export default function Payments() {
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
   const filteredPayments = useMemo(() => paymentList.filter(p => {
     const q = search.toLowerCase();
@@ -303,6 +304,10 @@ export default function Payments() {
     }),
     [rentalDebtRows],
   );
+  const activeFilterCount = [
+    search.trim() !== '',
+    statusFilter !== 'all',
+  ].filter(Boolean).length;
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -478,33 +483,47 @@ export default function Payments() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 sm:gap-4 sm:p-4">
-        <div className="flex-1 min-w-[200px]">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-            <Input
-              placeholder="Поиск по счёту, клиенту, аренде..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-        </div>
-        <Select
-          value={statusFilter}
-          onValueChange={setStatusFilter}
-          placeholder="Все статусы"
-          options={[
-            { value: 'all', label: 'Все статусы' },
-            { value: 'paid', label: 'Оплачено' },
-            { value: 'partial', label: 'Частично' },
-            { value: 'pending', label: 'Не оплачено' },
-            { value: 'overdue', label: 'Просрочено' },
-          ]}
-          className="w-[180px]"
-        />
+      <div className="flex justify-end">
+        <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
       </div>
+
+      <FilterDialog
+        open={showFilters}
+        onOpenChange={setShowFilters}
+        title="Фильтры платежей"
+        description="Поиск по счёту, клиенту, аренде и статусу оплаты."
+        onReset={() => {
+          setSearch('');
+          setStatusFilter('all');
+        }}
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <FilterField label="Поиск" className="md:col-span-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Поиск по счёту, клиенту, аренде..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="app-filter-input pl-10"
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Статус оплаты">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="app-filter-input"
+            >
+              <option value="all">Все статусы</option>
+              <option value="paid">Оплачено</option>
+              <option value="partial">Частично</option>
+              <option value="pending">Не оплачено</option>
+              <option value="overdue">Просрочено</option>
+            </select>
+          </FilterField>
+        </div>
+      </FilterDialog>
 
       {/* Table */}
       <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">

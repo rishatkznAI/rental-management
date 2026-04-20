@@ -11,6 +11,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getServiceStatusBadge, getServicePriorityBadge } from '../components/ui/badge';
 import { Search, Plus } from 'lucide-react';
+import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { Link } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -27,6 +28,7 @@ export default function Service() {
   const [scenarioFilter, setScenarioFilter] = React.useState<string>('all');
   const [mechanicFilter, setMechanicFilter] = React.useState<string>('all');
   const [preset, setPreset] = React.useState<'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'maintenance'>('all');
+  const [showFilters, setShowFilters] = React.useState(false);
 
   const mechanicOptions = React.useMemo(() => (
     Array.from(new Set(
@@ -75,6 +77,15 @@ export default function Service() {
     setPreset('all');
   };
 
+  const activeFilterCount = [
+    search.trim() !== '',
+    priorityFilter !== 'all',
+    statusFilter !== 'all',
+    scenarioFilter !== 'all',
+    mechanicFilter !== 'all',
+    preset !== 'all',
+  ].filter(Boolean).length;
+
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
@@ -94,96 +105,107 @@ export default function Service() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {presetOptions.map(option => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => setPreset(option.value)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              preset === option.value
-                ? 'bg-[--color-primary] text-white'
-                : 'border border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-600 dark:hover:text-blue-300'
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
-        {(search || priorityFilter !== 'all' || statusFilter !== 'all' || scenarioFilter !== 'all' || mechanicFilter !== 'all' || preset !== 'all') && (
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="rounded-full border border-transparent px-3 py-1.5 text-xs font-medium text-red-500 hover:border-red-200 hover:bg-red-50 dark:hover:border-red-900/50 dark:hover:bg-red-950/20"
-          >
-            Сбросить фильтры
-          </button>
-        )}
+      <div className="flex justify-end">
+        <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 sm:gap-4 sm:p-4">
-        <div className="flex-1 min-w-[200px]">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-            <Input
-              placeholder="Поиск по ID, технике, причине..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
+      <FilterDialog
+        open={showFilters}
+        onOpenChange={setShowFilters}
+        title="Фильтры сервиса"
+        description="Отбери заявки по поиску, режиму, приоритету, статусу, сценарию и механику."
+        onReset={resetFilters}
+      >
+        <div className="space-y-5">
+          <FilterField label="Быстрый режим">
+            <div className="flex flex-wrap gap-2">
+              {presetOptions.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setPreset(option.value)}
+                  className="app-filter-chip"
+                  data-active={String(preset === option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </FilterField>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <FilterField label="Поиск" className="md:col-span-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Поиск по ID, технике, причине..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="app-filter-input pl-10"
+                />
+              </div>
+            </FilterField>
+            <FilterField label="Приоритет">
+              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                <SelectTrigger className="app-filter-input">
+                  <SelectValue placeholder="Все приоритеты" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все приоритеты</SelectItem>
+                  <SelectItem value="low">Низкий</SelectItem>
+                  <SelectItem value="medium">Средний</SelectItem>
+                  <SelectItem value="high">Высокий</SelectItem>
+                  <SelectItem value="critical">Критический</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField label="Статус">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="app-filter-input">
+                  <SelectValue placeholder="Все статусы" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все статусы</SelectItem>
+                  <SelectItem value="new">Новый</SelectItem>
+                  <SelectItem value="in_progress">В работе</SelectItem>
+                  <SelectItem value="waiting_parts">Ожидание запчастей</SelectItem>
+                  <SelectItem value="ready">Готово</SelectItem>
+                  <SelectItem value="closed">Закрыто</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField label="Сценарий">
+              <Select value={scenarioFilter} onValueChange={setScenarioFilter}>
+                <SelectTrigger className="app-filter-input">
+                  <SelectValue placeholder="Все сценарии" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все сценарии</SelectItem>
+                  <SelectItem value="repair">Ремонт</SelectItem>
+                  <SelectItem value="to">ТО</SelectItem>
+                  <SelectItem value="chto">ЧТО</SelectItem>
+                  <SelectItem value="pto">ПТО</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField label="Механик">
+              <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
+                <SelectTrigger className="app-filter-input">
+                  <SelectValue placeholder="Все механики" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все механики</SelectItem>
+                  {mechanicOptions.map(mechanic => (
+                    <SelectItem key={mechanic} value={mechanic}>
+                      {mechanic}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
           </div>
         </div>
-        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Все приоритеты" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все приоритеты</SelectItem>
-            <SelectItem value="low">Низкий</SelectItem>
-            <SelectItem value="medium">Средний</SelectItem>
-            <SelectItem value="high">Высокий</SelectItem>
-            <SelectItem value="critical">Критический</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Все статусы" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все статусы</SelectItem>
-            <SelectItem value="new">Новый</SelectItem>
-            <SelectItem value="in_progress">В работе</SelectItem>
-            <SelectItem value="waiting_parts">Ожидание запчастей</SelectItem>
-            <SelectItem value="ready">Готово</SelectItem>
-            <SelectItem value="closed">Закрыто</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={scenarioFilter} onValueChange={setScenarioFilter}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Все сценарии" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все сценарии</SelectItem>
-            <SelectItem value="repair">Ремонт</SelectItem>
-            <SelectItem value="to">ТО</SelectItem>
-            <SelectItem value="chto">ЧТО</SelectItem>
-            <SelectItem value="pto">ПТО</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
-          <SelectTrigger className="w-[220px]">
-            <SelectValue placeholder="Все механики" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все механики</SelectItem>
-            {mechanicOptions.map(mechanic => (
-              <SelectItem key={mechanic} value={mechanic}>
-                {mechanic}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      </FilterDialog>
 
       {/* Mobile: card list */}
       <div className="sm:hidden space-y-3">

@@ -13,14 +13,13 @@ import {
   AlertTriangle,
   Calendar,
   ChevronDown,
-  Filter,
   RefreshCw,
   Search,
   Wrench,
-  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
+import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { usePlannerRows, useUpdatePlannerItem } from '../hooks/usePlanner';
 import { usePermissions } from '../lib/permissions';
 import type { PlannerRow, PrepStatus, PlannerPriority, EquipmentType } from '../types';
@@ -396,8 +395,10 @@ export default function Planner() {
     if (filters.manager) n++;
     if (filters.equipType) n++;
     if (filters.riskOnly) n++;
+    if (includeShipped) n++;
+    if (filters.search.trim()) n++;
     return n;
-  }, [filters]);
+  }, [filters, includeShipped]);
 
   const quickFilterCounts = useMemo(() => ({
     today: rows.filter(row => matchesDateRange(row, { ...DEFAULT_FILTERS, dateRange: 'today' })).length,
@@ -434,164 +435,126 @@ export default function Planner() {
       </div>
 
       {/* ── Фильтры ── */}
-      <div className="px-6 pb-3 space-y-2">
-        {/* Строка поиска + кнопки диапазона дат */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Поиск */}
-          <div className="relative flex-1 min-w-48">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              value={filters.search}
-              onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
-              placeholder="Клиент, модель, инв. №, серийный №…"
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            {filters.search && (
-              <button
-                onClick={() => setFilters(f => ({ ...f, search: '' }))}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Период */}
-          {(['today', 'tomorrow', 'week', 'all'] as DateRange[]).map(range => (
-            <button
-              key={range}
-              onClick={() => setFilters(f => ({ ...f, dateRange: range }))}
-              className={cn(
-                'px-3 py-1.5 text-sm rounded-lg border transition-colors',
-                filters.dateRange === range
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700',
-              )}
-            >
-              {range === 'today'    && 'Сегодня'}
-              {range === 'tomorrow' && 'Завтра'}
-              {range === 'week'     && '7 дней'}
-              {range === 'all'      && 'Все'}
-            </button>
-          ))}
-
-          {/* Кнопка доп. фильтров */}
-          <button
-            onClick={() => setShowFilters(v => !v)}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors',
-              showFilters || activeFilterCount > 0
-                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400'
-                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700',
-            )}
-          >
-            <Filter className="h-4 w-4" />
-            Фильтры
-            {activeFilterCount > 0 && (
-              <span className="flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-white text-xs font-bold">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-
-          {/* Показать отгруженные */}
-          <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={includeShipped}
-              onChange={e => setIncludeShipped(e.target.checked)}
-              className="rounded"
-            />
-            Показать отгруженные
-          </label>
+      <div className="px-6 pb-3">
+        <div className="flex justify-end">
+          <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
         </div>
+      </div>
 
-        {/* Дополнительные фильтры */}
-        {showFilters && (
-          <div className="flex flex-wrap gap-2 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-            {/* Статус подготовки */}
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-gray-500 dark:text-gray-400">Статус подготовки</span>
-              <div className="flex flex-wrap gap-1">
-                {ALL_PREP_STATUSES.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => setFilters(f => ({
-                      ...f,
-                      prepStatuses: f.prepStatuses.includes(s)
-                        ? f.prepStatuses.filter(x => x !== s)
-                        : [...f.prepStatuses, s],
-                    }))}
-                    className={cn(
-                      'px-2 py-0.5 rounded text-xs font-medium border transition-colors',
-                      filters.prepStatuses.includes(s)
-                        ? PREP_STATUS_COLORS[s] + ' border-current'
-                        : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400',
-                    )}
-                  >
-                    {PREP_STATUS_LABELS[s]}
-                  </button>
-                ))}
-              </div>
+      <FilterDialog
+        open={showFilters}
+        onOpenChange={setShowFilters}
+        title="Фильтры планировщика"
+        description="Настрой период, поиск и дополнительные условия отображения подготовки техники."
+        onReset={() => {
+          setFilters(DEFAULT_FILTERS);
+          setIncludeShipped(false);
+        }}
+      >
+        <div className="space-y-5">
+          <FilterField label="Поиск">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                value={filters.search}
+                onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+                placeholder="Клиент, модель, инв. №, серийный №…"
+                className="app-filter-input pl-10"
+              />
             </div>
+          </FilterField>
 
-            {/* Менеджер */}
+          <FilterField label="Период">
+            <div className="flex flex-wrap gap-2">
+              {(['today', 'tomorrow', 'week', 'all'] as DateRange[]).map(range => (
+                <button
+                  key={range}
+                  type="button"
+                  onClick={() => setFilters(f => ({ ...f, dateRange: range }))}
+                  className="app-filter-chip"
+                  data-active={String(filters.dateRange === range)}
+                >
+                  {range === 'today' && 'Сегодня'}
+                  {range === 'tomorrow' && 'Завтра'}
+                  {range === 'week' && '7 дней'}
+                  {range === 'all' && 'Все'}
+                </button>
+              ))}
+            </div>
+          </FilterField>
+
+          <FilterField label="Статус подготовки">
+            <div className="flex flex-wrap gap-2">
+              {ALL_PREP_STATUSES.map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setFilters(f => ({
+                    ...f,
+                    prepStatuses: f.prepStatuses.includes(s)
+                      ? f.prepStatuses.filter(x => x !== s)
+                      : [...f.prepStatuses, s],
+                  }))}
+                  className="app-filter-chip"
+                  data-active={String(filters.prepStatuses.includes(s))}
+                >
+                  {PREP_STATUS_LABELS[s]}
+                </button>
+              ))}
+            </div>
+          </FilterField>
+
+          <div className="grid gap-4 md:grid-cols-2">
             {managers.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-gray-500 dark:text-gray-400">Менеджер</span>
+              <FilterField label="Менеджер">
                 <select
                   value={filters.manager}
                   onChange={e => setFilters(f => ({ ...f, manager: e.target.value }))}
-                  className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                  className="app-filter-input"
                 >
                   <option value="">Все</option>
                   {managers.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
-              </div>
+              </FilterField>
             )}
 
-            {/* Тип техники */}
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-gray-500 dark:text-gray-400">Тип техники</span>
+            <FilterField label="Тип техники">
               <select
                 value={filters.equipType}
                 onChange={e => setFilters(f => ({ ...f, equipType: e.target.value as EquipmentType | '' }))}
-                className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                className="app-filter-input"
               >
                 <option value="">Все</option>
                 {Object.entries(EQUIPMENT_TYPE_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
                 ))}
               </select>
-            </div>
-
-            {/* Только риски */}
-            <div className="flex flex-col gap-1 justify-end">
-              <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={filters.riskOnly}
-                  onChange={e => setFilters(f => ({ ...f, riskOnly: e.target.checked }))}
-                  className="rounded"
-                />
-                Только с риском
-              </label>
-            </div>
-
-            {/* Сброс фильтров */}
-            {activeFilterCount > 0 && (
-              <div className="flex items-end">
-                <button
-                  onClick={() => setFilters(DEFAULT_FILTERS)}
-                  className="text-xs text-red-600 dark:text-red-400 hover:underline"
-                >
-                  Сбросить все
-                </button>
-              </div>
-            )}
+            </FilterField>
           </div>
-        )}
-      </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-xl border border-border bg-secondary/70 px-4 py-3 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={filters.riskOnly}
+                onChange={e => setFilters(f => ({ ...f, riskOnly: e.target.checked }))}
+                className="rounded"
+              />
+              Только с риском
+            </label>
+
+            <label className="flex items-center gap-2 rounded-xl border border-border bg-secondary/70 px-4 py-3 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={includeShipped}
+                onChange={e => setIncludeShipped(e.target.checked)}
+                className="rounded"
+              />
+              Показать отгруженные
+            </label>
+          </div>
+        </div>
+      </FilterDialog>
 
       {/* ── Статистика ── */}
       {!isLoading && filtered.length > 0 && (
@@ -934,82 +897,8 @@ export default function Planner() {
       </div>
 
       <div className="sticky bottom-0 z-20 border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:hidden">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <button
-            type="button"
-            onClick={() => setFilters(f => ({ ...f, dateRange: 'today' }))}
-            className={cn(
-              'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
-              filters.dateRange === 'today'
-                ? 'bg-blue-600 text-white'
-                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700',
-            )}
-          >
-            Сегодня
-            <span className={cn(
-              'ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
-              filters.dateRange === 'today' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.today, 1, 4),
-            )}>
-              {quickFilterCounts.today}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilters(f => ({ ...f, dateRange: 'week' }))}
-            className={cn(
-              'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
-              filters.dateRange === 'week'
-                ? 'bg-blue-600 text-white'
-                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700',
-            )}
-          >
-            7 дней
-            <span className={cn(
-              'ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
-              filters.dateRange === 'week' ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.week, 3, 8),
-            )}>
-              {quickFilterCounts.week}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilters(f => ({ ...f, riskOnly: !f.riskOnly }))}
-            className={cn(
-              'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
-              filters.riskOnly
-                ? 'bg-red-600 text-white'
-                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700',
-            )}
-          >
-            Только риски
-            <span className={cn(
-              'ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
-              filters.riskOnly ? 'bg-white/20 text-white' : getQuickCountTone(quickFilterCounts.risks, 1, 3),
-            )}>
-              {quickFilterCounts.risks}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowFilters(v => !v)}
-            className={cn(
-              'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
-              showFilters || activeFilterCount > 0
-                ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-300 dark:bg-blue-900/20 dark:text-blue-300 dark:ring-blue-700'
-                : 'border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700',
-            )}
-          >
-            Фильтры
-          </button>
-          {activeFilterCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setFilters(DEFAULT_FILTERS)}
-              className="shrink-0 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30"
-            >
-              Сбросить
-            </button>
-          )}
+        <div className="flex items-center justify-end gap-2">
+          <FilterButton size="sm" activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
         </div>
       </div>
     </div>

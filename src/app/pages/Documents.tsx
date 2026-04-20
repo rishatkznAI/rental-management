@@ -11,6 +11,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getDocumentStatusBadge } from '../components/ui/badge';
 import { Search, Download, Eye } from 'lucide-react';
+import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { formatDate, formatCurrency } from '../lib/utils';
 import type { DocumentType, Document as Doc } from '../types';
@@ -20,6 +21,7 @@ export default function Documents() {
   const [search, setSearch] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
+  const [showFilters, setShowFilters] = React.useState(false);
 
   const filteredDocuments = documentList.filter(doc => {
     const matchesSearch = search === '' ||
@@ -41,6 +43,12 @@ export default function Documents() {
     return labels[type];
   };
 
+  const activeFilterCount = [
+    search.trim() !== '',
+    typeFilter !== 'all',
+    statusFilter !== 'all',
+  ].filter(Boolean).length;
+
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
@@ -55,42 +63,61 @@ export default function Documents() {
         </Button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 sm:gap-4 sm:p-4">
-        <div className="flex-1 min-w-[200px]">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-            <Input
-              placeholder="Поиск по номеру, клиенту..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-        </div>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Все типы" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все типы</SelectItem>
-            <SelectItem value="contract">Договоры</SelectItem>
-            <SelectItem value="act">Акты</SelectItem>
-            <SelectItem value="invoice">Счета</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Все статусы" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все статусы</SelectItem>
-            <SelectItem value="draft">Черновик</SelectItem>
-            <SelectItem value="signed">Подписан</SelectItem>
-            <SelectItem value="sent">Отправлен</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex justify-end">
+        <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
       </div>
+
+      <FilterDialog
+        open={showFilters}
+        onOpenChange={setShowFilters}
+        title="Фильтры документов"
+        description="Отбери документы по поиску, типу и статусу."
+        onReset={() => {
+          setSearch('');
+          setTypeFilter('all');
+          setStatusFilter('all');
+        }}
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <FilterField label="Поиск" className="md:col-span-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Поиск по номеру, клиенту..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="app-filter-input pl-10"
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Тип документа">
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="app-filter-input">
+                <SelectValue placeholder="Все типы" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все типы</SelectItem>
+                <SelectItem value="contract">Договоры</SelectItem>
+                <SelectItem value="act">Акты</SelectItem>
+                <SelectItem value="invoice">Счета</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Статус">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="app-filter-input">
+                <SelectValue placeholder="Все статусы" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все статусы</SelectItem>
+                <SelectItem value="draft">Черновик</SelectItem>
+                <SelectItem value="signed">Подписан</SelectItem>
+                <SelectItem value="sent">Отправлен</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+        </div>
+      </FilterDialog>
 
       {/* Table */}
       <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">

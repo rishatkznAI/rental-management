@@ -4,8 +4,8 @@ import { Search, Tag } from 'lucide-react';
 import { Badge, getEquipmentStatusBadge } from '../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
-import { Select } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { usePermissions } from '../lib/permissions';
 import { EQUIPMENT_SALE_PDI_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
@@ -28,6 +28,7 @@ export default function Sales() {
   const [pdiFilter, setPdiFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [quickFilter, setQuickFilter] = React.useState<'all' | 'pdi_ready' | 'pdi_in_progress' | 'no_price' | 'available_only'>('all');
+  const [showFilters, setShowFilters] = React.useState(false);
 
   if (!can('view', 'sales')) {
     return <Navigate to="/" replace />;
@@ -65,6 +66,12 @@ export default function Sales() {
   const inProgressCount = saleEquipment.filter((equipment) => equipment.salePdiStatus === 'in_progress').length;
   const noPriceCount = saleEquipment.filter((equipment) => !equipment.salePrice1 && !equipment.salePrice2 && !equipment.salePrice3).length;
   const availableCount = saleEquipment.filter((equipment) => equipment.status === 'available').length;
+  const activeFilterCount = [
+    search.trim() !== '',
+    pdiFilter !== 'all',
+    statusFilter !== 'all',
+    quickFilter !== 'all',
+  ].filter(Boolean).length;
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -105,100 +112,77 @@ export default function Sales() {
         </Card>
       </div>
 
-      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 sm:gap-4 sm:p-4">
-        <div className="min-w-[220px] flex-1">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-            <Input
-              placeholder="Поиск по модели, инв.№, SN, локации..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
+      <div className="flex justify-end">
+        <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
+      </div>
+
+      <FilterDialog
+        open={showFilters}
+        onOpenChange={setShowFilters}
+        title="Фильтры продаж"
+        description="Настрой выборку техники на продаже по поиску, PDI, статусу и быстрым режимам."
+        onReset={() => {
+          setSearch('');
+          setPdiFilter('all');
+          setStatusFilter('all');
+          setQuickFilter('all');
+        }}
+      >
+        <div className="space-y-5">
+          <FilterField label="Быстрый режим">
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: 'all', label: 'Все' },
+                { value: 'pdi_ready', label: `PDI готово · ${readyCount}` },
+                { value: 'pdi_in_progress', label: `PDI в работе · ${inProgressCount}` },
+                { value: 'no_price', label: `Без цены · ${noPriceCount}` },
+                { value: 'available_only', label: `Только свободная · ${availableCount}` },
+              ].map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setQuickFilter(option.value as typeof quickFilter)}
+                  className="app-filter-chip"
+                  data-active={String(quickFilter === option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </FilterField>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <FilterField label="Поиск" className="md:col-span-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Поиск по модели, инв. №, SN, локации..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="app-filter-input pl-10"
+                />
+              </div>
+            </FilterField>
+            <FilterField label="PDI">
+              <select value={pdiFilter} onChange={(e) => setPdiFilter(e.target.value)} className="app-filter-input">
+                <option value="all">Все PDI</option>
+                <option value="not_started">{EQUIPMENT_SALE_PDI_LABELS.not_started}</option>
+                <option value="in_progress">{EQUIPMENT_SALE_PDI_LABELS.in_progress}</option>
+                <option value="ready">{EQUIPMENT_SALE_PDI_LABELS.ready}</option>
+              </select>
+            </FilterField>
+            <FilterField label="Статус техники">
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-filter-input">
+                <option value="all">Все статусы</option>
+                <option value="available">Свободен</option>
+                <option value="reserved">Бронь</option>
+                <option value="in_service">В сервисе</option>
+                <option value="inactive">Списан</option>
+              </select>
+            </FilterField>
           </div>
         </div>
-        <Select
-          value={pdiFilter}
-          onValueChange={setPdiFilter}
-          placeholder="Все PDI"
-          options={[
-            { value: 'all', label: 'Все PDI' },
-            { value: 'not_started', label: EQUIPMENT_SALE_PDI_LABELS.not_started },
-            { value: 'in_progress', label: EQUIPMENT_SALE_PDI_LABELS.in_progress },
-            { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
-          ]}
-          className="w-[200px]"
-        />
-        <Select
-          value={statusFilter}
-          onValueChange={setStatusFilter}
-          placeholder="Все статусы"
-          options={[
-            { value: 'all', label: 'Все статусы' },
-            { value: 'available', label: 'Свободен' },
-            { value: 'reserved', label: 'Бронь' },
-            { value: 'in_service', label: 'В сервисе' },
-            { value: 'inactive', label: 'Списан' },
-          ]}
-          className="w-[180px]"
-        />
-        <button
-          type="button"
-          onClick={() => setQuickFilter((current) => current === 'pdi_ready' ? 'all' : 'pdi_ready')}
-          className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            quickFilter === 'pdi_ready'
-              ? 'bg-green-600 text-white'
-              : 'border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-700'
-          }`}
-        >
-          PDI готово · {readyCount}
-        </button>
-        <button
-          type="button"
-          onClick={() => setQuickFilter((current) => current === 'pdi_in_progress' ? 'all' : 'pdi_in_progress')}
-          className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            quickFilter === 'pdi_in_progress'
-              ? 'bg-amber-500 text-white'
-              : 'border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-700'
-          }`}
-        >
-          PDI в работе · {inProgressCount}
-        </button>
-        <button
-          type="button"
-          onClick={() => setQuickFilter((current) => current === 'no_price' ? 'all' : 'no_price')}
-          className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            quickFilter === 'no_price'
-              ? 'bg-red-600 text-white'
-              : 'border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-700'
-          }`}
-        >
-          Без цены · {noPriceCount}
-        </button>
-        <button
-          type="button"
-          onClick={() => setQuickFilter((current) => current === 'available_only' ? 'all' : 'available_only')}
-          className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            quickFilter === 'available_only'
-              ? 'bg-blue-600 text-white'
-              : 'border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-700'
-          }`}
-        >
-          Только свободная · {availableCount}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setSearch('');
-            setPdiFilter('all');
-            setStatusFilter('all');
-            setQuickFilter('all');
-          }}
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-700"
-        >
-          Сбросить всё
-        </button>
-      </div>
+      </FilterDialog>
 
       <div className="space-y-3 sm:hidden">
         {filteredEquipment.length === 0 ? (

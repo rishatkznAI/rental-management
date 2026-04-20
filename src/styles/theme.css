@@ -192,8 +192,9 @@
 
 @layer components {
   .app-shell-title {
-    font-family: 'Syne', sans-serif;
+    font-family: 'Manrope', sans-serif;
     letter-spacing: -0.03em;
+    font-weight: 800;
   }
 
   .app-panel {
@@ -217,7 +218,7 @@
   }
 
   .equipment-detail-skin [data-slot="card-title"] {
-    font-family: 'Syne', sans-serif;
+    font-family: 'Manrope', sans-serif;
     font-weight: 800;
     letter-spacing: -0.03em;
   }
@@ -240,5 +241,29 @@
 
   .equipment-detail-skin [data-slot="tabs-trigger"]:hover {
     @apply text-foreground;
+  }
+
+  .app-filter-dialog [data-slot="dialog-content"] {
+    @apply rounded-2xl border border-border bg-card text-card-foreground shadow-[0_28px_80px_-48px_rgba(15,23,42,0.95)];
+  }
+
+  .app-filter-field {
+    @apply space-y-2;
+  }
+
+  .app-filter-label {
+    @apply text-sm font-medium text-foreground;
+  }
+
+  .app-filter-input {
+    @apply h-11 w-full rounded-xl border border-border bg-input-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50;
+  }
+
+  .app-filter-chip {
+    @apply rounded-xl border border-border bg-secondary/80 px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground;
+  }
+
+  .app-filter-chip[data-active="true"] {
+    @apply border-primary/30 bg-accent text-foreground;
   }
 }

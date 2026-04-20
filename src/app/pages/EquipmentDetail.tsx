@@ -206,11 +206,8 @@ function printHandoffAct(event: ShippingPhoto, equipment: Equipment) {
     </section>
   `).join('');
 
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=1100,height=900');
-  if (!popup) return;
-
   const title = `${event.type === 'shipping' ? 'Акт отгрузки' : 'Акт приёмки'} ${equipment.inventoryNumber}`;
-  popup.document.write(`
+  const html = `
     <!doctype html>
     <html lang="ru">
       <head>
@@ -225,10 +222,24 @@ function printHandoffAct(event: ShippingPhoto, equipment: Equipment) {
           th, td { border:1px solid #d1d5db; padding:8px; text-align:left; font-size:12px; }
           th { background:#f3f4f6; }
           .muted { color:#6b7280; font-size:12px; }
-          @media print { body { margin: 12mm; } button { display:none; } }
+          .actions { margin-bottom:16px; display:flex; gap:8px; }
+          .action-btn {
+            border:1px solid #d1d5db;
+            background:#ffffff;
+            color:#111827;
+            border-radius:8px;
+            padding:8px 12px;
+            font-size:12px;
+            cursor:pointer;
+          }
+          .action-btn:hover { background:#f9fafb; }
+          @media print { body { margin: 12mm; } .actions { display:none; } }
         </style>
       </head>
       <body>
+        <div class="actions">
+          <button class="action-btn" onclick="window.print()">Печать</button>
+        </div>
         <h1>${escapeHtml(title)}</h1>
         <p class="muted">Дата операции: ${escapeHtml(formatDate(event.date))} · Исполнитель: ${escapeHtml(event.uploadedBy)}</p>
         <div class="meta">
@@ -265,15 +276,26 @@ function printHandoffAct(event: ShippingPhoto, equipment: Equipment) {
             ${event.signatureDataUrl ? `<div style="margin-top:12px;"><img src="${event.signatureDataUrl}" style="max-width:240px;max-height:100px;object-fit:contain;border-bottom:1px solid #9ca3af;" /></div>` : '<div style="margin-top:12px;color:#6b7280;">Подпись не приложена</div>'}
           </div>
         </section>
-        <script>
-          window.onload = () => {
-            setTimeout(() => window.print(), 200);
-          };
-        </script>
       </body>
     </html>
-  `);
-  popup.document.close();
+  `;
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const popup = window.open(url, '_blank', 'width=1100,height=900');
+
+  if (!popup) {
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  const revokeUrl = () => {
+    URL.revokeObjectURL(url);
+  };
+
+  popup.addEventListener('load', () => {
+    setTimeout(revokeUrl, 1000);
+  }, { once: true });
 }
 
 export default function EquipmentDetail() {

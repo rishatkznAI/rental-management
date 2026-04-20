@@ -121,12 +121,12 @@ export default function BotDetail() {
           {bot.webhookConfigured ? <Badge variant="success">Webhook подключён</Badge> : <Badge variant="warning">Webhook не настроен</Badge>}
         </div>
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <h1 className="flex items-center gap-3 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">
-              <Bot className="h-7 w-7 text-[--color-primary]" />
+          <div className="min-w-0">
+            <h1 className="flex min-w-0 items-center gap-3 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">
+              <Bot className="h-7 w-7 shrink-0 text-[--color-primary]" />
               {bot.name}
             </h1>
-            <p className="mt-2 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{bot.description}</p>
+            <p className="mt-2 max-w-3xl break-words text-sm text-gray-500 dark:text-gray-400">{bot.description}</p>
           </div>
           <div className="w-full max-w-md">
             <div className="relative">
@@ -199,10 +199,10 @@ export default function BotDetail() {
                       <div key={entry.id} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                         <div className="flex flex-wrap items-center gap-2">
                           {getActivityTypeBadge(entry.eventType)}
-                          <span className="font-medium text-gray-900 dark:text-white">{entry.userName || 'Не авторизован'}</span>
+                          <span className="break-words font-medium text-gray-900 dark:text-white">{entry.userName || 'Не авторизован'}</span>
                         </div>
-                        <p className="mt-2 text-sm text-gray-800 dark:text-gray-200">{entry.action}</p>
-                        {entry.details && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{entry.details}</p>}
+                        <p className="mt-2 break-words text-sm text-gray-800 dark:text-gray-200">{entry.action}</p>
+                        {entry.details && <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{entry.details}</p>}
                         <div className="mt-3 grid gap-1 text-xs text-gray-500 dark:text-gray-400">
                           <p>Время: {formatDateTimeSafe(entry.createdAt)}</p>
                           <p>Роль: {entry.userRole || '—'}</p>
@@ -226,21 +226,21 @@ export default function BotDetail() {
                       <TableBody>
                         {filteredActivity.map((entry: BotActivityEntry) => (
                           <TableRow key={entry.id}>
-                            <TableCell className="text-sm">{formatDateTimeSafe(entry.createdAt)}</TableCell>
+                            <TableCell className="whitespace-nowrap text-sm">{formatDateTimeSafe(entry.createdAt)}</TableCell>
                             <TableCell>
-                              <div className="space-y-1">
-                                <div className="font-medium text-gray-900 dark:text-white">{entry.userName || 'Не авторизован'}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">{entry.userRole || entry.email || '—'}</div>
+                              <div className="min-w-0 space-y-1">
+                                <div className="break-words font-medium text-gray-900 dark:text-white">{entry.userName || 'Не авторизован'}</div>
+                                <div className="break-all text-xs text-gray-500 dark:text-gray-400">{entry.userRole || entry.email || '—'}</div>
                               </div>
                             </TableCell>
                             <TableCell>{getActivityTypeBadge(entry.eventType)}</TableCell>
                             <TableCell>
-                              <div className="space-y-1">
-                                <div className="text-sm text-gray-900 dark:text-white">{entry.action}</div>
-                                {entry.details && <div className="text-xs text-gray-500 dark:text-gray-400">{entry.details}</div>}
+                              <div className="min-w-0 space-y-1">
+                                <div className="break-words text-sm text-gray-900 dark:text-white">{entry.action}</div>
+                                {entry.details && <div className="break-words text-xs text-gray-500 dark:text-gray-400">{entry.details}</div>}
                               </div>
                             </TableCell>
-                            <TableCell className="text-sm">{entry.maxUserId ?? entry.phone ?? '—'}</TableCell>
+                            <TableCell className="break-all text-sm">{entry.maxUserId ?? entry.phone ?? '—'}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -269,9 +269,9 @@ export default function BotDetail() {
                     {filteredConnections.map((connection: BotConnection) => (
                       <div key={connection.id} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                         <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-semibold text-gray-900 dark:text-white">{connection.userName || 'Не авторизован'}</p>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">{connection.userRole || connection.email || '—'}</p>
+                          <div className="min-w-0">
+                            <p className="break-words font-semibold text-gray-900 dark:text-white">{connection.userName || 'Не авторизован'}</p>
+                            <p className="break-all text-sm text-gray-500 dark:text-gray-400">{connection.userRole || connection.email || '—'}</p>
                           </div>
                           {renderConnectionState(connection)}
                         </div>
@@ -302,17 +302,17 @@ export default function BotDetail() {
                         {filteredConnections.map((connection: BotConnection) => (
                           <TableRow key={connection.id}>
                             <TableCell>
-                              <div className="space-y-1">
-                                <div className="font-medium text-gray-900 dark:text-white">{connection.userName || 'Не авторизован'}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">{connection.email || connection.phone}</div>
+                              <div className="min-w-0 space-y-1">
+                                <div className="break-words font-medium text-gray-900 dark:text-white">{connection.userName || 'Не авторизован'}</div>
+                                <div className="break-all text-xs text-gray-500 dark:text-gray-400">{connection.email || connection.phone}</div>
                               </div>
                             </TableCell>
-                            <TableCell className="text-sm">{connection.userRole || '—'}</TableCell>
-                            <TableCell className="text-sm">{connection.maxUserId ?? connection.phone}</TableCell>
+                            <TableCell className="break-words text-sm">{connection.userRole || '—'}</TableCell>
+                            <TableCell className="break-all text-sm">{connection.maxUserId ?? connection.phone}</TableCell>
                             <TableCell>{renderConnectionState(connection)}</TableCell>
-                            <TableCell className="text-sm">{connection.activeRepairId || '—'}</TableCell>
-                            <TableCell className="text-sm">{formatDateTimeSafe(connection.connectedAt)}</TableCell>
-                            <TableCell className="text-sm">{formatDateTimeSafe(connection.lastSeenAt)}</TableCell>
+                            <TableCell className="break-all text-sm">{connection.activeRepairId || '—'}</TableCell>
+                            <TableCell className="whitespace-nowrap text-sm">{formatDateTimeSafe(connection.connectedAt)}</TableCell>
+                            <TableCell className="whitespace-nowrap text-sm">{formatDateTimeSafe(connection.lastSeenAt)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

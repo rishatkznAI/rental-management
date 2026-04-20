@@ -105,9 +105,9 @@ export default function Bots() {
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Бот</h1>
-          <p className="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
+          <p className="mt-1 max-w-3xl break-words text-sm text-gray-500 dark:text-gray-400">
             Контроль подключений сотрудников к рабочим ботам и быстрый обзор последних действий.
           </p>
         </div>
@@ -162,12 +162,12 @@ export default function Bots() {
               <Card key={bot.id}>
                 <CardHeader>
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
-                        <Bot className="h-5 w-5 text-[--color-primary]" />
+                    <div className="min-w-0">
+                      <CardTitle className="flex min-w-0 items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
+                        <Bot className="h-5 w-5 shrink-0 text-[--color-primary]" />
                         {bot.name}
                       </CardTitle>
-                      <CardDescription className="mt-1">{bot.description}</CardDescription>
+                      <CardDescription className="mt-1 break-words">{bot.description}</CardDescription>
                     </div>
                     {getBotStatusBadge(bot.status)}
                   </div>
@@ -224,12 +224,12 @@ export default function Bots() {
                   {filteredBots.map(bot => (
                     <TableRow key={bot.id}>
                       <TableCell>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-white">
-                            <Bot className="h-4 w-4 text-[--color-primary]" />
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex min-w-0 items-center gap-2 font-medium text-gray-900 dark:text-white">
+                            <Bot className="h-4 w-4 shrink-0 text-[--color-primary]" />
                             {bot.name}
                           </div>
-                          <p className="max-w-md text-xs text-gray-500 dark:text-gray-400">{bot.description}</p>
+                          <p className="max-w-md break-words text-xs text-gray-500 dark:text-gray-400">{bot.description}</p>
                         </div>
                       </TableCell>
                       <TableCell>{getBotStatusBadge(bot.status)}</TableCell>
@@ -237,11 +237,11 @@ export default function Bots() {
                         <div className="font-medium text-gray-900 dark:text-white">{bot.totalConnections}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">Активных сценариев: {bot.pendingConnections}</div>
                       </TableCell>
-                      <TableCell className="text-sm">{bot.activity24h}</TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">{bot.activity24h}</TableCell>
                       <TableCell>
                         {bot.webhookConfigured ? <Badge variant="success">Готов</Badge> : <Badge variant="warning">Нет</Badge>}
                       </TableCell>
-                      <TableCell className="text-sm">{formatDateTimeSafe(bot.lastActivityAt)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">{formatDateTimeSafe(bot.lastActivityAt)}</TableCell>
                       <TableCell>
                         <Button asChild variant="outline" size="sm">
                           <Link to={`/bots/${bot.id}`}>Открыть</Link>
@@ -270,9 +270,9 @@ export default function Bots() {
                     {previewConnections.map(({ bot, connection }) => (
                       <div key={connection.id} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                         <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-semibold text-gray-900 dark:text-white">{connection.userName || 'Не авторизован'}</p>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">{bot.name}</p>
+                          <div className="min-w-0">
+                            <p className="break-words font-semibold text-gray-900 dark:text-white">{connection.userName || 'Не авторизован'}</p>
+                            <p className="break-words text-sm text-gray-500 dark:text-gray-400">{bot.name}</p>
                           </div>
                           {connection.pendingActionLabel ? <Badge variant="warning">{connection.pendingActionLabel}</Badge> : <Badge>Без сценария</Badge>}
                         </div>
@@ -301,18 +301,18 @@ export default function Bots() {
                         {previewConnections.map(({ bot, connection }) => (
                           <TableRow key={connection.id}>
                             <TableCell>
-                              <div className="space-y-1">
-                                <div className="font-medium text-gray-900 dark:text-white">{connection.userName || 'Не авторизован'}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">{connection.email || connection.phone}</div>
+                              <div className="min-w-0 space-y-1">
+                                <div className="break-words font-medium text-gray-900 dark:text-white">{connection.userName || 'Не авторизован'}</div>
+                                <div className="break-all text-xs text-gray-500 dark:text-gray-400">{connection.email || connection.phone}</div>
                               </div>
                             </TableCell>
                             <TableCell className="text-sm">{bot.name}</TableCell>
-                            <TableCell className="text-sm">{connection.userRole || '—'}</TableCell>
-                            <TableCell className="text-sm">{connection.maxUserId ?? connection.phone}</TableCell>
+                            <TableCell className="break-words text-sm">{connection.userRole || '—'}</TableCell>
+                            <TableCell className="break-all text-sm">{connection.maxUserId ?? connection.phone}</TableCell>
                             <TableCell>
                               {connection.pendingActionLabel ? <Badge variant="warning">{connection.pendingActionLabel}</Badge> : <Badge>Без сценария</Badge>}
                             </TableCell>
-                            <TableCell className="text-sm">{formatDateTimeSafe(connection.lastSeenAt)}</TableCell>
+                            <TableCell className="whitespace-nowrap text-sm">{formatDateTimeSafe(connection.lastSeenAt)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -343,11 +343,11 @@ export default function Bots() {
                       <div key={event.id} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                         <div className="flex flex-wrap items-center gap-2">
                           {getActivityTypeBadge(event.eventType)}
-                          <span className="text-sm font-medium text-gray-900 dark:text-white">{event.userName || 'Не авторизован'}</span>
+                          <span className="break-words text-sm font-medium text-gray-900 dark:text-white">{event.userName || 'Не авторизован'}</span>
                           <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTimeSafe(event.createdAt)}</span>
                         </div>
-                        <p className="mt-2 text-sm text-gray-800 dark:text-gray-200">{event.action}</p>
-                        {event.details && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{event.details}</p>}
+                        <p className="mt-2 break-words text-sm text-gray-800 dark:text-gray-200">{event.action}</p>
+                        {event.details && <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{event.details}</p>}
                       </div>
                     ))
                   )}

@@ -331,6 +331,7 @@ export interface Document {
   amount?: number;
   status: DocumentStatus;
   rental?: string;
+  manager?: string;
 }
 
 export type PaymentStatus = 'pending' | 'paid' | 'overdue' | 'partial';
@@ -346,6 +347,72 @@ export interface Payment {
   paidDate?: string;
   status: PaymentStatus;
   comment?: string;
+}
+
+export interface ManagerBreakdownPayment {
+  id: string;
+  invoiceNumber: string;
+  amount: number;
+  paidAmount: number;
+  dueDate: string;
+  paidDate?: string;
+  status: PaymentStatus;
+  comment?: string;
+}
+
+export interface ManagerBreakdownRental {
+  rentalId: string;
+  client: string;
+  equipmentInv: string;
+  startDate: string;
+  endDate: string;
+  amount: number;
+  status: 'created' | 'active' | 'returned' | 'closed';
+}
+
+export interface ManagerBreakdownDebtRow {
+  rentalId: string;
+  client: string;
+  equipmentInv: string;
+  startDate: string;
+  endDate: string;
+  expectedPaymentDate?: string;
+  amount: number;
+  paidAmount: number;
+  outstanding: number;
+  paymentStatus: 'paid' | 'unpaid' | 'partial';
+  rentalStatus: 'created' | 'active' | 'returned' | 'closed';
+  overdueDays: number;
+  payments: ManagerBreakdownPayment[];
+}
+
+export interface ManagerBreakdownDocument {
+  id: string;
+  type: DocumentType;
+  number: string;
+  client: string;
+  date: string;
+  amount?: number;
+  status: DocumentStatus;
+  rental?: string;
+}
+
+export interface ManagerBreakdownResponse {
+  summary: {
+    name: string;
+    activeRentals: number;
+    monthRentals: number;
+    monthRevenue: number;
+    currentDebt: number;
+    overdueDebt: number;
+    returnsSoon: number;
+    unsignedDocs: number;
+  };
+  monthRevenueRentals: ManagerBreakdownRental[];
+  currentDebtRows: ManagerBreakdownDebtRow[];
+  overdueDebtRows: ManagerBreakdownDebtRow[];
+  returnsSoonRentals: ManagerBreakdownRental[];
+  unsignedDocuments: ManagerBreakdownDocument[];
 }
 
 // ── Боты ──────────────────────────────────────────────────────────────────────

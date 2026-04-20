@@ -47,6 +47,7 @@ const {
   validateRentalPayload,
 } = require('./lib/rental-validation');
 const {
+  getRentalDebtOverdueDays,
   buildRentalDebtRows,
   buildClientReceivables,
   buildClientFinancialSnapshots,
@@ -547,6 +548,7 @@ apiRouter.use(registerRentalRoutes({
 registerFinanceRoutes(apiRouter, {
   requireAuth,
   readData,
+  getRentalDebtOverdueDays,
   buildRentalDebtRows,
   buildClientReceivables,
   buildClientFinancialSnapshots,

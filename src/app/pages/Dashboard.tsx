@@ -3,6 +3,13 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '../components/ui/sheet';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -24,6 +31,7 @@ import { useEquipmentList } from '../hooks/useEquipment';
 import { useRentalsList, useGanttData } from '../hooks/useRentals';
 import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
+import { financeService } from '../services/finance.service';
 import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useClientsList } from '../hooks/useClients';
@@ -37,7 +45,16 @@ import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { appendRentalHistory, buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
-import type { Equipment, Rental, ServiceTicket, Client, Payment, Document, EquipmentStatus } from '../types';
+import type {
+  Equipment,
+  Rental,
+  ServiceTicket,
+  Client,
+  Payment,
+  Document,
+  EquipmentStatus,
+  ManagerBreakdownResponse,
+} from '../types';
 import type { GanttRentalData } from '../mock-data';
 import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 
@@ -151,6 +168,7 @@ export default function Dashboard() {
   const [showOfficeUpdModal, setShowOfficeUpdModal] = useState(false);
   const [officeUpdUpdatingId, setOfficeUpdUpdatingId] = useState<string | null>(null);
   const [officeUpdManagerFilter, setOfficeUpdManagerFilter] = useState('');
+  const [managerBreakdownName, setManagerBreakdownName] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const dashboardCardClass = 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/60';
   const dashboardCardHeaderClass = 'space-y-2 px-5 pt-5 pb-3';
@@ -242,6 +260,17 @@ export default function Dashboard() {
     (row.expectedPaymentDate && row.expectedPaymentDate < todayKey) || row.endDate < todayKey,
   );
   const totalDebt = rentalDebtRows.reduce((sum, row) => sum + row.outstanding, 0);
+  const {
+    data: managerBreakdown,
+    isLoading: managerBreakdownLoading,
+    isFetching: managerBreakdownFetching,
+    error: managerBreakdownError,
+  } = useQuery<ManagerBreakdownResponse>({
+    queryKey: ['finance', 'manager-breakdown', managerBreakdownName, todayKey],
+    queryFn: () => financeService.getManagerBreakdown(managerBreakdownName || '', todayKey),
+    enabled: !!managerBreakdownName,
+    staleTime: 1000 * 60,
+  });
 
   // Month debt: overdue rental debt this month
   const monthOverduePayments = overduePayments.filter(row => {
@@ -1370,6 +1399,15 @@ export default function Dashboard() {
                           <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                             {formatCurrency(row.monthRevenue)}
                           </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="mt-3"
+                            onClick={() => setManagerBreakdownName(row.name)}
+                          >
+                            Расшифровка
+                          </Button>
                         </div>
                       </div>
                       <div className="mt-3 grid gap-2 sm:grid-cols-4">
@@ -2192,6 +2230,264 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <Sheet open={!!managerBreakdownName} onOpenChange={(open) => !open && setManagerBreakdownName(null)}>
+        <SheetContent side="right" className="w-full overflow-y-auto border-gray-200 bg-white sm:max-w-2xl dark:border-gray-700 dark:bg-gray-950">
+          <SheetHeader className="border-b border-gray-200 pb-4 dark:border-gray-700">
+            <SheetTitle className="flex items-center gap-2 text-left">
+              <User className="h-5 w-5 text-[--color-primary]" />
+              Расшифровка карточки менеджера
+            </SheetTitle>
+            <SheetDescription className="text-left">
+              {managerBreakdownName
+                ? `Показываем, из каких аренд, платежей и документов сложились показатели менеджера ${managerBreakdownName}.`
+                : 'Выберите менеджера на дашборде.'}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="space-y-4 p-4">
+            {managerBreakdownLoading ? (
+              <div className="flex items-center gap-2 rounded-xl border border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Загружаем расшифровку...
+              </div>
+            ) : managerBreakdownError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                Не удалось загрузить расшифровку. Попробуй обновить страницу или открыть карточку ещё раз.
+              </div>
+            ) : managerBreakdown ? (
+              <>
+                <div className="grid gap-2 sm:grid-cols-4">
+                  <div className="rounded-xl bg-gray-50 px-3 py-3 dark:bg-gray-800/80">
+                    <p className="text-[11px] uppercase tracking-wide text-gray-400">Выручка месяца</p>
+                    <p className="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(managerBreakdown.summary.monthRevenue)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-gray-50 px-3 py-3 dark:bg-gray-800/80">
+                    <p className="text-[11px] uppercase tracking-wide text-gray-400">Долг</p>
+                    <p className="mt-1 text-sm font-semibold text-orange-600 dark:text-orange-400">
+                      {formatCurrency(managerBreakdown.summary.currentDebt)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-gray-50 px-3 py-3 dark:bg-gray-800/80">
+                    <p className="text-[11px] uppercase tracking-wide text-gray-400">Просрочка</p>
+                    <p className="mt-1 text-sm font-semibold text-red-600 dark:text-red-400">
+                      {formatCurrency(managerBreakdown.summary.overdueDebt)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-gray-50 px-3 py-3 dark:bg-gray-800/80">
+                    <p className="text-[11px] uppercase tracking-wide text-gray-400">Возвраты / документы</p>
+                    <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                      {managerBreakdown.summary.returnsSoon} / {managerBreakdown.summary.unsignedDocs}
+                    </p>
+                  </div>
+                </div>
+
+                <section className="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-medium text-gray-900 dark:text-white">Выручка месяца</h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {managerBreakdown.summary.monthRentals} аренд вошло в расчёт.
+                      </p>
+                    </div>
+                    <Badge>{formatCurrency(managerBreakdown.summary.monthRevenue)}</Badge>
+                  </div>
+                  {managerBreakdown.monthRevenueRentals.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Нет аренд за текущий месяц.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {managerBreakdown.monthRevenueRentals.map(item => (
+                        <div key={item.rentalId} className="rounded-lg bg-gray-50 px-3 py-3 dark:bg-gray-800/80">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-medium text-gray-900 dark:text-white">{item.client}</p>
+                              <p className="text-sm text-gray-500 dark:text-gray-400">
+                                {item.equipmentInv} · {formatDate(item.startDate)} - {formatDate(item.endDate)}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(item.amount)}</p>
+                              <p className="text-xs text-gray-400">{item.rentalId}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-medium text-gray-900 dark:text-white">Долг и платежи</h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        По каждой аренде видно остаток и связанные платежи.
+                      </p>
+                    </div>
+                    <Badge>{managerBreakdown.currentDebtRows.length}</Badge>
+                  </div>
+                  {managerBreakdown.currentDebtRows.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Открытого долга по арендам нет.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {managerBreakdown.currentDebtRows.map(row => (
+                        <div key={row.rentalId} className="rounded-lg bg-gray-50 px-3 py-3 dark:bg-gray-800/80">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
+                              <p className="text-sm text-gray-500 dark:text-gray-400">
+                                {row.equipmentInv} · {formatDate(row.startDate)} - {formatDate(row.endDate)}
+                              </p>
+                              <p className="mt-1 text-xs text-gray-400">
+                                К оплате {formatCurrency(row.amount)} · оплачено {formatCurrency(row.paidAmount)} · статус {row.paymentStatus}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold text-orange-600 dark:text-orange-400">{formatCurrency(row.outstanding)}</p>
+                              <p className="text-xs text-gray-400">
+                                {row.overdueDays > 0 ? `Просрочка ${row.overdueDays} дн.` : 'Не просрочено'}
+                              </p>
+                            </div>
+                          </div>
+                          {row.payments.length > 0 ? (
+                            <div className="mt-3 space-y-2 border-t border-gray-200 pt-3 dark:border-gray-700">
+                              {row.payments.map(payment => (
+                                <div key={payment.id} className="flex items-start justify-between gap-3 text-sm">
+                                  <div className="min-w-0">
+                                    <p className="font-medium text-gray-700 dark:text-gray-200">{payment.invoiceNumber}</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      Срок {formatDate(payment.dueDate)}{payment.paidDate ? ` · оплачено ${formatDate(payment.paidDate)}` : ''}
+                                    </p>
+                                    {payment.comment ? (
+                                      <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{payment.comment}</p>
+                                    ) : null}
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="font-medium text-gray-900 dark:text-white">{formatCurrency(payment.amount)}</p>
+                                    <p className="text-xs text-gray-400">
+                                      {payment.paidAmount > 0 ? `Оплачено ${formatCurrency(payment.paidAmount)}` : payment.status}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-3 text-xs text-gray-400">Платежей по этой аренде пока не создано.</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-medium text-gray-900 dark:text-white">Просрочка</h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Только те аренды, где срок оплаты уже прошёл.
+                      </p>
+                    </div>
+                    <Badge variant="danger">{managerBreakdown.overdueDebtRows.length}</Badge>
+                  </div>
+                  {managerBreakdown.overdueDebtRows.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Просроченных аренд нет.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {managerBreakdown.overdueDebtRows.map(row => (
+                        <div key={row.rentalId} className="flex items-start justify-between gap-3 rounded-lg bg-red-50 px-3 py-3 dark:bg-red-950/30">
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              {row.equipmentInv} · срок {formatDate(row.expectedPaymentDate || row.endDate)}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold text-red-600 dark:text-red-400">{formatCurrency(row.outstanding)}</p>
+                            <p className="text-xs text-red-500 dark:text-red-300">{row.overdueDays} дн.</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-medium text-gray-900 dark:text-white">Возвраты в ближайшие 2 дня</h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Активные аренды, которые скоро вернутся.
+                      </p>
+                    </div>
+                    <Badge>{managerBreakdown.returnsSoonRentals.length}</Badge>
+                  </div>
+                  {managerBreakdown.returnsSoonRentals.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Ближайших возвратов нет.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {managerBreakdown.returnsSoonRentals.map(item => (
+                        <div key={item.rentalId} className="flex items-start justify-between gap-3 rounded-lg bg-amber-50 px-3 py-3 dark:bg-amber-950/30">
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 dark:text-white">{item.client}</p>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">{item.equipmentInv}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-medium text-amber-700 dark:text-amber-300">{formatDate(item.endDate)}</p>
+                            <p className="text-xs text-gray-400">{item.rentalId}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-medium text-gray-900 dark:text-white">Документы без подписи</h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Договоры и акты, которые ещё не подписаны.
+                      </p>
+                    </div>
+                    <Badge>{managerBreakdown.unsignedDocuments.length}</Badge>
+                  </div>
+                  {managerBreakdown.unsignedDocuments.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Неподписанных документов нет.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {managerBreakdown.unsignedDocuments.map(item => (
+                        <div key={item.id} className="flex items-start justify-between gap-3 rounded-lg bg-gray-50 px-3 py-3 dark:bg-gray-800/80">
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 dark:text-white">{item.number}</p>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              {item.client} · {item.type === 'contract' ? 'Договор' : 'Акт'}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">{formatDate(item.date)}</p>
+                            <p className="text-xs text-gray-400">
+                              {item.amount ? formatCurrency(item.amount) : item.status}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {managerBreakdownFetching ? (
+                  <p className="text-xs text-gray-400">Обновляем данные...</p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Нет данных для расшифровки.</p>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* ── Modals ───────────────────────────────────────────────────────────── */}
       <KPIDetailModal

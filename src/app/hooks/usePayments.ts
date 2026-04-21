@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsService } from '../services/payments.service';
+import { RENTAL_KEYS } from './useRentals';
 import type { Payment } from '../types';
 
 export const PAYMENT_KEYS = {
@@ -27,7 +28,10 @@ export function useCreatePayment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<Payment, 'id'>) => paymentsService.create(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
+      qc.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+    },
   });
 }
 
@@ -39,6 +43,7 @@ export function useUpdatePayment() {
     onSuccess: (_res, { id }) => {
       qc.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
       qc.invalidateQueries({ queryKey: PAYMENT_KEYS.detail(id) });
+      qc.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
     },
   });
 }
@@ -47,6 +52,9 @@ export function useDeletePayment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => paymentsService.delete(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
+      qc.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+    },
   });
 }

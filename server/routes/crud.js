@@ -1,4 +1,5 @@
 const express = require('express');
+const { syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
 
 function registerCrudRoutes(deps) {
   const {
@@ -18,9 +19,16 @@ function registerCrudRoutes(deps) {
     requireNonEmptyString,
     generateId,
     nowIso,
+    applyServiceTicketCreationEffects,
   } = deps;
 
   const router = express.Router();
+
+  function syncPaymentStatusesAfterPaymentWrite(payments) {
+    const currentGanttRentals = readData('gantt_rentals') || [];
+    const nextGanttRentals = syncGanttRentalPaymentStatuses(currentGanttRentals, payments);
+    writeData('gantt_rentals', nextGanttRentals);
+  }
 
   function officeManagerCanOnlyCreateRental(req, collection, method) {
     const isRentalCollection = collection === 'rentals' || collection === 'gantt_rentals';
@@ -145,6 +153,12 @@ function registerCrudRoutes(deps) {
         }
         data.push(newItem);
         writeData(collection, data);
+        if (collection === 'payments') {
+          syncPaymentStatusesAfterPaymentWrite(data);
+        }
+        if (collection === 'service') {
+          applyServiceTicketCreationEffects?.(newItem, req.user.userName);
+        }
         if (collection === 'users') {
           return res.status(201).json(sanitizeUser(newItem));
         }
@@ -209,6 +223,9 @@ function registerCrudRoutes(deps) {
             : nextItem;
         }
         writeData(collection, data);
+        if (collection === 'payments') {
+          syncPaymentStatusesAfterPaymentWrite(data);
+        }
         if (collection === 'users') {
           return res.json(sanitizeUser(data[idx]));
         }
@@ -240,6 +257,9 @@ function registerCrudRoutes(deps) {
       }
       data.splice(idx, 1);
       writeData(collection, data);
+      if (collection === 'payments') {
+        syncPaymentStatusesAfterPaymentWrite(data);
+      }
       return res.json({ ok: true });
     });
 
@@ -295,6 +315,9 @@ function registerCrudRoutes(deps) {
       }
 
       writeData(collection, list);
+      if (collection === 'payments') {
+        syncPaymentStatusesAfterPaymentWrite(list);
+      }
       return res.json({ ok: true, count: list.length });
     });
   }

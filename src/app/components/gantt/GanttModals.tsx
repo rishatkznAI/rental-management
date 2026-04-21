@@ -112,6 +112,7 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
   const [returnDate, setReturnDate] = useState(new Date().toISOString().split('T')[0]);
   const [result, setResult] = useState<'available' | 'service' | 'downtime'>('available');
   const [selectedRentalId, setSelectedRentalId] = useState('');
+  const showPicker = !rentalProp;
 
   // Сброс при открытии модалки
   React.useEffect(() => {
@@ -125,20 +126,24 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
   const { data: fetchedGanttRentals = [] } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
-    enabled: !ganttRentalsProp,
+    enabled: open && showPicker,
   });
 
-  // Список аренд для выбора: только активные и созданные (не возвращённые/закрытые)
+  // Список аренд для выбора: объединяем локальный state и свежий query,
+  // чтобы только что созданные записи не пропадали из модалки из-за stale-снимка.
   const activeRentals = useMemo(() => {
-    const all = ganttRentalsProp ?? fetchedGanttRentals;
-    return all.filter(r => r.status === 'active' || r.status === 'created');
+    const merged = new Map<string, GanttRentalData>();
+    fetchedGanttRentals.forEach(rental => {
+      merged.set(rental.id, rental);
+    });
+    (ganttRentalsProp ?? []).forEach(rental => {
+      merged.set(rental.id, rental);
+    });
+    return Array.from(merged.values()).filter(r => r.status === 'active' || r.status === 'created');
   }, [fetchedGanttRentals, ganttRentalsProp]);
 
   // Определяем рабочую аренду: переданная через props ИЛИ выбранная в дропдауне
   const rental = rentalProp ?? activeRentals.find(r => r.id === selectedRentalId) ?? null;
-
-  // Показываем дропдаун выбора только если аренда не передана через props
-  const showPicker = !rentalProp;
 
   if (!open) return null;
 

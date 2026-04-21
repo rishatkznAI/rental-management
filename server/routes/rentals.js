@@ -7,6 +7,8 @@ function registerRentalRoutes(deps) {
     requireAuth,
     validateRentalPayload,
     mergeRentalHistory,
+    normalizeGanttRentalList,
+    normalizeGanttRentalStatus,
     generateId,
     idPrefixes,
   } = deps;
@@ -58,6 +60,7 @@ function registerRentalRoutes(deps) {
 
       let newItem = { ...req.body, id: req.body.id || generateId(prefix) };
       if (collection === 'gantt_rentals') {
+        newItem = normalizeGanttRentalStatus(newItem);
         newItem = mergeRentalHistory(null, newItem, req.user.userName);
       }
       data.push(newItem);
@@ -76,6 +79,9 @@ function registerRentalRoutes(deps) {
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
 
       let nextItem = { ...data[idx], ...req.body, id: data[idx].id };
+      if (collection === 'gantt_rentals') {
+        nextItem = normalizeGanttRentalStatus(nextItem);
+      }
       const validation = validateRentalPayload(collection, nextItem, data, readData('equipment') || [], data[idx].id);
       if (!validation.ok) {
         return res.status(validation.status).json({ ok: false, error: validation.error });
@@ -124,8 +130,12 @@ function registerRentalRoutes(deps) {
         }
       }
 
-      writeData(collection, list);
-      return res.json({ ok: true, count: list.length });
+      const nextList = collection === 'gantt_rentals'
+        ? normalizeGanttRentalList(list)
+        : list;
+
+      writeData(collection, nextList);
+      return res.json({ ok: true, count: nextList.length });
     });
   }
 

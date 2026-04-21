@@ -47,6 +47,10 @@ const {
   validateRentalPayload,
 } = require('./lib/rental-validation');
 const {
+  normalizeGanttRentalList,
+  normalizeGanttRentalStatus,
+} = require('./lib/gantt-rental-status');
+const {
   getRentalDebtOverdueDays,
   buildRentalDebtRows,
   buildClientReceivables,
@@ -541,6 +545,8 @@ apiRouter.use(registerRentalRoutes({
   requireAuth,
   validateRentalPayload,
   mergeRentalHistory,
+  normalizeGanttRentalList,
+  normalizeGanttRentalStatus,
   generateId,
   idPrefixes: ID_PREFIXES,
 }));

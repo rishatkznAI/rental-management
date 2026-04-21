@@ -38,23 +38,36 @@ function createBotUi() {
   function mechanicKeyboard() {
     return keyboard([
       [button('Мои заявки', 'menu:myrepairs'), button('Новая заявка', 'menu:new_ticket')],
-      [button('Найти технику', 'menu:find_equipment'), button('Черновик', 'menu:draft')],
-      [button('Отгрузка', 'menu:shipout'), button('Приёмка', 'menu:receivein')],
-      [button('Итог', 'menu:summary'), button('Готово', 'menu:ready')],
-      [button('Закрыть', 'menu:close'), button('Отчёт за день', 'menu:day_report')],
+      [button('Операции', 'menu:operations'), button('Работа по заявке', 'menu:repair_actions')],
+      [button('Найти технику', 'menu:find_equipment'), button('Отчёт за день', 'menu:day_report')],
       [button('Помощь', 'menu:help')],
     ]);
   }
 
   function currentRepairKeyboard(ticketId = '') {
     return keyboard([
-      [button('Черновик', 'menu:draft'), button('Итог', 'menu:summary')],
-      [button('Работы', 'menu:works'), button('Запчасти', 'menu:parts')],
-      [button('Фото ДО', 'menu:repair_before'), button('Фото ПОСЛЕ', 'menu:repair_after')],
-      [button('Готово', 'menu:ready'), button('Ожидание', 'menu:waiting')],
-      [button('Закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close'), button('Назад', 'menu:myrepairs')],
+      [button('Текущий отчёт', 'menu:draft'), button('Работа по заявке', 'menu:repair_actions')],
+      [button('К закрытию', 'menu:ready'), button('Закрыть заявку', ticketId ? `ticket:close:${ticketId}` : 'menu:close')],
       [button('Главное меню', 'menu:main')],
       [button('Мои заявки', 'menu:myrepairs'), button('Отчёт за день', 'menu:day_report')],
+    ]);
+  }
+
+  function operationsKeyboard() {
+    return keyboard([
+      [button('Отгрузка', 'menu:shipout'), button('Приёмка', 'menu:receivein')],
+      [button('Назад', 'menu:main')],
+    ]);
+  }
+
+  function repairActionsKeyboard(ticketId = '') {
+    return keyboard([
+      [button('Заполнить итог', 'menu:summary'), button('Текущий отчёт', 'menu:draft')],
+      [button('Добавить работы', 'menu:works'), button('Добавить запчасти', 'menu:parts')],
+      [button('Фото до ремонта', 'menu:repair_before'), button('Фото после ремонта', 'menu:repair_after')],
+      [button('Ожидание запчастей', 'menu:waiting'), button('К закрытию', 'menu:ready')],
+      [button('Закрыть заявку', ticketId ? `ticket:close:${ticketId}` : 'menu:close'), button('К заявкам', 'menu:myrepairs')],
+      [button('Главное меню', 'menu:main')],
     ]);
   }
 
@@ -222,6 +235,8 @@ function createBotUi() {
     authKeyboard,
     mechanicKeyboard,
     currentRepairKeyboard,
+    operationsKeyboard,
+    repairActionsKeyboard,
     repairReasonKeyboard,
     quantityKeyboard,
     operationKeyboard,

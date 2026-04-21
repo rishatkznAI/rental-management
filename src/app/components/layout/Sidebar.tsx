@@ -29,7 +29,7 @@ import { NotificationCenter } from './NotificationCenter';
 import { Input } from '../ui/input';
 import { useEquipmentList } from '../../hooks/useEquipment';
 import { useClientsList } from '../../hooks/useClients';
-import { useRentalsList } from '../../hooks/useRentals';
+import { useGanttData, useRentalsList } from '../../hooks/useRentals';
 import { useServiceTicketsList } from '../../hooks/useServiceTickets';
 import type { Client, Equipment, Rental, ServiceTicket } from '../../types';
 
@@ -135,6 +135,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { data: equipment = [] } = useEquipmentList();
   const { data: clients = [] } = useClientsList();
   const { data: rentals = [] } = useRentalsList();
+  const { data: ganttRentals = [] } = useGanttData();
   const { data: serviceTickets = [] } = useServiceTicketsList();
   const [search, setSearch] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -142,13 +143,20 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const deferredSearch = useDeferredValue(search);
   const normalizedSearch = normalizeSearch(deferredSearch);
 
-  const navBadges = useMemo(() => ({
-    equipment: equipment.length,
-    rentals: rentals.length,
-    service: serviceTickets.filter(item => item.status !== 'closed').length,
-    documents: 0,
-    payments: 0,
-  }), [equipment.length, rentals.length, serviceTickets]);
+  const navBadges = useMemo(() => {
+    const todayKey = new Date().toISOString().slice(0, 10);
+
+    return {
+      equipment: equipment.filter(item => item.status === 'in_service' || item.status === 'inactive').length,
+      rentals: ganttRentals.filter(item =>
+        (item.status === 'active' || item.status === 'created')
+        && item.endDate <= todayKey,
+      ).length,
+      service: serviceTickets.filter(item => item.status !== 'closed').length,
+      documents: 0,
+      payments: 0,
+    };
+  }, [equipment, ganttRentals, serviceTickets]);
 
   const handleLogout = () => {
     logout();

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { formatDate } from '../lib/utils';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
+import { DOCUMENT_KEYS, useDocumentsList } from '../hooks/useDocuments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS, useServiceTicketById, useUpdateServiceTicket } from '../hooks/useServiceTickets';
 import type {
@@ -32,6 +33,7 @@ import type {
   ServiceWorkPerformed,
   SparePart,
 } from '../types';
+import { documentsService } from '../services/documents.service';
 import { equipmentService } from '../services/equipment.service';
 import { mechanicsService } from '../services/mechanics.service';
 import { repairPartItemsService } from '../services/repair-part-items.service';
@@ -43,6 +45,11 @@ import { sparePartsService } from '../services/spare-parts.service';
 import { serviceVehiclesService } from '../services/service-vehicles.service';
 import { getEquipmentTypeLabel } from '../lib/equipmentClassification';
 import { getServiceScenarioLabel, inferServiceKind, isRepairScenario } from '../lib/serviceScenarios';
+import {
+  buildServiceWorkOrderDocumentData,
+  buildServiceWorkOrderHtml,
+  openPrintableHtml,
+} from '../lib/serviceWorkOrder';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -309,8 +316,10 @@ export default function ServiceDetail() {
   const queryClient = useQueryClient();
   const canEdit = can('edit', 'service');
   const canDeleteService = user?.role === 'Администратор' && can('delete', 'service');
+  const canCreateDocuments = can('create', 'documents');
 
   const { data: fetchedTicket } = useServiceTicketById(id ?? '');
+  const { data: documents = [] } = useDocumentsList();
   const { data: equipmentList = [] } = useQuery<Equipment[]>({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
@@ -361,6 +370,8 @@ export default function ServiceDetail() {
   const [repairFormError, setRepairFormError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [workOrderError, setWorkOrderError] = useState<string | null>(null);
+  const [workOrderBusy, setWorkOrderBusy] = useState(false);
 
   // ── Photo upload state ──
   const [photoPending, setPhotoPending] = useState<string[]>([]);
@@ -449,6 +460,10 @@ export default function ServiceDetail() {
   const closeChecklistEntries = ticket ? repairCloseChecklistEntries(ticket, repairWorkItems, repairPartItems) : [];
   const scenarioIsRepair = ticket ? isRepairScenario(ticket) : true;
   const serviceScenarioLabel = ticket ? getServiceScenarioLabel(ticket) : '';
+  const relatedWorkOrder = React.useMemo(() => {
+    if (!ticket) return null;
+    return documents.find((doc) => doc.type === 'work_order' && doc.serviceTicket === ticket.id) ?? null;
+  }, [documents, ticket]);
 
   // ── actions ────────────────────────────────────────────────────────────────
 
@@ -756,6 +771,69 @@ export default function ServiceDetail() {
     await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
   };
 
+  const handleGenerateWorkOrder = useCallback(async () => {
+    if (!ticket || !canCreateDocuments) return;
+
+    setWorkOrderBusy(true);
+    setWorkOrderError(null);
+
+    try {
+      const existingOrdersCount = documents.filter(
+        (doc) => doc.type === 'work_order' && doc.serviceTicket === ticket.id,
+      ).length;
+      const generatedDocument = buildServiceWorkOrderDocumentData(
+        ticket,
+        currentEquipment,
+        repairWorkItems,
+        repairPartItems,
+        existingOrdersCount,
+      );
+      const nextDocument = relatedWorkOrder
+        ? {
+            ...generatedDocument,
+            number: relatedWorkOrder.number,
+            date: relatedWorkOrder.date,
+            status: relatedWorkOrder.status,
+          }
+        : generatedDocument;
+      const contentHtml = buildServiceWorkOrderHtml({
+        document: nextDocument,
+        ticket,
+        equipment: currentEquipment,
+        workItems: repairWorkItems,
+        partItems: repairPartItems,
+      });
+
+      if (relatedWorkOrder) {
+        await documentsService.update(relatedWorkOrder.id, {
+          ...nextDocument,
+          contentHtml,
+        });
+      } else {
+        await documentsService.create({
+          ...nextDocument,
+          contentHtml,
+        });
+      }
+
+      await queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      openPrintableHtml(contentHtml);
+    } catch {
+      setWorkOrderError('Не удалось сформировать заказ-наряд. Попробуйте ещё раз.');
+    } finally {
+      setWorkOrderBusy(false);
+    }
+  }, [
+    canCreateDocuments,
+    currentEquipment,
+    documents,
+    queryClient,
+    relatedWorkOrder,
+    repairPartItems,
+    repairWorkItems,
+    ticket,
+  ]);
+
   // ── "not found" screen ─────────────────────────────────────────────────────
 
   if (!ticket) {
@@ -860,6 +938,24 @@ export default function ServiceDetail() {
       );
     }
   }
+  if (canCreateDocuments) {
+    actions.unshift(
+      <Button
+        key="work-order"
+        variant="secondary"
+        className="w-full sm:w-auto"
+        onClick={() => { void handleGenerateWorkOrder(); }}
+        disabled={workOrderBusy}
+      >
+        <FileText className="h-4 w-4" />
+        {workOrderBusy
+          ? 'Формирование...'
+          : relatedWorkOrder
+            ? `Заказ-наряд ${relatedWorkOrder.number}`
+            : 'Сформировать заказ-наряд'}
+      </Button>,
+    );
+  }
 
   // ── log icon ──────────────────────────────────────────────────────────────
 
@@ -900,6 +996,11 @@ export default function ServiceDetail() {
           {deleteError}
         </div>
       )}
+      {workOrderError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+          {workOrderError}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ── Left column (2/3) ───────────────────────────────────────────── */}
@@ -926,6 +1027,7 @@ export default function ServiceDetail() {
                 <Field label="Источник" value={ticket.source ? SOURCE_LABELS[ticket.source] : undefined} />
                 <Field label="Кто создал" value={ticket.createdByUserName ?? ticket.createdBy} />
                 <Field label="Контактное лицо" value={ticket.reporterContact} />
+                <Field label="Заказ-наряд" value={relatedWorkOrder?.number} />
               </div>
             </CardContent>
           </Card>

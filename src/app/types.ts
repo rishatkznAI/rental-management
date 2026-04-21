@@ -319,7 +319,7 @@ export interface Client {
   history?: AuditEntry[];
 }
 
-export type DocumentType = 'contract' | 'act' | 'invoice';
+export type DocumentType = 'contract' | 'act' | 'invoice' | 'work_order';
 export type DocumentStatus = 'draft' | 'signed' | 'sent';
 
 export interface Document {
@@ -331,7 +331,9 @@ export interface Document {
   amount?: number;
   status: DocumentStatus;
   rental?: string;
+  serviceTicket?: string;
   manager?: string;
+  contentHtml?: string;
 }
 
 export type PaymentStatus = 'pending' | 'paid' | 'overdue' | 'partial';

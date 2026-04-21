@@ -13,6 +13,7 @@ import { getDocumentStatusBadge } from '../components/ui/badge';
 import { Search, Download, Eye } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { useDocumentsList } from '../hooks/useDocuments';
+import { downloadPrintableHtml, openPrintableHtml } from '../lib/serviceWorkOrder';
 import { formatDate, formatCurrency } from '../lib/utils';
 import type { DocumentType, Document as Doc } from '../types';
 
@@ -39,8 +40,19 @@ export default function Documents() {
       contract: 'Договор',
       act: 'Акт',
       invoice: 'Счёт',
+      work_order: 'Заказ-наряд',
     };
     return labels[type];
+  };
+
+  const openDocument = (doc: Doc) => {
+    if (!doc.contentHtml) return;
+    openPrintableHtml(doc.contentHtml);
+  };
+
+  const downloadDocument = (doc: Doc) => {
+    if (!doc.contentHtml) return;
+    downloadPrintableHtml(doc.contentHtml, `${doc.number}.html`);
   };
 
   const activeFilterCount = [
@@ -55,7 +67,7 @@ export default function Documents() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">Документы</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Договоры, акты и счета</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Договоры, акты, счета и заказ-наряды</p>
         </div>
         <Button>
           <Download className="h-4 w-4" />
@@ -100,6 +112,7 @@ export default function Documents() {
                 <SelectItem value="contract">Договоры</SelectItem>
                 <SelectItem value="act">Акты</SelectItem>
                 <SelectItem value="invoice">Счета</SelectItem>
+                <SelectItem value="work_order">Заказ-наряды</SelectItem>
               </SelectContent>
             </Select>
           </FilterField>
@@ -161,16 +174,20 @@ export default function Documents() {
                 <TableCell>
                   <div className="flex gap-2">
                     <button
+                      onClick={() => openDocument(doc)}
+                      disabled={!doc.contentHtml}
                       className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      title="Просмотр"
+                      title={doc.contentHtml ? 'Просмотр' : 'Просмотр недоступен'}
                     >
-                      <Eye className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                      <Eye className={`h-4 w-4 ${doc.contentHtml ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
                     </button>
                     <button
+                      onClick={() => downloadDocument(doc)}
+                      disabled={!doc.contentHtml}
                       className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      title="Скачать"
+                      title={doc.contentHtml ? 'Скачать' : 'Скачать недоступно'}
                     >
-                      <Download className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                      <Download className={`h-4 w-4 ${doc.contentHtml ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
                     </button>
                   </div>
                 </TableCell>

@@ -36,6 +36,8 @@ function createBotHandlers(deps) {
     authKeyboard,
     mechanicKeyboard,
     currentRepairKeyboard,
+    operationsKeyboard,
+    repairActionsKeyboard,
     repairReasonKeyboard,
     quantityKeyboard,
     operationKeyboard,
@@ -972,6 +974,36 @@ function createBotHandlers(deps) {
         '🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.',
         {
           attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        },
+      );
+    }
+
+    if (normalized === 'menu:operations') {
+      resetBotFlow(phone);
+      return reply(
+        senderId,
+        'Выберите сценарий работы с техникой.',
+        {
+          attachments: operationsKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        },
+      );
+    }
+
+    if (normalized === 'menu:repair_actions') {
+      const currentTicket = getCurrentRepair(phone);
+      return reply(
+        senderId,
+        currentTicket
+          ? `Выберите действие по заявке ${currentTicket.id}.`
+          : 'Сначала откройте заявку, либо выберите действие заранее.',
+        {
+          attachments: repairActionsKeyboard(currentTicket?.id || ''),
           phone,
           callbackContext,
           replaceMessage: true,

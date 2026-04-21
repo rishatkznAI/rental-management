@@ -48,6 +48,17 @@ function registerCrudRoutes(deps) {
     return null;
   }
 
+  function serviceWriteForbiddenReason(req, collection, method) {
+    if (collection !== 'service') return null;
+
+    const role = req.user?.userRole;
+    if (role === 'Менеджер по аренде' && method !== 'POST') {
+      return 'Недостаточно прав: менеджер по аренде может только создавать сервисные заявки.';
+    }
+
+    return null;
+  }
+
   function registerCRUD(collection) {
     if (collection === 'rentals' || collection === 'gantt_rentals') {
       return;
@@ -101,6 +112,10 @@ function registerCrudRoutes(deps) {
       if (rentalForbiddenReason) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
       }
+      const serviceForbiddenReason = serviceWriteForbiddenReason(req, collection, 'POST');
+      if (serviceForbiddenReason) {
+        return res.status(403).json({ ok: false, error: serviceForbiddenReason });
+      }
       try {
         if (collection === 'rentals' || collection === 'gantt_rentals') {
           const validation = validateRentalPayload(collection, req.body, readData(collection) || []);
@@ -143,6 +158,10 @@ function registerCrudRoutes(deps) {
       const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
       if (rentalForbiddenReason) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
+      }
+      const serviceForbiddenReason = serviceWriteForbiddenReason(req, collection, 'PATCH');
+      if (serviceForbiddenReason) {
+        return res.status(403).json({ ok: false, error: serviceForbiddenReason });
       }
       if (officeManagerCanOnlyCreateRental(req, collection, 'PATCH')) {
         return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
@@ -204,6 +223,10 @@ function registerCrudRoutes(deps) {
       if (rentalForbiddenReason) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
       }
+      const serviceForbiddenReason = serviceWriteForbiddenReason(req, collection, 'DELETE');
+      if (serviceForbiddenReason) {
+        return res.status(403).json({ ok: false, error: serviceForbiddenReason });
+      }
       if (officeManagerCanOnlyCreateRental(req, collection, 'DELETE')) {
         return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
       }
@@ -224,6 +247,10 @@ function registerCrudRoutes(deps) {
       const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'PUT');
       if (rentalForbiddenReason) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
+      }
+      const serviceForbiddenReason = serviceWriteForbiddenReason(req, collection, 'PUT');
+      if (serviceForbiddenReason) {
+        return res.status(403).json({ ok: false, error: serviceForbiddenReason });
       }
       if (officeManagerCanOnlyCreateRental(req, collection, 'PUT')) {
         return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });

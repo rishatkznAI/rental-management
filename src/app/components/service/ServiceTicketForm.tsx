@@ -9,11 +9,8 @@ import { EquipmentCombobox } from '../ui/EquipmentCombobox';
 import { SERVICE_TICKET_KEYS, useCreateServiceTicket } from '../../hooks/useServiceTickets';
 import { EQUIPMENT_KEYS, useEquipmentList } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
-import type { EquipmentStatus, ServiceTicket } from '../../types';
+import type { ServiceTicket } from '../../types';
 import { getEquipmentTypeLabel } from '../../lib/equipmentClassification';
-import { appendAuditHistory, createAuditEntry } from '../../lib/entity-history';
-import { equipmentService } from '../../services/equipment.service';
-import { rentalsService } from '../../services/rentals.service';
 import {
   getServiceScenarioLabel,
   SERVICE_SCENARIO_DESCRIPTION_HINTS,
@@ -183,7 +180,6 @@ export function ServiceTicketForm({
     const equipmentLabel = `${eq.manufacturer} ${eq.model} (INV: ${eq.inventoryNumber})`;
     const authorName = user?.name || 'Оператор';
     const now = new Date().toISOString();
-    const todayStr = now.slice(0, 10);
 
     const newTicket: Omit<ServiceTicket, 'id'> = {
       equipmentId: formData.equipmentId,
@@ -228,52 +224,6 @@ export function ServiceTicketForm({
 
     try {
       const createdTicket = await createTicket.mutateAsync(newTicket);
-
-      const [allEquipment, allGanttRentals] = await Promise.all([
-        equipmentService.getAll(),
-        rentalsService.getGanttData(),
-      ]);
-
-      const updatedEquipment = allEquipment.map(item =>
-        item.id === eq.id
-          ? appendAuditHistory(
-              { ...item, status: 'in_service' as EquipmentStatus, currentClient: undefined, returnDate: undefined },
-              createAuditEntry(
-                authorName,
-                `Техника переведена в сервис по заявке ${createdTicket.id}: ${createdTicket.reason}`,
-              ),
-            )
-          : item,
-      );
-
-      const updatedGanttRentals = allGanttRentals.map(rental => {
-        if (
-          rental.equipmentId === eq.id &&
-          rental.status === 'active' &&
-          rental.startDate <= todayStr &&
-          rental.endDate >= todayStr
-        ) {
-          return {
-            ...rental,
-            endDate: todayStr,
-            status: 'returned' as const,
-            comments: [
-              ...(rental.comments ?? []),
-              {
-                date: now,
-                text: `Аренда остановлена из-за сервисной заявки ${createdTicket.id}`,
-                author: authorName,
-              },
-            ],
-          };
-        }
-        return rental;
-      });
-
-      await Promise.all([
-        equipmentService.bulkReplace(updatedEquipment),
-        rentalsService.bulkReplaceGantt(updatedGanttRentals),
-      ]);
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),

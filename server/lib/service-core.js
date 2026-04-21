@@ -1,3 +1,4 @@
+const { createAuditEntry } = require('./audit-history');
 const { isUniqueInventoryNumber } = require('./equipment-matching');
 
 function createServiceCore(deps) {
@@ -48,6 +49,59 @@ function createServiceCore(deps) {
     const tickets = readServiceTickets();
     const nextTickets = tickets.map(ticket => ticket.id === updatedTicket.id ? updatedTicket : ticket);
     writeServiceTickets(nextTickets);
+  }
+
+  function applyServiceTicketCreationEffects(ticket, author = 'Система') {
+    if (!ticket) return;
+
+    const equipmentList = readData('equipment') || [];
+    const ganttRentals = readData('gantt_rentals') || [];
+    const todayStr = nowIso().slice(0, 10);
+    const auditText = `Техника переведена в сервис по заявке ${ticket.id}: ${ticket.reason || 'Без причины'}`;
+
+    const nextEquipment = equipmentList.map(item => {
+      if (!equipmentMatchesServiceTicket(ticket, item, equipmentList)) return item;
+      return {
+        ...item,
+        status: 'in_service',
+        currentClient: undefined,
+        returnDate: undefined,
+        history: [
+          ...(Array.isArray(item.history) ? item.history : []),
+          createAuditEntry(author, auditText),
+        ],
+      };
+    });
+
+    const nextRentals = ganttRentals.map(rental => {
+      const matchesEquipment =
+        (ticket.equipmentId && rental.equipmentId === ticket.equipmentId)
+        || (!rental.equipmentId && ticket.inventoryNumber && rental.equipmentInv === ticket.inventoryNumber);
+
+      const isActiveToday =
+        rental.status === 'active'
+        && rental.startDate <= todayStr
+        && rental.endDate >= todayStr;
+
+      if (!matchesEquipment || !isActiveToday) return rental;
+
+      return {
+        ...rental,
+        endDate: todayStr,
+        status: 'returned',
+        comments: [
+          ...(Array.isArray(rental.comments) ? rental.comments : []),
+          {
+            date: nowIso(),
+            text: `Аренда остановлена из-за сервисной заявки ${ticket.id}`,
+            author,
+          },
+        ],
+      };
+    });
+
+    writeData('equipment', nextEquipment);
+    writeData('gantt_rentals', nextRentals);
   }
 
   function appendServiceLog(ticket, text, author, type = 'comment') {
@@ -155,6 +209,7 @@ function createServiceCore(deps) {
     appendServiceLog,
     findServiceTicketOr404,
     getMechanicReferenceByUser,
+    applyServiceTicketCreationEffects,
     syncEquipmentStatusForService,
     updateServiceTicketStatus,
     getOpenTicketByEquipment,

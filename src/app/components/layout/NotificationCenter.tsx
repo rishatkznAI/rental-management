@@ -12,6 +12,7 @@ import { usePermissions } from '../../lib/permissions';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '../ui/sheet';
 
 const READ_KEY = 'app_notification_reads_v1';
+const READ_SYNC_EVENT = 'app-notification-reads-updated';
 
 const priorityStyles: Record<NotificationPriority, string> = {
   critical: 'border-red-200 bg-red-50 dark:border-red-900/70 dark:bg-red-950/30',
@@ -36,6 +37,7 @@ function readIdsFromStorage(): string[] {
 
 function writeIdsToStorage(ids: string[]) {
   localStorage.setItem(READ_KEY, JSON.stringify(ids));
+  window.dispatchEvent(new CustomEvent(READ_SYNC_EVENT, { detail: ids }));
 }
 
 function getIcon(notification: AppNotification) {
@@ -96,6 +98,34 @@ export function NotificationCenter() {
   React.useEffect(() => {
     writeIdsToStorage(readIds);
   }, [readIds]);
+
+  React.useEffect(() => {
+    const syncFromStorage = () => {
+      const next = readIdsFromStorage();
+      setReadIds(prev => {
+        if (prev.length === next.length && prev.every((id, index) => id === next[index])) {
+          return prev;
+        }
+        return next;
+      });
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key && event.key !== READ_KEY) return;
+      syncFromStorage();
+    };
+
+    const handleCustomSync = () => {
+      syncFromStorage();
+    };
+
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener(READ_SYNC_EVENT, handleCustomSync);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener(READ_SYNC_EVENT, handleCustomSync);
+    };
+  }, []);
 
   React.useEffect(() => {
     setReadIds(prev => {

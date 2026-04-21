@@ -575,6 +575,28 @@ registerDeliveryRoutes(apiRouter, {
   idPrefixes: ID_PREFIXES,
 });
 
+const serviceCore = createServiceCore({
+  readData,
+  writeData,
+  nowIso,
+  equipmentMatchesServiceTicket,
+});
+
+const {
+  serviceStatusLabel,
+  readServiceTickets,
+  writeServiceTickets,
+  findServiceTicketById,
+  saveServiceTicket,
+  appendServiceLog,
+  findServiceTicketOr404,
+  getMechanicReferenceByUser,
+  applyServiceTicketCreationEffects,
+  syncEquipmentStatusForService,
+  updateServiceTicketStatus,
+  getOpenTicketByEquipment,
+} = serviceCore;
+
 apiRouter.use(registerCrudRoutes({
   collections: COLLECTIONS,
   idPrefixes: ID_PREFIXES,
@@ -592,6 +614,7 @@ apiRouter.use(registerCrudRoutes({
   requireNonEmptyString,
   generateId,
   nowIso,
+  applyServiceTicketCreationEffects,
 }));
 
 function requireNonEmptyString(value, fieldName) {
@@ -599,27 +622,6 @@ function requireNonEmptyString(value, fieldName) {
     throw new Error(`Поле «${fieldName}» обязательно`);
   }
 }
-
-const serviceCore = createServiceCore({
-  readData,
-  writeData,
-  nowIso,
-  equipmentMatchesServiceTicket,
-});
-
-const {
-  serviceStatusLabel,
-  readServiceTickets,
-  writeServiceTickets,
-  findServiceTicketById,
-  saveServiceTicket,
-  appendServiceLog,
-  findServiceTicketOr404,
-  getMechanicReferenceByUser,
-  syncEquipmentStatusForService,
-  updateServiceTicketStatus,
-  getOpenTicketByEquipment,
-} = serviceCore;
 
 registerServiceRoutes(apiRouter, {
   readData,

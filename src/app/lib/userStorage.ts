@@ -42,6 +42,26 @@ export const ROLES: UserRole[] = [
   'Офис-менеджер',
 ];
 
+export const RENTAL_MANAGER_ROLES: UserRole[] = [
+  'Менеджер по аренде',
+  'Офис-менеджер',
+];
+
+type UserWithManagerRole = {
+  role?: UserRole | string;
+  status?: UserStatus | string;
+};
+
+export function isRentalManagerUser(user: UserWithManagerRole | null | undefined): boolean {
+  if (!user) return false;
+  return user.status === 'Активен'
+    && (user.role === 'Менеджер по аренде' || user.role === 'Офис-менеджер');
+}
+
+export function filterRentalManagerUsers<T extends UserWithManagerRole>(users: T[]): T[] {
+  return users.filter(isRentalManagerUser);
+}
+
 // ── Ключ хранилища ────────────────────────────────────────────────────────────
 
 export const USERS_STORAGE_KEY = 'app_system_users';

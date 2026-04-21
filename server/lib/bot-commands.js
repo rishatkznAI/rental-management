@@ -91,14 +91,22 @@ function createBotHandlers(deps) {
     } = options;
 
     if (replaceMessage && callbackContext?.callbackId) {
-      const payload = await answerCallback(callbackContext.callbackId, {
+      await answerCallback(callbackContext.callbackId, {
         ...(notification ? { notification: { text: notification } } : {}),
-        message: {
-          text,
-          ...(attachments ? { attachments } : {}),
-        },
       });
-      await rememberBotMessage(phone, payload, callbackContext.messageId || null);
+      if (phone) {
+        await cleanupPreviousBotMessage(phone);
+      } else if (callbackContext.messageId) {
+        try {
+          await deleteMessage(callbackContext.messageId);
+        } catch (error) {
+          // Не ломаем сценарий, если MAX не дал удалить прошлое сообщение.
+        }
+      }
+      const payload = await sendMessage(target, text, {
+        ...(attachments ? { attachments } : {}),
+      });
+      await rememberBotMessage(phone, payload);
       return payload;
     }
 
@@ -1889,7 +1897,9 @@ function createBotHandlers(deps) {
       const repairId = trimmed.slice('/ремонт'.length).trim();
       const ticket = findServiceTicketById(repairId);
       if (!ticket) {
-        return sendMessage(senderId, '❌ Заявка не найдена.');
+        return replyWithUi('❌ Заявка не найдена. Выберите заявку из списка ниже или откройте /моизаявки.', {
+          attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
+        });
       }
       setCurrentRepair(phone, ticket.id);
       return replyWithUi(withBotMenu([
@@ -1901,6 +1911,12 @@ function createBotHandlers(deps) {
         'Теперь можно работать по заявке.',
       ].join('\n'), ['итог', 'работы поиск', 'запчасти поиск', 'черновик']), {
         attachments: currentRepairKeyboard(ticket.id),
+      });
+    }
+
+    if (lower === '/ремонт' && canManageRepair) {
+      return replyWithUi(formatServiceForUser(authUser, 'assigned'), {
+        attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
       });
     }
 
@@ -1925,7 +1941,12 @@ function createBotHandlers(deps) {
         }
       }
       clearBotSession(phone);
-      return sendMessage(senderId, '🧹 Текущая заявка сброшена. Выберите новую через /ремонт ID');
+      return replyWithUi(
+        '🧹 Текущая заявка сброшена. Выберите новую из списка ниже или откройте /моизаявки.',
+        {
+          attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
+        },
+      );
     }
 
     if (lower.startsWith('/итог ') && canManageRepair) {

@@ -20,7 +20,7 @@ import {
   mockDowntimes,
   mockServicePeriods,
 } from '../mock-data';
-import type { SystemUser } from '../lib/userStorage';
+import { filterRentalManagerUsers, type SystemUser } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
@@ -396,7 +396,7 @@ export default function Rentals() {
   );
 
   // Менеджеры для фильтра (динамически из базы пользователей)
-  const managersList = useMemo(() => usersData.filter(u => u.status === 'Активен'), [usersData]);
+  const managersList = useMemo(() => filterRentalManagerUsers(usersData), [usersData]);
 
   // Toast-уведомление
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);

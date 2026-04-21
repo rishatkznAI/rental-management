@@ -17,6 +17,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { createAuditEntry } from '../lib/entity-history';
 import type { Client } from '../types';
+import { filterRentalManagerUsers } from '../lib/userStorage';
 
 const PAYMENT_TERMS_OPTIONS = [
   { value: 'Постоплата 14 дней', label: 'Постоплата 14 дней' },
@@ -72,7 +73,7 @@ export default function ClientNew() {
   // Загружаем активных менеджеров из API
   useEffect(() => {
     api.get<{ id: string; name: string; role: string; status: string }[]>('/api/users')
-      .then(users => setManagers(users.filter(u => u.status === 'Активен')))
+      .then(users => setManagers(filterRentalManagerUsers(users)))
       .catch(() => {});
   }, []);
 

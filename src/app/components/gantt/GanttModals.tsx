@@ -4,7 +4,7 @@ import { X, RotateCcw, CirclePause as PauseCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import type { GanttRentalData } from '../../mock-data';
-import type { SystemUser } from '../../lib/userStorage';
+import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
 import type { Client, Equipment } from '../../types';
 import { equipmentService } from '../../services/equipment.service';
 import { clientsService } from '../../services/clients.service';
@@ -438,7 +438,7 @@ export function NewRentalModal({
   const allClients = useMemo(() => clientsProp ?? clientsData, [clientsData, clientsProp]);
 
   const managers = useMemo(() =>
-    (managersProp ?? usersData).filter(u => u.status === 'Активен'),
+    filterRentalManagerUsers(managersProp ?? usersData),
   [managersProp, usersData]);
 
   // Единый источник данных: сначала берём из пропса (React-состояние родителя),

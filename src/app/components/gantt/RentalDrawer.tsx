@@ -12,7 +12,7 @@ import { findConflictingRental } from '../../lib/rental-conflicts';
 import type { GanttRentalData } from '../../mock-data';
 import type { Client, Equipment, Payment } from '../../types';
 import type { ClientReceivableRow } from '../../lib/finance';
-import type { SystemUser } from '../../lib/userStorage';
+import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
 
 interface RentalDrawerProps {
   rental: GanttRentalData | null;
@@ -129,7 +129,7 @@ export function RentalDrawer({
     setManagerEditMode(false);
   }, [rental]);
 
-  const activeManagers = managers.filter(item => item.status === 'Активен');
+  const activeManagers = filterRentalManagerUsers(managers);
 
   // Payments for this rental
   const rentalPayments = payments.filter(p => p.rentalId === rental.id);

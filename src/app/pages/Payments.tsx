@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { ClientCombobox } from '../components/ui/ClientCombobox';
 import { getPaymentStatusBadge } from '../components/ui/badge';
 import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
@@ -35,6 +36,7 @@ interface AddPaymentModalProps {
 }
 
 function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayments }: AddPaymentModalProps) {
+  const [clientError, setClientError] = useState('');
   const [form, setForm] = useState({
     rentalId: '',
     client: '',
@@ -56,6 +58,9 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
       }
       return next;
     });
+    if (k === 'client') {
+      setClientError('');
+    }
   };
 
   // Compute current client debt (excluding payments being created right now)
@@ -68,6 +73,10 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.client.trim()) {
+      setClientError('Выберите клиента из базы');
+      return;
+    }
     const amt = Number(form.amount) || 0;
     const paid = Number(form.paidAmount) || amt;
     const newPayment: Payment = {
@@ -120,12 +129,15 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
               Клиент <span className="text-red-500">*</span>
             </label>
-            <Input
-              required
-              placeholder="Название клиента"
+            <ClientCombobox
+              clients={clients}
               value={form.client}
-              onChange={e => set('client', e.target.value)}
+              onChange={value => set('client', value)}
+              placeholder="Выберите клиента из базы"
             />
+            {clientError && (
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{clientError}</p>
+            )}
             {/* Debt banner */}
             {clientDebt && clientDebt.currentDebt > 0 && (
               <div className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${

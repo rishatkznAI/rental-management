@@ -2581,18 +2581,18 @@ function ServiceWorkCatalogReferenceList() {
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl">
             <CardTitle>Работы</CardTitle>
             <CardDescription>Каталог работ с нормо-часами для ремонтов и аналитики механиков</CardDescription>
           </div>
-          <Button onClick={openCreate}>
+          <Button size="sm" onClick={openCreate}>
             <Plus className="h-4 w-4" />
             Добавить работу
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
           <Input placeholder="Поиск по названию, категории или описанию" value={search} onChange={e => setSearch(e.target.value)} />
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -2608,7 +2608,7 @@ function ServiceWorkCatalogReferenceList() {
           </Select>
         </div>
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap gap-2">
             {[
               { id: 'all', label: 'Все', count: counts.total },
@@ -2628,14 +2628,14 @@ function ServiceWorkCatalogReferenceList() {
               </Button>
             ))}
           </div>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 lg:text-right">
             Найдено: <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>
           </p>
         </div>
 
         {selectedCount > 0 && (
-          <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40 xl:flex-row xl:items-center xl:justify-between">
-            <p className="text-sm">
+          <div className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-900/40 xl:flex-row xl:items-center xl:justify-between">
+            <p className="text-sm leading-none">
               Выбрано работ: <span className="font-semibold">{selectedCount}</span>
             </p>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
@@ -2664,9 +2664,9 @@ function ServiceWorkCatalogReferenceList() {
           </div>
         )}
 
-        <div className="hidden overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 lg:block">
+        <div className="hidden max-h-[620px] overflow-auto rounded-xl border border-gray-200 dark:border-gray-700 lg:block">
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 z-10 bg-white dark:bg-gray-800">
               <TableRow>
                 <TableHead className="w-[48px]">
                   <input
@@ -2689,10 +2689,10 @@ function ServiceWorkCatalogReferenceList() {
               {filtered.map(item => (
                 <TableRow
                   key={item.id}
-                  className="cursor-pointer"
+                  className="cursor-pointer align-top"
                   onClick={() => openEdit(item)}
                 >
-                  <TableCell>
+                  <TableCell className="py-2.5">
                     <input
                       type="checkbox"
                       aria-label={`Выбрать работу ${item.name}`}
@@ -2701,26 +2701,26 @@ function ServiceWorkCatalogReferenceList() {
                       onChange={e => toggleSelected(item.id, e.target.checked)}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-2.5">
                     <div className="space-y-1">
-                      <p className="font-medium">{item.name}</p>
+                      <p className="font-medium leading-snug">{item.name}</p>
                       {item.description && (
-                        <p className="line-clamp-2 text-xs text-gray-500">{item.description}</p>
+                        <p className="line-clamp-1 text-xs text-gray-500">{item.description}</p>
                       )}
                     </div>
                   </TableCell>
-                  <TableCell>{item.category || 'Без категории'}</TableCell>
-                  <TableCell>{item.normHours} н/ч</TableCell>
-                  <TableCell>
+                  <TableCell className="py-2.5">{item.category || 'Без категории'}</TableCell>
+                  <TableCell className="py-2.5 whitespace-nowrap">{item.normHours} н/ч</TableCell>
+                  <TableCell className="py-2.5 whitespace-nowrap">
                     {item.ratePerHour > 0 ? `${item.ratePerHour.toLocaleString('ru-RU')} ₽/н·ч` : 'Не задана'}
                   </TableCell>
-                  <TableCell>{item.sortOrder}</TableCell>
-                  <TableCell>
+                  <TableCell className="py-2.5">{item.sortOrder}</TableCell>
+                  <TableCell className="py-2.5">
                     <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>
                       {statusLabel(item.isActive ? 'active' : 'inactive')}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-2.5">
                     <div className="flex justify-end gap-2">
                       <Button
                         size="sm"
@@ -2750,11 +2750,11 @@ function ServiceWorkCatalogReferenceList() {
           </Table>
         </div>
 
-        <div className="space-y-3 lg:hidden">
+        <div className="space-y-2 lg:hidden lg:max-h-none max-h-[70vh] overflow-auto pr-1">
           {filtered.map(item => (
             <div
               key={item.id}
-              className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"
+              className="rounded-xl border border-gray-200 p-2.5 dark:border-gray-700"
               onClick={() => openEdit(item)}
             >
               <div className="flex items-start justify-between gap-3">
@@ -2768,19 +2768,19 @@ function ServiceWorkCatalogReferenceList() {
                     onChange={e => toggleSelected(item.id, e.target.checked)}
                   />
                   <div>
-                  <p className="text-sm font-medium">{item.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {item.category || 'Без категории'} · {item.normHours} н/ч
-                    {item.ratePerHour > 0 ? ` · ${item.ratePerHour.toLocaleString('ru-RU')} ₽/н·ч` : ''}
-                  </p>
-                  {item.description && <p className="mt-1 text-xs text-gray-500">{item.description}</p>}
+                    <p className="text-sm font-medium leading-snug">{item.name}</p>
+                    <p className="text-xs text-gray-500">
+                      {item.category || 'Без категории'} · {item.normHours} н/ч
+                      {item.ratePerHour > 0 ? ` · ${item.ratePerHour.toLocaleString('ru-RU')} ₽/н·ч` : ''}
+                    </p>
+                    {item.description && <p className="mt-1 line-clamp-2 text-xs text-gray-500">{item.description}</p>}
                   </div>
                 </div>
                 <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>
                   {statusLabel(item.isActive ? 'active' : 'inactive')}
                 </Badge>
               </div>
-              <div className="mt-3 flex gap-2">
+              <div className="mt-2 flex gap-2">
                 <Button size="sm" variant="secondary" onClick={() => openEdit(item)}>
                   Редактировать
                 </Button>
@@ -3010,18 +3010,18 @@ function SparePartsReferenceList() {
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl">
             <CardTitle>Запчасти</CardTitle>
             <CardDescription>Каталог запчастей для ремонтов с хранением артикула, единицы и базовой цены</CardDescription>
           </div>
-          <Button onClick={openCreate}>
+          <Button size="sm" onClick={openCreate}>
             <Plus className="h-4 w-4" />
             Добавить запчасть
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_220px]">
           <Input placeholder="Поиск по названию, артикулу, категории или производителю" value={search} onChange={e => setSearch(e.target.value)} />
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -3048,7 +3048,7 @@ function SparePartsReferenceList() {
           </Select>
         </div>
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap gap-2">
             {[
               { id: 'all', label: 'Все', count: counts.total },
@@ -3068,14 +3068,14 @@ function SparePartsReferenceList() {
               </Button>
             ))}
           </div>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 lg:text-right">
             Найдено: <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>
           </p>
         </div>
 
         {selectedCount > 0 && (
-          <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40 xl:flex-row xl:items-center xl:justify-between">
-            <p className="text-sm">
+          <div className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-900/40 xl:flex-row xl:items-center xl:justify-between">
+            <p className="text-sm leading-none">
               Выбрано запчастей: <span className="font-semibold">{selectedCount}</span>
             </p>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
@@ -3104,9 +3104,9 @@ function SparePartsReferenceList() {
           </div>
         )}
 
-        <div className="hidden overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 lg:block">
+        <div className="hidden max-h-[620px] overflow-auto rounded-xl border border-gray-200 dark:border-gray-700 lg:block">
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 z-10 bg-white dark:bg-gray-800">
               <TableRow>
                 <TableHead className="w-[48px]">
                   <input
@@ -3129,10 +3129,10 @@ function SparePartsReferenceList() {
               {filtered.map(item => (
                 <TableRow
                   key={item.id}
-                  className="cursor-pointer"
+                  className="cursor-pointer align-top"
                   onClick={() => openEdit(item)}
                 >
-                  <TableCell>
+                  <TableCell className="py-2.5">
                     <input
                       type="checkbox"
                       aria-label={`Выбрать запчасть ${item.name}`}
@@ -3141,22 +3141,22 @@ function SparePartsReferenceList() {
                       onChange={e => toggleSelected(item.id, e.target.checked)}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-2.5">
                     <div className="space-y-1">
-                      <p className="font-medium">{item.name}</p>
+                      <p className="font-medium leading-snug">{item.name}</p>
                       <p className="text-xs text-gray-500">{item.unit}</p>
                     </div>
                   </TableCell>
-                  <TableCell>{item.article || 'Без артикула'}</TableCell>
-                  <TableCell>{item.category || 'Без категории'}</TableCell>
-                  <TableCell>{item.manufacturer || 'Не указан'}</TableCell>
-                  <TableCell>{`${item.defaultPrice.toLocaleString('ru-RU')} ₽/${item.unit}`}</TableCell>
-                  <TableCell>
+                  <TableCell className="py-2.5">{item.article || 'Без артикула'}</TableCell>
+                  <TableCell className="py-2.5">{item.category || 'Без категории'}</TableCell>
+                  <TableCell className="py-2.5">{item.manufacturer || 'Не указан'}</TableCell>
+                  <TableCell className="py-2.5 whitespace-nowrap">{`${item.defaultPrice.toLocaleString('ru-RU')} ₽/${item.unit}`}</TableCell>
+                  <TableCell className="py-2.5">
                     <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>
                       {statusLabel(item.isActive ? 'active' : 'inactive')}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-2.5">
                     <div className="flex justify-end gap-2">
                       <Button
                         size="sm"
@@ -3186,11 +3186,11 @@ function SparePartsReferenceList() {
           </Table>
         </div>
 
-        <div className="space-y-3 lg:hidden">
+        <div className="space-y-2 lg:hidden lg:max-h-none max-h-[70vh] overflow-auto pr-1">
           {filtered.map(item => (
             <div
               key={item.id}
-              className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"
+              className="rounded-xl border border-gray-200 p-2.5 dark:border-gray-700"
               onClick={() => openEdit(item)}
             >
               <div className="flex items-start justify-between gap-3">
@@ -3204,20 +3204,20 @@ function SparePartsReferenceList() {
                     onChange={e => toggleSelected(item.id, e.target.checked)}
                   />
                   <div>
-                  <p className="text-sm font-medium">{item.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {item.article || 'Без артикула'} · {item.defaultPrice.toLocaleString('ru-RU')} ₽/{item.unit}
-                  </p>
-                  {(item.category || item.manufacturer) && (
-                    <p className="mt-1 text-xs text-gray-500">{[item.category, item.manufacturer].filter(Boolean).join(' · ')}</p>
-                  )}
+                    <p className="text-sm font-medium leading-snug">{item.name}</p>
+                    <p className="text-xs text-gray-500">
+                      {item.article || 'Без артикула'} · {item.defaultPrice.toLocaleString('ru-RU')} ₽/{item.unit}
+                    </p>
+                    {(item.category || item.manufacturer) && (
+                      <p className="mt-1 line-clamp-2 text-xs text-gray-500">{[item.category, item.manufacturer].filter(Boolean).join(' · ')}</p>
+                    )}
                   </div>
                 </div>
                 <Badge variant={statusVariant(item.isActive ? 'active' : 'inactive')}>
                   {statusLabel(item.isActive ? 'active' : 'inactive')}
                 </Badge>
               </div>
-              <div className="mt-3 flex gap-2">
+              <div className="mt-2 flex gap-2">
                 <Button size="sm" variant="secondary" onClick={() => openEdit(item)}>
                   Редактировать
                 </Button>

@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import {
 } from '../mock-data';
-import type { ShippingPhoto, ServiceTicket, Payment } from '../types';
+import type { ShippingPhoto, ServiceTicket, Payment, EquipmentStatus, EquipmentOperationPhotoCategory, ShippingEventType } from '../types';
 import { formatDate, formatDateTime, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
@@ -148,6 +148,20 @@ function inferPhotoExtension(url: string, contentType?: string) {
   }
 
   return 'jpg';
+}
+
+function dataUrlToBytes(url: string) {
+  const [meta, body = ''] = url.split(',', 2);
+  const isBase64 = meta.includes(';base64');
+  if (isBase64) {
+    const binary = window.atob(body);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  }
+  return textEncoder.encode(decodeURIComponent(body));
 }
 
 function crc32(bytes: Uint8Array) {
@@ -678,10 +692,23 @@ export default function EquipmentDetail() {
 
         for (let index = 0; index < groupedPhotos.length; index += 1) {
           const photo = groupedPhotos[index];
-          const response = await fetch(photo.url);
-          const blob = await response.blob();
-          const extension = inferPhotoExtension(photo.url, blob.type);
-          const bytes = new Uint8Array(await blob.arrayBuffer());
+          let bytes: Uint8Array;
+          let mimeType = '';
+
+          if (photo.url.startsWith('data:')) {
+            bytes = dataUrlToBytes(photo.url);
+            mimeType = photo.url.match(/^data:([^;]+)/)?.[1] || '';
+          } else {
+            const response = await fetch(photo.url);
+            if (!response.ok) {
+              throw new Error(`Не удалось получить файл: ${response.status}`);
+            }
+            const blob = await response.blob();
+            bytes = new Uint8Array(await blob.arrayBuffer());
+            mimeType = blob.type;
+          }
+
+          const extension = inferPhotoExtension(photo.url, mimeType);
           const categoryLabel = sanitizeZipSegment(photo.label);
           const fileBase = `${baseFolder}/${categoryLabel}/${String(index + 1).padStart(2, '0')}`;
           let fileName = `${fileBase}.${extension}`;

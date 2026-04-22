@@ -23,6 +23,7 @@ function registerSystemRoutes(app, deps) {
         payments,
         users,
         documents,
+        mechanic_documents,
         shipping_photos,
       } = req.body;
       const prev = getSnapshot();
@@ -36,6 +37,7 @@ function registerSystemRoutes(app, deps) {
       if (payments) writeData('payments', payments);
       if (users) writeData('users', users);
       if (documents) writeData('documents', documents);
+      if (mechanic_documents) writeData('mechanic_documents', mechanic_documents);
       if (shipping_photos) writeData('shipping_photos', shipping_photos);
 
       const notifications = [];

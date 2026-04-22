@@ -174,11 +174,11 @@ function safeMovementDateLabel(value?: string) {
   return format(date, hasTime ? 'dd.MM.yyyy HH:mm' : 'dd.MM.yyyy', { locale: ru });
 }
 
-function getEquipmentMovementLabel(equipment?: Pick<Equipment, 'brand' | 'model' | 'inventoryNumber'> | null) {
+function getEquipmentMovementLabel(equipment?: Pick<Equipment, 'manufacturer' | 'model' | 'inventoryNumber'> | null) {
   if (!equipment) return 'Техника не найдена';
-  const brandModel = [equipment.brand, equipment.model].filter(Boolean).join(' ').trim();
-  if (brandModel && equipment.inventoryNumber) return `${brandModel} · INV ${equipment.inventoryNumber}`;
-  if (brandModel) return brandModel;
+  const manufacturerModel = [equipment.manufacturer, equipment.model].filter(Boolean).join(' ').trim();
+  if (manufacturerModel && equipment.inventoryNumber) return `${manufacturerModel} · INV ${equipment.inventoryNumber}`;
+  if (manufacturerModel) return manufacturerModel;
   if (equipment.inventoryNumber) return `INV ${equipment.inventoryNumber}`;
   return 'Без названия';
 }

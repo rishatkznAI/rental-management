@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -9,7 +10,7 @@ import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
   DollarSign, TrendingUp, Clock, Plus, Bot, User, Calendar,
   CheckCircle, AlertTriangle, MapPin, ChevronRight, MessageSquare,
-  Upload, Trash2, X, PenLine, RotateCcw,
+  Upload, Trash2, X, PenLine, RotateCcw, Download,
 } from 'lucide-react';
 import {
 } from '../mock-data';
@@ -113,6 +114,133 @@ const HANDOFF_REQUIRED_PHOTO_CATEGORIES: EquipmentOperationPhotoCategory[] = [
   'basket',
   'engine_bay',
 ];
+
+const textEncoder = new TextEncoder();
+
+function sanitizeZipSegment(value: string) {
+  return value
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80) || 'file';
+}
+
+function inferPhotoExtension(url: string, contentType?: string) {
+  if (contentType?.includes('png')) return 'png';
+  if (contentType?.includes('webp')) return 'webp';
+  if (contentType?.includes('gif')) return 'gif';
+  if (contentType?.includes('jpeg') || contentType?.includes('jpg')) return 'jpg';
+
+  if (url.startsWith('data:image/')) {
+    const match = url.match(/^data:image\/([a-zA-Z0-9+.-]+);/);
+    if (match?.[1]) {
+      return match[1] === 'jpeg' ? 'jpg' : match[1];
+    }
+  }
+
+  try {
+    const pathname = new URL(url, window.location.href).pathname;
+    const fileName = pathname.split('/').pop() || '';
+    const ext = fileName.split('.').pop();
+    if (ext && ext.length <= 5) return ext.toLowerCase();
+  } catch {
+    // Ignore malformed URLs and fall back to jpg.
+  }
+
+  return 'jpg';
+}
+
+function crc32(bytes: Uint8Array) {
+  let crc = 0 ^ -1;
+  for (let i = 0; i < bytes.length; i += 1) {
+    crc ^= bytes[i];
+    for (let j = 0; j < 8; j += 1) {
+      crc = (crc >>> 1) ^ (0xEDB88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ -1) >>> 0;
+}
+
+function getDosDateTime(date: Date) {
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const year = Math.max(safeDate.getFullYear(), 1980);
+  const dosTime = ((safeDate.getHours() & 0x1f) << 11)
+    | ((safeDate.getMinutes() & 0x3f) << 5)
+    | ((Math.floor(safeDate.getSeconds() / 2)) & 0x1f);
+  const dosDate = (((year - 1980) & 0x7f) << 9)
+    | (((safeDate.getMonth() + 1) & 0x0f) << 5)
+    | (safeDate.getDate() & 0x1f);
+  return { dosDate, dosTime };
+}
+
+function writeUint16(target: number[], value: number) {
+  target.push(value & 0xff, (value >>> 8) & 0xff);
+}
+
+function writeUint32(target: number[], value: number) {
+  target.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+}
+
+function buildZip(entries: Array<{ name: string; data: Uint8Array; date?: Date }>) {
+  const fileBytes: number[] = [];
+  const centralDirectory: number[] = [];
+  let offset = 0;
+
+  entries.forEach(entry => {
+    const nameBytes = textEncoder.encode(entry.name);
+    const crc = crc32(entry.data);
+    const size = entry.data.length;
+    const { dosDate, dosTime } = getDosDateTime(entry.date ?? new Date());
+
+    writeUint32(fileBytes, 0x04034b50);
+    writeUint16(fileBytes, 20);
+    writeUint16(fileBytes, 0x0800);
+    writeUint16(fileBytes, 0);
+    writeUint16(fileBytes, dosTime);
+    writeUint16(fileBytes, dosDate);
+    writeUint32(fileBytes, crc);
+    writeUint32(fileBytes, size);
+    writeUint32(fileBytes, size);
+    writeUint16(fileBytes, nameBytes.length);
+    writeUint16(fileBytes, 0);
+    fileBytes.push(...nameBytes);
+    fileBytes.push(...entry.data);
+
+    writeUint32(centralDirectory, 0x02014b50);
+    writeUint16(centralDirectory, 20);
+    writeUint16(centralDirectory, 20);
+    writeUint16(centralDirectory, 0x0800);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, dosTime);
+    writeUint16(centralDirectory, dosDate);
+    writeUint32(centralDirectory, crc);
+    writeUint32(centralDirectory, size);
+    writeUint32(centralDirectory, size);
+    writeUint16(centralDirectory, nameBytes.length);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, 0);
+    writeUint32(centralDirectory, 0);
+    writeUint32(centralDirectory, offset);
+    centralDirectory.push(...nameBytes);
+
+    offset = fileBytes.length;
+  });
+
+  const centralDirectoryOffset = fileBytes.length;
+  fileBytes.push(...centralDirectory);
+  writeUint32(fileBytes, 0x06054b50);
+  writeUint16(fileBytes, 0);
+  writeUint16(fileBytes, 0);
+  writeUint16(fileBytes, entries.length);
+  writeUint16(fileBytes, entries.length);
+  writeUint32(fileBytes, centralDirectory.length);
+  writeUint32(fileBytes, centralDirectoryOffset);
+  writeUint16(fileBytes, 0);
+
+  return new Blob([new Uint8Array(fileBytes)], { type: 'application/zip' });
+}
 
 function createEmptyHandoffChecklist() {
   return {
@@ -466,6 +594,7 @@ export default function EquipmentDetail() {
   const [uploadDamageDescription, setUploadDamageDescription] = useState('');
   const [uploadSignatureDataUrl, setUploadSignatureDataUrl] = useState('');
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
+  const [isDownloadingPhotoZip, setIsDownloadingPhotoZip] = useState(false);
   const mainPhotoInputRef = React.useRef<HTMLInputElement>(null);
   const shippingPhotoInputRefs = React.useRef<Partial<Record<EquipmentOperationPhotoCategory, HTMLInputElement | null>>>({});
   const signatureCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -529,6 +658,70 @@ export default function EquipmentDetail() {
     }));
     e.target.value = '';
   };
+
+  const handleDownloadShippingPhotosZip = React.useCallback(async () => {
+    if (!equipment || shippingPhotos.length === 0 || isDownloadingPhotoZip) return;
+
+    setIsDownloadingPhotoZip(true);
+    try {
+      const zipEntries: Array<{ name: string; data: Uint8Array; date?: Date }> = [];
+      const usedNames = new Set<string>();
+
+      for (const event of shippingPhotos) {
+        const baseFolder = `${sanitizeZipSegment(event.type === 'shipping' ? 'Отгрузка' : 'Приёмка')}_${sanitizeZipSegment(event.date || 'без-даты')}`;
+        const groupedPhotos = event.photoCategories && Object.keys(event.photoCategories).length > 0
+          ? Object.entries(PHOTO_CATEGORY_LABELS).flatMap(([key, label]) => {
+              const photos = event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [];
+              return photos.map(photo => ({ label, url: photo }));
+            })
+          : event.photos.map(photo => ({ label: 'Фотографии', url: photo }));
+
+        for (let index = 0; index < groupedPhotos.length; index += 1) {
+          const photo = groupedPhotos[index];
+          const response = await fetch(photo.url);
+          const blob = await response.blob();
+          const extension = inferPhotoExtension(photo.url, blob.type);
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          const categoryLabel = sanitizeZipSegment(photo.label);
+          const fileBase = `${baseFolder}/${categoryLabel}/${String(index + 1).padStart(2, '0')}`;
+          let fileName = `${fileBase}.${extension}`;
+          let duplicateIndex = 2;
+          while (usedNames.has(fileName)) {
+            fileName = `${fileBase}-${duplicateIndex}.${extension}`;
+            duplicateIndex += 1;
+          }
+          usedNames.add(fileName);
+          zipEntries.push({
+            name: fileName,
+            data: bytes,
+            date: new Date(event.date),
+          });
+        }
+      }
+
+      if (zipEntries.length === 0) {
+        toast.error('В этой карточке пока нет фотографий для архива.');
+        return;
+      }
+
+      const zipBlob = buildZip(zipEntries);
+      const archiveName = `${sanitizeZipSegment([equipment.manufacturer, equipment.model].filter(Boolean).join(' ') || equipment.inventoryNumber || 'equipment')}-photos.zip`;
+      const url = URL.createObjectURL(zipBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = archiveName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Архив готов: ${zipEntries.length} фото`);
+    } catch (error) {
+      console.error('Failed to download shipping photos zip', error);
+      toast.error('Не удалось собрать ZIP-архив с фотографиями');
+    } finally {
+      setIsDownloadingPhotoZip(false);
+    }
+  }, [equipment, isDownloadingPhotoZip, shippingPhotos]);
 
   const activeOrCreatedRental = ganttRentals.find(r => r.status === 'active' || r.status === 'created');
 
@@ -952,7 +1145,13 @@ export default function EquipmentDetail() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className={`rounded-2xl border p-4 ${
-          equipment.status === 'in_service'
+          equipment.isForSale
+            ? equipment.salePdiStatus === 'ready'
+              ? 'border-emerald-500/25 bg-emerald-500/8'
+              : equipment.salePdiStatus === 'in_progress'
+              ? 'border-orange-500/25 bg-orange-500/8'
+              : 'border-border bg-card/95'
+            : equipment.status === 'in_service'
             ? 'border-red-500/25 bg-red-500/8'
             : equipment.status === 'reserved'
             ? 'border-orange-500/25 bg-orange-500/8'
@@ -963,15 +1162,25 @@ export default function EquipmentDetail() {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Статус</p>
-              <p className="mt-1 text-lg font-semibold text-foreground">{EQ_STATUS_LABELS[equipment.status]}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{equipment.currentClient || 'Техника без активного клиента'}</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">
+                {equipment.isForSale
+                  ? (equipment.salePdiStatus === 'ready' ? 'PDI готов' : 'PDI не готов')
+                  : EQ_STATUS_LABELS[equipment.status]}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {equipment.isForSale
+                  ? EQUIPMENT_SALE_PDI_LABELS[equipment.salePdiStatus ?? 'not_started']
+                  : (equipment.currentClient || 'Техника без активного клиента')}
+              </p>
             </div>
             <Calendar className="h-5 w-5 text-muted-foreground" />
           </div>
         </div>
 
         <div className={`rounded-2xl border p-4 ${
-          daysUntilMaintenance <= 7
+          equipment.isForSale
+            ? 'border-border bg-card/95'
+            : daysUntilMaintenance <= 7
             ? 'border-red-500/25 bg-red-500/8'
             : daysUntilMaintenance <= 30
             ? 'border-orange-500/25 bg-orange-500/8'
@@ -979,10 +1188,16 @@ export default function EquipmentDetail() {
         }`}>
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Следующее ТО</p>
-              <p className="mt-1 text-lg font-semibold text-foreground">{formatDate(equipment.nextMaintenance)}</p>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                {equipment.isForSale ? 'Продажный контур' : 'Следующее ТО'}
+              </p>
+              <p className="mt-1 text-lg font-semibold text-foreground">
+                {equipment.isForSale ? 'На продаже' : formatDate(equipment.nextMaintenance)}
+              </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {daysUntilMaintenance > 0 ? `через ${daysUntilMaintenance} дн.` : 'просрочено'}
+                {equipment.isForSale
+                  ? 'Карточка адаптирована под продажу и готовность PDI'
+                  : (daysUntilMaintenance > 0 ? `через ${daysUntilMaintenance} дн.` : 'просрочено')}
               </p>
             </div>
             <Wrench className="h-5 w-5 text-muted-foreground" />
@@ -1023,7 +1238,7 @@ export default function EquipmentDetail() {
         </div>
       </div>
 
-      {daysUntilMaintenance <= 30 && (
+      {!equipment.isForSale && daysUntilMaintenance <= 30 && (
         <div className={`rounded-2xl border px-4 py-3 ${
           daysUntilMaintenance <= 7
             ? 'border-red-500/25 bg-red-500/8'
@@ -1129,7 +1344,7 @@ export default function EquipmentDetail() {
               <InfoField label="Серийный номер" value={equipment.serialNumber} mono />
               <InfoField label="Инвентарный номер" value={equipment.inventoryNumber} mono />
               <InfoField label="Год выпуска" value={String(equipment.year)} />
-              <InfoField label="Моточасы" value={`${equipment.hours} ч`} />
+              {!equipment.isForSale && <InfoField label="Моточасы" value={`${equipment.hours} ч`} />}
               <InfoField label="Высота подъёма" value={`${equipment.liftHeight} м`} />
               {equipment.workingHeight && <InfoField label="Рабочая высота" value={`${equipment.workingHeight} м`} />}
               {equipment.loadCapacity && <InfoField label="Грузоподъёмность" value={`${equipment.loadCapacity} кг`} />}
@@ -1140,7 +1355,9 @@ export default function EquipmentDetail() {
               {equipment.owner === 'sublease' && equipment.subleasePrice && (
                 <InfoField label="Стоимость субаренды" value={`${formatCurrency(equipment.subleasePrice)}/мес`} highlight="orange" />
               )}
-              <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} highlight={daysUntilMaintenance <= 0 ? 'red' : undefined} />
+              {!equipment.isForSale && (
+                <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} highlight={daysUntilMaintenance <= 0 ? 'red' : undefined} />
+              )}
             </div>
 
             {equipment.currentClient && (
@@ -1188,11 +1405,13 @@ export default function EquipmentDetail() {
               </div>
             )}
 
-            <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-3">
-              <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} />
-              {equipment.maintenanceCHTO && <InfoField label="Дата ЧТО" value={formatDate(equipment.maintenanceCHTO)} />}
-              {equipment.maintenancePTO && <InfoField label="Дата ПТО" value={formatDate(equipment.maintenancePTO)} />}
-            </div>
+            {!equipment.isForSale && (
+              <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-3">
+                <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} />
+                {equipment.maintenanceCHTO && <InfoField label="Дата ЧТО" value={formatDate(equipment.maintenanceCHTO)} />}
+                {equipment.maintenancePTO && <InfoField label="Дата ПТО" value={formatDate(equipment.maintenancePTO)} />}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -1814,8 +2033,18 @@ export default function EquipmentDetail() {
                   <CardTitle>Фото отгрузок и приёмки</CardTitle>
                   <CardDescription>{shippingPhotos.length} событий</CardDescription>
                 </div>
-                {canManageAcceptance && (
-                  <div className="hidden sm:flex items-center gap-2">
+                <div className="hidden sm:flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void handleDownloadShippingPhotosZip()}
+                    disabled={shippingPhotos.length === 0 || isDownloadingPhotoZip}
+                  >
+                    <Download className="h-4 w-4" />
+                    {isDownloadingPhotoZip ? 'Собираем ZIP...' : 'Скачать ZIP'}
+                  </Button>
+                  {canManageAcceptance && (
+                    <>
                     <Button size="sm" variant="secondary" onClick={() => openReceptionForm('shipping')}>
                       <Upload className="h-4 w-4" />
                       Отправить в аренду
@@ -1828,29 +2057,43 @@ export default function EquipmentDetail() {
                     <Plus className="h-4 w-4" />
                     Загрузить фото
                     </Button>
-                  </div>
-                )}
+                    </>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {canManageAcceptance && (
-                <div className="grid gap-2 sm:hidden">
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button size="sm" variant="secondary" onClick={() => openReceptionForm('shipping')}>
-                      <Upload className="h-4 w-4" />
-                      Отгрузка
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => openReceptionForm('receiving')}>
-                      <Camera className="h-4 w-4" />
-                      Приёмка
-                    </Button>
-                  </div>
+              <div className="grid gap-2 sm:hidden">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void handleDownloadShippingPhotosZip()}
+                  disabled={shippingPhotos.length === 0 || isDownloadingPhotoZip}
+                >
+                  <Download className="h-4 w-4" />
+                  {isDownloadingPhotoZip ? 'Собираем ZIP...' : 'Скачать ZIP'}
+                </Button>
+                {canManageAcceptance && (
+                  <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openReceptionForm('shipping')}
+                  >
+                    <Upload className="h-4 w-4" />
+                    Отгрузка
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => openReceptionForm('receiving')}>
+                    <Camera className="h-4 w-4" />
+                    Приёмка
+                  </Button>
                   <Button size="sm" variant="secondary" onClick={() => setShowUploadPhotoForm(v => !v)}>
                     <Plus className="h-4 w-4" />
                     Загрузить фото/акт
                   </Button>
-                </div>
-              )}
+                  </>
+                )}
+              </div>
               {(latestShippingEvent || latestReceivingEvent) && (
                 <div className="grid gap-4 lg:grid-cols-2">
                   {[latestShippingEvent, latestReceivingEvent].filter(Boolean).map(event => {

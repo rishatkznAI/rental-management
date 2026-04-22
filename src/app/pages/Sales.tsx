@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, Navigate } from 'react-router-dom';
-import { Search, Tag } from 'lucide-react';
-import { Badge, getEquipmentStatusBadge } from '../components/ui/badge';
+import { Plus, Search, Tag } from 'lucide-react';
+import { Badge } from '../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -19,6 +19,14 @@ function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
     ready: 'success',
   };
   return <Badge variant={variants[status]}>{EQUIPMENT_SALE_PDI_LABELS[status]}</Badge>;
+}
+
+function getSaleReadinessBadge(status: EquipmentSalePdiStatus = 'not_started') {
+  return (
+    <Badge variant={status === 'ready' ? 'success' : 'warning'}>
+      {status === 'ready' ? 'PDI готов' : 'PDI не готов'}
+    </Badge>
+  );
 }
 
 export default function Sales() {
@@ -75,11 +83,21 @@ export default function Sales() {
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Продажи</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Наличие техники на продажу для менеджера с PDI и тремя уровнями цены.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Продажи</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Наличие техники на продажу для менеджера с PDI и тремя уровнями цены.
+          </p>
+        </div>
+        {can('create', 'equipment') && (
+          <Link to="/equipment/new">
+            <Button className="app-button-primary h-10 rounded-xl px-4">
+              <Plus className="h-4 w-4" />
+              Добавить технику
+            </Button>
+          </Link>
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
@@ -199,7 +217,7 @@ export default function Sales() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-amber-700 dark:text-amber-300">{equipment.manufacturer} {equipment.model}</span>
               {getSalePdiBadge(equipment.salePdiStatus)}
-              {getEquipmentStatusBadge(equipment.status)}
+              {getSaleReadinessBadge(equipment.salePdiStatus)}
             </div>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Инв.№: {equipment.inventoryNumber || '—'} · SN: {equipment.serialNumber || 'не указан'}
@@ -229,7 +247,7 @@ export default function Sales() {
             <TableRow>
               <TableHead>Техника</TableHead>
               <TableHead>PDI</TableHead>
-              <TableHead>Статус</TableHead>
+              <TableHead>Готовность</TableHead>
               <TableHead>Локация</TableHead>
               <TableHead>Цена 1</TableHead>
               <TableHead>Цена 2</TableHead>
@@ -247,7 +265,7 @@ export default function Sales() {
                   <p className="text-xs text-gray-500 dark:text-gray-400">SN: {equipment.serialNumber || 'не указан'}</p>
                 </TableCell>
                 <TableCell>{getSalePdiBadge(equipment.salePdiStatus)}</TableCell>
-                <TableCell>{getEquipmentStatusBadge(equipment.status)}</TableCell>
+                <TableCell>{getSaleReadinessBadge(equipment.salePdiStatus)}</TableCell>
                 <TableCell className="text-gray-700 dark:text-gray-300">{equipment.location}</TableCell>
                 <TableCell className="font-medium text-gray-700 dark:text-gray-200">{formatCurrency(equipment.salePrice1 ?? 0)}</TableCell>
                 <TableCell className="font-medium text-gray-700 dark:text-gray-200">{formatCurrency(equipment.salePrice2 ?? 0)}</TableCell>

@@ -336,6 +336,19 @@ export interface Document {
   contentHtml?: string;
 }
 
+export interface MechanicDocument {
+  id: string;
+  mechanicId: string;
+  mechanicName: string;
+  title: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+  uploadedBy?: string;
+  dataUrl: string;
+}
+
 export type PaymentStatus = 'pending' | 'paid' | 'overdue' | 'partial';
 
 export interface Payment {

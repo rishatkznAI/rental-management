@@ -35,6 +35,7 @@ function createBotHandlers(deps) {
     chunkButtons,
     authKeyboard,
     mechanicKeyboard,
+    rentalManagerKeyboard,
     currentRepairKeyboard,
     operationsKeyboard,
     repairActionsKeyboard,
@@ -134,6 +135,214 @@ function createBotHandlers(deps) {
       ? `\n\nБыстро:\n${lines.map(line => `• ${line}`).join('\n')}`
       : '';
     return `${text}${footer}`;
+  }
+
+  function managerSummaryKeyboard() {
+    return rentalManagerKeyboard();
+  }
+
+  function createDeliveryTypeKeyboard() {
+    return keyboard([
+      [button('Отгрузка', 'deliverycreate:type:shipping'), button('Приёмка', 'deliverycreate:type:receiving')],
+      [button('Отмена', 'deliverycreate:cancel')],
+    ]);
+  }
+
+  function createDeliverySkipKeyboard() {
+    return keyboard([
+      [button('Пропустить', 'deliverycreate:skip_comment')],
+      [button('Отмена', 'deliverycreate:cancel')],
+    ]);
+  }
+
+  function normalizeBotDateInput(value) {
+    const trimmed = String(value || '').trim().toLowerCase();
+    if (!trimmed) return '';
+    if (trimmed === 'сегодня') return new Date().toISOString().slice(0, 10);
+    if (trimmed === 'завтра') {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return tomorrow.toISOString().slice(0, 10);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    return '';
+  }
+
+  function deliveryTypeLabel(type) {
+    return type === 'receiving' ? 'Приёмка' : 'Отгрузка';
+  }
+
+  function getManagerSummaryData(managerName) {
+    const rentals = readData('gantt_rentals') || [];
+    const payments = readData('payments') || [];
+    const equipment = readData('equipment') || [];
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const managerRentals = rentals.filter(item => item.manager === managerName);
+    const activeRentals = managerRentals.filter(item => item.status === 'active');
+    const monthRentals = managerRentals.filter(item => {
+      const start = new Date(item.startDate || '');
+      return Number.isFinite(start.getTime()) && start >= monthStart;
+    });
+
+    const paidByRentalId = new Map();
+    payments.forEach(payment => {
+      if (!payment?.rentalId) return;
+      paidByRentalId.set(
+        payment.rentalId,
+        (paidByRentalId.get(payment.rentalId) || 0) + (typeof payment.paidAmount === 'number' ? payment.paidAmount : payment.amount || 0),
+      );
+    });
+
+    const currentDebt = managerRentals.reduce((sum, rental) => {
+      const paid = paidByRentalId.get(rental.id) || 0;
+      return sum + Math.max(0, Number(rental.amount || 0) - paid);
+    }, 0);
+
+    const freeEquipment = equipment.filter(item => item.status === 'available');
+    return {
+      activeRentals,
+      monthTurnover: monthRentals.reduce((sum, rental) => sum + Number(rental.amount || 0), 0),
+      currentDebt,
+      freeEquipment,
+    };
+  }
+
+  function buildManagerMorningSummaryMessage(authUser) {
+    const { activeRentals, monthTurnover, currentDebt, freeEquipment } = getManagerSummaryData(authUser.userName);
+    const freeLines = freeEquipment.slice(0, 8).map(item => `• ${formatEquipmentForBot(item)}`);
+
+    return [
+      `🌅 Доброе утро, ${authUser.userName}!`,
+      '',
+      `Сейчас в аренде у вас: ${activeRentals.length}`,
+      `Дебиторка: ${currentDebt.toLocaleString('ru-RU')} ₽`,
+      `Оборот за месяц: ${monthTurnover.toLocaleString('ru-RU')} ₽`,
+      `Свободная техника: ${freeEquipment.length}`,
+      '',
+      freeLines.length ? ['Свободные единицы:', ...freeLines].join('\n') : 'Свободной техники сейчас нет.',
+    ].join('\n');
+  }
+
+  function createDeliveryFromBot(authUser, draft) {
+    const deliveries = readData('deliveries') || [];
+    const delivery = {
+      id: generateId(idPrefixes.deliveries),
+      type: draft.type === 'receiving' ? 'receiving' : 'shipping',
+      status: 'new',
+      transportDate: draft.transportDate,
+      neededBy: draft.transportDate,
+      origin: draft.origin,
+      destination: draft.destination,
+      cargo: draft.cargo,
+      contactName: draft.contactName,
+      contactPhone: draft.contactPhone,
+      cost: 0,
+      comment: draft.comment || '',
+      client: draft.client,
+      clientId: null,
+      manager: authUser.userName,
+      carrierKey: null,
+      carrierName: null,
+      carrierPhone: null,
+      carrierChatId: null,
+      carrierUserId: null,
+      ganttRentalId: null,
+      classicRentalId: null,
+      equipmentId: null,
+      equipmentInv: null,
+      equipmentLabel: null,
+      botSentAt: null,
+      botSendError: null,
+      carrierInvoiceReceived: false,
+      carrierInvoiceReceivedAt: null,
+      clientPaymentVerified: false,
+      clientPaymentVerifiedAt: null,
+      completedAt: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      createdBy: authUser.userName,
+    };
+    deliveries.push(delivery);
+    writeData('deliveries', deliveries);
+    return delivery;
+  }
+
+  function deliveryStatusLabel(status) {
+    const map = {
+      new: 'Новая',
+      sent: 'Отправлена',
+      accepted: 'Принята',
+      in_transit: 'Выехал',
+      completed: 'Выполнена',
+      cancelled: 'Отменена',
+    };
+    return map[status] || status;
+  }
+
+  function deliveryStatusKeyboard(delivery) {
+    if (!delivery || delivery.status === 'completed' || delivery.status === 'cancelled') return null;
+    if (delivery.status === 'accepted') {
+      return keyboard([
+        [button('Выехал', `delivery:status:${delivery.id}:in_transit`)],
+      ]);
+    }
+    if (delivery.status === 'in_transit') {
+      return keyboard([
+        [button('Доставлено', `delivery:status:${delivery.id}:completed`)],
+      ]);
+    }
+    return keyboard([
+      [button('Принял', `delivery:status:${delivery.id}:accepted`)],
+    ]);
+  }
+
+  function formatDeliveryStatusMessage(delivery) {
+    return [
+      delivery.type === 'shipping' ? '🚚 Заявка на отгрузку' : '📥 Заявка на приёмку',
+      `Статус: ${deliveryStatusLabel(delivery.status)}`,
+      `Дата перевозки: ${delivery.transportDate}`,
+      delivery.neededBy ? `Когда нужно: ${delivery.neededBy}` : null,
+      `Маршрут: ${delivery.origin} → ${delivery.destination}`,
+      `Что перевозим: ${delivery.cargo}`,
+      `Клиент: ${delivery.client}`,
+      `Контакт: ${delivery.contactName} · ${delivery.contactPhone}`,
+      delivery.cost > 0 ? `Стоимость: ${delivery.cost.toLocaleString('ru-RU')} ₽` : null,
+      delivery.comment ? `Комментарий: ${delivery.comment}` : null,
+    ].filter(Boolean).join('\n');
+  }
+
+  function updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName) {
+    const deliveries = readData('deliveries') || [];
+    const index = deliveries.findIndex(item => item.id === deliveryId);
+    if (index === -1) return null;
+    const current = deliveries[index];
+    const allowedTransitions = {
+      sent: ['accepted'],
+      accepted: ['in_transit'],
+      in_transit: ['completed'],
+      new: ['accepted'],
+    };
+    const currentAllowed = allowedTransitions[current.status] || [];
+    if (!currentAllowed.includes(nextStatus) && current.status !== nextStatus) {
+      return { delivery: current, changed: false, invalid: true };
+    }
+    const timestamp = nowIso();
+    const delivery = {
+      ...current,
+      status: nextStatus,
+      updatedAt: timestamp,
+      completedAt: nextStatus === 'completed' ? (current.completedAt || timestamp) : null,
+      comment: [
+        String(current.comment || '').trim(),
+        `[${new Date().toLocaleString('ru-RU')}] Статус через MAX: ${deliveryStatusLabel(nextStatus)} (${actorName})`,
+      ].filter(Boolean).join('\n'),
+    };
+    deliveries[index] = delivery;
+    writeData('deliveries', deliveries);
+    return { delivery, changed: current.status !== nextStatus, invalid: false };
   }
 
   async function handleBotStarted(senderId, phone, payload) {
@@ -338,7 +547,11 @@ function createBotHandlers(deps) {
     if (!matches.length) {
       updateBotSession(phone, {
         pendingAction: 'equipment_search',
-        pendingPayload: flow === 'photo_event' ? { flow, photoEventType } : null,
+        pendingPayload: flow === 'photo_event'
+          ? { flow, photoEventType }
+          : flow === 'service_ticket'
+            ? { flow: 'service_ticket' }
+            : null,
       });
       return sendMessage(
         senderId,
@@ -355,10 +568,15 @@ function createBotHandlers(deps) {
         serialNumber: item.serialNumber,
         model: item.model,
       })),
-      pendingAction: flow === 'photo_event' ? 'equipment_search' : 'equipment_action_menu',
-      pendingPayload: flow === 'photo_event' ? { flow, photoEventType } : null,
+      pendingAction: flow === 'photo_event' || flow === 'service_ticket' ? 'equipment_search' : 'equipment_action_menu',
+      pendingPayload: flow === 'photo_event'
+        ? { flow, photoEventType }
+        : flow === 'service_ticket'
+          ? { flow: 'service_ticket' }
+          : null,
     });
     const isPhotoFlow = flow === 'photo_event';
+    const isServiceTicketFlow = flow === 'service_ticket';
     return reply(senderId, withBotMenu([
       '🚜 Найденная техника:',
       ...matches.map((item, index) => `${index + 1}. ${formatEquipmentForBot(item)}`),
@@ -366,7 +584,9 @@ function createBotHandlers(deps) {
       'Можно нажать кнопку с техникой ниже.',
       isPhotoFlow
         ? `После выбора начнётся пошаговая ${photoEventType === 'shipping' ? 'отгрузка' : 'приёмка'}.`
-        : 'После выбора откроется меню действий по технике.',
+        : isServiceTicketFlow
+          ? 'После выбора бот попросит написать причину сервисной заявки.'
+          : 'После выбора откроется меню действий по технике.',
     ].join('\n'), ['новый поиск: найти технику', 'отмена: /сброс']), {
       attachments: equipmentSearchKeyboard(matches),
       phone,
@@ -904,6 +1124,80 @@ function createBotHandlers(deps) {
       });
     }
 
+    if (normalized === 'deliverycreate:cancel') {
+      resetBotFlow(phone);
+      const authUser = getAuthorizedUser(String(phone));
+      return reply(senderId, '❎ Создание доставки отменено.', {
+        attachments: authUser?.userRole === 'Менеджер по аренде' ? managerSummaryKeyboard() : defaultKeyboardForRole(authUser?.userRole || ''),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('deliverycreate:type:')) {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const type = normalized.slice('deliverycreate:type:'.length);
+      updateBotSession(phone, {
+        pendingAction: 'manager_delivery_date',
+        pendingPayload: {
+          managerDeliveryDraft: {
+            type: type === 'receiving' ? 'receiving' : 'shipping',
+          },
+        },
+      });
+      return reply(senderId, `🚚 ${deliveryTypeLabel(type)}\n\nНапишите дату перевозки в формате ГГГГ-ММ-ДД.\nМожно просто написать: сегодня или завтра.`, {
+        attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized === 'deliverycreate:skip_comment') {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const draft = getBotSession(phone).pendingPayload?.managerDeliveryDraft || null;
+      if (!draft) {
+        resetBotFlow(phone);
+        return reply(senderId, '❌ Черновик доставки не найден. Начните заново.', {
+          attachments: managerSummaryKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const delivery = createDeliveryFromBot(authUser, draft);
+      resetBotFlow(phone);
+      return reply(senderId, withBotMenu([
+        `✅ Доставка создана: ${delivery.id}`,
+        `${deliveryTypeLabel(delivery.type)} · ${delivery.transportDate}`,
+        `${delivery.origin} → ${delivery.destination}`,
+        `Груз: ${delivery.cargo}`,
+        `Клиент: ${delivery.client}`,
+      ].join('\n'), ['моя сводка', 'аренды', 'новая доставка']), {
+        attachments: managerSummaryKeyboard(),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
     if (normalized === 'menu:cancel_photo_event') {
       const activeOperationId = getBotSession(phone).pendingPayload?.operationSessionId;
       if (activeOperationId) {
@@ -983,16 +1277,17 @@ function createBotHandlers(deps) {
     }
 
     if (normalized === 'menu:new_ticket') {
+      const authUser = getAuthorizedUser(String(phone));
       updateBotSession(phone, {
         pendingAction: 'equipment_search',
-        pendingPayload: null,
+        pendingPayload: { flow: 'service_ticket' },
         lastEquipmentSearch: [],
       });
       return reply(
         senderId,
         '🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.',
         {
-          attachments: mechanicKeyboard(),
+          attachments: defaultKeyboardForRole(authUser?.userRole || ''),
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1204,6 +1499,8 @@ function createBotHandlers(deps) {
       'menu:myrepairs': '/моизаявки',
       'menu:new_ticket': '/новаязаявка',
       'menu:find_equipment': '/найтитехнику',
+      'menu:manager_summary': '/моясводка',
+      'menu:new_delivery': '/новаядоставка',
       'menu:shipout': '/отгрузка',
       'menu:receivein': '/приёмка',
       'menu:draft': '/черновик',
@@ -1220,6 +1517,36 @@ function createBotHandlers(deps) {
     if (normalized.startsWith('ticket:open:')) {
       const ticketId = normalized.slice('ticket:open:'.length);
       return handleCommand(senderId, phone, `/ремонт ${ticketId}`, {}, { callbackContext, replaceMessage: true });
+    }
+
+    if (normalized.startsWith('delivery:status:')) {
+      const [, , deliveryId, nextStatus] = normalized.split(':');
+      const authUser = getAuthorizedUser(String(phone));
+      const actorName = authUser?.userName || 'Перевозчик';
+      const result = updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName);
+      if (!result) {
+        return reply(senderId, '❌ Доставка не найдена.', {
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      if (result.invalid) {
+        return reply(senderId, formatDeliveryStatusMessage(result.delivery), {
+          attachments: deliveryStatusKeyboard(result.delivery),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+          notification: 'Статус нельзя изменить этим шагом',
+        });
+      }
+      return reply(senderId, formatDeliveryStatusMessage(result.delivery), {
+        attachments: deliveryStatusKeyboard(result.delivery),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+        notification: result.changed ? `Статус: ${deliveryStatusLabel(result.delivery.status)}` : 'Статус уже установлен',
+      });
     }
 
     if (normalized.startsWith('ticket:take:')) {
@@ -1317,8 +1644,9 @@ function createBotHandlers(deps) {
       const equipmentId = normalized.slice('equipment:choose:'.length);
       const equipment = (readData('equipment') || []).find(item => item.id === equipmentId);
       if (!equipment) {
+        const authUser = getAuthorizedUser(String(phone));
         return reply(senderId, '❌ Техника больше не найдена. Выполните поиск заново.', {
-          attachments: mechanicKeyboard(),
+          attachments: defaultKeyboardForRole(authUser?.userRole || ''),
         });
       }
       const flow = getBotSession(phone).pendingPayload?.flow;
@@ -1334,6 +1662,22 @@ function createBotHandlers(deps) {
           });
         }
         return startEquipmentOperationRequest(senderId, phone, authUser, equipment, photoEventType, { callbackContext });
+      }
+      if (flow === 'service_ticket') {
+        updateBotSession(phone, {
+          pendingAction: 'ticket_reason',
+          pendingPayload: { selectedEquipmentId: equipment.id },
+        });
+        return reply(
+          senderId,
+          `🛠 ${formatEquipmentForBot(equipment)}\n\nНапишите причину сервисной заявки следующим сообщением.`,
+          {
+            attachments: keyboard([backAndMainRow('menu:new_ticket')]),
+            phone,
+            callbackContext,
+            replaceMessage: true,
+          },
+        );
       }
 
       updateBotSession(phone, {
@@ -1748,16 +2092,18 @@ function createBotHandlers(deps) {
 
     const { userName, userRole } = authUser;
     const canManageRepair = userRole === 'Механик' || userRole === 'Администратор';
+    const canCreateServiceRequest = canManageRepair || userRole === 'Менеджер по аренде' || userRole === 'Офис-менеджер';
+    const isRentalManager = userRole === 'Менеджер по аренде';
 
-    if (!trimmed.startsWith('/') && canManageRepair) {
+    if (!trimmed.startsWith('/')) {
       const currentTicket = getCurrentRepair(phone);
-      if (session.pendingAction === 'equipment_search') {
+      if (session.pendingAction === 'equipment_search' && canCreateServiceRequest) {
         return handleEquipmentSearchRequest(senderId, phone, trimmed, uiContext);
       }
-      if (session.pendingAction === 'ticket_reason') {
+      if (session.pendingAction === 'ticket_reason' && canCreateServiceRequest) {
         return handleCreateTicketRequest(senderId, phone, authUser, trimmed, uiContext);
       }
-      if (session.pendingAction === 'maintenance_summary') {
+      if (session.pendingAction === 'maintenance_summary' && canManageRepair) {
         const equipmentId = session.pendingPayload?.selectedEquipmentId;
         const maintenanceKind = session.pendingPayload?.maintenanceKind;
         const equipment = (readData('equipment') || []).find(item => item.id === equipmentId);
@@ -1783,6 +2129,154 @@ function createBotHandlers(deps) {
           callbackContext: uiContext.callbackContext,
           replaceMessage: Boolean(uiContext.callbackContext),
           cleanupPrevious: !uiContext.callbackContext,
+        });
+      }
+      if (session.pendingAction === 'manager_delivery_date' && isRentalManager) {
+        const transportDate = normalizeBotDateInput(trimmed);
+        if (!transportDate) {
+          return reply(senderId, '❌ Укажите дату в формате ГГГГ-ММ-ДД. Можно написать: сегодня или завтра.', {
+            attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+            phone,
+            callbackContext: uiContext.callbackContext,
+            replaceMessage: Boolean(uiContext.callbackContext),
+          });
+        }
+        updateBotSession(phone, {
+          pendingAction: 'manager_delivery_cargo',
+          pendingPayload: {
+            managerDeliveryDraft: {
+              ...(session.pendingPayload?.managerDeliveryDraft || {}),
+              transportDate,
+            },
+          },
+        });
+        return reply(senderId, '📦 Напишите, что нужно перевезти.', {
+          attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      if (session.pendingAction === 'manager_delivery_cargo' && isRentalManager) {
+        updateBotSession(phone, {
+          pendingAction: 'manager_delivery_client',
+          pendingPayload: {
+            managerDeliveryDraft: {
+              ...(session.pendingPayload?.managerDeliveryDraft || {}),
+              cargo: trimmed,
+            },
+          },
+        });
+        return reply(senderId, '🏢 Напишите название клиента.', {
+          attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      if (session.pendingAction === 'manager_delivery_client' && isRentalManager) {
+        updateBotSession(phone, {
+          pendingAction: 'manager_delivery_origin',
+          pendingPayload: {
+            managerDeliveryDraft: {
+              ...(session.pendingPayload?.managerDeliveryDraft || {}),
+              client: trimmed,
+            },
+          },
+        });
+        return reply(senderId, '📍 Напишите точку отправления.', {
+          attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      if (session.pendingAction === 'manager_delivery_origin' && isRentalManager) {
+        updateBotSession(phone, {
+          pendingAction: 'manager_delivery_destination',
+          pendingPayload: {
+            managerDeliveryDraft: {
+              ...(session.pendingPayload?.managerDeliveryDraft || {}),
+              origin: trimmed,
+            },
+          },
+        });
+        return reply(senderId, '📍 Напишите точку назначения.', {
+          attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      if (session.pendingAction === 'manager_delivery_destination' && isRentalManager) {
+        updateBotSession(phone, {
+          pendingAction: 'manager_delivery_contact_name',
+          pendingPayload: {
+            managerDeliveryDraft: {
+              ...(session.pendingPayload?.managerDeliveryDraft || {}),
+              destination: trimmed,
+            },
+          },
+        });
+        return reply(senderId, '👤 Напишите контактное лицо.', {
+          attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      if (session.pendingAction === 'manager_delivery_contact_name' && isRentalManager) {
+        updateBotSession(phone, {
+          pendingAction: 'manager_delivery_contact_phone',
+          pendingPayload: {
+            managerDeliveryDraft: {
+              ...(session.pendingPayload?.managerDeliveryDraft || {}),
+              contactName: trimmed,
+            },
+          },
+        });
+        return reply(senderId, '📞 Напишите контактный телефон.', {
+          attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      if (session.pendingAction === 'manager_delivery_contact_phone' && isRentalManager) {
+        updateBotSession(phone, {
+          pendingAction: 'manager_delivery_comment',
+          pendingPayload: {
+            managerDeliveryDraft: {
+              ...(session.pendingPayload?.managerDeliveryDraft || {}),
+              contactPhone: trimmed,
+            },
+          },
+        });
+        return reply(senderId, '📝 Напишите комментарий к доставке или нажмите «Пропустить».', {
+          attachments: createDeliverySkipKeyboard(),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      if (session.pendingAction === 'manager_delivery_comment' && isRentalManager) {
+        const draft = {
+          ...(session.pendingPayload?.managerDeliveryDraft || {}),
+          comment: trimmed,
+        };
+        const delivery = createDeliveryFromBot(authUser, draft);
+        resetBotFlow(phone);
+        return reply(senderId, withBotMenu([
+          `✅ Доставка создана: ${delivery.id}`,
+          `${deliveryTypeLabel(delivery.type)} · ${delivery.transportDate}`,
+          `${delivery.origin} → ${delivery.destination}`,
+          `Груз: ${delivery.cargo}`,
+          `Клиент: ${delivery.client}`,
+        ].join('\n'), ['моя сводка', 'аренды', 'новая доставка']), {
+          attachments: managerSummaryKeyboard(),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
         });
       }
       if (session.pendingAction === 'work_search') {
@@ -1851,19 +2345,21 @@ function createBotHandlers(deps) {
       });
     }
 
-    if ((lower === '/меню' || lower === 'меню') && canManageRepair) {
+    if ((lower === '/меню' || lower === 'меню')) {
       return replyWithUi(getMainMenuText(authUser), {
         attachments: defaultKeyboardForRole(userRole),
       });
     }
 
-    if ((lower === '/новаязаявка' || lower === 'новая заявка' || lower === 'создать заявку') && canManageRepair) {
+    if ((lower === '/новаязаявка' || lower === 'новая заявка' || lower === 'создать заявку') && canCreateServiceRequest) {
       updateBotSession(phone, {
         pendingAction: 'equipment_search',
-        pendingPayload: null,
+        pendingPayload: { flow: 'service_ticket' },
         lastEquipmentSearch: [],
       });
-      return replyWithUi('🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.');
+      return replyWithUi('🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.', {
+        attachments: defaultKeyboardForRole(userRole),
+      });
     }
 
     if ((lower === '/отгрузка' || lower === 'отгрузка') && canManageRepair) {
@@ -1888,18 +2384,37 @@ function createBotHandlers(deps) {
       });
     }
 
-    if ((lower.startsWith('/найтитехнику') || lower.startsWith('/техпоиск')) && canManageRepair) {
+    if ((lower.startsWith('/найтитехнику') || lower.startsWith('/техпоиск')) && canCreateServiceRequest) {
       const command = lower.startsWith('/техпоиск') ? '/техпоиск' : '/найтитехнику';
       const query = trimmed.slice(command.length).trim();
       if (!query) {
-        updateBotSession(phone, { pendingAction: 'equipment_search', pendingPayload: null });
-        return replyWithUi('🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.');
+        updateBotSession(phone, { pendingAction: 'equipment_search', pendingPayload: { flow: 'service_ticket' } });
+        return replyWithUi('🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.', {
+          attachments: defaultKeyboardForRole(userRole),
+        });
       }
       return handleEquipmentSearchRequest(senderId, phone, query, uiContext);
     }
 
-    if (lower.startsWith('/создатьзаявку ') && canManageRepair) {
+    if (lower.startsWith('/создатьзаявку ') && canCreateServiceRequest) {
       return handleCreateTicketRequest(senderId, phone, authUser, trimmed.slice('/создатьзаявку'.length).trim(), uiContext);
+    }
+
+    if ((lower === '/моясводка' || lower === 'моя сводка') && isRentalManager) {
+      return replyWithUi(withBotMenu(buildManagerMorningSummaryMessage(authUser), ['мои аренды', 'свободная техника', 'новая доставка']), {
+        attachments: managerSummaryKeyboard(),
+      });
+    }
+
+    if ((lower === '/новаядоставка' || lower === 'новая доставка') && isRentalManager) {
+      resetBotFlow(phone);
+      updateBotSession(phone, {
+        pendingAction: 'manager_delivery_type',
+        pendingPayload: { managerDeliveryDraft: {} },
+      });
+      return replyWithUi('🚚 Выберите тип доставки.', {
+        attachments: createDeliveryTypeKeyboard(),
+      });
     }
 
     if (lower.startsWith('/вработу ') && canManageRepair) {
@@ -1969,7 +2484,7 @@ function createBotHandlers(deps) {
       });
     }
 
-    if (lower === '/сброс' && canManageRepair) {
+    if (lower === '/сброс' && (canManageRepair || isRentalManager || canCreateServiceRequest)) {
       const operationId = getBotSession(phone).pendingPayload?.operationSessionId;
       if (operationId) {
         const operation = getOperationSessionById(operationId);
@@ -1983,9 +2498,11 @@ function createBotHandlers(deps) {
       }
       clearBotSession(phone);
       return replyWithUi(
-        '🧹 Текущая заявка сброшена. Выберите новую из списка ниже или откройте /моизаявки.',
+        isRentalManager
+          ? '🧹 Текущий сценарий сброшен. Можно снова открыть сводку, аренды или создать новую доставку.'
+          : '🧹 Текущая заявка сброшена. Выберите новую из списка ниже или откройте /моизаявки.',
         {
-          attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
+          attachments: isRentalManager ? managerSummaryKeyboard() : (serviceTicketsKeyboard(authUser) || mechanicKeyboard()),
         },
       );
     }
@@ -2112,6 +2629,8 @@ function createBotHandlers(deps) {
 
   return {
     withBotMenu,
+    buildManagerMorningSummaryMessage,
+    getDefaultKeyboardForRole: defaultKeyboardForRole,
     handleBotStarted,
     handleCommand,
     handleCallback,

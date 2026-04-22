@@ -44,6 +44,14 @@ function createBotUi() {
     ]);
   }
 
+  function rentalManagerKeyboard() {
+    return keyboard([
+      [button('Мои аренды', 'menu:rentals'), button('Свободная техника', 'menu:equipment')],
+      [button('Моя сводка', 'menu:manager_summary'), button('Новая доставка', 'menu:new_delivery')],
+      [button('Новая сервисная', 'menu:new_ticket'), button('Помощь', 'menu:help')],
+    ]);
+  }
+
   function currentRepairKeyboard(ticketId = '') {
     return keyboard([
       [button('Текущий отчёт', 'menu:draft'), button('Действия по заявке', 'menu:repair_actions')],
@@ -219,6 +227,9 @@ function createBotUi() {
     if (role === 'Механик' || role === 'Администратор') {
       return mechanicKeyboard();
     }
+    if (role === 'Менеджер по аренде') {
+      return rentalManagerKeyboard();
+    }
     return keyboard([
       [button('Аренды', 'menu:rentals'), button('Техника', 'menu:equipment')],
       [button('Сервис', 'menu:service'), button('Помощь', 'menu:help')],
@@ -232,6 +243,7 @@ function createBotUi() {
     chunkButtons,
     authKeyboard,
     mechanicKeyboard,
+    rentalManagerKeyboard,
     currentRepairKeyboard,
     operationsKeyboard,
     repairActionsKeyboard,

@@ -654,6 +654,8 @@ const {
   handleBotStarted,
   handleCommand,
   handleCallback,
+  buildManagerMorningSummaryMessage,
+  getDefaultKeyboardForRole,
 } = createBotHandlers({
   readData,
   writeData,
@@ -679,6 +681,66 @@ const {
   getOpenTicketByEquipment,
   serviceStatusLabel,
 });
+
+function getMoscowDateParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Moscow',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter(part => part.type !== 'literal')
+      .map(part => [part.type, part.value]),
+  );
+  return {
+    dateKey: `${parts.year}-${parts.month}-${parts.day}`,
+    hour: Number(parts.hour || 0),
+    minute: Number(parts.minute || 0),
+  };
+}
+
+async function sendRentalManagerMorningDigests() {
+  const { dateKey, hour, minute } = getMoscowDateParts();
+  if (hour !== 8 || minute >= 15) return;
+
+  const botUsers = getBotUsers();
+  let changed = false;
+
+  for (const [phone, user] of Object.entries(botUsers)) {
+    if (!user || user.userRole !== 'Менеджер по аренде') continue;
+    if (!user.replyTarget) continue;
+    if (user.lastManagerDigestDate === dateKey) continue;
+
+    try {
+      await sendMessage(user.replyTarget, buildManagerMorningSummaryMessage(user), {
+        attachments: getDefaultKeyboardForRole(user.userRole),
+      });
+      botUsers[phone] = {
+        ...user,
+        lastManagerDigestDate: dateKey,
+      };
+      changed = true;
+    } catch (error) {
+      console.error('[BOT] Не удалось отправить утреннюю сводку менеджеру по аренде', user.userName || phone, error?.message || error);
+    }
+  }
+
+  if (changed) {
+    saveBotUsers(botUsers);
+  }
+}
+
+setInterval(() => {
+  sendRentalManagerMorningDigests().catch(error => {
+    console.error('[BOT] Ошибка утренней рассылки менеджерам по аренде', error?.message || error);
+  });
+}, 10 * 60_000);
 
 const BOT_ACTIVITY_LIMIT = 2000;
 

@@ -396,6 +396,7 @@ function createBotFormatters(deps) {
 
   function getHelpText(role) {
     const isMechanic = role === 'Механик' || role === 'Администратор';
+    const isRentalManager = role === 'Менеджер по аренде';
     const mechanicLines = [
       '/моизаявки — мои сервисные заявки',
       '/новаязаявка — создать новую заявку',
@@ -412,6 +413,14 @@ function createBotFormatters(deps) {
       '/мойдень — отчёт механика за день',
     ];
 
+    const rentalManagerLines = [
+      '/моясводка — утренняя сводка по арендам',
+      '/новаядоставка — создать заявку на доставку',
+      '/новаязаявка — создать сервисную заявку',
+      '/аренды — ваши активные аренды',
+      '/техника — свободная техника',
+    ];
+
     const commonLines = [
       '/аренды — активные аренды',
       '/техника — свободная техника',
@@ -424,6 +433,7 @@ function createBotFormatters(deps) {
       '📘 Доступные команды:',
       '',
       ...(isMechanic ? mechanicLines : []),
+      ...(isRentalManager ? rentalManagerLines : []),
       ...commonLines,
       '',
       'Полный список команд доступен по кнопке «Помощь».',
@@ -436,6 +446,14 @@ function createBotFormatters(deps) {
         `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
         '',
         'Выберите действие кнопками ниже.',
+      ].join('\n');
+    }
+
+    if (authUser.userRole === 'Менеджер по аренде') {
+      return [
+        `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
+        '',
+        'Доступны аренды, свободная техника, утренняя сводка и быстрые заявки в доставку и сервис.',
       ].join('\n');
     }
 

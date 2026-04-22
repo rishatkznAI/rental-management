@@ -422,7 +422,7 @@ function createBotHandlers(deps) {
         `Причина: ${existingOpenTicket.reason}`,
         '',
         'Я открыл её как текущую.',
-      ].join('\n'), ['черновик', 'работы гидравлика', 'запчасти фильтр', 'готово', 'закрыть']), {
+      ].join('\n'), ['черновик', 'работы гидравлика', 'запчасти фильтр', 'готово']), {
         attachments: currentRepairKeyboard(existingOpenTicket.id),
         phone,
         callbackContext: uiContext.callbackContext,
@@ -616,7 +616,7 @@ function createBotHandlers(deps) {
       ...matches.map((item, index) => `${index + 1}. ${item.name}${item.category ? ` · ${item.category}` : ''} · ${Number(item.normHours || 0).toLocaleString('ru-RU')} н/ч`),
       '',
       query
-        ? 'Нажмите кнопку с работой ниже, чтобы сразу выбрать количество.'
+        ? 'Нажмите кнопку с работой ниже, чтобы сразу добавить её в заявку.'
         : 'Показываю популярные работы. Можно сразу нажать кнопку или выполнить новый текстовый поиск.',
     ].join('\n'), ['новый поиск работ', 'черновик', 'отмена: /сброс']), {
       attachments: workSearchKeyboard(matches),
@@ -665,22 +665,18 @@ function createBotHandlers(deps) {
     if (!selectedWorkId && firstRaw && Number.isNaN(Number(firstRaw))) {
       return handleWorkSearchRequest(senderId, phone, ticket, selectionText.trim(), uiContext);
     }
-    const quantity = Number(selectedWorkId ? firstRaw : secondRaw);
+    const quantity = selectedWorkId ? 1 : Number(secondRaw);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       if (selectedWorkId) {
-        return reply(
-          senderId,
-          '❌ Для выбранной работы напишите количество одним числом. Например: 2. Если хотите найти другую работу, нажмите «Новый поиск работ».',
-          {
-            attachments: currentRepairKeyboard(ticket.id),
-            phone,
-            callbackContext: uiContext.callbackContext,
-            replaceMessage: Boolean(uiContext.callbackContext),
-            cleanupPrevious: !uiContext.callbackContext,
-          },
-        );
+        return reply(senderId, '❌ Не удалось определить выбранную работу. Нажмите кнопку работы ещё раз или выполните новый поиск.', {
+          attachments: currentRepairKeyboard(ticket.id),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+          cleanupPrevious: !uiContext.callbackContext,
+        });
       }
-      return reply(senderId, '❌ Формат такой: НОМЕР КОЛИЧЕСТВО. Например: 1 2. Или просто напишите новый поисковый запрос.');
+      return reply(senderId, '❌ Формат такой: НОМЕР РАБОТЫ. Например: 1. Или просто напишите новый поисковый запрос.');
     }
     let work = null;
 
@@ -699,10 +695,10 @@ function createBotHandlers(deps) {
       return reply(senderId, '❌ Работа больше недоступна в справочнике. Выполните поиск заново.');
     }
     addRepairWorkItemFromCatalog(ticket, work, quantity, authUser);
-    const updated = appendServiceLog(ticket, `Добавлена работа через MAX: ${work.name} × ${quantity}`, authUser.userName, 'repair_result');
+    const updated = appendServiceLog(ticket, `Добавлена работа через MAX: ${work.name}`, authUser.userName, 'repair_result');
     saveServiceTicket(updated);
     resetBotFlow(phone);
-    return reply(senderId, withBotMenu(`✅ Добавлена работа: ${work.name} × ${quantity}`, ['ещё работы', 'запчасти', 'черновик', 'готово']), {
+    return reply(senderId, withBotMenu(`✅ Добавлена работа: ${work.name}`, ['ещё работы', 'запчасти', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
       phone,
       callbackContext: uiContext.callbackContext,
@@ -1219,7 +1215,6 @@ function createBotHandlers(deps) {
       'menu:parts': '/запчасти',
       'menu:ready': '/готово',
       'menu:waiting': '/ожидание',
-      'menu:close': '/закрыть',
     };
 
     if (normalized.startsWith('ticket:open:')) {
@@ -1230,15 +1225,6 @@ function createBotHandlers(deps) {
     if (normalized.startsWith('ticket:take:')) {
       const ticketId = normalized.slice('ticket:take:'.length);
       return handleCommand(senderId, phone, `/вработу ${ticketId}`, {}, { callbackContext, replaceMessage: true });
-    }
-
-    if (normalized.startsWith('ticket:close:')) {
-      const ticketId = normalized.slice('ticket:close:'.length);
-      const current = getCurrentRepair(phone);
-      if (!current || current.id !== ticketId) {
-        setCurrentRepair(phone, ticketId);
-      }
-      return handleCommand(senderId, phone, '/закрыть', {}, { callbackContext, replaceMessage: true });
     }
 
     if (normalized.startsWith('repairclose:confirm:')) {
@@ -1490,16 +1476,10 @@ function createBotHandlers(deps) {
         pendingAction: 'work_pick',
         pendingPayload: { selectedWorkId: work.id },
       });
-      return reply(
-        senderId,
-        `🧰 Выбрана работа:\n${work.name}\n\nВыберите количество кнопкой ниже или нажмите «Ввести руками».`,
-        {
-          attachments: quantityKeyboard('work'),
-          phone,
-          callbackContext,
-          replaceMessage: true,
-        },
-      );
+      return handleAddWorkRequest(senderId, phone, getAuthorizedUser(String(phone)), ticket, work.name, {
+        callbackContext,
+        replaceMessage: true,
+      });
     }
 
     if (normalized.startsWith('part:choose:')) {
@@ -2101,32 +2081,18 @@ function createBotHandlers(deps) {
       const updated = updateServiceTicketStatus(ticket, 'ready', authUser.userName, 'Работы завершены через MAX');
       return replyWithUi(withBotMenu([
         `✅ Заявка ${updated.id} переведена в статус «Готово»`,
-        'Если нужно, можно ещё закрыть её командой /закрыть',
-        'Или посмотреть отчет: /черновик',
-      ].join('\n'), ['черновик', 'закрыть', 'мои заявки']), {
+        'Теперь бригадир может проверить работу в программе и либо закрыть заявку, либо вернуть её на доработку.',
+        'Если нужно, можно посмотреть отчет: /черновик',
+      ].join('\n'), ['черновик', 'мои заявки', 'меню']), {
         attachments: currentRepairKeyboard(updated.id),
       });
     }
 
     if (lower === '/закрыть' && canManageRepair) {
-      const ticket = getCurrentRepair(phone);
-      if (!ticket) {
-        return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
-      }
-      const sessionChecklist = getBotSession(phone).pendingPayload?.closeChecklistDraft || {};
-      const checklist = buildRepairCloseChecklistStatus(ticket, sessionChecklist);
-      const missingKey = nextMissingRepairCloseChecklistKey(checklist);
-      if (missingKey) {
-        return startRepairCloseChecklist(senderId, phone, ticket, uiContext);
-      }
-      const updated = updateServiceTicketStatus({
-        ...ticket,
-        closeChecklist: checklist,
-      }, 'closed', authUser.userName, 'Заявка закрыта через MAX');
-      clearBotSession(phone);
-      return replyWithUi(withBotMenu(`✅ Заявка ${updated.id} закрыта.`, ['мои заявки', 'новая заявка', 'меню']), {
-        attachments: mechanicKeyboard(),
-      });
+      return replyWithUi(
+        'ℹ️ Финальное закрытие из бота отключено. Переведите заявку в статус «Готово», а бригадир закроет её в программе или вернёт на доработку.',
+        { attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || '') },
+      );
     }
 
     if ((lower === '/мойдень' || lower === '/отчётзадень' || lower === '/отчетзадень' || lower === 'отчёт за день' || lower === 'отчет за день') && canManageRepair) {

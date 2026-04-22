@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import {
   Plus, ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightSmall, SlidersHorizontal, RotateCcw, CirclePause as PauseCircle,
-  Search, CircleCheck, CircleAlert, CreditCard,
+  Search, CircleCheck, CircleAlert, CreditCard, ArrowRightLeft,
   AlertTriangle, Wrench
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
@@ -14,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { RentalDrawer } from '../components/gantt/RentalDrawer';
 import { ReturnModal, DowntimeModal, NewRentalModal } from '../components/gantt/GanttModals';
 import {
@@ -24,7 +26,7 @@ import { filterRentalManagerUsers, type SystemUser } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
-import type { Equipment, EquipmentType, EquipmentStatus, Payment, ServiceTicket, ServiceStatus } from '../types';
+import type { Equipment, EquipmentType, EquipmentStatus, Payment, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
@@ -162,6 +164,23 @@ function safeRentalDateRangeLabel(start?: string, end?: string) {
 
 function safeRentalCompactDate(value?: string) {
   return typeof value === 'string' && value.length >= 10 ? value.slice(5, 10) : '—';
+}
+
+function safeMovementDateLabel(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const hasTime = value.includes('T');
+  return format(date, hasTime ? 'dd.MM.yyyy HH:mm' : 'dd.MM.yyyy', { locale: ru });
+}
+
+function getEquipmentMovementLabel(equipment?: Pick<Equipment, 'brand' | 'model' | 'inventoryNumber'> | null) {
+  if (!equipment) return 'Техника не найдена';
+  const brandModel = [equipment.brand, equipment.model].filter(Boolean).join(' ').trim();
+  if (brandModel && equipment.inventoryNumber) return `${brandModel} · INV ${equipment.inventoryNumber}`;
+  if (brandModel) return brandModel;
+  if (equipment.inventoryNumber) return `INV ${equipment.inventoryNumber}`;
+  return 'Без названия';
 }
 
 // ========== Helpers ==========
@@ -336,6 +355,10 @@ export default function Rentals() {
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
   });
+  const { data: shippingPhotos = [] } = useQuery<ShippingPhoto[]>({
+    queryKey: ['shippingPhotos', 'all'],
+    queryFn: equipmentService.getAllShippingPhotos,
+  });
   const { data: serviceTickets = [] } = useQuery<ServiceTicket[]>({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
@@ -500,11 +523,13 @@ export default function Rentals() {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showDowntimeModal, setShowDowntimeModal] = useState(false);
   const [showNewRentalModal, setShowNewRentalModal] = useState(false);
+  const [showMovementSheet, setShowMovementSheet] = useState(false);
   const [preselectedEquipmentInv, setPreselectedEquipmentInv] = useState('');
   const [preselectedEquipmentId, setPreselectedEquipmentId] = useState('');
   const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
   const [compactView, setCompactView] = useState<CompactView>('cards');
   const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
+  const [movementFilter, setMovementFilter] = useState<'all' | 'shipping' | 'receiving'>('all');
 
   const appendEquipmentHistoryEntry = useCallback(
     (equipment: Equipment, text: string) =>
@@ -958,6 +983,42 @@ export default function Rentals() {
     };
   }, [ganttRentals, today]);
 
+  const movementEntries = useMemo(() => {
+    const rentalsById = new Map(ganttRentals.map(rental => [rental.id, rental]));
+    const equipmentById = new Map(equipmentList.map(item => [item.id, item]));
+
+    return [...shippingPhotos]
+      .filter(event => event.type === 'shipping' || event.type === 'receiving')
+      .sort((a, b) => {
+        const aTime = new Date(a.date).getTime();
+        const bTime = new Date(b.date).getTime();
+        if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0;
+        if (Number.isNaN(aTime)) return 1;
+        if (Number.isNaN(bTime)) return -1;
+        return bTime - aTime;
+      })
+      .map(event => {
+        const rental = event.rentalId ? rentalsById.get(event.rentalId) : undefined;
+        const equipment = equipmentById.get(event.equipmentId);
+        return {
+          ...event,
+          rental,
+          equipment,
+          equipmentLabel: getEquipmentMovementLabel(equipment),
+          clientLabel: rental?.client || equipment?.currentClient || 'Без клиента',
+          typeLabel: event.type === 'shipping' ? 'Отгрузка' : 'Приёмка',
+          typeBadgeClassName: event.type === 'shipping'
+            ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300',
+        };
+      });
+  }, [equipmentList, ganttRentals, shippingPhotos]);
+
+  const filteredMovementEntries = useMemo(
+    () => movementEntries.filter(entry => movementFilter === 'all' || entry.type === movementFilter),
+    [movementEntries, movementFilter],
+  );
+
   const mobileEquipmentCards = useMemo(() => {
     return filteredEquipment.map(equipment => {
       const rentalsForEquipment = filteredRentals
@@ -1352,6 +1413,15 @@ export default function Rentals() {
                   Новая аренда
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant="secondary"
+                className="app-button-outline h-10 rounded-xl px-4"
+                onClick={() => setShowMovementSheet(true)}
+              >
+                <ArrowRightLeft className="h-4 w-4" />
+                Движение техники
+              </Button>
               <Button size="sm" variant="secondary" className="app-button-outline h-10 rounded-xl px-4" onClick={() => handleOpenReturn()}>
                 <RotateCcw className="h-4 w-4" />
                 Возврат техники
@@ -2496,6 +2566,103 @@ export default function Rentals() {
           }
         }}
       />
+      <Sheet open={showMovementSheet} onOpenChange={setShowMovementSheet}>
+        <SheetContent side="right" className="w-full overflow-y-auto border-gray-200 bg-white sm:max-w-2xl dark:border-gray-700 dark:bg-gray-950">
+          <SheetHeader className="border-b border-gray-200 pb-4 dark:border-gray-700">
+            <SheetTitle>Движение техники</SheetTitle>
+            <SheetDescription>
+              История фактических отгрузок и приёмок по аренде. Технику можно открыть прямо из списка.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex flex-1 flex-col gap-4 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { value: 'all' as const, label: `Все (${movementEntries.length})` },
+                {
+                  value: 'shipping' as const,
+                  label: `Отгрузки (${movementEntries.filter(entry => entry.type === 'shipping').length})`,
+                },
+                {
+                  value: 'receiving' as const,
+                  label: `Приёмки (${movementEntries.filter(entry => entry.type === 'receiving').length})`,
+                },
+              ].map(filterOption => (
+                <button
+                  key={filterOption.value}
+                  type="button"
+                  onClick={() => setMovementFilter(filterOption.value)}
+                  className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    movementFilter === filterOption.value
+                      ? 'border-[--color-primary] bg-[--color-primary]/12 text-[--color-primary]'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:text-white'
+                  }`}
+                >
+                  {filterOption.label}
+                </button>
+              ))}
+            </div>
+
+            {filteredMovementEntries.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-400">
+                В истории пока нет событий для выбранного фильтра.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredMovementEntries.map(entry => (
+                  <div
+                    key={entry.id}
+                    className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${entry.typeBadgeClassName}`}>
+                            {entry.typeLabel}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {safeMovementDateLabel(entry.date)}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1">
+                          <Link
+                            to={`/equipment/${entry.equipmentId}`}
+                            className="inline-flex items-center gap-1 text-sm font-semibold text-[--color-primary] hover:underline"
+                            onClick={() => setShowMovementSheet(false)}
+                          >
+                            {entry.equipmentLabel}
+                          </Link>
+                          <div className="text-sm text-gray-600 dark:text-gray-300">
+                            Клиент: <span className="font-medium text-gray-900 dark:text-white">{entry.clientLabel}</span>
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-300">
+                            Оформил: <span className="font-medium text-gray-900 dark:text-white">{entry.uploadedBy || 'Не указано'}</span>
+                          </div>
+                          {entry.rental && (
+                            <div className="text-sm text-gray-600 dark:text-gray-300">
+                              Период аренды: <span className="font-medium text-gray-900 dark:text-white">{safeRentalDateRangeLabel(entry.rental.startDate, entry.rental.endDate)}</span>
+                            </div>
+                          )}
+                          {entry.comment && (
+                            <div className="text-sm text-gray-600 dark:text-gray-300">
+                              Комментарий: <span className="text-gray-900 dark:text-white">{entry.comment}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-muted-foreground">
+                        Фото: {entry.photos.length}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
       {/* ===== Toast notification ===== */}
       {toast && (
         <div className={`fixed bottom-6 left-1/2 z-[100] -translate-x-1/2 transform rounded-xl px-5 py-3 shadow-lg text-sm font-medium text-white transition-all ${

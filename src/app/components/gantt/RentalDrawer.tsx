@@ -3,10 +3,11 @@ import {
   X, Calendar, CreditCard, FileText, User, MessageSquare,
   ArrowRight, RotateCcw, CirclePause as PauseCircle,
   CircleCheck, CircleAlert, Clock, Trash2, Plus, ChevronDown, ChevronUp,
-  CalendarClock, LogOut, Edit
+  CalendarClock, LogOut, Edit, Wrench
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { formatCurrency, formatDate, formatDateTime, getRentalDays } from '../../lib/utils';
 import { findConflictingRental } from '../../lib/rental-conflicts';
 import type { GanttRentalData } from '../../mock-data';
@@ -39,6 +40,10 @@ interface RentalDrawerProps {
   onExtend: (rental: GanttRentalData, newEndDate: string) => void;
   onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
   onUpdChange: (rental: GanttRentalData, updSigned: boolean, updDate?: string) => void;
+  onUpdateMaintenanceFilters: (
+    equipment: Equipment,
+    data: Pick<Equipment, 'maintenanceEngineFilter' | 'maintenanceFuelFilter' | 'maintenanceHydraulicFilter'>,
+  ) => void;
 }
 
 const statusLabels: Record<GanttRentalData['status'], string> = {
@@ -72,7 +77,7 @@ export function RentalDrawer({
   clients = [], clientReceivables = [], managers = [],
   canEditRentals, canEditRentalDates, canReassignManager, canRestoreRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
-  onRestore, onUpdate, onAddComment, onAddPayment, onExtend, onEarlyReturn, onUpdChange,
+  onRestore, onUpdate, onAddComment, onAddPayment, onExtend, onEarlyReturn, onUpdChange, onUpdateMaintenanceFilters,
 }: RentalDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -110,6 +115,10 @@ export function RentalDrawer({
   const [updEditMode, setUpdEditMode] = useState(false);
   const [updDateInput, setUpdDateInput] = useState(() => new Date().toISOString().slice(0, 10));
   const [updUnsignConfirm, setUpdUnsignConfirm] = useState(false);
+  const [showMaintenanceDialog, setShowMaintenanceDialog] = useState(false);
+  const [engineFilter, setEngineFilter] = useState('');
+  const [fuelFilter, setFuelFilter] = useState('');
+  const [hydraulicFilter, setHydraulicFilter] = useState('');
 
   if (!rental) return null;
 
@@ -127,7 +136,14 @@ export function RentalDrawer({
     setCommentText('');
     setCommentError('');
     setManagerEditMode(false);
+    setShowMaintenanceDialog(false);
   }, [rental]);
+
+  useEffect(() => {
+    setEngineFilter(equipment?.maintenanceEngineFilter || '');
+    setFuelFilter(equipment?.maintenanceFuelFilter || '');
+    setHydraulicFilter(equipment?.maintenanceHydraulicFilter || '');
+  }, [equipment]);
 
   const activeManagers = filterRentalManagerUsers(managers);
 
@@ -294,6 +310,23 @@ export function RentalDrawer({
     });
     setManagerEditMode(false);
   };
+
+  const handleMaintenanceSave = () => {
+    if (!equipment) return;
+    onUpdateMaintenanceFilters(equipment, {
+      maintenanceEngineFilter: engineFilter.trim() || undefined,
+      maintenanceFuelFilter: fuelFilter.trim() || undefined,
+      maintenanceHydraulicFilter: hydraulicFilter.trim() || undefined,
+    });
+    setShowMaintenanceDialog(false);
+  };
+
+  const maintenanceRows = [
+    { label: 'Фильтр двигателя', value: equipment?.maintenanceEngineFilter },
+    { label: 'Топливная система', value: equipment?.maintenanceFuelFilter },
+    { label: 'Гидравлический фильтр', value: equipment?.maintenanceHydraulicFilter },
+  ];
+  const hasMaintenanceFilters = maintenanceRows.some(row => !!row.value?.trim());
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -467,6 +500,47 @@ export function RentalDrawer({
                   </div>
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                <Wrench className="h-4 w-4" />
+                <span>ТО</span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowMaintenanceDialog(true)}
+                disabled={!equipment}
+              >
+                ТО
+              </Button>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+              {!equipment ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Техника для этой аренды не найдена.
+                </p>
+              ) : hasMaintenanceFilters ? (
+                <div className="space-y-2">
+                  {maintenanceRows.map(row => (
+                    <div key={row.label} className="flex items-start justify-between gap-4">
+                      <span className="text-xs uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
+                        {row.label}
+                      </span>
+                      <span className="max-w-[62%] text-right text-sm font-medium text-gray-900 dark:text-white">
+                        {row.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Фильтры для ТО ещё не заполнены.
+                </p>
+              )}
             </div>
           </section>
 
@@ -1054,6 +1128,65 @@ export function RentalDrawer({
           )}
         </div>
       </div>
+
+      <Dialog open={showMaintenanceDialog} onOpenChange={setShowMaintenanceDialog}>
+        <DialogContent className="sm:max-w-[620px]">
+          <DialogHeader>
+            <DialogTitle>ТО и фильтры</DialogTitle>
+            <DialogDescription>
+              {equipment
+                ? `${equipment.manufacturer} ${equipment.model} · INV ${equipment.inventoryNumber}`
+                : 'Заполните расходники для техники в аренде.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Фильтр двигателя
+              </label>
+              <input
+                type="text"
+                value={engineFilter}
+                onChange={event => setEngineFilter(event.target.value)}
+                placeholder="Например: Fleetguard LF3349"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Фильтр топливной системы
+              </label>
+              <input
+                type="text"
+                value={fuelFilter}
+                onChange={event => setFuelFilter(event.target.value)}
+                placeholder="Например: Donaldson P550588"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Гидравлический фильтр
+              </label>
+              <input
+                type="text"
+                value={hydraulicFilter}
+                onChange={event => setHydraulicFilter(event.target.value)}
+                placeholder="Например: HY90438"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowMaintenanceDialog(false)}>
+              Отмена
+            </Button>
+            <Button onClick={handleMaintenanceSave} disabled={!equipment}>
+              Сохранить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

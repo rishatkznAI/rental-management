@@ -77,6 +77,9 @@ export interface Equipment {
   nextMaintenance: string;
   maintenanceCHTO?: string;
   maintenancePTO?: string;
+  maintenanceEngineFilter?: string;
+  maintenanceFuelFilter?: string;
+  maintenanceHydraulicFilter?: string;
   notes?: string;
   currentClient?: string;
   returnDate?: string;

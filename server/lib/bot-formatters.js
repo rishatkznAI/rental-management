@@ -180,7 +180,10 @@ function createBotFormatters(deps) {
     const tickets = getAssignedServiceTickets(authUser).slice(0, 6);
     if (!tickets.length) return null;
     const buttons = tickets.map(ticket =>
-      button(`Открыть ${ticket.id}`, `ticket:open:${ticket.id}`),
+      button(
+        `${ticket.equipment}${ticket.equipmentInv ? ` · INV ${ticket.equipmentInv}` : ''}`.slice(0, 48),
+        `ticket:open:${ticket.id}`,
+      ),
     );
     return keyboard([
       ...chunkButtons(buttons, 2),

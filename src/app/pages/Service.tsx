@@ -19,6 +19,12 @@ import { formatDate } from '../lib/utils';
 import type { ServiceTicket } from '../types';
 import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
 
+function truncateText(value: string, maxLength: number) {
+  const normalized = value.trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength).trimEnd()}...`;
+}
+
 export default function Service() {
   const { can } = usePermissions();
   const { data: ticketList = [] } = useServiceTicketsList();
@@ -276,8 +282,20 @@ export default function Service() {
                   <p className="text-sm">{ticket.equipment}</p>
                 </TableCell>
                 <TableCell>
-                  <p className="text-sm">{ticket.reason}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{ticket.description}</p>
+                  <p
+                    className="max-w-[460px] truncate text-sm"
+                    title={ticket.reason}
+                  >
+                    {truncateText(ticket.reason, 90)}
+                  </p>
+                  {ticket.description && (
+                    <p
+                      className="max-w-[460px] truncate text-xs text-gray-500 dark:text-gray-400"
+                      title={ticket.description}
+                    >
+                      {truncateText(ticket.description, 110)}
+                    </p>
+                  )}
                 </TableCell>
                 <TableCell>
                   <p className="text-sm">{getServiceScenarioLabel(ticket)}</p>

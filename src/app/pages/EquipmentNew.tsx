@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -140,10 +140,12 @@ const DEFAULT_OWNERS = [
 
 export default function EquipmentNew() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { can } = usePermissions();
   const { user } = useAuth();
   const createEquipment = useCreateEquipment();
   const [owners, setOwners] = React.useState(DEFAULT_OWNERS);
+  const isSaleMode = useMemo(() => new URLSearchParams(location.search).get('sale') === '1', [location.search]);
 
   // Защита от прямого перехода без прав
   useEffect(() => {
@@ -175,7 +177,7 @@ export default function EquipmentNew() {
     category: 'own',
     priority: 'medium',
     activeInFleet: 'yes',
-    isForSale: 'no',
+    isForSale: isSaleMode ? 'yes' : 'no',
     salePdiStatus: 'not_started',
     salePrice1: '',
     salePrice2: '',
@@ -190,6 +192,16 @@ export default function EquipmentNew() {
   const update = (field: string, value: string) =>
     setForm(prev => ({ ...prev, [field]: value }));
 
+  useEffect(() => {
+    if (!isSaleMode) return;
+    setForm(prev => ({
+      ...prev,
+      isForSale: 'yes',
+      inventoryNumber: '',
+      activeInFleet: 'no',
+    }));
+  }, [isSaleMode]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -200,7 +212,7 @@ export default function EquipmentNew() {
       : 'own';
 
     createEquipment.mutate({
-      inventoryNumber:       form.inventoryNumber,
+      inventoryNumber:       isSaleMode ? '' : form.inventoryNumber,
       manufacturer:          form.manufacturer,
       model:                 form.model,
       type:                  form.type as 'scissor' | 'articulated' | 'telescopic',
@@ -229,10 +241,10 @@ export default function EquipmentNew() {
       history: [
         createAuditEntry(
           user?.name || 'Система',
-          `Техника создана: ${form.inventoryNumber} · ${form.manufacturer} ${form.model}`,
+          `Техника создана: ${[form.manufacturer, form.model, form.serialNumber ? `SN ${form.serialNumber}` : ''].filter(Boolean).join(' · ')}`,
         ),
       ],
-    }, { onSuccess: () => navigate('/equipment') });
+    }, { onSuccess: () => navigate(isSaleMode ? '/sales' : '/equipment') });
   };
 
   const createError =
@@ -257,10 +269,10 @@ export default function EquipmentNew() {
           Вернуться к списку
         </Link>
         <h1 className="mt-4 text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">
-          Добавить технику
+          {isSaleMode ? 'Добавить технику в продажи' : 'Добавить технику'}
         </h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Заполните карточку новой единицы техники
+          {isSaleMode ? 'Заполните карточку продажной техники' : 'Заполните карточку новой единицы техники'}
         </p>
       </div>
 
@@ -280,16 +292,6 @@ export default function EquipmentNew() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Input
-                  label="Инвентарный номер"
-                  placeholder="Например, INV-006"
-                  value={form.inventoryNumber}
-                  onChange={e => update('inventoryNumber', e.target.value)}
-                  required
-                />
-                <FieldHint>Внутренний номер учёта из реестра компании</FieldHint>
-              </div>
-              <div>
-                <Input
                   label="Серийный номер"
                   placeholder="Например, GS-SN-20240012"
                   value={form.serialNumber}
@@ -298,6 +300,18 @@ export default function EquipmentNew() {
                 />
                 <FieldHint>Заводской номер из паспорта или шильдика</FieldHint>
               </div>
+              {!isSaleMode && (
+                <div>
+                  <Input
+                    label="Инвентарный номер"
+                    placeholder="Например, INV-006"
+                    value={form.inventoryNumber}
+                    onChange={e => update('inventoryNumber', e.target.value)}
+                    required
+                  />
+                  <FieldHint>Внутренний номер учёта из реестра компании</FieldHint>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

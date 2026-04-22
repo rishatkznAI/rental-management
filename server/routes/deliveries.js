@@ -54,7 +54,7 @@ function registerDeliveryRoutes(router, deps) {
 
   function normalizeDeliveryPayload(body, existing = null, author = 'Система') {
     const type = body.type === 'receiving' ? 'receiving' : 'shipping';
-    const status = ['new', 'sent', 'accepted', 'completed', 'cancelled'].includes(body.status)
+    const status = ['new', 'sent', 'accepted', 'in_transit', 'completed', 'cancelled'].includes(body.status)
       ? body.status
       : (existing?.status || 'new');
     const transportDate = String(body.transportDate || '').slice(0, 10);
@@ -110,8 +110,45 @@ function registerDeliveryRoutes(router, deps) {
     if (next.status === 'completed' && !next.completedAt) {
       next.completedAt = nowIso();
     }
+    if (next.status !== 'completed') {
+      next.completedAt = null;
+    }
 
     return next;
+  }
+
+  function button(text, payload) {
+    return {
+      type: 'callback',
+      text,
+      payload,
+    };
+  }
+
+  function keyboard(rows) {
+    return [{
+      type: 'inline_keyboard',
+      payload: {
+        buttons: rows,
+      },
+    }];
+  }
+
+  function deliveryStatusKeyboard(deliveryId, status) {
+    if (status === 'completed' || status === 'cancelled') return null;
+    if (status === 'accepted') {
+      return keyboard([
+        [button('Выехал', `delivery:status:${deliveryId}:in_transit`)],
+      ]);
+    }
+    if (status === 'in_transit') {
+      return keyboard([
+        [button('Доставлено', `delivery:status:${deliveryId}:completed`)],
+      ]);
+    }
+    return keyboard([
+      [button('Принял', `delivery:status:${deliveryId}:accepted`)],
+    ]);
   }
 
   function syncLinkedRentals(delivery, author) {
@@ -302,6 +339,7 @@ function registerDeliveryRoutes(router, deps) {
     const text = [
       delivery.type === 'shipping' ? '🚚 Новая заявка на отгрузку' : '📥 Новая заявка на приёмку',
       `Дата перевозки: ${delivery.transportDate}`,
+      `Статус: ${delivery.status === 'accepted' ? 'Принята' : delivery.status === 'in_transit' ? 'Выехал' : delivery.status === 'completed' ? 'Выполнена' : 'Отправлена'}`,
       delivery.neededBy ? `Когда нужно: ${delivery.neededBy}` : null,
       `Маршрут: ${delivery.origin} → ${delivery.destination}`,
       `Что перевозим: ${delivery.cargo}`,
@@ -312,7 +350,9 @@ function registerDeliveryRoutes(router, deps) {
     ].filter(Boolean).join('\n');
 
     try {
-      await sendMessage(target, text);
+      await sendMessage(target, text, {
+        attachments: deliveryStatusKeyboard(delivery.id, delivery.status === 'new' ? 'sent' : delivery.status),
+      });
       return {
         ...delivery,
         status: delivery.status === 'new' ? 'sent' : delivery.status,

@@ -501,7 +501,7 @@ export interface BotDetailResponse {
 // ── Доставка ──────────────────────────────────────────────────────────────────
 
 export type DeliveryType = 'shipping' | 'receiving';
-export type DeliveryStatus = 'new' | 'sent' | 'accepted' | 'completed' | 'cancelled';
+export type DeliveryStatus = 'new' | 'sent' | 'accepted' | 'in_transit' | 'completed' | 'cancelled';
 
 export interface Delivery {
   id: string;

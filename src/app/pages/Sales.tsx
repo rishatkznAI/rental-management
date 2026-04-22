@@ -54,7 +54,6 @@ export default function Sales() {
       const matchesSearch = search === ''
         || equipment.manufacturer.toLowerCase().includes(query)
         || equipment.model.toLowerCase().includes(query)
-        || equipment.inventoryNumber.toLowerCase().includes(query)
         || equipment.serialNumber.toLowerCase().includes(query)
         || equipment.location.toLowerCase().includes(query);
       const matchesPdi = pdiFilter === 'all' || equipment.salePdiStatus === pdiFilter;
@@ -92,7 +91,7 @@ export default function Sales() {
           </p>
         </div>
         {can('create', 'equipment') && (
-          <Link to="/equipment/new">
+          <Link to="/equipment/new?sale=1">
             <Button className="app-button-primary h-10 rounded-xl px-4">
               <Plus className="h-4 w-4" />
               Добавить технику
@@ -175,7 +174,7 @@ export default function Sales() {
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Поиск по модели, инв. №, SN, локации..."
+                  placeholder="Поиск по модели, SN, локации..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="app-filter-input pl-10"
@@ -221,7 +220,7 @@ export default function Sales() {
               {getSaleReadinessBadge(equipment.salePdiStatus)}
             </div>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Инв.№: {equipment.inventoryNumber || '—'} · SN: {equipment.serialNumber || 'не указан'}
+              SN: {equipment.serialNumber || 'не указан'}
             </p>
             <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Локация: {equipment.location}</p>
             <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-amber-50/80 p-3 text-xs dark:bg-amber-950/20">
@@ -262,7 +261,6 @@ export default function Sales() {
                   <Link to={`/equipment/${equipment.id}`} className="font-medium text-amber-700 hover:underline dark:text-amber-300">
                     {equipment.manufacturer} {equipment.model}
                   </Link>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Инв.№: {equipment.inventoryNumber || '—'}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">SN: {equipment.serialNumber || 'не указан'}</p>
                 </TableCell>
                 <TableCell>{getSalePdiBadge(equipment.salePdiStatus)}</TableCell>

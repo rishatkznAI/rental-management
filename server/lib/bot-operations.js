@@ -74,7 +74,6 @@ function createBotOperations(deps) {
       partsRecordedOrNotRequired: false,
       beforePhotosAttached: false,
       afterPhotosAttached: false,
-      summaryFilled: false,
     };
   }
 
@@ -90,7 +89,6 @@ function createBotOperations(deps) {
   function buildRepairCloseChecklistStatus(ticket, overrides = {}) {
     const workItems = (readData('repair_work_items') || []).filter(item => item.repairId === ticket.id);
     const repairPhotos = normalizeRepairPhotos(ticket);
-    const summary = String(ticket.resultData?.summary || ticket.result || '').trim();
     const base = createEmptyRepairCloseChecklist();
 
     return {
@@ -100,7 +98,6 @@ function createBotOperations(deps) {
       worksRecorded: Boolean(workItems.length),
       beforePhotosAttached: repairPhotos.before.length > 0,
       afterPhotosAttached: repairPhotos.after.length > 0,
-      summaryFilled: Boolean(summary),
     };
   }
 
@@ -120,8 +117,6 @@ function createBotOperations(deps) {
       actionRows.push([button('Загрузить фото ДО', 'menu:repair_before')]);
     } else if (nextKey === 'afterPhotosAttached') {
       actionRows.push([button('Загрузить фото ПОСЛЕ', 'menu:repair_after')]);
-    } else if (nextKey === 'summaryFilled') {
-      actionRows.push([button('Заполнить итог', 'menu:summary')]);
     } else {
       actionRows.push([button('Закрыть заявку', `repairclose:complete:${ticket.id}`)]);
     }

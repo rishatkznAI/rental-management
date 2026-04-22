@@ -62,7 +62,7 @@ function createBotUi() {
 
   function repairActionsKeyboard(ticketId = '') {
     return keyboard([
-      [button('Заполнить итог', 'menu:summary'), button('Текущий отчёт', 'menu:draft')],
+      [button('Комментарий по результату', 'menu:summary'), button('Текущий отчёт', 'menu:draft')],
       [button('Добавить работы', 'menu:works'), button('Добавить запчасти', 'menu:parts')],
       [button('Фото до ремонта', 'menu:repair_before'), button('Фото после ремонта', 'menu:repair_after')],
       [button('Ожидание запчастей', 'menu:waiting'), button('Завершить ремонт', 'menu:ready')],
@@ -116,7 +116,6 @@ function createBotUi() {
     partsRecordedOrNotRequired: 'Запчасти внесены или не требовались',
     beforePhotosAttached: 'Фото ДО приложены',
     afterPhotosAttached: 'Фото ПОСЛЕ приложены',
-    summaryFilled: 'Итог ремонта заполнен',
   };
 
   const REPAIR_CLOSE_CHECKLIST_ORDER = [
@@ -125,7 +124,6 @@ function createBotUi() {
     'partsRecordedOrNotRequired',
     'beforePhotosAttached',
     'afterPhotosAttached',
-    'summaryFilled',
   ];
 
   const OPERATION_STEP_META = {

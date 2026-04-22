@@ -35,14 +35,12 @@ function createBotFormatters(deps) {
   function buildRepairCloseChecklistStatus(ticket, overrides = {}) {
     const workItems = (readData('repair_work_items') || []).filter(item => item.repairId === ticket.id);
     const repairPhotos = normalizeRepairPhotos(ticket);
-    const summary = String(ticket.resultData?.summary || ticket.result || '').trim();
     const base = {
       faultEliminated: false,
       worksRecorded: false,
       partsRecordedOrNotRequired: false,
       beforePhotosAttached: false,
       afterPhotosAttached: false,
-      summaryFilled: false,
     };
 
     return {
@@ -52,7 +50,6 @@ function createBotFormatters(deps) {
       worksRecorded: Boolean(workItems.length),
       beforePhotosAttached: repairPhotos.before.length > 0,
       afterPhotosAttached: repairPhotos.after.length > 0,
-      summaryFilled: Boolean(summary),
     };
   }
 
@@ -103,7 +100,7 @@ function createBotFormatters(deps) {
   function formatCurrentRepairDraft(ticket) {
     const workItems = (readData('repair_work_items') || []).filter(item => item.repairId === ticket.id);
     const partItems = (readData('repair_part_items') || []).filter(item => item.repairId === ticket.id);
-    const summary = ticket.resultData?.summary || ticket.result || 'не заполнен';
+    const summary = ticket.resultData?.summary || ticket.result || 'не добавлен';
     const repairPhotos = normalizeRepairPhotos(ticket);
     const closeChecklist = buildRepairCloseChecklistStatus(ticket);
     const worksText = workItems.length
@@ -117,7 +114,7 @@ function createBotFormatters(deps) {
       `🧾 Текущий отчет по ${ticket.id}`,
       `${ticket.equipment}`,
       `Статус: ${serviceStatusLabel(ticket.status)}`,
-      `Итог: ${summary}`,
+      `Комментарий по результату: ${summary}`,
       `Фото ДО: ${repairPhotos.before.length}`,
       `Фото ПОСЛЕ: ${repairPhotos.after.length}`,
       `Чек-лист закрытия: ${REPAIR_CLOSE_CHECKLIST_ORDER.filter(key => closeChecklist[key]).length}/${REPAIR_CLOSE_CHECKLIST_ORDER.length}`,
@@ -204,11 +201,14 @@ function createBotFormatters(deps) {
   function searchServiceWorks(query) {
     const works = (readData('service_works') || []).filter(item => item.isActive !== false);
     if (!normalizeBotText(query)) return works.slice(0, 7);
-    return works.filter(item =>
-      botSearchMatches(item.name, query) ||
-      botSearchMatches(item.category, query) ||
-      botSearchMatches(item.description, query)
-    ).slice(0, 7);
+    return works.filter(item => {
+      const haystack = [
+        item.name,
+        item.category,
+        item.description,
+      ].filter(Boolean).join(' ');
+      return botSearchMatches(haystack, query);
+    }).slice(0, 7);
   }
 
   function searchSpareParts(query) {
@@ -400,7 +400,7 @@ function createBotFormatters(deps) {
       '/отгрузка — оформить отгрузку',
       '/приёмка — оформить приёмку',
       '/черновик — текущий отчёт по ремонту',
-      '/итог — итог ремонта',
+      '/итог — комментарий по результату',
       '/работы — поиск и добавление работ',
       '/запчасти — поиск и добавление запчастей',
       '/фотодо — загрузить фото до ремонта',

@@ -594,7 +594,16 @@ function createBotHandlers(deps) {
     const matches = searchServiceWorks(query);
     if (!matches.length) {
       updateBotSession(phone, { pendingAction: 'work_search', activeRepairId: ticket.id });
-      return sendMessage(senderId, '🔎 По этому запросу активные работы не найдены. Напишите другой запрос.');
+      return reply(senderId, withBotMenu(
+        '🔎 По этому запросу активные работы не найдены. Напишите другое название или часть названия.',
+        ['пример: гидравлика', 'пример: замена масла', 'черновик'],
+      ), {
+        attachments: currentRepairKeyboard(ticket.id),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      });
     }
     updateBotSession(phone, {
       activeRepairId: ticket.id,
@@ -775,7 +784,13 @@ function createBotHandlers(deps) {
   async function handleSummaryRequest(senderId, phone, authUser, ticket, summary, uiContext = {}) {
     if (!summary) {
       updateBotSession(phone, { pendingAction: 'summary', activeRepairId: ticket.id });
-      return reply(senderId, '📝 Напишите следующим сообщением итог ремонта одним текстом.');
+      return reply(senderId, '📝 Напишите следующим сообщением комментарий по результату одним текстом. Это необязательно: можно кратко описать, чем закончилась работа.', {
+        attachments: currentRepairKeyboard(ticket.id),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      });
     }
     const updated = appendServiceLog({
       ...ticket,
@@ -786,10 +801,10 @@ function createBotHandlers(deps) {
         worksPerformed: ticket.resultData?.worksPerformed || [],
         partsUsed: ticket.resultData?.partsUsed || [],
       },
-    }, 'Обновлён итог ремонта через MAX', authUser.userName, 'repair_result');
+    }, 'Обновлён комментарий по результату через MAX', authUser.userName, 'repair_result');
     saveServiceTicket(updated);
     resetBotFlow(phone);
-    return reply(senderId, withBotMenu(`✅ Итог ремонта сохранён для ${ticket.id}`, ['работы', 'запчасти', 'черновик', 'готово']), {
+    return reply(senderId, withBotMenu(`✅ Комментарий по результату сохранён для ${ticket.id}`, ['работы', 'запчасти', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
       phone,
       callbackContext: uiContext.callbackContext,
@@ -1965,9 +1980,13 @@ function createBotHandlers(deps) {
     if (lower === '/черновик' && canManageRepair) {
       const ticket = getCurrentRepair(phone);
       if (!ticket) {
-        return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID или /вработу ID');
+        return replyWithUi('ℹ️ Сначала выберите заявку: /ремонт ID или /вработу ID', {
+          attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
+        });
       }
-      return sendMessage(senderId, formatCurrentRepairDraft(ticket));
+      return replyWithUi(formatCurrentRepairDraft(ticket), {
+        attachments: currentRepairKeyboard(ticket.id),
+      });
     }
 
     if (lower === '/сброс' && canManageRepair) {

@@ -38,7 +38,7 @@ function createBotUi() {
   function mechanicKeyboard() {
     return keyboard([
       [button('Мои заявки', 'menu:myrepairs'), button('Новая заявка', 'menu:new_ticket')],
-      [button('Операции', 'menu:operations'), button('Работа по заявке', 'menu:repair_actions')],
+      [button('Операции', 'menu:operations'), button('Действия по заявке', 'menu:repair_actions')],
       [button('Найти технику', 'menu:find_equipment'), button('Отчёт за день', 'menu:day_report')],
       [button('Помощь', 'menu:help')],
     ]);
@@ -46,8 +46,8 @@ function createBotUi() {
 
   function currentRepairKeyboard(ticketId = '') {
     return keyboard([
-      [button('Текущий отчёт', 'menu:draft'), button('Работа по заявке', 'menu:repair_actions')],
-      [button('К закрытию', 'menu:ready'), button('Закрыть заявку', ticketId ? `ticket:close:${ticketId}` : 'menu:close')],
+      [button('Текущий отчёт', 'menu:draft'), button('Действия по заявке', 'menu:repair_actions')],
+      [button('Завершить ремонт', 'menu:ready'), button('Финально закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close')],
       [button('Главное меню', 'menu:main')],
       [button('Мои заявки', 'menu:myrepairs'), button('Отчёт за день', 'menu:day_report')],
     ]);
@@ -65,8 +65,8 @@ function createBotUi() {
       [button('Заполнить итог', 'menu:summary'), button('Текущий отчёт', 'menu:draft')],
       [button('Добавить работы', 'menu:works'), button('Добавить запчасти', 'menu:parts')],
       [button('Фото до ремонта', 'menu:repair_before'), button('Фото после ремонта', 'menu:repair_after')],
-      [button('Ожидание запчастей', 'menu:waiting'), button('К закрытию', 'menu:ready')],
-      [button('Закрыть заявку', ticketId ? `ticket:close:${ticketId}` : 'menu:close'), button('К заявкам', 'menu:myrepairs')],
+      [button('Ожидание запчастей', 'menu:waiting'), button('Завершить ремонт', 'menu:ready')],
+      [button('Финально закрыть', ticketId ? `ticket:close:${ticketId}` : 'menu:close'), button('К заявкам', 'menu:myrepairs')],
       [button('Главное меню', 'menu:main')],
     ]);
   }

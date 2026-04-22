@@ -190,6 +190,13 @@ function createBotHandlers(deps) {
     return getBotUsers()[phone] || null;
   }
 
+  function clearAuthorizedUser(phone) {
+    const botUsers = getBotUsers();
+    if (!botUsers[phone]) return;
+    delete botUsers[phone];
+    saveBotUsers(botUsers);
+  }
+
   function getBotSession(phone) {
     return getBotSessions()[phone] || {};
   }
@@ -862,6 +869,7 @@ function createBotHandlers(deps) {
     const normalized = String(payload || '').trim();
 
     if (normalized === 'auth:start') {
+      clearAuthorizedUser(phone);
       updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
       return reply(
         senderId,
@@ -1656,6 +1664,7 @@ function createBotHandlers(deps) {
       console.log('[TRACE] user=%s', user ? user.name : 'null');
       if (!user) {
         console.log('[TRACE] sending auth error');
+        clearAuthorizedUser(phone);
         updateBotSession(phone, {
           pendingAction: 'login_email',
           pendingPayload: null,
@@ -1707,6 +1716,7 @@ function createBotHandlers(deps) {
           return reply(senderId, '❌ Внутренняя ошибка авторизации. Попробуйте позже.');
         }
         if (!user) {
+          clearAuthorizedUser(phone);
           updateBotSession(phone, {
             pendingAction: 'login_email',
             pendingPayload: null,

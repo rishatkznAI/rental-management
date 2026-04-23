@@ -62,6 +62,9 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     reports:          ALL,
     settings:         ALL,
   },
+  'Инвестор': {
+    rentals: VIEW,
+  },
   'Менеджер по аренде': {
     dashboard:        VIEW,        // только своё
     equipment:        VIEW,

@@ -397,7 +397,16 @@ export default function Gsm() {
   const [routePeriod, setRoutePeriod] = React.useState<RoutePeriod>('day');
 
   const snapshots = React.useMemo(
-    () => equipment.map(item => buildGsmSnapshot(item, shippingPhotos, ganttRentals, rentals, clients)),
+    () => equipment
+      .map((item) => {
+        try {
+          return buildGsmSnapshot(item, shippingPhotos, ganttRentals, rentals, clients);
+        } catch (error) {
+          console.error('GSM snapshot build failed for equipment', item?.id, error);
+          return null;
+        }
+      })
+      .filter(Boolean) as GsmEquipmentSnapshot[],
     [clients, equipment, ganttRentals, rentals, shippingPhotos],
   );
 

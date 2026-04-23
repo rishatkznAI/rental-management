@@ -75,6 +75,8 @@ export interface Equipment {
   location: string;
   status: EquipmentStatus;
   owner: EquipmentOwnerType;
+  ownerId?: string;
+  ownerName?: string;
   category: EquipmentCategory;
   priority: EquipmentPriority;
   activeInFleet: boolean;

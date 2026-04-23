@@ -93,7 +93,15 @@ function roleBadgeVariant(role: UserRole): BadgeVariant {
   return 'info';
 }
 
-const EMPTY_FORM = { name: '', email: '', role: 'Менеджер по аренде' as UserRole, status: 'Активен' as UserStatus, password: '' };
+const EMPTY_FORM = {
+  name: '',
+  email: '',
+  role: 'Менеджер по аренде' as UserRole,
+  status: 'Активен' as UserStatus,
+  password: '',
+  ownerId: '',
+  ownerName: '',
+};
 
 // ── Основной компонент ────────────────────────────────────────────────────────
 
@@ -105,6 +113,10 @@ export default function Settings() {
   const { data: usersData = [] } = useQuery<SystemUser[]>({
     queryKey: ['users'],
     queryFn: usersService.getAll,
+  });
+  const { data: ownersData = [] } = useQuery<Owner[]>({
+    queryKey: ['owners'],
+    queryFn: ownersService.getAll,
   });
 
   React.useEffect(() => {
@@ -137,7 +149,15 @@ export default function Settings() {
 
   const openEdit = (user: SystemUser) => {
     setEditingId(user.id);
-    setForm({ name: user.name, email: user.email, role: user.role, status: user.status, password: '' });
+    setForm({
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      password: '',
+      ownerId: user.ownerId || '',
+      ownerName: user.ownerName || '',
+    });
     setShowPassword(false);
     setFormError('');
     setDialogOpen(true);
@@ -151,22 +171,50 @@ export default function Settings() {
     if (!form.name.trim())  { setFormError('Введите имя'); return; }
     if (!form.email.trim()) { setFormError('Введите email'); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) { setFormError('Некорректный email'); return; }
+    if (form.role === 'Инвестор' && !form.ownerId) { setFormError('Для роли инвестора выберите собственника'); return; }
 
     // Проверка дублирующего email (при добавлении или смене email)
     const duplicate = users.find(u => u.email.toLowerCase() === form.email.toLowerCase() && u.id !== editingId);
     if (duplicate) { setFormError('Пользователь с таким email уже существует'); return; }
+
+    const selectedOwner = ownersData.find(owner => owner.id === form.ownerId);
+    const ownerPayload = form.role === 'Инвестор'
+      ? {
+          ownerId: form.ownerId,
+          ownerName: selectedOwner?.name || form.ownerName || '',
+        }
+      : {
+          ownerId: undefined,
+          ownerName: undefined,
+        };
 
     if (editingId) {
       // При редактировании: пустой пароль = не меняем; непустой — хешируем
       const hashedPwd = form.password ? await hashPassword(form.password) : undefined;
       await setUsers(prev => prev.map(u => {
         if (u.id !== editingId) return u;
-        return { ...u, name: form.name, email: form.email, role: form.role, status: form.status, ...(hashedPwd ? { password: hashedPwd } : {}) };
+        return {
+          ...u,
+          name: form.name,
+          email: form.email,
+          role: form.role,
+          status: form.status,
+          ...ownerPayload,
+          ...(hashedPwd ? { password: hashedPwd } : {}),
+        };
       }));
     } else {
       if (!form.password.trim()) { setFormError('Задайте пароль для нового пользователя'); return; }
       const hashedPwd = await hashPassword(form.password);
-      const newUser: SystemUser = { id: Date.now().toString(), name: form.name, email: form.email, role: form.role, status: form.status, password: hashedPwd };
+      const newUser: SystemUser = {
+        id: Date.now().toString(),
+        name: form.name,
+        email: form.email,
+        role: form.role,
+        status: form.status,
+        password: hashedPwd,
+        ...ownerPayload,
+      };
       await setUsers(prev => [...prev, newUser]);
     }
     setDialogOpen(false);
@@ -226,6 +274,7 @@ export default function Settings() {
                       <TableHead>Email (логин)</TableHead>
                       <TableHead>Роль</TableHead>
                       <TableHead>Статус</TableHead>
+                      <TableHead>Собственник</TableHead>
                       <TableHead className="w-[90px]">Действия</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -241,6 +290,9 @@ export default function Settings() {
                           <Badge variant={user.status === 'Активен' ? 'success' : 'secondary'}>
                             {user.status}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-sm">{user.role === 'Инвестор' ? (user.ownerName || 'Не привязан') : '—'}</p>
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-2">
@@ -400,6 +452,23 @@ export default function Settings() {
                 </SelectContent>
               </Select>
             </Field>
+
+            {form.role === 'Инвестор' && (
+              <Field label="Собственник инвестора">
+                <Select
+                  value={form.ownerId}
+                  onValueChange={val => {
+                    const selectedOwner = ownersData.find(owner => owner.id === val);
+                    setForm(f => ({ ...f, ownerId: val, ownerName: selectedOwner?.name || '' }));
+                  }}
+                >
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Выберите собственника" /></SelectTrigger>
+                  <SelectContent>
+                    {ownersData.map(owner => <SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
 
             {/* Статус */}
             <Field label="Статус">

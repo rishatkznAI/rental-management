@@ -314,6 +314,7 @@ export default function ServiceDetail() {
   const { can } = usePermissions();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const isAdmin = user?.role === 'Администратор';
   const canEdit = can('edit', 'service');
   const canDeleteService = user?.role === 'Администратор' && can('delete', 'service');
   const canCreateDocuments = can('create', 'documents');
@@ -403,7 +404,7 @@ export default function ServiceDetail() {
     });
 
   const handlePhotoFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEdit) {
+    if (!canEditTicketFields) {
       e.target.value = '';
       return;
     }
@@ -415,7 +416,7 @@ export default function ServiceDetail() {
   };
 
   const savePhotos = () => {
-    if (!ticket || !canEdit || !photoPending.length) return;
+    if (!ticket || !canEditTicketFields || !photoPending.length) return;
     const updated: ServiceTicket = {
       ...ticket,
       photos: [...(ticket.photos ?? []), ...photoPending],
@@ -425,7 +426,7 @@ export default function ServiceDetail() {
   };
 
   const deletePhoto = (idx: number) => {
-    if (!ticket || !canEdit) return;
+    if (!ticket || !canEditTicketFields) return;
     const updated: ServiceTicket = {
       ...ticket,
       photos: (ticket.photos ?? []).filter((_, i) => i !== idx),
@@ -468,7 +469,7 @@ export default function ServiceDetail() {
   // ── actions ────────────────────────────────────────────────────────────────
 
   const changeStatus = async (newStatus: ServiceStatus, logText: string, author = user?.name || 'Оператор') => {
-    if (!ticket || !canEdit) return;
+    if (!ticket || !canEditTicketFields) return;
     const now = new Date().toISOString();
     const updated: ServiceTicket = {
       ...ticket,
@@ -553,7 +554,7 @@ export default function ServiceDetail() {
   };
 
   const addComment = () => {
-    if (!ticket || !canEdit || !newComment.trim()) return;
+    if (!ticket || !canEditTicketFields || !newComment.trim()) return;
     const now = new Date().toISOString();
     persist({
       ...ticket,
@@ -563,7 +564,7 @@ export default function ServiceDetail() {
   };
 
   const saveAssignee = () => {
-    if (!ticket || !canEdit || !newAssigneeId) return;
+    if (!ticket || !canEditTicketFields || !newAssigneeId) return;
     const mechanic = mechanics.find(item => item.id === newAssigneeId);
     if (!mechanic) return;
     const now = new Date().toISOString();
@@ -583,7 +584,7 @@ export default function ServiceDetail() {
   };
 
   const saveResultSummary = () => {
-    if (!ticket || !canEdit) return;
+    if (!ticket || !canEditTicketFields) return;
     persist({
       ...ticket,
       result: resultSummary.trim(),
@@ -597,7 +598,7 @@ export default function ServiceDetail() {
   };
 
   const savePlannedDate = () => {
-    if (!ticket || !canEdit || !newPlannedDate) return;
+    if (!ticket || !canEditTicketFields || !newPlannedDate) return;
     persist({ ...ticket, plannedDate: newPlannedDate });
     setNewPlannedDate('');
   };
@@ -682,7 +683,7 @@ export default function ServiceDetail() {
   }, [canDeleteService, navigate, queryClient, ticket]);
 
   const addWorkPerformed = async () => {
-    if (!ticket || !canEdit || !selectedWorkId) return;
+    if (!ticket || !canEditTicketFields || !selectedWorkId) return;
     const work = workCatalog.find(item => item.id === selectedWorkId);
     const qty = Number(selectedWorkQty);
     if (!work || !Number.isFinite(qty) || qty <= 0) {
@@ -708,7 +709,7 @@ export default function ServiceDetail() {
   };
 
   const removeWorkPerformed = async (item: RepairWorkItem, name: string) => {
-    if (!ticket || !canEdit) return;
+    if (!ticket || !canEditTicketFields) return;
     await repairWorkItemsService.remove(item.id);
     persist({
       ...ticket,
@@ -724,7 +725,7 @@ export default function ServiceDetail() {
   };
 
   const addPartUsage = async () => {
-    if (!ticket || !canEdit || !selectedPartId) return;
+    if (!ticket || !canEditTicketFields || !selectedPartId) return;
     const part = sparePartsCatalog.find(item => item.id === selectedPartId);
     const qty = Number(selectedPartQty);
     const cost = Number(selectedPartCost);
@@ -756,7 +757,7 @@ export default function ServiceDetail() {
   };
 
   const removePartUsage = async (item: RepairPartItem, name: string) => {
-    if (!ticket || !canEdit) return;
+    if (!ticket || !canEditTicketFields) return;
     await repairPartItemsService.remove(item.id);
     persist({
       ...ticket,
@@ -849,11 +850,14 @@ export default function ServiceDetail() {
     );
   }
 
+  const canEditTicketFields = canEdit && (ticket.status !== 'closed' || isAdmin);
+  const canChangeTicketStatus = canEdit && ticket.status !== 'closed';
+
   // ── action buttons based on status (only for users with edit permission) ──
 
   const actions: React.ReactNode[] = [];
 
-  if (canEdit && ticket.status === 'new') {
+  if (canChangeTicketStatus && ticket.status === 'new') {
     actions.push(
       <Button key="start" className="w-full sm:w-auto" onClick={() => changeStatus('in_progress', scenarioIsRepair ? 'Заявка взята в работу' : `${serviceScenarioLabel} взято в работу`)}>
         <Play className="h-4 w-4" />
@@ -861,7 +865,7 @@ export default function ServiceDetail() {
       </Button>
     );
   }
-  if (canEdit && ticket.status === 'in_progress' && scenarioIsRepair) {
+  if (canChangeTicketStatus && ticket.status === 'in_progress' && scenarioIsRepair) {
     actions.push(
       <Button key="parts" variant="secondary" className="w-full sm:w-auto" onClick={() => changeStatus('waiting_parts', 'Заявка переведена в статус «Ожидание запчастей»')}>
         <Package className="h-4 w-4" />
@@ -869,7 +873,7 @@ export default function ServiceDetail() {
       </Button>
     );
   }
-  if (canEdit && ticket.status === 'in_progress') {
+  if (canChangeTicketStatus && ticket.status === 'in_progress') {
     actions.push(
       <Button key="ready" className="w-full sm:w-auto" onClick={() => changeStatus('ready', scenarioIsRepair ? 'Работы завершены, заявка готова к закрытию' : `${serviceScenarioLabel} выполнено, запись готова к закрытию`)}>
         <CheckCircle className="h-4 w-4" />
@@ -877,7 +881,7 @@ export default function ServiceDetail() {
       </Button>
     );
   }
-  if (canEdit && ticket.status === 'waiting_parts' && scenarioIsRepair) {
+  if (canChangeTicketStatus && ticket.status === 'waiting_parts' && scenarioIsRepair) {
     actions.push(
       <Button key="resume" variant="secondary" className="w-full sm:w-auto" onClick={() => changeStatus('in_progress', 'Запчасти получены, возобновлена работа')}>
         <Play className="h-4 w-4" />
@@ -885,7 +889,7 @@ export default function ServiceDetail() {
       </Button>
     );
   }
-  if (canEdit && ticket.status === 'ready') {
+  if (canChangeTicketStatus && ticket.status === 'ready') {
     actions.push(
       <Button key="close" className="w-full sm:w-auto" onClick={() => changeStatus('closed', scenarioIsRepair ? 'Заявка закрыта' : `${serviceScenarioLabel} зафиксировано и закрыто`)}>
         <CheckCircle className="h-4 w-4" />
@@ -893,7 +897,7 @@ export default function ServiceDetail() {
       </Button>
     );
   }
-  if (canEdit && ticket.status !== 'closed') {
+  if (canChangeTicketStatus) {
     actions.push(
       <Button key="cancel" variant="secondary" className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50"
         onClick={() => changeStatus('closed', 'Заявка отменена / закрыта без выполнения')}>
@@ -999,6 +1003,11 @@ export default function ServiceDetail() {
       {workOrderError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
           {workOrderError}
+        </div>
+      )}
+      {isAdmin && ticket.status === 'closed' && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/40 dark:text-blue-300">
+          Закрытая заявка открыта в режиме редактирования администратора.
         </div>
       )}
 
@@ -1118,7 +1127,7 @@ export default function ServiceDetail() {
                                   )}
                                 </p>
                               </div>
-                              {canEdit && ticket.status !== 'closed' && item && (
+                              {canEditTicketFields && item && (
                                 <button onClick={() => void removeWorkPerformed(item, work.name)} className="text-xs text-red-500 hover:underline">
                                   Удалить
                                 </button>
@@ -1147,7 +1156,7 @@ export default function ServiceDetail() {
                                   )}
                                 </p>
                               </div>
-                              {canEdit && ticket.status !== 'closed' && item && (
+                              {canEditTicketFields && item && (
                                 <button onClick={() => void removePartUsage(item, part.name)} className="text-xs text-red-500 hover:underline">
                                   Удалить
                                 </button>
@@ -1160,7 +1169,7 @@ export default function ServiceDetail() {
                   </div>
                 </>
               )}
-              {canEdit && ticket.status !== 'closed' && (
+              {canEditTicketFields && (
                 <>
                   <Divider />
                   <div className="space-y-4">
@@ -1280,7 +1289,7 @@ export default function ServiceDetail() {
                 </div>
               ))}
 
-              {canEdit && ticket.status !== 'closed' && (
+              {canEditTicketFields && (
                 <>
                   <Divider />
                   <div className="flex gap-2 items-end pt-1">
@@ -1311,7 +1320,7 @@ export default function ServiceDetail() {
                   <Camera className="h-4 w-4" />
                   Фото заявки
                 </CardTitle>
-                {canEdit && (
+                {canEditTicketFields && (
                   <Button size="sm" variant="secondary" onClick={() => photoInputRef.current?.click()}>
                     <Plus className="h-4 w-4" />
                     Добавить фото
@@ -1330,7 +1339,7 @@ export default function ServiceDetail() {
               />
 
               {/* Pending previews */}
-              {canEdit && photoPending.length > 0 && (
+              {canEditTicketFields && photoPending.length > 0 && (
                 <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-blue-700 dark:text-blue-300 font-medium">Выбрано {photoPending.length} фото</span>
@@ -1367,7 +1376,7 @@ export default function ServiceDetail() {
                         className="h-full w-full object-cover cursor-pointer hover:opacity-90"
                         onClick={() => window.open(src, '_blank')}
                       />
-                      {canEdit && (
+                      {canEditTicketFields && (
                         <button
                           onClick={() => deletePhoto(i)}
                           className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
@@ -1382,7 +1391,7 @@ export default function ServiceDetail() {
                 <div className="flex flex-col items-center justify-center py-6 text-center">
                   <Camera className="h-8 w-8 text-gray-300 dark:text-gray-600 mb-2" />
                   <p className="text-sm text-gray-400 dark:text-gray-500">Фото не добавлены</p>
-                  {canEdit && (
+                  {canEditTicketFields && (
                     <button
                       onClick={() => photoInputRef.current?.click()}
                       className="mt-2 text-sm text-[--color-primary] hover:underline"
@@ -1442,7 +1451,7 @@ export default function ServiceDetail() {
                   {ticket.assignedMechanicName || ticket.assignedTo || <span className="text-gray-400 font-normal italic">Не назначен</span>}
                 </p>
               </div>
-              {canEdit && ticket.status !== 'closed' && (
+              {canEditTicketFields && (
                 <>
                   <Divider />
                   <div className="flex gap-2 items-end">
@@ -1489,7 +1498,7 @@ export default function ServiceDetail() {
                         </p>
                         <p className="text-xs text-gray-500 font-mono">{sv.plateNumber}</p>
                       </div>
-                      {canEdit && ticket.status !== 'closed' && (
+                      {canEditTicketFields && (
                         <Button variant="outline" size="sm"
                           onClick={() => persist({ ...ticket, serviceVehicleId: null })}
                         >
@@ -1504,7 +1513,7 @@ export default function ServiceDetail() {
               ) : (
                 <p className="text-sm text-gray-400">Машина не назначена</p>
               )}
-              {canEdit && ticket.status !== 'closed' && (
+              {canEditTicketFields && (
                 <>
                   <Divider />
                   <div className="flex gap-2 items-end">
@@ -1551,7 +1560,7 @@ export default function ServiceDetail() {
               <Field label="Дата создания" value={formatDate(ticket.createdAt)} />
               {ticket.plannedDate
                 ? <Field label="Плановая дата" value={formatDate(ticket.plannedDate)} />
-                : canEdit && ticket.status !== 'closed' && (
+                : canEditTicketFields && (
                   <>
                     <Divider />
                     <div className="flex gap-2 items-end">
@@ -1644,7 +1653,7 @@ export default function ServiceDetail() {
           )}
         </div>
       </div>
-      {canEdit && (
+      {canChangeTicketStatus && (
         <div className="fixed inset-x-0 bottom-16 z-10 border-t border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:hidden">
           <div className="grid grid-cols-2 gap-2">
             {ticket.status === 'new' && (
@@ -1683,7 +1692,7 @@ export default function ServiceDetail() {
                 Закрыть
               </Button>
             )}
-            {ticket.status !== 'closed' && (
+            {canChangeTicketStatus && (
               <Button
                 variant="secondary"
                 className="border-red-200 text-red-600 hover:bg-red-50"

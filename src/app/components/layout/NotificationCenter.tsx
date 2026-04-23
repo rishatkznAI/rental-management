@@ -36,8 +36,9 @@ function readIdsFromStorage(): string[] {
 }
 
 function writeIdsToStorage(ids: string[]) {
-  localStorage.setItem(READ_KEY, JSON.stringify(ids));
-  window.dispatchEvent(new CustomEvent(READ_SYNC_EVENT, { detail: ids }));
+  const merged = Array.from(new Set([...readIdsFromStorage(), ...ids]));
+  localStorage.setItem(READ_KEY, JSON.stringify(merged));
+  window.dispatchEvent(new CustomEvent(READ_SYNC_EVENT, { detail: merged }));
 }
 
 function getIcon(notification: AppNotification) {
@@ -126,13 +127,6 @@ export function NotificationCenter() {
       window.removeEventListener(READ_SYNC_EVENT, handleCustomSync);
     };
   }, []);
-
-  React.useEffect(() => {
-    setReadIds(prev => {
-      const next = prev.filter(id => notifications.some(item => item.id === id));
-      return next.length === prev.length && next.every((id, index) => id === prev[index]) ? prev : next;
-    });
-  }, [notifications]);
 
   const unreadNotifications = React.useMemo(
     () => notifications.filter(item => !readIds.includes(item.id)),

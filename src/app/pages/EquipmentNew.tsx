@@ -224,6 +224,8 @@ export default function EquipmentNew() {
       location:              form.location,
       status:                form.status as 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive',
       owner:                 ownerType as 'own' | 'investor' | 'sublease',
+      ownerId:               selectedOwner?.id || undefined,
+      ownerName:             ownerName || undefined,
       category:              form.category as 'own' | 'sold' | 'client' | 'partner',
       priority:              form.priority as 'low' | 'medium' | 'high' | 'critical',
       activeInFleet:         form.activeInFleet === 'yes',

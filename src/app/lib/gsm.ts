@@ -115,6 +115,11 @@ const CLIENT_OBJECT_TEXT_RE = /объект|строй|цех|площадка|�
 const MOVEMENT_TEXT_RE = /аренд|отгруж|прием|приём|достав|локац|перемещ|выдан|возврат|клиент|склад|база/iu;
 const DEFAULT_CENTER = { lat: 55.796127, lng: 49.106414 };
 const DEFAULT_WAREHOUSE_LABEL = 'Склад / база';
+const GSM_SIGNAL_STATES = new Set<EquipmentGsmSignalState>(['online', 'location_only', 'offline']);
+
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
+}
 
 function normalizeText(value: unknown) {
   return String(value || '').trim().toLowerCase();
@@ -142,6 +147,28 @@ function parseCoordinates(value: string) {
   if (lat === null || lng === null) return null;
   if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
   return { lat, lng };
+}
+
+function isValidCoordinatePair(lat: number | null, lng: number | null) {
+  return lat !== null
+    && lng !== null
+    && Math.abs(lat) <= 90
+    && Math.abs(lng) <= 180;
+}
+
+function buildPointFromTelemetryEntry(
+  entry: EquipmentGsmPositionPoint,
+  fallbackAddress: string,
+): GsmResolvedPoint | undefined {
+  const lat = toNumber(entry?.lat);
+  const lng = toNumber(entry?.lng);
+  if (!isValidCoordinatePair(lat, lng)) return undefined;
+  return {
+    lat,
+    lng,
+    source: entry?.source || 'gps',
+    address: entry?.address || fallbackAddress,
+  };
 }
 
 function jitterPoint(lat: number, lng: number, seed: string) {
@@ -189,11 +216,13 @@ export function resolveNamedPoint(value: string | undefined | null, seed = ''): 
 }
 
 function getLatestMovementDate(equipment: Equipment, shippingPhotos: ShippingPhoto[]) {
+  const history = asArray<Equipment['history'][number]>(equipment.history);
+  const movementHistory = asArray<EquipmentGsmPositionPoint>(equipment.gsmMovementHistory);
   const dates = [
     equipment.gsmLastSignalAt,
     ...shippingPhotos.map(item => item.date),
-    ...(equipment.history || []).map(item => item.date),
-    ...(equipment.gsmMovementHistory || []).map(item => item.at),
+    ...history.map(item => item?.date),
+    ...movementHistory.map(item => item?.at),
   ].filter(Boolean) as string[];
 
   if (dates.length === 0) return null;
@@ -204,7 +233,7 @@ function getLatestMovementDate(equipment: Equipment, shippingPhotos: ShippingPho
 }
 
 export function deriveSignalState(equipment: Equipment, lastSeenAt: string | null): EquipmentGsmSignalState {
-  if (equipment.gsmSignalStatus) return equipment.gsmSignalStatus;
+  if (equipment.gsmSignalStatus && GSM_SIGNAL_STATES.has(equipment.gsmSignalStatus)) return equipment.gsmSignalStatus;
   if (equipment.gsmLastSignalAt) {
     const ageHours = Math.max(0, (Date.now() - new Date(equipment.gsmLastSignalAt).getTime()) / 36e5);
     return ageHours <= 24 ? 'online' : 'offline';
@@ -213,7 +242,8 @@ export function deriveSignalState(equipment: Equipment, lastSeenAt: string | nul
 }
 
 function getTelemetrySummary(equipment: Equipment): GsmTelemetrySummary {
-  const movementSpeed = [...(equipment.gsmMovementHistory || [])]
+  const movementHistory = asArray<EquipmentGsmPositionPoint>(equipment.gsmMovementHistory);
+  const movementSpeed = [...movementHistory]
     .reverse()
     .find(entry => typeof entry.speedKph === 'number');
 
@@ -245,7 +275,7 @@ function findClassicRentalForBinding(
   rentals: Rental[],
 ) {
   const candidates = rentals.filter(rental =>
-    rental.equipment.includes(equipment.inventoryNumber)
+    asArray<string>(rental.equipment).includes(equipment.inventoryNumber)
     || (ganttRental ? normalizeText(rental.client) === normalizeText(ganttRental.client) : false)
     || (equipment.currentClient ? normalizeText(rental.client) === normalizeText(equipment.currentClient) : false),
   );
@@ -418,7 +448,8 @@ export function buildMovementEntries(
     } satisfies GsmMovementEntry;
   });
 
-  const historyEntries = (equipment.history || [])
+  const historyEntries = asArray<NonNullable<Equipment['history']>[number]>(equipment.history)
+    .filter(Boolean)
     .filter(entry => MOVEMENT_TEXT_RE.test(entry.text))
     .map((entry, index) => {
       const point = getPointForHistoryEntry(entry.text, currentPoint, warehouseZone, jobsiteZone);
@@ -434,24 +465,29 @@ export function buildMovementEntries(
       } satisfies GsmMovementEntry;
     });
 
-  const telemetryEntries = (equipment.gsmMovementHistory || []).map((entry, index) => ({
-    id: `${equipment.id}:telemetry:${index}:${entry.at}`,
-    equipmentId: equipment.id,
-    occurredAt: entry.at,
-    kind: 'telemetry' as const,
-    title: 'Точка GSM',
-    description: [
-      entry.address || '',
-      typeof entry.speedKph === 'number' ? `Скорость: ${entry.speedKph} км/ч` : '',
-    ].filter(Boolean).join(' · '),
-    location: entry.address || equipment.gsmAddress || equipment.location || 'Точка без адреса',
-    point: {
-      lat: entry.lat,
-      lng: entry.lng,
-      source: entry.source,
-      address: entry.address || equipment.gsmAddress || equipment.location || 'Точка GSM',
-    },
-  }));
+  const telemetryEntries = asArray<EquipmentGsmPositionPoint>(equipment.gsmMovementHistory)
+    .map((entry, index) => {
+      const point = buildPointFromTelemetryEntry(
+        entry,
+        equipment.gsmAddress || equipment.location || 'Точка GSM',
+      );
+      if (!point) return null;
+
+      return {
+        id: `${equipment.id}:telemetry:${index}:${entry.at}`,
+        equipmentId: equipment.id,
+        occurredAt: entry.at,
+        kind: 'telemetry' as const,
+        title: 'Точка GSM',
+        description: [
+          entry.address || '',
+          typeof entry.speedKph === 'number' ? `Скорость: ${entry.speedKph} км/ч` : '',
+        ].filter(Boolean).join(' · '),
+        location: entry.address || equipment.gsmAddress || equipment.location || 'Точка без адреса',
+        point,
+      } satisfies GsmMovementEntry;
+    })
+    .filter(Boolean) as GsmMovementEntry[];
 
   if (!shippingEntries.length && !historyEntries.length && !telemetryEntries.length && currentPoint) {
     historyEntries.push({
@@ -493,15 +529,23 @@ function buildRoutePoints(
   equipment: Equipment,
   movementEntries: GsmMovementEntry[],
 ): GsmRoutePoint[] {
-  const telemetryPoints = (equipment.gsmMovementHistory || [])
-    .map(entry => ({
-      at: entry.at,
-      lat: entry.lat,
-      lng: entry.lng,
-      source: entry.source,
-      address: entry.address || equipment.gsmAddress || equipment.location || 'Точка GSM',
-      label: 'Точка GSM',
-    }))
+  const telemetryPoints = (asArray<EquipmentGsmPositionPoint>(equipment.gsmMovementHistory)
+    .map(entry => {
+      const point = buildPointFromTelemetryEntry(
+        entry,
+        equipment.gsmAddress || equipment.location || 'Точка GSM',
+      );
+      if (!point) return null;
+      return {
+        at: entry.at,
+        lat: point.lat,
+        lng: point.lng,
+        source: point.source,
+        address: point.address,
+        label: 'Точка GSM',
+      } satisfies GsmRoutePoint;
+    })
+    .filter(Boolean) as GsmRoutePoint[])
     .sort((left, right) => new Date(left.at).getTime() - new Date(right.at).getTime());
 
   if (telemetryPoints.length > 0) {

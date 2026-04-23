@@ -27,6 +27,7 @@ import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, type Section } from '../../lib/permissions';
+import { getInvestorBinding, isInvestorUser } from '../../lib/userStorage';
 import { NotificationCenter } from './NotificationCenter';
 import { Input } from '../ui/input';
 import { useEquipmentList } from '../../hooks/useEquipment';
@@ -146,13 +147,71 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const searchRef = useRef<HTMLDivElement>(null);
   const deferredSearch = useDeferredValue(search);
   const normalizedSearch = normalizeSearch(deferredSearch);
+  const investorBinding = useMemo(() => getInvestorBinding(user), [user]);
+  const isInvestorRole = isInvestorUser({
+    role: user?.role,
+    status: 'Активен',
+    ownerId: user?.ownerId,
+    ownerName: user?.ownerName,
+    name: user?.name,
+  });
+  const investorEquipmentIds = useMemo(() => {
+    if (!isInvestorRole || !investorBinding) return null;
+    return new Set(
+      (equipment as Equipment[])
+        .filter(item =>
+          item.owner === 'investor'
+          && (
+            (investorBinding.ownerId && item.ownerId === investorBinding.ownerId)
+            || (investorBinding.ownerName && (item.ownerName || '').trim() === investorBinding.ownerName)
+          ),
+        )
+        .map(item => item.id),
+    );
+  }, [equipment, investorBinding, isInvestorRole]);
+  const investorInventoryNumbers = useMemo(() => {
+    if (!isInvestorRole || !investorBinding) return null;
+    return new Set(
+      (equipment as Equipment[])
+        .filter(item =>
+          item.owner === 'investor'
+          && (
+            (investorBinding.ownerId && item.ownerId === investorBinding.ownerId)
+            || (investorBinding.ownerName && (item.ownerName || '').trim() === investorBinding.ownerName)
+          ),
+        )
+        .map(item => item.inventoryNumber),
+    );
+  }, [equipment, investorBinding, isInvestorRole]);
+  const visibleRentals = useMemo(() => {
+    if (!isInvestorRole || !investorEquipmentIds || !investorInventoryNumbers) return rentals as Rental[];
+    const allowedRentalIds = new Set(
+      ganttRentals
+        .filter(item =>
+          (item.equipmentId && investorEquipmentIds.has(item.equipmentId))
+          || investorInventoryNumbers.has(item.equipmentInv),
+        )
+        .map(item => item.id),
+    );
+    return (rentals as Rental[]).filter(item =>
+      allowedRentalIds.has(item.id)
+      || item.equipment.some(label => investorInventoryNumbers.has(label)),
+    );
+  }, [ganttRentals, investorEquipmentIds, investorInventoryNumbers, isInvestorRole, rentals]);
+  const visibleGanttRentals = useMemo(() => {
+    if (!isInvestorRole || !investorEquipmentIds || !investorInventoryNumbers) return ganttRentals;
+    return ganttRentals.filter(item =>
+      (item.equipmentId && investorEquipmentIds.has(item.equipmentId))
+      || investorInventoryNumbers.has(item.equipmentInv),
+    );
+  }, [ganttRentals, investorEquipmentIds, investorInventoryNumbers, isInvestorRole]);
 
   const navBadges = useMemo(() => {
     const todayKey = new Date().toISOString().slice(0, 10);
 
     return {
       equipment: equipment.filter(item => item.status === 'in_service' || item.status === 'inactive').length,
-      rentals: ganttRentals.filter(item =>
+      rentals: visibleGanttRentals.filter(item =>
         (item.status === 'active' || item.status === 'created')
         && item.endDate <= todayKey,
       ).length,
@@ -160,7 +219,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       documents: 0,
       payments: 0,
     };
-  }, [equipment, ganttRentals, serviceTickets]);
+  }, [equipment, serviceTickets, visibleGanttRentals]);
 
   const handleLogout = () => {
     logout();
@@ -239,7 +298,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     }
 
     if (canView('rentals')) {
-      for (const item of rentals as Rental[]) {
+      for (const item of visibleRentals) {
         if (!includesSearch([
           item.id,
           item.client,
@@ -288,7 +347,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     }
 
     return results.slice(0, 12);
-  }, [canView, clients, equipment, normalizedSearch, rentals, serviceTickets]);
+  }, [canView, clients, equipment, normalizedSearch, serviceTickets, visibleRentals]);
 
   const groupedResults = useMemo(() => {
     const groups = new Map<SearchResult['group'], SearchResult[]>();

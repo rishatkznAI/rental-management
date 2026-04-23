@@ -43,6 +43,8 @@ function registerAuthRoutes(app, deps) {
           name: user.name,
           email: user.email,
           role: user.role,
+          ownerId: user.ownerId || undefined,
+          ownerName: user.ownerName || undefined,
         },
       });
     } catch (err) {

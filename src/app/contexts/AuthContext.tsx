@@ -6,6 +6,8 @@ export interface AuthUser {
   name: string;
   role: string;
   email: string;
+  ownerId?: string;
+  ownerName?: string;
 }
 
 interface AuthState {
@@ -39,13 +41,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; email: string } }>('/api/auth/me')
+    api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; email: string; ownerId?: string; ownerName?: string } }>('/api/auth/me')
       .then(({ user: session }) => {
         const user: AuthUser = {
           id:    session.userId,
           name:  session.userName,
           role:  session.userRole,
           email: session.email,
+          ownerId: session.ownerId,
+          ownerName: session.ownerName,
         };
         setState({ user, isAuthenticated: true, isLoading: false });
       })
@@ -73,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; email: string } }>(
+    const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; email: string; ownerId?: string; ownerName?: string } }>(
       '/api/auth/login',
       { email, password }
     );
@@ -85,6 +89,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name:  result.user.name,
       role:  result.user.role,
       email: result.user.email,
+      ownerId: result.user.ownerId,
+      ownerName: result.user.ownerName,
     };
     setState({ user, isAuthenticated: true, isLoading: false });
   }, []);

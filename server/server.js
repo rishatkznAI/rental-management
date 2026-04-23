@@ -183,6 +183,8 @@ function createSession(user) {
     userName:  user.name,
     userRole:  user.role,
     email:     user.email,
+    ownerId:   user.ownerId || null,
+    ownerName: user.ownerName || null,
     createdAt: Date.now(),
   };
   saveSession(token, session, session.createdAt + SESSION_TTL);

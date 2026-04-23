@@ -22,6 +22,7 @@ export function Layout() {
 
   const { isAuthenticated, isLoading } = useAuth();
   const { can, canView, defaultPath } = usePermissions();
+  const visibleBottomNav = BOTTOM_NAV.filter(item => canView(pathToSection(item.href) || 'dashboard'));
   const section = pathToSection(location.pathname);
   const requiredAction = pathToRequiredAction(location.pathname);
   const shouldRedirectBySection = Boolean(section && !canView(section));
@@ -98,8 +99,11 @@ export function Layout() {
 
       {/* Mobile bottom navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-border/80 bg-sidebar/95 backdrop-blur-xl sm:hidden">
-        <div className="grid grid-cols-5">
-          {BOTTOM_NAV.map((item) => {
+        <div
+          className="grid"
+          style={{ gridTemplateColumns: `repeat(${Math.max(visibleBottomNav.length, 1)}, minmax(0, 1fr))` }}
+        >
+          {visibleBottomNav.map((item) => {
             const Icon = item.icon;
             const isActive =
               location.pathname === item.href ||

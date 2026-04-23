@@ -21,6 +21,7 @@ import { api } from './api';
 
 export type UserRole =
   | 'Администратор'
+  | 'Инвестор'
   | 'Менеджер по аренде'
   | 'Менеджер по продажам'
   | 'Механик'
@@ -36,6 +37,8 @@ export interface SystemUser {
   email:    string;
   role:     UserRole;
   status:   UserStatus;
+  ownerId?: string;
+  ownerName?: string;
   /**
    * Пароль хранится как 'h1:<sha256-hex>' после первой миграции.
    * Устаревший plain-text автоматически мигрируется при входе.
@@ -52,6 +55,7 @@ export const MECHANIC_ROLES: UserRole[] = [
 
 export const ROLES: UserRole[] = [
   'Администратор',
+  'Инвестор',
   'Менеджер по аренде',
   'Менеджер по продажам',
   ...MECHANIC_ROLES,
@@ -68,6 +72,12 @@ type UserWithManagerRole = {
   status?: UserStatus | string;
 };
 
+type UserWithInvestorRole = UserWithManagerRole & {
+  ownerId?: string;
+  ownerName?: string;
+  name?: string;
+};
+
 export function isRentalManagerUser(user: UserWithManagerRole | null | undefined): boolean {
   if (!user) return false;
   return user.status === 'Активен'
@@ -80,6 +90,18 @@ export function filterRentalManagerUsers<T extends UserWithManagerRole>(users: T
 
 export function isMechanicRole(role: UserRole | string | null | undefined): boolean {
   return MECHANIC_ROLES.some(item => item === role);
+}
+
+export function isInvestorUser(user: UserWithInvestorRole | null | undefined): boolean {
+  return Boolean(user && user.status === 'Активен' && user.role === 'Инвестор');
+}
+
+export function getInvestorBinding(user: UserWithInvestorRole | null | undefined) {
+  if (!isInvestorUser(user)) return null;
+  return {
+    ownerId: user?.ownerId?.trim() || '',
+    ownerName: user?.ownerName?.trim() || user?.name?.trim() || '',
+  };
 }
 
 // ── Ключ хранилища ────────────────────────────────────────────────────────────

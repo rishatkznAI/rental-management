@@ -22,7 +22,7 @@ import {
   mockDowntimes,
   mockServicePeriods,
 } from '../mock-data';
-import { filterRentalManagerUsers, type SystemUser } from '../lib/userStorage';
+import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, type SystemUser } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
@@ -372,13 +372,62 @@ export default function Rentals() {
     queryFn: clientsService.getAll,
   });
 
-  useEffect(() => {
-    setGanttRentals(ganttData);
-  }, [ganttData]);
+  const investorBinding = useMemo(() => getInvestorBinding(user), [user]);
+  const isInvestorRole = isInvestorUser({
+    role: user?.role,
+    status: 'Активен',
+    ownerId: user?.ownerId,
+    ownerName: user?.ownerName,
+    name: user?.name,
+  });
+  const investorEquipmentIds = useMemo(() => {
+    if (!isInvestorRole || !investorBinding) return null;
+    return new Set(
+      equipmentData
+        .filter(item =>
+          item.owner === 'investor'
+          && (
+            (investorBinding.ownerId && item.ownerId === investorBinding.ownerId)
+            || (investorBinding.ownerName && (item.ownerName || '').trim() === investorBinding.ownerName)
+          ),
+        )
+        .map(item => item.id),
+    );
+  }, [equipmentData, investorBinding, isInvestorRole]);
+  const investorInventoryNumbers = useMemo(() => {
+    if (!isInvestorRole || !investorBinding) return null;
+    return new Set(
+      equipmentData
+        .filter(item =>
+          item.owner === 'investor'
+          && (
+            (investorBinding.ownerId && item.ownerId === investorBinding.ownerId)
+            || (investorBinding.ownerName && (item.ownerName || '').trim() === investorBinding.ownerName)
+          ),
+        )
+        .map(item => item.inventoryNumber)
+        .filter(Boolean),
+    );
+  }, [equipmentData, investorBinding, isInvestorRole]);
 
   useEffect(() => {
-    setEquipmentList(equipmentData);
-  }, [equipmentData]);
+    if (!isInvestorRole || !investorEquipmentIds || !investorInventoryNumbers) {
+      setGanttRentals(ganttData);
+      return;
+    }
+    setGanttRentals(ganttData.filter(item =>
+      (item.equipmentId && investorEquipmentIds.has(item.equipmentId))
+      || (!item.equipmentId && investorInventoryNumbers.has(item.equipmentInv)),
+    ));
+  }, [ganttData, investorEquipmentIds, investorInventoryNumbers, isInvestorRole]);
+
+  useEffect(() => {
+    if (!isInvestorRole || !investorEquipmentIds) {
+      setEquipmentList(equipmentData);
+      return;
+    }
+    setEquipmentList(equipmentData.filter(item => investorEquipmentIds.has(item.id)));
+  }, [equipmentData, investorEquipmentIds, isInvestorRole]);
 
   useEffect(() => {
     setPayments(paymentData);
@@ -939,6 +988,10 @@ export default function Rentals() {
     setRentalPreset('all');
   };
 
+  const toggleRentalPreset = useCallback((preset: 'overdue' | 'unpaid') => {
+    setRentalPreset(current => current === preset ? 'all' : preset);
+  }, []);
+
   const toggleGroupCollapsed = useCallback((type: EquipmentType) => {
     setCollapsedGroups(prev => ({
       ...prev,
@@ -1432,14 +1485,34 @@ export default function Rentals() {
                   <span className="font-semibold text-foreground">{shownRentals}</span>
                   аренд
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/15 bg-blue-500/10 px-2.5 py-1 text-blue-300">
+                <button
+                  type="button"
+                  onClick={() => toggleRentalPreset('unpaid')}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 transition-colors',
+                    rentalPreset === 'unpaid'
+                      ? 'border-blue-400/40 bg-blue-500/20 text-blue-200'
+                      : 'border-blue-500/15 bg-blue-500/10 text-blue-300 hover:border-blue-400/30 hover:bg-blue-500/15',
+                  )}
+                  title="Показать аренды без оплаты"
+                >
                   <CreditCard className="h-3.5 w-3.5" />
                   {quickFilterCounts.unpaid} без оплаты
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-red-500/15 bg-red-500/10 px-2.5 py-1 text-red-300">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleRentalPreset('overdue')}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 transition-colors',
+                    rentalPreset === 'overdue'
+                      ? 'border-red-400/40 bg-red-500/20 text-red-200'
+                      : 'border-red-500/15 bg-red-500/10 text-red-300 hover:border-red-400/30 hover:bg-red-500/15',
+                  )}
+                  title="Показать просроченные аренды"
+                >
                   <AlertTriangle className="h-3.5 w-3.5" />
                   {quickFilterCounts.overdue} просроч.
-                </span>
+                </button>
               </div>
             </div>
 
@@ -1450,23 +1523,27 @@ export default function Rentals() {
                   Новая аренда
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant="secondary"
-                className="app-button-outline h-10 rounded-xl px-4"
-                onClick={() => setShowMovementSheet(true)}
-              >
-                <ArrowRightLeft className="h-4 w-4" />
-                Движение техники
-              </Button>
-              <Button size="sm" variant="secondary" className="app-button-outline h-10 rounded-xl px-4" onClick={() => handleOpenReturn()}>
-                <RotateCcw className="h-4 w-4" />
-                Возврат техники
-              </Button>
-              <Button size="sm" variant="secondary" className="app-button-ghost h-10 rounded-xl px-4" onClick={() => handleOpenDowntime()}>
-                <PauseCircle className="h-4 w-4" />
-                Отметить простой
-              </Button>
+              {!isInvestorRole && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="app-button-outline h-10 rounded-xl px-4"
+                    onClick={() => setShowMovementSheet(true)}
+                  >
+                    <ArrowRightLeft className="h-4 w-4" />
+                    Движение техники
+                  </Button>
+                  <Button size="sm" variant="secondary" className="app-button-outline h-10 rounded-xl px-4" onClick={() => handleOpenReturn()}>
+                    <RotateCcw className="h-4 w-4" />
+                    Возврат техники
+                  </Button>
+                  <Button size="sm" variant="secondary" className="app-button-ghost h-10 rounded-xl px-4" onClick={() => handleOpenDowntime()}>
+                    <PauseCircle className="h-4 w-4" />
+                    Отметить простой
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 

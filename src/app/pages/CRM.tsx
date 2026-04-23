@@ -309,6 +309,8 @@ export default function CRM() {
   const [editingDeal, setEditingDeal] = React.useState<CrmDeal | null>(null);
   const [form, setForm] = React.useState<DealFormState>(makeEmptyForm(pipeline, user?.id));
   const [formError, setFormError] = React.useState('');
+  const [draggedDealId, setDraggedDealId] = React.useState<string | null>(null);
+  const [dragOverStage, setDragOverStage] = React.useState<CrmDealStage | null>(null);
 
   React.useEffect(() => {
     const nextAllowed = getAllowedPipelines(user?.role);
@@ -483,22 +485,63 @@ export default function CRM() {
   async function moveDeal(deal: CrmDeal, direction: -1 | 1) {
     const nextStage = getAdjacentStage(deal.pipeline, deal.stage, direction);
     if (!nextStage) return;
+    await moveDealToStage(deal, nextStage.id, nextStage.label);
+  }
+
+  async function moveDealToStage(deal: CrmDeal, nextStageId: CrmDealStage, nextStageLabel?: string) {
+    if (deal.stage === nextStageId) return;
+    const targetStageLabel = nextStageLabel || getStageLabel(deal.pipeline, nextStageId);
     await updateDeal.mutateAsync({
       id: deal.id,
       data: {
-        stage: nextStage.id,
-        status: stageToStatus(nextStage.id),
+        stage: nextStageId,
+        status: stageToStatus(nextStageId),
         updatedAt: nowIso(),
         history: [
           ...(deal.history || []),
           getHistoryEntry(
-            `Этап изменён: ${getStageLabel(deal.pipeline, deal.stage)} → ${nextStage.label}`,
+            `Этап изменён: ${getStageLabel(deal.pipeline, deal.stage)} → ${targetStageLabel}`,
             user?.name || 'Система',
           ),
         ],
       },
     });
-    toast.success(`Сделка переведена на этап «${nextStage.label}»`);
+    toast.success(`Сделка переведена на этап «${targetStageLabel}»`);
+  }
+
+  function handleCardDragStart(event: React.DragEvent<HTMLDivElement>, deal: CrmDeal) {
+    if (!canEditDeal || updateDeal.isPending) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', deal.id);
+    setDraggedDealId(deal.id);
+    setDragOverStage(deal.stage);
+  }
+
+  function handleCardDragEnd() {
+    setDraggedDealId(null);
+    setDragOverStage(null);
+  }
+
+  function handleStageDragOver(event: React.DragEvent<HTMLDivElement>, stageId: CrmDealStage) {
+    if (!canEditDeal || updateDeal.isPending || !draggedDealId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    if (dragOverStage !== stageId) {
+      setDragOverStage(stageId);
+    }
+  }
+
+  async function handleStageDrop(event: React.DragEvent<HTMLDivElement>, stageId: CrmDealStage, stageLabel: string) {
+    event.preventDefault();
+    const droppedDealId = event.dataTransfer.getData('text/plain') || draggedDealId;
+    const droppedDeal = scopedDeals.find((item) => item.id === droppedDealId);
+    setDraggedDealId(null);
+    setDragOverStage(null);
+    if (!droppedDeal || !canEditDeal || updateDeal.isPending) return;
+    await moveDealToStage(droppedDeal, stageId, stageLabel);
   }
 
   if (isLoading) {
@@ -657,7 +700,13 @@ export default function CRM() {
 
                 return (
                   <div key={stage.id} className="min-w-[320px] max-w-[320px] flex-1">
-                    <Card className={`h-full ${stage.accent}`}>
+                    <Card
+                      className={`h-full transition-all ${stage.accent} ${
+                        dragOverStage === stage.id && draggedDealId
+                          ? 'ring-2 ring-primary/60 shadow-[0_0_0_1px_rgba(212,247,74,0.24)]'
+                          : ''
+                      }`}
+                    >
                       <CardHeader className="border-b pb-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -667,10 +716,23 @@ export default function CRM() {
                           <Badge variant="default">{stageDeals.length}</Badge>
                         </div>
                       </CardHeader>
-                      <CardContent className="space-y-3 pt-4">
+                      <CardContent
+                        className="space-y-3 pt-4"
+                        onDragOver={(event) => handleStageDragOver(event, stage.id)}
+                        onDragEnter={(event) => handleStageDragOver(event, stage.id)}
+                        onDrop={(event) => void handleStageDrop(event, stage.id, stage.label)}
+                      >
                         {stageDeals.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-border/70 bg-background/60 px-4 py-8 text-center text-sm text-muted-foreground">
-                            Сделок на этом этапе пока нет.
+                          <div
+                            className={`rounded-xl border border-dashed px-4 py-8 text-center text-sm transition-colors ${
+                              dragOverStage === stage.id && draggedDealId
+                                ? 'border-primary/60 bg-primary/10 text-foreground'
+                                : 'border-border/70 bg-background/60 text-muted-foreground'
+                            }`}
+                          >
+                            {dragOverStage === stage.id && draggedDealId
+                              ? 'Отпустите карточку, чтобы переместить её на этот этап.'
+                              : 'Сделок на этом этапе пока нет.'}
                           </div>
                         ) : (
                           stageDeals.map((deal) => {
@@ -678,7 +740,19 @@ export default function CRM() {
                             const nextStage = getAdjacentStage(deal.pipeline, deal.stage, 1);
 
                             return (
-                              <div key={deal.id} className="rounded-2xl border bg-background/95 p-4 shadow-sm">
+                              <div
+                                key={deal.id}
+                                draggable={canEditDeal && !updateDeal.isPending}
+                                onDragStart={(event) => handleCardDragStart(event, deal)}
+                                onDragEnd={handleCardDragEnd}
+                                className={`rounded-2xl border bg-background/95 p-4 shadow-sm transition-all ${
+                                  canEditDeal ? 'cursor-grab active:cursor-grabbing' : ''
+                                } ${
+                                  draggedDealId === deal.id
+                                    ? 'scale-[0.98] opacity-60 shadow-none'
+                                    : 'hover:-translate-y-0.5 hover:shadow-md'
+                                }`}
+                              >
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
                                     <div className="truncate text-sm font-semibold text-foreground">{deal.title}</div>
@@ -691,6 +765,12 @@ export default function CRM() {
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                 </div>
+
+                                {canEditDeal && (
+                                  <div className="mt-3 rounded-xl border border-dashed border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                                    Перетащите карточку в нужную колонку или используйте стрелки ниже.
+                                  </div>
+                                )}
 
                                 <div className="mt-4 space-y-2 text-sm text-muted-foreground">
                                   <div className="flex items-start gap-2">

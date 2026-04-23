@@ -1647,6 +1647,7 @@ startServer({
     readData,
     writeData,
     normalizeServiceWorkRecord,
+    normalizeSparePartRecord,
     seedsDir: path.join(__dirname, 'seeds'),
   },
   logger: console,

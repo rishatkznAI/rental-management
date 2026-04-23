@@ -39,23 +39,19 @@ function partKey(record) {
   ].join('::');
 }
 
-function mergeUnique(existing, incoming) {
-  const normalizedExisting = existing.map(normalizePart);
-  const usedKeys = new Set(normalizedExisting.map(partKey));
-  const additions = [];
+function replaceUnique(incoming) {
+  const usedKeys = new Set();
+  const normalizedList = [];
 
   for (const item of incoming) {
     const normalized = normalizePart(item);
     const key = partKey(normalized);
     if (!normalized.name || usedKeys.has(key)) continue;
     usedKeys.add(key);
-    additions.push(normalized);
+    normalizedList.push(normalized);
   }
 
-  return {
-    merged: [...normalizedExisting, ...additions],
-    added: additions.length,
-  };
+  return normalizedList;
 }
 
 function main() {
@@ -72,13 +68,13 @@ function main() {
   const existingSpareParts = Array.isArray(getData('spare_parts')) ? getData('spare_parts') : [];
   const existingCatalog = Array.isArray(getData('spare_parts_catalog')) ? getData('spare_parts_catalog') : [];
 
-  const sparePartsResult = mergeUnique(existingSpareParts, incoming);
-  const catalogResult = mergeUnique(existingCatalog, incoming);
+  const spareParts = replaceUnique(incoming);
+  const catalog = replaceUnique(incoming);
 
-  setData('spare_parts', sparePartsResult.merged);
-  setData('spare_parts_catalog', catalogResult.merged);
+  setData('spare_parts', spareParts);
+  setData('spare_parts_catalog', catalog);
 
-  const categories = [...new Set(sparePartsResult.merged.map(item => item.category).filter(Boolean))].sort((a, b) =>
+  const categories = [...new Set(spareParts.map(item => item.category).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b, 'ru'),
   );
 
@@ -89,13 +85,13 @@ function main() {
     importedFromFile: incoming.length,
     spareParts: {
       before: existingSpareParts.length,
-      added: sparePartsResult.added,
-      after: sparePartsResult.merged.length,
+      replaced: spareParts.length,
+      after: spareParts.length,
     },
     sparePartsCatalog: {
       before: existingCatalog.length,
-      added: catalogResult.added,
-      after: catalogResult.merged.length,
+      replaced: catalog.length,
+      after: catalog.length,
     },
     categories,
   }, null, 2));

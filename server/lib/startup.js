@@ -17,6 +17,28 @@ function seedServiceWorks({ readData, writeData, normalizeServiceWorkRecord, see
   }
 }
 
+function hasSeededSpareParts(existing) {
+  return existing.some(item => String(item.article || item.sku || '').startsWith('GEN-'));
+}
+
+function seedSpareParts({ readData, writeData, normalizeSparePartRecord, seedsDir, logger = console }) {
+  try {
+    const existing = readData('spare_parts') || [];
+    const seedPath = path.join(seedsDir, 'spare_parts.json');
+    if (!fs.existsSync(seedPath)) return;
+    const parts = JSON.parse(fs.readFileSync(seedPath, 'utf-8'));
+    if (!Array.isArray(parts) || parts.length === 0) return;
+    if (existing.length >= parts.length && hasSeededSpareParts(existing)) return;
+
+    const normalized = parts.map(item => normalizeSparePartRecord(item));
+    writeData('spare_parts', normalized);
+    writeData('spare_parts_catalog', normalized);
+    logger.log(`✓ Справочник запчастей загружен из seed: ${normalized.length} записей`);
+  } catch (error) {
+    logger.warn('seedSpareParts error:', error.message);
+  }
+}
+
 async function startServer({ app, port, deps, logger = console }) {
   const {
     migrateJsonFilesToDb,
@@ -42,6 +64,13 @@ async function startServer({ app, port, deps, logger = console }) {
       readData: deps.readData,
       writeData: deps.writeData,
       normalizeServiceWorkRecord: deps.normalizeServiceWorkRecord,
+      seedsDir: deps.seedsDir,
+      logger,
+    });
+    seedSpareParts({
+      readData: deps.readData,
+      writeData: deps.writeData,
+      normalizeSparePartRecord: deps.normalizeSparePartRecord,
       seedsDir: deps.seedsDir,
       logger,
     });
@@ -97,6 +126,7 @@ async function startServer({ app, port, deps, logger = console }) {
 }
 
 module.exports = {
+  seedSpareParts,
   seedServiceWorks,
   startServer,
 };

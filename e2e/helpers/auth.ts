@@ -16,7 +16,7 @@ export const RENTAL_MANAGER_CREDENTIALS: Credentials = {
 };
 
 export async function login(page: Page, credentials: Credentials) {
-  await page.goto('./');
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await page.getByPlaceholder('example@company.ru').fill(credentials.email);
   await page.getByPlaceholder('••••••••').fill(credentials.password);
   await page.getByRole('button', { name: 'Войти' }).click();
@@ -31,7 +31,7 @@ async function expectAuthenticatedShell(page: Page) {
   await expect(async () => {
     const currentUrl = page.url();
     const isStillOnLogin = currentUrl.includes('#/login');
-    const rentalsNavVisible = await page.locator('aside').getByRole('button', { name: 'Аренды' }).isVisible().catch(() => false);
+    const rentalsNavVisible = await page.locator('aside').getByRole('button', { name: /^Аренды/ }).isVisible().catch(() => false);
     const logoutVisible = await page.getByRole('button', { name: 'Выйти' }).isVisible().catch(() => false);
 
     expect(isStillOnLogin).toBeFalsy();

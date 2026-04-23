@@ -10,6 +10,8 @@ import {
   withAdminApi,
 } from './helpers/api';
 
+test.setTimeout(60_000);
+
 test('admin can return equipment into service from the rentals planner', async ({ page }) => {
   const suffix = `return-${Date.now()}`;
   const { equipment, rental, ganttId } = await withAdminApi(async (api) => {

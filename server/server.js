@@ -122,10 +122,13 @@ const ALLOWED_ORIGINS = [
     ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
     : []),
 ];
+const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i;
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true); // curl / server-to-server
-    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin) || LOCAL_ORIGIN_PATTERN.test(origin)) {
+      return callback(null, true);
+    }
     console.warn(`[CORS] Blocked origin: ${origin}`);
     callback(new Error(`CORS: origin ${origin} not allowed`));
   },

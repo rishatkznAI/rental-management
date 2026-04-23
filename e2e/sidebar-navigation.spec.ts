@@ -4,11 +4,11 @@ import { loginAsAdmin } from './helpers/auth';
 test('sidebar navigation updates content without page refresh', async ({ page }) => {
   await loginAsAdmin(page);
 
-  await page.locator('aside').getByRole('button', { name: 'Аренды' }).click();
+  await page.locator('aside').getByRole('button', { name: /^Аренды/ }).click();
   await expect(page).toHaveURL(/#\/rentals$/);
   await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
 
-  await page.locator('aside').getByRole('button', { name: 'Сервис' }).click();
+  await page.locator('aside').getByRole('button', { name: /^Сервис/ }).click();
   await expect(page).toHaveURL(/#\/service$/);
   await expect(page.getByRole('heading', { name: 'Сервис' })).toBeVisible();
 

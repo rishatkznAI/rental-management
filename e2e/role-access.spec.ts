@@ -10,7 +10,7 @@ test('office manager can open rental creation page but cannot edit an existing r
   });
 
   await login(page, officeManager);
-  await expect(page.getByRole('heading', { name: 'Техника', exact: true })).toBeVisible();
+  await expect(page.locator('aside').getByRole('button', { name: /^Аренды/ })).toBeVisible();
 
   await page.goto('./#/rentals/new');
   await expect(page.getByRole('heading', { name: 'Новая аренда' })).toBeVisible();

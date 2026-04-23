@@ -16,6 +16,7 @@ import {
 } from '../mock-data';
 import type { ShippingPhoto, ServiceTicket, Payment, EquipmentStatus, EquipmentOperationPhotoCategory, ShippingEventType } from '../types';
 import { formatDate, formatDateTime, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
+import { cn } from '../lib/utils';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import {
@@ -441,6 +442,92 @@ function printHandoffAct(event: ShippingPhoto, equipment: Equipment) {
   }, { once: true });
 }
 
+type ShippingPhotoGroup = {
+  key: string;
+  label: string;
+  photos: string[];
+};
+
+type ShippingComparisonPair = {
+  id: string;
+  shipping: ShippingPhoto;
+  receiving: ShippingPhoto;
+};
+
+function getShippingPhotoGroups(event: ShippingPhoto): ShippingPhotoGroup[] {
+  if (event.photoCategories && Object.keys(event.photoCategories).length > 0) {
+    return Object.entries(PHOTO_CATEGORY_LABELS)
+      .map(([key, label]) => ({
+        key,
+        label,
+        photos: event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [],
+      }))
+      .filter(group => group.photos.length > 0);
+  }
+
+  return event.photos.length > 0
+    ? [{ key: 'generic', label: 'Фотографии', photos: event.photos }]
+    : [];
+}
+
+function buildShippingComparisonPairs(events: ShippingPhoto[]) {
+  const chronological = [...events].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const openShippingByRental = new Map<string, ShippingPhoto[]>();
+  const openShippingQueue: ShippingPhoto[] = [];
+  const pairs: ShippingComparisonPair[] = [];
+
+  chronological.forEach(event => {
+    if (event.type === 'shipping') {
+      if (event.rentalId) {
+        const list = openShippingByRental.get(event.rentalId) || [];
+        list.push(event);
+        openShippingByRental.set(event.rentalId, list);
+      }
+      openShippingQueue.push(event);
+      return;
+    }
+
+    let matchingShipping: ShippingPhoto | undefined;
+
+    if (event.rentalId) {
+      const list = openShippingByRental.get(event.rentalId) || [];
+      matchingShipping = list.shift();
+      if (list.length > 0) {
+        openShippingByRental.set(event.rentalId, list);
+      } else if (event.rentalId) {
+        openShippingByRental.delete(event.rentalId);
+      }
+    }
+
+    if (!matchingShipping) {
+      matchingShipping = openShippingQueue.find(item => item.type === 'shipping');
+    }
+
+    if (!matchingShipping) return;
+
+    const queueIndex = openShippingQueue.findIndex(item => item.id === matchingShipping?.id);
+    if (queueIndex >= 0) {
+      openShippingQueue.splice(queueIndex, 1);
+    }
+
+    pairs.push({
+      id: `${matchingShipping.id}:${event.id}`,
+      shipping: matchingShipping,
+      receiving: event,
+    });
+  });
+
+  return pairs.reverse();
+}
+
+function getComparisonLabel(pair: ShippingComparisonPair) {
+  const range = `${formatDate(pair.shipping.date)} → ${formatDate(pair.receiving.date)}`;
+  if (pair.shipping.rentalId) {
+    return `Аренда ${pair.shipping.rentalId} · ${range}`;
+  }
+  return `Цикл ${range}`;
+}
+
 export default function EquipmentDetail() {
   const { user } = useAuth();
   const { can } = usePermissions();
@@ -571,6 +658,10 @@ export default function EquipmentDetail() {
       .filter(p => p.equipmentId === id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     [allShippingPhotos, id],
+  );
+  const shippingComparisonPairs = useMemo(
+    () => buildShippingComparisonPairs(shippingPhotos),
+    [shippingPhotos],
   );
   const latestShippingEvent = useMemo(
     () => shippingPhotos.find(event => event.type === 'shipping') || null,
@@ -1005,6 +1096,15 @@ export default function EquipmentDetail() {
   const [showCreateServiceModal, setShowCreateServiceModal] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [selectedComparisonPairId, setSelectedComparisonPairId] = useState('');
+
+  useEffect(() => {
+    setSelectedComparisonPairId(currentId => {
+      if (shippingComparisonPairs.length === 0) return '';
+      if (shippingComparisonPairs.some(pair => pair.id === currentId)) return currentId;
+      return shippingComparisonPairs[0].id;
+    });
+  }, [shippingComparisonPairs]);
 
   // ── Not found screen ──
   if (!equipment) {
@@ -1085,6 +1185,28 @@ export default function EquipmentDetail() {
   const equipmentRentalIds = new Set(ganttRentals.map(r => r.id));
   const equipmentPayments = allPayments.filter(p => p.rentalId && equipmentRentalIds.has(p.rentalId));
   const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
+
+  const selectedComparisonPair = useMemo(
+    () => shippingComparisonPairs.find(pair => pair.id === selectedComparisonPairId) || shippingComparisonPairs[0] || null,
+    [selectedComparisonPairId, shippingComparisonPairs],
+  );
+
+  const selectedComparisonGroups = useMemo(() => {
+    if (!selectedComparisonPair) return [];
+
+    const beforeGroups = new Map(getShippingPhotoGroups(selectedComparisonPair.shipping).map(group => [group.key, group] as const));
+    const afterGroups = new Map(getShippingPhotoGroups(selectedComparisonPair.receiving).map(group => [group.key, group] as const));
+    const orderedKeys = [...Object.keys(PHOTO_CATEGORY_LABELS), 'generic'];
+
+    return orderedKeys
+      .filter(key => beforeGroups.has(key) || afterGroups.has(key))
+      .map(key => ({
+        key,
+        label: beforeGroups.get(key)?.label || afterGroups.get(key)?.label || 'Фотографии',
+        beforePhotos: beforeGroups.get(key)?.photos || [],
+        afterPhotos: afterGroups.get(key)?.photos || [],
+      }));
+  }, [selectedComparisonPair]);
 
   const tabTriggerClass = 'whitespace-nowrap';
 
@@ -2203,6 +2325,108 @@ export default function EquipmentDetail() {
                 </div>
               )}
 
+              {shippingComparisonPairs.length > 0 && selectedComparisonPair && (
+                <div className="rounded-2xl border border-border bg-secondary/30 p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Сравнение до / после аренды</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Слева фото перед отгрузкой, справа фото после возврата по одной и той же аренде.
+                      </p>
+                    </div>
+                    <div className="w-full lg:w-[360px]">
+                      <Select value={selectedComparisonPair.id} onValueChange={setSelectedComparisonPairId}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Выберите аренду для сравнения" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {shippingComparisonPairs.map(pair => (
+                            <SelectItem key={pair.id} value={pair.id}>
+                              {getComparisonLabel(pair)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                    <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <Badge variant="info">До аренды</Badge>
+                          <p className="mt-2 text-sm font-medium text-foreground">
+                            Отгрузка от {formatDate(selectedComparisonPair.shipping.date)}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {selectedComparisonPair.shipping.uploadedBy} · {selectedComparisonPair.shipping.hoursValue ?? equipment.hours ?? '—'} м/ч
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => printHandoffAct(selectedComparisonPair.shipping, equipment)}
+                        >
+                          Акт PDF
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <Badge variant="success">После аренды</Badge>
+                          <p className="mt-2 text-sm font-medium text-foreground">
+                            Приёмка от {formatDate(selectedComparisonPair.receiving.date)}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {selectedComparisonPair.receiving.uploadedBy} · {selectedComparisonPair.receiving.hoursValue ?? equipment.hours ?? '—'} м/ч
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => printHandoffAct(selectedComparisonPair.receiving, equipment)}
+                        >
+                          Акт PDF
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-4">
+                    {selectedComparisonGroups.map(group => (
+                      <div key={group.key} className="rounded-xl border border-border bg-card/80 p-4">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{group.label}</p>
+                            <p className="text-xs text-muted-foreground">
+                              До аренды: {group.beforePhotos.length} · После аренды: {group.afterPhotos.length}
+                            </p>
+                          </div>
+                          {(group.beforePhotos.length !== group.afterPhotos.length) && (
+                            <Badge variant="warning">Есть отличия по количеству фото</Badge>
+                          )}
+                        </div>
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          <ComparisonPhotoColumn
+                            title="До аренды"
+                            tone="before"
+                            photos={group.beforePhotos}
+                            onPreview={setPreviewImage}
+                          />
+                          <ComparisonPhotoColumn
+                            title="После аренды"
+                            tone="after"
+                            photos={group.afterPhotos}
+                            onPreview={setPreviewImage}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Upload form */}
               {canManageAcceptance && showUploadPhotoForm && (
                 <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 space-y-3">
@@ -2704,6 +2928,54 @@ function EmptyState({ icon, text, children }: { icon: React.ReactNode; text: str
       <div className="mx-auto text-gray-400">{icon}</div>
       <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{text}</p>
       {children}
+    </div>
+  );
+}
+
+function ComparisonPhotoColumn({
+  title,
+  tone,
+  photos,
+  onPreview,
+}: {
+  title: string;
+  tone: 'before' | 'after';
+  photos: string[];
+  onPreview: (value: string) => void;
+}) {
+  return (
+    <div className={cn(
+      'rounded-xl border p-3',
+      tone === 'before'
+        ? 'border-blue-500/20 bg-blue-500/5'
+        : 'border-emerald-500/20 bg-emerald-500/5',
+    )}>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{title}</p>
+        <span className="text-xs text-muted-foreground">{photos.length} фото</span>
+      </div>
+      {photos.length > 0 ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {photos.map((photo, index) => (
+            <button
+              key={`${title}-${index}`}
+              type="button"
+              onClick={() => onPreview(photo)}
+              className="group overflow-hidden rounded-lg border border-border bg-card text-left transition hover:border-primary/40"
+            >
+              <img
+                src={photo}
+                alt={`${title} ${index + 1}`}
+                className="h-28 w-full object-cover transition group-hover:scale-[1.02]"
+              />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-border bg-card/60 px-3 py-6 text-center text-sm text-muted-foreground">
+          Фото в этой части аренды не добавлены.
+        </div>
+      )}
     </div>
   );
 }

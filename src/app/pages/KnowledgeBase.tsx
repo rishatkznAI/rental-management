@@ -1001,8 +1001,8 @@ export default function KnowledgeBase() {
       </Tabs>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-5xl">
-          <div className="flex h-full flex-col">
+        <DialogContent className="max-h-[88vh] overflow-y-auto p-0 sm:max-w-5xl">
+          <div className="flex min-h-0 flex-col">
             <DialogHeader className="border-b border-border/70 px-6 py-5">
               <DialogTitle>{editingModule ? 'Редактирование модуля' : 'Новый модуль обучения'}</DialogTitle>
               <DialogDescription>
@@ -1010,7 +1010,7 @@ export default function KnowledgeBase() {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+            <div className="space-y-6 px-6 py-5">
               <div className="grid gap-6 lg:grid-cols-2">
                 <Card className="border-border/70 bg-background/60">
                   <CardHeader>
@@ -1024,6 +1024,7 @@ export default function KnowledgeBase() {
                         value={editorState.title}
                         onChange={event => setEditorState(current => ({ ...current, title: event.target.value }))}
                         placeholder="Например, Контроль дебиторки по аренде"
+                        autoComplete="off"
                       />
                     </div>
                     <div>
@@ -1032,6 +1033,7 @@ export default function KnowledgeBase() {
                         value={editorState.category}
                         onChange={event => setEditorState(current => ({ ...current, category: event.target.value }))}
                         placeholder="Аренда, Продажи, CRM, Общие"
+                        autoComplete="off"
                       />
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -1084,6 +1086,7 @@ export default function KnowledgeBase() {
                         value={editorState.description}
                         onChange={event => setEditorState(current => ({ ...current, description: event.target.value }))}
                         placeholder="Коротко объясните, чему учит модуль и какой навык он должен закрыть."
+                        autoComplete="off"
                       />
                     </div>
                   </CardContent>
@@ -1101,38 +1104,50 @@ export default function KnowledgeBase() {
                         value={editorState.videoUrl}
                         onChange={event => setEditorState(current => ({ ...current, videoUrl: event.target.value }))}
                         placeholder="https://..."
+                        autoComplete="off"
                       />
                     </div>
                     <div className="grid gap-4 sm:grid-cols-3">
                       <div>
                         <FieldLabel>Длительность, мин</FieldLabel>
                         <Input
-                          type="number"
-                          min="0"
+                          type="text"
+                          inputMode="numeric"
                           value={editorState.videoDurationMin}
-                          onChange={event => setEditorState(current => ({ ...current, videoDurationMin: event.target.value }))}
+                          onChange={event => setEditorState(current => ({
+                            ...current,
+                            videoDurationMin: event.target.value.replace(/[^\d]/g, ''),
+                          }))}
                           placeholder="8"
+                          autoComplete="off"
                         />
                       </div>
                       <div>
                         <FieldLabel>Порог, %</FieldLabel>
                         <Input
-                          type="number"
-                          min="1"
-                          max="100"
+                          type="text"
+                          inputMode="numeric"
                           value={editorState.passingScorePercent}
-                          onChange={event => setEditorState(current => ({ ...current, passingScorePercent: event.target.value }))}
+                          onChange={event => setEditorState(current => ({
+                            ...current,
+                            passingScorePercent: event.target.value.replace(/[^\d]/g, ''),
+                          }))}
                           placeholder="70"
+                          autoComplete="off"
                         />
                       </div>
                       <div>
                         <FieldLabel>Порядок</FieldLabel>
                         <Input
-                          type="number"
-                          min="0"
+                          type="text"
+                          inputMode="numeric"
                           value={editorState.sortOrder}
-                          onChange={event => setEditorState(current => ({ ...current, sortOrder: event.target.value }))}
+                          onChange={event => setEditorState(current => ({
+                            ...current,
+                            sortOrder: event.target.value.replace(/[^\d]/g, ''),
+                          }))}
                           placeholder="1"
+                          autoComplete="off"
                         />
                       </div>
                     </div>
@@ -1186,6 +1201,7 @@ export default function KnowledgeBase() {
                               question: event.target.value,
                             }))}
                             placeholder="Например, когда менеджер должен фиксировать следующий шаг в CRM?"
+                            autoComplete="off"
                           />
                         </div>
 
@@ -1199,6 +1215,7 @@ export default function KnowledgeBase() {
                               explanation: event.target.value,
                             }))}
                             placeholder="Необязательно. Можно указать подсказку для руководителя или объяснение правильного ответа."
+                            autoComplete="off"
                           />
                         </div>
 
@@ -1259,6 +1276,7 @@ export default function KnowledgeBase() {
                                       : currentOption),
                                   }))}
                                   placeholder="Введите вариант ответа"
+                                  autoComplete="off"
                                 />
                               </div>
                             ))}

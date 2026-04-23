@@ -314,21 +314,6 @@ export default function EquipmentNew() {
               )}
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <SelectField
-                label="Приоритет техники"
-                value={form.priority}
-                onValueChange={(value) => update('priority', value)}
-                options={[
-                  { value: 'critical', label: EQUIPMENT_PRIORITY_LABELS.critical },
-                  { value: 'high', label: EQUIPMENT_PRIORITY_LABELS.high },
-                  { value: 'medium', label: EQUIPMENT_PRIORITY_LABELS.medium },
-                  { value: 'low', label: EQUIPMENT_PRIORITY_LABELS.low },
-                ]}
-                hint="Используется для сортировки техники в списках и планировщике аренды."
-                required
-              />
-            </div>
             <div className="grid grid-cols-2 gap-4">
               <Input
                 label="Производитель"
@@ -342,6 +327,22 @@ export default function EquipmentNew() {
                 placeholder="Например, GS-3246, S-40"
                 value={form.model}
                 onChange={e => update('model', e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <SelectField
+                label="Приоритет техники"
+                value={form.priority}
+                onValueChange={(value) => update('priority', value)}
+                options={[
+                  { value: 'critical', label: EQUIPMENT_PRIORITY_LABELS.critical },
+                  { value: 'high', label: EQUIPMENT_PRIORITY_LABELS.high },
+                  { value: 'medium', label: EQUIPMENT_PRIORITY_LABELS.medium },
+                  { value: 'low', label: EQUIPMENT_PRIORITY_LABELS.low },
+                ]}
+                hint="Используется для сортировки техники в списках и планировщике аренды."
                 required
               />
             </div>
@@ -422,30 +423,34 @@ export default function EquipmentNew() {
               </div>
             </div>
 
-            <InnerDivider label="Техническое обслуживание" />
+            {!isSaleMode && (
+              <>
+                <InnerDivider label="Техническое обслуживание" />
 
-            <div className="grid grid-cols-2 gap-4">
-              <DateField
-                label="Дата ЧТО"
-                hint="ЧТО — частичное техническое обслуживание. Дата последней плановой проверки агрегатов."
-                value={form.maintenanceCHTO}
-                onChange={v => update('maintenanceCHTO', v)}
-              />
-              <DateField
-                label="Дата ПТО"
-                hint="ПТО — периодический технический осмотр. Дата последней полной проверки с заменой расходников."
-                value={form.maintenancePTO}
-                onChange={v => update('maintenancePTO', v)}
-              />
-            </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <DateField
+                    label="Дата ЧТО"
+                    hint="ЧТО — частичное техническое обслуживание. Дата последней плановой проверки агрегатов."
+                    value={form.maintenanceCHTO}
+                    onChange={v => update('maintenanceCHTO', v)}
+                  />
+                  <DateField
+                    label="Дата ПТО"
+                    hint="ПТО — периодический технический осмотр. Дата последней полной проверки с заменой расходников."
+                    value={form.maintenancePTO}
+                    onChange={v => update('maintenancePTO', v)}
+                  />
+                </div>
 
-            <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-800 dark:bg-blue-900/20">
-              <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-              <p className="text-xs text-blue-700 dark:text-blue-300">
-                Если даты неизвестны — оставьте пустыми. Система напомнит о приближении срока обслуживания
-                на основе нормативов пробега.
-              </p>
-            </div>
+                <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-800 dark:bg-blue-900/20">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+                  <p className="text-xs text-blue-700 dark:text-blue-300">
+                    Если даты неизвестны — оставьте пустыми. Система напомнит о приближении срока обслуживания
+                    на основе нормативов пробега.
+                  </p>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -522,33 +527,98 @@ export default function EquipmentNew() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <SelectField
-                label="Категория техники"
-                value={form.category}
-                onValueChange={v => update('category', v)}
-                options={[
-                  { value: 'own', label: EQUIPMENT_CATEGORY_LABELS.own },
-                  { value: 'sold', label: EQUIPMENT_CATEGORY_LABELS.sold },
-                  { value: 'client', label: EQUIPMENT_CATEGORY_LABELS.client },
-                  { value: 'partner', label: EQUIPMENT_CATEGORY_LABELS.partner },
-                ]}
-                hint="Используется для разделения списка техники и допуска в аренду"
-                required
-              />
+            {isSaleMode ? (
+              <>
+                <SelectField
+                  label="В продаже или нет"
+                  value={form.isForSale}
+                  onValueChange={v => update('isForSale', v)}
+                  options={[
+                    { value: 'yes', label: 'Да, техника в продаже' },
+                    { value: 'no', label: 'Нет, пока не выставлена' },
+                  ]}
+                  hint="Управляет попаданием техники во вкладку «Продажи»."
+                  required
+                />
 
-              <SelectField
-                label="Участвует в активном парке"
-                value={form.activeInFleet}
-                onValueChange={v => update('activeInFleet', v)}
-                options={[
-                  { value: 'yes', label: 'Да' },
-                  { value: 'no', label: 'Нет' },
-                ]}
-                hint="В аренде может участвовать только техника из активного парка"
-                required
-              />
-            </div>
+                {form.isForSale === 'yes' && (
+                  <>
+                    <SelectField
+                      label="Статус PDI"
+                      value={form.salePdiStatus}
+                      onValueChange={v => update('salePdiStatus', v)}
+                      options={[
+                        { value: 'not_started', label: EQUIPMENT_SALE_PDI_LABELS.not_started },
+                        { value: 'in_progress', label: EQUIPMENT_SALE_PDI_LABELS.in_progress },
+                        { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
+                      ]}
+                      hint="Показывает, готова ли техника к продаже и передаче клиенту."
+                    />
+
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div>
+                        <Input
+                          label="Цена 1, ₽"
+                          type="number"
+                          placeholder="Например, 4 950 000"
+                          value={form.salePrice1}
+                          onChange={e => update('salePrice1', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Input
+                          label="Цена 2, ₽"
+                          type="number"
+                          placeholder="Например, 4 750 000"
+                          value={form.salePrice2}
+                          onChange={e => update('salePrice2', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Input
+                          label="Цена 3, ₽"
+                          type="number"
+                          placeholder="Например, 4 550 000"
+                          value={form.salePrice3}
+                          onChange={e => update('salePrice3', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <FieldHint>
+                      Можно использовать три уровня цены как рекомендованную, переговорную и минимально допустимую.
+                    </FieldHint>
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <SelectField
+                  label="Категория техники"
+                  value={form.category}
+                  onValueChange={v => update('category', v)}
+                  options={[
+                    { value: 'own', label: EQUIPMENT_CATEGORY_LABELS.own },
+                    { value: 'sold', label: EQUIPMENT_CATEGORY_LABELS.sold },
+                    { value: 'client', label: EQUIPMENT_CATEGORY_LABELS.client },
+                    { value: 'partner', label: EQUIPMENT_CATEGORY_LABELS.partner },
+                  ]}
+                  hint="Используется для разделения списка техники и допуска в аренду"
+                  required
+                />
+
+                <SelectField
+                  label="Участвует в активном парке"
+                  value={form.activeInFleet}
+                  onValueChange={v => update('activeInFleet', v)}
+                  options={[
+                    { value: 'yes', label: 'Да' },
+                    { value: 'no', label: 'Нет' },
+                  ]}
+                  hint="В аренде может участвовать только техника из активного парка"
+                  required
+                />
+              </div>
+            )}
 
             {/* Условные подсказки по типу владения */}
             {isSublease && (
@@ -607,102 +677,30 @@ export default function EquipmentNew() {
           </CardContent>
         </Card>
 
-        {/* ─── 4 · Экономика ─── */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-gray-400" />
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                4 · Экономика
-              </CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Input
-              label="Плановый доход в месяц, ₽"
-              type="number"
-              placeholder="Например, 90 000"
-              value={form.plannedMonthlyRevenue}
-              onChange={e => update('plannedMonthlyRevenue', e.target.value)}
-            />
-            <FieldHint>
-              Ориентир для расчёта утилизации парка. Не влияет на фактическую выручку по аренде.
-            </FieldHint>
-          </CardContent>
-        </Card>
-
-        {/* ─── 4.1 · Продажа ─── */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <Tag className="h-4 w-4 text-gray-400" />
-              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                4.1 · Продажа
-              </CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <SelectField
-              label="Техника выставлена на продажу"
-              value={form.isForSale}
-              onValueChange={v => update('isForSale', v)}
-              options={[
-                { value: 'no', label: 'Нет, только аренда' },
-                { value: 'yes', label: 'Да, техника доступна к продаже' },
-              ]}
-              hint="Если включено, единица появится во вкладке «На продажу» и в разделе «Продажи»."
-            />
-
-            {form.isForSale === 'yes' && (
-              <>
-                <SelectField
-                  label="Статус PDI"
-                  value={form.salePdiStatus}
-                  onValueChange={v => update('salePdiStatus', v)}
-                  options={[
-                    { value: 'not_started', label: EQUIPMENT_SALE_PDI_LABELS.not_started },
-                    { value: 'in_progress', label: EQUIPMENT_SALE_PDI_LABELS.in_progress },
-                    { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
-                  ]}
-                  hint="PDI нужен, чтобы менеджер понимал готовность единицы к продаже и передаче клиенту."
-                />
-
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div>
-                    <Input
-                      label="Цена 1, ₽"
-                      type="number"
-                      placeholder="Например, 4 950 000"
-                      value={form.salePrice1}
-                      onChange={e => update('salePrice1', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Input
-                      label="Цена 2, ₽"
-                      type="number"
-                      placeholder="Например, 4 750 000"
-                      value={form.salePrice2}
-                      onChange={e => update('salePrice2', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Input
-                      label="Цена 3, ₽"
-                      type="number"
-                      placeholder="Например, 4 550 000"
-                      value={form.salePrice3}
-                      onChange={e => update('salePrice3', e.target.value)}
-                    />
-                  </div>
-                </div>
-                <FieldHint>
-                  Можно использовать три уровня цены как рекомендованную, переговорную и минимально допустимую.
-                </FieldHint>
-              </>
-            )}
-          </CardContent>
-        </Card>
+        {!isSaleMode && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-gray-400" />
+                <CardTitle className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  4 · Экономика
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Input
+                label="Плановый доход в месяц, ₽"
+                type="number"
+                placeholder="Например, 90 000"
+                value={form.plannedMonthlyRevenue}
+                onChange={e => update('plannedMonthlyRevenue', e.target.value)}
+              />
+              <FieldHint>
+                Ориентир для расчёта утилизации парка. Не влияет на фактическую выручку по аренде.
+              </FieldHint>
+            </CardContent>
+          </Card>
+        )}
 
         {/* ─── 5 · История обслуживания и примечания ─── */}
         <Card>

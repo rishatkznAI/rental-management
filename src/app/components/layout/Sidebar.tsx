@@ -20,6 +20,7 @@ import {
   BadgeDollarSign,
   Route,
   Bot,
+  Briefcase,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -37,6 +38,7 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Дашборд',      href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
   { name: 'Техника',      href: '/equipment', icon: Truck,           section: 'equipment'  },
   { name: 'Продажи',      href: '/sales',     icon: BadgeDollarSign, section: 'sales'      },
+  { name: 'CRM',          href: '/crm',       icon: Briefcase,       section: 'crm'        },
   { name: 'Доставка',     href: '/deliveries',icon: Route,           section: 'deliveries' },
   { name: 'Аренды',       href: '/rentals',   icon: FileText,        section: 'rentals'    },
   { name: 'Планировщик',  href: '/planner',   icon: CalendarClock,   section: 'planner'    },
@@ -54,7 +56,7 @@ const NAV_GROUPS: Array<{
   title: string;
   items: Section[];
 }> = [
-  { title: 'Главное', items: ['dashboard', 'equipment', 'sales', 'deliveries', 'rentals'] },
+  { title: 'Главное', items: ['dashboard', 'equipment', 'sales', 'crm', 'deliveries', 'rentals'] },
   { title: 'Операции', items: ['planner', 'service', 'service_vehicles'] },
   { title: 'Данные', items: ['clients', 'documents', 'payments'] },
   { title: 'Прочее', items: ['bots', 'reports', 'settings'] },

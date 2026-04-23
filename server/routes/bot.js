@@ -39,6 +39,22 @@ function byDateDesc(left, right) {
   return rightTime - leftTime;
 }
 
+function matchesDeliveryActivity(entry) {
+  const haystack = [
+    entry?.action,
+    entry?.details,
+    entry?.pendingAction,
+    entry?.pendingActionLabel,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes('delivery:') ||
+    haystack.includes('доставк') ||
+    haystack.includes('перевоз');
+}
+
 function requireBotAdmin(req, res, next) {
   if (req.user?.userRole !== 'Администратор') {
     return res.status(403).json({ ok: false, error: 'Раздел бота доступен только администратору.' });
@@ -155,23 +171,52 @@ function registerBotApiRoutes(router, deps) {
   } = deps;
 
   const botRouter = express.Router();
-  const BOT_ID = 'max';
-  const BOT_NAME = 'MAX бот';
+  const BOT_CONFIGS = [
+    {
+      id: 'max',
+      name: 'MAX бот',
+      description: 'Общий рабочий бот MAX: авторизация сотрудников, сервисные сценарии и действия в чате.',
+      filterConnections: () => true,
+      filterActivity: () => true,
+    },
+    {
+      id: 'manager',
+      name: 'Бот менеджера аренды',
+      description: 'Утренняя сводка, свободная техника, создание доставки и сервисных заявок для менеджеров аренды.',
+      filterConnections: (connection) => connection.userRole === 'Менеджер по аренде',
+      filterActivity: (entry) => entry.userRole === 'Менеджер по аренде',
+    },
+    {
+      id: 'delivery',
+      name: 'Бот доставки',
+      description: 'Статусы доставки, работа перевозчиков и действия по логистическим заявкам в MAX.',
+      filterConnections: (connection) =>
+        connection.userRole === 'Перевозчик' ||
+        matchesDeliveryActivity(connection),
+      filterActivity: (entry) => matchesDeliveryActivity(entry),
+    },
+  ];
 
   function readBotActivity() {
     return readData('bot_activity') || [];
   }
 
-  function buildPayload() {
+  function buildBotPayload(config) {
     const botUsers = getBotUsers() || {};
     const botSessions = getBotSessions() || {};
-    const activity = buildBotActivity(BOT_ID, botUsers, readBotActivity());
-    const connections = buildBotConnections(BOT_ID, botUsers, botSessions, activity);
+    const rawActivity = buildBotActivity('max', botUsers, readBotActivity());
+    const rawConnections = buildBotConnections('max', botUsers, botSessions, rawActivity);
+    const activity = rawActivity
+      .filter(config.filterActivity)
+      .map(entry => ({ ...entry, botId: config.id, id: `${config.id}:${entry.id}` }));
+    const connections = rawConnections
+      .filter(config.filterConnections)
+      .map(connection => ({ ...connection, botId: config.id, id: `${config.id}:${connection.phone}` }));
     const summary = buildBotSummary({
-      botId: BOT_ID,
-      name: BOT_NAME,
+      botId: config.id,
+      name: config.name,
       provider: 'MAX',
-      description: 'Операционный бот для MAX: авторизация сотрудников, сервисные сценарии и рабочие действия в чате.',
+      description: config.description,
       botToken,
       webhookUrl,
       connections,
@@ -182,16 +227,16 @@ function registerBotApiRoutes(router, deps) {
   }
 
   botRouter.get('/bots', requireAuth, requireBotAdmin, (_req, res) => {
-    const { summary } = buildPayload();
-    return res.json([summary]);
+    return res.json(BOT_CONFIGS.map(config => buildBotPayload(config).summary));
   });
 
   botRouter.get('/bots/:botId', requireAuth, requireBotAdmin, (req, res) => {
-    if (req.params.botId !== BOT_ID) {
+    const config = BOT_CONFIGS.find(item => item.id === req.params.botId);
+    if (!config) {
       return res.status(404).json({ ok: false, error: 'Бот не найден.' });
     }
 
-    const { summary, connections, activity } = buildPayload();
+    const { summary, connections, activity } = buildBotPayload(config);
 
     return res.json({
       bot: summary,

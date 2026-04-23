@@ -18,6 +18,7 @@ export type Section =
   | 'dashboard'
   | 'equipment'
   | 'sales'
+  | 'crm'
   | 'deliveries'
   | 'rentals'
   | 'planner'
@@ -45,6 +46,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard:        ALL,
     equipment:        ALL,
     sales:            ALL,
+    crm:              ALL,
     deliveries:       ALL,
     rentals:          ALL,
     planner:          ALL,
@@ -61,6 +63,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard:        VIEW,        // только своё
     equipment:        VIEW,
     sales:            VIEW,
+    crm:              ['view', 'create', 'edit'],
     deliveries:       ['view', 'create', 'edit'],
     rentals:          VIEW,
     planner:          VIEW,
@@ -76,6 +79,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard:        VIEW,
     equipment:        ALL,
     sales:            VIEW,
+    crm:              ALL,
     deliveries:       ALL,
     rentals:          ['view', 'create', 'edit'],
     planner:          ALL,
@@ -86,6 +90,15 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     payments:         ALL,
     // reports:  нет
     // settings: нет
+  },
+  'Менеджер по продажам': {
+    dashboard:        VIEW,
+    equipment:        VIEW,
+    sales:            ALL,
+    crm:              ['view', 'create', 'edit'],
+    clients:          VIEW_CREATE,
+    documents:        VIEW,
+    payments:         VIEW,
   },
   'Механик': {
     // dashboard: нет
@@ -116,6 +129,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname === '/')                       return 'dashboard';
   if (pathname.startsWith('/equipment'))      return 'equipment';
   if (pathname.startsWith('/sales'))          return 'sales';
+  if (pathname.startsWith('/crm'))            return 'crm';
   if (pathname.startsWith('/deliveries'))     return 'deliveries';
   if (pathname.startsWith('/rentals'))        return 'rentals';
   if (pathname.startsWith('/planner'))        return 'planner';
@@ -136,6 +150,7 @@ const SECTION_PATHS: Array<[Section, string]> = [
   ['dashboard',  '/'],
   ['equipment',  '/equipment'],
   ['sales',      '/sales'],
+  ['crm',        '/crm'],
   ['deliveries', '/deliveries'],
   ['rentals',    '/rentals'],
   ['planner',          '/planner'],

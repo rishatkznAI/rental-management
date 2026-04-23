@@ -433,6 +433,51 @@ export interface ManagerBreakdownResponse {
   unsignedDocuments: ManagerBreakdownDocument[];
 }
 
+// ── CRM ───────────────────────────────────────────────────────────────────────
+
+export type CrmPipelineType = 'rental' | 'sales';
+export type CrmDealStatus = 'open' | 'won' | 'lost';
+export type CrmDealPriority = 'low' | 'medium' | 'high';
+export type CrmDealStage =
+  | 'lead'
+  | 'qualified'
+  | 'proposal'
+  | 'negotiation'
+  | 'reserved'
+  | 'demo'
+  | 'invoice'
+  | 'won'
+  | 'lost';
+
+export interface CrmDeal {
+  id: string;
+  pipeline: CrmPipelineType;
+  title: string;
+  stage: CrmDealStage;
+  status: CrmDealStatus;
+  priority: CrmDealPriority;
+  company: string;
+  clientId?: string | null;
+  contactName?: string | null;
+  contactPhone?: string | null;
+  contactEmail?: string | null;
+  source?: string | null;
+  budget?: number;
+  probability?: number;
+  equipmentNeed?: string | null;
+  location?: string | null;
+  expectedCloseDate?: string | null;
+  nextAction?: string | null;
+  nextActionDate?: string | null;
+  responsibleUserId?: string | null;
+  responsibleUserName?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  history?: AuditEntry[];
+}
+
 // ── Боты ──────────────────────────────────────────────────────────────────────
 
 export type BotStatus = 'online' | 'offline';

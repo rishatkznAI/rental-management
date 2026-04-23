@@ -1,11 +1,25 @@
 function registerAuthRoutes(app, deps) {
   const {
     readData,
+    writeData,
     verifyPassword,
+    hashPassword,
     createSession,
     requireAuth,
     destroySession,
   } = deps;
+
+  function buildSessionUser(user) {
+    return {
+      userId: user.id,
+      userName: user.name,
+      userRole: user.role,
+      email: user.email,
+      profilePhoto: user.profilePhoto || undefined,
+      ownerId: user.ownerId || undefined,
+      ownerName: user.ownerName || undefined,
+    };
+  }
 
   app.post('/api/auth/login', (req, res) => {
     try {
@@ -43,6 +57,7 @@ function registerAuthRoutes(app, deps) {
           name: user.name,
           email: user.email,
           role: user.role,
+          profilePhoto: user.profilePhoto || undefined,
           ownerId: user.ownerId || undefined,
           ownerName: user.ownerName || undefined,
         },
@@ -54,7 +69,63 @@ function registerAuthRoutes(app, deps) {
   });
 
   app.get('/api/auth/me', requireAuth, (req, res) => {
-    res.json({ ok: true, user: req.user });
+    const users = readData('users') || [];
+    const user = users.find(item => item.id === req.user.userId);
+    if (!user) {
+      return res.status(401).json({ ok: false, error: 'Session user not found' });
+    }
+    res.json({ ok: true, user: buildSessionUser(user) });
+  });
+
+  app.patch('/api/auth/profile', requireAuth, (req, res) => {
+    const users = readData('users') || [];
+    const idx = users.findIndex(item => item.id === req.user.userId);
+    if (idx === -1) {
+      return res.status(404).json({ ok: false, error: 'User not found' });
+    }
+
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : users[idx].name;
+    const profilePhoto = typeof req.body?.profilePhoto === 'string' && req.body.profilePhoto.trim()
+      ? req.body.profilePhoto.trim()
+      : undefined;
+
+    if (!name) {
+      return res.status(400).json({ ok: false, error: 'Имя не может быть пустым' });
+    }
+
+    users[idx] = {
+      ...users[idx],
+      name,
+      profilePhoto,
+    };
+    writeData('users', users);
+    return res.json({ ok: true, user: buildSessionUser(users[idx]) });
+  });
+
+  app.post('/api/auth/change-password', requireAuth, (req, res) => {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ ok: false, error: 'Текущий и новый пароль обязательны' });
+    }
+    if (String(newPassword).trim().length < 4) {
+      return res.status(400).json({ ok: false, error: 'Новый пароль должен быть не короче 4 символов' });
+    }
+
+    const users = readData('users') || [];
+    const idx = users.findIndex(item => item.id === req.user.userId);
+    if (idx === -1) {
+      return res.status(404).json({ ok: false, error: 'User not found' });
+    }
+    if (!verifyPassword(currentPassword, users[idx].password)) {
+      return res.status(400).json({ ok: false, error: 'Текущий пароль введён неверно' });
+    }
+
+    users[idx] = {
+      ...users[idx],
+      password: hashPassword(String(newPassword)),
+    };
+    writeData('users', users);
+    return res.json({ ok: true });
   });
 
   app.post('/api/auth/logout', requireAuth, (req, res) => {

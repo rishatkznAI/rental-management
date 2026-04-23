@@ -32,7 +32,8 @@ export type Section =
   | 'payments'
   | 'bots'
   | 'reports'
-  | 'settings';
+  | 'profile_settings'
+  | 'admin_panel';
 
 export type Action = 'view' | 'create' | 'edit' | 'delete';
 
@@ -62,10 +63,12 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     payments:         ALL,
     bots:             VIEW,
     reports:          ALL,
-    settings:         ALL,
+    profile_settings: ['view', 'edit'],
+    admin_panel:      ALL,
   },
   'Инвестор': {
     rentals: VIEW,
+    profile_settings: ['view', 'edit'],
   },
   'Менеджер по аренде': {
     dashboard:        VIEW,        // только своё
@@ -82,8 +85,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     clients:          VIEW,
     documents:        VIEW,
     payments:         VIEW,
-    // reports:  нет
-    // settings: нет
+    profile_settings: ['view', 'edit'],
   },
   'Офис-менеджер': {
     dashboard:        VIEW,
@@ -100,8 +102,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     clients:          ALL,
     documents:        ALL,
     payments:         ALL,
-    // reports:  нет
-    // settings: нет
+    profile_settings: ['view', 'edit'],
   },
   'Менеджер по продажам': {
     dashboard:        VIEW,
@@ -113,6 +114,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     clients:          VIEW_CREATE,
     documents:        VIEW,
     payments:         VIEW,
+    profile_settings: ['view', 'edit'],
   },
   ...Object.fromEntries(
     MECHANIC_ROLES.map(role => [role, {
@@ -122,7 +124,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
       planner:          ALL,
       service:          ALL,
       service_vehicles: ALL,         // механик ведёт журнал поездок
-      // остальное: нет
+      profile_settings: ['view', 'edit'],
     }]),
   ),
 };
@@ -159,7 +161,8 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname.startsWith('/payments'))       return 'payments';
   if (pathname.startsWith('/bots'))           return 'bots';
   if (pathname.startsWith('/reports'))        return 'reports';
-  if (pathname.startsWith('/settings'))       return 'settings';
+  if (pathname.startsWith('/settings'))       return 'profile_settings';
+  if (pathname.startsWith('/admin'))          return 'admin_panel';
   return null;
 }
 
@@ -182,7 +185,8 @@ const SECTION_PATHS: Array<[Section, string]> = [
   ['payments',   '/payments'],
   ['bots',       '/bots'],
   ['reports',    '/reports'],
-  ['settings',   '/settings'],
+  ['profile_settings', '/settings'],
+  ['admin_panel', '/admin'],
 ];
 
 // ── Хук ──────────────────────────────────────────────────────────────────────

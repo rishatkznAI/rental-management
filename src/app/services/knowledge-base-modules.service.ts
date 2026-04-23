@@ -10,4 +10,7 @@ export const knowledgeBaseModulesService = {
 
   update: (id: string, data: Partial<KnowledgeBaseModule>): Promise<KnowledgeBaseModule> =>
     api.patch<KnowledgeBaseModule>(`/api/knowledge_base_modules/${id}`, data),
+
+  delete: (id: string): Promise<{ ok: true }> =>
+    api.del<{ ok: true }>(`/api/knowledge_base_modules/${id}`),
 };

@@ -594,6 +594,14 @@ export interface KnowledgeBaseProgress {
   createdAt: string;
 }
 
+export interface AppSetting {
+  id: string;
+  key: string;
+  value: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── Боты ──────────────────────────────────────────────────────────────────────
 
 export type BotStatus = 'online' | 'offline';

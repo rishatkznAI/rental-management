@@ -5,7 +5,7 @@ import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
-import { Plus, Trash2, Edit, Eye, EyeOff, AlertTriangle, CheckCircle2, RefreshCw, ShieldAlert, Download, Upload } from 'lucide-react';
+import { Plus, Trash2, Edit, Eye, EyeOff, AlertTriangle, CheckCircle2, RefreshCw, ShieldAlert, Download, Upload, ArrowUp, ArrowDown, LayoutPanelLeft } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -47,6 +47,7 @@ import { deliveryCarriersService, type DeliveryCarrierConnection } from '../serv
 import { serviceWorksService } from '../services/service-works.service';
 import { sparePartsService } from '../services/spare-parts.service';
 import { serviceRouteNormsService } from '../services/service-route-norms.service';
+import { appSettingsService } from '../services/app-settings.service';
 import { equipmentService } from '../services/equipment.service';
 import { reportsService } from '../services/reports.service';
 import { rentalsService } from '../services/rentals.service';
@@ -63,7 +64,9 @@ import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
+import { DEFAULT_SIDEBAR_ORDER, SIDEBAR_NAV_GROUPS, SIDEBAR_SECTION_LABELS } from '../lib/navigation';
 import type {
+  AppSetting,
   Equipment,
   EquipmentCategory,
   EquipmentStatus,
@@ -120,10 +123,31 @@ export default function Settings() {
     queryKey: ['owners'],
     queryFn: ownersService.getAll,
   });
+  const { data: appSettings = [] } = useQuery<AppSetting[]>({
+    queryKey: ['app-settings'],
+    queryFn: appSettingsService.getAll,
+  });
 
   React.useEffect(() => {
     setUsersState(usersData);
   }, [usersData]);
+
+  const sidebarOrderSetting = React.useMemo(
+    () => appSettings.find(item => item.key === 'sidebar_navigation_order') || null,
+    [appSettings],
+  );
+  const [sidebarOrder, setSidebarOrder] = React.useState(DEFAULT_SIDEBAR_ORDER);
+
+  React.useEffect(() => {
+    const storedOrder = Array.isArray(sidebarOrderSetting?.value)
+      ? sidebarOrderSetting.value.filter((value): value is (typeof DEFAULT_SIDEBAR_ORDER)[number] => typeof value === 'string')
+      : [];
+    const merged = [
+      ...(storedOrder.length ? storedOrder : DEFAULT_SIDEBAR_ORDER),
+      ...DEFAULT_SIDEBAR_ORDER.filter(section => !(storedOrder.length ? storedOrder : DEFAULT_SIDEBAR_ORDER).includes(section)),
+    ];
+    setSidebarOrder(merged);
+  }, [sidebarOrderSetting]);
 
   // Синхронизируем с сервером
   const setUsers = React.useCallback(async (updater: (prev: SystemUser[]) => SystemUser[]) => {
@@ -133,6 +157,35 @@ export default function Settings() {
     await usersService.bulkReplace(next);
     await queryClient.invalidateQueries({ queryKey: ['users'] });
   }, [queryClient, users]);
+
+  const moveSidebarSection = React.useCallback((section: (typeof DEFAULT_SIDEBAR_ORDER)[number], direction: -1 | 1) => {
+    setSidebarOrder(current => {
+      const index = current.indexOf(section);
+      const targetIndex = index + direction;
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.length) return current;
+      const next = [...current];
+      const [item] = next.splice(index, 1);
+      next.splice(targetIndex, 0, item);
+      return next;
+    });
+  }, []);
+
+  const handleSaveSidebarOrder = React.useCallback(async () => {
+    const payload = {
+      key: 'sidebar_navigation_order',
+      value: sidebarOrder,
+      createdAt: sidebarOrderSetting?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (sidebarOrderSetting) {
+      await appSettingsService.update(sidebarOrderSetting.id, payload);
+    } else {
+      await appSettingsService.create(payload);
+    }
+
+    await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
+  }, [queryClient, sidebarOrder, sidebarOrderSetting]);
 
   // ── Диалог ──────────────────────────────────────────────────────────────────
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -226,14 +279,15 @@ export default function Settings() {
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       <div>
-        <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">Настройки</h1>
-        <p className="mt-1 text-sm text-gray-500">Конфигурация системы и справочники</p>
+        <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">Панель администратора</h1>
+        <p className="mt-1 text-sm text-gray-500">Управление пользователями, справочниками, системными данными и порядком левого меню</p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="flex h-auto w-full justify-start gap-4 rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
           {[
             { value: 'users',         label: 'Пользователи и роли' },
+            { value: 'menu',          label: 'Левое меню' },
             { value: 'reference',     label: 'Справочники' },
             { value: 'notifications', label: 'Уведомления' },
             { value: 'data',          label: 'Данные системы' },
@@ -328,6 +382,74 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="menu">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <LayoutPanelLeft className="h-5 w-5" />
+                Порядок левого меню
+              </CardTitle>
+              <CardDescription>
+                Администратор может менять порядок пунктов боковой навигации. Изменения применяются для всех пользователей системы.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-6 lg:grid-cols-2">
+                {SIDEBAR_NAV_GROUPS.map(group => {
+                  const items = sidebarOrder.filter(section => group.items.includes(section));
+                  if (!items.length) return null;
+                  return (
+                    <div key={group.title} className="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+                      <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{group.title}</div>
+                      <div className="space-y-2">
+                        {items.map((section, index) => {
+                          const absoluteIndex = sidebarOrder.indexOf(section);
+                          return (
+                            <div key={section} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-700 dark:bg-gray-900">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                                {index + 1}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900 dark:text-white">{SIDEBAR_SECTION_LABELS[section]}</div>
+                                <div className="text-xs text-gray-500">{section}</div>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="outline"
+                                  onClick={() => moveSidebarSection(section, -1)}
+                                  disabled={absoluteIndex <= 0}
+                                >
+                                  <ArrowUp className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="outline"
+                                  onClick={() => moveSidebarSection(section, 1)}
+                                  disabled={absoluteIndex === sidebarOrder.length - 1}
+                                >
+                                  <ArrowDown className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={() => void handleSaveSidebarOrder()}>
+                  Сохранить порядок меню
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* ── Справочники ──────────────────────────────────────────────────── */}
         <TabsContent value="reference">
           <div className="grid gap-6 lg:grid-cols-2">
@@ -388,7 +510,7 @@ export default function Settings() {
         {/* ── Данные системы ────────────────────────────────────────────────── */}
         <TabsContent value="data">
           <div className="space-y-6">
-            <DataManagementSection canManageData={can('edit', 'settings')} />
+            <DataManagementSection canManageData={can('edit', 'admin_panel')} />
             <DataResetSection />
           </div>
         </TabsContent>

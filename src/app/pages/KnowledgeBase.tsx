@@ -32,6 +32,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   useCreateKnowledgeBaseModule,
   useCreateKnowledgeBaseProgress,
+  useDeleteKnowledgeBaseModule,
   useKnowledgeBaseModulesList,
   useKnowledgeBaseProgressList,
   useUpdateKnowledgeBaseModule,
@@ -268,10 +269,12 @@ export default function KnowledgeBase() {
   const updateProgress = useUpdateKnowledgeBaseProgress();
   const createModule = useCreateKnowledgeBaseModule();
   const updateModule = useUpdateKnowledgeBaseModule();
+  const deleteModule = useDeleteKnowledgeBaseModule();
 
   const canTakeTraining = isManagerRole(user?.role);
   const canReviewManagers = isReviewerRole(user?.role);
   const canManageModules = canReviewManagers;
+  const canDeleteModules = user?.role === 'Администратор';
 
   const [tab, setTab] = React.useState<'courses' | 'cards'>('courses');
   const [audienceFilter, setAudienceFilter] = React.useState<AudienceFilter>(
@@ -374,7 +377,7 @@ export default function KnowledgeBase() {
   const editingModule = editingModuleId
     ? moduleCatalog.find(item => item.id === editingModuleId) || null
     : null;
-  const isSavingModule = createModule.isPending || updateModule.isPending;
+  const isSavingModule = createModule.isPending || updateModule.isPending || deleteModule.isPending;
 
   function openCreateModuleEditor() {
     const defaultAudience = audienceFilter === 'all' ? 'all' : audienceFilter;
@@ -470,6 +473,20 @@ export default function KnowledgeBase() {
     }
 
     setEditorOpen(false);
+  }
+
+  async function handleDeleteModule() {
+    if (!editingModule || !canDeleteModules) return;
+    const confirmed = window.confirm(`Удалить модуль «${editingModule.title}»? Это действие нельзя отменить.`);
+    if (!confirmed) return;
+
+    await deleteModule.mutateAsync(editingModule.id);
+    setEditorOpen(false);
+    if (selectedModuleId === editingModule.id) {
+      const nextModule = visibleModules.find(item => item.id !== editingModule.id);
+      setSelectedModuleId(nextModule?.id || '');
+    }
+    toast.success('Модуль удалён.');
   }
 
   async function upsertProgress(data: Omit<KnowledgeBaseProgress, 'id' | 'createdAt' | 'updatedAt'>) {
@@ -1290,17 +1307,28 @@ export default function KnowledgeBase() {
             </div>
 
             <DialogFooter className="border-t border-border/70 px-6 py-5">
-              <Button type="button" variant="secondary" onClick={() => setEditorOpen(false)}>
-                Отмена
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void handleSaveModule()}
-                disabled={isSavingModule}
-                className="bg-lime-300 text-slate-950 hover:bg-lime-200"
-              >
-                {editingModule ? 'Сохранить модуль' : 'Создать модуль'}
-              </Button>
+              <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  {editingModule && canDeleteModules ? (
+                    <Button type="button" variant="destructive" onClick={() => void handleDeleteModule()} disabled={isSavingModule}>
+                      Удалить модуль
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                  <Button type="button" variant="secondary" onClick={() => setEditorOpen(false)}>
+                    Отмена
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleSaveModule()}
+                    disabled={isSavingModule}
+                    className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+                  >
+                    {editingModule ? 'Сохранить модуль' : 'Создать модуль'}
+                  </Button>
+                </div>
+              </div>
             </DialogFooter>
           </div>
         </DialogContent>

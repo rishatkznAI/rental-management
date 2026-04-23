@@ -65,3 +65,14 @@ export function useUpdateKnowledgeBaseModule() {
     },
   });
 }
+
+export function useDeleteKnowledgeBaseModule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => knowledgeBaseModulesService.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KNOWLEDGE_BASE_KEYS.modules });
+      qc.invalidateQueries({ queryKey: KNOWLEDGE_BASE_KEYS.progress });
+    },
+  });
+}

@@ -6,6 +6,7 @@ export interface AuthUser {
   name: string;
   role: string;
   email: string;
+  profilePhoto?: string;
   ownerId?: string;
   ownerName?: string;
 }
@@ -20,6 +21,7 @@ interface AuthState {
 interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -33,6 +35,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading: true,
   });
 
+  const refreshUser = useCallback(async () => {
+    const result = await api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>('/api/auth/me');
+    const session = result.user;
+    const user: AuthUser = {
+      id: session.userId,
+      name: session.userName,
+      role: session.userRole,
+      email: session.email,
+      profilePhoto: session.profilePhoto,
+      ownerId: session.ownerId,
+      ownerName: session.ownerName,
+    };
+    setState({ user, isAuthenticated: true, isLoading: false });
+  }, []);
+
   // При монтировании проверяем, есть ли сохранённый токен, и если да — подтверждаем сессию
   useEffect(() => {
     const token = localStorage.getItem(AUTH_TOKEN_KEY);
@@ -41,18 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; email: string; ownerId?: string; ownerName?: string } }>('/api/auth/me')
-      .then(({ user: session }) => {
-        const user: AuthUser = {
-          id:    session.userId,
-          name:  session.userName,
-          role:  session.userRole,
-          email: session.email,
-          ownerId: session.ownerId,
-          ownerName: session.ownerName,
-        };
-        setState({ user, isAuthenticated: true, isLoading: false });
-      })
+    refreshUser()
       .catch((err: unknown) => {
         // Удаляем токен ТОЛЬКО если сервер явно ответил 401 (сессия истекла / невалидна).
         // Сетевые ошибки, 502/503 и другие временные сбои (например, Railway redeploy)
@@ -64,7 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         setState({ user: null, isAuthenticated: false, isLoading: false });
       });
-  }, []);
+  }, [refreshUser]);
 
   // Слушаем событие из api.ts: любой запрос получил 401 в рантайме (не только bootstrap).
   // Это обеспечивает немедленный редирект на /login при истечении сессии в любом месте.
@@ -77,7 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; email: string; ownerId?: string; ownerName?: string } }>(
+    const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>(
       '/api/auth/login',
       { email, password }
     );
@@ -89,6 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name:  result.user.name,
       role:  result.user.role,
       email: result.user.email,
+      profilePhoto: result.user.profilePhoto,
       ownerId: result.user.ownerId,
       ownerName: result.user.ownerName,
     };
@@ -106,7 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, logout }}>
+    <AuthContext.Provider value={{ ...state, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

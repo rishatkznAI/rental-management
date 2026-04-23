@@ -16,6 +16,7 @@ const JSON_COLLECTIONS = [
   'clients',
   'knowledge_base_modules',
   'knowledge_base_progress',
+  'app_settings',
   'documents',
   'mechanic_documents',
   'payments',

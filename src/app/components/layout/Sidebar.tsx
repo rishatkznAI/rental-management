@@ -1,4 +1,5 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -23,11 +24,14 @@ import {
   Briefcase,
   MapPinned,
   GraduationCap,
+  Shield,
+  UserCog,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, type Section } from '../../lib/permissions';
+import { DEFAULT_SIDEBAR_ORDER, SIDEBAR_NAV_GROUPS } from '../../lib/navigation';
 import { getInvestorBinding, isInvestorUser } from '../../lib/userStorage';
 import { NotificationCenter } from './NotificationCenter';
 import { Input } from '../ui/input';
@@ -35,6 +39,7 @@ import { useEquipmentList } from '../../hooks/useEquipment';
 import { useClientsList } from '../../hooks/useClients';
 import { useGanttData, useRentalsList } from '../../hooks/useRentals';
 import { useServiceTicketsList } from '../../hooks/useServiceTickets';
+import { appSettingsService } from '../../services/app-settings.service';
 import type { Client, Equipment, Rental, ServiceTicket } from '../../types';
 
 const navigation: { name: string; href: string; icon: React.ElementType; section: Section }[] = [
@@ -54,17 +59,8 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Платежи',      href: '/payments',  icon: CreditCard,      section: 'payments'   },
   { name: 'Бот',          href: '/bots',      icon: Bot,             section: 'bots'       },
   { name: 'Отчёты',       href: '/reports',   icon: BarChart3,       section: 'reports'    },
-  { name: 'Настройки',    href: '/settings',  icon: Settings,        section: 'settings'   },
-];
-
-const NAV_GROUPS: Array<{
-  title: string;
-  items: Section[];
-}> = [
-  { title: 'Главное', items: ['dashboard', 'equipment', 'gsm', 'knowledge_base', 'sales', 'crm', 'deliveries', 'rentals'] },
-  { title: 'Операции', items: ['planner', 'service', 'service_vehicles'] },
-  { title: 'Данные', items: ['clients', 'documents', 'payments'] },
-  { title: 'Прочее', items: ['bots', 'reports', 'settings'] },
+  { name: 'Личные настройки', href: '/settings', icon: UserCog,      section: 'profile_settings' },
+  { name: 'Панель администратора', href: '/admin', icon: Shield,     section: 'admin_panel' },
 ];
 
 function getInitials(name: string): string {
@@ -144,6 +140,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { data: rentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: serviceTickets = [] } = useServiceTicketsList();
+  const { data: appSettings = [] } = useQuery({
+    queryKey: ['app-settings'],
+    queryFn: appSettingsService.getAll,
+    staleTime: 1000 * 60 * 5,
+  });
   const [search, setSearch] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -368,9 +369,26 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     handleNavClick();
   };
 
-  const groupedNav = NAV_GROUPS.map(group => ({
+  const sidebarOrder = useMemo(() => {
+    const orderSetting = appSettings.find(item => item.key === 'sidebar_navigation_order');
+    const storedOrder = Array.isArray(orderSetting?.value) ? orderSetting.value.filter((value): value is Section => typeof value === 'string') : [];
+    return storedOrder.length ? storedOrder : DEFAULT_SIDEBAR_ORDER;
+  }, [appSettings]);
+
+  const orderIndex = useMemo(() => {
+    const next = new Map<Section, number>();
+    sidebarOrder.forEach((section, index) => next.set(section, index));
+    DEFAULT_SIDEBAR_ORDER.forEach((section, index) => {
+      if (!next.has(section)) next.set(section, sidebarOrder.length + index);
+    });
+    return next;
+  }, [sidebarOrder]);
+
+  const groupedNav = SIDEBAR_NAV_GROUPS.map(group => ({
     ...group,
-    items: navigation.filter(item => group.items.includes(item.section) && canView(item.section)),
+    items: navigation
+      .filter(item => group.items.includes(item.section) && canView(item.section))
+      .sort((a, b) => (orderIndex.get(a.section) ?? 999) - (orderIndex.get(b.section) ?? 999)),
   })).filter(group => group.items.length > 0);
 
   return (
@@ -560,7 +578,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
           <div className="flex items-center gap-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 px-3 py-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
-              {user ? getInitials(user.name) : '?'}
+              {user?.profilePhoto ? (
+                <img src={user.profilePhoto} alt={user.name} className="h-10 w-10 rounded-full object-cover" />
+              ) : (
+                user ? getInitials(user.name) : '?'
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <p className="truncate text-sm font-medium text-sidebar-foreground">

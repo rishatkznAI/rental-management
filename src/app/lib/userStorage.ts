@@ -37,6 +37,7 @@ export interface SystemUser {
   email:    string;
   role:     UserRole;
   status:   UserStatus;
+  profilePhoto?: string;
   ownerId?: string;
   ownerName?: string;
   /**

@@ -86,6 +86,13 @@ function registerCrudRoutes(deps) {
     return null;
   }
 
+  function knowledgeBaseModuleForbiddenReason(req, collection, method) {
+    if (collection !== 'knowledge_base_modules') return null;
+    if (method !== 'DELETE') return null;
+    if (req.user?.userRole === 'Администратор') return null;
+    return 'Недостаточно прав: удалять учебные модули может только администратор.';
+  }
+
   function registerCRUD(collection) {
     if (collection === 'rentals' || collection === 'gantt_rentals') {
       return;
@@ -152,6 +159,10 @@ function registerCrudRoutes(deps) {
       const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'POST');
       if (knowledgeProgressForbiddenReason) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
+      }
+      const knowledgeModuleForbiddenReason = knowledgeBaseModuleForbiddenReason(req, collection, 'POST');
+      if (knowledgeModuleForbiddenReason) {
+        return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
       }
       try {
         if (collection === 'rentals' || collection === 'gantt_rentals') {
@@ -224,6 +235,10 @@ function registerCrudRoutes(deps) {
       if (knowledgeProgressForbiddenReason) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
       }
+      const knowledgeModuleForbiddenReason = knowledgeBaseModuleForbiddenReason(req, collection, 'PATCH');
+      if (knowledgeModuleForbiddenReason) {
+        return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
+      }
 
       try {
         if (collection === 'rentals' || collection === 'gantt_rentals') {
@@ -292,6 +307,10 @@ function registerCrudRoutes(deps) {
       if (serviceForbiddenReason) {
         return res.status(403).json({ ok: false, error: serviceForbiddenReason });
       }
+      const knowledgeModuleForbiddenReason = knowledgeBaseModuleForbiddenReason(req, collection, 'DELETE');
+      if (knowledgeModuleForbiddenReason) {
+        return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
+      }
       if (officeManagerCanOnlyCreateRental(req, collection, 'DELETE')) {
         return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
       }
@@ -330,6 +349,10 @@ function registerCrudRoutes(deps) {
       const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'PUT');
       if (knowledgeProgressForbiddenReason) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
+      }
+      const knowledgeModuleForbiddenReason = knowledgeBaseModuleForbiddenReason(req, collection, 'PUT');
+      if (knowledgeModuleForbiddenReason) {
+        return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
       }
       const body = req.body;
       const list = Array.isArray(body) ? body : body.data;

@@ -491,8 +491,8 @@ export default function Gsm() {
   const metrics = React.useMemo(() => ({
     total: snapshots.length,
     mapped: snapshots.filter(item => item.point).length,
-    online: snapshots.filter(item => item.signalState === 'online').length,
-    locationOnly: snapshots.filter(item => item.signalState === 'location_only').length,
+    realGps: snapshots.filter(item => item.point?.source === 'gps').length,
+    locationDerived: snapshots.filter(item => item.point && item.point.source !== 'gps').length,
     rented: snapshots.filter(item => item.equipment.status === 'rented').length,
     alerts: snapshots.reduce((sum, item) => sum + item.notifications.length, 0),
   }), [snapshots]);
@@ -533,19 +533,19 @@ export default function Gsm() {
                 <div className="mt-1 text-sm text-slate-300">из {metrics.total} единиц техники</div>
               </div>
               <div className="rounded-3xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-emerald-200">Есть сигнал</div>
-                <div className="mt-2 text-3xl font-black text-white">{metrics.online}</div>
-                <div className="mt-1 text-sm text-emerald-100/80">с GPS / телематикой</div>
+                <div className="text-xs uppercase tracking-[0.18em] text-emerald-200">Реальный GPS</div>
+                <div className="mt-2 text-3xl font-black text-white">{metrics.realGps}</div>
+                <div className="mt-1 text-sm text-emerald-100/80">точка пришла от трекера</div>
               </div>
               <div className="rounded-3xl border border-amber-400/20 bg-amber-400/10 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-amber-100">По локации</div>
-                <div className="mt-2 text-3xl font-black text-white">{metrics.locationOnly}</div>
-                <div className="mt-1 text-sm text-amber-100/80">без GPS, но с геозонами</div>
+                <div className="text-xs uppercase tracking-[0.18em] text-amber-100">Расчётно по локации</div>
+                <div className="mt-2 text-3xl font-black text-white">{metrics.locationDerived}</div>
+                <div className="mt-1 text-sm text-amber-100/80">точка достроена по адресу и истории</div>
               </div>
               <div className="rounded-3xl border border-rose-400/20 bg-rose-400/10 p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-rose-100">Уведомления</div>
                 <div className="mt-2 text-3xl font-black text-white">{metrics.alerts}</div>
-                <div className="mt-1 text-sm text-rose-100/80">выезд, прибытие, пропажа сигнала</div>
+                <div className="mt-1 text-sm text-rose-100/80">только для техники с реальным трекером</div>
               </div>
             </div>
           </div>
@@ -865,11 +865,15 @@ export default function Gsm() {
                   <CardHeader>
                     <CardTitle className="text-lg font-bold text-white">Уведомления GSM</CardTitle>
                     <CardDescription className="text-slate-400">
-                      Выезд со склада, прибытие на объект и пропажа сигнала формируются прямо на основе текущей точки и геозон.
+                      Выезд со склада, прибытие на объект и пропажа сигнала формируются только для техники с настоящим трекером.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {notificationFeed.length === 0 ? (
+                    {selectedSnapshot && !selectedSnapshot.hasRealTracker ? (
+                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-400">
+                        У этой техники нет реального GSM-трекера, поэтому уведомления скрыты.
+                      </div>
+                    ) : notificationFeed.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-400">
                         Активных GSM-уведомлений нет.
                       </div>

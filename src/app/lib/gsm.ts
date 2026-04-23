@@ -76,6 +76,7 @@ export interface GsmTelemetrySummary {
 export interface GsmEquipmentSnapshot {
   equipment: Equipment;
   point?: GsmResolvedPoint;
+  hasRealTracker: boolean;
   signalState: EquipmentGsmSignalState;
   lastSeenAt: string | null;
   binding: GsmRentalBinding | null;
@@ -230,6 +231,24 @@ function getLatestMovementDate(equipment: Equipment, shippingPhotos: ShippingPho
   return dates.reduce((latest, current) => (
     new Date(current).getTime() > new Date(latest).getTime() ? current : latest
   ));
+}
+
+function hasRealTracker(equipment: Equipment) {
+  const gpsLat = toNumber(equipment.gsmLatitude);
+  const gpsLng = toNumber(equipment.gsmLongitude);
+  const movementHistory = asArray<EquipmentGsmPositionPoint>(equipment.gsmMovementHistory);
+
+  return Boolean(
+    String(equipment.gsmTrackerId || '').trim()
+    || String(equipment.gsmImei || '').trim()
+    || equipment.gsmLastSignalAt
+    || (equipment.gsmSignalStatus && equipment.gsmSignalStatus !== 'location_only')
+    || isValidCoordinatePair(gpsLat, gpsLng)
+    || movementHistory.some(entry => (
+      entry?.source === 'gps'
+      && isValidCoordinatePair(toNumber(entry?.lat), toNumber(entry?.lng))
+    ))
+  );
 }
 
 export function deriveSignalState(equipment: Equipment, lastSeenAt: string | null): EquipmentGsmSignalState {
@@ -586,6 +605,7 @@ export function isPointInsideZone(point: GsmResolvedPoint | undefined, zone: Gsm
 }
 
 function buildNotifications(
+  hasTracker: boolean,
   equipment: Equipment,
   signalState: EquipmentGsmSignalState,
   lastSeenAt: string | null,
@@ -594,6 +614,8 @@ function buildNotifications(
   zones: GsmZone[],
   binding: GsmRentalBinding | null,
 ): GsmNotification[] {
+  if (!hasTracker) return [];
+
   const notifications: GsmNotification[] = [];
   const warehouseZone = zones.find(zone => zone.kind === 'warehouse');
   const jobsiteZone = zones.find(zone => zone.kind === 'jobsite');
@@ -646,16 +668,18 @@ export function buildGsmSnapshot(
   const binding = buildRentalBinding(equipment, ganttRentals, rentals, clients);
   const point = resolveEquipmentPoint(equipment, binding);
   const lastSeenAt = getLatestMovementDate(equipment, shippingPhotos);
+  const hasTracker = hasRealTracker(equipment);
   const signalState = deriveSignalState(equipment, lastSeenAt);
   const telemetry = getTelemetrySummary(equipment);
   const zones = buildZones(equipment, binding);
   const movementEntries = buildMovementEntries(equipment, shippingPhotos, point, zones, binding);
   const routePoints = buildRoutePoints(equipment, movementEntries);
-  const notifications = buildNotifications(equipment, signalState, lastSeenAt, point, movementEntries, zones, binding);
+  const notifications = buildNotifications(hasTracker, equipment, signalState, lastSeenAt, point, movementEntries, zones, binding);
 
   return {
     equipment,
     point,
+    hasRealTracker: hasTracker,
     signalState,
     lastSeenAt,
     binding,

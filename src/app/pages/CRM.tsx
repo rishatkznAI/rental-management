@@ -745,42 +745,59 @@ export default function CRM() {
                                 draggable={canEditDeal && !updateDeal.isPending}
                                 onDragStart={(event) => handleCardDragStart(event, deal)}
                                 onDragEnd={handleCardDragEnd}
-                                className={`rounded-2xl border bg-background/95 p-4 shadow-sm transition-all ${
-                                  canEditDeal ? 'cursor-grab active:cursor-grabbing' : ''
+                                onClick={() => openEditDeal(deal)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    openEditDeal(deal);
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                className={`rounded-xl border bg-background/95 p-3 shadow-sm transition-all ${
+                                  canEditDeal ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
                                 } ${
                                   draggedDealId === deal.id
                                     ? 'scale-[0.98] opacity-60 shadow-none'
                                     : 'hover:-translate-y-0.5 hover:shadow-md'
                                 }`}
                               >
-                                <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
-                                    <div className="truncate text-sm font-semibold text-foreground">{deal.title}</div>
-                                    <div className="mt-1 flex flex-wrap gap-2">
+                                    <div className="line-clamp-2 text-sm font-semibold leading-5 text-foreground">{deal.title}</div>
+                                    <div className="mt-1 flex flex-wrap gap-1.5">
                                       <Badge variant={PRIORITY_META[deal.priority].variant}>{PRIORITY_META[deal.priority].label}</Badge>
                                       <Badge variant={STATUS_META[deal.status].variant}>{STATUS_META[deal.status].label}</Badge>
                                     </div>
                                   </div>
-                                  <Button variant="ghost" size="icon" onClick={() => openEditDeal(deal)}>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openEditDeal(deal);
+                                    }}
+                                  >
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                 </div>
 
                                 {canEditDeal && (
-                                  <div className="mt-3 rounded-xl border border-dashed border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                                  <div className="mt-2 text-[11px] text-muted-foreground">
                                     Перетащите карточку в нужную колонку или используйте стрелки ниже.
                                   </div>
                                 )}
 
-                                <div className="mt-4 space-y-2 text-sm text-muted-foreground">
+                                <div className="mt-3 space-y-1.5 text-xs text-muted-foreground">
                                   <div className="flex items-start gap-2">
                                     <Building2 className="mt-0.5 h-4 w-4 shrink-0" />
-                                    <span className="min-w-0 break-words">{deal.company}</span>
+                                    <span className="min-w-0 line-clamp-2 break-words">{deal.company}</span>
                                   </div>
                                   {deal.contactName && (
                                     <div className="flex items-start gap-2">
                                       <Phone className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <span className="min-w-0 break-words">
+                                      <span className="min-w-0 line-clamp-2 break-words">
                                         {deal.contactName}{deal.contactPhone ? ` · ${deal.contactPhone}` : ''}
                                       </span>
                                     </div>
@@ -788,13 +805,13 @@ export default function CRM() {
                                   {deal.contactEmail && (
                                     <div className="flex items-start gap-2">
                                       <Mail className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <span className="min-w-0 break-words">{deal.contactEmail}</span>
+                                      <span className="min-w-0 truncate">{deal.contactEmail}</span>
                                     </div>
                                   )}
                                   {deal.equipmentNeed && (
                                     <div className="flex items-start gap-2">
                                       <Target className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <span className="min-w-0 break-words">{deal.equipmentNeed}</span>
+                                      <span className="min-w-0 line-clamp-2 break-words">{deal.equipmentNeed}</span>
                                     </div>
                                   )}
                                   <div className="flex items-start gap-2">
@@ -807,24 +824,27 @@ export default function CRM() {
                                   </div>
                                   <div className={`flex items-start gap-2 ${isOverdueNextAction(deal) ? 'text-amber-700 dark:text-amber-300' : ''}`}>
                                     <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
-                                    <span>
+                                    <span className="line-clamp-2">
                                       {deal.nextAction || 'Следующий шаг не задан'}
                                       {deal.nextActionDate ? ` · ${formatDate(deal.nextActionDate)}` : ''}
                                     </span>
                                   </div>
                                 </div>
 
-                                <div className="mt-4 rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                                <div className="mt-3 rounded-lg bg-muted/50 px-3 py-1.5 text-[11px] text-muted-foreground">
                                   Ответственный: <span className="font-medium text-foreground">{deal.responsibleUserName || 'Не назначен'}</span>
                                 </div>
 
-                                <div className="mt-4 flex items-center justify-between gap-2">
+                                <div className="mt-3 flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-2">
                                     <Button
                                       variant="outline"
                                       size="sm"
                                       disabled={!previousStage || !canEditDeal || updateDeal.isPending}
-                                      onClick={() => moveDeal(deal, -1)}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void moveDeal(deal, -1);
+                                      }}
                                     >
                                       <ArrowLeft className="h-3.5 w-3.5" />
                                     </Button>
@@ -832,14 +852,24 @@ export default function CRM() {
                                       variant="outline"
                                       size="sm"
                                       disabled={!nextStage || !canEditDeal || updateDeal.isPending}
-                                      onClick={() => moveDeal(deal, 1)}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void moveDeal(deal, 1);
+                                      }}
                                     >
                                       <ArrowRight className="h-3.5 w-3.5" />
                                     </Button>
                                   </div>
 
                                   {canDeleteDeal && (
-                                    <Button variant="ghost" size="sm" onClick={() => handleDeleteDeal(deal)}>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void handleDeleteDeal(deal);
+                                      }}
+                                    >
                                       <Trash2 className="h-3.5 w-3.5" />
                                       Удалить
                                     </Button>

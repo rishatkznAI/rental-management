@@ -646,12 +646,6 @@ export default function EquipmentNew() {
                 Формула: от 40% выручки менеджер получает <strong>7%</strong>
               </div>
             )}
-            {!isSublease && !isInvestor && owners.length > 0 && (
-              <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
-                Менеджер получает <strong>3%</strong> от результата по собственной технике
-              </div>
-            )}
-
             {/* Склад / локация */}
             <SelectField
               label="Склад / местонахождение"

@@ -5,15 +5,12 @@ import {
   ArrowRight,
   Briefcase,
   Building2,
-  CalendarDays,
   CircleDollarSign,
   Clock3,
-  Mail,
   Pencil,
   Phone,
   Plus,
   Search,
-  Target,
   Trash2,
   TrendingUp,
 } from 'lucide-react';
@@ -783,63 +780,45 @@ export default function CRM() {
                                   </Button>
                                 </div>
 
-                                {canEditDeal && (
-                                  <div className="mt-2 text-[11px] text-muted-foreground">
-                                    Перетащите карточку в нужную колонку или используйте стрелки ниже.
-                                  </div>
-                                )}
-
-                                <div className="mt-3 space-y-1.5 text-xs text-muted-foreground">
+                                <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                                   <div className="flex items-start gap-2">
                                     <Building2 className="mt-0.5 h-4 w-4 shrink-0" />
-                                    <span className="min-w-0 line-clamp-2 break-words">{deal.company}</span>
+                                    <span className="min-w-0 truncate">{deal.company}</span>
                                   </div>
-                                  {deal.contactName && (
+                                  {(deal.contactName || deal.contactPhone) && (
                                     <div className="flex items-start gap-2">
                                       <Phone className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <span className="min-w-0 line-clamp-2 break-words">
-                                        {deal.contactName}{deal.contactPhone ? ` · ${deal.contactPhone}` : ''}
+                                      <span className="min-w-0 truncate">
+                                        {[deal.contactName, deal.contactPhone].filter(Boolean).join(' · ')}
                                       </span>
                                     </div>
                                   )}
-                                  {deal.contactEmail && (
+                                  {(Number(deal.budget) || 0) > 0 ? (
                                     <div className="flex items-start gap-2">
-                                      <Mail className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <span className="min-w-0 truncate">{deal.contactEmail}</span>
+                                      <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0" />
+                                      <span>{formatCurrency(deal.budget)}</span>
                                     </div>
-                                  )}
-                                  {deal.equipmentNeed && (
-                                    <div className="flex items-start gap-2">
-                                      <Target className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <span className="min-w-0 line-clamp-2 break-words">{deal.equipmentNeed}</span>
+                                  ) : null}
+                                  {deal.nextAction ? (
+                                    <div className={`flex items-start gap-2 ${isOverdueNextAction(deal) ? 'text-amber-700 dark:text-amber-300' : ''}`}>
+                                      <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
+                                      <span className="line-clamp-2">
+                                        {deal.nextAction}
+                                        {deal.nextActionDate ? ` · ${formatDate(deal.nextActionDate)}` : ''}
+                                      </span>
                                     </div>
-                                  )}
-                                  <div className="flex items-start gap-2">
-                                    <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0" />
-                                    <span>{formatCurrency(deal.budget)}</span>
-                                  </div>
-                                  <div className="flex items-start gap-2">
-                                    <CalendarDays className="mt-0.5 h-4 w-4 shrink-0" />
-                                    <span>План закрытия: {formatDate(deal.expectedCloseDate)}</span>
-                                  </div>
-                                  <div className={`flex items-start gap-2 ${isOverdueNextAction(deal) ? 'text-amber-700 dark:text-amber-300' : ''}`}>
-                                    <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
-                                    <span className="line-clamp-2">
-                                      {deal.nextAction || 'Следующий шаг не задан'}
-                                      {deal.nextActionDate ? ` · ${formatDate(deal.nextActionDate)}` : ''}
-                                    </span>
-                                  </div>
+                                  ) : null}
                                 </div>
 
-                                <div className="mt-3 rounded-lg bg-muted/50 px-3 py-1.5 text-[11px] text-muted-foreground">
-                                  Ответственный: <span className="font-medium text-foreground">{deal.responsibleUserName || 'Не назначен'}</span>
-                                </div>
-
-                                <div className="mt-3 flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2">
+                                <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/70 pt-2">
+                                  <div className="min-w-0 truncate text-[11px] text-muted-foreground">
+                                    Ответственный: <span className="font-medium text-foreground">{deal.responsibleUserName || 'Не назначен'}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
                                     <Button
                                       variant="outline"
                                       size="sm"
+                                      className="h-8 px-2"
                                       disabled={!previousStage || !canEditDeal || updateDeal.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -851,6 +830,7 @@ export default function CRM() {
                                     <Button
                                       variant="outline"
                                       size="sm"
+                                      className="h-8 px-2"
                                       disabled={!nextStage || !canEditDeal || updateDeal.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -861,10 +841,14 @@ export default function CRM() {
                                     </Button>
                                   </div>
 
-                                  {canDeleteDeal && (
+                                </div>
+
+                                {canDeleteDeal && (
+                                  <div className="mt-2 flex justify-end">
                                     <Button
                                       variant="ghost"
                                       size="sm"
+                                      className="h-8 px-2 text-muted-foreground"
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         void handleDeleteDeal(deal);
@@ -873,8 +857,8 @@ export default function CRM() {
                                       <Trash2 className="h-3.5 w-3.5" />
                                       Удалить
                                     </Button>
-                                  )}
-                                </div>
+                                  </div>
+                                )}
                               </div>
                             );
                           })

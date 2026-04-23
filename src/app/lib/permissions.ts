@@ -49,7 +49,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Администратор': {
     dashboard:        ALL,
     equipment:        ALL,
-    gsm:              VIEW,
+    gsm:              ALL,
     knowledge_base:   ALL,
     sales:            ALL,
     crm:              ALL,
@@ -90,7 +90,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Офис-менеджер': {
     dashboard:        VIEW,
     equipment:        ALL,
-    gsm:              VIEW,
+    gsm:              ALL,
     knowledge_base:   ['view', 'create', 'edit'],
     sales:            VIEW,
     crm:              ALL,

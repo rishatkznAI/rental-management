@@ -64,6 +64,7 @@ const {
   mergeRentalHistory,
 } = require('./lib/audit-history');
 const { createBotHandlers } = require('./lib/bot-commands');
+const { createGprsGateway } = require('./lib/gprs-gateway');
 const { createMaxApiClient } = require('./lib/max-api');
 const { createServiceCore } = require('./lib/service-core');
 const { MECHANIC_ROLES } = require('./lib/role-groups');
@@ -73,6 +74,7 @@ const { registerBotApiRoutes, registerBotRoutes } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
 const { registerFinanceRoutes } = require('./routes/finance');
+const { registerGsmRoutes } = require('./routes/gsm');
 const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
 const { registerSystemRoutes } = require('./routes/system');
@@ -172,6 +174,12 @@ const {
   logger: console,
 });
 
+const gprsGateway = createGprsGateway({
+  readData,
+  writeData,
+  logger: console,
+});
+
 // ── Сессии (SQLite-backed, Bearer-токен) ──────────────────────────────────────
 
 const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 часа
@@ -219,6 +227,7 @@ const WRITE_PERMISSIONS = {
   knowledge_base_modules: ['Администратор', 'Офис-менеджер'],
   knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
   app_settings: ['Администратор'],
+  gsm_commands:  ['Администратор', 'Офис-менеджер'],
   documents:      ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   payments:       ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
@@ -591,6 +600,12 @@ registerFinanceRoutes(apiRouter, {
   buildManagerReceivables,
   buildOverdueBuckets,
   buildFinanceReport,
+});
+
+registerGsmRoutes(apiRouter, {
+  requireAuth,
+  requireWrite,
+  gprsGateway,
 });
 
 registerDeliveryRoutes(apiRouter, {
@@ -1662,6 +1677,7 @@ startServer({
     migrateLegacyRepairFacts,
     applyAdminResetFromEnv,
     registerWebhook,
+    startGprsGateway: () => gprsGateway.start(),
     dbPath: DB_PATH,
     botToken: BOT_TOKEN,
     readData,

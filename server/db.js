@@ -17,6 +17,8 @@ const JSON_COLLECTIONS = [
   'knowledge_base_modules',
   'knowledge_base_progress',
   'app_settings',
+  'gsm_packets',
+  'gsm_commands',
   'documents',
   'mechanic_documents',
   'payments',

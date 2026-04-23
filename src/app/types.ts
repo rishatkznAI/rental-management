@@ -112,6 +112,83 @@ export interface Equipment {
   history?: AuditEntry[];
 }
 
+export type GsmPacketDirection = 'inbound' | 'outbound';
+export type GsmCommandStatus = 'queued' | 'sent' | 'failed';
+
+export interface GsmGatewayStatus {
+  enabled: boolean;
+  host: string;
+  port: number;
+  startedAt?: string | null;
+  startError?: string;
+  onlineConnections: number;
+  onlineDevices: number;
+  packetsStored: number;
+  packetsToday: number;
+  queuedCommands: number;
+  sentToday: number;
+  failedCommands: number;
+  lastPacketAt?: string | null;
+}
+
+export interface GsmGatewayConnection {
+  id: string;
+  deviceId?: string | null;
+  trackerId?: string | null;
+  imei?: string | null;
+  equipmentId?: string | null;
+  equipmentLabel?: string | null;
+  remoteAddress?: string | null;
+  remotePort?: number | null;
+  connectedAt: string;
+  lastSeenAt: string;
+  packetsReceived: number;
+  bytesReceived: number;
+  isOnline: boolean;
+}
+
+export interface GsmGatewayPacket {
+  id: string;
+  direction: GsmPacketDirection;
+  deviceId?: string | null;
+  trackerId?: string | null;
+  imei?: string | null;
+  equipmentId?: string | null;
+  equipmentLabel?: string | null;
+  connectionId?: string | null;
+  remoteAddress?: string | null;
+  remotePort?: number | null;
+  payload?: string | null;
+  payloadHex: string;
+  encoding: 'text' | 'hex';
+  protocol?: string | null;
+  summary?: string | null;
+  parsedPayload?: Record<string, unknown> | null;
+  createdAt: string;
+  createdBy?: string | null;
+}
+
+export interface GsmGatewayCommand {
+  id: string;
+  equipmentId?: string | null;
+  equipmentLabel?: string | null;
+  deviceId?: string | null;
+  trackerId?: string | null;
+  imei?: string | null;
+  payload: string;
+  encoding: 'text' | 'hex';
+  appendNewline: boolean;
+  status: GsmCommandStatus;
+  createdAt: string;
+  createdBy?: string | null;
+  sentAt?: string | null;
+  failedAt?: string | null;
+  error?: string | null;
+  connectionId?: string | null;
+  remoteAddress?: string | null;
+  remotePort?: number | null;
+}
+
 export interface RepairRecord {
   id: string;
   equipmentId: string;

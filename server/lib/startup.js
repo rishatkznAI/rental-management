@@ -85,6 +85,7 @@ async function startServer({ app, port, deps, logger = console }) {
     migrateLegacyRepairFacts,
     applyAdminResetFromEnv,
     registerWebhook,
+    startGprsGateway,
     dbPath,
     botToken,
   } = deps;
@@ -127,6 +128,9 @@ async function startServer({ app, port, deps, logger = console }) {
       logger,
     });
     applyAdminResetFromEnv();
+    if (typeof startGprsGateway === 'function') {
+      startGprsGateway();
+    }
 
     logger.log('');
     logger.log('╔══════════════════════════════════════════════════════╗');

@@ -1,12 +1,16 @@
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
   Activity,
   AlertTriangle,
+  ArrowDownToLine,
+  ArrowUpToLine,
   ArrowUpRight,
   BatteryCharging,
+  Cable,
   Clock3,
+  Cpu,
   Gauge,
   History,
   Map as MapIcon,
@@ -14,14 +18,17 @@ import {
   Navigation,
   Route,
   Search,
+  SendHorizontal,
+  Server,
   Siren,
   Truck,
-  Wifi,
   Wrench,
   Zap,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Textarea } from '../components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge, getEquipmentStatusBadge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -29,7 +36,9 @@ import { cn } from '../lib/utils';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useClientsList } from '../hooks/useClients';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
+import { useAuth } from '../contexts/AuthContext';
 import { equipmentService } from '../services/equipment.service';
+import { gsmGatewayService } from '../services/gsm-gateway.service';
 import {
   buildGsmSnapshot,
   isPointInsideZone,
@@ -40,7 +49,15 @@ import {
   type GsmRoutePoint,
   type GsmZone,
 } from '../lib/gsm';
-import type { EquipmentGsmSignalState, EquipmentStatus, ShippingPhoto } from '../types';
+import type {
+  EquipmentGsmSignalState,
+  EquipmentStatus,
+  GsmGatewayCommand,
+  GsmGatewayConnection,
+  GsmGatewayPacket,
+  GsmGatewayStatus,
+  ShippingPhoto,
+} from '../types';
 
 declare global {
   interface Window {
@@ -51,10 +68,26 @@ declare global {
 
 type SignalFilter = 'all' | EquipmentGsmSignalState;
 type StatusFilter = 'all' | EquipmentStatus;
-type GsmTab = 'live' | 'history';
+type GsmTab = 'live' | 'history' | 'gateway';
 type RoutePeriod = 'day' | 'week';
+type GsmCommandEncoding = 'text' | 'hex';
 
 const DEFAULT_CENTER: [number, number] = [55.796127, 49.106414];
+const DEFAULT_GATEWAY_STATUS: GsmGatewayStatus = {
+  enabled: true,
+  host: '0.0.0.0',
+  port: 5055,
+  startedAt: null,
+  startError: '',
+  onlineConnections: 0,
+  onlineDevices: 0,
+  packetsStored: 0,
+  packetsToday: 0,
+  queuedCommands: 0,
+  sentToday: 0,
+  failedCommands: 0,
+  lastPacketAt: null,
+};
 
 const SIGNAL_META: Record<EquipmentGsmSignalState, {
   label: string;
@@ -131,6 +164,19 @@ function formatVoltage(value: number | null) {
 function formatSpeed(value: number | null) {
   if (value === null) return '—';
   return `${value.toLocaleString('ru-RU')} км/ч`;
+}
+
+function formatBytes(value: number | null | undefined) {
+  const amount = Number(value) || 0;
+  if (amount >= 1024 * 1024) return `${(amount / (1024 * 1024)).toFixed(1)} МБ`;
+  if (amount >= 1024) return `${(amount / 1024).toFixed(1)} КБ`;
+  return `${amount} Б`;
+}
+
+function compactPayloadText(packet: GsmGatewayPacket | GsmGatewayCommand) {
+  const text = String(packet.payload || '').trim();
+  if (!text) return 'HEX пакет';
+  return text.length > 120 ? `${text.slice(0, 120)}…` : text;
 }
 
 function buildEquipmentLabel(snapshot: GsmEquipmentSnapshot) {
@@ -379,6 +425,8 @@ function filterRoutePoints(points: GsmRoutePoint[], period: RoutePeriod) {
 }
 
 export default function Gsm() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { data: equipment = [] } = useEquipmentList();
   const { data: rentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
@@ -395,6 +443,24 @@ export default function Gsm() {
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [routePeriod, setRoutePeriod] = React.useState<RoutePeriod>('day');
+  const [commandPayload, setCommandPayload] = React.useState('');
+  const [commandEncoding, setCommandEncoding] = React.useState<GsmCommandEncoding>('text');
+  const [appendNewline, setAppendNewline] = React.useState(true);
+  const [commandDeviceId, setCommandDeviceId] = React.useState('');
+  const canSendGprsCommands = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
+
+  const { data: gatewayStatus = DEFAULT_GATEWAY_STATUS } = useQuery({
+    queryKey: ['gsmGateway', 'status'],
+    queryFn: () => gsmGatewayService.getStatus().catch(() => DEFAULT_GATEWAY_STATUS),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
+  const { data: gatewayConnections = [] } = useQuery<GsmGatewayConnection[]>({
+    queryKey: ['gsmGateway', 'connections'],
+    queryFn: () => gsmGatewayService.getConnections().catch(() => []),
+    refetchInterval: 5_000,
+    staleTime: 3_000,
+  });
 
   const snapshots = React.useMemo(
     () => equipment
@@ -447,6 +513,14 @@ export default function Gsm() {
     () => filteredSnapshots.find(item => item.equipment.id === selectedId) || filteredSnapshots[0] || null,
     [filteredSnapshots, selectedId],
   );
+  const selectedTrackerId = React.useMemo(
+    () => String(selectedSnapshot?.equipment.gsmTrackerId || selectedSnapshot?.equipment.gsmImei || '').trim(),
+    [selectedSnapshot],
+  );
+
+  React.useEffect(() => {
+    setCommandDeviceId(selectedTrackerId);
+  }, [selectedTrackerId]);
 
   const selectedRoutePoints = React.useMemo(
     () => selectedSnapshot ? filterRoutePoints(selectedSnapshot.routePoints, routePeriod) : [],
@@ -508,6 +582,69 @@ export default function Gsm() {
 
   const warehouseZone = selectedSnapshot?.zones.find(zone => zone.kind === 'warehouse');
   const jobsiteZone = selectedSnapshot?.zones.find(zone => zone.kind === 'jobsite');
+
+  const selectedGatewayConnections = React.useMemo(() => {
+    if (!selectedSnapshot) return gatewayConnections;
+    return gatewayConnections.filter((item) => (
+      item.equipmentId === selectedSnapshot.equipment.id
+      || [item.deviceId, item.trackerId, item.imei].includes(selectedTrackerId)
+    ));
+  }, [gatewayConnections, selectedSnapshot, selectedTrackerId]);
+
+  const { data: gatewayPackets = [] } = useQuery<GsmGatewayPacket[]>({
+    queryKey: ['gsmGateway', 'packets', selectedSnapshot?.equipment.id || 'all', selectedTrackerId || 'none'],
+    queryFn: () => gsmGatewayService.getPackets({
+      equipmentId: selectedSnapshot?.equipment.id || undefined,
+      deviceId: selectedTrackerId || undefined,
+      limit: 60,
+    }).catch(() => []),
+    refetchInterval: 5_000,
+    staleTime: 3_000,
+  });
+
+  const { data: gatewayCommands = [] } = useQuery<GsmGatewayCommand[]>({
+    queryKey: ['gsmGateway', 'commands', selectedSnapshot?.equipment.id || 'all', selectedTrackerId || 'none'],
+    queryFn: () => gsmGatewayService.getCommands({
+      equipmentId: selectedSnapshot?.equipment.id || undefined,
+      deviceId: selectedTrackerId || undefined,
+      limit: 40,
+    }).catch(() => []),
+    refetchInterval: 5_000,
+    staleTime: 3_000,
+  });
+
+  const sendCommandMutation = useMutation({
+    mutationFn: gsmGatewayService.sendCommand,
+    onSuccess: (result) => {
+      toast.success(result.status === 'queued'
+        ? 'Команда сохранена в очередь и уйдёт при следующем соединении'
+        : 'Команда отправлена на устройство');
+      setCommandPayload('');
+      queryClient.invalidateQueries({ queryKey: ['gsmGateway'] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Не удалось отправить пакет в GPRS канал');
+    },
+  });
+
+  const handleSendGprsCommand = React.useCallback(() => {
+    if (!canSendGprsCommands) return;
+    sendCommandMutation.mutate({
+      equipmentId: selectedSnapshot?.equipment.id,
+      deviceId: commandDeviceId.trim() || undefined,
+      payload: commandPayload,
+      encoding: commandEncoding,
+      appendNewline,
+    });
+  }, [
+    appendNewline,
+    canSendGprsCommands,
+    commandDeviceId,
+    commandEncoding,
+    commandPayload,
+    selectedSnapshot,
+    sendCommandMutation,
+  ]);
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.08),transparent_28%),radial-gradient(circle_at_top_right,rgba(163,230,53,0.08),transparent_24%),linear-gradient(180deg,#050816_0%,#09101f_100%)] px-4 py-8 text-white sm:px-6 lg:px-8">
@@ -624,6 +761,9 @@ export default function Gsm() {
             </TabsTrigger>
             <TabsTrigger value="history" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
               История и маршрут
+            </TabsTrigger>
+            <TabsTrigger value="gateway" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+              GPRS канал
             </TabsTrigger>
           </TabsList>
 
@@ -1078,37 +1218,376 @@ export default function Gsm() {
               </Card>
             </div>
           </TabsContent>
+
+          <TabsContent value="gateway">
+            <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardContent className="p-5">
+                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-cyan-300">
+                      <Server className="h-5 w-5" />
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Шлюз GPRS</div>
+                    <div className="mt-2 text-2xl font-black text-white">
+                      {gatewayStatus.startError ? 'Ошибка' : 'Активен'}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-400">
+                      {gatewayStatus.host}:{gatewayStatus.port}
+                    </div>
+                    {gatewayStatus.startError ? (
+                      <div className="mt-2 text-xs text-rose-300">{gatewayStatus.startError}</div>
+                    ) : (
+                      <div className="mt-2 text-xs text-slate-500">Запущен: {formatDateTime(gatewayStatus.startedAt)}</div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardContent className="p-5">
+                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-emerald-300">
+                      <Cable className="h-5 w-5" />
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Онлайн соединения</div>
+                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.onlineConnections}</div>
+                    <div className="mt-1 text-sm text-slate-400">{gatewayStatus.onlineDevices} устройств на линии</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardContent className="p-5">
+                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-cyan-300">
+                      <ArrowDownToLine className="h-5 w-5" />
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Пакеты за сегодня</div>
+                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.packetsToday}</div>
+                    <div className="mt-1 text-sm text-slate-400">в журнале всего {gatewayStatus.packetsStored}</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardContent className="p-5">
+                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-amber-300">
+                      <ArrowUpToLine className="h-5 w-5" />
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Команды</div>
+                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.sentToday}</div>
+                    <div className="mt-1 text-sm text-slate-400">
+                      очередь {gatewayStatus.queuedCommands} · ошибок {gatewayStatus.failedCommands}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_420px]">
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardHeader>
+                    <CardTitle className="text-xl font-bold text-white">Отправка пакета на устройство</CardTitle>
+                    <CardDescription className="text-slate-400">
+                      Для выбранной техники можно отправить текстовую команду или HEX-пакет. Если устройство не в сети, команда встанет в очередь.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {!selectedSnapshot ? (
+                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                        Сначала выберите технику по текущим фильтрам, чтобы привязать команду к конкретному трекеру.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="text-lg font-semibold text-white">{buildEquipmentLabel(selectedSnapshot)}</div>
+                              <div className="mt-1 text-sm text-slate-400">
+                                Трекер: {selectedTrackerId || 'не привязан в карточке техники'}
+                              </div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                Последний пакет: {formatDateTime(gatewayStatus.lastPacketAt)}
+                              </div>
+                            </div>
+                            <Badge variant={selectedGatewayConnections.length > 0 ? 'success' : 'default'}>
+                              {selectedGatewayConnections.length > 0 ? 'Устройство онлайн' : 'Устройство офлайн'}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_240px]">
+                          <div className="space-y-2">
+                            <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              Device ID / IMEI
+                            </label>
+                            <Input
+                              value={commandDeviceId}
+                              onChange={(event) => setCommandDeviceId(event.target.value)}
+                              placeholder="IMEI или deviceId трекера"
+                              className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              Формат пакета
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                              {([
+                                { value: 'text', label: 'Текст' },
+                                { value: 'hex', label: 'HEX' },
+                              ] as Array<{ value: GsmCommandEncoding; label: string }>).map(option => (
+                                <Button
+                                  key={option.value}
+                                  type="button"
+                                  variant={commandEncoding === option.value ? 'default' : 'secondary'}
+                                  onClick={() => setCommandEncoding(option.value)}
+                                  className={cn(
+                                    'rounded-full',
+                                    commandEncoding === option.value
+                                      ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+                                      : 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10',
+                                  )}
+                                >
+                                  {option.label}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                            Пакет команды
+                          </label>
+                          <Textarea
+                            value={commandPayload}
+                            onChange={(event) => setCommandPayload(event.target.value)}
+                            placeholder={commandEncoding === 'hex'
+                              ? 'Например: 78780D0101234567890123450D0A'
+                              : 'Например: engine=off;relay=1'}
+                            className="min-h-[140px] rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                          />
+                          <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={appendNewline}
+                              onChange={(event) => setAppendNewline(event.target.checked)}
+                              className="h-4 w-4 rounded border-white/20 bg-slate-950/70"
+                            />
+                            Добавлять перевод строки в текстовую команду
+                          </label>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            onClick={handleSendGprsCommand}
+                            disabled={!canSendGprsCommands || !commandPayload.trim() || sendCommandMutation.isPending}
+                            className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                          >
+                            <SendHorizontal className="h-4 w-4" />
+                            {sendCommandMutation.isPending ? 'Отправляем...' : 'Отправить пакет'}
+                          </Button>
+                          {!canSendGprsCommands && (
+                            <span className="text-sm text-slate-500">
+                              Отправка доступна только администратору и офис-менеджеру.
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardHeader>
+                    <CardTitle className="text-xl font-bold text-white">Онлайн-соединения трекеров</CardTitle>
+                    <CardDescription className="text-slate-400">
+                      Активные GPRS/TCP соединения с сервером. Если техника выбрана, список сужается под неё.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedGatewayConnections.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                        Активных соединений по текущей технике нет.
+                      </div>
+                    ) : (
+                      <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
+                        {selectedGatewayConnections.map((connection) => (
+                          <div key={connection.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-white">
+                                  {connection.equipmentLabel || connection.deviceId || connection.imei || 'Неопознанное устройство'}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {connection.remoteAddress}:{connection.remotePort || '—'}
+                                </div>
+                              </div>
+                              <Badge variant={connection.isOnline ? 'success' : 'default'}>
+                                {connection.isOnline ? 'Онлайн' : 'Отключено'}
+                              </Badge>
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последний пакет</div>
+                                <div className="mt-1 text-white">{formatDateTime(connection.lastSeenAt)}</div>
+                              </div>
+                              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Трафик</div>
+                                <div className="mt-1 text-white">
+                                  {connection.packetsReceived} пак. · {formatBytes(connection.bytesReceived)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_420px]">
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardHeader>
+                    <CardTitle className="text-xl font-bold text-white">Последние пакеты GPRS</CardTitle>
+                    <CardDescription className="text-slate-400">
+                      Входящие и исходящие сообщения по текущей технике. Для бинарных пакетов сохраняется HEX.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {gatewayPackets.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                        Пакетов по текущей выборке пока нет.
+                      </div>
+                    ) : (
+                      <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
+                        {gatewayPackets.map((packet) => (
+                          <div key={packet.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge variant={packet.direction === 'inbound' ? 'info' : 'warning'}>
+                                    {packet.direction === 'inbound' ? 'Входящий' : 'Исходящий'}
+                                  </Badge>
+                                  <span className="text-xs text-slate-500">{formatDateTime(packet.createdAt)}</span>
+                                </div>
+                                <div className="mt-2 text-sm font-semibold text-white">
+                                  {packet.summary || packet.equipmentLabel || packet.deviceId || 'Пакет'}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {packet.deviceId || packet.imei || 'Устройство не опознано'} · {packet.protocol || 'raw'}
+                                </div>
+                              </div>
+                              <div className="text-right text-xs text-slate-500">
+                                <div>{packet.remoteAddress || '—'}</div>
+                                <div>{packet.remotePort || '—'}</div>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Текст пакета</div>
+                              <div className="mt-2 whitespace-pre-wrap break-all text-sm text-slate-200">
+                                {compactPayloadText(packet)}
+                              </div>
+                            </div>
+
+                            <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">HEX</div>
+                              <div className="mt-2 break-all font-mono text-xs text-cyan-200">
+                                {packet.payloadHex || '—'}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardHeader>
+                    <CardTitle className="text-xl font-bold text-white">Очередь и история команд</CardTitle>
+                    <CardDescription className="text-slate-400">
+                      Здесь видно, ушла ли команда сразу, встала в очередь или вернулась с ошибкой.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {gatewayCommands.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                        По текущей технике команды ещё не отправлялись.
+                      </div>
+                    ) : (
+                      <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
+                        {gatewayCommands.map((command) => (
+                          <div key={command.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-white">
+                                  {command.equipmentLabel || command.deviceId || command.imei || 'Команда'}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {command.createdBy || 'Оператор'} · {formatDateTime(command.createdAt)}
+                                </div>
+                              </div>
+                              <Badge
+                                variant={
+                                  command.status === 'sent'
+                                    ? 'success'
+                                    : command.status === 'failed'
+                                      ? 'danger'
+                                      : 'warning'
+                                }
+                              >
+                                {command.status === 'sent' ? 'Отправлено' : command.status === 'failed' ? 'Ошибка' : 'В очереди'}
+                              </Badge>
+                            </div>
+
+                            <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-sm text-slate-200">
+                              {compactPayloadText(command)}
+                            </div>
+
+                            <div className="mt-3 space-y-1 text-xs text-slate-500">
+                              <div>Формат: {command.encoding === 'hex' ? 'HEX' : 'Текст'}{command.appendNewline ? ' · с переводом строки' : ''}</div>
+                              {command.sentAt && <div>Отправлено: {formatDateTime(command.sentAt)}</div>}
+                              {command.error && <div className="text-rose-300">Ошибка: {command.error}</div>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
         </Tabs>
 
         <Card className="border-white/10 bg-slate-950/70 text-white">
           <CardHeader>
-            <CardTitle className="text-xl font-bold text-white">Что ещё можно развить в GSM дальше</CardTitle>
+            <CardTitle className="text-xl font-bold text-white">Что ещё можно усилить после запуска GPRS</CardTitle>
             <CardDescription className="text-slate-400">
-              Базовый контур уже есть. Следующий уровень — связать этот экран с реальными трекерами и автоматическими событиями.
+              Базовый шлюз уже работает. Следующий шаг — углубить поддержку конкретных моделей трекеров и бизнес-сценариев.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {[
                 {
-                  icon: Wifi,
-                  title: 'Онлайн-поток от трекера',
-                  text: 'Чтобы карта обновлялась сама без ручного обновления страницы и показывала живые точки.',
+                  icon: Cpu,
+                  title: 'Конкретные протоколы',
+                  text: 'Добавить отдельные декодеры под Teltonika, GT06, Arnavi, Galileo и другие реальные устройства без ручной настройки.',
                 },
                 {
                   icon: Clock3,
-                  title: 'Уведомления в бот',
-                  text: 'Сообщения менеджеру и офису: техника покинула склад, прибыла на объект или потеряла сигнал.',
+                  title: 'ACK и диалоги с устройством',
+                  text: 'Подтверждать приём пакетов по протоколу трекера, хранить ответы и показывать успешность каждой команды.',
                 },
                 {
                   icon: AlertTriangle,
                   title: 'Контроль отклонений',
-                  text: 'Если техника ушла не туда, где находится объект аренды, экран может показывать тревогу и отклонение по расстоянию.',
+                  text: 'Если техника ушла не туда, где находится объект аренды, экран может поднимать тревогу и считать отклонение по расстоянию.',
                 },
                 {
                   icon: History,
-                  title: 'Глубокая история',
-                  text: 'Хранение маршрутов по дням и неделям с возможностью открыть любой день и посмотреть весь трек.',
+                  title: 'Глубокая история пакетов',
+                  text: 'Хранить длинный журнал трафика, статус доставки команд и историю маршрутов по дням для технического разбора.',
                 },
               ].map((item) => {
                 const Icon = item.icon;

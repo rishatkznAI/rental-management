@@ -10,6 +10,8 @@ export type EquipmentSalePdiStatus = 'not_started' | 'in_progress' | 'ready';
 export type RepairEventType = 'repair' | 'maintenance' | 'diagnostics' | 'breakdown';
 export type RepairSource = 'manual' | 'bot';
 export type ShippingEventType = 'shipping' | 'receiving';
+export type EquipmentGsmSignalState = 'online' | 'location_only' | 'offline';
+export type EquipmentGsmPointSource = 'gps' | 'parsed' | 'directory' | 'approximate';
 export type EquipmentOperationPhotoCategory =
   | 'front'
   | 'rear'
@@ -37,6 +39,15 @@ export interface EquipmentHandoffChecklist {
   basket: boolean;
   tires: boolean;
   leaksAndDamage: boolean;
+}
+
+export interface EquipmentGsmPositionPoint {
+  at: string;
+  lat: number;
+  lng: number;
+  source: EquipmentGsmPointSource;
+  address?: string;
+  speedKph?: number;
 }
 
 export interface AuditEntry {
@@ -84,6 +95,18 @@ export interface Equipment {
   currentClient?: string;
   returnDate?: string;
   photo?: string;
+  gsmTrackerId?: string;
+  gsmImei?: string;
+  gsmLatitude?: number;
+  gsmLongitude?: number;
+  gsmAddress?: string;
+  gsmLastSignalAt?: string;
+  gsmSignalStatus?: EquipmentGsmSignalState;
+  gsmIgnitionOn?: boolean;
+  gsmBatteryVoltage?: number;
+  gsmHourmeter?: number;
+  gsmSpeedKph?: number;
+  gsmMovementHistory?: EquipmentGsmPositionPoint[];
   history?: AuditEntry[];
 }
 

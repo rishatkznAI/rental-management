@@ -18,6 +18,7 @@ import { MECHANIC_ROLES } from './userStorage';
 export type Section =
   | 'dashboard'
   | 'equipment'
+  | 'gsm'
   | 'sales'
   | 'crm'
   | 'deliveries'
@@ -46,6 +47,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Администратор': {
     dashboard:        ALL,
     equipment:        ALL,
+    gsm:              VIEW,
     sales:            ALL,
     crm:              ALL,
     deliveries:       ALL,
@@ -63,6 +65,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Менеджер по аренде': {
     dashboard:        VIEW,        // только своё
     equipment:        VIEW,
+    gsm:              VIEW,
     sales:            VIEW,
     crm:              ['view', 'create', 'edit'],
     deliveries:       ['view', 'create', 'edit'],
@@ -79,6 +82,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Офис-менеджер': {
     dashboard:        VIEW,
     equipment:        ALL,
+    gsm:              VIEW,
     sales:            VIEW,
     crm:              ALL,
     deliveries:       ALL,
@@ -95,6 +99,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Менеджер по продажам': {
     dashboard:        VIEW,
     equipment:        VIEW,
+    gsm:              VIEW,
     sales:            ALL,
     crm:              ['view', 'create', 'edit'],
     clients:          VIEW_CREATE,
@@ -105,6 +110,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     MECHANIC_ROLES.map(role => [role, {
       // dashboard: нет
       equipment:        VIEW,
+      gsm:              VIEW,
       planner:          ALL,
       service:          ALL,
       service_vehicles: ALL,         // механик ведёт журнал поездок
@@ -131,6 +137,7 @@ export function pathToRequiredAction(pathname: string): { section: Section; acti
 export function pathToSection(pathname: string): Section | null {
   if (pathname === '/')                       return 'dashboard';
   if (pathname.startsWith('/equipment'))      return 'equipment';
+  if (pathname.startsWith('/gsm'))            return 'gsm';
   if (pathname.startsWith('/sales'))          return 'sales';
   if (pathname.startsWith('/crm'))            return 'crm';
   if (pathname.startsWith('/deliveries'))     return 'deliveries';
@@ -152,6 +159,7 @@ export function pathToSection(pathname: string): Section | null {
 const SECTION_PATHS: Array<[Section, string]> = [
   ['dashboard',  '/'],
   ['equipment',  '/equipment'],
+  ['gsm',        '/gsm'],
   ['sales',      '/sales'],
   ['crm',        '/crm'],
   ['deliveries', '/deliveries'],

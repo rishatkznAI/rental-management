@@ -19,7 +19,15 @@ import { api } from './api';
 
 // ── Типы ─────────────────────────────────────────────────────────────────────
 
-export type UserRole   = 'Администратор' | 'Менеджер по аренде' | 'Менеджер по продажам' | 'Механик' | 'Офис-менеджер';
+export type UserRole =
+  | 'Администратор'
+  | 'Менеджер по аренде'
+  | 'Менеджер по продажам'
+  | 'Механик'
+  | 'Младший стационарный механик'
+  | 'Выездной механик'
+  | 'Старший стационарный механик'
+  | 'Офис-менеджер';
 export type UserStatus = 'Активен' | 'Неактивен';
 
 export interface SystemUser {
@@ -35,11 +43,18 @@ export interface SystemUser {
   password: string;
 }
 
+export const MECHANIC_ROLES: UserRole[] = [
+  'Механик',
+  'Младший стационарный механик',
+  'Выездной механик',
+  'Старший стационарный механик',
+];
+
 export const ROLES: UserRole[] = [
   'Администратор',
   'Менеджер по аренде',
   'Менеджер по продажам',
-  'Механик',
+  ...MECHANIC_ROLES,
   'Офис-менеджер',
 ];
 
@@ -61,6 +76,10 @@ export function isRentalManagerUser(user: UserWithManagerRole | null | undefined
 
 export function filterRentalManagerUsers<T extends UserWithManagerRole>(users: T[]): T[] {
   return users.filter(isRentalManagerUser);
+}
+
+export function isMechanicRole(role: UserRole | string | null | undefined): boolean {
+  return MECHANIC_ROLES.some(item => item === role);
 }
 
 // ── Ключ хранилища ────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 const { createBotUi } = require('./bot-ui');
 const { createBotFormatters } = require('./bot-formatters');
 const { createBotOperations } = require('./bot-operations');
+const { isMechanicRole } = require('./role-groups');
 
 function createBotHandlers(deps) {
   const {
@@ -2091,7 +2092,7 @@ function createBotHandlers(deps) {
     saveBotUsers(botUsers);
 
     const { userName, userRole } = authUser;
-    const canManageRepair = userRole === 'Механик' || userRole === 'Администратор';
+    const canManageRepair = isMechanicRole(userRole) || userRole === 'Администратор';
     const canCreateServiceRequest = canManageRepair || userRole === 'Менеджер по аренде' || userRole === 'Офис-менеджер';
     const isRentalManager = userRole === 'Менеджер по аренде';
 

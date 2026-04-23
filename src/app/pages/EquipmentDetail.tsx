@@ -28,6 +28,7 @@ import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
+import { isMechanicRole } from '../lib/userStorage';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
@@ -446,7 +447,7 @@ export default function EquipmentDetail() {
   const queryClient = useQueryClient();
   const canEditEquipment = can('edit', 'equipment');
   const canCreateService = can('create', 'service');
-  const canManageAcceptance = canEditEquipment || canCreateService || user?.role === 'Механик';
+  const canManageAcceptance = canEditEquipment || canCreateService || isMechanicRole(user?.role);
   const { id } = useParams();
 
   const [allEquipment, setAllEquipment] = useState<Equipment[]>([]);

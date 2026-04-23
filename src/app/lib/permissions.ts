@@ -11,6 +11,7 @@
 
 import { useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { MECHANIC_ROLES } from './userStorage';
 
 // ── Типы ─────────────────────────────────────────────────────────────────────
 
@@ -100,14 +101,16 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     documents:        VIEW,
     payments:         VIEW,
   },
-  'Механик': {
-    // dashboard: нет
-    equipment:        VIEW,
-    planner:          ALL,
-    service:          ALL,
-    service_vehicles: ALL,         // механик ведёт журнал поездок
-    // остальное: нет
-  },
+  ...Object.fromEntries(
+    MECHANIC_ROLES.map(role => [role, {
+      // dashboard: нет
+      equipment:        VIEW,
+      planner:          ALL,
+      service:          ALL,
+      service_vehicles: ALL,         // механик ведёт журнал поездок
+      // остальное: нет
+    }]),
+  ),
 };
 
 // ── Маппинг URL → Section ─────────────────────────────────────────────────────

@@ -1,3 +1,5 @@
+const { isMechanicRole } = require('./role-groups');
+
 function createBotUi() {
   function button(text, payload) {
     return {
@@ -224,7 +226,7 @@ function createBotUi() {
   }
 
   function defaultKeyboardForRole(role) {
-    if (role === 'Механик' || role === 'Администратор') {
+    if (isMechanicRole(role) || role === 'Администратор') {
       return mechanicKeyboard();
     }
     if (role === 'Менеджер по аренде') {

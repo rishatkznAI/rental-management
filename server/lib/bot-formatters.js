@@ -1,3 +1,5 @@
+const { isMechanicRole } = require('./role-groups');
+
 function createBotFormatters(deps) {
   const {
     readData,
@@ -127,7 +129,7 @@ function createBotFormatters(deps) {
 
   function getAccessibleServiceTickets(authUser) {
     const tickets = readServiceTickets();
-    if (authUser.userRole === 'Механик') {
+    if (isMechanicRole(authUser.userRole)) {
       return tickets.filter(ticket =>
         ticket.status !== 'closed' &&
         (
@@ -141,7 +143,7 @@ function createBotFormatters(deps) {
 
   function getAssignedServiceTickets(authUser) {
     const tickets = readServiceTickets();
-    if (authUser.userRole !== 'Механик') {
+    if (!isMechanicRole(authUser.userRole)) {
       return tickets.filter(ticket => ticket.status !== 'closed');
     }
     return tickets.filter(ticket =>
@@ -162,9 +164,9 @@ function createBotFormatters(deps) {
 
     const lines = tickets.slice(0, 10).map(formatTicketLine);
     return [
-      authUser.userRole === 'Механик' && mode === 'assigned'
+      isMechanicRole(authUser.userRole) && mode === 'assigned'
         ? `🧰 Мои сервисные заявки (${tickets.length}):`
-        : authUser.userRole === 'Механик'
+        : isMechanicRole(authUser.userRole)
         ? `🔧 Доступные вам сервисные заявки (${tickets.length}):`
         : `🔧 Открытые сервисные заявки (${tickets.length}):`,
       ...lines,
@@ -395,7 +397,7 @@ function createBotFormatters(deps) {
   }
 
   function getHelpText(role) {
-    const isMechanic = role === 'Механик' || role === 'Администратор';
+    const isMechanic = isMechanicRole(role) || role === 'Администратор';
     const isRentalManager = role === 'Менеджер по аренде';
     const mechanicLines = [
       '/моизаявки — мои сервисные заявки',
@@ -441,7 +443,7 @@ function createBotFormatters(deps) {
   }
 
   function getMainMenuText(authUser) {
-    if (authUser.userRole === 'Механик' || authUser.userRole === 'Администратор') {
+    if (isMechanicRole(authUser.userRole) || authUser.userRole === 'Администратор') {
       return [
         `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
         '',

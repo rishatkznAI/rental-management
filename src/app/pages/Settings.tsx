@@ -38,6 +38,7 @@ import {
   type UserRole, type UserStatus, type SystemUser,
   ROLES, USERS_STORAGE_KEY,
   hashPassword,
+  isMechanicRole,
 } from '../lib/userStorage';
 import { usersService } from '../services/users.service';
 import { ownersService } from '../services/owners.service';
@@ -88,7 +89,7 @@ type BadgeVariant = 'danger' | 'warning' | 'info' | 'success' | 'secondary';
 function roleBadgeVariant(role: UserRole): BadgeVariant {
   if (role === 'Администратор') return 'danger';
   if (role === 'Менеджер по продажам') return 'success';
-  if (role === 'Механик') return 'warning';
+  if (isMechanicRole(role)) return 'warning';
   return 'info';
 }
 

@@ -66,6 +66,7 @@ const {
 const { createBotHandlers } = require('./lib/bot-commands');
 const { createMaxApiClient } = require('./lib/max-api');
 const { createServiceCore } = require('./lib/service-core');
+const { MECHANIC_ROLES } = require('./lib/role-groups');
 const { startServer } = require('./lib/startup');
 const { registerAuthRoutes } = require('./routes/auth');
 const { registerBotApiRoutes, registerBotRoutes } = require('./routes/bot');
@@ -210,25 +211,25 @@ const WRITE_PERMISSIONS = {
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   delivery_carriers: ['Администратор'],
-  service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Механик'],
+  service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   clients:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   documents:      ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   payments:       ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
-  shipping_photos:['Администратор', 'Механик', 'Менеджер по аренде'],
+  shipping_photos:['Администратор', ...MECHANIC_ROLES, 'Менеджер по аренде'],
   owners:         ['Администратор'],
   mechanics:      ['Администратор'],
   service_works:  ['Администратор'],
   spare_parts:    ['Администратор'],
-  repair_work_items: ['Администратор', 'Механик'],
-  repair_part_items: ['Администратор', 'Механик'],
+  repair_work_items: ['Администратор', ...MECHANIC_ROLES],
+  repair_part_items: ['Администратор', ...MECHANIC_ROLES],
   service_work_catalog: ['Администратор'],
   spare_parts_catalog: ['Администратор'],
-  planner_items:  ['Администратор', 'Офис-менеджер', 'Механик'],
-  service_vehicles: ['Администратор', 'Офис-менеджер', 'Механик'],
-  vehicle_trips:    ['Администратор', 'Офис-менеджер', 'Механик'],
+  planner_items:  ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  service_vehicles: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  vehicle_trips:    ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
 };
 
 // ── Middleware ─────────────────────────────────────────────────────────────────

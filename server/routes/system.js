@@ -1,3 +1,5 @@
+const { isMechanicRole } = require('../lib/role-groups');
+
 function registerSystemRoutes(app, deps) {
   const {
     readData,
@@ -90,7 +92,7 @@ function registerSystemRoutes(app, deps) {
           for (const [phone, botUser] of Object.entries(botUsers)) {
             const shouldNotify =
               notification.role === 'all' ||
-              (notification.role === 'mechanic' && botUser.userRole === 'Механик') ||
+              (notification.role === 'mechanic' && isMechanicRole(botUser.userRole)) ||
               (notification.role === 'manager' && botUser.userName === notification.managerName);
 
             if (shouldNotify) {

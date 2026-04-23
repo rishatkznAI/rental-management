@@ -42,6 +42,7 @@ import { ServiceRequestModal } from '../components/modals/ServiceRequestModal';
 import { NewClientModal } from '../components/modals/NewClientModal';
 import { NewRentalModal } from '../components/gantt/GanttModals';
 import { useAuth } from '../contexts/AuthContext';
+import { isMechanicRole } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import { appendRentalHistory, buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
@@ -204,7 +205,7 @@ export default function Dashboard() {
   const isManagerRole = user?.role === 'Менеджер по аренде';
   const isAdminRole = user?.role === 'Администратор';
   const currentUserName = user?.name ?? '';
-  const shouldShowRentalAttention = user?.role !== 'Механик';
+  const shouldShowRentalAttention = !isMechanicRole(user?.role);
   const viewRentals = isManagerRole && currentUserName
     ? rentals.filter(r => r.manager === currentUserName)
     : rentals;
@@ -433,7 +434,7 @@ export default function Dashboard() {
       ];
     }
 
-    if (user?.role === 'Механик') {
+    if (isMechanicRole(user?.role)) {
       return [
         {
           id: 'service-assigned',
@@ -572,7 +573,7 @@ export default function Dashboard() {
         description: 'Здесь закреплены ваши сделки, возвраты, оплаты и документы. Это стартовая точка для ежедневной работы.',
       };
     }
-    if (user?.role === 'Механик') {
+    if (isMechanicRole(user?.role)) {
       return {
         badge: 'Роль: сервис',
         title: 'Мой сервисный дашборд',

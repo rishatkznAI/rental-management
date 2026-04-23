@@ -67,6 +67,25 @@ function registerCrudRoutes(deps) {
     return null;
   }
 
+  function isKnowledgeBaseReviewer(req) {
+    return req.user?.userRole === 'Администратор' || req.user?.userRole === 'Офис-менеджер';
+  }
+
+  function knowledgeBaseProgressForbiddenReason(req, collection, method, existingItem) {
+    if (collection !== 'knowledge_base_progress') return null;
+    if (isKnowledgeBaseReviewer(req)) return null;
+
+    if (method === 'DELETE' || method === 'PUT') {
+      return 'Недостаточно прав: массово менять или удалять прогресс обучения может только администратор или офис-менеджер.';
+    }
+
+    if (existingItem && existingItem.userId !== req.user?.userId) {
+      return 'Недостаточно прав: можно менять только свой прогресс обучения.';
+    }
+
+    return null;
+  }
+
   function registerCRUD(collection) {
     if (collection === 'rentals' || collection === 'gantt_rentals') {
       return;
@@ -97,6 +116,9 @@ function registerCrudRoutes(deps) {
         }
         return res.json(data.filter(item => item.status === 'Активен').map(publicUserView));
       }
+      if (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req)) {
+        return res.json(data.filter(item => item.userId === req.user.userId));
+      }
       return res.json(data);
     });
 
@@ -112,6 +134,9 @@ function registerCrudRoutes(deps) {
         }
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
+      if (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req) && item.userId !== req.user.userId) {
+        return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
       return res.json(item);
     });
 
@@ -123,6 +148,10 @@ function registerCrudRoutes(deps) {
       const serviceForbiddenReason = serviceWriteForbiddenReason(req, collection, 'POST');
       if (serviceForbiddenReason) {
         return res.status(403).json({ ok: false, error: serviceForbiddenReason });
+      }
+      const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'POST');
+      if (knowledgeProgressForbiddenReason) {
+        return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
       }
       try {
         if (collection === 'rentals' || collection === 'gantt_rentals') {
@@ -142,6 +171,14 @@ function registerCrudRoutes(deps) {
 
         const data = readData(collection) || [];
         let newItem = { ...req.body, id: req.body.id || generateId(prefix) };
+        if (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req)) {
+          newItem = {
+            ...newItem,
+            userId: req.user.userId,
+            userName: req.user.userName,
+            userRole: req.user.userRole,
+          };
+        }
         if (collection === 'service_works') {
           newItem = normalizeServiceWorkRecord({ ...newItem, updatedAt: nowIso() });
         }
@@ -183,6 +220,10 @@ function registerCrudRoutes(deps) {
       const data = readData(collection) || [];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+      const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'PATCH', data[idx]);
+      if (knowledgeProgressForbiddenReason) {
+        return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
+      }
 
       try {
         if (collection === 'rentals' || collection === 'gantt_rentals') {
@@ -220,7 +261,14 @@ function registerCrudRoutes(deps) {
           const nextItem = { ...data[idx], ...req.body, id: data[idx].id };
           data[idx] = collection === 'clients' || collection === 'equipment'
             ? mergeEntityHistory(collection, data[idx], nextItem, req.user.userName)
-            : nextItem;
+            : (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req)
+              ? {
+                  ...nextItem,
+                  userId: data[idx].userId,
+                  userName: data[idx].userName,
+                  userRole: data[idx].userRole,
+                }
+              : nextItem);
         }
         writeData(collection, data);
         if (collection === 'payments') {
@@ -250,6 +298,10 @@ function registerCrudRoutes(deps) {
       const data = readData(collection) || [];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+      const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'DELETE', data[idx]);
+      if (knowledgeProgressForbiddenReason) {
+        return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
+      }
       if (collection === 'service') {
         const repairId = data[idx].id;
         writeData('repair_work_items', (readData('repair_work_items') || []).filter(item => item.repairId !== repairId));
@@ -274,6 +326,10 @@ function registerCrudRoutes(deps) {
       }
       if (officeManagerCanOnlyCreateRental(req, collection, 'PUT')) {
         return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
+      }
+      const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'PUT');
+      if (knowledgeProgressForbiddenReason) {
+        return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
       }
       const body = req.body;
       const list = Array.isArray(body) ? body : body.data;

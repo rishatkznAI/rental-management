@@ -17,6 +17,27 @@ function seedServiceWorks({ readData, writeData, normalizeServiceWorkRecord, see
   }
 }
 
+function seedKnowledgeBaseModules({ readData, writeData, seedsDir, logger = console }) {
+  try {
+    const existing = readData('knowledge_base_modules') || [];
+    if (existing.length > 0) return;
+    const seedPath = path.join(seedsDir, 'knowledge_base_modules.json');
+    if (!fs.existsSync(seedPath)) return;
+    const modules = JSON.parse(fs.readFileSync(seedPath, 'utf-8'));
+    if (!Array.isArray(modules) || modules.length === 0) return;
+    writeData('knowledge_base_modules', modules);
+    logger.log(`✓ База знаний загружена из seed: ${modules.length} модулей`);
+  } catch (error) {
+    logger.warn('seedKnowledgeBaseModules error:', error.message);
+  }
+}
+
+function ensureKnowledgeBaseProgress({ readData, writeData }) {
+  const existing = readData('knowledge_base_progress');
+  if (Array.isArray(existing)) return;
+  writeData('knowledge_base_progress', []);
+}
+
 function hasSeededSpareParts(existing) {
   return existing.some(item => String(item.article || item.sku || '').startsWith('GEN-'));
 }
@@ -81,6 +102,16 @@ async function startServer({ app, port, deps, logger = console }) {
       normalizeServiceWorkRecord: deps.normalizeServiceWorkRecord,
       seedsDir: deps.seedsDir,
       logger,
+    });
+    seedKnowledgeBaseModules({
+      readData: deps.readData,
+      writeData: deps.writeData,
+      seedsDir: deps.seedsDir,
+      logger,
+    });
+    ensureKnowledgeBaseProgress({
+      readData: deps.readData,
+      writeData: deps.writeData,
     });
     seedSpareParts({
       readData: deps.readData,
@@ -147,6 +178,8 @@ async function startServer({ app, port, deps, logger = console }) {
 }
 
 module.exports = {
+  ensureKnowledgeBaseProgress,
+  seedKnowledgeBaseModules,
   seedSpareParts,
   seedServiceRouteNorms,
   seedServiceWorks,

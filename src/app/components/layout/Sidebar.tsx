@@ -22,6 +22,7 @@ import {
   Bot,
   Briefcase,
   MapPinned,
+  GraduationCap,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -40,6 +41,7 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Дашборд',      href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
   { name: 'Техника',      href: '/equipment', icon: Truck,           section: 'equipment'  },
   { name: 'GSM',          href: '/gsm',       icon: MapPinned,       section: 'gsm'        },
+  { name: 'База знаний',  href: '/knowledge-base', icon: GraduationCap, section: 'knowledge_base' },
   { name: 'Продажи',      href: '/sales',     icon: BadgeDollarSign, section: 'sales'      },
   { name: 'CRM',          href: '/crm',       icon: Briefcase,       section: 'crm'        },
   { name: 'Доставка',     href: '/deliveries',icon: Route,           section: 'deliveries' },
@@ -59,7 +61,7 @@ const NAV_GROUPS: Array<{
   title: string;
   items: Section[];
 }> = [
-  { title: 'Главное', items: ['dashboard', 'equipment', 'gsm', 'sales', 'crm', 'deliveries', 'rentals'] },
+  { title: 'Главное', items: ['dashboard', 'equipment', 'gsm', 'knowledge_base', 'sales', 'crm', 'deliveries', 'rentals'] },
   { title: 'Операции', items: ['planner', 'service', 'service_vehicles'] },
   { title: 'Данные', items: ['clients', 'documents', 'payments'] },
   { title: 'Прочее', items: ['bots', 'reports', 'settings'] },

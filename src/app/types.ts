@@ -542,6 +542,58 @@ export interface CrmDeal {
   history?: AuditEntry[];
 }
 
+// ── База знаний ──────────────────────────────────────────────────────────────
+
+export type KnowledgeBaseAudience = 'rental' | 'sales' | 'all';
+export type KnowledgeBaseProgressStatus = 'not_started' | 'in_progress' | 'passed' | 'failed';
+
+export interface KnowledgeBaseQuestionOption {
+  id: string;
+  text: string;
+}
+
+export interface KnowledgeBaseQuestion {
+  id: string;
+  question: string;
+  options: KnowledgeBaseQuestionOption[];
+  correctOptionId: string;
+  explanation?: string;
+}
+
+export interface KnowledgeBaseModule {
+  id: string;
+  title: string;
+  category: string;
+  audience: KnowledgeBaseAudience;
+  description: string;
+  videoUrl?: string;
+  videoDurationMin?: number;
+  passingScorePercent: number;
+  sortOrder: number;
+  isActive: boolean;
+  quiz: KnowledgeBaseQuestion[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeBaseProgress {
+  id: string;
+  moduleId: string;
+  userId: string;
+  userName: string;
+  userRole: string;
+  status: KnowledgeBaseProgressStatus;
+  watchedVideo: boolean;
+  watchedAt?: string | null;
+  score: number;
+  maxScore: number;
+  attemptsCount: number;
+  lastAttemptAt?: string | null;
+  completedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+
 // ── Боты ──────────────────────────────────────────────────────────────────────
 
 export type BotStatus = 'online' | 'offline';

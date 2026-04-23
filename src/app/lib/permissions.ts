@@ -19,6 +19,7 @@ export type Section =
   | 'dashboard'
   | 'equipment'
   | 'gsm'
+  | 'knowledge_base'
   | 'sales'
   | 'crm'
   | 'deliveries'
@@ -48,6 +49,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard:        ALL,
     equipment:        ALL,
     gsm:              VIEW,
+    knowledge_base:   ALL,
     sales:            ALL,
     crm:              ALL,
     deliveries:       ALL,
@@ -69,6 +71,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard:        VIEW,        // только своё
     equipment:        VIEW,
     gsm:              VIEW,
+    knowledge_base:   ['view', 'create', 'edit'],
     sales:            VIEW,
     crm:              ['view', 'create', 'edit'],
     deliveries:       ['view', 'create', 'edit'],
@@ -86,6 +89,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard:        VIEW,
     equipment:        ALL,
     gsm:              VIEW,
+    knowledge_base:   ['view', 'create', 'edit'],
     sales:            VIEW,
     crm:              ALL,
     deliveries:       ALL,
@@ -103,6 +107,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     dashboard:        VIEW,
     equipment:        VIEW,
     gsm:              VIEW,
+    knowledge_base:   ['view', 'create', 'edit'],
     sales:            ALL,
     crm:              ['view', 'create', 'edit'],
     clients:          VIEW_CREATE,
@@ -141,6 +146,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname === '/')                       return 'dashboard';
   if (pathname.startsWith('/equipment'))      return 'equipment';
   if (pathname.startsWith('/gsm'))            return 'gsm';
+  if (pathname.startsWith('/knowledge-base')) return 'knowledge_base';
   if (pathname.startsWith('/sales'))          return 'sales';
   if (pathname.startsWith('/crm'))            return 'crm';
   if (pathname.startsWith('/deliveries'))     return 'deliveries';
@@ -163,6 +169,7 @@ const SECTION_PATHS: Array<[Section, string]> = [
   ['dashboard',  '/'],
   ['equipment',  '/equipment'],
   ['gsm',        '/gsm'],
+  ['knowledge_base', '/knowledge-base'],
   ['sales',      '/sales'],
   ['crm',        '/crm'],
   ['deliveries', '/deliveries'],

@@ -14,6 +14,8 @@ const JSON_COLLECTIONS = [
   'gantt_rentals',
   'service',
   'clients',
+  'knowledge_base_modules',
+  'knowledge_base_progress',
   'documents',
   'mechanic_documents',
   'payments',

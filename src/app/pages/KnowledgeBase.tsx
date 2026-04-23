@@ -5,7 +5,9 @@ import {
   CheckCircle2,
   Clock3,
   GraduationCap,
+  PencilLine,
   PlayCircle,
+  Plus,
   Trophy,
   UserRound,
   Video,
@@ -14,17 +16,37 @@ import { toast } from 'sonner';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
+import { Input } from '../components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Textarea } from '../components/ui/textarea';
 import { useAuth } from '../contexts/AuthContext';
 import {
+  useCreateKnowledgeBaseModule,
   useCreateKnowledgeBaseProgress,
   useKnowledgeBaseModulesList,
   useKnowledgeBaseProgressList,
+  useUpdateKnowledgeBaseModule,
   useUpdateKnowledgeBaseProgress,
 } from '../hooks/useKnowledgeBase';
 import { cn } from '../lib/utils';
 import { usersService } from '../services/users.service';
-import type { KnowledgeBaseModule, KnowledgeBaseProgress, KnowledgeBaseProgressStatus } from '../types';
+import type {
+  KnowledgeBaseAudience,
+  KnowledgeBaseModule,
+  KnowledgeBaseProgress,
+  KnowledgeBaseProgressStatus,
+  KnowledgeBaseQuestion,
+  KnowledgeBaseQuestionOption,
+} from '../types';
 
 type AudienceFilter = 'all' | 'rental' | 'sales';
 
@@ -33,6 +55,19 @@ type TrainingUser = {
   name: string;
   role?: string;
   status?: string;
+};
+
+type ModuleEditorState = {
+  title: string;
+  category: string;
+  audience: KnowledgeBaseAudience;
+  description: string;
+  videoUrl: string;
+  videoDurationMin: string;
+  passingScorePercent: string;
+  sortOrder: string;
+  isActive: boolean;
+  quiz: KnowledgeBaseQuestion[];
 };
 
 const MANAGER_ROLES = ['Менеджер по аренде', 'Менеджер по продажам'] as const;
@@ -97,6 +132,129 @@ function getVideoSource(url?: string) {
   return url.trim() || null;
 }
 
+function createLocalId(prefix: string) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createEditorOption(text = ''): KnowledgeBaseQuestionOption {
+  return {
+    id: createLocalId('opt'),
+    text,
+  };
+}
+
+function createEditorQuestion(): KnowledgeBaseQuestion {
+  const optionA = createEditorOption();
+  const optionB = createEditorOption();
+  return {
+    id: createLocalId('q'),
+    question: '',
+    options: [optionA, optionB],
+    correctOptionId: optionA.id,
+    explanation: '',
+  };
+}
+
+function createEmptyModuleState(audience: KnowledgeBaseAudience = 'all', sortOrder = 0): ModuleEditorState {
+  return {
+    title: '',
+    category: '',
+    audience,
+    description: '',
+    videoUrl: '',
+    videoDurationMin: '',
+    passingScorePercent: '70',
+    sortOrder: String(sortOrder),
+    isActive: true,
+    quiz: [createEditorQuestion()],
+  };
+}
+
+function moduleToEditorState(module: KnowledgeBaseModule): ModuleEditorState {
+  return {
+    title: module.title,
+    category: module.category,
+    audience: module.audience,
+    description: module.description,
+    videoUrl: module.videoUrl || '',
+    videoDurationMin: module.videoDurationMin ? String(module.videoDurationMin) : '',
+    passingScorePercent: String(module.passingScorePercent),
+    sortOrder: String(module.sortOrder),
+    isActive: module.isActive !== false,
+    quiz: module.quiz.map((question) => ({
+      ...question,
+      explanation: question.explanation || '',
+      options: question.options.map((option) => ({ ...option })),
+    })),
+  };
+}
+
+function validateModuleEditor(editor: ModuleEditorState) {
+  if (!editor.title.trim()) return 'Укажите название модуля.';
+  if (!editor.category.trim()) return 'Укажите направление или категорию.';
+  if (!editor.description.trim()) return 'Добавьте краткое описание модуля.';
+
+  const passingScorePercent = Number(editor.passingScorePercent);
+  if (!Number.isFinite(passingScorePercent) || passingScorePercent < 1 || passingScorePercent > 100) {
+    return 'Порог прохождения должен быть в диапазоне от 1 до 100.';
+  }
+
+  const sortOrder = Number(editor.sortOrder);
+  if (!Number.isFinite(sortOrder) || sortOrder < 0) {
+    return 'Порядок сортировки должен быть числом 0 или больше.';
+  }
+
+  if (!editor.quiz.length) return 'Добавьте хотя бы один вопрос в тест.';
+
+  for (const [index, question] of editor.quiz.entries()) {
+    if (!question.question.trim()) return `Заполните текст вопроса ${index + 1}.`;
+
+    const filledOptions = question.options.filter(option => option.text.trim());
+    if (filledOptions.length < 2) {
+      return `В вопросе ${index + 1} должно быть минимум два заполненных варианта ответа.`;
+    }
+    if (!filledOptions.some(option => option.id === question.correctOptionId)) {
+      return `В вопросе ${index + 1} выберите правильный вариант ответа.`;
+    }
+  }
+
+  return null;
+}
+
+function buildModulePayload(editor: ModuleEditorState) {
+  const videoDurationMin = Number(editor.videoDurationMin);
+  const sortOrder = Number(editor.sortOrder);
+  const passingScorePercent = Number(editor.passingScorePercent);
+
+  return {
+    title: editor.title.trim(),
+    category: editor.category.trim(),
+    audience: editor.audience,
+    description: editor.description.trim(),
+    videoUrl: editor.videoUrl.trim() || undefined,
+    videoDurationMin: Number.isFinite(videoDurationMin) && videoDurationMin > 0 ? videoDurationMin : undefined,
+    passingScorePercent,
+    sortOrder,
+    isActive: editor.isActive,
+    quiz: editor.quiz.map((question) => ({
+      ...question,
+      question: question.question.trim(),
+      explanation: question.explanation?.trim() || undefined,
+      options: question.options
+        .filter(option => option.text.trim())
+        .map(option => ({ ...option, text: option.text.trim() })),
+    })),
+  };
+}
+
+function FieldLabel({ children }: React.PropsWithChildren) {
+  return (
+    <div className="mb-2 text-sm font-medium text-foreground">
+      {children}
+    </div>
+  );
+}
+
 export default function KnowledgeBase() {
   const { user } = useAuth();
   const { data: modules = [] } = useKnowledgeBaseModulesList();
@@ -108,28 +266,37 @@ export default function KnowledgeBase() {
   });
   const createProgress = useCreateKnowledgeBaseProgress();
   const updateProgress = useUpdateKnowledgeBaseProgress();
+  const createModule = useCreateKnowledgeBaseModule();
+  const updateModule = useUpdateKnowledgeBaseModule();
 
   const canTakeTraining = isManagerRole(user?.role);
   const canReviewManagers = isReviewerRole(user?.role);
+  const canManageModules = canReviewManagers;
 
-  const [tab, setTab] = React.useState<'courses' | 'cards'>(canReviewManagers ? 'courses' : 'courses');
+  const [tab, setTab] = React.useState<'courses' | 'cards'>('courses');
   const [audienceFilter, setAudienceFilter] = React.useState<AudienceFilter>(
     user?.role === 'Менеджер по аренде' ? 'rental' : user?.role === 'Менеджер по продажам' ? 'sales' : 'all',
   );
   const [selectedModuleId, setSelectedModuleId] = React.useState<string>('');
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
+  const [editorOpen, setEditorOpen] = React.useState(false);
+  const [editingModuleId, setEditingModuleId] = React.useState<string | null>(null);
+  const [editorState, setEditorState] = React.useState<ModuleEditorState>(() => createEmptyModuleState('all', 1));
 
-  const activeModules = React.useMemo(() => (
-    modules
-      .filter(item => item.isActive !== false)
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title, 'ru'))
+  const moduleCatalog = React.useMemo(() => (
+    [...modules].sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title, 'ru'))
   ), [modules]);
 
+  const activeModules = React.useMemo(() => (
+    moduleCatalog.filter(item => item.isActive !== false)
+  ), [moduleCatalog]);
+
   const visibleModules = React.useMemo(() => (
-    activeModules
+    moduleCatalog
       .filter(item => audienceFilter === 'all' || item.audience === audienceFilter || item.audience === 'all')
       .filter(item => moduleMatchesRole(item, user?.role))
-  ), [activeModules, audienceFilter, user?.role]);
+      .filter(item => canManageModules || item.isActive !== false)
+  ), [audienceFilter, canManageModules, moduleCatalog, user?.role]);
 
   React.useEffect(() => {
     if (!visibleModules.length) {
@@ -194,7 +361,7 @@ export default function KnowledgeBase() {
         lastActivityAt,
         pendingTitles,
       };
-    }),
+    })
   ), [activeModules, managerUsers, progress]);
 
   const summary = React.useMemo(() => ({
@@ -203,6 +370,107 @@ export default function KnowledgeBase() {
     passedByMe: ownPassedCount,
     ownAverage: ownAverageScore,
   }), [managerUsers.length, ownAverageScore, ownPassedCount, visibleModules.length]);
+
+  const editingModule = editingModuleId
+    ? moduleCatalog.find(item => item.id === editingModuleId) || null
+    : null;
+  const isSavingModule = createModule.isPending || updateModule.isPending;
+
+  function openCreateModuleEditor() {
+    const defaultAudience = audienceFilter === 'all' ? 'all' : audienceFilter;
+    setEditingModuleId(null);
+    setEditorState(createEmptyModuleState(defaultAudience, moduleCatalog.length + 1));
+    setEditorOpen(true);
+  }
+
+  function openEditModuleEditor(module: KnowledgeBaseModule) {
+    setEditingModuleId(module.id);
+    setEditorState(moduleToEditorState(module));
+    setEditorOpen(true);
+  }
+
+  function updateEditorQuestion(questionId: string, updater: (question: KnowledgeBaseQuestion) => KnowledgeBaseQuestion) {
+    setEditorState(current => ({
+      ...current,
+      quiz: current.quiz.map(question => question.id === questionId ? updater(question) : question),
+    }));
+  }
+
+  function addEditorQuestion() {
+    setEditorState(current => ({
+      ...current,
+      quiz: [...current.quiz, createEditorQuestion()],
+    }));
+  }
+
+  function removeEditorQuestion(questionId: string) {
+    setEditorState(current => {
+      if (current.quiz.length <= 1) {
+        toast.error('В модуле должен остаться хотя бы один вопрос.');
+        return current;
+      }
+      return {
+        ...current,
+        quiz: current.quiz.filter(question => question.id !== questionId),
+      };
+    });
+  }
+
+  function addEditorOption(questionId: string) {
+    updateEditorQuestion(questionId, question => ({
+      ...question,
+      options: [...question.options, createEditorOption()],
+    }));
+  }
+
+  function removeEditorOption(questionId: string, optionId: string) {
+    updateEditorQuestion(questionId, (question) => {
+      if (question.options.length <= 2) {
+        toast.error('У вопроса должно остаться минимум два варианта ответа.');
+        return question;
+      }
+
+      const nextOptions = question.options.filter(option => option.id !== optionId);
+      return {
+        ...question,
+        options: nextOptions,
+        correctOptionId: question.correctOptionId === optionId ? nextOptions[0]?.id || '' : question.correctOptionId,
+      };
+    });
+  }
+
+  async function handleSaveModule() {
+    const validationError = validateModuleEditor(editorState);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+
+    const payload = buildModulePayload(editorState);
+
+    if (editingModule) {
+      const updated = await updateModule.mutateAsync({
+        id: editingModule.id,
+        data: {
+          ...payload,
+          updatedAt: nowIso(),
+        },
+      });
+      setSelectedModuleId(updated.id);
+      toast.success('Модуль обновлён.');
+    } else {
+      const created = await createModule.mutateAsync({
+        ...payload,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      });
+      setAudienceFilter(created.audience === 'all' ? 'all' : created.audience);
+      setSelectedModuleId(created.id);
+      toast.success('Модуль создан.');
+    }
+
+    setEditorOpen(false);
+  }
 
   async function upsertProgress(data: Omit<KnowledgeBaseProgress, 'id' | 'createdAt' | 'updatedAt'>) {
     const existing = progress.find(item => item.moduleId === data.moduleId && item.userId === data.userId);
@@ -337,10 +605,34 @@ export default function KnowledgeBase() {
 
         <TabsContent value="courses" className="space-y-6">
           <Card className="border-border/70 bg-card/70">
-            <CardHeader className="gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle>Каталог обучения</CardTitle>
-                <CardDescription>Фильтруйте курсы по направлению и выбирайте нужный модуль.</CardDescription>
+            <CardHeader className="gap-4">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <CardTitle>Каталог обучения</CardTitle>
+                  <CardDescription>Фильтруйте курсы по направлению и выбирайте нужный модуль.</CardDescription>
+                </div>
+                {canManageModules ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-full border-border/70"
+                      onClick={() => openEditModuleEditor(selectedModule)}
+                      disabled={!selectedModule}
+                    >
+                      <PencilLine className="h-4 w-4" />
+                      Редактировать модуль
+                    </Button>
+                    <Button
+                      type="button"
+                      className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                      onClick={openCreateModuleEditor}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Новый модуль
+                    </Button>
+                  </div>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 {([
@@ -364,6 +656,11 @@ export default function KnowledgeBase() {
                   </Button>
                 ))}
               </div>
+              {canManageModules ? (
+                <div className="rounded-2xl border border-dashed border-border/70 bg-background/40 px-4 py-3 text-sm text-muted-foreground">
+                  Администратор и офис-менеджер могут создавать и редактировать модули прямо здесь: описание, видео, порог прохождения и вопросы теста.
+                </div>
+              ) : null}
             </CardHeader>
           </Card>
 
@@ -402,7 +699,9 @@ export default function KnowledgeBase() {
                             <div className="text-sm font-semibold text-foreground">{module.title}</div>
                             <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{module.description}</div>
                           </div>
-                          <Badge variant={meta.variant}>{meta.label}</Badge>
+                          <Badge variant={module.isActive !== false ? meta.variant : 'warning'}>
+                            {module.isActive !== false ? meta.label : 'Черновик'}
+                          </Badge>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Badge variant="default">{module.category}</Badge>
@@ -436,6 +735,7 @@ export default function KnowledgeBase() {
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="info">{getAudienceLabel(selectedModule.audience)}</Badge>
                       <Badge variant={currentStatusMeta.variant}>{currentStatusMeta.label}</Badge>
+                      {selectedModule.isActive === false ? <Badge variant="warning">Неактивен</Badge> : null}
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-6">
@@ -555,6 +855,11 @@ export default function KnowledgeBase() {
                                 );
                               })}
                             </div>
+                            {question.explanation ? (
+                              <div className="mt-3 rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+                                Подсказка для руководителя: {question.explanation}
+                              </div>
+                            ) : null}
                           </div>
                         ))}
 
@@ -694,6 +999,294 @@ export default function KnowledgeBase() {
           </TabsContent>
         ) : null}
       </Tabs>
+
+      <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+        <DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-5xl">
+          <div className="flex h-full flex-col">
+            <DialogHeader className="border-b border-border/70 px-6 py-5">
+              <DialogTitle>{editingModule ? 'Редактирование модуля' : 'Новый модуль обучения'}</DialogTitle>
+              <DialogDescription>
+                Заполните карточку курса, добавьте видео и соберите тест. Этот модуль сразу появится в базе знаний.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+              <div className="grid gap-6 lg:grid-cols-2">
+                <Card className="border-border/70 bg-background/60">
+                  <CardHeader>
+                    <CardTitle className="text-base">Карточка модуля</CardTitle>
+                    <CardDescription>Название, аудитория и базовые настройки курса.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <FieldLabel>Название модуля</FieldLabel>
+                      <Input
+                        value={editorState.title}
+                        onChange={event => setEditorState(current => ({ ...current, title: event.target.value }))}
+                        placeholder="Например, Контроль дебиторки по аренде"
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel>Категория / направление</FieldLabel>
+                      <Input
+                        value={editorState.category}
+                        onChange={event => setEditorState(current => ({ ...current, category: event.target.value }))}
+                        placeholder="Аренда, Продажи, CRM, Общие"
+                      />
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <FieldLabel>Для кого модуль</FieldLabel>
+                        <Select
+                          value={editorState.audience}
+                          onValueChange={(value) => setEditorState(current => ({ ...current, audience: value as KnowledgeBaseAudience }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Выберите аудиторию" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Все менеджеры</SelectItem>
+                            <SelectItem value="rental">Менеджеры аренды</SelectItem>
+                            <SelectItem value="sales">Менеджеры продаж</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <FieldLabel>Активность</FieldLabel>
+                        <div className="flex rounded-xl border border-border/70 bg-card p-1">
+                          <button
+                            type="button"
+                            className={cn(
+                              'flex-1 rounded-lg px-3 py-2 text-sm transition-colors',
+                              editorState.isActive ? 'bg-lime-300 font-medium text-slate-950' : 'text-muted-foreground',
+                            )}
+                            onClick={() => setEditorState(current => ({ ...current, isActive: true }))}
+                          >
+                            Активен
+                          </button>
+                          <button
+                            type="button"
+                            className={cn(
+                              'flex-1 rounded-lg px-3 py-2 text-sm transition-colors',
+                              !editorState.isActive ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground',
+                            )}
+                            onClick={() => setEditorState(current => ({ ...current, isActive: false }))}
+                          >
+                            Черновик
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <FieldLabel>Описание</FieldLabel>
+                      <Textarea
+                        rows={4}
+                        value={editorState.description}
+                        onChange={event => setEditorState(current => ({ ...current, description: event.target.value }))}
+                        placeholder="Коротко объясните, чему учит модуль и какой навык он должен закрыть."
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border/70 bg-background/60">
+                  <CardHeader>
+                    <CardTitle className="text-base">Видео и прохождение</CardTitle>
+                    <CardDescription>Ссылка на ролик, длительность и порог сдачи теста.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <FieldLabel>Ссылка на видео</FieldLabel>
+                      <Input
+                        value={editorState.videoUrl}
+                        onChange={event => setEditorState(current => ({ ...current, videoUrl: event.target.value }))}
+                        placeholder="https://..."
+                      />
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <div>
+                        <FieldLabel>Длительность, мин</FieldLabel>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={editorState.videoDurationMin}
+                          onChange={event => setEditorState(current => ({ ...current, videoDurationMin: event.target.value }))}
+                          placeholder="8"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Порог, %</FieldLabel>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={editorState.passingScorePercent}
+                          onChange={event => setEditorState(current => ({ ...current, passingScorePercent: event.target.value }))}
+                          placeholder="70"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Порядок</FieldLabel>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={editorState.sortOrder}
+                          onChange={event => setEditorState(current => ({ ...current, sortOrder: event.target.value }))}
+                          placeholder="1"
+                        />
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground">
+                      Менеджер смотрит видео, отмечает просмотр и проходит тест. Порог задаёт минимальный процент правильных ответов для статуса «Пройдено».
+                    </div>
+                    <div className="rounded-2xl border border-dashed border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
+                      Если видео ещё не готово, модуль можно сохранить черновиком и активировать позже.
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card className="border-border/70 bg-background/60">
+                <CardHeader className="gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <CardTitle className="text-base">Тест по модулю</CardTitle>
+                    <CardDescription>Соберите вопросы, варианты ответов и отметьте правильные.</CardDescription>
+                  </div>
+                  <Button type="button" variant="outline" className="rounded-full" onClick={addEditorQuestion}>
+                    <Plus className="h-4 w-4" />
+                    Добавить вопрос
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {editorState.quiz.map((question, questionIndex) => (
+                    <div key={question.id} className="rounded-2xl border border-border/70 bg-card/80 p-4">
+                      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">Вопрос {questionIndex + 1}</div>
+                          <div className="text-xs text-muted-foreground">Менеджер увидит вопрос именно в таком виде в тесте.</div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="rounded-full text-muted-foreground hover:text-foreground"
+                          onClick={() => removeEditorQuestion(question.id)}
+                        >
+                          Удалить вопрос
+                        </Button>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div>
+                          <FieldLabel>Текст вопроса</FieldLabel>
+                          <Textarea
+                            rows={2}
+                            value={question.question}
+                            onChange={(event) => updateEditorQuestion(question.id, current => ({
+                              ...current,
+                              question: event.target.value,
+                            }))}
+                            placeholder="Например, когда менеджер должен фиксировать следующий шаг в CRM?"
+                          />
+                        </div>
+
+                        <div>
+                          <FieldLabel>Комментарий / пояснение</FieldLabel>
+                          <Textarea
+                            rows={2}
+                            value={question.explanation || ''}
+                            onChange={(event) => updateEditorQuestion(question.id, current => ({
+                              ...current,
+                              explanation: event.target.value,
+                            }))}
+                            placeholder="Необязательно. Можно указать подсказку для руководителя или объяснение правильного ответа."
+                          />
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <FieldLabel>Варианты ответа</FieldLabel>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="rounded-full"
+                              onClick={() => addEditorOption(question.id)}
+                            >
+                              <Plus className="h-4 w-4" />
+                              Добавить вариант
+                            </Button>
+                          </div>
+                          <div className="space-y-3">
+                            {question.options.map((option, optionIndex) => (
+                              <div key={option.id} className="rounded-xl border border-border/70 bg-background/70 p-3">
+                                <div className="mb-2 flex items-center justify-between gap-3">
+                                  <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                                    Вариант {optionIndex + 1}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant={question.correctOptionId === option.id ? 'default' : 'outline'}
+                                      className={cn(
+                                        'rounded-full',
+                                        question.correctOptionId === option.id && 'bg-cyan-300 text-slate-950 hover:bg-cyan-200',
+                                      )}
+                                      onClick={() => updateEditorQuestion(question.id, current => ({
+                                        ...current,
+                                        correctOptionId: option.id,
+                                      }))}
+                                    >
+                                      {question.correctOptionId === option.id ? 'Правильный' : 'Сделать правильным'}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="ghost"
+                                      className="rounded-full text-muted-foreground hover:text-foreground"
+                                      onClick={() => removeEditorOption(question.id, option.id)}
+                                    >
+                                      Удалить
+                                    </Button>
+                                  </div>
+                                </div>
+                                <Input
+                                  value={option.text}
+                                  onChange={(event) => updateEditorQuestion(question.id, current => ({
+                                    ...current,
+                                    options: current.options.map(currentOption => currentOption.id === option.id
+                                      ? { ...currentOption, text: event.target.value }
+                                      : currentOption),
+                                  }))}
+                                  placeholder="Введите вариант ответа"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
+
+            <DialogFooter className="border-t border-border/70 px-6 py-5">
+              <Button type="button" variant="secondary" onClick={() => setEditorOpen(false)}>
+                Отмена
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleSaveModule()}
+                disabled={isSavingModule}
+                className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+              >
+                {editingModule ? 'Сохранить модуль' : 'Создать модуль'}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

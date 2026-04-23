@@ -24,6 +24,16 @@ export function useKnowledgeBaseProgressList() {
   });
 }
 
+export function useCreateKnowledgeBaseModule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Omit<KnowledgeBaseModule, 'id'>) => knowledgeBaseModulesService.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KNOWLEDGE_BASE_KEYS.modules });
+    },
+  });
+}
+
 export function useCreateKnowledgeBaseProgress() {
   const qc = useQueryClient();
   return useMutation({

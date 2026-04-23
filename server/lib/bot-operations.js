@@ -165,12 +165,131 @@ function createBotOperations(deps) {
     }, `Добавлены фото ${actionLabel} через MAX (${photoUrls.length})`, author, 'repair_result');
   }
 
+  function normalizeFieldTripStatus(status) {
+    return ['started', 'arrived', 'completed', 'cancelled'].includes(status) ? status : 'started';
+  }
+
+  function calculateFieldTripNormHours(distanceKm, normSpeedKmh = 70) {
+    const safeDistance = Math.max(0, Number(distanceKm) || 0);
+    const safeSpeed = Math.max(1, Number(normSpeedKmh) || 70);
+    return Math.round((safeDistance / safeSpeed) * 10) / 10;
+  }
+
+  function readServiceFieldTrips() {
+    return readData('service_field_trips') || [];
+  }
+
+  function writeServiceFieldTrips(trips) {
+    writeData('service_field_trips', trips);
+  }
+
+  function getActiveFieldTripForRepair(repairId, mechanicName = '') {
+    const normalizedMechanic = String(mechanicName || '').trim().toLowerCase();
+    return readServiceFieldTrips().find(item =>
+      item.serviceTicketId === repairId &&
+      normalizeFieldTripStatus(item.status) !== 'completed' &&
+      normalizeFieldTripStatus(item.status) !== 'cancelled' &&
+      String(item.mechanicName || '').trim().toLowerCase() === normalizedMechanic,
+    ) || null;
+  }
+
+  function appendFieldTripLog(ticket, trip, author, text) {
+    const updatedTicket = appendServiceLog(ticket, text, author, 'comment');
+    const tickets = readServiceTickets().map(item => item.id === updatedTicket.id ? updatedTicket : item);
+    writeServiceTickets(tickets);
+    return updatedTicket;
+  }
+
+  function createFieldTripFromBot(ticket, authUser, payload) {
+    const now = nowIso();
+    const mechanicRef = getMechanicReferenceByUser(authUser);
+    const trip = {
+      id: generateId(idPrefixes.service_field_trips),
+      serviceTicketId: ticket.id,
+      mechanicId: mechanicRef?.id || null,
+      mechanicName: mechanicRef?.name || authUser.userName,
+      serviceVehicleId: payload.serviceVehicleId || ticket.serviceVehicleId || null,
+      routeNormId: payload.routeNormId || null,
+      routeFrom: String(payload.routeFrom || '').trim(),
+      routeTo: String(payload.routeTo || '').trim(),
+      distanceKm: Math.max(0, Number(payload.distanceKm) || 0),
+      normSpeedKmh: Math.max(1, Number(payload.normSpeedKmh) || 70),
+      closedNormHours: calculateFieldTripNormHours(payload.distanceKm, payload.normSpeedKmh),
+      status: 'started',
+      startedAt: now,
+      arrivedAt: null,
+      completedAt: null,
+      comment: payload.comment ? String(payload.comment).trim() : null,
+      source: payload.source || 'bot',
+      equipmentId: ticket.equipmentId || null,
+      equipmentLabel: ticket.equipment || null,
+      inventoryNumber: ticket.inventoryNumber || null,
+      createdAt: now,
+      createdByUserId: authUser.userId,
+      createdByUserName: authUser.userName,
+    };
+
+    writeServiceFieldTrips([...readServiceFieldTrips(), trip]);
+    appendFieldTripLog(
+      ticket,
+      trip,
+      authUser.userName,
+      `Начат выезд: ${trip.routeFrom} → ${trip.routeTo} · ${trip.distanceKm} км · ${trip.closedNormHours.toFixed(1)} н/ч`,
+    );
+    return trip;
+  }
+
+  function updateFieldTripStatusFromBot(tripId, nextStatus, authUser) {
+    const trips = readServiceFieldTrips();
+    const index = trips.findIndex(item => item.id === tripId);
+    if (index === -1) return null;
+
+    const current = trips[index];
+    const normalizedCurrent = normalizeFieldTripStatus(current.status);
+    const normalizedNext = normalizeFieldTripStatus(nextStatus);
+    const isValidTransition =
+      (normalizedCurrent === 'started' && (normalizedNext === 'arrived' || normalizedNext === 'completed'))
+      || (normalizedCurrent === 'arrived' && normalizedNext === 'completed')
+      || normalizedCurrent === normalizedNext;
+
+    if (!isValidTransition) {
+      return { trip: current, changed: false, invalid: true };
+    }
+
+    const timestamp = nowIso();
+    const trip = {
+      ...current,
+      status: normalizedNext,
+      arrivedAt: normalizedNext === 'arrived'
+        ? (current.arrivedAt || timestamp)
+        : current.arrivedAt,
+      completedAt: normalizedNext === 'completed'
+        ? (current.completedAt || timestamp)
+        : current.completedAt,
+    };
+    trips[index] = trip;
+    writeServiceFieldTrips(trips);
+
+    const ticket = readServiceTickets().find(item => item.id === trip.serviceTicketId);
+    if (ticket) {
+      const statusText = normalizedNext === 'arrived'
+        ? `Механик прибыл на объект: ${trip.routeFrom} → ${trip.routeTo}`
+        : normalizedNext === 'completed'
+          ? `Выезд завершён: ${trip.routeFrom} → ${trip.routeTo} · ${trip.distanceKm} км · ${trip.closedNormHours.toFixed(1)} н/ч`
+          : `Выезд обновлён: ${trip.routeFrom} → ${trip.routeTo}`;
+      appendFieldTripLog(ticket, trip, authUser.userName, statusText);
+    }
+
+    return { trip, changed: normalizedCurrent !== normalizedNext, invalid: false };
+  }
+
   function formatMechanicDayReport(authUser) {
     const today = nowIso().slice(0, 10);
     const normalizeName = String(authUser.userName || '').trim().toLowerCase();
     const tickets = readServiceTickets();
     const workItems = readData('repair_work_items') || [];
     const partItems = readData('repair_part_items') || [];
+    const fieldTrips = readServiceFieldTrips();
 
     const myTickets = tickets.filter(ticket =>
       String(ticket.assignedMechanicName || '').trim().toLowerCase() === normalizeName ||
@@ -221,6 +340,22 @@ function createBotOperations(deps) {
     const totalNormHours = myWorkItems.reduce((sum, item) => sum + ((Number(item.normHoursSnapshot) || 0) * (Number(item.quantity) || 0)), 0);
     const totalPartsCost = myPartItems.reduce((sum, item) => sum + ((Number(item.priceSnapshot) || 0) * (Number(item.quantity) || 0)), 0);
     const lastClosedLines = closedToday.slice(0, 5).map(ticket => `• ${ticket.id} · ${ticket.equipment}`);
+    const myCompletedTripsToday = fieldTrips.filter(item =>
+      item.status === 'completed' &&
+      String(item.completedAt || '').startsWith(today) &&
+      String(item.mechanicName || '').trim().toLowerCase() === normalizeName,
+    );
+    const myActiveTrips = fieldTrips.filter(item =>
+      String(item.mechanicName || '').trim().toLowerCase() === normalizeName &&
+      item.status !== 'completed' &&
+      item.status !== 'cancelled',
+    );
+    const fieldTripDistance = myCompletedTripsToday.reduce((sum, item) => sum + (Number(item.distanceKm) || 0), 0);
+    const fieldTripNormHours = myCompletedTripsToday.reduce((sum, item) => sum + (Number(item.closedNormHours) || 0), 0);
+    const fieldTripLines = myCompletedTripsToday
+      .slice(0, 5)
+      .map(item => `• ${item.serviceTicketId} · ${item.routeFrom} → ${item.routeTo} · ${item.distanceKm} км · ${Number(item.closedNormHours || 0).toFixed(1)} н/ч`);
+    const totalClosedNormHours = totalNormHours + fieldTripNormHours;
 
     return [
       '📊 Быстрый отчёт за день',
@@ -231,9 +366,14 @@ function createBotOperations(deps) {
       `Переведено в «Готово»: ${readyToday.length}`,
       `Закрыто заявок: ${closedToday.length}`,
       `Добавлено работ: ${myWorkItems.length} · ${totalNormHours.toLocaleString('ru-RU')} н/ч`,
+      `Выезды завершены: ${myCompletedTripsToday.length} · ${fieldTripDistance.toLocaleString('ru-RU')} км · ${fieldTripNormHours.toLocaleString('ru-RU')} н/ч`,
+      `Активные выезды: ${myActiveTrips.length}`,
+      `Всего закрыто н/ч: ${totalClosedNormHours.toLocaleString('ru-RU')}`,
       `Добавлено запчастей: ${myPartItems.length} · ${totalPartsCost.toLocaleString('ru-RU')} ₽`,
       `Фото ДО: ${myRepairPhotos.before}`,
       `Фото ПОСЛЕ: ${myRepairPhotos.after}`,
+      '',
+      fieldTripLines.length ? `Последние выезды:\n${fieldTripLines.join('\n')}` : 'Сегодня завершённых выездов пока нет.',
       '',
       closedToday.length ? `Последние закрытые:\n${lastClosedLines.join('\n')}` : 'Сегодня закрытых заявок пока нет.',
     ].join('\n');
@@ -811,8 +951,11 @@ function createBotOperations(deps) {
     repairCloseChecklistKeyboard,
     formatRepairCloseChecklist,
     appendRepairPhotos,
+    calculateFieldTripNormHours,
+    createFieldTripFromBot,
     formatMechanicDayReport,
     getOperationSessions,
+    getActiveFieldTripForRepair,
     writeOperationSessions,
     getOperationSessionById,
     saveOperationSession,
@@ -827,6 +970,7 @@ function createBotOperations(deps) {
     appendEquipmentHistoryEntry,
     completeBotEquipmentOperation,
     saveBotShippingPhotoEvent,
+    updateFieldTripStatusFromBot,
     addRepairWorkItemFromCatalog,
     addRepairPartItemFromCatalog,
   };

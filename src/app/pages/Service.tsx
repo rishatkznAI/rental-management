@@ -34,7 +34,22 @@ export default function Service() {
   const [scenarioFilter, setScenarioFilter] = React.useState<string>('all');
   const [mechanicFilter, setMechanicFilter] = React.useState<string>('all');
   const [preset, setPreset] = React.useState<'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'maintenance'>('all');
+  const [datePreset, setDatePreset] = React.useState<'all' | 'today' | 'last7' | 'month'>('all');
+  const [dateFrom, setDateFrom] = React.useState('');
+  const [dateTo, setDateTo] = React.useState('');
   const [showFilters, setShowFilters] = React.useState(false);
+
+  const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const monthStartIso = React.useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  }, []);
+  const last7StartIso = React.useMemo(() => {
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(start.getDate() - 6);
+    return start.toISOString().slice(0, 10);
+  }, []);
 
   const mechanicOptions = React.useMemo(() => (
     Array.from(new Set(
@@ -56,6 +71,20 @@ export default function Service() {
     const matchesScenario = scenarioFilter === 'all' || inferServiceKind(ticket) === scenarioFilter;
     const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || '';
     const matchesMechanic = mechanicFilter === 'all' || assignedMechanic === mechanicFilter;
+    const createdDate = typeof ticket.createdAt === 'string' ? ticket.createdAt.slice(0, 10) : '';
+    const effectiveDateFrom = dateFrom || (
+      datePreset === 'today'
+        ? todayIso
+        : datePreset === 'last7'
+          ? last7StartIso
+          : datePreset === 'month'
+            ? monthStartIso
+            : ''
+    );
+    const effectiveDateTo = dateTo || (datePreset === 'all' ? '' : todayIso);
+    const matchesDate =
+      (!effectiveDateFrom || (createdDate && createdDate >= effectiveDateFrom))
+      && (!effectiveDateTo || (createdDate && createdDate <= effectiveDateTo));
     const matchesPreset =
       preset === 'all'
       || (preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
@@ -63,7 +92,7 @@ export default function Service() {
       || (preset === 'waiting_parts' && ticket.status === 'waiting_parts')
       || (preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
 
-    return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesMechanic && matchesPreset;
+    return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesMechanic && matchesDate && matchesPreset;
   });
 
   const presetOptions = [
@@ -74,6 +103,13 @@ export default function Service() {
     { value: 'maintenance', label: 'ТО / ЧТО / ПТО' },
   ] as const;
 
+  const datePresetOptions = [
+    { value: 'all', label: 'Все даты' },
+    { value: 'today', label: 'Сегодня' },
+    { value: 'last7', label: '7 дней' },
+    { value: 'month', label: 'Этот месяц' },
+  ] as const;
+
   const resetFilters = () => {
     setSearch('');
     setPriorityFilter('all');
@@ -81,6 +117,9 @@ export default function Service() {
     setScenarioFilter('all');
     setMechanicFilter('all');
     setPreset('all');
+    setDatePreset('all');
+    setDateFrom('');
+    setDateTo('');
   };
 
   const activeFilterCount = [
@@ -90,6 +129,9 @@ export default function Service() {
     scenarioFilter !== 'all',
     mechanicFilter !== 'all',
     preset !== 'all',
+    datePreset !== 'all',
+    dateFrom !== '',
+    dateTo !== '',
   ].filter(Boolean).length;
 
   return (
@@ -119,7 +161,7 @@ export default function Service() {
         open={showFilters}
         onOpenChange={setShowFilters}
         title="Фильтры сервиса"
-        description="Отбери заявки по поиску, режиму, приоритету, статусу, сценарию и механику."
+        description="Отбери заявки по поиску, режиму, дате, приоритету, статусу, сценарию и механику."
         onReset={resetFilters}
       >
         <div className="space-y-5">
@@ -139,6 +181,22 @@ export default function Service() {
             </div>
           </FilterField>
 
+          <FilterField label="Период">
+            <div className="flex flex-wrap gap-2">
+              {datePresetOptions.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setDatePreset(option.value)}
+                  className="app-filter-chip"
+                  data-active={String(datePreset === option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </FilterField>
+
           <div className="grid gap-4 md:grid-cols-2">
             <FilterField label="Поиск" className="md:col-span-2">
               <div className="relative">
@@ -150,6 +208,22 @@ export default function Service() {
                   className="app-filter-input pl-10"
                 />
               </div>
+            </FilterField>
+            <FilterField label="Дата с">
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="app-filter-input"
+              />
+            </FilterField>
+            <FilterField label="Дата по">
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="app-filter-input"
+              />
             </FilterField>
             <FilterField label="Приоритет">
               <Select value={priorityFilter} onValueChange={setPriorityFilter}>

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "SRN-KZN-ALB",
+    "from": "Казань",
+    "to": "Алабуга",
+    "distanceKm": 200,
+    "normSpeedKmh": 70,
+    "isActive": true,
+    "createdAt": "2026-04-23T00:00:00.000Z",
+    "updatedAt": "2026-04-23T00:00:00.000Z"
+  },
+  {
+    "id": "SRN-ALB-KZN",
+    "from": "Алабуга",
+    "to": "Казань",
+    "distanceKm": 200,
+    "normSpeedKmh": 70,
+    "isActive": true,
+    "createdAt": "2026-04-23T00:00:00.000Z",
+    "updatedAt": "2026-04-23T00:00:00.000Z"
+  },
+  {
+    "id": "SRN-KZN-CHL",
+    "from": "Казань",
+    "to": "Набережные Челны",
+    "distanceKm": 240,
+    "normSpeedKmh": 70,
+    "isActive": true,
+    "createdAt": "2026-04-23T00:00:00.000Z",
+    "updatedAt": "2026-04-23T00:00:00.000Z"
+  },
+  {
+    "id": "SRN-CHL-KZN",
+    "from": "Набережные Челны",
+    "to": "Казань",
+    "distanceKm": 240,
+    "normSpeedKmh": 70,
+    "isActive": true,
+    "createdAt": "2026-04-23T00:00:00.000Z",
+    "updatedAt": "2026-04-23T00:00:00.000Z"
+  }
+]

@@ -74,6 +74,7 @@ function createBotUi() {
     return keyboard([
       [button('Комментарий по результату', 'menu:summary'), button('Текущий отчёт', 'menu:draft')],
       [button('Добавить работы', 'menu:works'), button('Добавить запчасти', 'menu:parts')],
+      [button('Выезд', 'menu:field_trip')],
       [button('Фото до ремонта', 'menu:repair_before'), button('Фото после ремонта', 'menu:repair_after')],
       [button('Ожидание запчастей', 'menu:waiting'), button('Завершить ремонт', 'menu:ready')],
       [button('К заявкам', 'menu:myrepairs')],

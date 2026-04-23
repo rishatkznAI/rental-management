@@ -324,6 +324,45 @@ export interface ServiceTicket {
   serviceVehicleId?: string | null;   // Служебная машина, используемая в выезде
 }
 
+export interface ServiceRouteNorm {
+  id: string;
+  from: string;
+  to: string;
+  distanceKm: number;
+  normSpeedKmh: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type ServiceFieldTripStatus = 'started' | 'arrived' | 'completed' | 'cancelled';
+
+export interface ServiceFieldTrip {
+  id: string;
+  serviceTicketId: string;
+  mechanicId?: string | null;
+  mechanicName: string;
+  serviceVehicleId?: string | null;
+  routeNormId?: string | null;
+  routeFrom: string;
+  routeTo: string;
+  distanceKm: number;
+  normSpeedKmh: number;
+  closedNormHours: number;
+  status: ServiceFieldTripStatus;
+  startedAt: string;
+  arrivedAt?: string | null;
+  completedAt?: string | null;
+  comment?: string | null;
+  source?: 'bot' | 'manual' | 'system';
+  equipmentId?: string | null;
+  equipmentLabel?: string | null;
+  inventoryNumber?: string | null;
+  createdAt: string;
+  createdByUserId?: string | null;
+  createdByUserName?: string | null;
+}
+
 export type ClientStatus = 'active' | 'inactive' | 'blocked';
 
 export interface Client {

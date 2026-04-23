@@ -46,6 +46,7 @@ import { mechanicsService } from '../services/mechanics.service';
 import { deliveryCarriersService, type DeliveryCarrierConnection } from '../services/delivery-carriers.service';
 import { serviceWorksService } from '../services/service-works.service';
 import { sparePartsService } from '../services/spare-parts.service';
+import { serviceRouteNormsService } from '../services/service-route-norms.service';
 import { equipmentService } from '../services/equipment.service';
 import { reportsService } from '../services/reports.service';
 import { rentalsService } from '../services/rentals.service';
@@ -77,6 +78,7 @@ import type {
   DeliveryCarrier,
   ReferenceStatus,
   ServiceWork,
+  ServiceRouteNorm,
   SparePart,
   Rental,
 } from '../types';
@@ -335,6 +337,7 @@ export default function Settings() {
             <ReferenceList title="Причины простоя" items={['Плановое ТО', 'Ремонт', 'Ожидание запчастей', 'Калибровка']} />
             <OwnersReferenceList />
             <MechanicsReferenceList />
+            <ServiceRouteNormsReferenceList />
             <DeliveryCarriersReferenceList />
             <ServiceWorkCatalogReferenceList />
             <SparePartsReferenceList />
@@ -2500,6 +2503,260 @@ function DeliveryCarriersReferenceList() {
               }}
             >
               Добавить
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ServiceRouteNormsReferenceList() {
+  const queryClient = useQueryClient();
+  const { data: routesData = [] } = useQuery<ServiceRouteNorm[]>({
+    queryKey: ['serviceRouteNorms'],
+    queryFn: serviceRouteNormsService.getAll,
+  });
+  const [search, setSearch] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState<'all' | 'active' | 'inactive'>('all');
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [formError, setFormError] = React.useState('');
+  const emptyForm = React.useMemo(() => ({
+    from: '',
+    to: '',
+    distanceKm: '',
+    normSpeedKmh: '70',
+  }), []);
+  const [form, setForm] = React.useState(emptyForm);
+
+  const counts = React.useMemo(() => ({
+    total: routesData.length,
+    active: routesData.filter(item => item.isActive !== false).length,
+    inactive: routesData.filter(item => item.isActive === false).length,
+  }), [routesData]);
+
+  const filtered = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return routesData
+      .filter(item => {
+        const isActive = item.isActive !== false;
+        if (statusFilter === 'active' && !isActive) return false;
+        if (statusFilter === 'inactive' && isActive) return false;
+        return !query || [item.from, item.to, item.distanceKm].join(' ').toLowerCase().includes(query);
+      })
+      .sort((a, b) => {
+        const left = `${a.from} ${a.to}`;
+        const right = `${b.from} ${b.to}`;
+        return left.localeCompare(right, 'ru');
+      });
+  }, [routesData, search, statusFilter]);
+
+  const persist = async (next: ServiceRouteNorm[]) => {
+    const now = new Date().toISOString();
+    const normalized = next.map((item, index) => ({
+      ...item,
+      id: item.id || `route-${Date.now()}-${index}`,
+      from: String(item.from || '').trim(),
+      to: String(item.to || '').trim(),
+      distanceKm: Math.max(0, Number(item.distanceKm) || 0),
+      normSpeedKmh: Math.max(1, Number(item.normSpeedKmh) || 70),
+      isActive: item.isActive !== false,
+      createdAt: item.createdAt || now,
+      updatedAt: now,
+    }));
+    await serviceRouteNormsService.bulkReplace(normalized);
+    await queryClient.invalidateQueries({ queryKey: ['serviceRouteNorms'] });
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setForm(emptyForm);
+    setFormError('');
+  };
+
+  const openEdit = (item: ServiceRouteNorm) => {
+    setEditingId(item.id);
+    setForm({
+      from: item.from,
+      to: item.to,
+      distanceKm: String(item.distanceKm),
+      normSpeedKmh: String(item.normSpeedKmh || 70),
+    });
+    setFormError('');
+  };
+
+  const submitForm = async () => {
+    const from = form.from.trim();
+    const to = form.to.trim();
+    const distanceKm = Number(form.distanceKm);
+    const normSpeedKmh = Number(form.normSpeedKmh);
+
+    if (!from || !to) {
+      setFormError('Укажите начальную и конечную точку');
+      return;
+    }
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
+      setFormError('Километраж должен быть больше 0');
+      return;
+    }
+    if (!Number.isFinite(normSpeedKmh) || normSpeedKmh <= 0) {
+      setFormError('Нормативная скорость должна быть больше 0');
+      return;
+    }
+
+    const payload: ServiceRouteNorm = {
+      id: editingId || `route-${Date.now()}`,
+      from,
+      to,
+      distanceKm,
+      normSpeedKmh,
+      isActive: true,
+    };
+
+    if (editingId) {
+      await persist(routesData.map(item => item.id === editingId ? { ...item, ...payload, isActive: item.isActive !== false } : item));
+    } else {
+      await persist([...routesData, payload]);
+    }
+
+    resetForm();
+  };
+
+  const toggleStatus = async (item: ServiceRouteNorm) => {
+    await persist(routesData.map(entry => entry.id === item.id ? { ...entry, isActive: !(entry.isActive !== false) } : entry));
+  };
+
+  const removeRoute = async (id: string) => {
+    await persist(routesData.filter(item => item.id !== id));
+    if (editingId === id) resetForm();
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl">
+            <CardTitle>Маршруты выезда</CardTitle>
+            <CardDescription>Справочник расстояний для выездных механиков. Закрытие н/ч считается автоматически по формуле км / скорость.</CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: 'all', label: 'Все', count: counts.total },
+              { id: 'active', label: 'Активные', count: counts.active },
+              { id: 'inactive', label: 'Отключенные', count: counts.inactive },
+            ].map(filter => (
+              <Button
+                key={filter.id}
+                size="sm"
+                variant={statusFilter === filter.id ? 'default' : 'secondary'}
+                onClick={() => setStatusFilter(filter.id as 'all' | 'active' | 'inactive')}
+              >
+                {filter.label}
+                <span className="ml-2 rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-semibold text-current dark:bg-white/10">
+                  {filter.count}
+                </span>
+              </Button>
+            ))}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
+          <Input
+            placeholder="Поиск по точке отправления, назначения или километражу"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          <p className="flex items-center justify-end text-sm text-gray-500">
+            Найдено: <span className="ml-1 font-medium text-gray-900 dark:text-white">{filtered.length}</span>
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          {filtered.map(item => {
+            const normHours = item.normSpeedKmh > 0 ? (item.distanceKm / item.normSpeedKmh) : 0;
+            return (
+              <div key={item.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {item.from} → {item.to}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {item.distanceKm} км · скорость {item.normSpeedKmh} км/ч · закрывается {normHours.toFixed(1)} н/ч
+                    </p>
+                    <div className="mt-2">
+                      <Badge variant={statusVariant(item.isActive !== false ? 'active' : 'inactive')}>
+                        {statusLabel(item.isActive !== false ? 'active' : 'inactive')}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => openEdit(item)}>
+                      Редактировать
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void toggleStatus(item)}>
+                      {item.isActive !== false ? 'Отключить' : 'Включить'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void removeRoute(item.id)}>
+                      Удалить
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {filtered.length === 0 && (
+          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center dark:border-gray-700">
+            <p className="text-sm font-medium text-gray-900 dark:text-white">Маршруты не найдены</p>
+            <p className="mt-1 text-sm text-gray-500">Добавьте первый маршрут или измените поиск.</p>
+          </div>
+        )}
+
+        <div className="rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-700">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">{editingId ? 'Редактировать маршрут' : 'Добавить маршрут'}</p>
+              <p className="text-xs text-gray-500">Этот справочник будет использоваться ботом при оформлении выезда.</p>
+            </div>
+            {editingId && (
+              <Button size="sm" variant="ghost" onClick={resetForm}>
+                Отменить редактирование
+              </Button>
+            )}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input placeholder="Откуда" value={form.from} onChange={e => setForm(prev => ({ ...prev, from: e.target.value }))} />
+            <Input placeholder="Куда" value={form.to} onChange={e => setForm(prev => ({ ...prev, to: e.target.value }))} />
+            <Input
+              type="number"
+              min="1"
+              step="1"
+              placeholder="Километраж"
+              value={form.distanceKm}
+              onChange={e => setForm(prev => ({ ...prev, distanceKm: e.target.value }))}
+            />
+            <Input
+              type="number"
+              min="1"
+              step="1"
+              placeholder="Нормативная скорость, км/ч"
+              value={form.normSpeedKmh}
+              onChange={e => setForm(prev => ({ ...prev, normSpeedKmh: e.target.value }))}
+            />
+          </div>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            Нормо-часы по маршруту: {((Number(form.distanceKm) || 0) / Math.max(1, Number(form.normSpeedKmh) || 70)).toFixed(1)} н/ч
+          </p>
+          {formError && <p className="mt-2 text-sm text-red-600">{formError}</p>}
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" onClick={() => void submitForm()}>
+              {editingId ? 'Сохранить маршрут' : 'Добавить маршрут'}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={resetForm}>
+              Очистить
             </Button>
           </div>
         </div>

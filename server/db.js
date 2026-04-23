@@ -27,6 +27,8 @@ const JSON_COLLECTIONS = [
   'mechanics',
   'service_works',
   'spare_parts',
+  'service_route_norms',
+  'service_field_trips',
   'repair_work_items',
   'repair_part_items',
   'service_work_catalog',

@@ -9,7 +9,7 @@ import {
   Clock3,
   Gauge,
   History,
-  Map,
+  Map as MapIcon,
   MapPinned,
   Navigation,
   Route,
@@ -515,8 +515,8 @@ export default function Gsm() {
         <section className="overflow-hidden rounded-[32px] border border-white/10 bg-slate-950/70 shadow-[0_32px_80px_-44px_rgba(15,23,42,0.9)] backdrop-blur-xl">
           <div className="grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
             <div>
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">
-                <Map className="h-3.5 w-3.5" />
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">
+                <MapIcon className="h-3.5 w-3.5" />
                 GSM
               </div>
               <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Геозоны, уведомления и маршруты техники</h1>

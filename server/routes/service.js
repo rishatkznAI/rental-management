@@ -230,6 +230,7 @@ function registerServiceRoutes(router, deps) {
     const equipment = readData('equipment') || [];
     const workItems = readData('repair_work_items') || [];
     const partItems = readData('repair_part_items') || [];
+    const fieldTrips = readData('service_field_trips') || [];
 
     const ticketMap = new Map(tickets.map(item => [item.id, item]));
     const equipmentMap = new Map(equipment.map(item => [item.id, item]));
@@ -314,6 +315,42 @@ function registerServiceRoutes(router, deps) {
       }));
     });
 
+    const completedFieldTripRows = fieldTrips
+      .filter(item => item && item.status === 'completed')
+      .map(item => {
+        const ticket = ticketMap.get(item.serviceTicketId);
+        const eq = item?.equipmentId ? equipmentMap.get(item.equipmentId) : (ticket?.equipmentId ? equipmentMap.get(ticket.equipmentId) : null);
+        const serviceKind = ticket ? inferServiceKind(ticket) : 'repair';
+        const mechanic = item?.mechanicId
+          ? mechanics.find(entry => entry.id === item.mechanicId)
+          : null;
+        const routeFrom = String(item.routeFrom || '').trim();
+        const routeTo = String(item.routeTo || '').trim();
+        return {
+          id: item.id,
+          mechanicId: item?.mechanicId || ticket?.assignedMechanicId || '',
+          mechanicName: mechanic?.name || item?.mechanicName || ticket?.assignedMechanicName || ticket?.assignedTo || 'Не назначен',
+          repairId: item.serviceTicketId || '',
+          serviceKind,
+          repairStatus: ticket?.status || '',
+          createdAt: item.completedAt || item.startedAt || item.createdAt || '',
+          completedAt: item.completedAt || '',
+          tripStatus: item.status || 'completed',
+          equipmentId: item?.equipmentId || ticket?.equipmentId || '',
+          equipmentLabel: item?.equipmentLabel || ticket?.equipment || [eq?.manufacturer, eq?.model].filter(Boolean).join(' ') || '—',
+          equipmentType: eq?.type || ticket?.equipmentType || '',
+          equipmentTypeLabel: ticket?.equipmentTypeLabel || ticket?.equipmentType || eq?.type || '',
+          inventoryNumber: item?.inventoryNumber || ticket?.inventoryNumber || eq?.inventoryNumber || '—',
+          serialNumber: ticket?.serialNumber || eq?.serialNumber || '—',
+          routeFrom,
+          routeTo,
+          routeLabel: [routeFrom, routeTo].filter(Boolean).join(' → '),
+          distanceKm: Number(item.distanceKm) || 0,
+          closedNormHours: Number(item.closedNormHours) || 0,
+          serviceVehicleId: item.serviceVehicleId || null,
+        };
+      });
+
     const summaryMap = new Map();
     for (const row of rows) {
       const key = row.mechanicId || row.mechanicName;
@@ -326,6 +363,9 @@ function registerServiceRoutes(router, deps) {
           totalNormHours: 0,
           partsCost: 0,
           equipmentIds: new Set(),
+          fieldTripCount: 0,
+          fieldTripDistanceKm: 0,
+          fieldTripNormHours: 0,
         });
       }
       const summary = summaryMap.get(key);
@@ -339,15 +379,43 @@ function registerServiceRoutes(router, deps) {
       if (row.equipmentId) summary.equipmentIds.add(row.equipmentId);
     }
 
+    for (const trip of completedFieldTripRows) {
+      const key = trip.mechanicId || trip.mechanicName;
+      if (!summaryMap.has(key)) {
+        summaryMap.set(key, {
+          mechanicId: trip.mechanicId,
+          mechanicName: trip.mechanicName,
+          repairIds: new Set(),
+          worksCount: 0,
+          totalNormHours: 0,
+          partsCost: 0,
+          equipmentIds: new Set(),
+          fieldTripCount: 0,
+          fieldTripDistanceKm: 0,
+          fieldTripNormHours: 0,
+        });
+      }
+      const summary = summaryMap.get(key);
+      summary.fieldTripCount += 1;
+      summary.fieldTripDistanceKm += trip.distanceKm;
+      summary.fieldTripNormHours += trip.closedNormHours;
+      if (trip.equipmentId) summary.equipmentIds.add(trip.equipmentId);
+      if (trip.repairId) summary.repairIds.add(trip.repairId);
+    }
+
     const summary = [...summaryMap.values()].map(item => ({
       mechanicId: item.mechanicId,
       mechanicName: item.mechanicName,
       repairsCount: item.repairIds.size,
       worksCount: item.worksCount,
       totalNormHours: Number(item.totalNormHours.toFixed(2)),
+      fieldTripCount: item.fieldTripCount,
+      fieldTripDistanceKm: Number(item.fieldTripDistanceKm.toFixed(2)),
+      fieldTripNormHours: Number(item.fieldTripNormHours.toFixed(2)),
+      totalClosedNormHours: Number((item.totalNormHours + item.fieldTripNormHours).toFixed(2)),
       partsCost: Number(item.partsCost.toFixed(2)),
       equipmentCount: [...item.equipmentIds].filter(value => !String(value).startsWith('parts:')).length,
-    })).sort((a, b) => b.totalNormHours - a.totalNormHours);
+    })).sort((a, b) => b.totalClosedNormHours - a.totalClosedNormHours);
 
     const repeatFailureMap = new Map();
     for (const ticket of tickets) {
@@ -429,7 +497,7 @@ function registerServiceRoutes(router, deps) {
       .filter(item => item.repairsCount >= 2)
       .sort((a, b) => b.repairsCount - a.repairsCount || b.totalNormHours - a.totalNormHours || String(b.lastCreatedAt).localeCompare(String(a.lastCreatedAt)));
 
-    res.json({ summary, rows, repeatFailures });
+    res.json({ summary, rows, fieldTrips: completedFieldTripRows, repeatFailures });
   });
 
   router.post('/admin/migrate-repair-facts', requireAuth, requireWrite('service_works'), (req, res) => {

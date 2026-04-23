@@ -142,6 +142,81 @@ function createBotHandlers(deps) {
     return rentalManagerKeyboard();
   }
 
+  function getServiceRouteNorms() {
+    return (readData('service_route_norms') || [])
+      .filter(item => item && item.isActive !== false)
+      .sort((left, right) =>
+        `${left.from} ${left.to}`.localeCompare(`${right.from} ${right.to}`, 'ru'),
+      );
+  }
+
+  function routeNormButtonLabel(route) {
+    return `${route.from} → ${route.to}`.slice(0, 48);
+  }
+
+  function fieldTripRouteKeyboard(routes) {
+    const routeButtons = routes.slice(0, 6).map(route =>
+      button(routeNormButtonLabel(route), `fieldtrip:start_route:${route.id}`),
+    );
+    return keyboard([
+      ...chunkButtons(routeButtons, 1),
+      [button('Ввести маршрут вручную', 'fieldtrip:manual')],
+      [button('Назад', 'menu:repair_actions'), button('Главное меню', 'menu:main')],
+    ]);
+  }
+
+  function fieldTripStatusKeyboard(trip) {
+    const rows = [];
+    if (trip?.status === 'started') {
+      rows.push([button('Я на объекте', `fieldtrip:arrived:${trip.id}`), button('Завершить выезд', `fieldtrip:complete:${trip.id}`)]);
+    } else if (trip?.status === 'arrived') {
+      rows.push([button('Завершить выезд', `fieldtrip:complete:${trip.id}`)]);
+    }
+    rows.push([button('К заявке', 'menu:repair_actions'), button('Главное меню', 'menu:main')]);
+    return keyboard(rows);
+  }
+
+  function fieldTripStatusLabel(status) {
+    return ({
+      started: 'В пути',
+      arrived: 'На объекте',
+      completed: 'Завершён',
+      cancelled: 'Отменён',
+    })[status] || status;
+  }
+
+  function parseManualFieldTripRoute(value) {
+    const text = String(value || '').trim();
+    if (!text) return null;
+    const parts = text.split(/\s*(?:→|->|—|–|-)\s*/).filter(Boolean);
+    if (parts.length < 2) return null;
+    return {
+      routeFrom: parts[0].trim(),
+      routeTo: parts.slice(1).join(' ').trim(),
+    };
+  }
+
+  function formatFieldTripMessage(trip, ticket) {
+    const vehicles = readData('service_vehicles') || [];
+    const vehicle = trip?.serviceVehicleId
+      ? vehicles.find(item => item.id === trip.serviceVehicleId)
+      : null;
+    const routeFormula = `${Number(trip.distanceKm || 0).toLocaleString('ru-RU')} / ${Number(trip.normSpeedKmh || 70).toLocaleString('ru-RU')}`;
+    return [
+      `🚐 Выезд по заявке ${trip.serviceTicketId}`,
+      ticket?.equipment || trip.equipmentLabel || 'Техника не указана',
+      `Маршрут: ${trip.routeFrom} → ${trip.routeTo}`,
+      `Расстояние: ${Number(trip.distanceKm || 0).toLocaleString('ru-RU')} км`,
+      `К закрытию: ${Number(trip.closedNormHours || 0).toFixed(1)} н/ч (${routeFormula})`,
+      `Статус: ${fieldTripStatusLabel(trip.status)}`,
+      vehicle ? `Служебная машина: ${vehicle.name}` : null,
+      trip.startedAt ? `Старт: ${new Date(trip.startedAt).toLocaleString('ru-RU')}` : null,
+      trip.arrivedAt ? `На объекте: ${new Date(trip.arrivedAt).toLocaleString('ru-RU')}` : null,
+      trip.completedAt ? `Завершён: ${new Date(trip.completedAt).toLocaleString('ru-RU')}` : null,
+      trip.comment ? `Комментарий: ${trip.comment}` : null,
+    ].filter(Boolean).join('\n');
+  }
+
   function createDeliveryTypeKeyboard() {
     return keyboard([
       [button('Отгрузка', 'deliverycreate:type:shipping'), button('Приёмка', 'deliverycreate:type:receiving')],
@@ -482,7 +557,10 @@ function createBotHandlers(deps) {
     repairCloseChecklistKeyboard,
     formatRepairCloseChecklist,
     appendRepairPhotos,
+    calculateFieldTripNormHours,
+    createFieldTripFromBot,
     formatMechanicDayReport,
+    getActiveFieldTripForRepair,
     getOperationSessionById,
     saveOperationSession,
     createOperationSession,
@@ -494,6 +572,7 @@ function createBotHandlers(deps) {
     createMaintenanceTicketFromBot,
     createReturnInspectionTicketFromBot,
     completeBotEquipmentOperation,
+    updateFieldTripStatusFromBot,
     addRepairWorkItemFromCatalog,
     addRepairPartItemFromCatalog,
   } = createBotOperations({
@@ -1491,6 +1570,135 @@ function createBotHandlers(deps) {
       });
     }
 
+    if (normalized === 'fieldtrip:manual') {
+      const ticket = getCurrentRepair(phone);
+      if (!ticket) {
+        return reply(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID', {
+          attachments: mechanicKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      updateBotSession(phone, {
+        activeRepairId: ticket.id,
+        pendingAction: 'field_trip_manual_route',
+        pendingPayload: { serviceTicketId: ticket.id },
+      });
+      return reply(senderId, '🚐 Напишите маршрут в формате: Казань → Алабуга', {
+        attachments: keyboard([[button('Назад', 'menu:field_trip'), button('Главное меню', 'menu:main')]]),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('fieldtrip:start_route:')) {
+      const routeId = normalized.slice('fieldtrip:start_route:'.length);
+      const authUser = getAuthorizedUser(String(phone));
+      const ticket = getCurrentRepair(phone);
+      const route = getServiceRouteNorms().find(item => item.id === routeId);
+      if (!authUser || !ticket || !route) {
+        return reply(senderId, '❌ Не удалось определить заявку или маршрут выезда.', {
+          attachments: currentRepairKeyboard(ticket?.id || ''),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const activeTrip = getActiveFieldTripForRepair(ticket.id, authUser.userName);
+      if (activeTrip) {
+        return reply(senderId, formatFieldTripMessage(activeTrip, ticket), {
+          attachments: fieldTripStatusKeyboard(activeTrip),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+          notification: 'По этой заявке уже есть активный выезд',
+        });
+      }
+      const trip = createFieldTripFromBot(ticket, authUser, {
+        routeNormId: route.id,
+        routeFrom: route.from,
+        routeTo: route.to,
+        distanceKm: route.distanceKm,
+        normSpeedKmh: route.normSpeedKmh,
+        serviceVehicleId: ticket.serviceVehicleId || null,
+        source: 'bot',
+      });
+      resetBotFlow(phone);
+      setCurrentRepair(phone, ticket.id);
+      return reply(senderId, formatFieldTripMessage(trip, ticket), {
+        attachments: fieldTripStatusKeyboard(trip),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+        notification: `Выезд начат · ${trip.closedNormHours.toFixed(1)} н/ч`,
+      });
+    }
+
+    if (normalized.startsWith('fieldtrip:arrived:')) {
+      const tripId = normalized.slice('fieldtrip:arrived:'.length);
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const result = updateFieldTripStatusFromBot(tripId, 'arrived', authUser);
+      if (!result) {
+        return reply(senderId, '❌ Выезд не найден.', {
+          attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || ''),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const ticket = result.trip?.serviceTicketId ? findServiceTicketById(result.trip.serviceTicketId) : null;
+      return reply(senderId, formatFieldTripMessage(result.trip, ticket), {
+        attachments: fieldTripStatusKeyboard(result.trip),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+        notification: result.changed ? 'Отмечено: на объекте' : 'Статус уже установлен',
+      });
+    }
+
+    if (normalized.startsWith('fieldtrip:complete:')) {
+      const tripId = normalized.slice('fieldtrip:complete:'.length);
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const result = updateFieldTripStatusFromBot(tripId, 'completed', authUser);
+      if (!result) {
+        return reply(senderId, '❌ Выезд не найден.', {
+          attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || ''),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const ticket = result.trip?.serviceTicketId ? findServiceTicketById(result.trip.serviceTicketId) : null;
+      setCurrentRepair(phone, ticket?.id || getCurrentRepair(phone)?.id || '');
+      return reply(senderId, formatFieldTripMessage(result.trip, ticket), {
+        attachments: currentRepairKeyboard(ticket?.id || getCurrentRepair(phone)?.id || ''),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+        notification: result.changed
+          ? `Выезд закрыт · ${Number(result.trip.closedNormHours || 0).toFixed(1)} н/ч`
+          : 'Выезд уже завершён',
+      });
+    }
+
     const map = {
       'menu:help': '/помощь',
       'menu:main': '/меню',
@@ -1511,6 +1719,7 @@ function createBotHandlers(deps) {
       'menu:day_report': '/мойдень',
       'menu:works': '/работы',
       'menu:parts': '/запчасти',
+      'menu:field_trip': '/выезд',
       'menu:ready': '/готово',
       'menu:waiting': '/ожидание',
     };
@@ -2300,6 +2509,71 @@ function createBotHandlers(deps) {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
         return handleSummaryRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
       }
+      if (session.pendingAction === 'field_trip_manual_route') {
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        const parsedRoute = parseManualFieldTripRoute(trimmed);
+        if (!parsedRoute) {
+          return reply(senderId, '❌ Напишите маршрут в формате: Казань → Алабуга', {
+            attachments: keyboard([[button('Назад', 'menu:field_trip'), button('Главное меню', 'menu:main')]]),
+            phone,
+            callbackContext: uiContext.callbackContext,
+            replaceMessage: Boolean(uiContext.callbackContext),
+          });
+        }
+        updateBotSession(phone, {
+          activeRepairId: currentTicket.id,
+          pendingAction: 'field_trip_manual_distance',
+          pendingPayload: {
+            serviceTicketId: currentTicket.id,
+            fieldTripDraft: parsedRoute,
+          },
+        });
+        return reply(senderId, '📏 Напишите расстояние в километрах числом. Например: 200', {
+          attachments: keyboard([[button('Назад', 'menu:field_trip'), button('Главное меню', 'menu:main')]]),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
+      if (session.pendingAction === 'field_trip_manual_distance') {
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        const distanceKm = Math.max(0, Number(String(trimmed).replace(',', '.')) || 0);
+        if (!distanceKm) {
+          return reply(senderId, '❌ Напишите расстояние числом в километрах. Например: 200', {
+            attachments: keyboard([[button('Назад', 'menu:field_trip'), button('Главное меню', 'menu:main')]]),
+            phone,
+            callbackContext: uiContext.callbackContext,
+            replaceMessage: Boolean(uiContext.callbackContext),
+          });
+        }
+        const activeTrip = getActiveFieldTripForRepair(currentTicket.id, authUser.userName);
+        if (activeTrip) {
+          resetBotFlow(phone);
+          return reply(senderId, formatFieldTripMessage(activeTrip, currentTicket), {
+            attachments: fieldTripStatusKeyboard(activeTrip),
+            phone,
+            callbackContext: uiContext.callbackContext,
+            replaceMessage: Boolean(uiContext.callbackContext),
+          });
+        }
+        const draft = session.pendingPayload?.fieldTripDraft || {};
+        const trip = createFieldTripFromBot(currentTicket, authUser, {
+          routeFrom: draft.routeFrom,
+          routeTo: draft.routeTo,
+          distanceKm,
+          normSpeedKmh: 70,
+          serviceVehicleId: currentTicket.serviceVehicleId || null,
+          source: 'bot',
+        });
+        resetBotFlow(phone);
+        setCurrentRepair(phone, currentTicket.id);
+        return reply(senderId, formatFieldTripMessage(trip, currentTicket), {
+          attachments: fieldTripStatusKeyboard(trip),
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+        });
+      }
       if (session.pendingAction === 'repair_photo_before') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
         return handleRepairPhotoUpload(senderId, phone, authUser, currentTicket, 'before', { ...messageMeta, text: trimmed }, uiContext);
@@ -2416,6 +2690,48 @@ function createBotHandlers(deps) {
       return replyWithUi('🚚 Выберите тип доставки.', {
         attachments: createDeliveryTypeKeyboard(),
       });
+    }
+
+    if ((lower === '/выезд' || lower === 'выезд') && canManageRepair) {
+      const ticket = getCurrentRepair(phone);
+      if (!ticket) {
+        return replyWithUi('ℹ️ Сначала откройте текущую заявку: /ремонт ID', {
+          attachments: mechanicKeyboard(),
+        });
+      }
+      const activeTrip = getActiveFieldTripForRepair(ticket.id, authUser.userName);
+      if (activeTrip) {
+        return replyWithUi(formatFieldTripMessage(activeTrip, ticket), {
+          attachments: fieldTripStatusKeyboard(activeTrip),
+        });
+      }
+      const routes = getServiceRouteNorms();
+      if (!routes.length) {
+        updateBotSession(phone, {
+          activeRepairId: ticket.id,
+          pendingAction: 'field_trip_manual_route',
+          pendingPayload: { serviceTicketId: ticket.id },
+        });
+        return replyWithUi(
+          `🚐 ${ticket.id}\n${ticket.equipment}\n\nСправочник маршрутов пока пуст. Напишите маршрут вручную в формате: Казань → Алабуга`,
+          { attachments: keyboard([[button('Назад', 'menu:repair_actions'), button('Главное меню', 'menu:main')]]) },
+        );
+      }
+      updateBotSession(phone, {
+        activeRepairId: ticket.id,
+        pendingAction: 'field_trip_route_pick',
+        pendingPayload: { serviceTicketId: ticket.id },
+      });
+      return replyWithUi(
+        [
+          `🚐 Выезд по заявке ${ticket.id}`,
+          ticket.equipment,
+          '',
+          'Выберите маршрут из справочника или введите вручную.',
+          'Нормо-часы будут рассчитаны автоматически по формуле км / 70.',
+        ].join('\n'),
+        { attachments: fieldTripRouteKeyboard(routes) },
+      );
     }
 
     if (lower.startsWith('/вработу ') && canManageRepair) {

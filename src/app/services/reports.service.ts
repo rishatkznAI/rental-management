@@ -7,6 +7,10 @@ export interface MechanicWorkloadSummary {
   repairsCount: number;
   worksCount: number;
   totalNormHours: number;
+  fieldTripCount: number;
+  fieldTripDistanceKm: number;
+  fieldTripNormHours: number;
+  totalClosedNormHours: number;
   partsCost: number;
   equipmentCount: number;
 }
@@ -34,6 +38,30 @@ export interface MechanicWorkloadRow {
   partsCost: number;
 }
 
+export interface MechanicFieldTripRow {
+  id: string;
+  mechanicId: string;
+  mechanicName: string;
+  repairId: string;
+  serviceKind: ServiceScenario;
+  repairStatus: string;
+  createdAt: string;
+  completedAt: string;
+  tripStatus: string;
+  equipmentId: string;
+  equipmentLabel: string;
+  equipmentType: string;
+  equipmentTypeLabel: string;
+  inventoryNumber: string;
+  serialNumber: string;
+  routeFrom: string;
+  routeTo: string;
+  routeLabel: string;
+  distanceKm: number;
+  closedNormHours: number;
+  serviceVehicleId: string | null;
+}
+
 export interface RepeatFailureRow {
   equipmentId: string;
   equipmentLabel: string;
@@ -59,6 +87,7 @@ export interface RepeatFailureRow {
 export interface MechanicsWorkloadReport {
   summary: MechanicWorkloadSummary[];
   rows: MechanicWorkloadRow[];
+  fieldTrips: MechanicFieldTripRow[];
   repeatFailures: RepeatFailureRow[];
 }
 

@@ -21,6 +21,21 @@ function hasSeededSpareParts(existing) {
   return existing.some(item => String(item.article || item.sku || '').startsWith('GEN-'));
 }
 
+function seedServiceRouteNorms({ readData, writeData, seedsDir, logger = console }) {
+  try {
+    const existing = readData('service_route_norms') || [];
+    if (existing.length > 0) return;
+    const seedPath = path.join(seedsDir, 'service_route_norms.json');
+    if (!fs.existsSync(seedPath)) return;
+    const routes = JSON.parse(fs.readFileSync(seedPath, 'utf-8'));
+    if (!Array.isArray(routes) || routes.length === 0) return;
+    writeData('service_route_norms', routes);
+    logger.log(`✓ Справочник маршрутов выезда загружен из seed: ${routes.length} записей`);
+  } catch (error) {
+    logger.warn('seedServiceRouteNorms error:', error.message);
+  }
+}
+
 function seedSpareParts({ readData, writeData, normalizeSparePartRecord, seedsDir, logger = console }) {
   try {
     const existing = readData('spare_parts') || [];
@@ -71,6 +86,12 @@ async function startServer({ app, port, deps, logger = console }) {
       readData: deps.readData,
       writeData: deps.writeData,
       normalizeSparePartRecord: deps.normalizeSparePartRecord,
+      seedsDir: deps.seedsDir,
+      logger,
+    });
+    seedServiceRouteNorms({
+      readData: deps.readData,
+      writeData: deps.writeData,
       seedsDir: deps.seedsDir,
       logger,
     });
@@ -127,6 +148,7 @@ async function startServer({ app, port, deps, logger = console }) {
 
 module.exports = {
   seedSpareParts,
+  seedServiceRouteNorms,
   seedServiceWorks,
   startServer,
 };

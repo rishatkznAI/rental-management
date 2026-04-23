@@ -23,7 +23,7 @@ import type { Equipment, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
 import { equipmentService } from '../services/equipment.service';
-import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
+import { reportsService, type MechanicFieldTripRow, type MechanicsWorkloadReport } from '../services/reports.service';
 import { clientsService } from '../services/clients.service';
 import { paymentsService } from '../services/payments.service';
 import { rentalsService } from '../services/rentals.service';
@@ -275,6 +275,22 @@ export default function Reports() {
     });
   }, [mechanicWorkload, serviceDateFrom, serviceDateTo, serviceMechanic, serviceScenario, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName]);
 
+  const filteredFieldTrips = useMemo(() => {
+    const trips = mechanicWorkload?.fieldTrips ?? [];
+    return trips.filter((trip: MechanicFieldTripRow) => {
+      if (serviceMechanic !== 'all' && trip.mechanicName !== serviceMechanic) return false;
+      if (serviceScenario !== 'all' && trip.serviceKind !== serviceScenario) return false;
+      if (serviceStatus !== 'all' && trip.repairStatus !== serviceStatus) return false;
+      if (serviceEquipmentType !== 'all' && (trip.equipmentTypeLabel || trip.equipmentType) !== serviceEquipmentType) return false;
+      if (serviceWorkCategory !== 'all') return false;
+      if (servicePartName !== 'all') return false;
+      const created = trip.createdAt ? trip.createdAt.slice(0, 10) : '';
+      if (serviceDateFrom && created && created < serviceDateFrom) return false;
+      if (serviceDateTo && created && created > serviceDateTo) return false;
+      return true;
+    });
+  }, [mechanicWorkload, serviceDateFrom, serviceDateTo, serviceMechanic, serviceScenario, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName]);
+
   const filteredMechanicSummary = useMemo(() => {
     const map = new Map<string, {
       mechanicId: string;
@@ -282,6 +298,9 @@ export default function Reports() {
       repairs: Set<string>;
       worksCount: number;
       totalNormHours: number;
+      fieldTripCount: number;
+      fieldTripDistanceKm: number;
+      fieldTripNormHours: number;
       equipment: Set<string>;
       partsCost: number;
     }>();
@@ -295,6 +314,9 @@ export default function Reports() {
           repairs: new Set(),
           worksCount: 0,
           totalNormHours: 0,
+          fieldTripCount: 0,
+          fieldTripDistanceKm: 0,
+          fieldTripNormHours: 0,
           equipment: new Set(),
           partsCost: 0,
         });
@@ -307,6 +329,30 @@ export default function Reports() {
       item.partsCost += row.partsCost;
     }
 
+    for (const trip of filteredFieldTrips) {
+      const key = trip.mechanicId || trip.mechanicName;
+      if (!map.has(key)) {
+        map.set(key, {
+          mechanicId: trip.mechanicId,
+          mechanicName: trip.mechanicName,
+          repairs: new Set(),
+          worksCount: 0,
+          totalNormHours: 0,
+          fieldTripCount: 0,
+          fieldTripDistanceKm: 0,
+          fieldTripNormHours: 0,
+          equipment: new Set(),
+          partsCost: 0,
+        });
+      }
+      const item = map.get(key)!;
+      if (trip.repairId) item.repairs.add(trip.repairId);
+      item.fieldTripCount += 1;
+      item.fieldTripDistanceKm += trip.distanceKm;
+      item.fieldTripNormHours += trip.closedNormHours;
+      if (trip.equipmentId) item.equipment.add(trip.equipmentId);
+    }
+
     return [...map.values()]
       .map(item => ({
         mechanicId: item.mechanicId,
@@ -314,11 +360,15 @@ export default function Reports() {
         repairsCount: item.repairs.size,
         worksCount: item.worksCount,
         totalNormHours: Number(item.totalNormHours.toFixed(2)),
+        fieldTripCount: item.fieldTripCount,
+        fieldTripDistanceKm: Number(item.fieldTripDistanceKm.toFixed(2)),
+        fieldTripNormHours: Number(item.fieldTripNormHours.toFixed(2)),
+        totalClosedNormHours: Number((item.totalNormHours + item.fieldTripNormHours).toFixed(2)),
         partsCost: Number(item.partsCost.toFixed(2)),
         equipmentCount: item.equipment.size,
       }))
-      .sort((a, b) => b.totalNormHours - a.totalNormHours);
-  }, [filteredMechanicRows]);
+      .sort((a, b) => b.totalClosedNormHours - a.totalClosedNormHours);
+  }, [filteredFieldTrips, filteredMechanicRows]);
 
   const equipmentServiceSummary = useMemo(() => {
     const map = new Map<string, {
@@ -417,9 +467,23 @@ export default function Reports() {
 
   const serviceRepairCount = useMemo(() => new Set(filteredMechanicRows.map(row => row.repairId)).size, [filteredMechanicRows]);
   const filteredRepairIds = useMemo(() => new Set(filteredMechanicRows.map(row => row.repairId)), [filteredMechanicRows]);
+  const serviceFieldTripCount = filteredFieldTrips.length;
+  const serviceFieldTripDistance = useMemo(
+    () => filteredFieldTrips.reduce((sum, trip) => sum + trip.distanceKm, 0),
+    [filteredFieldTrips],
+  );
+  const serviceFieldTripNormHours = useMemo(
+    () => filteredFieldTrips.reduce((sum, trip) => sum + trip.closedNormHours, 0),
+    [filteredFieldTrips],
+  );
+  const serviceRepairNormHours = useMemo(
+    () => filteredMechanicRows.reduce((sum, row) => sum + row.totalNormHours, 0),
+    [filteredMechanicRows],
+  );
+  const serviceTotalClosedNormHours = serviceRepairNormHours + serviceFieldTripNormHours;
   const serviceAverageNormHoursPerRepair = serviceRepairCount === 0
     ? 0
-    : filteredMechanicRows.reduce((sum, row) => sum + row.totalNormHours, 0) / serviceRepairCount;
+    : serviceRepairNormHours / serviceRepairCount;
   const serviceAveragePartsCostPerRepair = serviceRepairCount === 0
     ? 0
     : filteredMechanicRows.reduce((sum, row) => sum + row.partsCost, 0) / serviceRepairCount;
@@ -454,10 +518,23 @@ export default function Reports() {
       const created = row.createdAt ? row.createdAt.slice(0, 10) : '';
       return created >= previousStart && created <= previousEnd;
     });
+    const previousTrips = (mechanicWorkload?.fieldTrips ?? []).filter(trip => {
+      if (serviceMechanic !== 'all' && trip.mechanicName !== serviceMechanic) return false;
+      if (serviceScenario !== 'all' && trip.serviceKind !== serviceScenario) return false;
+      if (serviceStatus !== 'all' && trip.repairStatus !== serviceStatus) return false;
+      if (serviceEquipmentType !== 'all' && (trip.equipmentTypeLabel || trip.equipmentType) !== serviceEquipmentType) return false;
+      if (serviceWorkCategory !== 'all') return false;
+      if (servicePartName !== 'all') return false;
+      const created = trip.createdAt ? trip.createdAt.slice(0, 10) : '';
+      return created >= previousStart && created <= previousEnd;
+    });
 
     const previousRepairCount = new Set(previousRows.map(row => row.repairId)).size;
     const previousNormHours = previousRows.reduce((sum, row) => sum + row.totalNormHours, 0);
     const previousPartsCost = previousRows.reduce((sum, row) => sum + row.partsCost, 0);
+    const previousFieldTripCount = previousTrips.length;
+    const previousFieldTripNormHours = previousTrips.reduce((sum, trip) => sum + trip.closedNormHours, 0);
+    const previousFieldTripDistance = previousTrips.reduce((sum, trip) => sum + trip.distanceKm, 0);
 
     return {
       currentStart,
@@ -466,22 +543,35 @@ export default function Reports() {
       previousEnd,
       currentRepairCount: serviceRepairCount,
       previousRepairCount,
-      currentNormHours: filteredMechanicRows.reduce((sum, row) => sum + row.totalNormHours, 0),
+      currentNormHours: serviceRepairNormHours,
       previousNormHours,
+      currentFieldTripCount: serviceFieldTripCount,
+      previousFieldTripCount,
+      currentFieldTripNormHours: serviceFieldTripNormHours,
+      previousFieldTripNormHours,
+      currentFieldTripDistance: serviceFieldTripDistance,
+      previousFieldTripDistance,
+      currentClosedNormHours: serviceTotalClosedNormHours,
+      previousClosedNormHours: previousNormHours + previousFieldTripNormHours,
       currentPartsCost: filteredMechanicRows.reduce((sum, row) => sum + row.partsCost, 0),
       previousPartsCost,
     };
   }, [
     filteredMechanicRows,
     mechanicWorkload,
+    serviceFieldTripCount,
+    serviceFieldTripDistance,
+    serviceFieldTripNormHours,
     serviceDateFrom,
     serviceDateTo,
     serviceEquipmentType,
     serviceMechanic,
+    serviceRepairNormHours,
     serviceScenario,
     servicePartName,
     serviceRepairCount,
     serviceStatus,
+    serviceTotalClosedNormHours,
     serviceWorkCategory,
   ]);
 
@@ -668,6 +758,7 @@ export default function Reports() {
 
   const exportServiceCsv = useCallback(() => {
     const header = [
+      'Тип строки',
       'Механик',
       'Сценарий',
       'Статус заявки',
@@ -683,11 +774,14 @@ export default function Reports() {
       'Количество',
       'Нормо-часы',
       'Итого н/ч',
+      'Километры',
+      'Статус выезда',
     ];
 
     const lines = [
       header.map(escapeCsv).join(','),
       ...filteredMechanicRows.map(row => [
+        'Работа',
         row.mechanicName,
         getServiceScenarioLabel(row.serviceKind),
         formatServiceStatus(row.repairStatus),
@@ -703,11 +797,33 @@ export default function Reports() {
         row.quantity,
         row.normHours,
         row.totalNormHours.toFixed(2),
+        '',
+        '',
+      ].map(escapeCsv).join(',')),
+      ...filteredFieldTrips.map(trip => [
+        'Выезд',
+        trip.mechanicName,
+        getServiceScenarioLabel(trip.serviceKind),
+        formatServiceStatus(trip.repairStatus),
+        trip.createdAt ? trip.createdAt.slice(0, 10) : '',
+        trip.repairId,
+        trip.equipmentTypeLabel || trip.equipmentType,
+        trip.equipmentLabel,
+        trip.inventoryNumber,
+        trip.serialNumber,
+        trip.routeLabel,
+        'Выезд',
+        '',
+        1,
+        trip.closedNormHours.toFixed(2),
+        trip.closedNormHours.toFixed(2),
+        trip.distanceKm.toFixed(1),
+        trip.tripStatus,
       ].map(escapeCsv).join(',')),
     ].join('\n');
 
     downloadFile(`\ufeff${lines}`, `service-report-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
-  }, [filteredMechanicRows]);
+  }, [filteredFieldTrips, filteredMechanicRows]);
 
   const exportServiceXls = useCallback(() => {
     const summaryRowsXml = filteredMechanicSummary.map(item => `
@@ -715,8 +831,12 @@ export default function Reports() {
         <Cell><Data ss:Type="String">${escapeXml(item.mechanicName)}</Data></Cell>
         <Cell><Data ss:Type="Number">${escapeXml(item.repairsCount)}</Data></Cell>
         <Cell><Data ss:Type="Number">${escapeXml(item.worksCount)}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.fieldTripCount)}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.fieldTripDistanceKm.toFixed(2))}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.fieldTripNormHours.toFixed(2))}</Data></Cell>
         <Cell><Data ss:Type="Number">${escapeXml(item.equipmentCount)}</Data></Cell>
         <Cell><Data ss:Type="Number">${escapeXml(item.totalNormHours.toFixed(2))}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(item.totalClosedNormHours.toFixed(2))}</Data></Cell>
         <Cell><Data ss:Type="Number">${escapeXml(item.partsCost.toFixed(2))}</Data></Cell>
       </Row>
     `).join('');
@@ -755,6 +875,25 @@ export default function Reports() {
       </Row>
     `).join('');
 
+    const fieldTripRowsXml = filteredFieldTrips.map(trip => `
+      <Row>
+        <Cell><Data ss:Type="String">${escapeXml(trip.mechanicName)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(getServiceScenarioLabel(trip.serviceKind))}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(formatServiceStatus(trip.repairStatus))}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(trip.createdAt ? trip.createdAt.slice(0, 10) : '')}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(trip.repairId)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(trip.equipmentTypeLabel || trip.equipmentType)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(trip.equipmentLabel)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(trip.inventoryNumber)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(trip.serialNumber)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(trip.routeFrom)}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(trip.routeTo)}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(trip.distanceKm.toFixed(2))}</Data></Cell>
+        <Cell><Data ss:Type="Number">${escapeXml(trip.closedNormHours.toFixed(2))}</Data></Cell>
+        <Cell><Data ss:Type="String">${escapeXml(trip.tripStatus)}</Data></Cell>
+      </Row>
+    `).join('');
+
     const xls = `<?xml version="1.0"?>
       <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
         xmlns:o="urn:schemas-microsoft-com:office:office"
@@ -766,8 +905,12 @@ export default function Reports() {
               <Cell><Data ss:Type="String">Механик</Data></Cell>
               <Cell><Data ss:Type="String">Ремонты</Data></Cell>
               <Cell><Data ss:Type="String">Работы</Data></Cell>
+              <Cell><Data ss:Type="String">Выезды</Data></Cell>
+              <Cell><Data ss:Type="String">Км выезда</Data></Cell>
+              <Cell><Data ss:Type="String">Выездные н/ч</Data></Cell>
               <Cell><Data ss:Type="String">Техника</Data></Cell>
-              <Cell><Data ss:Type="String">Итого н/ч</Data></Cell>
+              <Cell><Data ss:Type="String">Ремонтные н/ч</Data></Cell>
+              <Cell><Data ss:Type="String">Всего закрыто н/ч</Data></Cell>
               <Cell><Data ss:Type="String">Запчасти, ₽</Data></Cell>
             </Row>
             ${summaryRowsXml}
@@ -795,6 +938,27 @@ export default function Reports() {
             ${rowsXml}
           </Table>
         </Worksheet>
+        <Worksheet ss:Name="Выезды">
+          <Table>
+            <Row>
+              <Cell><Data ss:Type="String">Механик</Data></Cell>
+              <Cell><Data ss:Type="String">Сценарий</Data></Cell>
+              <Cell><Data ss:Type="String">Статус заявки</Data></Cell>
+              <Cell><Data ss:Type="String">Дата</Data></Cell>
+              <Cell><Data ss:Type="String">Заявка</Data></Cell>
+              <Cell><Data ss:Type="String">Тип техники</Data></Cell>
+              <Cell><Data ss:Type="String">Техника</Data></Cell>
+              <Cell><Data ss:Type="String">INV</Data></Cell>
+              <Cell><Data ss:Type="String">SN</Data></Cell>
+              <Cell><Data ss:Type="String">Откуда</Data></Cell>
+              <Cell><Data ss:Type="String">Куда</Data></Cell>
+              <Cell><Data ss:Type="String">Километры</Data></Cell>
+              <Cell><Data ss:Type="String">Закрыто н/ч</Data></Cell>
+              <Cell><Data ss:Type="String">Статус выезда</Data></Cell>
+            </Row>
+            ${fieldTripRowsXml}
+          </Table>
+        </Worksheet>
         <Worksheet ss:Name="По технике">
           <Table>
             <Row>
@@ -814,7 +978,7 @@ export default function Reports() {
       </Workbook>`;
 
     downloadFile(xls, `service-report-${new Date().toISOString().slice(0, 10)}.xls`, 'application/vnd.ms-excel');
-  }, [equipmentServiceSummary, filteredMechanicRows, filteredMechanicSummary]);
+  }, [equipmentServiceSummary, filteredFieldTrips, filteredMechanicRows, filteredMechanicSummary]);
 
   const exportFinanceXls = useCallback(() => {
     const clientRowsXml = financeClientSnapshots
@@ -1766,11 +1930,11 @@ export default function Reports() {
                     <Button variant="secondary" onClick={deleteCurrentServicePreset} disabled={servicePresetId === 'none'}>
                       Удалить пресет
                     </Button>
-                    <Button variant="secondary" onClick={exportServiceCsv} disabled={filteredMechanicRows.length === 0}>
+                    <Button variant="secondary" onClick={exportServiceCsv} disabled={filteredMechanicRows.length === 0 && filteredFieldTrips.length === 0}>
                       <Download className="h-4 w-4" />
                       CSV
                     </Button>
-                    <Button variant="secondary" onClick={exportServiceXls} disabled={filteredMechanicRows.length === 0}>
+                    <Button variant="secondary" onClick={exportServiceXls} disabled={filteredMechanicRows.length === 0 && filteredFieldTrips.length === 0}>
                       <Download className="h-4 w-4" />
                       XLS
                     </Button>
@@ -1796,21 +1960,21 @@ export default function Reports() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Механиков в отчёте</CardDescription>
                 <CardTitle className="text-3xl">{filteredMechanicSummary.length}</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Сотрудники с заявками и выполненными работами по текущему сценарию</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Сотрудники с работами и выездами по текущему сценарию</p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Закрыто нормо-часов</CardDescription>
+                <CardDescription>Ремонтные н/ч</CardDescription>
                 <CardTitle className="text-3xl">
-                  {filteredMechanicSummary.reduce((sum, item) => sum + item.totalNormHours, 0).toFixed(1)}
+                  {serviceRepairNormHours.toFixed(1)}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -1819,18 +1983,29 @@ export default function Reports() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Использовано на запчасти</CardDescription>
+                <CardDescription>Выездные н/ч</CardDescription>
                 <CardTitle className="text-3xl">
-                  {formatCurrency(filteredMechanicSummary.reduce((sum, item) => sum + item.partsCost, 0))}
+                  {serviceFieldTripNormHours.toFixed(1)}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Сумма по snapshot-ценам в ремонтах</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Автозакрытие по маршрутам выезда механиков</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Всего закрыто н/ч</CardDescription>
+                <CardTitle className="text-3xl">
+                  {serviceTotalClosedNormHours.toFixed(1)}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Ремонтные и выездные нормо-часы вместе</p>
               </CardContent>
             </Card>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-5">
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Ремонтов в срезе</CardDescription>
@@ -1847,6 +2022,24 @@ export default function Reports() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Средняя трудоёмкость одного ремонта</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Выездов завершено</CardDescription>
+                <CardTitle className="text-3xl">{serviceFieldTripCount}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Количество завершённых выездов по фильтру</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Километры выезда</CardDescription>
+                <CardTitle className="text-3xl">{serviceFieldTripDistance.toFixed(0)}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Суммарный километраж завершённых выездов</p>
               </CardContent>
             </Card>
             <Card>
@@ -1886,7 +2079,7 @@ export default function Reports() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-5">
                 <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                   <p className="text-xs text-gray-500">Ремонты</p>
                   <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{serviceComparison.currentRepairCount}</p>
@@ -1895,10 +2088,24 @@ export default function Reports() {
                   </p>
                 </div>
                 <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-                  <p className="text-xs text-gray-500">Нормо-часы</p>
+                  <p className="text-xs text-gray-500">Ремонтные н/ч</p>
                   <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{serviceComparison.currentNormHours.toFixed(1)}</p>
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     Было: {serviceComparison.previousNormHours.toFixed(1)} · Δ {formatDelta(serviceComparison.currentNormHours, serviceComparison.previousNormHours, ' н/ч')}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                  <p className="text-xs text-gray-500">Выездные н/ч</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{serviceComparison.currentFieldTripNormHours.toFixed(1)}</p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Было: {serviceComparison.previousFieldTripNormHours.toFixed(1)} · Δ {formatDelta(serviceComparison.currentFieldTripNormHours, serviceComparison.previousFieldTripNormHours, ' н/ч')}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                  <p className="text-xs text-gray-500">Всего закрыто н/ч</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{serviceComparison.currentClosedNormHours.toFixed(1)}</p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Было: {serviceComparison.previousClosedNormHours.toFixed(1)} · Δ {formatDelta(serviceComparison.currentClosedNormHours, serviceComparison.previousClosedNormHours, ' н/ч')}
                   </p>
                 </div>
                 <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
@@ -2008,7 +2215,7 @@ export default function Reports() {
           <Card>
             <CardHeader>
               <CardTitle>Сводка по механикам</CardTitle>
-              <CardDescription>Сколько ремонтов и нормо-часов закрыл каждый механик</CardDescription>
+              <CardDescription>Ремонты, выезды, километры и общий объём закрытых н/ч по каждому механику</CardDescription>
             </CardHeader>
             <CardContent>
               {filteredMechanicSummary.length > 0 ? (
@@ -2019,19 +2226,22 @@ export default function Reports() {
                         <div>
                           <p className="text-sm font-semibold text-gray-900 dark:text-white">{item.mechanicName}</p>
                           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            Ремонтов: {item.repairsCount} · Работ: {item.worksCount} · Техники: {item.equipmentCount}
+                            Ремонтов: {item.repairsCount} · Работ: {item.worksCount} · Выездов: {item.fieldTripCount} · Км: {item.fieldTripDistanceKm.toFixed(0)} · Техники: {item.equipmentCount}
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-lg font-bold text-gray-900 dark:text-white">{item.totalNormHours.toFixed(1)} н/ч</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{formatCurrency(item.partsCost)} запчасти</p>
+                          <p className="text-lg font-bold text-gray-900 dark:text-white">{item.totalClosedNormHours.toFixed(1)} н/ч</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Ремонт: {item.totalNormHours.toFixed(1)} н/ч · Выезд: {item.fieldTripNormHours.toFixed(1)} н/ч
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatCurrency(item.partsCost)} запчасти</p>
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <EmptyChart message="Пока нет данных по работам механиков. Добавьте выполненные работы в сервисных заявках." />
+                <EmptyChart message="Пока нет данных по работам и выездам механиков. Добавьте выполненные работы или завершите выезд по заявке." />
               )}
             </CardContent>
           </Card>
@@ -2136,6 +2346,60 @@ export default function Reports() {
                 </div>
               ) : (
                 <EmptyChart message="Нет строк выполненных работ для детализации." />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Выезды на объект</CardTitle>
+              <CardDescription>Завершённые выезды механиков с маршрутом, километражем и закрытыми н/ч</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {filteredFieldTrips.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                        <th className="px-3 py-2 font-medium">Механик</th>
+                        <th className="px-3 py-2 font-medium">Заявка</th>
+                        <th className="px-3 py-2 font-medium">Техника</th>
+                        <th className="px-3 py-2 font-medium">Маршрут</th>
+                        <th className="px-3 py-2 font-medium">Километры</th>
+                        <th className="px-3 py-2 font-medium">Закрыто н/ч</th>
+                        <th className="px-3 py-2 font-medium">Дата</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredFieldTrips.map(trip => (
+                        <tr key={trip.id} className="border-b border-gray-100 dark:border-gray-800">
+                          <td className="px-3 py-2">{trip.mechanicName}</td>
+                          <td className="px-3 py-2 font-mono text-xs">
+                            <Link to={`/service/${trip.repairId}`} className="text-[--color-primary] hover:underline">
+                              {trip.repairId}
+                            </Link>
+                          </td>
+                          <td className="px-3 py-2">
+                            {trip.equipmentId ? (
+                              <Link to={`/equipment/${trip.equipmentId}`} className="font-medium text-[--color-primary] hover:underline">
+                                {trip.equipmentLabel}
+                              </Link>
+                            ) : (
+                              <div className="font-medium text-gray-900 dark:text-white">{trip.equipmentLabel}</div>
+                            )}
+                            <div className="text-xs text-gray-500 dark:text-gray-400">INV {trip.inventoryNumber} · SN {trip.serialNumber}</div>
+                          </td>
+                          <td className="px-3 py-2">{trip.routeLabel || [trip.routeFrom, trip.routeTo].filter(Boolean).join(' → ') || 'Маршрут не указан'}</td>
+                          <td className="px-3 py-2">{trip.distanceKm.toFixed(1)} км</td>
+                          <td className="px-3 py-2 font-semibold">{trip.closedNormHours.toFixed(1)} н/ч</td>
+                          <td className="px-3 py-2">{trip.createdAt ? trip.createdAt.slice(0, 10) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyChart message="Завершённых выездов по текущим фильтрам пока нет." />
               )}
             </CardContent>
           </Card>

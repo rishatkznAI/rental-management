@@ -52,7 +52,7 @@ import {
   startOfDay, startOfMonth, startOfQuarter, startOfWeek, startOfYear
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { calculateRentalAmount, getRentalDays } from '../lib/utils';
+import { calculateRentalAmount, cn, getRentalDays } from '../lib/utils';
 
 // ========== Constants & Types ==========
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';

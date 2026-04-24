@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
   DollarSign, TrendingUp, Clock, Plus, Bot, User, Calendar,
-  CheckCircle, AlertTriangle, MapPin, ChevronRight, MessageSquare,
+  CheckCircle, AlertTriangle, MapPin, ChevronRight, ChevronDown, MessageSquare,
   Upload, Trash2, X, PenLine, RotateCcw, Download,
 } from 'lucide-react';
 import {
@@ -701,10 +701,25 @@ export default function EquipmentDetail() {
   const [uploadSignatureDataUrl, setUploadSignatureDataUrl] = useState('');
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [isDownloadingPhotoZip, setIsDownloadingPhotoZip] = useState(false);
+  const [isShippingGalleryCollapsed, setIsShippingGalleryCollapsed] = useState(false);
   const mainPhotoInputRef = React.useRef<HTMLInputElement>(null);
   const shippingPhotoInputRefs = React.useRef<Partial<Record<EquipmentOperationPhotoCategory, HTMLInputElement | null>>>({});
   const signatureCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const signatureDrawingRef = React.useRef(false);
+
+  const shippingGalleryPhotoCount = useMemo(
+    () => shippingPhotos.reduce((sum, event) => {
+      const categoryCount = event.photoCategories
+        ? Object.values(event.photoCategories).reduce(
+            (photoSum, photos) => photoSum + (Array.isArray(photos) ? photos.length : 0),
+            0,
+          )
+        : 0;
+      const flatCount = Array.isArray(event.photos) ? event.photos.length : 0;
+      return sum + Math.max(categoryCount, flatCount);
+    }, 0),
+    [shippingPhotos],
+  );
 
   // Compress image to base64 (max 800px, 70% quality)
   const compressToBase64 = (file: File): Promise<string> =>
@@ -2209,6 +2224,20 @@ export default function EquipmentDetail() {
                     </Button>
                     </>
                   )}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setIsShippingGalleryCollapsed(prev => {
+                        const next = !prev;
+                        if (next) setShowUploadPhotoForm(false);
+                        return next;
+                      });
+                    }}
+                  >
+                    <ChevronDown className={cn('h-4 w-4 transition-transform', isShippingGalleryCollapsed && '-rotate-90')} />
+                    {isShippingGalleryCollapsed ? 'Развернуть' : 'Свернуть'}
+                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -2243,8 +2272,29 @@ export default function EquipmentDetail() {
                   </Button>
                   </>
                 )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setIsShippingGalleryCollapsed(prev => {
+                      const next = !prev;
+                      if (next) setShowUploadPhotoForm(false);
+                      return next;
+                    });
+                  }}
+                >
+                  <ChevronDown className={cn('h-4 w-4 transition-transform', isShippingGalleryCollapsed && '-rotate-90')} />
+                  {isShippingGalleryCollapsed ? 'Развернуть галерею' : 'Свернуть галерею'}
+                </Button>
               </div>
-              {(latestShippingEvent || latestReceivingEvent) && (
+              <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-secondary/30 px-3 py-2 text-xs text-muted-foreground">
+                <span>{shippingPhotos.length} событий</span>
+                <span>{shippingGalleryPhotoCount} фото</span>
+                {shippingComparisonPairs.length > 0 && <span>{shippingComparisonPairs.length} сравнений аренды</span>}
+                {latestShippingEvent && <span>Последняя отгрузка: {formatDate(latestShippingEvent.date)}</span>}
+                {latestReceivingEvent && <span>Последняя приёмка: {formatDate(latestReceivingEvent.date)}</span>}
+              </div>
+              {!isShippingGalleryCollapsed && (latestShippingEvent || latestReceivingEvent) && (
                 <div className="grid gap-4 lg:grid-cols-2">
                   {[latestShippingEvent, latestReceivingEvent].filter(Boolean).map(event => {
                     const categoryCount = event?.photoCategories
@@ -2325,7 +2375,7 @@ export default function EquipmentDetail() {
                 </div>
               )}
 
-              {shippingComparisonPairs.length > 0 && selectedComparisonPair && (
+              {!isShippingGalleryCollapsed && shippingComparisonPairs.length > 0 && selectedComparisonPair && (
                 <div className="rounded-2xl border border-border bg-secondary/30 p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                     <div>
@@ -2428,7 +2478,7 @@ export default function EquipmentDetail() {
               )}
 
               {/* Upload form */}
-              {canManageAcceptance && showUploadPhotoForm && (
+              {!isShippingGalleryCollapsed && canManageAcceptance && showUploadPhotoForm && (
                 <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-blue-200">
@@ -2647,7 +2697,8 @@ export default function EquipmentDetail() {
               )}
 
               {/* Photo events list */}
-              {shippingPhotos.length > 0 ? (
+              {!isShippingGalleryCollapsed ? (
+                shippingPhotos.length > 0 ? (
                 <div className="space-y-6">
                   {shippingPhotos.map(event => (
                     <div key={event.id} className="rounded-2xl border border-border bg-card/70 p-4">
@@ -2749,7 +2800,7 @@ export default function EquipmentDetail() {
                     </div>
                   ))}
                 </div>
-              ) : (
+                ) : (
                 !showUploadPhotoForm && (
                   <EmptyState icon={<Camera className="h-12 w-12" />} text="Фотографий пока нет">
                     {canEditEquipment && (
@@ -2762,6 +2813,11 @@ export default function EquipmentDetail() {
                     )}
                   </EmptyState>
                 )
+                )
+              ) : (
+                <div className="rounded-2xl border border-dashed border-border bg-card/40 px-4 py-6 text-center text-sm text-muted-foreground">
+                  Галерея свернута. Разверните блок, чтобы посмотреть сравнение, список событий и все фотографии.
+                </div>
               )}
             </CardContent>
           </Card>

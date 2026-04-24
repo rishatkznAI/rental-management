@@ -142,8 +142,16 @@ app.use(cors({
 // ── Конфигурация ───────────────────────────────────────────────────────────────
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const DELIVERY_BOT_TOKEN = process.env.DELIVERY_BOT_TOKEN || '';
 const MAX_API   = 'https://platform-api.max.ru';
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const DELIVERY_WEBHOOK_URL = process.env.DELIVERY_WEBHOOK_URL || WEBHOOK_URL;
+const MAIN_BOT_WEBHOOK_PATH = '/bot/webhook';
+const DELIVERY_BOT_WEBHOOK_PATH = '/bot/webhook/delivery';
+const hasDedicatedDeliveryBot = Boolean(
+  String(DELIVERY_BOT_TOKEN || '').trim()
+  && String(DELIVERY_BOT_TOKEN || '').trim() !== String(BOT_TOKEN || '').trim(),
+);
 
 function readData(name) {
   return getData(name);
@@ -166,14 +174,31 @@ const {
   sendMessage,
   deleteMessage,
   answerCallback,
-  registerWebhook,
+  registerWebhook: registerMainWebhook,
 } = createMaxApiClient({
   botToken: BOT_TOKEN,
   maxApiBase: MAX_API,
   fetchImpl: fetch,
   webhookUrl: WEBHOOK_URL,
+  webhookPath: MAIN_BOT_WEBHOOK_PATH,
   logger: console,
 });
+
+const deliveryMaxApiClient = hasDedicatedDeliveryBot
+  ? createMaxApiClient({
+      botToken: DELIVERY_BOT_TOKEN,
+      maxApiBase: MAX_API,
+      fetchImpl: fetch,
+      webhookUrl: DELIVERY_WEBHOOK_URL,
+      webhookPath: DELIVERY_BOT_WEBHOOK_PATH,
+      logger: console,
+    })
+  : null;
+
+const deliverySendMessage = deliveryMaxApiClient?.sendMessage || sendMessage;
+const deliveryDeleteMessage = deliveryMaxApiClient?.deleteMessage || deleteMessage;
+const deliveryAnswerCallback = deliveryMaxApiClient?.answerCallback || answerCallback;
+const registerDeliveryWebhook = deliveryMaxApiClient?.registerWebhook || null;
 
 const gprsGateway = createGprsGateway({
   readData,
@@ -629,7 +654,7 @@ registerDeliveryRoutes(apiRouter, {
   writeData,
   requireAuth,
   requireWrite,
-  sendMessage,
+  sendMessage: deliverySendMessage,
   getBotUsers,
   nowIso,
   generateId,
@@ -707,6 +732,8 @@ registerBotApiRoutes(apiRouter, {
   getBotSessions,
   botToken: BOT_TOKEN,
   webhookUrl: WEBHOOK_URL,
+  deliveryBotToken: hasDedicatedDeliveryBot ? DELIVERY_BOT_TOKEN : '',
+  deliveryWebhookUrl: hasDedicatedDeliveryBot ? DELIVERY_WEBHOOK_URL : '',
 });
 
 const {
@@ -740,6 +767,34 @@ const {
   getOpenTicketByEquipment,
   serviceStatusLabel,
 });
+
+const deliveryBotHandlers = hasDedicatedDeliveryBot
+  ? createBotHandlers({
+      readData,
+      writeData,
+      verifyPassword,
+      getBotUsers,
+      saveBotUsers,
+      getBotSessions,
+      saveBotSessions,
+      sendMessage: deliverySendMessage,
+      deleteMessage: deliveryDeleteMessage,
+      answerCallback: deliveryAnswerCallback,
+      generateId,
+      idPrefixes: ID_PREFIXES,
+      nowIso,
+      readServiceTickets,
+      writeServiceTickets,
+      findServiceTicketById,
+      saveServiceTicket,
+      appendServiceLog,
+      getMechanicReferenceByUser,
+      syncEquipmentStatusForService,
+      updateServiceTicketStatus,
+      getOpenTicketByEquipment,
+      serviceStatusLabel,
+    })
+  : null;
 
 function getMoscowDateParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -1667,7 +1722,19 @@ registerBotRoutes(app, {
   handleCallback: auditedHandleCallback,
   answerCallback,
   logger: console,
+  webhookPath: MAIN_BOT_WEBHOOK_PATH,
 });
+
+if (deliveryBotHandlers) {
+  registerBotRoutes(app, {
+    handleCommand: deliveryBotHandlers.handleCommand,
+    handleBotStarted: deliveryBotHandlers.handleBotStarted,
+    handleCallback: deliveryBotHandlers.handleCallback,
+    answerCallback: deliveryAnswerCallback,
+    logger: console,
+    webhookPath: DELIVERY_BOT_WEBHOOK_PATH,
+  });
+}
 
 registerSystemRoutes(app, {
   readData,
@@ -1695,7 +1762,12 @@ startServer({
     migrateReferenceCollections,
     migrateLegacyRepairFacts,
     applyAdminResetFromEnv,
-    registerWebhook,
+    registerWebhook: async () => {
+      await registerMainWebhook();
+      if (typeof registerDeliveryWebhook === 'function') {
+        await registerDeliveryWebhook();
+      }
+    },
     startGprsGateway: () => gprsGateway.start(),
     dbPath: DB_PATH,
     botToken: BOT_TOKEN,

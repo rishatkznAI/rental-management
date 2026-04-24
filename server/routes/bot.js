@@ -168,6 +168,8 @@ function registerBotApiRoutes(router, deps) {
     getBotSessions,
     botToken,
     webhookUrl,
+    deliveryBotToken,
+    deliveryWebhookUrl,
   } = deps;
 
   const botRouter = express.Router();
@@ -190,6 +192,8 @@ function registerBotApiRoutes(router, deps) {
       id: 'delivery',
       name: 'Бот доставки',
       description: 'Статусы доставки, работа перевозчиков и действия по логистическим заявкам в MAX.',
+      botToken: deliveryBotToken || '',
+      webhookUrl: deliveryBotToken ? (deliveryWebhookUrl || null) : null,
       filterConnections: (connection) =>
         connection.userRole === 'Перевозчик' ||
         matchesDeliveryActivity(connection),
@@ -217,8 +221,8 @@ function registerBotApiRoutes(router, deps) {
       name: config.name,
       provider: 'MAX',
       description: config.description,
-      botToken,
-      webhookUrl,
+      botToken: config.botToken ?? botToken,
+      webhookUrl: config.webhookUrl ?? webhookUrl,
       connections,
       activity,
     });
@@ -255,9 +259,10 @@ function registerBotRoutes(app, deps) {
     handleCallback,
     answerCallback,
     logger = console,
+    webhookPath = '/bot/webhook',
   } = deps;
 
-  app.post('/bot/webhook', async (req, res) => {
+  app.post(webhookPath, async (req, res) => {
     res.sendStatus(200);
 
     try {

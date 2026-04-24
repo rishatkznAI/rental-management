@@ -1,4 +1,4 @@
-function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logger = console }) {
+function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, webhookPath = '/bot/webhook', logger = console }) {
   function resolveRecipientQuery(target) {
     if (target && typeof target === 'object') {
       const chatId = target.chatId ?? target.chat_id;
@@ -74,12 +74,15 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, logge
       logger.log('[BOT] WEBHOOK_URL не задан — пропускаем регистрацию.');
       return;
     }
+    const normalizedPath = String(webhookPath || '/bot/webhook').startsWith('/')
+      ? String(webhookPath || '/bot/webhook')
+      : `/${String(webhookPath || 'bot/webhook')}`;
     const res = await maxRequest('POST', '/subscriptions', {
-      url: `${webhookUrl}/bot/webhook`,
+      url: `${webhookUrl}${normalizedPath}`,
       update_types: ['message_created', 'bot_started', 'message_callback'],
     });
     if (res && !res.error) {
-      logger.log(`[BOT] Webhook зарегистрирован: ${webhookUrl}/bot/webhook`);
+      logger.log(`[BOT] Webhook зарегистрирован: ${webhookUrl}${normalizedPath}`);
     } else {
       logger.error('[BOT] Ошибка регистрации webhook:', res?.message || res);
     }

@@ -623,6 +623,7 @@ export interface CrmDeal {
 
 export type KnowledgeBaseAudience = 'rental' | 'sales' | 'all';
 export type KnowledgeBaseProgressStatus = 'not_started' | 'in_progress' | 'passed' | 'failed';
+export type KnowledgeBaseSectionId = 'manager_training' | 'equipment_review' | 'scripts_standards' | 'regulations';
 
 export interface KnowledgeBaseQuestionOption {
   id: string;
@@ -640,6 +641,7 @@ export interface KnowledgeBaseQuestion {
 export interface KnowledgeBaseModule {
   id: string;
   title: string;
+  section?: KnowledgeBaseSectionId;
   category: string;
   audience: KnowledgeBaseAudience;
   description: string;

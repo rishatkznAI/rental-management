@@ -342,11 +342,58 @@ export default function Settings() {
         <p className="mt-1 text-sm text-gray-500">Управление пользователями, справочниками, системными данными и порядком левого меню</p>
       </div>
 
+      <Card className="border-amber-500/20 bg-amber-500/5">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle className="text-base">CRM</CardTitle>
+              <CardDescription>
+                Быстрое управление архивом CRM. Раздел можно скрыть на 30 дней, а потом при необходимости восстановить.
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={crmArchiveState.isArchived ? 'warning' : crmArchiveState.isDeleted ? 'danger' : 'success'}>
+                {crmArchiveState.isArchived ? 'CRM в архиве' : crmArchiveState.isDeleted ? 'CRM удалена' : 'CRM активна'}
+              </Badge>
+              {crmArchiveState.isArchived && crmArchiveState.daysLeft !== null && (
+                <Badge variant="secondary">Осталось {crmArchiveState.daysLeft} дн.</Badge>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            {crmArchiveState.isArchived
+              ? 'CRM уже скрыта из приложения. Здесь её можно восстановить одним кликом.'
+              : crmArchiveState.isDeleted
+                ? 'Архив CRM истёк, и сделки были очищены. При желании можно включить раздел заново.'
+                : 'Если хотите временно убрать CRM из приложения, используйте кнопку архивации.'}
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {!crmArchiveState.isArchived && !crmArchiveState.isDeleted && (
+              <Button variant="destructive" onClick={() => void handleArchiveCrm()}>
+                Архивировать CRM на 30 дней
+              </Button>
+            )}
+            {crmArchiveState.isArchived && (
+              <Button onClick={() => void handleRestoreCrm()}>
+                Восстановить CRM
+              </Button>
+            )}
+            {crmArchiveState.isDeleted && crmArchiveState.setting && (
+              <Button onClick={() => void handleRestoreCrm()}>
+                Включить CRM заново
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="flex h-auto w-full justify-start gap-4 rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
           {[
             { value: 'users',         label: 'Пользователи и роли' },
-            { value: 'menu',          label: 'Левое меню' },
+            { value: 'menu',          label: 'Левое меню и CRM' },
             { value: 'reference',     label: 'Справочники' },
             { value: 'notifications', label: 'Уведомления' },
             { value: 'data',          label: 'Данные системы' },

@@ -161,6 +161,33 @@ function deleteSession(token) {
   db.prepare('DELETE FROM app_sessions WHERE token = ?').run(token);
 }
 
+function deleteSessionsForUserIds(userIds) {
+  const ids = Array.isArray(userIds)
+    ? [...new Set(userIds.map(value => String(value || '').trim()).filter(Boolean))]
+    : [];
+  if (ids.length === 0) return 0;
+
+  const db = ensureDb();
+  const rows = db.prepare('SELECT token, json FROM app_sessions').all();
+  const tokensToDelete = rows
+    .map(row => {
+      try {
+        const session = JSON.parse(row.json);
+        return ids.includes(String(session?.userId || '').trim()) ? row.token : null;
+      } catch {
+        return row.token;
+      }
+    })
+    .filter(Boolean);
+
+  const del = db.prepare('DELETE FROM app_sessions WHERE token = ?');
+  const tx = db.transaction((tokens) => {
+    for (const token of tokens) del.run(token);
+  });
+  tx(tokensToDelete);
+  return tokensToDelete.length;
+}
+
 function cleanupExpiredSessions(now = Date.now()) {
   const db = ensureDb();
   db.prepare('DELETE FROM app_sessions WHERE expires_at <= ?').run(now);
@@ -178,6 +205,7 @@ module.exports = {
   countActiveSessions,
   cleanupExpiredSessions,
   deleteSession,
+  deleteSessionsForUserIds,
   getData,
   getSession,
   setData,

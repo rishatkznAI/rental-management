@@ -82,6 +82,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
 
+  useEffect(() => {
+    if (!state.isAuthenticated) return undefined;
+
+    let disposed = false;
+
+    const verifySession = () => {
+      if (disposed || document.visibilityState === 'hidden') return;
+      refreshUser().catch(() => {});
+    };
+
+    const intervalId = window.setInterval(verifySession, 15000);
+    window.addEventListener('focus', verifySession);
+    document.addEventListener('visibilitychange', verifySession);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', verifySession);
+      document.removeEventListener('visibilitychange', verifySession);
+    };
+  }, [refreshUser, state.isAuthenticated]);
+
   const login = useCallback(async (email: string, password: string) => {
     const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>(
       '/api/auth/login',

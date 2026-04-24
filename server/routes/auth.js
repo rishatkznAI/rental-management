@@ -7,6 +7,7 @@ function registerAuthRoutes(app, deps) {
     createSession,
     requireAuth,
     destroySession,
+    deleteSessionsForUserIds,
   } = deps;
 
   function buildSessionUser(user) {
@@ -71,8 +72,12 @@ function registerAuthRoutes(app, deps) {
   app.get('/api/auth/me', requireAuth, (req, res) => {
     const users = readData('users') || [];
     const user = users.find(item => item.id === req.user.userId);
-    if (!user) {
-      return res.status(401).json({ ok: false, error: 'Session user not found' });
+    if (!user || user.status !== 'Активен') {
+      const auth = req.headers['authorization'];
+      if (auth?.startsWith('Bearer ')) {
+        destroySession(auth.slice(7));
+      }
+      return res.status(401).json({ ok: false, error: 'Аккаунт отключён или удалён' });
     }
     res.json({ ok: true, user: buildSessionUser(user) });
   });
@@ -132,6 +137,14 @@ function registerAuthRoutes(app, deps) {
     const token = req.headers['authorization'].slice(7);
     destroySession(token);
     res.json({ ok: true });
+  });
+
+  app.post('/api/auth/logout-user/:userId', requireAuth, (req, res) => {
+    if (req.user?.userRole !== 'Администратор') {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    const count = deleteSessionsForUserIds([req.params.userId]);
+    return res.json({ ok: true, count });
   });
 }
 

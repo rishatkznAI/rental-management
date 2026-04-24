@@ -7,6 +7,7 @@ function registerCrudRoutes(deps) {
     idPrefixes,
     readData,
     writeData,
+    deleteSessionsForUserIds,
     requireAuth,
     requireWrite,
     sanitizeUser,
@@ -28,6 +29,24 @@ function registerCrudRoutes(deps) {
     const currentGanttRentals = readData('gantt_rentals') || [];
     const nextGanttRentals = syncGanttRentalPaymentStatuses(currentGanttRentals, payments);
     writeData('gantt_rentals', nextGanttRentals);
+  }
+
+  function invalidateAffectedUserSessions(previousUsers, nextUsers) {
+    if (typeof deleteSessionsForUserIds !== 'function') return;
+    const previous = Array.isArray(previousUsers) ? previousUsers : [];
+    const next = Array.isArray(nextUsers) ? nextUsers : [];
+    const nextById = new Map(next.map(item => [item.id, item]));
+    const affectedIds = previous
+      .filter(item => {
+        const nextItem = nextById.get(item.id);
+        if (!nextItem) return true;
+        return nextItem.status !== 'Активен' || nextItem.email !== item.email || nextItem.role !== item.role;
+      })
+      .map(item => item.id);
+
+    if (affectedIds.length > 0) {
+      deleteSessionsForUserIds(affectedIds);
+    }
   }
 
   function officeManagerCanOnlyCreateRental(req, collection, method) {
@@ -201,6 +220,9 @@ function registerCrudRoutes(deps) {
         }
         data.push(newItem);
         writeData(collection, data);
+        if (collection === 'users' && newItem.status !== 'Активен') {
+          invalidateAffectedUserSessions([], [newItem]);
+        }
         if (collection === 'payments') {
           syncPaymentStatusesAfterPaymentWrite(data);
         }
@@ -241,6 +263,7 @@ function registerCrudRoutes(deps) {
       }
 
       try {
+        const previousItem = collection === 'users' ? { ...data[idx] } : null;
         if (collection === 'rentals' || collection === 'gantt_rentals') {
           const validation = validateRentalPayload(
             collection,
@@ -286,6 +309,9 @@ function registerCrudRoutes(deps) {
               : nextItem);
         }
         writeData(collection, data);
+        if (collection === 'users' && previousItem) {
+          invalidateAffectedUserSessions([previousItem], [data[idx]]);
+        }
         if (collection === 'payments') {
           syncPaymentStatusesAfterPaymentWrite(data);
         }
@@ -321,6 +347,7 @@ function registerCrudRoutes(deps) {
       if (knowledgeProgressForbiddenReason) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
       }
+      const removedItem = data[idx];
       if (collection === 'service') {
         const repairId = data[idx].id;
         writeData('repair_work_items', (readData('repair_work_items') || []).filter(item => item.repairId !== repairId));
@@ -328,6 +355,9 @@ function registerCrudRoutes(deps) {
       }
       data.splice(idx, 1);
       writeData(collection, data);
+      if (collection === 'users') {
+        invalidateAffectedUserSessions([removedItem], []);
+      }
       if (collection === 'payments') {
         syncPaymentStatusesAfterPaymentWrite(data);
       }
@@ -390,6 +420,7 @@ function registerCrudRoutes(deps) {
           return item;
         });
         writeData('users', merged);
+        invalidateAffectedUserSessions(existing, merged);
         return res.json({ ok: true, count: merged.length });
       }
 

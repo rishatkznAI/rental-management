@@ -84,6 +84,7 @@ const {
   countActiveSessions,
   cleanupExpiredSessions,
   deleteSession,
+  deleteSessionsForUserIds,
   getData,
   getSession: getStoredSession,
   migrateJsonFilesToDb,
@@ -261,7 +262,21 @@ function requireAuth(req, res, next) {
   if (!session) {
     return res.status(401).json({ ok: false, error: 'Session expired or invalid' });
   }
-  req.user = session;
+  const users = readData('users') || [];
+  const currentUser = users.find(item => item.id === session.userId);
+  if (!currentUser || currentUser.status !== 'Активен') {
+    destroySession(token);
+    return res.status(401).json({ ok: false, error: 'Аккаунт отключён или удалён' });
+  }
+  req.user = {
+    ...session,
+    userName: currentUser.name,
+    userRole: currentUser.role,
+    email: currentUser.email,
+    profilePhoto: currentUser.profilePhoto || null,
+    ownerId: currentUser.ownerId || null,
+    ownerName: currentUser.ownerName || null,
+  };
   next();
 }
 
@@ -576,6 +591,7 @@ registerAuthRoutes(app, {
   createSession,
   requireAuth,
   destroySession,
+  deleteSessionsForUserIds,
 });
 
 apiRouter.use(registerRentalRoutes({
@@ -647,6 +663,7 @@ apiRouter.use(registerCrudRoutes({
   idPrefixes: ID_PREFIXES,
   readData,
   writeData,
+  deleteSessionsForUserIds,
   requireAuth,
   requireWrite,
   sanitizeUser,

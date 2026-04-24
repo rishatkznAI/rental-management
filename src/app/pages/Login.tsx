@@ -36,17 +36,17 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-slate-950">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="mb-5 rounded-2xl border border-[--color-primary]/15 bg-[--color-primary]/5 p-4 text-left">
-            <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-[--color-primary]/12 text-[--color-primary]">
+          <div className="mb-5 rounded-2xl border border-[--color-primary]/15 bg-[--color-primary]/5 p-4 text-left dark:border-[--color-primary]/20 dark:bg-[--color-primary]/10">
+            <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-[--color-primary]/12 text-[--color-primary] dark:bg-[--color-primary]/18">
               <Quote className="h-4 w-4" />
             </div>
-            <p className="text-sm font-medium leading-6 text-gray-900">
+            <p className="text-sm font-medium leading-6 text-gray-900 dark:text-slate-100">
               {quote.text}
             </p>
-            <p className="mt-2 text-xs uppercase tracking-[0.16em] text-gray-500">
+            <p className="mt-2 text-xs uppercase tracking-[0.16em] text-gray-500 dark:text-slate-400">
               {quote.author}
             </p>
           </div>

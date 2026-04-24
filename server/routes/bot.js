@@ -8,6 +8,13 @@ function trimText(value, maxLength = 160) {
     : normalized;
 }
 
+function describeIncomingText(text) {
+  const value = String(text || '').trim();
+  if (!value) return 'empty';
+  if (value.toLowerCase().startsWith('/start')) return '/start [redacted]';
+  return `len=${value.length}`;
+}
+
 function toFiniteNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -266,10 +273,8 @@ function registerBotRoutes(app, deps) {
     res.sendStatus(200);
 
     try {
-      // Полная структура для отладки
-      logger.log('[BOT] RAW body keys:', Object.keys(req.body || {}));
-      logger.log('[BOT] RAW body:', JSON.stringify(req.body).slice(0, 600));
       const updates = req.body?.updates || [req.body];
+      logger.log(`[BOT] webhook updates=${updates.length}`);
 
       for (const update of updates) {
         if (update.update_type === 'bot_started') {
@@ -304,7 +309,7 @@ function registerBotRoutes(app, deps) {
           };
           const phone = String(replyTarget.user_id || '');
 
-          logger.log(`[BOT] callback payload=${payload} target=${JSON.stringify(replyTarget)}`);
+          logger.log(`[BOT] callback payload=${payload} user=${replyTarget.user_id || 'unknown'}`);
           await handleCallback(replyTarget, phone, String(payload || ''), {
             callbackId,
             messageId: callbackMessageId,
@@ -319,9 +324,6 @@ function registerBotRoutes(app, deps) {
         const sender = msg?.sender;
         if (!sender?.user_id) continue;
 
-        logger.log('[BOT] msg.recipient:', JSON.stringify(msg?.recipient));
-        logger.log('[BOT] msg.sender:', JSON.stringify(sender));
-
         const replyTarget = {
           chat_id: msg?.recipient?.chat_id,
           user_id: sender.user_id,
@@ -333,7 +335,7 @@ function registerBotRoutes(app, deps) {
 
         if (!text.trim() && (!Array.isArray(attachments) || attachments.length === 0)) continue;
 
-        logger.log(`[BOT] [${sender.name || sender.user_id}] replyTarget=${JSON.stringify(replyTarget)} text="${text}" attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
+        logger.log(`[BOT] message user=${sender.user_id} text=${describeIncomingText(text)} attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
         await handleCommand(senderId, phone, text, { message: msg, body: msg?.body, attachments });
       }
     } catch (err) {

@@ -62,10 +62,11 @@ const PRIORITY_COLORS: Record<PlannerPriority, string> = {
   low:    'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
 };
 
-const EQUIPMENT_TYPE_LABELS: Record<EquipmentType, string> = {
+const EQUIPMENT_TYPE_LABELS: Record<string, string> = {
   scissor:    'Ножничный',
   articulated:'Коленчатый',
   telescopic: 'Телескопический',
+  mast: 'Мачтовый',
 };
 
 const EQUIPMENT_STATUS_LABELS: Record<string, string> = {

@@ -92,21 +92,51 @@ const {
   setData,
 } = require('./db');
 
-// ── Пароли (совместимо с frontend userStorage.ts) ─────────────────────────────
+// ── Пароли ────────────────────────────────────────────────────────────────────
 
-const HASH_PREFIX = 'h1:';
+const LEGACY_HASH_PREFIX = 'h1:';
+const STRONG_HASH_PREFIX = 'h2:scrypt:';
 const HASH_SALT   = 'rental-mgmt-v1';
+const SCRYPT_KEY_LENGTH = 64;
+const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1 };
+
+function hashLegacyPassword(plain) {
+  const hex = crypto.createHash('sha256').update(plain + ':' + HASH_SALT).digest('hex');
+  return LEGACY_HASH_PREFIX + hex;
+}
 
 function hashPassword(plain) {
-  const hex = crypto.createHash('sha256').update(plain + ':' + HASH_SALT).digest('hex');
-  return HASH_PREFIX + hex;
+  const salt = crypto.randomBytes(16).toString('base64url');
+  const hash = crypto.scryptSync(String(plain), salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS).toString('base64url');
+  return `${STRONG_HASH_PREFIX}${salt}:${hash}`;
+}
+
+function verifyStrongPassword(plain, stored) {
+  const parts = String(stored || '').split(':');
+  if (parts.length !== 4 || parts[0] !== 'h2' || parts[1] !== 'scrypt') return false;
+  const [, , salt, expectedHash] = parts;
+  if (!salt || !expectedHash) return false;
+  try {
+    const actual = crypto.scryptSync(String(plain), salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS);
+    const expected = Buffer.from(expectedHash, 'base64url');
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
 }
 
 function verifyPassword(plain, stored) {
-  if (stored && stored.startsWith(HASH_PREFIX)) {
-    return hashPassword(plain) === stored;
+  if (stored && stored.startsWith(STRONG_HASH_PREFIX)) {
+    return verifyStrongPassword(plain, stored);
+  }
+  if (stored && stored.startsWith(LEGACY_HASH_PREFIX)) {
+    return hashLegacyPassword(plain) === stored;
   }
   return plain === stored; // legacy plain-text
+}
+
+function needsPasswordRehash(stored) {
+  return !String(stored || '').startsWith(STRONG_HASH_PREFIX);
 }
 
 // ── Express ───────────────────────────────────────────────────────────────────
@@ -275,6 +305,41 @@ const WRITE_PERMISSIONS = {
   vehicle_trips:    ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
 };
 
+const READ_PERMISSIONS = {
+  equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...MECHANIC_ROLES],
+  rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
+  gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
+  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  delivery_carriers: ['Администратор'],
+  service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
+  clients:        ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  knowledge_base_modules: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
+  knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
+  app_settings: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...MECHANIC_ROLES],
+  gsm_packets: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
+  gsm_commands: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
+  documents:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
+  payments:       ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  users:          ['Администратор'],
+  shipping_photos:['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
+  owners:         ['Администратор', 'Инвестор'],
+  mechanics:      ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  service_works:  ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  spare_parts:    ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  service_route_norms: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  service_field_trips: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  repair_work_items: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  repair_part_items: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  service_work_catalog: ['Администратор'],
+  spare_parts_catalog: ['Администратор'],
+  planner_items:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
+  service_vehicles: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  vehicle_trips:    ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  reports: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+};
+
 // ── Middleware ─────────────────────────────────────────────────────────────────
 
 function requireAuth(req, res, next) {
@@ -313,6 +378,27 @@ function requireWrite(collection) {
     }
     next();
   };
+}
+
+function canReadCollection(req, collection) {
+  const allowed = READ_PERMISSIONS[collection] || ['Администратор'];
+  return allowed.includes(req.user?.userRole);
+}
+
+function requireRead(collection) {
+  return (req, res, next) => {
+    if (!canReadCollection(req, collection)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden: insufficient role' });
+    }
+    next();
+  };
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user?.userRole !== 'Администратор') {
+    return res.status(403).json({ ok: false, error: 'Forbidden: admin only' });
+  }
+  next();
 }
 
 function sanitizeUser(user) {
@@ -613,6 +699,7 @@ registerAuthRoutes(app, {
   writeData,
   verifyPassword,
   hashPassword,
+  needsPasswordRehash,
   createSession,
   requireAuth,
   destroySession,
@@ -623,6 +710,7 @@ apiRouter.use(registerRentalRoutes({
   readData,
   writeData,
   requireAuth,
+  requireRead,
   validateRentalPayload,
   mergeRentalHistory,
   normalizeGanttRentalList,
@@ -633,6 +721,7 @@ apiRouter.use(registerRentalRoutes({
 
 registerFinanceRoutes(apiRouter, {
   requireAuth,
+  requireRead,
   readData,
   getRentalDebtOverdueDays,
   buildRentalDebtRows,
@@ -653,6 +742,7 @@ registerDeliveryRoutes(apiRouter, {
   readData,
   writeData,
   requireAuth,
+  requireRead,
   requireWrite,
   sendMessage: deliverySendMessage,
   getBotUsers,
@@ -690,10 +780,12 @@ apiRouter.use(registerCrudRoutes({
   writeData,
   deleteSessionsForUserIds,
   requireAuth,
+  requireRead,
   requireWrite,
   sanitizeUser,
   publicUserView,
   canReadFullUsers,
+  hashPassword,
   normalizeServiceWorkRecord,
   normalizeSparePartRecord,
   validateRentalPayload,
@@ -714,6 +806,7 @@ registerServiceRoutes(apiRouter, {
   readData,
   writeData,
   requireAuth,
+  requireRead,
   requireWrite,
   normalizeServiceWorkRecord,
   normalizeSparePartRecord,
@@ -732,8 +825,8 @@ registerBotApiRoutes(apiRouter, {
   getBotSessions,
   botToken: BOT_TOKEN,
   webhookUrl: WEBHOOK_URL,
-  deliveryBotToken: hasDedicatedDeliveryBot ? DELIVERY_BOT_TOKEN : '',
-  deliveryWebhookUrl: hasDedicatedDeliveryBot ? DELIVERY_WEBHOOK_URL : '',
+  deliveryBotToken: hasDedicatedDeliveryBot ? DELIVERY_BOT_TOKEN : BOT_TOKEN,
+  deliveryWebhookUrl: hasDedicatedDeliveryBot ? DELIVERY_WEBHOOK_URL : WEBHOOK_URL,
 });
 
 const {
@@ -793,6 +886,7 @@ const deliveryBotHandlers = hasDedicatedDeliveryBot
       updateServiceTicketStatus,
       getOpenTicketByEquipment,
       serviceStatusLabel,
+      preferCarrierAutoLogin: true,
     })
   : null;
 
@@ -1059,7 +1153,7 @@ async function auditedHandleCallback(senderId, phone, payload, callbackContext) 
  * Исключает строки с prepStatus === 'shipped' (уже отгруженные) — если только
  * не передан query-параметр ?include_shipped=1.
  */
-apiRouter.get('/planner', requireAuth, (req, res) => {
+apiRouter.get('/planner', requireAuth, requireRead('planner_items'), (req, res) => {
   try {
     const includeShipped = req.query.include_shipped === '1';
 
@@ -1525,7 +1619,7 @@ apiRouter.post('/vehicle-trips', requireAuth, requireWrite('vehicle_trips'), (re
  * GET /api/vehicle-trips
  * Получить поездки (фильтр ?vehicleId=...).
  */
-apiRouter.get('/vehicle-trips', requireAuth, (req, res) => {
+apiRouter.get('/vehicle-trips', requireAuth, requireRead('vehicle_trips'), (req, res) => {
   try {
     let trips = readData('vehicle_trips') || [];
     if (req.query.vehicleId) {
@@ -1599,6 +1693,11 @@ app.use('/api', apiRouter);
 
 // ── Seed default admin ────────────────────────────────────────────────────────
 
+function isProductionRuntime() {
+  return process.env.NODE_ENV === 'production' ||
+    Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
+}
+
 function getDefaultUsers() {
   return [
     {
@@ -1656,6 +1755,28 @@ function seedDefaultUsers() {
   const existing = readData('users');
   if (existing && existing.length > 0) return; // уже есть данные
 
+  if (isProductionRuntime()) {
+    const bootstrapPassword = process.env.ADMIN_RESET_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD;
+    if (!bootstrapPassword) {
+      console.error('[INIT] В production не создаём пользователей с известными паролями.');
+      console.error('[INIT] Задайте ADMIN_RESET_PASSWORD или BOOTSTRAP_ADMIN_PASSWORD для первичного администратора.');
+      return;
+    }
+
+    const bootstrapEmail = (process.env.ADMIN_RESET_EMAIL || process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@rental.local').trim().toLowerCase();
+    writeData('users', [{
+      id:       'U-bootstrap-admin',
+      name:     'Администратор',
+      email:    bootstrapEmail,
+      role:     'Администратор',
+      status:   'Активен',
+      password: hashPassword(bootstrapPassword),
+    }]);
+    console.log(`[INIT] Создан production-администратор: ${bootstrapEmail}`);
+    console.log('[INIT] ⚠️  После первого входа смените пароль и удалите bootstrap/reset env.');
+    return;
+  }
+
   const defaults = getDefaultUsers();
   writeData('users', defaults);
   console.log('[INIT] Созданы стандартные пользователи для первого входа');
@@ -1664,6 +1785,8 @@ function seedDefaultUsers() {
 }
 
 function ensureLegacyDefaultUsers() {
+  if (isProductionRuntime()) return;
+
   const users = readData('users') || [];
   const isSingleDefaultAdmin =
     users.length === 1 &&
@@ -1748,6 +1871,7 @@ registerSystemRoutes(app, {
   dbPath: DB_PATH,
   webhookUrl: WEBHOOK_URL,
   requireAuth,
+  requireAdmin,
   fetchImpl: fetch,
 });
 

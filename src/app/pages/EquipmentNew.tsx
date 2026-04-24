@@ -20,6 +20,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { createAuditEntry } from '../lib/entity-history';
 import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS } from '../lib/equipmentClassification';
+import { useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 
 // ─── Вспомогательные компоненты ────────────────────────────────────────────
 
@@ -146,6 +147,7 @@ export default function EquipmentNew() {
   const createEquipment = useCreateEquipment();
   const [owners, setOwners] = React.useState(DEFAULT_OWNERS);
   const isSaleMode = useMemo(() => new URLSearchParams(location.search).get('sale') === '1', [location.search]);
+  const equipmentTypeOptions = useEquipmentTypeCatalog();
 
   // Защита от прямого перехода без прав
   useEffect(() => {
@@ -215,7 +217,7 @@ export default function EquipmentNew() {
       inventoryNumber:       isSaleMode ? '' : form.inventoryNumber,
       manufacturer:          form.manufacturer,
       model:                 form.model,
-      type:                  form.type as 'scissor' | 'articulated' | 'telescopic',
+      type:                  form.type,
       drive:                 form.drive as 'diesel' | 'electric',
       serialNumber:          form.serialNumber,
       year:                  Number(form.year) || new Date().getFullYear(),
@@ -369,11 +371,7 @@ export default function EquipmentNew() {
                 placeholder="Выберите тип"
                 value={form.type}
                 onValueChange={v => update('type', v)}
-                options={[
-                  { value: 'scissor',     label: 'Ножничный (Scissor Lift)' },
-                  { value: 'articulated', label: 'Коленчатый (Boom Lift)' },
-                  { value: 'telescopic',  label: 'Телескопический (Telehandler)' },
-                ]}
+                options={equipmentTypeOptions}
                 hint="Конструктивный тип платформы"
               />
               <SelectField

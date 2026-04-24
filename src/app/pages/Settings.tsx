@@ -37,7 +37,6 @@ import {
 import {
   type UserRole, type UserStatus, type SystemUser,
   ROLES, USERS_STORAGE_KEY,
-  hashPassword,
   isMechanicRole,
 } from '../lib/userStorage';
 import { usersService } from '../services/users.service';
@@ -66,6 +65,12 @@ import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/ren
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { DEFAULT_SIDEBAR_ORDER, SIDEBAR_NAV_GROUPS, SIDEBAR_SECTION_LABELS } from '../lib/navigation';
 import { CRM_ARCHIVE_TTL_MS, resolveCrmArchiveState } from '../lib/crmArchive';
+import {
+  EQUIPMENT_TYPE_CATALOG_SETTING_KEY,
+  makeCustomEquipmentTypeValue,
+  resolveEquipmentTypeCatalog,
+  type EquipmentTypeCatalogItem,
+} from '../lib/equipmentTypes';
 import type {
   AppSetting,
   Equipment,
@@ -156,7 +161,7 @@ export default function Settings() {
   const setUsers = React.useCallback(async (updater: (prev: SystemUser[]) => SystemUser[]) => {
     const next = updater(users);
     setUsersState(next);
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(next));
+    localStorage.removeItem(USERS_STORAGE_KEY);
     await usersService.bulkReplace(next);
     await queryClient.invalidateQueries({ queryKey: ['users'] });
   }, [queryClient, users]);
@@ -303,8 +308,8 @@ export default function Settings() {
         };
 
     if (editingId) {
-      // При редактировании: пустой пароль = не меняем; непустой — хешируем
-      const hashedPwd = form.password ? await hashPassword(form.password) : undefined;
+      // При редактировании: пустой пароль = не меняем; непустой сервер сохранит как scrypt-хеш.
+      const nextPassword = form.password ? form.password : undefined;
       await setUsers(prev => prev.map(u => {
         if (u.id !== editingId) return u;
         return {
@@ -314,19 +319,18 @@ export default function Settings() {
           role: form.role,
           status: form.status,
           ...ownerPayload,
-          ...(hashedPwd ? { password: hashedPwd } : {}),
+          ...(nextPassword ? { password: nextPassword } : {}),
         };
       }));
     } else {
       if (!form.password.trim()) { setFormError('Задайте пароль для нового пользователя'); return; }
-      const hashedPwd = await hashPassword(form.password);
       const newUser: SystemUser = {
         id: Date.now().toString(),
         name: form.name,
         email: form.email,
         role: form.role,
         status: form.status,
-        password: hashedPwd,
+        password: form.password,
         ...ownerPayload,
       };
       await setUsers(prev => [...prev, newUser]);
@@ -619,7 +623,7 @@ export default function Settings() {
         {/* ── Справочники ──────────────────────────────────────────────────── */}
         <TabsContent value="reference">
           <div className="grid gap-6 lg:grid-cols-2">
-            <ReferenceList title="Типы техники"    items={['Ножничный', 'Коленчатый', 'Телескопический', 'Мачтовый']} />
+            <EquipmentTypesReferenceList appSettings={appSettings} />
             <ReferenceList title="Локации"         items={['Москва, склад А', 'Москва, склад Б', 'Санкт-Петербург']} />
             <StatusList />
             <ReferenceList title="Причины простоя" items={['Плановое ТО', 'Ремонт', 'Ожидание запчастей', 'Калибровка']} />
@@ -873,6 +877,204 @@ function ReferenceList({ title, items: initialItems }: { title: string; items: s
               <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>✕</Button>
             </div>
           )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function EquipmentTypesReferenceList({ appSettings }: { appSettings: AppSetting[] }) {
+  const queryClient = useQueryClient();
+  const catalog = React.useMemo(() => resolveEquipmentTypeCatalog(appSettings), [appSettings]);
+  const setting = React.useMemo(
+    () => appSettings.find(item => item.key === EQUIPMENT_TYPE_CATALOG_SETTING_KEY) || null,
+    [appSettings],
+  );
+  const [adding, setAdding] = React.useState(false);
+  const [newValue, setNewValue] = React.useState('');
+  const [editValue, setEditValue] = React.useState('');
+  const [editingValue, setEditingValue] = React.useState<string | null>(null);
+  const [error, setError] = React.useState('');
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  const saveCatalog = React.useCallback(async (nextCatalog: EquipmentTypeCatalogItem[]) => {
+    const now = new Date().toISOString();
+    const payload = {
+      key: EQUIPMENT_TYPE_CATALOG_SETTING_KEY,
+      value: nextCatalog.map(item => ({
+        value: item.value,
+        label: item.label,
+        isDefault: Boolean(item.isDefault),
+      })),
+      createdAt: setting?.createdAt || now,
+      updatedAt: now,
+    };
+
+    setIsSaving(true);
+    try {
+      if (setting) {
+        await appSettingsService.update(setting.id, payload);
+      } else {
+        await appSettingsService.create(payload);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [queryClient, setting]);
+
+  const hasDuplicate = React.useCallback((label: string, value: string, currentValue?: string) => {
+    const normalizedLabel = label.trim().toLowerCase();
+    const normalizedValue = value.trim().toLowerCase();
+    return catalog.some(item =>
+      item.value !== currentValue &&
+      (
+        item.label.trim().toLowerCase() === normalizedLabel ||
+        item.value.trim().toLowerCase() === normalizedValue
+      )
+    );
+  }, [catalog]);
+
+  const handleAdd = async () => {
+    const label = newValue.replace(/\s+/g, ' ').trim();
+    const value = makeCustomEquipmentTypeValue(label);
+    if (!label || !value) {
+      setError('Введите название типа техники');
+      return;
+    }
+    if (hasDuplicate(label, value)) {
+      setError('Такой тип техники уже есть в справочнике');
+      return;
+    }
+    setError('');
+    await saveCatalog([...catalog, { value, label, isDefault: false }]);
+    setNewValue('');
+    setAdding(false);
+  };
+
+  const handleEditSave = async (item: EquipmentTypeCatalogItem) => {
+    const label = editValue.replace(/\s+/g, ' ').trim();
+    if (!label) {
+      setError('Название типа техники не может быть пустым');
+      return;
+    }
+    if (hasDuplicate(label, item.value, item.value)) {
+      setError('Такой тип техники уже есть в справочнике');
+      return;
+    }
+    setError('');
+    await saveCatalog(catalog.map(entry => (
+      entry.value === item.value ? { ...entry, label } : entry
+    )));
+    setEditingValue(null);
+    setEditValue('');
+  };
+
+  const handleDelete = async (item: EquipmentTypeCatalogItem) => {
+    if (item.isDefault) return;
+    setError('');
+    await saveCatalog(catalog.filter(entry => entry.value !== item.value));
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle>Типы техники для продаж</CardTitle>
+            <CardDescription>Справочник используется в карточке техники и при добавлении позиции в продажи</CardDescription>
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => setAdding(true)} disabled={isSaving}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {catalog.map(item => (
+            <div key={item.value} className="flex items-center justify-between rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+              {editingValue === item.value ? (
+                <input
+                  autoFocus
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') void handleEditSave(item);
+                    if (e.key === 'Escape') setEditingValue(null);
+                  }}
+                  className="mr-2 flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800"
+                />
+              ) : (
+                <div className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{item.label}</span>
+                  <span className="block truncate text-xs text-gray-500">{item.value}</span>
+                </div>
+              )}
+
+              <div className="flex gap-1">
+                {editingValue === item.value ? (
+                  <>
+                    <button
+                      onClick={() => void handleEditSave(item)}
+                      className="rounded bg-[--color-primary] px-2 py-1 text-xs text-white hover:opacity-90"
+                      disabled={isSaving}
+                    >
+                      OK
+                    </button>
+                    <button
+                      onClick={() => setEditingValue(null)}
+                      className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      disabled={isSaving}
+                    >
+                      Отмена
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditingValue(item.value);
+                        setEditValue(item.label);
+                        setError('');
+                      }}
+                      className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      disabled={isSaving}
+                    >
+                      <Edit className="h-4 w-4 text-gray-500" />
+                    </button>
+                    <button
+                      onClick={() => void handleDelete(item)}
+                      className="rounded p-1 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-900/20"
+                      disabled={isSaving || item.isDefault}
+                      title={item.isDefault ? 'Базовый тип нельзя удалить' : 'Удалить тип'}
+                    >
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {adding && (
+            <div className="flex gap-2">
+              <input
+                autoFocus
+                value={newValue}
+                onChange={e => setNewValue(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') void handleAdd();
+                  if (e.key === 'Escape') setAdding(false);
+                }}
+                placeholder="Например: Вертикальный мачтовый подъёмник"
+                className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800"
+              />
+              <Button size="sm" onClick={() => void handleAdd()} disabled={isSaving}>OK</Button>
+              <Button size="sm" variant="ghost" onClick={() => setAdding(false)} disabled={isSaving}>Отмена</Button>
+            </div>
+          )}
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       </CardContent>
     </Card>
@@ -1517,7 +1719,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           notes,
         ] = columns;
 
-        const type = TYPE_IMPORT_MAP[(typeRaw || '').toLowerCase()];
+        const type = TYPE_IMPORT_MAP[(typeRaw || '').toLowerCase()] || typeRaw;
         const drive = DRIVE_IMPORT_MAP[(driveRaw || '').toLowerCase()];
         const status = STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'available';
         const owner = OWNER_IMPORT_MAP[(ownerRaw || '').toLowerCase()] ?? 'own';
@@ -1527,7 +1729,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           : true;
 
         if (!inventoryNumber || !manufacturer || !model || !serialNumber || !type || !drive || !location) {
-          throw new Error(`Строка ${index + 2}: не заполнены обязательные поля или неизвестный тип/привод`);
+          throw new Error(`Строка ${index + 2}: не заполнены обязательные поля или неизвестный привод`);
         }
 
         return {

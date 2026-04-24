@@ -24,7 +24,7 @@ export default defineConfig({
     {
       command: 'npm start',
       cwd: './server',
-      url: 'http://127.0.0.1:3000/api/status',
+      url: 'http://127.0.0.1:3000/health',
       reuseExistingServer: true,
       timeout: 120_000,
     },

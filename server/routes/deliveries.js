@@ -5,6 +5,7 @@ function registerDeliveryRoutes(router, deps) {
     readData,
     writeData,
     requireAuth,
+    requireRead,
     requireWrite,
     sendMessage,
     getBotUsers,
@@ -149,6 +150,17 @@ function registerDeliveryRoutes(router, deps) {
     return keyboard([
       [button('Принял', `delivery:status:${deliveryId}:accepted`)],
     ]);
+  }
+
+  function getMaxApiErrorMessage(response) {
+    if (!response) return 'MAX не вернул ответ';
+    if (response.error) {
+      return response.message || response.error_description || response.error || 'MAX вернул ошибку';
+    }
+    if (response.success === false) {
+      return response.message || 'MAX вернул ошибку';
+    }
+    return null;
   }
 
   function syncLinkedRentals(delivery, author) {
@@ -350,9 +362,13 @@ function registerDeliveryRoutes(router, deps) {
     ].filter(Boolean).join('\n');
 
     try {
-      await sendMessage(target, text, {
+      const response = await sendMessage(target, text, {
         attachments: deliveryStatusKeyboard(delivery.id, delivery.status === 'new' ? 'sent' : delivery.status),
       });
+      const maxApiError = getMaxApiErrorMessage(response);
+      if (maxApiError) {
+        throw new Error(maxApiError);
+      }
       return {
         ...delivery,
         status: delivery.status === 'new' ? 'sent' : delivery.status,
@@ -367,15 +383,15 @@ function registerDeliveryRoutes(router, deps) {
     }
   }
 
-  router.get('/delivery-carriers', requireAuth, (req, res) => {
+  router.get('/delivery-carriers', requireAuth, requireRead('deliveries'), (req, res) => {
     res.json(listCarrierDirectory());
   });
 
-  router.get('/delivery-carrier-connections', requireAuth, (req, res) => {
+  router.get('/delivery-carrier-connections', requireAuth, requireRead('delivery_carriers'), (req, res) => {
     res.json(listRawCarrierConnections());
   });
 
-  router.get('/deliveries', requireAuth, (req, res) => {
+  router.get('/deliveries', requireAuth, requireRead('deliveries'), (req, res) => {
     let deliveries = readData('deliveries') || [];
     if (req.query.status) {
       deliveries = deliveries.filter((item) => item.status === req.query.status);
@@ -391,7 +407,7 @@ function registerDeliveryRoutes(router, deps) {
     res.json(deliveries);
   });
 
-  router.get('/deliveries/:id', requireAuth, (req, res) => {
+  router.get('/deliveries/:id', requireAuth, requireRead('deliveries'), (req, res) => {
     const deliveries = readData('deliveries') || [];
     const found = deliveries.find((item) => item.id === req.params.id);
     if (!found) {

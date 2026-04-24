@@ -9,10 +9,12 @@ function registerCrudRoutes(deps) {
     writeData,
     deleteSessionsForUserIds,
     requireAuth,
+    requireRead,
     requireWrite,
     sanitizeUser,
     publicUserView,
     canReadFullUsers,
+    hashPassword,
     normalizeServiceWorkRecord,
     normalizeSparePartRecord,
     validateRentalPayload,
@@ -29,6 +31,32 @@ function registerCrudRoutes(deps) {
     const currentGanttRentals = readData('gantt_rentals') || [];
     const nextGanttRentals = syncGanttRentalPaymentStatuses(currentGanttRentals, payments);
     writeData('gantt_rentals', nextGanttRentals);
+  }
+
+  function hasReadAccess(req, collection) {
+    if (collection === 'users') return true;
+    if (typeof requireRead !== 'function') return true;
+    return new Promise((resolve) => {
+      requireRead(collection)(req, {
+        status(statusCode) {
+          return {
+            json(payload) {
+              resolve({ denied: true, statusCode, payload });
+            },
+          };
+        },
+      }, () => resolve({ denied: false }));
+    });
+  }
+
+  function normalizeUserPasswordForWrite(user, existing = null) {
+    const next = { ...user };
+    if (!next.password && existing?.password) {
+      next.password = existing.password;
+    } else if (next.password && !String(next.password).startsWith('h1:') && !String(next.password).startsWith('h2:scrypt:')) {
+      next.password = hashPassword(String(next.password));
+    }
+    return next;
   }
 
   function crmArchiveForbiddenReason(collection) {
@@ -129,7 +157,11 @@ function registerCrudRoutes(deps) {
     }
     const prefix = idPrefixes[collection] || collection;
 
-    router.get(`/${collection}`, requireAuth, (req, res) => {
+    router.get(`/${collection}`, requireAuth, async (req, res) => {
+      const readAccess = await hasReadAccess(req, collection);
+      if (readAccess.denied) {
+        return res.status(readAccess.statusCode).json(readAccess.payload);
+      }
       const crmForbiddenReason = crmArchiveForbiddenReason(collection);
       if (crmForbiddenReason) {
         return res.status(410).json({ ok: false, error: crmForbiddenReason });
@@ -163,7 +195,11 @@ function registerCrudRoutes(deps) {
       return res.json(data);
     });
 
-    router.get(`/${collection}/:id`, requireAuth, (req, res) => {
+    router.get(`/${collection}/:id`, requireAuth, async (req, res) => {
+      const readAccess = await hasReadAccess(req, collection);
+      if (readAccess.denied) {
+        return res.status(readAccess.statusCode).json(readAccess.payload);
+      }
       const crmForbiddenReason = crmArchiveForbiddenReason(collection);
       if (crmForbiddenReason) {
         return res.status(410).json({ ok: false, error: crmForbiddenReason });
@@ -224,6 +260,9 @@ function registerCrudRoutes(deps) {
 
         const data = readData(collection) || [];
         let newItem = { ...req.body, id: req.body.id || generateId(prefix) };
+        if (collection === 'users') {
+          newItem = normalizeUserPasswordForWrite(newItem);
+        }
         if (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req)) {
           newItem = {
             ...newItem,
@@ -323,7 +362,10 @@ function registerCrudRoutes(deps) {
             updatedAt: nowIso(),
           });
         } else {
-          const nextItem = { ...data[idx], ...req.body, id: data[idx].id };
+          let nextItem = { ...data[idx], ...req.body, id: data[idx].id };
+          if (collection === 'users') {
+            nextItem = normalizeUserPasswordForWrite(nextItem, data[idx]);
+          }
           data[idx] = collection === 'clients' || collection === 'equipment'
             ? mergeEntityHistory(collection, data[idx], nextItem, req.user.userName)
             : (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req)
@@ -452,7 +494,7 @@ function registerCrudRoutes(deps) {
             const existingPwd = existingById.get(item.id)?.password;
             if (existingPwd) return { ...item, password: existingPwd };
           }
-          return item;
+          return normalizeUserPasswordForWrite(item, existingById.get(item.id));
         });
         writeData('users', merged);
         invalidateAffectedUserSessions(existing, merged);

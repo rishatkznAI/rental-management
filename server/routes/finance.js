@@ -3,6 +3,7 @@ const express = require('express');
 function registerFinanceRoutes(router, deps) {
   const {
     requireAuth,
+    requireRead,
     readData,
     buildRentalDebtRows,
     getRentalDebtOverdueDays,
@@ -21,35 +22,35 @@ function registerFinanceRoutes(router, deps) {
     };
   }
 
-  router.get('/finance/debt-rows', requireAuth, (req, res) => {
+  router.get('/finance/debt-rows', requireAuth, requireRead('payments'), (req, res) => {
     const { rentals, payments } = getFinanceCollections();
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildRentalDebtRows(rentals, payments, today);
     res.json(rows);
   });
 
-  router.get('/finance/clients', requireAuth, (req, res) => {
+  router.get('/finance/clients', requireAuth, requireRead('payments'), (req, res) => {
     const { clients, rentals, payments } = getFinanceCollections();
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildClientReceivables(clients, buildRentalDebtRows(rentals, payments), today);
     res.json(rows);
   });
 
-  router.get('/finance/client-snapshots', requireAuth, (req, res) => {
+  router.get('/finance/client-snapshots', requireAuth, requireRead('payments'), (req, res) => {
     const { clients, rentals, payments } = getFinanceCollections();
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildClientFinancialSnapshots(clients, rentals, payments, today);
     res.json(rows);
   });
 
-  router.get('/finance/managers', requireAuth, (req, res) => {
+  router.get('/finance/managers', requireAuth, requireRead('payments'), (req, res) => {
     const { rentals, payments } = getFinanceCollections();
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildManagerReceivables(buildRentalDebtRows(rentals, payments), today);
     res.json(rows);
   });
 
-  router.get('/finance/manager-breakdown', requireAuth, (req, res) => {
+  router.get('/finance/manager-breakdown', requireAuth, requireRead('payments'), (req, res) => {
     const { rentals, payments } = getFinanceCollections();
     const documents = readData('documents') || [];
     const manager = String(req.query.manager || '').trim();
@@ -165,14 +166,14 @@ function registerFinanceRoutes(router, deps) {
     });
   });
 
-  router.get('/finance/aging', requireAuth, (req, res) => {
+  router.get('/finance/aging', requireAuth, requireRead('payments'), (req, res) => {
     const { rentals, payments } = getFinanceCollections();
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildOverdueBuckets(buildRentalDebtRows(rentals, payments), today);
     res.json(rows);
   });
 
-  router.get('/finance/report', requireAuth, (req, res) => {
+  router.get('/finance/report', requireAuth, requireRead('payments'), (req, res) => {
     const { clients, rentals, payments } = getFinanceCollections();
     const today = String(req.query.today || '').trim() || undefined;
     res.json(buildFinanceReport({ clients, rentals, payments }, today));

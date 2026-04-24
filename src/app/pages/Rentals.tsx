@@ -72,10 +72,11 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
 
 const LEFT_PANEL_WIDTH = 236;
 
-const TYPE_LABELS: Record<EquipmentType, string> = {
+const TYPE_LABELS: Record<string, string> = {
   scissor: 'Ножничный',
   articulated: 'Коленчатый',
   telescopic: 'Телескопический',
+  mast: 'Мачтовый',
 };
 
 const EQ_STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -598,10 +599,11 @@ export default function Rentals() {
   const [filterStatus, setFilterStatus] = useState('');
   const [rentalPreset, setRentalPreset] = useState<'all' | 'returns_today' | 'overdue' | 'unpaid' | 'with_service'>('all');
   const [showFiltersDialog, setShowFiltersDialog] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<EquipmentType, boolean>>({
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({
     scissor: false,
     articulated: false,
     telescopic: false,
+    mast: false,
   });
 
   // Derived: any filter is currently active
@@ -637,12 +639,13 @@ export default function Rentals() {
     if (!savedGroups) return;
 
     try {
-      const parsed = JSON.parse(savedGroups) as Partial<Record<EquipmentType, boolean>>;
+      const parsed = JSON.parse(savedGroups) as Partial<Record<string, boolean>>;
       setCollapsedGroups(prev => ({
         ...prev,
         scissor: typeof parsed.scissor === 'boolean' ? parsed.scissor : prev.scissor,
         articulated: typeof parsed.articulated === 'boolean' ? parsed.articulated : prev.articulated,
         telescopic: typeof parsed.telescopic === 'boolean' ? parsed.telescopic : prev.telescopic,
+        mast: typeof parsed.mast === 'boolean' ? parsed.mast : prev.mast,
       }));
     } catch {
       // Ignore corrupted local settings and fall back to defaults.
@@ -886,10 +889,11 @@ export default function Rentals() {
       grouped.set(item.type, bucket);
     });
 
-    return (['scissor', 'articulated', 'telescopic'] as EquipmentType[])
+    return Array.from(grouped.keys())
+      .sort((a, b) => (TYPE_LABELS[a] || a).localeCompare(TYPE_LABELS[b] || b, 'ru'))
       .map(type => ({
         type,
-        label: TYPE_LABELS[type],
+        label: TYPE_LABELS[type] || type,
         items: grouped.get(type) ?? [],
       }))
       .filter(group => group.items.length > 0);
@@ -1980,7 +1984,7 @@ export default function Rentals() {
                       {equipment.model}
                     </h3>
                     <p className="mt-1 text-[11px] uppercase tracking-[0.04em] text-gray-500 dark:text-gray-400">
-                      SN {equipment.serialNumber || 'не указан'} · {TYPE_LABELS[equipment.type]}
+                      SN {equipment.serialNumber || 'не указан'} · {TYPE_LABELS[equipment.type] || equipment.type}
                     </p>
                   </div>
                 </div>

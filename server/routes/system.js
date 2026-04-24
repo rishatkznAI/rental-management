@@ -1,4 +1,117 @@
 const { isMechanicRole } = require('../lib/role-groups');
+const dns = require('dns');
+const http = require('http');
+const https = require('https');
+const net = require('net');
+
+const MAX_MEDIA_PROXY_BYTES = 10 * 1024 * 1024;
+const MEDIA_PROXY_TIMEOUT_MS = 10_000;
+const dnsPromises = dns.promises;
+
+function isPrivateAddress(address) {
+  if (!address) return true;
+  if (address.startsWith('::ffff:')) {
+    return isPrivateAddress(address.slice('::ffff:'.length));
+  }
+
+  const family = net.isIP(address);
+  if (family === 4) {
+    const parts = address.split('.').map(part => Number(part));
+    if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+    const [a, b] = parts;
+    return a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 0) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      (a === 198 && b === 51) ||
+      (a === 203 && b === 0) ||
+      a >= 224;
+  }
+
+  if (family === 6) {
+    const normalized = address.toLowerCase();
+    return normalized === '::1' ||
+      normalized === '::' ||
+      normalized.startsWith('fc') ||
+      normalized.startsWith('fd') ||
+      normalized.startsWith('fe80:') ||
+      normalized.startsWith('ff') ||
+      normalized.startsWith('2001:db8:');
+  }
+
+  return true;
+}
+
+async function assertPublicHttpUrl(sourceUrl) {
+  let parsed;
+  try {
+    parsed = new URL(sourceUrl);
+  } catch {
+    throw new Error('Некорректный URL.');
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('Поддерживаются только внешние http/https URL.');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('URL с учётными данными не поддерживаются.');
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    throw new Error('Внутренние адреса не поддерживаются.');
+  }
+  if (net.isIP(hostname)) {
+    if (isPrivateAddress(hostname)) {
+      throw new Error('Внутренние адреса не поддерживаются.');
+    }
+    return parsed;
+  }
+
+  const addresses = await dnsPromises.lookup(hostname, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some(item => isPrivateAddress(item.address))) {
+    throw new Error('Внутренние адреса не поддерживаются.');
+  }
+  return parsed;
+}
+
+function createPublicLookup() {
+  return (hostname, options, callback) => {
+    dns.lookup(hostname, options, (error, address, family) => {
+      if (error) {
+        callback(error);
+        return;
+      }
+
+      const entries = Array.isArray(address)
+        ? address
+        : [{ address, family }];
+      if (!entries.length || entries.some(item => isPrivateAddress(item.address || item))) {
+        callback(new Error('Внутренние адреса не поддерживаются.'));
+        return;
+      }
+
+      if (Array.isArray(address)) {
+        callback(null, address);
+        return;
+      }
+      callback(null, address, family);
+    });
+  };
+}
+
+const mediaProxyLookup = createPublicLookup();
+const mediaProxyHttpAgent = new http.Agent({ lookup: mediaProxyLookup });
+const mediaProxyHttpsAgent = new https.Agent({ lookup: mediaProxyLookup });
+
+function mediaProxyAgent(parsedUrl) {
+  return parsedUrl.protocol === 'https:' ? mediaProxyHttpsAgent : mediaProxyHttpAgent;
+}
 
 function registerSystemRoutes(app, deps) {
   const {
@@ -13,10 +126,18 @@ function registerSystemRoutes(app, deps) {
     dbPath,
     webhookUrl,
     requireAuth,
+    requireAdmin,
     fetchImpl,
   } = deps;
 
-  app.post('/api/sync', async (req, res) => {
+  app.post('/api/sync', requireAuth, requireAdmin, async (req, res) => {
+    if (process.env.ENABLE_LEGACY_SYNC !== '1') {
+      return res.status(410).json({
+        ok: false,
+        error: 'Legacy sync отключён. Используйте обычные авторизованные CRUD API.',
+      });
+    }
+
     try {
       const {
         equipment,
@@ -119,7 +240,11 @@ function registerSystemRoutes(app, deps) {
     res.json({ ok: true, service: 'rental-management-api', uptime: Math.round(process.uptime()) });
   });
 
-  app.get('/api/bot-test', async (req, res) => {
+  app.get('/api/bot-test', requireAuth, requireAdmin, async (req, res) => {
+    if (process.env.ENABLE_BOT_TEST !== '1') {
+      return res.status(404).json({ ok: false, error: 'Bot test endpoint disabled' });
+    }
+
     const chatId = Number(req.query.chatId) || 134374193;
     const text = req.query.text || 'Тест бота';
     try {
@@ -130,7 +255,7 @@ function registerSystemRoutes(app, deps) {
     }
   });
 
-  app.get('/api/status', (req, res) => {
+  app.get('/api/status', requireAuth, requireAdmin, (req, res) => {
     const equipment = readData('equipment') || [];
     const rentals = readData('rentals') || [];
     const service = readData('service') || [];
@@ -158,31 +283,44 @@ function registerSystemRoutes(app, deps) {
 
   app.get('/api/media/fetch', requireAuth, async (req, res) => {
     const sourceUrl = String(req.query.url || '').trim();
-    if (!/^https?:\/\//i.test(sourceUrl)) {
-      return res.status(400).json({ ok: false, error: 'Поддерживаются только внешние http/https URL.' });
-    }
 
     try {
-      const upstream = await fetchImpl(sourceUrl, {
+      const parsedUrl = await assertPublicHttpUrl(sourceUrl);
+      const upstream = await fetchImpl(parsedUrl.toString(), {
         headers: {
           'user-agent': 'Rental-Management-MediaProxy/1.0',
           'accept': '*/*',
         },
+        agent: mediaProxyAgent(parsedUrl),
+        redirect: 'manual',
+        size: MAX_MEDIA_PROXY_BYTES,
+        timeout: MEDIA_PROXY_TIMEOUT_MS,
       });
+
+      if (upstream.status >= 300 && upstream.status < 400) {
+        return res.status(400).json({ ok: false, error: 'Редиректы внешних файлов не поддерживаются.' });
+      }
 
       if (!upstream.ok) {
         return res.status(502).json({ ok: false, error: `Источник вернул ${upstream.status}` });
       }
 
+      const declaredLength = Number(upstream.headers.get('content-length') || 0);
+      if (declaredLength > MAX_MEDIA_PROXY_BYTES) {
+        return res.status(413).json({ ok: false, error: 'Файл слишком большой для прокси.' });
+      }
+
       const buffer = await upstream.buffer();
+      if (buffer.length > MAX_MEDIA_PROXY_BYTES) {
+        return res.status(413).json({ ok: false, error: 'Файл слишком большой для прокси.' });
+      }
       const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
-      const contentLength = upstream.headers.get('content-length');
-      const fileName = sourceUrl.split('/').pop()?.split('?')[0] || 'media.bin';
+      const fileName = (parsedUrl.pathname.split('/').pop() || 'media.bin')
+        .replace(/["\r\n\\]/g, '_')
+        .slice(0, 160) || 'media.bin';
 
       res.setHeader('Content-Type', contentType);
-      if (contentLength) {
-        res.setHeader('Content-Length', contentLength);
-      }
+      res.setHeader('Content-Length', String(buffer.length));
       res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
       return res.send(buffer);
     } catch (error) {

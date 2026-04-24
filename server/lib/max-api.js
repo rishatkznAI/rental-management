@@ -1,4 +1,11 @@
 function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, webhookPath = '/bot/webhook', logger = console }) {
+  function normalizeCallbackNotification(value) {
+    if (!value) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value.text === 'string') return value.text;
+    return String(value);
+  }
+
   function resolveRecipientQuery(target) {
     if (target && typeof target === 'object') {
       const chatId = target.chatId ?? target.chat_id;
@@ -60,8 +67,9 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, webho
 
   async function answerCallback(callbackId, options = {}) {
     if (!callbackId) return null;
+    const notification = normalizeCallbackNotification(options.notification);
     const res = await maxRequest('POST', `/answers?callback_id=${encodeURIComponent(callbackId)}`, {
-      ...(options.notification ? { notification: options.notification } : {}),
+      ...(notification ? { notification } : {}),
       ...(options.message ? { message: options.message } : {}),
     });
     logger.log(`[MAX API] answerCallback ← ${JSON.stringify(res).slice(0, 200)}`);

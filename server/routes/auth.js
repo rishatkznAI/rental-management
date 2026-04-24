@@ -4,11 +4,43 @@ function registerAuthRoutes(app, deps) {
     writeData,
     verifyPassword,
     hashPassword,
+    needsPasswordRehash,
     createSession,
     requireAuth,
     destroySession,
     deleteSessionsForUserIds,
   } = deps;
+
+  const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+  const LOGIN_MAX_ATTEMPTS = 10;
+  const loginAttempts = new Map();
+
+  function loginAttemptKey(req, email) {
+    const forwardedFor = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const ip = forwardedFor || req.ip || req.socket?.remoteAddress || 'unknown';
+    return `${ip}:${String(email || '').trim().toLowerCase()}`;
+  }
+
+  function getLoginAttempt(req, email) {
+    const key = loginAttemptKey(req, email);
+    const now = Date.now();
+    const current = loginAttempts.get(key);
+    if (!current || current.expiresAt <= now) {
+      const fresh = { count: 0, expiresAt: now + LOGIN_WINDOW_MS };
+      loginAttempts.set(key, fresh);
+      return { key, attempt: fresh };
+    }
+    return { key, attempt: current };
+  }
+
+  function recordFailedLogin(req, email) {
+    const { attempt } = getLoginAttempt(req, email);
+    attempt.count += 1;
+  }
+
+  function clearLoginAttempts(req, email) {
+    loginAttempts.delete(loginAttemptKey(req, email));
+  }
 
   function buildSessionUser(user) {
     return {
@@ -29,6 +61,11 @@ function registerAuthRoutes(app, deps) {
         return res.status(400).json({ ok: false, error: 'email and password required' });
       }
 
+      const { attempt } = getLoginAttempt(req, email);
+      if (attempt.count >= LOGIN_MAX_ATTEMPTS) {
+        return res.status(429).json({ ok: false, error: 'Слишком много попыток входа. Попробуйте позже.' });
+      }
+
       const users = readData('users') || [];
       const normalizedEmail = String(email).trim().toLowerCase();
       const user = users.find(
@@ -36,6 +73,7 @@ function registerAuthRoutes(app, deps) {
       );
 
       if (!user) {
+        recordFailedLogin(req, email);
         return res.status(401).json({ ok: false, error: 'Пользователь с таким email не найден' });
       }
 
@@ -44,7 +82,21 @@ function registerAuthRoutes(app, deps) {
       }
 
       if (!verifyPassword(password, user.password)) {
+        recordFailedLogin(req, email);
         return res.status(401).json({ ok: false, error: 'Неверный пароль' });
+      }
+
+      clearLoginAttempts(req, email);
+
+      if (typeof needsPasswordRehash === 'function' && needsPasswordRehash(user.password)) {
+        const userIndex = users.findIndex(item => item.id === user.id);
+        if (userIndex >= 0) {
+          users[userIndex] = {
+            ...users[userIndex],
+            password: hashPassword(String(password)),
+          };
+          writeData('users', users);
+        }
       }
 
       const token = createSession(user);

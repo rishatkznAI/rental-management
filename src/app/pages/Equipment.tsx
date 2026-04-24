@@ -14,6 +14,7 @@ import {
   EQUIPMENT_SALE_PDI_LABELS,
   normalizeEquipmentList,
 } from '../lib/equipmentClassification';
+import { findEquipmentTypeLabel, mergeEquipmentTypesWithExistingEquipment, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { formatCurrency, formatDate } from '../lib/utils';
 import type {
   Equipment as EquipmentEntity,
@@ -21,7 +22,6 @@ import type {
   EquipmentOwnerType,
   EquipmentSalePdiStatus,
   EquipmentStatus,
-  EquipmentType,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
@@ -72,15 +72,6 @@ function getOwnerLabel(owner: EquipmentOwnerType): string {
     sublease: 'Субаренда',
   };
   return labels[owner];
-}
-
-function getEquipmentTypeLabel(type: EquipmentType): string {
-  const labels: Record<EquipmentType, string> = {
-    scissor: 'Ножничный',
-    articulated: 'Коленчатый',
-    telescopic: 'Телескопический',
-  };
-  return labels[type];
 }
 
 function getEquipmentDriveLabel(drive: EquipmentDrive): string {
@@ -147,9 +138,11 @@ function matchesTabType(equipment: EquipmentEntity, activeTab: EquipmentTab) {
 function EquipmentMobileCard({
   equipment,
   isSaleTab,
+  equipmentTypeLabel,
 }: {
   equipment: EquipmentEntity;
   isSaleTab: boolean;
+  equipmentTypeLabel: string;
 }) {
   return (
     <div className="rounded-2xl border border-border bg-card/95 p-4 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)]">
@@ -178,7 +171,7 @@ function EquipmentMobileCard({
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-        <div>Тип: <span className="text-foreground">{getEquipmentTypeLabel(equipment.type)}</span></div>
+        <div>Тип: <span className="text-foreground">{equipmentTypeLabel}</span></div>
         <div>Привод: <span className="text-foreground">{getEquipmentDriveLabel(equipment.drive)}</span></div>
         <div>Локация: <span className="text-foreground">{equipment.location || '—'}</span></div>
         <div>След. ТО: <span className={new Date(equipment.nextMaintenance) < new Date() ? 'text-red-300' : 'text-foreground'}>{formatDate(equipment.nextMaintenance)}</span></div>
@@ -211,6 +204,7 @@ export default function Equipment() {
   const { can } = usePermissions();
   const { data: equipmentList = [] } = useEquipmentList();
   const { data: ganttRentals = [] } = useGanttData();
+  const equipmentTypeCatalog = useEquipmentTypeCatalog();
   const [search, setSearch] = React.useState('');
   const [activeTab, setActiveTab] = React.useState<EquipmentTab>('active');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
@@ -230,6 +224,10 @@ export default function Equipment() {
   const locationOptions = React.useMemo(
     () => Array.from(new Set(enrichedEquipmentList.map((eq) => eq.location).filter(Boolean))).sort(),
     [enrichedEquipmentList],
+  );
+  const equipmentTypeOptions = React.useMemo(
+    () => mergeEquipmentTypesWithExistingEquipment(equipmentTypeCatalog, enrichedEquipmentList),
+    [enrichedEquipmentList, equipmentTypeCatalog],
   );
 
   const filteredEquipment = React.useMemo(() => (
@@ -416,9 +414,9 @@ export default function Equipment() {
           <FilterField label="Тип">
             <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="app-filter-input">
               <option value="all">Все типы</option>
-              <option value="scissor">Ножничный</option>
-              <option value="articulated">Коленчатый</option>
-              <option value="telescopic">Телескопический</option>
+              {equipmentTypeOptions.map(type => (
+                <option key={type.value} value={type.value}>{type.label}</option>
+              ))}
             </select>
           </FilterField>
           <FilterField label="Собственник">
@@ -449,7 +447,12 @@ export default function Equipment() {
 
       <div className="space-y-3 sm:hidden">
         {totalVisible === 0 ? <EmptyState /> : filteredEquipment.map((equipment) => (
-          <EquipmentMobileCard key={equipment.id} equipment={equipment} isSaleTab={isSaleTab} />
+          <EquipmentMobileCard
+            key={equipment.id}
+            equipment={equipment}
+            isSaleTab={isSaleTab}
+            equipmentTypeLabel={findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
+          />
         ))}
       </div>
 
@@ -485,7 +488,7 @@ export default function Equipment() {
                           <div className="text-xs text-muted-foreground">SN {equipment.serialNumber || 'не указан'}</div>
                           <div className="mt-2 flex flex-wrap gap-1">
                             <span className="rounded-md bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
-                              {getEquipmentTypeLabel(equipment.type)}
+                              {findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
                             </span>
                             <span className="rounded-md bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
                               {getEquipmentDriveLabel(equipment.drive)}
@@ -583,7 +586,7 @@ export default function Equipment() {
                             ) : null}
                           </div>
                         </div>
-                        <div className="text-sm text-muted-foreground">{getEquipmentTypeLabel(equipment.type)}</div>
+                        <div className="text-sm text-muted-foreground">{findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}</div>
                         <div>
                           <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${getPriorityAppearance(equipment.priority)}`}>
                             {getPriorityLabel(equipment.priority)}

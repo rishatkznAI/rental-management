@@ -3,6 +3,7 @@ function registerServiceRoutes(router, deps) {
     readData,
     writeData,
     requireAuth,
+    requireRead,
     requireWrite,
     normalizeServiceWorkRecord,
     normalizeSparePartRecord,
@@ -31,7 +32,7 @@ function registerServiceRoutes(router, deps) {
     return 'repair';
   };
 
-  router.get('/service_works/active', requireAuth, (req, res) => {
+  router.get('/service_works/active', requireAuth, requireRead('service'), (req, res) => {
     const list = (readData('service_works') || [])
       .map(normalizeServiceWorkRecord)
       .filter(item => item.isActive)
@@ -56,7 +57,7 @@ function registerServiceRoutes(router, deps) {
     return res.json(list[index]);
   });
 
-  router.get('/spare_parts/active', requireAuth, (req, res) => {
+  router.get('/spare_parts/active', requireAuth, requireRead('service'), (req, res) => {
     const list = (readData('spare_parts') || [])
       .map(normalizeSparePartRecord)
       .filter(item => item.isActive)
@@ -81,7 +82,7 @@ function registerServiceRoutes(router, deps) {
     return res.json(list[index]);
   });
 
-  router.get('/repair_work_items', requireAuth, (req, res) => {
+  router.get('/repair_work_items', requireAuth, requireRead('repair_work_items'), (req, res) => {
     const repairId = String(req.query.repair_id || '').trim();
     const list = readData('repair_work_items') || [];
     const catalog = readData('service_works') || [];
@@ -152,7 +153,7 @@ function registerServiceRoutes(router, deps) {
     res.json({ ok: true });
   });
 
-  router.get('/repair_part_items', requireAuth, (req, res) => {
+  router.get('/repair_part_items', requireAuth, requireRead('repair_part_items'), (req, res) => {
     const repairId = String(req.query.repair_id || '').trim();
     const list = readData('repair_part_items') || [];
     const catalog = readData('spare_parts') || [];
@@ -224,7 +225,7 @@ function registerServiceRoutes(router, deps) {
     res.json({ ok: true });
   });
 
-  router.get('/reports/mechanics-workload', requireAuth, (req, res) => {
+  router.get('/reports/mechanics-workload', requireAuth, requireRead('reports'), (req, res) => {
     const mechanics = readData('mechanics') || [];
     const tickets = readData('service') || [];
     const equipment = readData('equipment') || [];

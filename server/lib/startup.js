@@ -199,8 +199,8 @@ async function startServer({ app, port, deps, logger = console }) {
     logger.log('║  GET  /api/payments    — платежи                     ║');
     logger.log('║  ... и ещё 5 коллекций (PATCH/POST/DELETE/PUT)       ║');
     logger.log('╠══════════════════════════════════════════════════════╣');
-    logger.log('║  POST /api/sync        — bulk sync (legacy)          ║');
-    logger.log('║  GET  /api/status      — статус сервера              ║');
+    logger.log('║  GET  /health          — healthcheck                 ║');
+    logger.log('║  GET  /api/status      — статус сервера (admin)      ║');
     logger.log('║  POST /bot/webhook     — MAX бот webhook             ║');
     logger.log('╚══════════════════════════════════════════════════════╝');
     logger.log('');

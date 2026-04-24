@@ -41,6 +41,7 @@ import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
 import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
 import { AUTH_TOKEN_KEY } from '../lib/api';
+import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -68,12 +69,6 @@ const EQ_STATUS_LABELS: Record<EquipmentStatus, string> = {
   reserved: 'Забронирована',
   in_service: 'В сервисе',
   inactive: 'Списана',
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  scissor: 'Ножничный',
-  articulated: 'Коленчатый',
-  telescopic: 'Телескопический',
 };
 
 const SERVICE_STATUS_LABELS: Record<string, string> = {
@@ -613,6 +608,7 @@ export default function EquipmentDetail() {
   const canCreateService = can('create', 'service');
   const canManageAcceptance = canEditEquipment || canCreateService || isMechanicRole(user?.role);
   const { id } = useParams();
+  const equipmentTypeCatalog = useEquipmentTypeCatalog();
 
   const [allEquipment, setAllEquipment] = useState<Equipment[]>([]);
   const [allGanttRentals, setAllGanttRentals] = useState<GanttRentalData[]>([]);
@@ -1136,7 +1132,7 @@ export default function EquipmentDetail() {
           inventoryNumber: equipment.inventoryNumber,
           serialNumber: equipment.serialNumber,
           equipmentType: equipment.type,
-          equipmentTypeLabel: TYPE_LABELS[equipment.type] || equipment.type,
+          equipmentTypeLabel: findEquipmentTypeLabel(equipment.type, equipmentTypeCatalog),
           location: equipment.location,
           reason: 'Приёмка с аренды',
           description: uploadComment?.trim()
@@ -1603,7 +1599,7 @@ export default function EquipmentDetail() {
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
               <InfoField label="Производитель" value={equipment.manufacturer} />
               <InfoField label="Модель" value={equipment.model} />
-              <InfoField label="Тип" value={TYPE_LABELS[equipment.type] || equipment.type} />
+              <InfoField label="Тип" value={findEquipmentTypeLabel(equipment.type, equipmentTypeCatalog)} />
               <InfoField label="Приоритет" value={EQUIPMENT_PRIORITY_LABELS[equipment.priority]} />
               <InfoField label="Привод" value={equipment.drive === 'diesel' ? 'Дизель' : 'Электро'} />
               <InfoField label="Серийный номер" value={equipment.serialNumber} mono />
@@ -3275,6 +3271,7 @@ function EditEquipmentModal({
   onSave: (updated: Equipment) => void;
 }) {
   const [form, setForm] = useState(equipment);
+  const equipmentTypeOptions = useEquipmentTypeCatalog();
 
   useEffect(() => {
     if (open) setForm(equipment);
@@ -3364,11 +3361,7 @@ function EditEquipmentModal({
                   <FieldSelect
                     value={form.type}
                     onValueChange={setStr('type')}
-                    options={[
-                      { value: 'scissor',     label: '✂  Ножничный подъёмник' },
-                      { value: 'articulated', label: '🦾 Коленчатый подъёмник' },
-                      { value: 'telescopic',  label: '🔭 Телескопический подъёмник' },
-                    ]}
+                    options={equipmentTypeOptions}
                   />
                 </FormField>
 

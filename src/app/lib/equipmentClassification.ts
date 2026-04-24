@@ -1,4 +1,5 @@
-import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentSalePdiStatus, EquipmentType } from '../types';
+import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentSalePdiStatus } from '../types';
+import { DEFAULT_EQUIPMENT_TYPE_CATALOG, findEquipmentTypeLabel } from './equipmentTypes';
 
 export const EQUIPMENT_CATEGORY_LABELS: Record<EquipmentCategory, string> = {
   own: 'Собственная',
@@ -57,15 +58,17 @@ const DRIVE_LABELS: Record<EquipmentDrive, string> = {
   electric: 'Электрический',
 };
 
-const TYPE_LABELS: Record<EquipmentType, string> = {
+const TYPE_LABELS: Record<string, string> = {
   scissor: 'ножничный подъемник',
   articulated: 'коленчатый подъемник',
   telescopic: 'телескопический подъемник',
+  mast: 'мачтовый подъемник',
 };
 
 export function getEquipmentTypeLabel(equipment: Partial<Equipment>): string {
   const drive = equipment.drive ? DRIVE_LABELS[equipment.drive] : '';
-  const type = equipment.type ? TYPE_LABELS[equipment.type] : '';
+  const defaultLabel = equipment.type ? findEquipmentTypeLabel(equipment.type, DEFAULT_EQUIPMENT_TYPE_CATALOG) : '';
+  const type = equipment.type ? (TYPE_LABELS[equipment.type] || defaultLabel.toLowerCase()) : '';
   const label = [drive, type].filter(Boolean).join(' ');
   if (label) return label.charAt(0).toUpperCase() + label.slice(1);
   return equipment.model ? `Подъемник ${equipment.model}` : 'Подъемник';

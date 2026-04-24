@@ -1,7 +1,7 @@
 // Типы данных для системы управления арендой подъёмных платформ
 
 export type EquipmentStatus = 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive';
-export type EquipmentType = 'scissor' | 'articulated' | 'telescopic';
+export type EquipmentType = string;
 export type EquipmentDrive = 'diesel' | 'electric';
 export type EquipmentOwnerType = 'own' | 'investor' | 'sublease';
 export type EquipmentCategory = 'own' | 'sold' | 'client' | 'partner';

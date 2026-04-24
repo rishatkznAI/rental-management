@@ -28,6 +28,7 @@ function createBotHandlers(deps) {
     updateServiceTicketStatus,
     getOpenTicketByEquipment,
     serviceStatusLabel,
+    preferCarrierAutoLogin = false,
   } = deps;
   const {
     button,
@@ -428,12 +429,19 @@ function createBotHandlers(deps) {
       pendingAction: null,
       pendingPayload: null,
     });
-    const carrierUser = authorizeCarrier(phone, senderId);
-    if (carrierUser) {
+    const existingUser = authorizeCarrier(phone, senderId);
+    if (existingUser?.userRole === 'Перевозчик') {
       return reply(
         senderId,
-        getMainMenuText(carrierUser),
+        getMainMenuText(existingUser),
         { attachments: carrierKeyboard(), phone, cleanupPrevious: true },
+      );
+    }
+    if (existingUser) {
+      return reply(
+        senderId,
+        getMainMenuText(existingUser),
+        { attachments: defaultKeyboardForRole(existingUser.userRole), phone, cleanupPrevious: true },
       );
     }
     return reply(
@@ -490,10 +498,11 @@ function createBotHandlers(deps) {
 
   function authorizeCarrier(phone, replyTarget = null) {
     const existing = getAuthorizedUser(phone);
-    if (existing) return existing;
-
     const carrier = findCarrierByMaxKey(phone);
-    if (!carrier) return null;
+    if (existing && (!carrier || (!preferCarrierAutoLogin && existing.userRole !== 'Перевозчик'))) {
+      return existing;
+    }
+    if (!carrier) return existing || null;
 
     const botUsers = getBotUsers();
     const linkedCarrier = {
@@ -2276,7 +2285,7 @@ function createBotHandlers(deps) {
 
     authorizeCarrier(String(phone), senderId);
 
-    console.log('[TRACE] handleCommand senderId=%s phone=%s text=%s', senderId, phone, text);
+    console.log('[TRACE] handleCommand phone=%s command=%s', phone, lower.startsWith('/start') ? '/start' : lower.split(/\s+/)[0] || 'message');
 
     if (lower.startsWith('/start')) {
       console.log('[TRACE] /start matched, parts=%d', parts.length);

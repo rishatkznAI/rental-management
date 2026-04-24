@@ -5,6 +5,7 @@ function registerRentalRoutes(deps) {
     readData,
     writeData,
     requireAuth,
+    requireRead,
     validateRentalPayload,
     mergeRentalHistory,
     normalizeGanttRentalList,
@@ -34,11 +35,11 @@ function registerRentalRoutes(deps) {
   function registerRentalCollection(collection) {
     const prefix = idPrefixes[collection] || collection;
 
-    router.get(`/${collection}`, requireAuth, (req, res) => {
+    router.get(`/${collection}`, requireAuth, requireRead(collection), (req, res) => {
       return res.json(readData(collection) || []);
     });
 
-    router.get(`/${collection}/:id`, requireAuth, (req, res) => {
+    router.get(`/${collection}/:id`, requireAuth, requireRead(collection), (req, res) => {
       const data = readData(collection) || [];
       const item = data.find(entry => entry.id === req.params.id);
       if (!item) return res.status(404).json({ ok: false, error: 'Not found' });

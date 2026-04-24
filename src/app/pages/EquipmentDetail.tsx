@@ -778,7 +778,7 @@ export default function EquipmentDetail() {
   const [uploadSignatureDataUrl, setUploadSignatureDataUrl] = useState('');
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [isDownloadingPhotoZip, setIsDownloadingPhotoZip] = useState(false);
-  const [isShippingGalleryCollapsed, setIsShippingGalleryCollapsed] = useState(false);
+  const [collapsedShippingEventIds, setCollapsedShippingEventIds] = useState<string[]>([]);
   const mainPhotoInputRef = React.useRef<HTMLInputElement>(null);
   const shippingPhotoInputRefs = React.useRef<Partial<Record<EquipmentOperationPhotoCategory, HTMLInputElement | null>>>({});
   const signatureCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -796,6 +796,19 @@ export default function EquipmentDetail() {
       return sum + Math.max(categoryCount, flatCount);
     }, 0),
     [shippingPhotos],
+  );
+
+  const toggleShippingEventCollapsed = React.useCallback((eventId: string) => {
+    setCollapsedShippingEventIds(current =>
+      current.includes(eventId)
+        ? current.filter(id => id !== eventId)
+        : [...current, eventId],
+    );
+  }, []);
+
+  const isShippingEventCollapsed = React.useCallback(
+    (eventId: string) => collapsedShippingEventIds.includes(eventId),
+    [collapsedShippingEventIds],
   );
 
   // Compress image to base64 (max 800px, 70% quality)
@@ -2303,20 +2316,6 @@ export default function EquipmentDetail() {
                     </Button>
                     </>
                   )}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      setIsShippingGalleryCollapsed(prev => {
-                        const next = !prev;
-                        if (next) setShowUploadPhotoForm(false);
-                        return next;
-                      });
-                    }}
-                  >
-                    <ChevronDown className={cn('h-4 w-4 transition-transform', isShippingGalleryCollapsed && '-rotate-90')} />
-                    {isShippingGalleryCollapsed ? 'Развернуть' : 'Свернуть'}
-                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -2351,20 +2350,6 @@ export default function EquipmentDetail() {
                   </Button>
                   </>
                 )}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    setIsShippingGalleryCollapsed(prev => {
-                      const next = !prev;
-                      if (next) setShowUploadPhotoForm(false);
-                      return next;
-                    });
-                  }}
-                >
-                  <ChevronDown className={cn('h-4 w-4 transition-transform', isShippingGalleryCollapsed && '-rotate-90')} />
-                  {isShippingGalleryCollapsed ? 'Развернуть галерею' : 'Свернуть галерею'}
-                </Button>
               </div>
               <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-secondary/30 px-3 py-2 text-xs text-muted-foreground">
                 <span>{shippingPhotos.length} событий</span>
@@ -2373,9 +2358,10 @@ export default function EquipmentDetail() {
                 {latestShippingEvent && <span>Последняя отгрузка: {formatDate(latestShippingEvent.date)}</span>}
                 {latestReceivingEvent && <span>Последняя приёмка: {formatDate(latestReceivingEvent.date)}</span>}
               </div>
-              {!isShippingGalleryCollapsed && (latestShippingEvent || latestReceivingEvent) && (
+              {(latestShippingEvent || latestReceivingEvent) && (
                 <div className="grid gap-4 lg:grid-cols-2">
                   {[latestShippingEvent, latestReceivingEvent].filter(Boolean).map(event => {
+                    const isCollapsed = isShippingEventCollapsed(event!.id);
                     const categoryCount = event?.photoCategories
                       ? Object.values(event.photoCategories).filter(list => Array.isArray(list) && list.length > 0).length
                       : (event?.photos?.length ? 1 : 0);
@@ -2404,49 +2390,64 @@ export default function EquipmentDetail() {
                               Моточасы: {event!.hoursValue ?? equipment.hours ?? '—'}
                             </p>
                           </div>
-                          <button
-                            onClick={() => printHandoffAct(event!, equipment)}
-                            className="rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-blue-400/40 hover:text-blue-300"
-                          >
-                            Акт PDF
-                          </button>
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                          <div className="rounded-xl border border-border bg-card/70 p-3">
-                            <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Чек-лист</p>
-                            <p className={`mt-1 font-medium ${checklistComplete ? 'text-emerald-300' : 'text-orange-300'}`}>
-                              {checklistComplete ? 'Заполнен полностью' : 'Заполнен частично'}
-                            </p>
-                          </div>
-                          <div className="rounded-xl border border-border bg-card/70 p-3">
-                            <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Категории фото</p>
-                            <p className="mt-1 font-medium text-foreground">{categoryCount}</p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => toggleShippingEventCollapsed(event!.id)}
+                              className="rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-blue-400/40 hover:text-blue-300"
+                            >
+                              <span className="inline-flex items-center gap-1.5">
+                                <ChevronDown className={cn('h-4 w-4 transition-transform', isCollapsed && '-rotate-90')} />
+                                {isCollapsed ? 'Развернуть' : 'Свернуть'}
+                              </span>
+                            </button>
+                            <button
+                              onClick={() => printHandoffAct(event!, equipment)}
+                              className="rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-blue-400/40 hover:text-blue-300"
+                            >
+                              Акт PDF
+                            </button>
                           </div>
                         </div>
 
-                        {event!.damageDescription && (
-                          <div className="mt-3 rounded-xl border border-orange-500/20 bg-card/70 p-3 text-sm text-orange-200">
-                            <p className="text-xs uppercase tracking-wide text-orange-300">Повреждения</p>
-                            <p className="mt-1">{event!.damageDescription}</p>
-                          </div>
-                        )}
+                        {!isCollapsed && (
+                          <>
+                            <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                              <div className="rounded-xl border border-border bg-card/70 p-3">
+                                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Чек-лист</p>
+                                <p className={`mt-1 font-medium ${checklistComplete ? 'text-emerald-300' : 'text-orange-300'}`}>
+                                  {checklistComplete ? 'Заполнен полностью' : 'Заполнен частично'}
+                                </p>
+                              </div>
+                              <div className="rounded-xl border border-border bg-card/70 p-3">
+                                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Категории фото</p>
+                                <p className="mt-1 font-medium text-foreground">{categoryCount}</p>
+                              </div>
+                            </div>
 
-                        {event!.photoCategories && Object.keys(event!.photoCategories).length > 0 && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {Object.entries(PHOTO_CATEGORY_LABELS).map(([key, label]) => {
-                              const photos = event!.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [];
-                              if (!photos.length) return null;
-                              return (
-                                <span
-                                  key={key}
-                                  className="rounded-full border border-border bg-card/70 px-2.5 py-1 text-xs text-muted-foreground"
-                                >
-                                  {label}: {photos.length}
-                                </span>
-                              );
-                            })}
-                          </div>
+                            {event!.damageDescription && (
+                              <div className="mt-3 rounded-xl border border-orange-500/20 bg-card/70 p-3 text-sm text-orange-200">
+                                <p className="text-xs uppercase tracking-wide text-orange-300">Повреждения</p>
+                                <p className="mt-1">{event!.damageDescription}</p>
+                              </div>
+                            )}
+
+                            {event!.photoCategories && Object.keys(event!.photoCategories).length > 0 && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {Object.entries(PHOTO_CATEGORY_LABELS).map(([key, label]) => {
+                                  const photos = event!.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [];
+                                  if (!photos.length) return null;
+                                  return (
+                                    <span
+                                      key={key}
+                                      className="rounded-full border border-border bg-card/70 px-2.5 py-1 text-xs text-muted-foreground"
+                                    >
+                                      {label}: {photos.length}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     );
@@ -2454,7 +2455,7 @@ export default function EquipmentDetail() {
                 </div>
               )}
 
-              {!isShippingGalleryCollapsed && shippingComparisonPairs.length > 0 && selectedComparisonPair && (
+              {shippingComparisonPairs.length > 0 && selectedComparisonPair && (
                 <div className="rounded-2xl border border-border bg-secondary/30 p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                     <div>
@@ -2557,7 +2558,7 @@ export default function EquipmentDetail() {
               )}
 
               {/* Upload form */}
-              {!isShippingGalleryCollapsed && canManageAcceptance && showUploadPhotoForm && (
+              {canManageAcceptance && showUploadPhotoForm && (
                 <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-blue-200">
@@ -2776,8 +2777,7 @@ export default function EquipmentDetail() {
               )}
 
               {/* Photo events list */}
-              {!isShippingGalleryCollapsed ? (
-                shippingPhotos.length > 0 ? (
+              {shippingPhotos.length > 0 ? (
                 <div className="space-y-6">
                   {shippingPhotos.map(event => (
                     <div key={event.id} className="rounded-2xl border border-border bg-card/70 p-4">
@@ -2793,6 +2793,16 @@ export default function EquipmentDetail() {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">Загрузил: {event.uploadedBy}</span>
+                          <button
+                            onClick={() => toggleShippingEventCollapsed(event.id)}
+                            className="rounded-xl border border-border px-2 py-1 text-xs text-foreground transition hover:border-blue-400/40 hover:bg-blue-500/10 hover:text-blue-300"
+                            title={isShippingEventCollapsed(event.id) ? 'Развернуть событие' : 'Свернуть событие'}
+                          >
+                            <span className="inline-flex items-center gap-1">
+                              <ChevronDown className={cn('h-4 w-4 transition-transform', isShippingEventCollapsed(event.id) && '-rotate-90')} />
+                              {isShippingEventCollapsed(event.id) ? 'Развернуть' : 'Свернуть'}
+                            </span>
+                          </button>
                           <button
                             onClick={() => printHandoffAct(event, equipment)}
                             className="rounded-xl border border-border px-2 py-1 text-xs text-blue-300 transition hover:border-blue-400/40 hover:bg-blue-500/10"
@@ -2814,72 +2824,76 @@ export default function EquipmentDetail() {
                           )}
                         </div>
                       </div>
-                      {event.comment && <p className="mt-2 text-sm text-muted-foreground">{event.comment}</p>}
-                      {event.checklist && (
-                        <div className="mt-3 rounded-xl border border-border bg-secondary/70 p-3">
-                          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                            Чек-лист операции
-                          </div>
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            {Object.entries(HANDOFF_CHECKLIST_LABELS).map(([key, label]) => {
-                              const checklistKey = key as keyof typeof HANDOFF_CHECKLIST_LABELS;
-                              const checked = event.checklist?.[checklistKey];
-                              return (
-                                <div key={key} className="flex items-center gap-2 text-sm">
-                                  <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-medium ${
-                                    checked
-                                      ? 'bg-emerald-500/15 text-emerald-300'
-                                      : 'bg-secondary text-muted-foreground'
-                                  }`}>
-                                    {checked ? '✓' : '•'}
-                                  </span>
-                                  <span className="text-foreground/90">{label}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                      {event.photoCategories && Object.keys(event.photoCategories).length > 0 ? (
-                        <div className="mt-3 space-y-3">
-                          {Object.entries(PHOTO_CATEGORY_LABELS).map(([key, label]) => {
-                            const photos = event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [];
-                            if (!photos.length) return null;
-                            return (
-                              <div key={key}>
-                                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                  {label}
-                                </div>
-                                <div className="flex gap-3 overflow-x-auto pb-1">
-                                  {photos.map((photo, idx) => (
-                                    <img
-                                      key={`${key}-${idx}`}
-                                      src={photo}
-                                      alt={`${label} ${idx + 1}`}
-                                      className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
-                                      onClick={() => setPreviewImage(photo)}
-                                    />
-                                  ))}
-                                </div>
+                      {!isShippingEventCollapsed(event.id) && (
+                        <>
+                          {event.comment && <p className="mt-2 text-sm text-muted-foreground">{event.comment}</p>}
+                          {event.checklist && (
+                            <div className="mt-3 rounded-xl border border-border bg-secondary/70 p-3">
+                              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                Чек-лист операции
                               </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
-	                          {event.photos.map((photo, idx) => (
-	                            <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
-	                              className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
-	                              onClick={() => setPreviewImage(photo)}
-	                            />
-	                          ))}
-	                        </div>
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                {Object.entries(HANDOFF_CHECKLIST_LABELS).map(([key, label]) => {
+                                  const checklistKey = key as keyof typeof HANDOFF_CHECKLIST_LABELS;
+                                  const checked = event.checklist?.[checklistKey];
+                                  return (
+                                    <div key={key} className="flex items-center gap-2 text-sm">
+                                      <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-medium ${
+                                        checked
+                                          ? 'bg-emerald-500/15 text-emerald-300'
+                                          : 'bg-secondary text-muted-foreground'
+                                      }`}>
+                                        {checked ? '✓' : '•'}
+                                      </span>
+                                      <span className="text-foreground/90">{label}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          {event.photoCategories && Object.keys(event.photoCategories).length > 0 ? (
+                            <div className="mt-3 space-y-3">
+                              {Object.entries(PHOTO_CATEGORY_LABELS).map(([key, label]) => {
+                                const photos = event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [];
+                                if (!photos.length) return null;
+                                return (
+                                  <div key={key}>
+                                    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                      {label}
+                                    </div>
+                                    <div className="flex gap-3 overflow-x-auto pb-1">
+                                      {photos.map((photo, idx) => (
+                                        <img
+                                          key={`${key}-${idx}`}
+                                          src={photo}
+                                          alt={`${label} ${idx + 1}`}
+                                          className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
+                                          onClick={() => setPreviewImage(photo)}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+                              {event.photos.map((photo, idx) => (
+                                <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
+                                  className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
+                                  onClick={() => setPreviewImage(photo)}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          <p className="mt-2 text-xs text-muted-foreground">{event.photos.length} фото · нажмите для просмотра</p>
+                        </>
                       )}
-                      <p className="mt-2 text-xs text-muted-foreground">{event.photos.length} фото · нажмите для просмотра</p>
                     </div>
                   ))}
                 </div>
-                ) : (
+              ) : (
                 !showUploadPhotoForm && (
                   <EmptyState icon={<Camera className="h-12 w-12" />} text="Фотографий пока нет">
                     {canEditEquipment && (
@@ -2892,11 +2906,6 @@ export default function EquipmentDetail() {
                     )}
                   </EmptyState>
                 )
-                )
-              ) : (
-                <div className="rounded-2xl border border-dashed border-border bg-card/40 px-4 py-6 text-center text-sm text-muted-foreground">
-                  Галерея свернута. Разверните блок, чтобы посмотреть сравнение, список событий и все фотографии.
-                </div>
               )}
             </CardContent>
           </Card>

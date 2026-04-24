@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
+const CRM_ARCHIVE_SETTING_KEY = 'crm_archive_state';
+const CRM_ARCHIVE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 function seedServiceWorks({ readData, writeData, normalizeServiceWorkRecord, seedsDir, logger = console }) {
   try {
     const existing = readData('service_works') || [];
@@ -75,6 +78,43 @@ function seedSpareParts({ readData, writeData, normalizeSparePartRecord, seedsDi
   }
 }
 
+function cleanupArchivedCrm({ readData, writeData, logger = console }) {
+  try {
+    const settings = readData('app_settings') || [];
+    const idx = settings.findIndex(item => item?.key === CRM_ARCHIVE_SETTING_KEY);
+    if (idx === -1) return;
+
+    const setting = settings[idx];
+    const raw = setting?.value && typeof setting.value === 'object' ? setting.value : {};
+    const status = raw?.status;
+    if (status !== 'archived') return;
+
+    const archivedAtMs = Date.parse(raw.archivedAt || setting.updatedAt || setting.createdAt || '');
+    const deleteAfterMs = Date.parse(raw.deleteAfter || '')
+      || (Number.isNaN(archivedAtMs) ? NaN : archivedAtMs + CRM_ARCHIVE_TTL_MS);
+    if (Number.isNaN(deleteAfterMs) || Date.now() < deleteAfterMs) return;
+
+    const deals = Array.isArray(readData('crm_deals')) ? readData('crm_deals') : [];
+    writeData('crm_deals', []);
+
+    settings[idx] = {
+      ...setting,
+      updatedAt: new Date().toISOString(),
+      value: {
+        ...raw,
+        status: 'deleted',
+        deletedAt: new Date().toISOString(),
+        deleteAfter: new Date(deleteAfterMs).toISOString(),
+        purgedDealsCount: deals.length,
+      },
+    };
+    writeData('app_settings', settings);
+    logger.log(`✓ Архив CRM истёк, сделки очищены: ${deals.length}`);
+  } catch (error) {
+    logger.warn('cleanupArchivedCrm error:', error.message);
+  }
+}
+
 async function startServer({ app, port, deps, logger = console }) {
   const {
     migrateJsonFilesToDb,
@@ -127,10 +167,22 @@ async function startServer({ app, port, deps, logger = console }) {
       seedsDir: deps.seedsDir,
       logger,
     });
+    cleanupArchivedCrm({
+      readData: deps.readData,
+      writeData: deps.writeData,
+      logger,
+    });
     applyAdminResetFromEnv();
     if (typeof startGprsGateway === 'function') {
       startGprsGateway();
     }
+    setInterval(() => {
+      cleanupArchivedCrm({
+        readData: deps.readData,
+        writeData: deps.writeData,
+        logger,
+      });
+    }, 60 * 60 * 1000);
 
     logger.log('');
     logger.log('╔══════════════════════════════════════════════════════╗');
@@ -187,5 +239,6 @@ module.exports = {
   seedSpareParts,
   seedServiceRouteNorms,
   seedServiceWorks,
+  cleanupArchivedCrm,
   startServer,
 };

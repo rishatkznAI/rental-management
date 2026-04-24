@@ -32,6 +32,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, type Section } from '../../lib/permissions';
 import { DEFAULT_SIDEBAR_ORDER, SIDEBAR_NAV_GROUPS } from '../../lib/navigation';
+import { resolveCrmArchiveState } from '../../lib/crmArchive';
 import { getInvestorBinding, isInvestorUser } from '../../lib/userStorage';
 import { NotificationCenter } from './NotificationCenter';
 import { Input } from '../ui/input';
@@ -140,7 +141,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { data: rentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: serviceTickets = [] } = useServiceTicketsList();
-  const { data: appSettings = [] } = useQuery({
+  const { data: appSettings = [], isLoading: isLoadingAppSettings } = useQuery({
     queryKey: ['app-settings'],
     queryFn: appSettingsService.getAll,
     staleTime: 1000 * 60 * 5,
@@ -374,6 +375,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     const storedOrder = Array.isArray(orderSetting?.value) ? orderSetting.value.filter((value): value is Section => typeof value === 'string') : [];
     return storedOrder.length ? storedOrder : DEFAULT_SIDEBAR_ORDER;
   }, [appSettings]);
+  const crmArchiveState = useMemo(() => resolveCrmArchiveState(appSettings), [appSettings]);
 
   const orderIndex = useMemo(() => {
     const next = new Map<Section, number>();
@@ -387,7 +389,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const groupedNav = SIDEBAR_NAV_GROUPS.map(group => ({
     ...group,
     items: navigation
-      .filter(item => group.items.includes(item.section) && canView(item.section))
+      .filter(item =>
+        group.items.includes(item.section)
+        && canView(item.section)
+        && (item.section !== 'crm' || (!crmArchiveState.isHidden && !isLoadingAppSettings)),
+      )
       .sort((a, b) => (orderIndex.get(a.section) ?? 999) - (orderIndex.get(b.section) ?? 999)),
   })).filter(group => group.items.length > 0);
 

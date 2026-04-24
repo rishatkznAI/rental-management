@@ -31,6 +31,17 @@ function registerCrudRoutes(deps) {
     writeData('gantt_rentals', nextGanttRentals);
   }
 
+  function crmArchiveForbiddenReason(collection) {
+    if (collection !== 'crm_deals') return null;
+    const settings = readData('app_settings') || [];
+    const setting = settings.find(item => item?.key === 'crm_archive_state');
+    const value = setting?.value && typeof setting.value === 'object' ? setting.value : {};
+    const status = value?.status;
+    if (status === 'archived') return 'CRM находится в архиве и временно скрыта из системы.';
+    if (status === 'deleted') return 'CRM удалена из системы.';
+    return null;
+  }
+
   function invalidateAffectedUserSessions(previousUsers, nextUsers) {
     if (typeof deleteSessionsForUserIds !== 'function') return;
     const previous = Array.isArray(previousUsers) ? previousUsers : [];
@@ -119,6 +130,10 @@ function registerCrudRoutes(deps) {
     const prefix = idPrefixes[collection] || collection;
 
     router.get(`/${collection}`, requireAuth, (req, res) => {
+      const crmForbiddenReason = crmArchiveForbiddenReason(collection);
+      if (crmForbiddenReason) {
+        return res.status(410).json({ ok: false, error: crmForbiddenReason });
+      }
       let data = readData(collection) || [];
       if (collection === 'service_works') {
         data = data
@@ -149,6 +164,10 @@ function registerCrudRoutes(deps) {
     });
 
     router.get(`/${collection}/:id`, requireAuth, (req, res) => {
+      const crmForbiddenReason = crmArchiveForbiddenReason(collection);
+      if (crmForbiddenReason) {
+        return res.status(410).json({ ok: false, error: crmForbiddenReason });
+      }
       const data = readData(collection) || [];
       let item = data.find(entry => entry.id === req.params.id);
       if (!item) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -167,6 +186,10 @@ function registerCrudRoutes(deps) {
     });
 
     router.post(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+      const crmForbiddenReason = crmArchiveForbiddenReason(collection);
+      if (crmForbiddenReason) {
+        return res.status(410).json({ ok: false, error: crmForbiddenReason });
+      }
       const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'POST');
       if (rentalForbiddenReason) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
@@ -239,6 +262,10 @@ function registerCrudRoutes(deps) {
     });
 
     router.patch(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+      const crmForbiddenReason = crmArchiveForbiddenReason(collection);
+      if (crmForbiddenReason) {
+        return res.status(410).json({ ok: false, error: crmForbiddenReason });
+      }
       const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
       if (rentalForbiddenReason) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
@@ -325,6 +352,10 @@ function registerCrudRoutes(deps) {
     });
 
     router.delete(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+      const crmForbiddenReason = crmArchiveForbiddenReason(collection);
+      if (crmForbiddenReason) {
+        return res.status(410).json({ ok: false, error: crmForbiddenReason });
+      }
       const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'DELETE');
       if (rentalForbiddenReason) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });
@@ -365,6 +396,10 @@ function registerCrudRoutes(deps) {
     });
 
     router.put(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+      const crmForbiddenReason = crmArchiveForbiddenReason(collection);
+      if (crmForbiddenReason) {
+        return res.status(410).json({ ok: false, error: crmForbiddenReason });
+      }
       const rentalForbiddenReason = rentalWriteForbiddenReason(req, collection, 'PUT');
       if (rentalForbiddenReason) {
         return res.status(403).json({ ok: false, error: rentalForbiddenReason });

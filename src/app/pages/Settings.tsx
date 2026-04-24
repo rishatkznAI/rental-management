@@ -65,6 +65,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { DEFAULT_SIDEBAR_ORDER, SIDEBAR_NAV_GROUPS, SIDEBAR_SECTION_LABELS } from '../lib/navigation';
+import { CRM_ARCHIVE_TTL_MS, resolveCrmArchiveState } from '../lib/crmArchive';
 import type {
   AppSetting,
   Equipment,
@@ -112,6 +113,7 @@ const EMPTY_FORM = {
 
 export default function Settings() {
   const { can } = usePermissions();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = React.useState('users');
   const [users, setUsersState] = React.useState<SystemUser[]>([]);
@@ -136,6 +138,7 @@ export default function Settings() {
     () => appSettings.find(item => item.key === 'sidebar_navigation_order') || null,
     [appSettings],
   );
+  const crmArchiveState = React.useMemo(() => resolveCrmArchiveState(appSettings), [appSettings]);
   const [sidebarOrder, setSidebarOrder] = React.useState(DEFAULT_SIDEBAR_ORDER);
 
   React.useEffect(() => {
@@ -186,6 +189,62 @@ export default function Settings() {
 
     await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
   }, [queryClient, sidebarOrder, sidebarOrderSetting]);
+
+  const handleArchiveCrm = React.useCallback(async () => {
+    const now = new Date();
+    const payload = {
+      key: 'crm_archive_state',
+      value: {
+        status: 'archived',
+        archivedAt: now.toISOString(),
+        deleteAfter: new Date(now.getTime() + CRM_ARCHIVE_TTL_MS).toISOString(),
+        archivedBy: user?.name || 'Администратор',
+        deletedAt: null,
+        restoredAt: null,
+        restoredBy: null,
+      },
+      createdAt: crmArchiveState.setting?.createdAt || now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+
+    if (crmArchiveState.setting) {
+      await appSettingsService.update(crmArchiveState.setting.id, payload);
+    } else {
+      await appSettingsService.create(payload);
+    }
+
+    await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
+  }, [crmArchiveState.setting, queryClient, user?.name]);
+
+  const handleRestoreCrm = React.useCallback(async () => {
+    const now = new Date();
+    if (!crmArchiveState.setting) return;
+
+    await appSettingsService.update(crmArchiveState.setting.id, {
+      key: 'crm_archive_state',
+      value: {
+        status: 'active',
+        archivedAt: crmArchiveState.archivedAt,
+        deleteAfter: crmArchiveState.deleteAfter,
+        archivedBy: crmArchiveState.archivedBy,
+        restoredAt: now.toISOString(),
+        restoredBy: user?.name || 'Администратор',
+        deletedAt: null,
+        purgedDealsCount: crmArchiveState.purgedDealsCount,
+      },
+      updatedAt: now.toISOString(),
+    });
+
+    await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
+  }, [
+    crmArchiveState.archivedAt,
+    crmArchiveState.archivedBy,
+    crmArchiveState.deleteAfter,
+    crmArchiveState.purgedDealsCount,
+    crmArchiveState.setting,
+    queryClient,
+    user?.name,
+  ]);
 
   // ── Диалог ──────────────────────────────────────────────────────────────────
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -383,71 +442,131 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="menu">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <LayoutPanelLeft className="h-5 w-5" />
-                Порядок левого меню
-              </CardTitle>
-              <CardDescription>
-                Администратор может менять порядок пунктов боковой навигации. Изменения применяются для всех пользователей системы.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid gap-6 lg:grid-cols-2">
-                {SIDEBAR_NAV_GROUPS.map(group => {
-                  const items = sidebarOrder.filter(section => group.items.includes(section));
-                  if (!items.length) return null;
-                  return (
-                    <div key={group.title} className="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
-                      <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{group.title}</div>
-                      <div className="space-y-2">
-                        {items.map((section, index) => {
-                          const absoluteIndex = sidebarOrder.indexOf(section);
-                          return (
-                            <div key={section} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-700 dark:bg-gray-900">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                                {index + 1}
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Архив CRM</CardTitle>
+                <CardDescription>
+                  CRM можно скрыть из приложения на 30 дней. Пока она в архиве, раздел не виден в меню и не открывается по прямой ссылке.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={crmArchiveState.isArchived ? 'warning' : crmArchiveState.isDeleted ? 'danger' : 'success'}>
+                    {crmArchiveState.isArchived ? 'CRM в архиве' : crmArchiveState.isDeleted ? 'CRM удалена' : 'CRM активна'}
+                  </Badge>
+                  {crmArchiveState.isArchived && crmArchiveState.daysLeft !== null && (
+                    <span className="text-sm text-gray-500">
+                      До автоочистки: {crmArchiveState.daysLeft} дн.
+                    </span>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+                  {crmArchiveState.isArchived ? (
+                    <>
+                      CRM скрыта {crmArchiveState.archivedAt ? `с ${new Date(crmArchiveState.archivedAt).toLocaleDateString('ru-RU')}` : ''}.
+                      {crmArchiveState.deleteAfter ? ` Если не восстановить её до ${new Date(crmArchiveState.deleteAfter).toLocaleDateString('ru-RU')}, сделки будут удалены автоматически.` : ''}
+                    </>
+                  ) : crmArchiveState.isDeleted ? (
+                    <>
+                      Архив CRM истёк, и сделки были удалены автоматически.
+                      {typeof crmArchiveState.purgedDealsCount === 'number' ? ` Очищено сделок: ${crmArchiveState.purgedDealsCount}.` : ''}
+                    </>
+                  ) : (
+                    <>CRM сейчас доступна в приложении. При архивации раздел исчезнет из меню для всех пользователей.</>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  {!crmArchiveState.isArchived && !crmArchiveState.isDeleted && (
+                    <Button variant="destructive" onClick={() => void handleArchiveCrm()}>
+                      Архивировать CRM на 30 дней
+                    </Button>
+                  )}
+                  {crmArchiveState.isArchived && (
+                    <Button onClick={() => void handleRestoreCrm()}>
+                      Восстановить CRM
+                    </Button>
+                  )}
+                  {crmArchiveState.isDeleted && crmArchiveState.setting && (
+                    <Button onClick={() => void handleRestoreCrm()}>
+                      Включить CRM заново
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <LayoutPanelLeft className="h-5 w-5" />
+                  Порядок левого меню
+                </CardTitle>
+                <CardDescription>
+                  Администратор может менять порядок пунктов боковой навигации. Изменения применяются для всех пользователей системы.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-6 lg:grid-cols-2">
+                  {SIDEBAR_NAV_GROUPS.map(group => {
+                    const items = sidebarOrder.filter(section =>
+                      group.items.includes(section)
+                      && !(crmArchiveState.isHidden && section === 'crm'),
+                    );
+                    if (!items.length) return null;
+                    return (
+                      <div key={group.title} className="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+                        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{group.title}</div>
+                        <div className="space-y-2">
+                          {items.map((section, index) => {
+                            const absoluteIndex = sidebarOrder.indexOf(section);
+                            return (
+                              <div key={section} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-700 dark:bg-gray-900">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                                  {index + 1}
+                                </div>
+                                <div className="flex-1">
+                                  <div className="font-medium text-gray-900 dark:text-white">{SIDEBAR_SECTION_LABELS[section]}</div>
+                                  <div className="text-xs text-gray-500">{section}</div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={() => moveSidebarSection(section, -1)}
+                                    disabled={absoluteIndex <= 0}
+                                  >
+                                    <ArrowUp className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={() => moveSidebarSection(section, 1)}
+                                    disabled={absoluteIndex === sidebarOrder.length - 1}
+                                  >
+                                    <ArrowDown className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
-                              <div className="flex-1">
-                                <div className="font-medium text-gray-900 dark:text-white">{SIDEBAR_SECTION_LABELS[section]}</div>
-                                <div className="text-xs text-gray-500">{section}</div>
-                              </div>
-                              <div className="flex gap-2">
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  variant="outline"
-                                  onClick={() => moveSidebarSection(section, -1)}
-                                  disabled={absoluteIndex <= 0}
-                                >
-                                  <ArrowUp className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  variant="outline"
-                                  onClick={() => moveSidebarSection(section, 1)}
-                                  disabled={absoluteIndex === sidebarOrder.length - 1}
-                                >
-                                  <ArrowDown className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex justify-end">
-                <Button onClick={() => void handleSaveSidebarOrder()}>
-                  Сохранить порядок меню
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-end">
+                  <Button onClick={() => void handleSaveSidebarOrder()}>
+                    Сохранить порядок меню
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {/* ── Справочники ──────────────────────────────────────────────────── */}

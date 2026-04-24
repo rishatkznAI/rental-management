@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { LayoutDashboard, Truck, FileText, Wrench, Users, Menu } from 'lucide-react';
@@ -6,6 +7,8 @@ import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, pathToSection, pathToRequiredAction } from '../../lib/permissions';
+import { appSettingsService } from '../../services/app-settings.service';
+import { resolveCrmArchiveState } from '../../lib/crmArchive';
 
 const BOTTOM_NAV = [
   { name: 'Дашборд', href: '/', icon: LayoutDashboard },
@@ -22,13 +25,20 @@ export function Layout() {
 
   const { isAuthenticated, isLoading } = useAuth();
   const { can, canView, defaultPath } = usePermissions();
+  const { data: appSettings = [], isLoading: isLoadingAppSettings } = useQuery({
+    queryKey: ['app-settings'],
+    queryFn: appSettingsService.getAll,
+    staleTime: 1000 * 60 * 5,
+  });
   const visibleBottomNav = BOTTOM_NAV.filter(item => canView(pathToSection(item.href) || 'dashboard'));
   const section = pathToSection(location.pathname);
   const requiredAction = pathToRequiredAction(location.pathname);
+  const crmArchiveState = resolveCrmArchiveState(appSettings);
   const shouldRedirectBySection = Boolean(section && !canView(section));
   const shouldRedirectByAction = Boolean(
     requiredAction && !can(requiredAction.action, requiredAction.section),
   );
+  const shouldRedirectArchivedCrm = section === 'crm' && crmArchiveState.isHidden;
 
   // Auth + permission guard via useEffect — avoids render-time <Navigate> which
   // conflicts with React 18 concurrent rendering and breaks Outlet updates.
@@ -47,16 +57,22 @@ export function Layout() {
 
     if (requiredAction && shouldRedirectByAction) {
       navigate(`/${requiredAction.section}`, { replace: true });
+      return;
+    }
+
+    if (shouldRedirectArchivedCrm) {
+      const fallback = defaultPath();
+      navigate(fallback === '/crm' ? '/' : fallback, { replace: true });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultPath, isAuthenticated, isLoading, location.pathname, navigate, requiredAction, shouldRedirectByAction, shouldRedirectBySection]);
+  }, [crmArchiveState.isHidden, defaultPath, isAuthenticated, isLoading, location.pathname, navigate, requiredAction, section, shouldRedirectArchivedCrm, shouldRedirectByAction, shouldRedirectBySection]);
 
   // While checking auth — render nothing
   if (isLoading) return null;
   // Not authenticated yet — useEffect will redirect; render nothing in the meantime
   if (!isAuthenticated) return null;
   // Do not mount a forbidden screen even for one render tick.
-  if (shouldRedirectBySection || shouldRedirectByAction) return null;
+  if ((section === 'crm' && isLoadingAppSettings) || shouldRedirectBySection || shouldRedirectByAction || shouldRedirectArchivedCrm) return null;
 
   return (
     <div className="min-h-screen bg-background text-foreground">

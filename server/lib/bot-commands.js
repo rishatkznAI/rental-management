@@ -37,6 +37,7 @@ function createBotHandlers(deps) {
     authKeyboard,
     mechanicKeyboard,
     rentalManagerKeyboard,
+    carrierKeyboard,
     currentRepairKeyboard,
     operationsKeyboard,
     repairActionsKeyboard,
@@ -427,6 +428,14 @@ function createBotHandlers(deps) {
       pendingAction: null,
       pendingPayload: null,
     });
+    const carrierUser = authorizeCarrier(phone, senderId);
+    if (carrierUser) {
+      return reply(
+        senderId,
+        getMainMenuText(carrierUser),
+        { attachments: carrierKeyboard(), phone, cleanupPrevious: true },
+      );
+    }
     return reply(
       senderId,
       withBotMenu(
@@ -471,6 +480,35 @@ function createBotHandlers(deps) {
     return found;
   }
 
+  function findCarrierByMaxKey(phone) {
+    return (readData('delivery_carriers') || []).find(item =>
+      item &&
+      item.status !== 'inactive' &&
+      String(item.maxCarrierKey || '').trim() === String(phone || '').trim(),
+    ) || null;
+  }
+
+  function authorizeCarrier(phone, replyTarget = null) {
+    const existing = getAuthorizedUser(phone);
+    if (existing) return existing;
+
+    const carrier = findCarrierByMaxKey(phone);
+    if (!carrier) return null;
+
+    const botUsers = getBotUsers();
+    const linkedCarrier = {
+      userId: carrier.id || `carrier:${phone}`,
+      userName: carrier.name || 'Перевозчик',
+      userRole: 'Перевозчик',
+      email: null,
+      carrierId: carrier.id || null,
+      replyTarget: normalizeReplyTarget(replyTarget, phone),
+    };
+    botUsers[phone] = linkedCarrier;
+    saveBotUsers(botUsers);
+    return linkedCarrier;
+  }
+
   function getAuthorizedUser(phone) {
     return getBotUsers()[phone] || null;
   }
@@ -508,6 +546,52 @@ function createBotHandlers(deps) {
       pendingAction: null,
       pendingPayload: null,
     });
+  }
+
+  function getCarrierDeliveries(phone, authUser) {
+    const carrier = authUser?.carrierId
+      ? (readData('delivery_carriers') || []).find(item => item.id === authUser.carrierId)
+      : findCarrierByMaxKey(phone);
+    if (!carrier) return [];
+
+    const carrierKeys = new Set(
+      [carrier.id, carrier.key, carrier.maxCarrierKey]
+        .filter(Boolean)
+        .map(value => String(value)),
+    );
+    const phoneValue = String(phone || '').trim();
+
+    return (readData('deliveries') || [])
+      .filter(item => {
+        const deliveryCarrierKey = item?.carrierKey ? String(item.carrierKey) : '';
+        const deliveryCarrierUserId = item?.carrierUserId != null ? String(item.carrierUserId) : '';
+        return carrierKeys.has(deliveryCarrierKey) || (phoneValue && deliveryCarrierUserId === phoneValue);
+      })
+      .sort((left, right) => new Date(right.transportDate || 0).getTime() - new Date(left.transportDate || 0).getTime());
+  }
+
+  function formatCarrierDeliveries(deliveries) {
+    if (!deliveries.length) {
+      return [
+        '🚚 У вас пока нет доставок.',
+        '',
+        'Как только офис назначит вас на доставку, здесь появятся заявки и статусы.',
+      ].join('\n');
+    }
+
+    const lines = deliveries.slice(0, 10).map((delivery, index) => (
+      `${index + 1}. ${deliveryTypeLabel(delivery.type)} · ${delivery.transportDate}\n` +
+      `   ${delivery.origin} → ${delivery.destination}\n` +
+      `   ${delivery.cargo} · ${delivery.client}\n` +
+      `   Статус: ${deliveryStatusLabel(delivery.status)}`
+    ));
+
+    return [
+      `🚚 Мои доставки (${deliveries.length})`,
+      '',
+      ...lines,
+      deliveries.length > 10 ? `... и ещё ${deliveries.length - 10}` : '',
+    ].filter(Boolean).join('\n');
   }
   const {
     normalizeBotText,
@@ -1702,6 +1786,7 @@ function createBotHandlers(deps) {
     const map = {
       'menu:help': '/помощь',
       'menu:main': '/меню',
+      'menu:deliveries': '/доставки',
       'menu:rentals': '/аренды',
       'menu:equipment': '/техника',
       'menu:service': '/сервис',
@@ -2189,10 +2274,20 @@ function createBotHandlers(deps) {
       });
     }
 
+    authorizeCarrier(String(phone), senderId);
+
     console.log('[TRACE] handleCommand senderId=%s phone=%s text=%s', senderId, phone, text);
 
     if (lower.startsWith('/start')) {
       console.log('[TRACE] /start matched, parts=%d', parts.length);
+      const carrierUser = getAuthorizedUser(String(phone));
+      if (carrierUser?.userRole === 'Перевозчик' && parts.length < 3) {
+        resetBotFlow(phone);
+        return replyWithUi(
+          getMainMenuText(carrierUser),
+          { attachments: carrierKeyboard() },
+        );
+      }
       if (parts.length < 3) {
         updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
         return reply(
@@ -2304,6 +2399,7 @@ function createBotHandlers(deps) {
     const canManageRepair = isMechanicRole(userRole) || userRole === 'Администратор';
     const canCreateServiceRequest = canManageRepair || userRole === 'Менеджер по аренде' || userRole === 'Офис-менеджер';
     const isRentalManager = userRole === 'Менеджер по аренде';
+    const isCarrier = userRole === 'Перевозчик';
 
     if (!trimmed.startsWith('/')) {
       const currentTicket = getCurrentRepair(phone);
@@ -2623,6 +2719,14 @@ function createBotHandlers(deps) {
     if ((lower === '/меню' || lower === 'меню')) {
       return replyWithUi(getMainMenuText(authUser), {
         attachments: defaultKeyboardForRole(userRole),
+      });
+    }
+
+    if ((lower === '/доставки' || lower === 'доставки' || lower === 'мои доставки') && isCarrier) {
+      const deliveries = getCarrierDeliveries(phone, authUser);
+      const activeDelivery = deliveries.find(item => item.status !== 'completed' && item.status !== 'cancelled') || deliveries[0] || null;
+      return replyWithUi(formatCarrierDeliveries(deliveries), {
+        attachments: activeDelivery ? deliveryStatusKeyboard(activeDelivery) : carrierKeyboard(),
       });
     }
 

@@ -54,6 +54,13 @@ function createBotUi() {
     ]);
   }
 
+  function carrierKeyboard() {
+    return keyboard([
+      [button('Мои доставки', 'menu:deliveries')],
+      [button('Помощь', 'menu:help')],
+    ]);
+  }
+
   function currentRepairKeyboard(ticketId = '') {
     return keyboard([
       [button('Текущий отчёт', 'menu:draft'), button('Действия по заявке', 'menu:repair_actions')],
@@ -233,6 +240,9 @@ function createBotUi() {
     if (role === 'Менеджер по аренде') {
       return rentalManagerKeyboard();
     }
+    if (role === 'Перевозчик') {
+      return carrierKeyboard();
+    }
     return keyboard([
       [button('Аренды', 'menu:rentals'), button('Техника', 'menu:equipment')],
       [button('Сервис', 'menu:service'), button('Помощь', 'menu:help')],
@@ -247,6 +257,7 @@ function createBotUi() {
     authKeyboard,
     mechanicKeyboard,
     rentalManagerKeyboard,
+    carrierKeyboard,
     currentRepairKeyboard,
     operationsKeyboard,
     repairActionsKeyboard,

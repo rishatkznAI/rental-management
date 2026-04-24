@@ -399,6 +399,7 @@ function createBotFormatters(deps) {
   function getHelpText(role) {
     const isMechanic = isMechanicRole(role) || role === 'Администратор';
     const isRentalManager = role === 'Менеджер по аренде';
+    const isCarrier = role === 'Перевозчик';
     const mechanicLines = [
       '/моизаявки — мои сервисные заявки',
       '/новаязаявка — создать новую заявку',
@@ -424,6 +425,11 @@ function createBotFormatters(deps) {
       '/техника — свободная техника',
     ];
 
+    const carrierLines = [
+      '/доставки — мои доставки',
+      '/меню — главное меню',
+    ];
+
     const commonLines = [
       '/аренды — активные аренды',
       '/техника — свободная техника',
@@ -437,6 +443,7 @@ function createBotFormatters(deps) {
       '',
       ...(isMechanic ? mechanicLines : []),
       ...(isRentalManager ? rentalManagerLines : []),
+      ...(isCarrier ? carrierLines : []),
       ...commonLines,
       '',
       'Полный список команд доступен по кнопке «Помощь».',
@@ -457,6 +464,14 @@ function createBotFormatters(deps) {
         `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
         '',
         'Доступны аренды, свободная техника, утренняя сводка и быстрые заявки в доставку и сервис.',
+      ].join('\n');
+    }
+
+    if (authUser.userRole === 'Перевозчик') {
+      return [
+        `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
+        '',
+        'Здесь вы видите свои доставки и можете менять их статусы: Принял, Выехал, Доставлено.',
       ].join('\n');
     }
 

@@ -1121,6 +1121,28 @@ export default function EquipmentDetail() {
     });
   }, [shippingComparisonPairs]);
 
+  const selectedComparisonPair = useMemo(
+    () => shippingComparisonPairs.find(pair => pair.id === selectedComparisonPairId) || shippingComparisonPairs[0] || null,
+    [selectedComparisonPairId, shippingComparisonPairs],
+  );
+
+  const selectedComparisonGroups = useMemo(() => {
+    if (!selectedComparisonPair) return [];
+
+    const beforeGroups = new Map(getShippingPhotoGroups(selectedComparisonPair.shipping).map(group => [group.key, group] as const));
+    const afterGroups = new Map(getShippingPhotoGroups(selectedComparisonPair.receiving).map(group => [group.key, group] as const));
+    const orderedKeys = [...Object.keys(PHOTO_CATEGORY_LABELS), 'generic'];
+
+    return orderedKeys
+      .filter(key => beforeGroups.has(key) || afterGroups.has(key))
+      .map(key => ({
+        key,
+        label: beforeGroups.get(key)?.label || afterGroups.get(key)?.label || 'Фотографии',
+        beforePhotos: beforeGroups.get(key)?.photos || [],
+        afterPhotos: afterGroups.get(key)?.photos || [],
+      }));
+  }, [selectedComparisonPair]);
+
   // ── Not found screen ──
   if (!equipment) {
     return (
@@ -1200,28 +1222,6 @@ export default function EquipmentDetail() {
   const equipmentRentalIds = new Set(ganttRentals.map(r => r.id));
   const equipmentPayments = allPayments.filter(p => p.rentalId && equipmentRentalIds.has(p.rentalId));
   const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
-
-  const selectedComparisonPair = useMemo(
-    () => shippingComparisonPairs.find(pair => pair.id === selectedComparisonPairId) || shippingComparisonPairs[0] || null,
-    [selectedComparisonPairId, shippingComparisonPairs],
-  );
-
-  const selectedComparisonGroups = useMemo(() => {
-    if (!selectedComparisonPair) return [];
-
-    const beforeGroups = new Map(getShippingPhotoGroups(selectedComparisonPair.shipping).map(group => [group.key, group] as const));
-    const afterGroups = new Map(getShippingPhotoGroups(selectedComparisonPair.receiving).map(group => [group.key, group] as const));
-    const orderedKeys = [...Object.keys(PHOTO_CATEGORY_LABELS), 'generic'];
-
-    return orderedKeys
-      .filter(key => beforeGroups.has(key) || afterGroups.has(key))
-      .map(key => ({
-        key,
-        label: beforeGroups.get(key)?.label || afterGroups.get(key)?.label || 'Фотографии',
-        beforePhotos: beforeGroups.get(key)?.photos || [],
-        afterPhotos: afterGroups.get(key)?.photos || [],
-      }));
-  }, [selectedComparisonPair]);
 
   const tabTriggerClass = 'whitespace-nowrap';
 

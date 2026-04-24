@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -8,7 +9,7 @@ import { Select } from '../components/ui/select';
 import {
   ArrowLeft, Edit, FileText, TrendingUp, Clock, Phone, Mail,
   Building2, MapPin, User, CreditCard, CheckCircle, XCircle,
-  AlertTriangle, Plus, Save, X,
+  AlertTriangle, Download, Plus, Save, Trash2, Upload, X,
 } from 'lucide-react';
 import { formatDate, formatDateTime, formatCurrency } from '../lib/utils';
 import { useClientById, useUpdateClient } from '../hooks/useClients';
@@ -55,6 +56,24 @@ function normalizeClientName(value?: string | null) {
 
 function Divider() {
   return <hr className="border-gray-100 dark:border-gray-800" />;
+}
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function downloadDataUrl(dataUrl: string, fileName: string) {
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 function Field({ label, value, mono, className }: { label: string; value?: string | null; mono?: boolean; className?: string }) {
@@ -170,6 +189,60 @@ export default function ClientDetail() {
     setEditing(false);
     setEditData({});
   };
+
+  async function handlePartnerCardUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    if (!client || !canEdit) return;
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const nextClient = appendAuditHistory(
+        {
+          ...client,
+          partnerCardFileName: file.name,
+          partnerCardMimeType: file.type || undefined,
+          partnerCardDataUrl: dataUrl,
+          partnerCardUploadedAt: new Date().toISOString(),
+          partnerCardUploadedBy: user?.name || 'Система',
+        },
+        {
+          date: new Date().toISOString(),
+          text: `Загружена карта партнёра: ${file.name}`,
+          author: user?.name || 'Система',
+          type: 'system',
+        },
+      );
+      persist(nextClient);
+      toast.success('Карта партнёра сохранена в карточке клиента.');
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : 'Не удалось загрузить карту партнёра.');
+    }
+  }
+
+  function handlePartnerCardDelete() {
+    if (!client || !canEdit || !client.partnerCardDataUrl) return;
+    const nextClient = appendAuditHistory(
+      {
+        ...client,
+        partnerCardFileName: undefined,
+        partnerCardMimeType: undefined,
+        partnerCardDataUrl: undefined,
+        partnerCardUploadedAt: undefined,
+        partnerCardUploadedBy: undefined,
+      },
+      {
+        date: new Date().toISOString(),
+        text: 'Удалена карта партнёра',
+        author: user?.name || 'Система',
+        type: 'system',
+      },
+    );
+    persist(nextClient);
+    toast.success('Карта партнёра удалена из карточки клиента.');
+  }
 
   // ── "not found" screen ────────────────────────────────────────────────────
 
@@ -487,6 +560,86 @@ export default function ClientDetail() {
                       </Badge>
                     </div>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-4">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileText className="h-4 w-4" />
+                Карта партнёра
+              </CardTitle>
+              {canEdit ? (
+                <label>
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+                    onChange={handlePartnerCardUpload}
+                  />
+                  <span className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700">
+                    <Upload className="h-4 w-4" />
+                    {client.partnerCardDataUrl ? 'Заменить файл' : 'Загрузить файл'}
+                  </span>
+                </label>
+              ) : null}
+            </CardHeader>
+            <CardContent>
+              {!client.partnerCardDataUrl ? (
+                <p className="text-sm text-gray-400 italic">Карта партнёра ещё не загружена</p>
+              ) : (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/50">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
+                          {client.partnerCardFileName || 'Карта партнёра'}
+                        </p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          <Field label="Загружен" value={client.partnerCardUploadedAt ? formatDateTime(client.partnerCardUploadedAt) : '—'} />
+                          <Field label="Кто загрузил" value={client.partnerCardUploadedBy || '—'} />
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button
+                          variant="secondary"
+                          onClick={() => downloadDataUrl(client.partnerCardDataUrl!, client.partnerCardFileName || 'partner-card')}
+                        >
+                          <Download className="h-4 w-4" />
+                          Скачать
+                        </Button>
+                        {canEdit ? (
+                          <Button variant="secondary" onClick={handlePartnerCardDelete}>
+                            <Trash2 className="h-4 w-4" />
+                            Удалить
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                  {client.partnerCardMimeType?.startsWith('image/') ? (
+                    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                      <img
+                        src={client.partnerCardDataUrl}
+                        alt={client.partnerCardFileName || 'Карта партнёра'}
+                        className="max-h-[420px] w-full object-contain"
+                      />
+                    </div>
+                  ) : client.partnerCardMimeType === 'application/pdf' ? (
+                    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                      <iframe
+                        src={client.partnerCardDataUrl}
+                        title={client.partnerCardFileName || 'Карта партнёра'}
+                        className="h-[520px] w-full"
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Предпросмотр для этого формата не поддерживается, но файл сохранён в карточке клиента и доступен для скачивания.
+                    </p>
+                  )}
                 </div>
               )}
             </CardContent>

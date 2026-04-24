@@ -458,6 +458,11 @@ export interface Client {
   manager?: string;
   status?: ClientStatus;
   notes?: string;
+  partnerCardFileName?: string;
+  partnerCardMimeType?: string;
+  partnerCardDataUrl?: string;
+  partnerCardUploadedAt?: string;
+  partnerCardUploadedBy?: string;
   createdAt?: string;
   createdBy?: string;
   history?: AuditEntry[];

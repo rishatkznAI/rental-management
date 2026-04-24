@@ -12,6 +12,8 @@ function registerSystemRoutes(app, deps) {
     countActiveSessions,
     dbPath,
     webhookUrl,
+    requireAuth,
+    fetchImpl,
   } = deps;
 
   app.post('/api/sync', async (req, res) => {
@@ -152,6 +154,40 @@ function registerSystemRoutes(app, deps) {
       botUsers: Object.keys(botUsers).length,
       webhook: webhookUrl || '(не задан)',
     });
+  });
+
+  app.get('/api/media/fetch', requireAuth, async (req, res) => {
+    const sourceUrl = String(req.query.url || '').trim();
+    if (!/^https?:\/\//i.test(sourceUrl)) {
+      return res.status(400).json({ ok: false, error: 'Поддерживаются только внешние http/https URL.' });
+    }
+
+    try {
+      const upstream = await fetchImpl(sourceUrl, {
+        headers: {
+          'user-agent': 'Rental-Management-MediaProxy/1.0',
+          'accept': '*/*',
+        },
+      });
+
+      if (!upstream.ok) {
+        return res.status(502).json({ ok: false, error: `Источник вернул ${upstream.status}` });
+      }
+
+      const buffer = await upstream.buffer();
+      const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+      const contentLength = upstream.headers.get('content-length');
+      const fileName = sourceUrl.split('/').pop()?.split('?')[0] || 'media.bin';
+
+      res.setHeader('Content-Type', contentType);
+      if (contentLength) {
+        res.setHeader('Content-Length', contentLength);
+      }
+      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+      return res.send(buffer);
+    } catch (error) {
+      return res.status(502).json({ ok: false, error: error.message || 'Не удалось получить внешний файл.' });
+    }
   });
 }
 

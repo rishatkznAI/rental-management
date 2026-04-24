@@ -40,6 +40,7 @@ import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
 import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
+import { AUTH_TOKEN_KEY } from '../lib/api';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -118,6 +119,7 @@ const HANDOFF_REQUIRED_PHOTO_CATEGORIES: EquipmentOperationPhotoCategory[] = [
 ];
 
 const textEncoder = new TextEncoder();
+const API_BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
 function sanitizeZipSegment(value: string) {
   return value
@@ -448,6 +450,11 @@ type ShippingPhotoGroup = {
   photos: string[];
 };
 
+type ShippingPhotoAsset = {
+  label: string;
+  url: string;
+};
+
 type ShippingComparisonPair = {
   id: string;
   shipping: ShippingPhoto;
@@ -460,14 +467,84 @@ function getShippingPhotoGroups(event: ShippingPhoto): ShippingPhotoGroup[] {
       .map(([key, label]) => ({
         key,
         label,
-        photos: event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [],
+        photos: Array.isArray(event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS])
+          ? event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || []
+          : [],
       }))
       .filter(group => group.photos.length > 0);
   }
 
-  return event.photos.length > 0
-    ? [{ key: 'generic', label: 'Фотографии', photos: event.photos }]
+  return Array.isArray(event.photos) && event.photos.length > 0
+    ? [{ key: 'generic', label: 'Фотографии', photos: event.photos.filter((photo): photo is string => typeof photo === 'string' && photo.trim().length > 0) }]
     : [];
+}
+
+function getShippingPhotoAssets(event: ShippingPhoto): ShippingPhotoAsset[] {
+  const groupedAssets = event.photoCategories && Object.keys(event.photoCategories).length > 0
+    ? Object.entries(PHOTO_CATEGORY_LABELS).flatMap(([key, label]) => {
+        const photos = event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS];
+        if (!Array.isArray(photos)) return [];
+        return photos
+          .filter((photo): photo is string => typeof photo === 'string' && photo.trim().length > 0)
+          .map(photo => ({ label, url: photo.trim() }));
+      })
+    : [];
+
+  if (groupedAssets.length > 0) return groupedAssets;
+
+  return Array.isArray(event.photos)
+    ? event.photos
+        .filter((photo): photo is string => typeof photo === 'string' && photo.trim().length > 0)
+        .map(photo => ({ label: 'Фотографии', url: photo.trim() }))
+    : [];
+}
+
+async function fetchPhotoBytes(url: string) {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
+
+  if (url.startsWith('data:')) {
+    return {
+      bytes: dataUrlToBytes(url),
+      mimeType: url.match(/^data:([^;]+)/)?.[1] || '',
+    };
+  }
+
+  const tryReadResponse = async (response: Response) => {
+    if (!response.ok) {
+      throw new Error(`Не удалось получить файл: ${response.status}`);
+    }
+    const blob = await response.blob();
+    return {
+      bytes: new Uint8Array(await blob.arrayBuffer()),
+      mimeType: blob.type,
+    };
+  };
+
+  const isAbsoluteHttp = /^https?:\/\//i.test(url);
+  const isSameOriginAbsolute = isAbsoluteHttp && new URL(url, window.location.href).origin === window.location.origin;
+  const canTryDirect = !isAbsoluteHttp || isSameOriginAbsolute || url.startsWith('blob:');
+
+  if (canTryDirect) {
+    try {
+      const response = await fetch(isAbsoluteHttp ? url : new URL(url, window.location.href).toString(), {
+        headers: authHeaders,
+      });
+      return await tryReadResponse(response);
+    } catch (error) {
+      if (!isAbsoluteHttp) throw error;
+    }
+  }
+
+  if (isAbsoluteHttp) {
+    const proxyUrl = `${API_BASE_URL}/api/media/fetch?url=${encodeURIComponent(url)}`;
+    const response = await fetch(proxyUrl, {
+      headers: authHeaders,
+    });
+    return await tryReadResponse(response);
+  }
+
+  throw new Error('Фото недоступно для скачивания');
 }
 
 function buildShippingComparisonPairs(events: ShippingPhoto[]) {
@@ -787,32 +864,30 @@ export default function EquipmentDetail() {
     try {
       const zipEntries: Array<{ name: string; data: Uint8Array; date?: Date }> = [];
       const usedNames = new Set<string>();
+      let skippedPhotos = 0;
 
       for (const event of shippingPhotos) {
         const baseFolder = `${sanitizeZipSegment(event.type === 'shipping' ? 'Отгрузка' : 'Приёмка')}_${sanitizeZipSegment(event.date || 'без-даты')}`;
-        const groupedPhotos = event.photoCategories && Object.keys(event.photoCategories).length > 0
-          ? Object.entries(PHOTO_CATEGORY_LABELS).flatMap(([key, label]) => {
-              const photos = event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS] || [];
-              return photos.map(photo => ({ label, url: photo }));
-            })
-          : event.photos.map(photo => ({ label: 'Фотографии', url: photo }));
+        const groupedPhotos = getShippingPhotoAssets(event);
 
         for (let index = 0; index < groupedPhotos.length; index += 1) {
           const photo = groupedPhotos[index];
           let bytes: Uint8Array;
           let mimeType = '';
 
-          if (photo.url.startsWith('data:')) {
-            bytes = dataUrlToBytes(photo.url);
-            mimeType = photo.url.match(/^data:([^;]+)/)?.[1] || '';
-          } else {
-            const response = await fetch(photo.url);
-            if (!response.ok) {
-              throw new Error(`Не удалось получить файл: ${response.status}`);
-            }
-            const blob = await response.blob();
-            bytes = new Uint8Array(await blob.arrayBuffer());
-            mimeType = blob.type;
+          try {
+            const fileData = await fetchPhotoBytes(photo.url);
+            bytes = fileData.bytes;
+            mimeType = fileData.mimeType;
+          } catch (error) {
+            skippedPhotos += 1;
+            console.warn('Skipping shipping photo in ZIP export', {
+              equipmentId: equipment.id,
+              eventId: event.id,
+              photoUrl: photo.url,
+              error,
+            });
+            continue;
           }
 
           const extension = inferPhotoExtension(photo.url, mimeType);
@@ -834,7 +909,7 @@ export default function EquipmentDetail() {
       }
 
       if (zipEntries.length === 0) {
-        toast.error('В этой карточке пока нет фотографий для архива.');
+        toast.error('Не удалось собрать архив: доступных фотографий не найдено.');
         return;
       }
 
@@ -848,7 +923,11 @@ export default function EquipmentDetail() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      toast.success(`Архив готов: ${zipEntries.length} фото`);
+      toast.success(
+        skippedPhotos > 0
+          ? `Архив готов: ${zipEntries.length} фото, пропущено ${skippedPhotos}`
+          : `Архив готов: ${zipEntries.length} фото`,
+      );
     } catch (error) {
       console.error('Failed to download shipping photos zip', error);
       toast.error('Не удалось собрать ZIP-архив с фотографиями');

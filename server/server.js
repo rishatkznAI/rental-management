@@ -1680,6 +1680,8 @@ registerSystemRoutes(app, {
   countActiveSessions,
   dbPath: DB_PATH,
   webhookUrl: WEBHOOK_URL,
+  requireAuth,
+  fetchImpl: fetch,
 });
 
 startServer({

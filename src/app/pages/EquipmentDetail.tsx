@@ -1204,6 +1204,7 @@ export default function EquipmentDetail() {
   const [activeTab, setActiveTab] = useState('overview');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [selectedComparisonPairId, setSelectedComparisonPairId] = useState('');
+  const comparisonSectionRef = React.useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setSelectedComparisonPairId(currentId => {
@@ -1234,6 +1235,13 @@ export default function EquipmentDetail() {
         afterPhotos: afterGroups.get(key)?.photos || [],
       }));
   }, [selectedComparisonPair]);
+
+  const scrollToComparisonSection = React.useCallback(() => {
+    comparisonSectionRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }, []);
 
   // ── Not found screen ──
   if (!equipment) {
@@ -2300,6 +2308,20 @@ export default function EquipmentDetail() {
                     <Download className="h-4 w-4" />
                     {isDownloadingPhotoZip ? 'Собираем ZIP...' : 'Скачать ZIP'}
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={scrollToComparisonSection}
+                    disabled={shippingComparisonPairs.length === 0}
+                    title={
+                      shippingComparisonPairs.length === 0
+                        ? 'Для сравнения нужна пара отгрузка и приёмка по одной аренде'
+                        : 'Открыть сравнение фото до и после аренды'
+                    }
+                  >
+                    <ImageIcon className="h-4 w-4" />
+                    {shippingComparisonPairs.length > 0 ? 'Сравнить до/после' : 'Нет сравнения'}
+                  </Button>
                   {canManageAcceptance && (
                     <>
                     <Button size="sm" variant="secondary" onClick={() => openReceptionForm('shipping')}>
@@ -2329,6 +2351,20 @@ export default function EquipmentDetail() {
                 >
                   <Download className="h-4 w-4" />
                   {isDownloadingPhotoZip ? 'Собираем ZIP...' : 'Скачать ZIP'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={scrollToComparisonSection}
+                  disabled={shippingComparisonPairs.length === 0}
+                  title={
+                    shippingComparisonPairs.length === 0
+                      ? 'Для сравнения нужна пара отгрузка и приёмка по одной аренде'
+                      : 'Открыть сравнение фото до и после аренды'
+                  }
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  {shippingComparisonPairs.length > 0 ? 'Сравнить до/после' : 'Нет сравнения'}
                 </Button>
                 {canManageAcceptance && (
                   <>
@@ -2456,7 +2492,7 @@ export default function EquipmentDetail() {
               )}
 
               {shippingComparisonPairs.length > 0 && selectedComparisonPair && (
-                <div className="rounded-2xl border border-border bg-secondary/30 p-4">
+                <div ref={comparisonSectionRef} className="rounded-2xl border border-border bg-secondary/30 p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                       <p className="text-sm font-semibold text-foreground">Сравнение до / после аренды</p>

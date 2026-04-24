@@ -470,19 +470,28 @@ export interface Client {
 
 export type DocumentType = 'contract' | 'act' | 'invoice' | 'work_order';
 export type DocumentStatus = 'draft' | 'signed' | 'sent';
+export type DocumentContractKind = 'rental' | 'supply';
 
 export interface Document {
   id: string;
   type: DocumentType;
+  contractKind?: DocumentContractKind;
   number: string;
   client: string;
   date: string;
   amount?: number;
   status: DocumentStatus;
+  signatoryName?: string;
+  signatoryBasis?: string;
   rental?: string;
   serviceTicket?: string;
   manager?: string;
   contentHtml?: string;
+  signedScanDataUrl?: string;
+  signedScanFileName?: string;
+  signedScanMimeType?: string;
+  signedAt?: string;
+  signedBy?: string;
 }
 
 export interface MechanicDocument {

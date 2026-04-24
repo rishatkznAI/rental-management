@@ -1,7 +1,16 @@
 import React from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -10,27 +19,79 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Textarea } from '../components/ui/textarea';
 import { getDocumentStatusBadge } from '../components/ui/badge';
-import { Download, Eye, Search, Upload, UserRound } from 'lucide-react';
+import { ClientCombobox } from '../components/ui/ClientCombobox';
+import {
+  CheckCircle2,
+  Download,
+  Eye,
+  FileSignature,
+  Plus,
+  Search,
+  Upload,
+  UserRound,
+} from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
-import { useDocumentsList } from '../hooks/useDocuments';
+import { useClientsList } from '../hooks/useClients';
+import { useCreateDocument, useDocumentsList, useUpdateDocument } from '../hooks/useDocuments';
 import { downloadPrintableHtml, openPrintableHtml } from '../lib/serviceWorkOrder';
-import { formatDate, formatCurrency } from '../lib/utils';
+import { formatDate, formatCurrency, formatDateTime } from '../lib/utils';
 import { mechanicsService } from '../services/mechanics.service';
 import { mechanicDocumentsService } from '../services/mechanic-documents.service';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
-import type { DocumentType, Document as Doc, Mechanic, MechanicDocument } from '../types';
+import type {
+  Client,
+  Document as Doc,
+  DocumentContractKind,
+  DocumentType,
+  Mechanic,
+  MechanicDocument,
+} from '../types';
 
 type DocumentsView = 'general' | 'mechanics';
 
-function downloadMechanicDocument(doc: MechanicDocument) {
+type ContractFormState = {
+  client: string;
+  signatoryName: string;
+  signatoryBasis: string;
+  date: string;
+  comment: string;
+};
+
+function escapeHtml(value: string | number | null | undefined) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function openDataUrl(dataUrl: string) {
+  window.open(dataUrl, '_blank', 'noopener,noreferrer');
+}
+
+function downloadDataUrl(dataUrl: string, fileName: string) {
   const link = document.createElement('a');
-  link.href = doc.dataUrl;
-  link.download = doc.fileName;
+  link.href = dataUrl;
+  link.download = fileName;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+function downloadMechanicDocument(doc: MechanicDocument) {
+  downloadDataUrl(doc.dataUrl, doc.fileName);
 }
 
 function formatFileSize(size: number) {
@@ -39,12 +100,143 @@ function formatFileSize(size: number) {
   return `${size} Б`;
 }
 
+function getContractKindLabel(kind?: DocumentContractKind) {
+  if (kind === 'supply') return 'Договор поставки';
+  return 'Договор аренды';
+}
+
+function getDocumentTypeLabel(doc: Doc): string {
+  const labels: Record<DocumentType, string> = {
+    contract: getContractKindLabel(doc.contractKind),
+    act: 'Акт',
+    invoice: 'Счёт',
+    work_order: 'Заказ-наряд',
+  };
+  return labels[doc.type];
+}
+
+function nextContractNumber(documents: Doc[], kind: DocumentContractKind, date: string) {
+  const year = (date || new Date().toISOString().slice(0, 10)).slice(0, 4);
+  const prefix = kind === 'rental' ? 'ДА' : 'ДП';
+  const nextIndex = documents.filter(doc =>
+    doc.type === 'contract'
+    && doc.contractKind === kind
+    && String(doc.date || '').slice(0, 4) === year,
+  ).length + 1;
+
+  return `${prefix}-${year}-${String(nextIndex).padStart(4, '0')}`;
+}
+
+function buildContractDraftHtml(params: {
+  kind: DocumentContractKind;
+  number: string;
+  client: string;
+  date: string;
+  signatoryName: string;
+  signatoryBasis: string;
+  comment?: string;
+}) {
+  const { kind, number, client, date, signatoryName, signatoryBasis, comment } = params;
+  return `
+    <!doctype html>
+    <html lang="ru">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(number)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 32px;
+            font-family: Arial, sans-serif;
+            color: #111827;
+            background: #fff;
+          }
+          .sheet {
+            border: 1px solid #d1d5db;
+            border-radius: 18px;
+            padding: 28px;
+          }
+          h1 {
+            margin: 0 0 10px;
+            font-size: 24px;
+          }
+          h2 {
+            margin: 26px 0 10px;
+            font-size: 16px;
+          }
+          p {
+            margin: 0 0 8px;
+            font-size: 14px;
+            line-height: 1.6;
+          }
+          .meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+            margin-top: 18px;
+          }
+          .box {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 14px;
+            background: #f9fafb;
+          }
+          .label {
+            margin-bottom: 4px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: #6b7280;
+          }
+          .placeholder {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 12px;
+            background: #eff6ff;
+            color: #1e3a8a;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="sheet">
+          <h1>${escapeHtml(getContractKindLabel(kind))}</h1>
+          <p><strong>Номер:</strong> ${escapeHtml(number)}</p>
+          <p><strong>Дата договора:</strong> ${escapeHtml(formatDate(date))}</p>
+          <p><strong>Клиент:</strong> ${escapeHtml(client)}</p>
+
+          <div class="meta">
+            <div class="box">
+              <div class="label">Подписант</div>
+              <div>${escapeHtml(signatoryName)}</div>
+            </div>
+            <div class="box">
+              <div class="label">Основание подписания</div>
+              <div>${escapeHtml(signatoryBasis)}</div>
+            </div>
+          </div>
+
+          ${comment
+            ? `<h2>Комментарий</h2><p>${escapeHtml(comment).replaceAll('\n', '<br />')}</p>`
+            : ''}
+
+          <div class="placeholder">
+            Шаблон основного текста договора будет подставлен позже. Сейчас система уже сохраняет договор в реестре, присваивает номер и фиксирует реквизиты подписанта.
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 export default function Documents() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { can } = usePermissions();
   const canManageDocuments = can('create', 'documents') || can('edit', 'documents');
   const { data: documentList = [] } = useDocumentsList();
+  const { data: clients = [] } = useClientsList();
+  const createDocument = useCreateDocument();
+  const updateDocument = useUpdateDocument();
   const { data: mechanics = [] } = useQuery<Mechanic[]>({
     queryKey: ['mechanics'],
     queryFn: mechanicsService.getAll,
@@ -62,7 +254,19 @@ export default function Documents() {
   const [mechanicSearch, setMechanicSearch] = React.useState('');
   const [selectedMechanicId, setSelectedMechanicId] = React.useState<string>('');
   const [mechanicDocuments, setMechanicDocuments] = React.useState<MechanicDocument[]>([]);
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+  const [createContractKind, setCreateContractKind] = React.useState<DocumentContractKind>('rental');
+  const [contractForm, setContractForm] = React.useState<ContractFormState>({
+    client: '',
+    signatoryName: '',
+    signatoryBasis: '',
+    date: new Date().toISOString().slice(0, 10),
+    comment: '',
+  });
+
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const signedScanInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [signedScanTargetDoc, setSignedScanTargetDoc] = React.useState<Doc | null>(null);
 
   React.useEffect(() => {
     setMechanicDocuments(mechanicDocsData);
@@ -75,35 +279,19 @@ export default function Documents() {
   }, [mechanics, selectedMechanicId]);
 
   const filteredDocuments = documentList.filter(doc => {
-    const matchesSearch = search === ''
-      || doc.number.toLowerCase().includes(search.toLowerCase())
-      || doc.client.toLowerCase().includes(search.toLowerCase());
+    const q = search.trim().toLowerCase();
+    const matchesSearch = q === ''
+      || doc.number.toLowerCase().includes(q)
+      || doc.client.toLowerCase().includes(q)
+      || getDocumentTypeLabel(doc).toLowerCase().includes(q)
+      || String(doc.signatoryName || '').toLowerCase().includes(q)
+      || String(doc.signatoryBasis || '').toLowerCase().includes(q);
 
     const matchesType = typeFilter === 'all' || doc.type === typeFilter;
     const matchesStatus = statusFilter === 'all' || doc.status === statusFilter;
 
     return matchesSearch && matchesType && matchesStatus;
   });
-
-  const getDocumentTypeLabel = (type: DocumentType): string => {
-    const labels: Record<DocumentType, string> = {
-      contract: 'Договор',
-      act: 'Акт',
-      invoice: 'Счёт',
-      work_order: 'Заказ-наряд',
-    };
-    return labels[type];
-  };
-
-  const openDocument = (doc: Doc) => {
-    if (!doc.contentHtml) return;
-    openPrintableHtml(doc.contentHtml);
-  };
-
-  const downloadDocument = (doc: Doc) => {
-    if (!doc.contentHtml) return;
-    downloadPrintableHtml(doc.contentHtml, `${doc.number}.html`);
-  };
 
   const activeFilterCount = [
     search.trim() !== '',
@@ -131,6 +319,11 @@ export default function Documents() {
       .filter(item => item.mechanicId === selectedMechanicId)
       .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt)),
     [mechanicDocuments, selectedMechanicId],
+  );
+
+  const generatedContractNumber = React.useMemo(
+    () => nextContractNumber(documentList, createContractKind, contractForm.date),
+    [createContractKind, contractForm.date, documentList],
   );
 
   const persistMechanicDocuments = React.useCallback(async (next: MechanicDocument[]) => {
@@ -168,13 +361,121 @@ export default function Documents() {
     event.target.value = '';
   };
 
+  function openContractCreate(kind: DocumentContractKind) {
+    setCreateContractKind(kind);
+    setContractForm({
+      client: '',
+      signatoryName: '',
+      signatoryBasis: '',
+      date: new Date().toISOString().slice(0, 10),
+      comment: '',
+    });
+    setCreateDialogOpen(true);
+  }
+
+  async function handleCreateContract() {
+    if (!contractForm.client.trim()) {
+      toast.error('Выберите клиента.');
+      return;
+    }
+    if (!contractForm.signatoryName.trim()) {
+      toast.error('Укажите, кто подписывает договор.');
+      return;
+    }
+    if (!contractForm.signatoryBasis.trim()) {
+      toast.error('Укажите основание подписания.');
+      return;
+    }
+    if (!contractForm.date) {
+      toast.error('Укажите дату договора.');
+      return;
+    }
+
+    const payload: Omit<Doc, 'id'> = {
+      type: 'contract',
+      contractKind: createContractKind,
+      number: generatedContractNumber,
+      client: contractForm.client.trim(),
+      date: contractForm.date,
+      status: 'draft',
+      signatoryName: contractForm.signatoryName.trim(),
+      signatoryBasis: contractForm.signatoryBasis.trim(),
+      manager: user?.name || 'Система',
+      contentHtml: buildContractDraftHtml({
+        kind: createContractKind,
+        number: generatedContractNumber,
+        client: contractForm.client.trim(),
+        date: contractForm.date,
+        signatoryName: contractForm.signatoryName.trim(),
+        signatoryBasis: contractForm.signatoryBasis.trim(),
+        comment: contractForm.comment.trim() || undefined,
+      }),
+    };
+
+    await createDocument.mutateAsync(payload);
+    setCreateDialogOpen(false);
+    toast.success(`${getContractKindLabel(createContractKind)} создан.`);
+  }
+
+  function openDocument(doc: Doc) {
+    if (doc.contentHtml) {
+      openPrintableHtml(doc.contentHtml);
+      return;
+    }
+    if (doc.signedScanDataUrl) {
+      openDataUrl(doc.signedScanDataUrl);
+    }
+  }
+
+  function downloadDocument(doc: Doc) {
+    if (doc.contentHtml) {
+      downloadPrintableHtml(doc.contentHtml, `${doc.number}.html`);
+      return;
+    }
+    if (doc.signedScanDataUrl) {
+      downloadDataUrl(doc.signedScanDataUrl, doc.signedScanFileName || `${doc.number}`);
+    }
+  }
+
+  function startMarkAsSigned(doc: Doc) {
+    setSignedScanTargetDoc(doc);
+    signedScanInputRef.current?.click();
+  }
+
+  async function handleSignedScanUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    const targetDoc = signedScanTargetDoc;
+    event.target.value = '';
+    if (!file || !targetDoc) return;
+
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      await updateDocument.mutateAsync({
+        id: targetDoc.id,
+        data: {
+          status: 'signed',
+          signedScanDataUrl: dataUrl,
+          signedScanFileName: file.name,
+          signedScanMimeType: file.type || 'application/octet-stream',
+          signedAt: new Date().toISOString(),
+          signedBy: user?.name || 'Система',
+        },
+      });
+      toast.success(`Скан загружен, договор ${targetDoc.number} отмечен как подписанный.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось загрузить скан договора.');
+    } finally {
+      setSignedScanTargetDoc(null);
+    }
+  }
+
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Документы</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Договоры, акты, счета, заказ-наряды и данные по механикам.
+            Реестр договоров, актов, счетов, заказ-нарядов и данных по механикам.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -196,7 +497,19 @@ export default function Documents() {
 
       {view === 'general' ? (
         <>
-          <div className="flex justify-end">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {canManageDocuments ? (
+              <>
+                <Button variant="secondary" onClick={() => openContractCreate('rental')}>
+                  <Plus className="h-4 w-4" />
+                  Договор аренды
+                </Button>
+                <Button variant="secondary" onClick={() => openContractCreate('supply')}>
+                  <Plus className="h-4 w-4" />
+                  Договор поставки
+                </Button>
+              </>
+            ) : null}
             <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
           </div>
 
@@ -216,7 +529,7 @@ export default function Documents() {
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    placeholder="Поиск по номеру, клиенту..."
+                    placeholder="Поиск по номеру, клиенту, подписанту..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className="app-filter-input pl-10"
@@ -253,6 +566,14 @@ export default function Documents() {
             </div>
           </FilterDialog>
 
+          <input
+            ref={signedScanInputRef}
+            type="file"
+            className="hidden"
+            accept=".pdf,.jpg,.jpeg,.png,.webp"
+            onChange={handleSignedScanUpload}
+          />
+
           <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
             <Table>
               <TableHeader>
@@ -260,53 +581,84 @@ export default function Documents() {
                   <TableHead>Тип</TableHead>
                   <TableHead>Номер</TableHead>
                   <TableHead>Клиент</TableHead>
+                  <TableHead>Подписант</TableHead>
                   <TableHead>Дата</TableHead>
-                  <TableHead>Сумма</TableHead>
                   <TableHead>Статус</TableHead>
-                  <TableHead className="w-[100px]">Действия</TableHead>
+                  <TableHead className="w-[160px]">Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredDocuments.map((doc) => (
                   <TableRow key={doc.id}>
                     <TableCell>
-                      <p className="text-sm font-medium">{getDocumentTypeLabel(doc.type)}</p>
+                      <div>
+                        <p className="text-sm font-medium">{getDocumentTypeLabel(doc)}</p>
+                        {doc.contractKind ? (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {doc.contractKind === 'rental' ? 'Реестр аренды' : 'Реестр поставки'}
+                          </p>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell>
-                      <p className="font-medium text-gray-900 dark:text-white">{doc.number}</p>
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-white">{doc.number}</p>
+                        {doc.signedScanFileName ? (
+                          <p className="text-xs text-green-600 dark:text-green-400">Скан загружен</p>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <p className="text-sm">{doc.client}</p>
                     </TableCell>
                     <TableCell>
-                      <p className="text-sm">{formatDate(doc.date)}</p>
+                      <div>
+                        <p className="text-sm">{doc.signatoryName || '—'}</p>
+                        {doc.signatoryBasis ? (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{doc.signatoryBasis}</p>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell>
-                      {doc.amount ? (
-                        <p className="text-sm font-medium">{formatCurrency(doc.amount)}</p>
-                      ) : (
-                        <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
-                      )}
+                      <div>
+                        <p className="text-sm">{formatDate(doc.date)}</p>
+                        {doc.signedAt ? (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.signedAt)}</p>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell>{getDocumentStatusBadge(doc.status)}</TableCell>
                     <TableCell>
                       <div className="flex gap-2">
                         <button
                           onClick={() => openDocument(doc)}
-                          disabled={!doc.contentHtml}
+                          disabled={!doc.contentHtml && !doc.signedScanDataUrl}
                           className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          title={doc.contentHtml ? 'Просмотр' : 'Просмотр недоступен'}
+                          title={doc.contentHtml || doc.signedScanDataUrl ? 'Просмотр' : 'Просмотр недоступен'}
                         >
-                          <Eye className={`h-4 w-4 ${doc.contentHtml ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
+                          <Eye className={`h-4 w-4 ${doc.contentHtml || doc.signedScanDataUrl ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
                         </button>
                         <button
                           onClick={() => downloadDocument(doc)}
-                          disabled={!doc.contentHtml}
+                          disabled={!doc.contentHtml && !doc.signedScanDataUrl}
                           className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          title={doc.contentHtml ? 'Скачать' : 'Скачать недоступно'}
+                          title={doc.contentHtml || doc.signedScanDataUrl ? 'Скачать' : 'Скачать недоступно'}
                         >
-                          <Download className={`h-4 w-4 ${doc.contentHtml ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
+                          <Download className={`h-4 w-4 ${doc.contentHtml || doc.signedScanDataUrl ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
                         </button>
+                        {canManageDocuments && doc.type === 'contract' ? (
+                          <button
+                            onClick={() => startMarkAsSigned(doc)}
+                            className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                            title={doc.signedScanDataUrl ? 'Заменить скан подписанного договора' : 'Загрузить скан и отметить как подписанный'}
+                          >
+                            {doc.status === 'signed' ? (
+                              <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                            ) : (
+                              <Upload className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                            )}
+                          </button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -332,6 +684,88 @@ export default function Documents() {
               <p>Показано {filteredDocuments.length} из {documentList.length} документов</p>
             </div>
           )}
+
+          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <FileSignature className="h-5 w-5" />
+                  {getContractKindLabel(createContractKind)}
+                </DialogTitle>
+                <DialogDescription>
+                  Система сама назначит номер договора из реестра. Шаблон основного текста договора подставим позже.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="grid gap-4 py-2">
+                <div className="rounded-xl border border-dashed border-border/70 bg-background/40 px-4 py-3">
+                  <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Номер договора</div>
+                  <div className="mt-1 text-lg font-semibold text-foreground">{generatedContractNumber}</div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-foreground">Клиент</div>
+                  <ClientCombobox
+                    clients={clients as Client[]}
+                    value={contractForm.client}
+                    onChange={(value) => setContractForm(current => ({ ...current, client: value }))}
+                    placeholder="Выберите клиента из базы"
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">Кто подписант</div>
+                    <Input
+                      value={contractForm.signatoryName}
+                      onChange={(event) => setContractForm(current => ({ ...current, signatoryName: event.target.value }))}
+                      placeholder="Например, Иванов Иван Иванович"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">Дата договора</div>
+                    <Input
+                      type="date"
+                      value={contractForm.date}
+                      onChange={(event) => setContractForm(current => ({ ...current, date: event.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-foreground">На основании какого документа подписывает</div>
+                  <Input
+                    value={contractForm.signatoryBasis}
+                    onChange={(event) => setContractForm(current => ({ ...current, signatoryBasis: event.target.value }))}
+                    placeholder="Например, Устава / Доверенности №... от ..."
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-foreground">Комментарий</div>
+                  <Textarea
+                    rows={3}
+                    value={contractForm.comment}
+                    onChange={(event) => setContractForm(current => ({ ...current, comment: event.target.value }))}
+                    placeholder="Необязательно. Можно оставить служебную пометку для офиса."
+                  />
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button variant="secondary" onClick={() => setCreateDialogOpen(false)}>
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => void handleCreateContract()}
+                  className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+                  disabled={createDocument.isPending}
+                >
+                  Создать договор
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       ) : (
         <>

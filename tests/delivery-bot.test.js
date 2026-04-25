@@ -117,6 +117,44 @@ test('dedicated delivery bot explains missing MAX carrier link', async () => {
   assert.equal(messages.at(-1).options.attachments[0].type, 'inline_keyboard');
 });
 
+test('dedicated delivery bot does not reuse an existing mechanic menu', async () => {
+  const { state, messages, handlers } = createMemoryBot(true);
+  state.delivery_carriers = [];
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/меню');
+
+  assert.equal(messages.length, 2);
+  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+  assert.match(messages.at(-1).text, /не привязан к перевозчику/);
+  assert.equal(messages.at(-1).options.attachments[0].payload.buttons[0][0].text, 'Мои доставки');
+});
+
+test('dedicated delivery bot ignores stale mechanic callbacks', async () => {
+  const { state, messages, handlers } = createMemoryBot(true);
+  state.delivery_carriers = [];
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'menu:new_ticket', { callbackId: 'cb-1' });
+
+  assert.equal(messages.length, 2);
+  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+  assert.match(messages.at(-1).text, /не привязан к перевозчику/);
+  assert.equal(messages.at(-1).options.attachments[0].payload.buttons[0][0].text, 'Мои доставки');
+});
+
 test('mechanic main navigation sends fallout-style stage image', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users['100'] = {

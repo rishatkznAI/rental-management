@@ -628,6 +628,19 @@ function createBotHandlers(deps) {
     return getBotUsers()[phone] || null;
   }
 
+  function getAuthorizedUserForCurrentBot(phone, replyTarget = null) {
+    if (!preferCarrierAutoLogin) return getAuthorizedUser(phone);
+    const carrierUser = authorizeCarrier(String(phone), replyTarget);
+    return carrierUser?.userRole === 'Перевозчик' ? carrierUser : null;
+  }
+
+  function isDeliveryBotCallback(payload) {
+    return payload === 'menu:main' ||
+      payload === 'menu:deliveries' ||
+      payload === 'menu:help' ||
+      payload.startsWith('delivery:status:');
+  }
+
   function clearAuthorizedUser(phone) {
     const botUsers = getBotUsers();
     if (!botUsers[phone]) return;
@@ -1442,6 +1455,22 @@ function createBotHandlers(deps) {
   async function handleCallback(senderId, phone, payload, callbackContext = null) {
     const normalized = String(payload || '').trim();
 
+    if (preferCarrierAutoLogin && !isDeliveryBotCallback(normalized)) {
+      const carrierUser = getAuthorizedUserForCurrentBot(phone, senderId);
+      return reply(
+        senderId,
+        carrierUser ? getMainMenuText(carrierUser) : formatUnlinkedCarrierMessage(),
+        {
+          attachments: carrierKeyboard(),
+          mechanicStage: 'delivery_main',
+          phone,
+          callbackContext,
+          replaceMessage: true,
+          cleanupPrevious: !callbackContext,
+        },
+      );
+    }
+
     if (normalized === 'auth:start') {
       clearAuthorizedUser(phone);
       updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
@@ -2020,7 +2049,7 @@ function createBotHandlers(deps) {
 
     if (normalized.startsWith('delivery:status:')) {
       const [, , deliveryId, nextStatus] = normalized.split(':');
-      const authUser = getAuthorizedUser(String(phone));
+      const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
       const actorName = authUser?.userName || 'Перевозчик';
       const result = updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName);
       if (!result) {
@@ -2509,13 +2538,13 @@ function createBotHandlers(deps) {
       });
     }
 
-    authorizeCarrier(String(phone), senderId);
+    const activeBotUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
 
     console.log('[TRACE] handleCommand phone=%s command=%s', phone, lower.startsWith('/start') ? '/start' : lower.split(/\s+/)[0] || 'message');
 
     if (lower.startsWith('/start')) {
       console.log('[TRACE] /start matched, parts=%d', parts.length);
-      const carrierUser = getAuthorizedUser(String(phone));
+      const carrierUser = activeBotUser;
       if (carrierUser?.userRole === 'Перевозчик' && parts.length < 3) {
         resetBotFlow(phone);
         return replyWithUi(
@@ -2576,8 +2605,18 @@ function createBotHandlers(deps) {
 
     if (!trimmed.startsWith('/')) {
       if (session.pendingAction === 'operation_step') {
-        const authUser = getAuthorizedUser(String(phone));
+        const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
         if (!authUser) {
+          if (preferCarrierAutoLogin) {
+            return reply(senderId, formatUnlinkedCarrierMessage(), {
+              attachments: carrierKeyboard(),
+              mechanicStage: 'delivery_main',
+              phone,
+              callbackContext,
+              replaceMessage: Boolean(uiContext.replaceMessage),
+              cleanupPrevious: !callbackContext,
+            });
+          }
           return reply(senderId, '🔒 Сначала авторизуйтесь.', { attachments: authKeyboard() });
         }
         return handleOperationStepInput(senderId, phone, authUser, {
@@ -2631,7 +2670,7 @@ function createBotHandlers(deps) {
       }
     }
 
-    const authUser = getAuthorizedUser(String(phone));
+    const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
     if (!authUser) {
       if (preferCarrierAutoLogin) {
         return reply(senderId, formatUnlinkedCarrierMessage(), {

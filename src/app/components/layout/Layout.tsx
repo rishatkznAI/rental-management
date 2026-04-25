@@ -83,8 +83,12 @@ export function Layout() {
           <Menu className="h-5 w-5 text-sidebar-foreground" />
         </button>
         <div className="flex items-center gap-2">
-          <Truck className="h-6 w-6 text-primary" />
-          <span className="app-shell-title text-base font-extrabold text-sidebar-foreground">Подъёмники</span>
+          <img
+            src="/skytech-logo.svg"
+            alt="Скайтех"
+            className="h-8 w-8 shrink-0 rounded-full object-contain shadow-[0_12px_30px_-16px_rgba(255,25,38,0.95)]"
+          />
+          <span className="app-shell-title text-base font-extrabold text-sidebar-foreground">Скайтех</span>
         </div>
         <NotificationCenter />
       </header>

@@ -415,11 +415,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     >
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-[0_12px_30px_-16px_rgba(212,247,74,0.95)]">
-            <Truck className="h-5 w-5" />
-          </div>
+          <img
+            src="/skytech-logo.svg"
+            alt="Скайтех"
+            className="h-9 w-9 shrink-0 rounded-full object-contain shadow-[0_12px_30px_-16px_rgba(255,25,38,0.95)]"
+          />
           <div className="min-w-0">
-            <div className="app-shell-title text-[15px] font-extrabold text-sidebar-foreground">Подъёмники</div>
+            <div className="app-shell-title text-[15px] font-extrabold text-sidebar-foreground">Скайтех</div>
           </div>
           <div className="ml-auto flex items-center gap-1">
             <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/60">

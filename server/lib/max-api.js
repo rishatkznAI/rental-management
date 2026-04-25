@@ -11,6 +11,7 @@ function createMaxApiClient({
   requestTimeoutMs = Number(process.env.MAX_API_TIMEOUT_MS || 8000),
   slowRequestMs = Number(process.env.MAX_API_SLOW_MS || 1500),
   useNativeUpload = true,
+  publicAssetBaseUrl = webhookUrl,
 }) {
   const uploadPayloadCache = new Map();
 
@@ -169,6 +170,17 @@ function createMaxApiClient({
     return payload.file || payload.path || payload.localPath || '';
   }
 
+  function publicAttachmentUrl(attachment) {
+    const payload = attachment?.payload || {};
+    if (payload.url) return payload.url;
+    if (!payload.publicPath || !publicAssetBaseUrl) return '';
+    try {
+      return new URL(payload.publicPath, publicAssetBaseUrl).toString();
+    } catch {
+      return '';
+    }
+  }
+
   function fileCacheKey(filePath, uploadType) {
     const resolved = path.resolve(filePath);
     const stat = fs.statSync(resolved);
@@ -258,6 +270,16 @@ function createMaxApiClient({
     const prepared = [];
     for (const attachment of attachments) {
       const filePath = localAttachmentPath(attachment);
+      const publicUrl = attachmentUploadType(attachment) === 'image'
+        ? publicAttachmentUrl(attachment)
+        : '';
+      if (publicUrl) {
+        prepared.push({
+          type: 'image',
+          payload: { url: publicUrl },
+        });
+        continue;
+      }
       if (!filePath) {
         prepared.push(attachment);
         continue;

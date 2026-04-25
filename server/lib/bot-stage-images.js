@@ -2,6 +2,7 @@ const path = require('path');
 
 const BOT_BRAND_IMAGE = path.join(__dirname, '..', 'assets', 'bot', 'brand', 'skytech-logo.png');
 const STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'mechanic-stages');
+const BOT_ASSET_PUBLIC_PATH = '/bot-assets';
 
 const MECHANIC_STAGE_IMAGES = {
   main: 'main-menu.jpg',
@@ -26,6 +27,7 @@ function stageImageAttachment(stageKey) {
     type: 'image',
     payload: {
       file: path.join(STAGE_IMAGE_DIR, fileName),
+      publicPath: `${BOT_ASSET_PUBLIC_PATH}/mechanic-stages/${fileName}`,
       cacheKey: `mechanic-stage:${stageKey}`,
     },
   };
@@ -41,6 +43,7 @@ function brandImageAttachment() {
     type: 'image',
     payload: {
       file: BOT_BRAND_IMAGE,
+      publicPath: `${BOT_ASSET_PUBLIC_PATH}/brand/skytech-logo.png`,
       cacheKey: 'brand:skytech-logo',
     },
   };

@@ -204,6 +204,33 @@ test('MAX sendMessage uploads local image attachments before sending', async () 
   }
 });
 
+test('MAX sendMessage can use public URL for bot stage images', async () => {
+  const requests = [];
+  const client = createMaxApiClient({
+    botToken: 'token',
+    maxApiBase: 'https://platform-api.example',
+    webhookUrl: 'https://bot.example',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { json: async () => ({ success: true }) };
+    },
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  await client.sendMessage({ user_id: 100 }, '', {
+    attachments: [attachMechanicStageImage('main', [])[0]],
+  });
+
+  assert.equal(requests.length, 1);
+  const messageBody = JSON.parse(requests[0].options.body);
+  assert.deepEqual(messageBody.attachments, [
+    {
+      type: 'image',
+      payload: { url: 'https://bot.example/bot-assets/mechanic-stages/main-menu.jpg' },
+    },
+  ]);
+});
+
 test('bot callback sends the new message before slow cleanup finishes', async () => {
   let deleteStarted = false;
   let answerStarted = false;

@@ -169,6 +169,11 @@ app.use(cors({
   credentials: true,
 }));
 
+app.use('/bot-assets', express.static(path.join(__dirname, 'assets', 'bot'), {
+  maxAge: '1h',
+  immutable: false,
+}));
+
 // ── Конфигурация ───────────────────────────────────────────────────────────────
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';

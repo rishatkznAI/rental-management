@@ -108,9 +108,11 @@ const PAYMENT_STATUS_FILTERS = [
   { value: 'partial', label: 'Частично' },
 ];
 
+const AVAILABLE_EQUIPMENT_STATUS_FILTER = 'available_equipment';
+
 const RENTAL_STATUS_FILTERS = [
   { value: '', label: 'Все статусы' },
-  { value: 'created', label: 'Создана' },
+  { value: AVAILABLE_EQUIPMENT_STATUS_FILTER, label: 'Свободная техника' },
   { value: 'active', label: 'В аренде' },
   { value: 'returned', label: 'Возвращена' },
   { value: 'closed', label: 'Закрыта' },
@@ -758,7 +760,9 @@ export default function Rentals() {
     if (filterUpd === 'yes') rentals = rentals.filter(r => r.updSigned);
     if (filterUpd === 'no')  rentals = rentals.filter(r => !r.updSigned);
     if (filterPayment) rentals = rentals.filter(r => r.paymentStatus === filterPayment);
-    if (filterStatus)  rentals = rentals.filter(r => r.status === filterStatus);
+    if (filterStatus && filterStatus !== AVAILABLE_EQUIPMENT_STATUS_FILTER) {
+      rentals = rentals.filter(r => r.status === filterStatus);
+    }
     const todayStr = format(today, 'yyyy-MM-dd');
     if (rentalPreset === 'returns_today') {
       rentals = rentals.filter(r => r.endDate === todayStr && r.status !== 'returned' && r.status !== 'closed');
@@ -874,12 +878,24 @@ export default function Rentals() {
         (e.serialNumber || '').toLowerCase().includes(q)
       );
     }
-    const hasRentalFilter = !!(filterManager || filterClient || filterUpd || filterPayment || filterStatus);
+    const hasRentalFilter = !!(
+      filterManager ||
+      filterClient ||
+      filterUpd ||
+      filterPayment ||
+      (filterStatus && filterStatus !== AVAILABLE_EQUIPMENT_STATUS_FILTER)
+    );
     if (hasRentalFilter) {
       eq = eq.filter(e => visibleFilteredRentals.some(r => matchesEquipmentRow(r, e)));
     }
+    if (filterStatus === AVAILABLE_EQUIPMENT_STATUS_FILTER) {
+      eq = eq.filter(e => {
+        const rentalsForEquipment = ganttRentals.filter(r => matchesEquipmentRow(r, e));
+        return computeEffectiveStatus(e, rentalsForEquipment, today, { start: viewStart, end: viewEnd }) === 'available';
+      });
+    }
     return [...eq].sort(compareEquipmentForPlanner);
-  }, [equipmentList, filterModel, visibleFilteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus, matchesEquipmentRow]);
+  }, [equipmentList, filterModel, visibleFilteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus, ganttRentals, matchesEquipmentRow, today, viewEnd, viewStart]);
 
   const filteredEquipmentGroups = useMemo(() => {
     const grouped = new Map<EquipmentType, Equipment[]>();
@@ -914,7 +930,7 @@ export default function Rentals() {
   const totalEquipment = equipmentList.length;
   const totalRentals = ganttRentals.length;
   const shownEquipment = filteredEquipment.length;
-  const shownRentals = filteredRentals.length;
+  const shownRentals = filterStatus === AVAILABLE_EQUIPMENT_STATUS_FILTER ? 0 : filteredRentals.length;
   const overviewCounts = useMemo(() => {
     let available = 0;
     let rented = 0;

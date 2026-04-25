@@ -146,6 +146,7 @@ function registerSystemRoutes(app, deps) {
         service,
         clients,
         payments,
+        company_expenses,
         users,
         documents,
         mechanic_documents,
@@ -160,6 +161,7 @@ function registerSystemRoutes(app, deps) {
       if (service) writeData('service', service);
       if (clients) writeData('clients', clients);
       if (payments) writeData('payments', payments);
+      if (company_expenses) writeData('company_expenses', company_expenses);
       if (users) writeData('users', users);
       if (documents) writeData('documents', documents);
       if (mechanic_documents) writeData('mechanic_documents', mechanic_documents);

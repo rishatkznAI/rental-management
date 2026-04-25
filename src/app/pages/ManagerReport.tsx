@@ -35,7 +35,7 @@ const EQ_TYPE_LABELS: Record<string, string> = {
 };
 
 const RENTAL_STATUS_LABELS: Record<string, string> = {
-  created: 'Создана',
+  created: 'Бронь',
   active: 'Активна',
   returned: 'Возвращена',
   closed: 'Закрыта',
@@ -977,7 +977,7 @@ export default function ManagerReport() {
 
             {sel(filters.rentalStatus, v => setF('rentalStatus', v), 'Статус аренды', [
               { value: 'all',      label: 'Все статусы' },
-              { value: 'created',  label: 'Создана' },
+              { value: 'created',  label: 'Бронь' },
               { value: 'active',   label: 'Активна' },
               { value: 'returned', label: 'Возвращена' },
               { value: 'closed',   label: 'Закрыта' },

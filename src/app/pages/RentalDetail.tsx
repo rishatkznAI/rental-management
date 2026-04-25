@@ -39,7 +39,7 @@ import type { DocumentType, Equipment, PaymentStatus, RentalStatus } from '../ty
 import type { GanttRentalData } from '../mock-data';
 
 const statusLabels: Record<RentalStatus, string> = {
-  new: 'Создана',
+  new: 'Новая',
   confirmed: 'Подтверждена',
   delivery: 'Доставка',
   active: 'Активна',

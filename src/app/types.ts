@@ -522,6 +522,27 @@ export interface Payment {
   comment?: string;
 }
 
+export type CompanyExpenseFrequency = 'monthly' | 'quarterly' | 'yearly';
+export type CompanyExpenseStatus = 'active' | 'paused' | 'archived';
+
+export interface CompanyExpense {
+  id: string;
+  name: string;
+  category: string;
+  amount: number;
+  frequency: CompanyExpenseFrequency;
+  paymentDay?: number;
+  nextPaymentDate?: string;
+  counterparty?: string;
+  account?: string;
+  status: CompanyExpenseStatus;
+  comment?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
 export interface ManagerBreakdownPayment {
   id: string;
   invoiceNumber: string;

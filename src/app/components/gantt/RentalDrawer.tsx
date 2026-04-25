@@ -47,7 +47,7 @@ interface RentalDrawerProps {
 }
 
 const statusLabels: Record<GanttRentalData['status'], string> = {
-  created: 'Создана',
+  created: 'Бронь',
   active: 'В аренде',
   returned: 'Возвращена',
   closed: 'Закрыта',

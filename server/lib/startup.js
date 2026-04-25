@@ -197,7 +197,8 @@ async function startServer({ app, port, deps, logger = console }) {
     logger.log('║  GET  /api/service     — сервисные заявки            ║');
     logger.log('║  GET  /api/rentals     — аренды                      ║');
     logger.log('║  GET  /api/payments    — платежи                     ║');
-    logger.log('║  ... и ещё 5 коллекций (PATCH/POST/DELETE/PUT)       ║');
+    logger.log('║  GET  /api/company_expenses — расходы                ║');
+    logger.log('║  ... и ещё 6 коллекций (PATCH/POST/DELETE/PUT)       ║');
     logger.log('╠══════════════════════════════════════════════════════╣');
     logger.log('║  GET  /health          — healthcheck                 ║');
     logger.log('║  GET  /api/status      — статус сервера (admin)      ║');

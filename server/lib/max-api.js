@@ -1,9 +1,52 @@
-function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, webhookPath = '/bot/webhook', logger = console }) {
+const fs = require('fs');
+const path = require('path');
+
+function createMaxApiClient({
+  botToken,
+  maxApiBase,
+  fetchImpl,
+  webhookUrl,
+  webhookPath = '/bot/webhook',
+  logger = console,
+  requestTimeoutMs = Number(process.env.MAX_API_TIMEOUT_MS || 8000),
+  slowRequestMs = Number(process.env.MAX_API_SLOW_MS || 1500),
+}) {
+  const uploadPayloadCache = new Map();
+
   function normalizeCallbackNotification(value) {
     if (!value) return null;
     if (typeof value === 'string') return value;
     if (typeof value.text === 'string') return value.text;
     return String(value);
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function readResponseJson(res) {
+    if (!res) return null;
+    if (typeof res.json === 'function') return res.json();
+    if (typeof res.text === 'function') {
+      const text = await res.text();
+      if (!text) return {};
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { raw: text };
+      }
+    }
+    return null;
+  }
+
+  function createAbortSignal() {
+    const controller = typeof AbortController !== 'undefined' && requestTimeoutMs > 0
+      ? new AbortController()
+      : null;
+    const timeout = controller
+      ? setTimeout(() => controller.abort(), requestTimeoutMs)
+      : null;
+    return { controller, timeout };
   }
 
   function resolveRecipientQuery(target) {
@@ -22,38 +65,194 @@ function createMaxApiClient({ botToken, maxApiBase, fetchImpl, webhookUrl, webho
     const token = (botToken || '').trim();
     const url = `${maxApiBase}${endpoint}`;
     logger.log(`[MAX API] token prefix="${token.slice(0, 8)}" len=${token.length}`);
+    const { controller, timeout } = createAbortSignal();
     const opts = {
       method,
       headers: {
         Authorization: token,
         'Content-Type': 'application/json',
       },
+      ...(controller ? { signal: controller.signal } : {}),
     };
-    if (body) opts.body = JSON.stringify(body);
+    if (body != null) opts.body = JSON.stringify(body);
 
+    const startedAt = Date.now();
     try {
       const res = await fetchImpl(url, opts);
-      const json = await res.json();
+      const json = await readResponseJson(res);
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs > slowRequestMs) {
+        logger.warn(`[MAX API] Медленный запрос ${method} ${endpoint}: ${elapsedMs}ms`);
+      }
       if (json.error) {
         logger.error(`[MAX API] Ошибка ответа (${endpoint}):`, JSON.stringify(json));
       }
       return json;
     } catch (err) {
-      logger.error('[MAX API] Ошибка:', err.message);
+      const elapsedMs = Date.now() - startedAt;
+      const timedOut = err?.name === 'AbortError';
+      logger.error(timedOut
+        ? `[MAX API] Таймаут ${method} ${endpoint} после ${elapsedMs}ms`
+        : `[MAX API] Ошибка ${method} ${endpoint}: ${err.message}`);
       return null;
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
+  }
+
+  function mimeTypeForFile(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    return ({
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.bmp': 'image/bmp',
+      '.tif': 'image/tiff',
+      '.tiff': 'image/tiff',
+      '.heic': 'image/heic',
+    })[ext] || 'application/octet-stream';
+  }
+
+  function multipartFileBody(filePath) {
+    const boundary = `----rental-mgmt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const filename = path.basename(filePath).replace(/"/g, '');
+    const fileBuffer = fs.readFileSync(filePath);
+    const header = Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="data"; filename="${filename}"\r\n` +
+      `Content-Type: ${mimeTypeForFile(filePath)}\r\n\r\n`,
+    );
+    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+    return {
+      body: Buffer.concat([header, fileBuffer, footer]),
+      contentType: `multipart/form-data; boundary=${boundary}`,
+    };
+  }
+
+  function attachmentUploadType(attachment) {
+    const type = String(attachment?.type || '').trim();
+    return ['image', 'file', 'video', 'audio'].includes(type) ? type : 'image';
+  }
+
+  function localAttachmentPath(attachment) {
+    const payload = attachment?.payload || {};
+    return payload.file || payload.path || payload.localPath || '';
+  }
+
+  function fileCacheKey(filePath, uploadType) {
+    const resolved = path.resolve(filePath);
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile()) throw new Error(`Файл вложения не найден: ${resolved}`);
+    return {
+      resolved,
+      key: `${uploadType}:${resolved}:${stat.size}:${Math.round(stat.mtimeMs)}`,
+    };
+  }
+
+  async function uploadLocalAttachment(attachment) {
+    const uploadType = attachmentUploadType(attachment);
+    const { resolved, key } = fileCacheKey(localAttachmentPath(attachment), uploadType);
+    if (uploadPayloadCache.has(key)) {
+      return uploadPayloadCache.get(key);
+    }
+
+    const uploadPromise = (async () => {
+      const uploadInfo = await maxRequest('POST', `/uploads?type=${encodeURIComponent(uploadType)}`);
+      const uploadUrl = uploadInfo?.url;
+      if (!uploadUrl) {
+        throw new Error(`MAX не вернул URL загрузки для ${path.basename(resolved)}`);
+      }
+
+      const token = (botToken || '').trim();
+      const { body, contentType } = multipartFileBody(resolved);
+      const { controller, timeout } = createAbortSignal();
+      const startedAt = Date.now();
+      try {
+        const res = await fetchImpl(uploadUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: token,
+            'Content-Type': contentType,
+            'Content-Length': String(body.length),
+          },
+          body,
+          ...(controller ? { signal: controller.signal } : {}),
+        });
+        const payload = await readResponseJson(res);
+        const elapsedMs = Date.now() - startedAt;
+        if (elapsedMs > slowRequestMs) {
+          logger.warn(`[MAX API] Медленная загрузка ${uploadType} ${path.basename(resolved)}: ${elapsedMs}ms`);
+        }
+        if (!payload || payload.error || (!payload.token && !payload.payload && !payload.url)) {
+          throw new Error(`MAX не принял вложение ${path.basename(resolved)}: ${JSON.stringify(payload)}`);
+        }
+        return payload.payload || payload;
+      } catch (err) {
+        const elapsedMs = Date.now() - startedAt;
+        const timedOut = err?.name === 'AbortError';
+        throw new Error(timedOut
+          ? `таймаут загрузки ${path.basename(resolved)} после ${elapsedMs}ms`
+          : err.message);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    })();
+
+    uploadPayloadCache.set(key, uploadPromise);
+    try {
+      return await uploadPromise;
+    } catch (error) {
+      uploadPayloadCache.delete(key);
+      throw error;
+    }
+  }
+
+  async function prepareAttachments(attachments) {
+    if (!Array.isArray(attachments)) return attachments;
+    const prepared = [];
+    for (const attachment of attachments) {
+      const filePath = localAttachmentPath(attachment);
+      if (!filePath) {
+        prepared.push(attachment);
+        continue;
+      }
+      try {
+        const payload = await uploadLocalAttachment(attachment);
+        prepared.push({
+          type: attachmentUploadType(attachment),
+          payload,
+        });
+      } catch (error) {
+        logger.error(`[MAX API] Не удалось подготовить вложение ${filePath}: ${error.message}`);
+      }
+    }
+    return prepared;
+  }
+
+  function isAttachmentNotReady(response) {
+    const code = response?.code || response?.error?.code || response?.error;
+    return code === 'attachment.not.ready';
   }
 
   async function sendMessage(target, text, options = {}) {
     const recipientQuery = resolveRecipientQuery(target);
     logger.log(`[MAX API] sendMessage → ${recipientQuery} text="${String(text).slice(0, 60)}"`);
+    const attachments = await prepareAttachments(options.attachments);
     const body = {
       text,
-      ...(options.attachments ? { attachments: options.attachments } : {}),
+      ...(attachments ? { attachments } : {}),
       ...(options.format ? { format: options.format } : {}),
       ...(options.notify != null ? { notify: options.notify } : {}),
     };
-    const res = await maxRequest('POST', `/messages?${recipientQuery}`, body);
+    let res = await maxRequest('POST', `/messages?${recipientQuery}`, body);
+    for (const delayMs of options.attachmentRetryDelaysMs || [800, 1600]) {
+      if (!isAttachmentNotReady(res)) break;
+      logger.warn(`[MAX API] Вложение ещё обрабатывается, повтор отправки через ${delayMs}ms`);
+      await sleep(delayMs);
+      res = await maxRequest('POST', `/messages?${recipientQuery}`, body);
+    }
     logger.log(`[MAX API] sendMessage ← ${JSON.stringify(res).slice(0, 200)}`);
     return res;
   }

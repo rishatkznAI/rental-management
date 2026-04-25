@@ -1,6 +1,10 @@
 const { createBotUi } = require('./bot-ui');
 const { createBotFormatters } = require('./bot-formatters');
 const { createBotOperations } = require('./bot-operations');
+const {
+  attachMechanicStageImage,
+  operationStageImageKey,
+} = require('./bot-stage-images');
 const { isMechanicRole } = require('./role-groups');
 
 function createBotHandlers(deps) {
@@ -67,16 +71,24 @@ function createBotHandlers(deps) {
       null;
   }
 
-  async function cleanupPreviousBotMessage(phone, preserveMessageId = null) {
-    if (!phone) return;
-    const session = getBotSession(phone);
-    const previousMessageId = session.lastBotMessageId;
-    if (!previousMessageId || previousMessageId === preserveMessageId) return;
-    try {
-      await deleteMessage(previousMessageId);
-    } catch (error) {
-      // Не блокируем сценарий, если MAX не дал удалить старое сообщение.
-    }
+  function getPreviousBotMessageId(phone, preserveMessageId = null) {
+    if (!phone) return null;
+    const previousMessageId = getBotSession(phone).lastBotMessageId;
+    if (!previousMessageId || previousMessageId === preserveMessageId) return null;
+    return previousMessageId;
+  }
+
+  function runBotSideEffect(task, label) {
+    Promise.resolve()
+      .then(task)
+      .catch(error => {
+        console.warn(`[BOT] ${label}:`, error?.message || String(error));
+      });
+  }
+
+  function deleteBotMessageLater(messageId, replacementMessageId = null) {
+    if (!messageId || messageId === replacementMessageId) return;
+    runBotSideEffect(() => deleteMessage(messageId), `Не удалось удалить сообщение ${messageId}`);
   }
 
   async function rememberBotMessage(phone, payload, fallbackMessageId = null) {
@@ -84,52 +96,58 @@ function createBotHandlers(deps) {
     const messageId = fallbackMessageId || extractMessageId(payload);
     if (!messageId) return;
     updateBotSession(phone, { lastBotMessageId: messageId });
+    return messageId;
   }
 
   async function reply(target, text, options = {}) {
     const {
       attachments,
+      mechanicStage = null,
       phone = '',
       callbackContext = null,
       replaceMessage = false,
       cleanupPrevious = false,
       notification = null,
     } = options;
+    const messageAttachments = mechanicStage
+      ? attachMechanicStageImage(mechanicStage, attachments)
+      : attachments;
+    const hasMessageAttachments = Array.isArray(messageAttachments)
+      ? messageAttachments.length > 0
+      : Boolean(messageAttachments);
 
     if (replaceMessage && callbackContext?.callbackId) {
-      await answerCallback(callbackContext.callbackId, {
+      const previousMessageId = getPreviousBotMessageId(phone) || callbackContext.messageId || null;
+      runBotSideEffect(() => answerCallback(callbackContext.callbackId, {
         ...(notification ? { notification: { text: notification } } : {}),
-      });
-      if (phone) {
-        await cleanupPreviousBotMessage(phone);
-      } else if (callbackContext.messageId) {
-        try {
-          await deleteMessage(callbackContext.messageId);
-        } catch (error) {
-          // Не ломаем сценарий, если MAX не дал удалить прошлое сообщение.
-        }
-      }
+      }), 'Не удалось ответить на callback');
       const payload = await sendMessage(target, text, {
-        ...(attachments ? { attachments } : {}),
+        ...(hasMessageAttachments ? { attachments: messageAttachments } : {}),
       });
-      await rememberBotMessage(phone, payload);
+      const replacementMessageId = await rememberBotMessage(phone, payload);
+      deleteBotMessageLater(previousMessageId, replacementMessageId);
       return payload;
     }
 
     if (callbackContext?.callbackId && notification) {
-      await answerCallback(callbackContext.callbackId, {
+      runBotSideEffect(() => answerCallback(callbackContext.callbackId, {
         notification: { text: notification },
-      });
+      }), 'Не удалось отправить callback-уведомление');
     }
 
-    if (cleanupPrevious && phone) {
-      await cleanupPreviousBotMessage(phone, callbackContext?.messageId || null);
-    }
+    const previousMessageId = cleanupPrevious
+      ? getPreviousBotMessageId(phone, callbackContext?.messageId || null)
+      : null;
 
     const payload = await sendMessage(target, text, {
-      ...(attachments ? { attachments } : {}),
+      ...(hasMessageAttachments ? { attachments: messageAttachments } : {}),
     });
-    await rememberBotMessage(phone, payload);
+    const replacementMessageId = await rememberBotMessage(phone, payload);
+
+    if (cleanupPrevious && phone) {
+      deleteBotMessageLater(previousMessageId, replacementMessageId);
+    }
+
     return payload;
   }
 
@@ -138,6 +156,19 @@ function createBotHandlers(deps) {
       ? `\n\nБыстро:\n${lines.map(line => `• ${line}`).join('\n')}`
       : '';
     return `${text}${footer}`;
+  }
+
+  function isMechanicMenuRole(role) {
+    return isMechanicRole(role) || role === 'Администратор';
+  }
+
+  function mechanicMainStageForRole(role) {
+    return isMechanicMenuRole(role) ? 'main' : null;
+  }
+
+  function mechanicStageForOperation(operation, isReview = false) {
+    if (isReview || operation?.currentStep === 'review') return 'complete';
+    return operationStageImageKey(OPERATION_STEP_META[operation?.currentStep]);
   }
 
   function managerSummaryKeyboard() {
@@ -441,7 +472,12 @@ function createBotHandlers(deps) {
       return reply(
         senderId,
         getMainMenuText(existingUser),
-        { attachments: defaultKeyboardForRole(existingUser.userRole), phone, cleanupPrevious: true },
+        {
+          attachments: defaultKeyboardForRole(existingUser.userRole),
+          mechanicStage: mechanicMainStageForRole(existingUser.userRole),
+          phone,
+          cleanupPrevious: true,
+        },
       );
     }
     return reply(
@@ -717,6 +753,11 @@ function createBotHandlers(deps) {
     const session = getBotSession(phone);
     const flow = session.pendingPayload?.flow;
     const photoEventType = session.pendingPayload?.photoEventType;
+    const stage = flow === 'photo_event'
+      ? 'handoff'
+      : flow === 'service_ticket'
+        ? 'ticket'
+        : 'repair';
     if (!matches.length) {
       updateBotSession(phone, {
         pendingAction: 'equipment_search',
@@ -726,12 +767,20 @@ function createBotHandlers(deps) {
             ? { flow: 'service_ticket' }
             : null,
       });
-      return sendMessage(
+      return reply(
         senderId,
         withBotMenu(
           '🔎 Техника не найдена. Напишите INV, SN, модель или производителя ещё раз.',
           ['пример: 083', 'пример: B200063918', 'отмена: /сброс'],
         ),
+        {
+          attachments: mechanicKeyboard(),
+          mechanicStage: stage,
+          phone,
+          callbackContext: uiContext.callbackContext,
+          replaceMessage: Boolean(uiContext.callbackContext),
+          cleanupPrevious: !uiContext.callbackContext,
+        },
       );
     }
     updateBotSession(phone, {
@@ -762,6 +811,7 @@ function createBotHandlers(deps) {
           : 'После выбора откроется меню действий по технике.',
     ].join('\n'), ['новый поиск: найти технику', 'отмена: /сброс']), {
       attachments: equipmentSearchKeyboard(matches),
+      mechanicStage: stage,
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -783,28 +833,38 @@ function createBotHandlers(deps) {
           pendingAction: 'ticket_reason',
           pendingPayload: { selectedEquipmentId: preselectedEquipmentId },
         });
-        return reply(senderId, '❌ Напишите причину обращения одним сообщением. Например: течь гидравлики');
+        return reply(senderId, '❌ Напишите причину обращения одним сообщением. Например: течь гидравлики', {
+          mechanicStage: 'ticket',
+        });
       }
     } else {
       const firstSpace = selectionText.indexOf(' ');
       if (firstSpace <= 0) {
         updateBotSession(phone, { pendingAction: 'ticket_reason', pendingPayload: null });
-        return reply(senderId, '❌ Формат: НОМЕР причина. Пример: 1 Течь гидравлики');
+        return reply(senderId, '❌ Формат: НОМЕР причина. Пример: 1 Течь гидравлики', {
+          mechanicStage: 'ticket',
+        });
       }
       const index = Number(selectionText.slice(0, firstSpace).trim());
       reason = selectionText.slice(firstSpace + 1).trim();
       const lastEquipmentSearch = Array.isArray(session.lastEquipmentSearch) ? session.lastEquipmentSearch : [];
       if (!Number.isInteger(index) || index <= 0 || index > lastEquipmentSearch.length) {
-        return reply(senderId, '❌ Неверный номер техники. Сначала выполните поиск заново.');
+        return reply(senderId, '❌ Неверный номер техники. Сначала выполните поиск заново.', {
+          mechanicStage: 'ticket',
+        });
       }
       if (!reason) {
-        return reply(senderId, '❌ Укажите причину обращения после номера техники.');
+        return reply(senderId, '❌ Укажите причину обращения после номера техники.', {
+          mechanicStage: 'ticket',
+        });
       }
       const selected = lastEquipmentSearch[index - 1];
       equipment = (readData('equipment') || []).find(item => item.id === selected.id);
     }
     if (!equipment) {
-      return reply(senderId, '❌ Техника больше не найдена в системе. Выполните поиск заново.');
+      return reply(senderId, '❌ Техника больше не найдена в системе. Выполните поиск заново.', {
+        mechanicStage: 'ticket',
+      });
     }
     const existingOpenTicket = getOpenTicketByEquipment(equipment);
     if (existingOpenTicket) {
@@ -817,6 +877,7 @@ function createBotHandlers(deps) {
         'Я открыл её как текущую.',
       ].join('\n'), ['черновик', 'работы гидравлика', 'запчасти фильтр', 'готово']), {
         attachments: currentRepairKeyboard(existingOpenTicket.id),
+        mechanicStage: 'repair',
         phone,
         callbackContext: uiContext.callbackContext,
         replaceMessage: Boolean(uiContext.callbackContext),
@@ -833,6 +894,7 @@ function createBotHandlers(deps) {
       'Заявка открыта как текущая.',
     ].join('\n'), ['итог', 'работы гидравлика', 'запчасти фильтр', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      mechanicStage: 'repair',
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -848,6 +910,7 @@ function createBotHandlers(deps) {
     });
     return reply(senderId, getOperationStepPrompt(operation), {
       attachments: operationKeyboard(operation),
+      mechanicStage: mechanicStageForOperation(operation),
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -863,6 +926,7 @@ function createBotHandlers(deps) {
       resetBotFlow(phone);
       return reply(senderId, '❌ Активный сценарий приёмки/отгрузки не найден. Начните заново.', {
         attachments: mechanicKeyboard(),
+        mechanicStage: 'handoff',
         phone,
         callbackContext: uiContext.callbackContext,
         replaceMessage: Boolean(uiContext.callbackContext),
@@ -875,6 +939,7 @@ function createBotHandlers(deps) {
       resetBotFlow(phone);
       return reply(senderId, '❌ Текущий шаг сценария не распознан. Начните заново.', {
         attachments: mechanicKeyboard(),
+        mechanicStage: 'handoff',
         phone,
         callbackContext: uiContext.callbackContext,
         replaceMessage: Boolean(uiContext.callbackContext),
@@ -887,6 +952,7 @@ function createBotHandlers(deps) {
     if (stepMeta.kind === 'check') {
       return reply(senderId, `✅ Пункт «${stepMeta.label}» подтверждается кнопкой ниже.`, {
         attachments: operationKeyboard(operation),
+        mechanicStage: mechanicStageForOperation(operation),
         phone,
         callbackContext: uiContext.callbackContext,
         replaceMessage: Boolean(uiContext.callbackContext),
@@ -898,6 +964,7 @@ function createBotHandlers(deps) {
       if (!photoUrls.length) {
         return reply(senderId, `📷 Я жду ${stepMeta.label}. Пожалуйста, отправьте фото.`, {
           attachments: operationKeyboard(operation),
+          mechanicStage: mechanicStageForOperation(operation),
           phone,
           callbackContext: uiContext.callbackContext,
           replaceMessage: Boolean(uiContext.callbackContext),
@@ -918,6 +985,7 @@ function createBotHandlers(deps) {
       if (!Number.isFinite(value) || value < 0) {
         return reply(senderId, '❌ Моточасы должны быть числом не меньше 0. Например: 1542', {
           attachments: operationKeyboard(operation),
+          mechanicStage: mechanicStageForOperation(operation),
           phone,
           callbackContext: uiContext.callbackContext,
           replaceMessage: Boolean(uiContext.callbackContext),
@@ -934,6 +1002,7 @@ function createBotHandlers(deps) {
       if (!rawText) {
         return reply(senderId, '❌ Опишите повреждения текстом.', {
           attachments: operationKeyboard(operation),
+          mechanicStage: mechanicStageForOperation(operation),
           phone,
           callbackContext: uiContext.callbackContext,
           replaceMessage: Boolean(uiContext.callbackContext),
@@ -963,6 +1032,7 @@ function createBotHandlers(deps) {
       });
       return reply(senderId, getOperationSummary(nextOperation), {
         attachments: operationKeyboard(nextOperation, true),
+        mechanicStage: mechanicStageForOperation(nextOperation, true),
         phone,
         callbackContext: uiContext.callbackContext,
         replaceMessage: Boolean(uiContext.callbackContext),
@@ -976,6 +1046,7 @@ function createBotHandlers(deps) {
     });
     return reply(senderId, getOperationStepPrompt(nextOperation), {
       attachments: operationKeyboard(nextOperation),
+      mechanicStage: mechanicStageForOperation(nextOperation),
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -992,6 +1063,7 @@ function createBotHandlers(deps) {
         ['пример: гидравлика', 'пример: замена масла', 'черновик'],
       ), {
         attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'work',
         phone,
         callbackContext: uiContext.callbackContext,
         replaceMessage: Boolean(uiContext.callbackContext),
@@ -1013,6 +1085,7 @@ function createBotHandlers(deps) {
         : 'Показываю популярные работы. Можно сразу нажать кнопку или выполнить новый текстовый поиск.',
     ].join('\n'), ['новый поиск работ', 'черновик', 'отмена: /сброс']), {
       attachments: workSearchKeyboard(matches),
+      mechanicStage: 'work',
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1043,6 +1116,7 @@ function createBotHandlers(deps) {
       ),
       {
         attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'work',
         phone,
         callbackContext: uiContext.callbackContext,
         replaceMessage: Boolean(uiContext.callbackContext),
@@ -1063,6 +1137,7 @@ function createBotHandlers(deps) {
       if (selectedWorkId) {
         return reply(senderId, '❌ Не удалось определить выбранную работу. Нажмите кнопку работы ещё раз или выполните новый поиск.', {
           attachments: currentRepairKeyboard(ticket.id),
+          mechanicStage: 'work',
           phone,
           callbackContext: uiContext.callbackContext,
           replaceMessage: Boolean(uiContext.callbackContext),
@@ -1093,6 +1168,7 @@ function createBotHandlers(deps) {
     resetBotFlow(phone);
     return reply(senderId, withBotMenu(`✅ Добавлена работа: ${work.name}`, ['ещё работы', 'запчасти', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      mechanicStage: 'work',
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1104,7 +1180,14 @@ function createBotHandlers(deps) {
     const matches = searchSpareParts(query);
     if (!matches.length) {
       updateBotSession(phone, { pendingAction: 'part_search', activeRepairId: ticket.id });
-      return sendMessage(senderId, '🔎 По этому запросу активные запчасти не найдены. Напишите другой запрос.');
+      return reply(senderId, '🔎 По этому запросу активные запчасти не найдены. Напишите другой запрос.', {
+        attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'parts',
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      });
     }
     updateBotSession(phone, {
       activeRepairId: ticket.id,
@@ -1122,6 +1205,7 @@ function createBotHandlers(deps) {
       'Если нужна своя цена, после выбора нажмите «Ввести руками».',
     ].join('\n'), ['новый поиск запчастей', 'черновик', 'отмена: /сброс']), {
       attachments: partSearchKeyboard(matches),
+      mechanicStage: 'parts',
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1163,6 +1247,7 @@ function createBotHandlers(deps) {
     resetBotFlow(phone);
     return reply(senderId, withBotMenu(`✅ Добавлена запчасть: ${part.name} × ${quantity} по ${price.toLocaleString('ru-RU')} ₽`, ['ещё запчасти', 'работы', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      mechanicStage: 'parts',
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1175,6 +1260,7 @@ function createBotHandlers(deps) {
       updateBotSession(phone, { pendingAction: 'summary', activeRepairId: ticket.id });
       return reply(senderId, '📝 Напишите следующим сообщением комментарий по результату одним текстом. Это необязательно: можно кратко описать, чем закончилась работа.', {
         attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'repair',
         phone,
         callbackContext: uiContext.callbackContext,
         replaceMessage: Boolean(uiContext.callbackContext),
@@ -1195,6 +1281,7 @@ function createBotHandlers(deps) {
     resetBotFlow(phone);
     return reply(senderId, withBotMenu(`✅ Комментарий по результату сохранён для ${ticket.id}`, ['работы', 'запчасти', 'черновик', 'готово']), {
       attachments: currentRepairKeyboard(ticket.id),
+      mechanicStage: 'repair',
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1211,6 +1298,7 @@ function createBotHandlers(deps) {
     });
     return reply(senderId, `📷 Отправьте фото ${phaseLabel} для заявки ${ticket.id}. Можно приложить несколько фото одним сообщением.`, {
       attachments: currentRepairKeyboard(ticket.id),
+      mechanicStage: 'photo',
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1223,6 +1311,7 @@ function createBotHandlers(deps) {
     if (!photoUrls.length) {
       return reply(senderId, `📷 Я жду фото ${phase === 'before' ? 'до ремонта' : 'после ремонта'}. Пожалуйста, приложите фото сообщением.`, {
         attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'photo',
         phone,
         callbackContext: uiContext.callbackContext,
         replaceMessage: Boolean(uiContext.callbackContext),
@@ -1239,6 +1328,7 @@ function createBotHandlers(deps) {
       'закрыть',
     ]), {
       attachments: currentRepairKeyboard(ticket.id),
+      mechanicStage: 'photo',
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1262,6 +1352,7 @@ function createBotHandlers(deps) {
     });
     return reply(senderId, formatRepairCloseChecklist(ticket, checklist), {
       attachments: repairCloseChecklistKeyboard(ticket, checklist),
+      mechanicStage: 'complete',
       phone,
       callbackContext: uiContext.callbackContext,
       replaceMessage: Boolean(uiContext.callbackContext),
@@ -1386,6 +1477,7 @@ function createBotHandlers(deps) {
       resetBotFlow(phone);
       return reply(senderId, '❎ Сценарий отгрузки/приёмки отменён.', {
         attachments: mechanicKeyboard(),
+        mechanicStage: 'handoff',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1399,6 +1491,7 @@ function createBotHandlers(deps) {
         resetBotFlow(phone);
         return reply(senderId, '❌ Активная операция не найдена.', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'handoff',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1418,6 +1511,7 @@ function createBotHandlers(deps) {
             : '📥 Вернулись к выбору техники для приёмки.\n\nНапишите INV, SN, модель или производителя.',
           {
             attachments: mechanicKeyboard(),
+            mechanicStage: 'handoff',
             phone,
             callbackContext,
             replaceMessage: true,
@@ -1430,6 +1524,7 @@ function createBotHandlers(deps) {
       });
       return reply(senderId, getOperationStepPrompt(previous), {
         attachments: operationKeyboard(previous),
+        mechanicStage: mechanicStageForOperation(previous),
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1461,6 +1556,7 @@ function createBotHandlers(deps) {
         '🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.',
         {
           attachments: defaultKeyboardForRole(authUser?.userRole || ''),
+          mechanicStage: mechanicMainStageForRole(authUser?.userRole || '') ? 'ticket' : null,
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1475,6 +1571,7 @@ function createBotHandlers(deps) {
         'Выберите сценарий работы с техникой.',
         {
           attachments: operationsKeyboard(),
+          mechanicStage: 'handoff',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1491,6 +1588,7 @@ function createBotHandlers(deps) {
           : 'Сначала откройте заявку, либо выберите действие заранее.',
         {
           attachments: repairActionsKeyboard(currentTicket?.id || ''),
+          mechanicStage: 'repair',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1505,6 +1603,7 @@ function createBotHandlers(deps) {
         resetBotFlow(phone);
         return reply(senderId, '❌ Активная операция не найдена.', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'handoff',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1515,6 +1614,7 @@ function createBotHandlers(deps) {
       if (!checklistKey) {
         return reply(senderId, '❌ Этот шаг нельзя подтвердить кнопкой.', {
           attachments: operationKeyboard(operation),
+          mechanicStage: mechanicStageForOperation(operation),
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1542,6 +1642,7 @@ function createBotHandlers(deps) {
       if (nextStep === 'review') {
         return reply(senderId, getOperationSummary(updated), {
           attachments: operationKeyboard(updated, true),
+          mechanicStage: mechanicStageForOperation(updated, true),
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1549,6 +1650,7 @@ function createBotHandlers(deps) {
       }
       return reply(senderId, getOperationStepPrompt(updated), {
         attachments: operationKeyboard(updated),
+        mechanicStage: mechanicStageForOperation(updated),
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1568,6 +1670,7 @@ function createBotHandlers(deps) {
       resetBotFlow(phone);
       return reply(senderId, '❎ Сценарий отгрузки/приёмки отменён.', {
         attachments: mechanicKeyboard(),
+        mechanicStage: 'handoff',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1590,6 +1693,7 @@ function createBotHandlers(deps) {
         resetBotFlow(phone);
         return reply(senderId, '❌ Активная операция не найдена.', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'handoff',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1624,6 +1728,7 @@ function createBotHandlers(deps) {
         });
         return reply(senderId, `❌ Сценарий ещё не завершён.\n\n${getOperationStepPrompt(restored)}`, {
           attachments: operationKeyboard(restored),
+          mechanicStage: mechanicStageForOperation(restored),
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1643,6 +1748,7 @@ function createBotHandlers(deps) {
             : 'Открытая сервисная заявка уже существовала.',
         ].join('\n'), ['мои заявки', 'черновик', 'новая заявка']), {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'complete',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1657,6 +1763,7 @@ function createBotHandlers(deps) {
           : 'Фотоотчёт сохранён в карточку техники.',
       ].join('\n'), ['мои заявки', 'найти технику']), {
         attachments: mechanicKeyboard(),
+        mechanicStage: 'complete',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1668,6 +1775,7 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return reply(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'field_trip',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1680,6 +1788,7 @@ function createBotHandlers(deps) {
       });
       return reply(senderId, '🚐 Напишите маршрут в формате: Казань → Алабуга', {
         attachments: keyboard([[button('Назад', 'menu:field_trip'), button('Главное меню', 'menu:main')]]),
+        mechanicStage: 'field_trip',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1694,6 +1803,7 @@ function createBotHandlers(deps) {
       if (!authUser || !ticket || !route) {
         return reply(senderId, '❌ Не удалось определить заявку или маршрут выезда.', {
           attachments: currentRepairKeyboard(ticket?.id || ''),
+          mechanicStage: 'field_trip',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1703,6 +1813,7 @@ function createBotHandlers(deps) {
       if (activeTrip) {
         return reply(senderId, formatFieldTripMessage(activeTrip, ticket), {
           attachments: fieldTripStatusKeyboard(activeTrip),
+          mechanicStage: 'field_trip',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1722,6 +1833,7 @@ function createBotHandlers(deps) {
       setCurrentRepair(phone, ticket.id);
       return reply(senderId, formatFieldTripMessage(trip, ticket), {
         attachments: fieldTripStatusKeyboard(trip),
+        mechanicStage: 'field_trip',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1744,6 +1856,7 @@ function createBotHandlers(deps) {
       if (!result) {
         return reply(senderId, '❌ Выезд не найден.', {
           attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || ''),
+          mechanicStage: 'field_trip',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1752,6 +1865,7 @@ function createBotHandlers(deps) {
       const ticket = result.trip?.serviceTicketId ? findServiceTicketById(result.trip.serviceTicketId) : null;
       return reply(senderId, formatFieldTripMessage(result.trip, ticket), {
         attachments: fieldTripStatusKeyboard(result.trip),
+        mechanicStage: 'field_trip',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1774,6 +1888,7 @@ function createBotHandlers(deps) {
       if (!result) {
         return reply(senderId, '❌ Выезд не найден.', {
           attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || ''),
+          mechanicStage: 'field_trip',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1783,6 +1898,7 @@ function createBotHandlers(deps) {
       setCurrentRepair(phone, ticket?.id || getCurrentRepair(phone)?.id || '');
       return reply(senderId, formatFieldTripMessage(result.trip, ticket), {
         attachments: currentRepairKeyboard(ticket?.id || getCurrentRepair(phone)?.id || ''),
+        mechanicStage: 'field_trip',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1885,6 +2001,7 @@ function createBotHandlers(deps) {
       const checklist = buildRepairCloseChecklistStatus(ticket, draft);
       return reply(senderId, formatRepairCloseChecklist(ticket, checklist), {
         attachments: repairCloseChecklistKeyboard(ticket, checklist),
+        mechanicStage: 'complete',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1897,6 +2014,7 @@ function createBotHandlers(deps) {
       const ticketId = normalized.slice('repairclose:cancel:'.length);
       return reply(senderId, `❎ Закрытие заявки ${ticketId} отменено.`, {
         attachments: currentRepairKeyboard(ticketId),
+        mechanicStage: 'repair',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -1929,6 +2047,7 @@ function createBotHandlers(deps) {
       if (missingKey) {
         return reply(senderId, formatRepairCloseChecklist(ticket, checklist), {
           attachments: repairCloseChecklistKeyboard(ticket, checklist),
+          mechanicStage: 'complete',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1951,6 +2070,7 @@ function createBotHandlers(deps) {
         const authUser = getAuthorizedUser(String(phone));
         return reply(senderId, '❌ Техника больше не найдена. Выполните поиск заново.', {
           attachments: defaultKeyboardForRole(authUser?.userRole || ''),
+          mechanicStage: mechanicMainStageForRole(authUser?.userRole || '') ? 'repair' : null,
         });
       }
       const flow = getBotSession(phone).pendingPayload?.flow;
@@ -1977,6 +2097,7 @@ function createBotHandlers(deps) {
           `🛠 ${formatEquipmentForBot(equipment)}\n\nНапишите причину сервисной заявки следующим сообщением.`,
           {
             attachments: keyboard([backAndMainRow('menu:new_ticket')]),
+            mechanicStage: 'ticket',
             phone,
             callbackContext,
             replaceMessage: true,
@@ -1993,6 +2114,7 @@ function createBotHandlers(deps) {
         formatEquipmentActionMenu(equipment),
         {
           attachments: equipmentActionKeyboard(equipment.id),
+          mechanicStage: 'repair',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2006,6 +2128,7 @@ function createBotHandlers(deps) {
       if (!equipment) {
         return reply(senderId, '❌ Техника больше не найдена.', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'repair',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2017,6 +2140,7 @@ function createBotHandlers(deps) {
       });
       return reply(senderId, formatEquipmentActionMenu(equipment), {
         attachments: equipmentActionKeyboard(equipment.id),
+        mechanicStage: 'repair',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -2029,6 +2153,7 @@ function createBotHandlers(deps) {
       if (!equipment) {
         return reply(senderId, '❌ Техника больше не найдена.', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'repair',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2044,6 +2169,7 @@ function createBotHandlers(deps) {
           [button('ЧТО', `equipmentmenu:maintenance:${equipment.id}:chto`), button('ПТО', `equipmentmenu:maintenance:${equipment.id}:pto`)],
           [button('Назад', `equipmentmenu:open:${equipment.id}`), button('Главное меню', 'menu:main')],
         ]),
+        mechanicStage: 'repair',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -2056,6 +2182,7 @@ function createBotHandlers(deps) {
       if (!equipment) {
         return reply(senderId, '❌ Техника больше не найдена.', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'repair',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2070,6 +2197,7 @@ function createBotHandlers(deps) {
         `🛠 ${formatEquipmentForBot(equipment)}\n\nНапишите причину ремонта следующим сообщением.`,
         {
           attachments: keyboard([backAndMainRow(`equipmentmenu:open:${equipment.id}`)]),
+          mechanicStage: 'ticket',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2084,6 +2212,7 @@ function createBotHandlers(deps) {
       if (!equipment || !maintenanceLabel) {
         return reply(senderId, '❌ Техника или тип обслуживания больше не найдены.', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'repair',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2098,6 +2227,7 @@ function createBotHandlers(deps) {
         `🧰 ${maintenanceLabel}: ${formatEquipmentForBot(equipment)}\n\nНапишите следующим сообщением, что именно было сделано.`,
         {
           attachments: keyboard([backAndMainRow(`equipmentmenu:open:${equipment.id}`)]),
+          mechanicStage: 'repair',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2111,12 +2241,14 @@ function createBotHandlers(deps) {
       if (!work) {
         return reply(senderId, '❌ Работа больше недоступна. Выполните поиск работ заново.', {
           attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || ''),
+          mechanicStage: 'work',
         });
       }
       const ticket = getCurrentRepair(phone);
       if (!ticket) {
         return reply(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'repairs',
         });
       }
       updateBotSession(phone, {
@@ -2136,12 +2268,14 @@ function createBotHandlers(deps) {
       if (!part) {
         return reply(senderId, '❌ Запчасть больше недоступна. Выполните поиск запчастей заново.', {
           attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || ''),
+          mechanicStage: 'parts',
         });
       }
       const ticket = getCurrentRepair(phone);
       if (!ticket) {
         return reply(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'repairs',
         });
       }
       updateBotSession(phone, {
@@ -2162,6 +2296,7 @@ function createBotHandlers(deps) {
         ].join('\n'),
         {
           attachments: quantityKeyboard('part'),
+          mechanicStage: 'parts',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2177,6 +2312,7 @@ function createBotHandlers(deps) {
         if (!selectedEquipmentId) {
           return reply(senderId, '❌ Сначала выберите технику.', {
             attachments: mechanicKeyboard(),
+            mechanicStage: 'ticket',
           });
         }
         updateBotSession(phone, {
@@ -2188,6 +2324,7 @@ function createBotHandlers(deps) {
           '📝 Напишите свою причину ремонта следующим сообщением.',
           {
             attachments: keyboard([backAndMainRow('menu:new_ticket')]),
+            mechanicStage: 'ticket',
             phone,
             callbackContext,
             replaceMessage: true,
@@ -2197,6 +2334,7 @@ function createBotHandlers(deps) {
       if (!currentReason) {
         return reply(senderId, '❌ Причина не распознана. Выберите кнопку ещё раз.', {
           attachments: repairReasonKeyboard(),
+          mechanicStage: 'ticket',
         });
       }
       const authUser = getAuthorizedUser(String(phone));
@@ -2216,6 +2354,7 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return reply(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'repairs',
         });
       }
 
@@ -2223,6 +2362,7 @@ function createBotHandlers(deps) {
         if (kind === 'work') {
           return reply(senderId, '🧰 Напишите количество работы одним числом. Например: 2', {
             attachments: currentRepairKeyboard(ticket.id),
+            mechanicStage: 'work',
             phone,
             callbackContext,
             replaceMessage: true,
@@ -2231,6 +2371,7 @@ function createBotHandlers(deps) {
         if (kind === 'part') {
           return reply(senderId, '📦 Напишите: КОЛИЧЕСТВО [ЦЕНА]\nПример: 2 3500\nЕсли цену не указывать, возьмётся базовая.', {
             attachments: currentRepairKeyboard(ticket.id),
+            mechanicStage: 'parts',
             phone,
             callbackContext,
             replaceMessage: true,
@@ -2241,6 +2382,7 @@ function createBotHandlers(deps) {
       if (!['1', '2', '3', '5'].includes(value || '')) {
         return reply(senderId, '❌ Количество не распознано.', {
           attachments: currentRepairKeyboard(ticket.id),
+          mechanicStage: kind === 'part' ? 'parts' : 'work',
         });
       }
 
@@ -2258,6 +2400,7 @@ function createBotHandlers(deps) {
 
     return reply(senderId, 'ℹ️ Действие кнопки пока не распознано.', {
       attachments: defaultKeyboardForRole(getAuthorizedUser(String(phone))?.userRole || ''),
+      mechanicStage: mechanicMainStageForRole(getAuthorizedUser(String(phone))?.userRole || ''),
       phone,
       callbackContext,
       replaceMessage: true,
@@ -2331,7 +2474,10 @@ function createBotHandlers(deps) {
       resetBotFlow(phone);
       return replyWithUi(
         getMainMenuText(user),
-        { attachments: defaultKeyboardForRole(user.role) },
+        {
+          attachments: defaultKeyboardForRole(user.role),
+          mechanicStage: mechanicMainStageForRole(user.role),
+        },
       );
     }
 
@@ -2384,7 +2530,10 @@ function createBotHandlers(deps) {
         return reply(
           senderId,
           getMainMenuText(user),
-          { attachments: defaultKeyboardForRole(user.role) },
+          {
+            attachments: defaultKeyboardForRole(user.role),
+            mechanicStage: mechanicMainStageForRole(user.role),
+          },
         );
       }
     }
@@ -2620,6 +2769,7 @@ function createBotHandlers(deps) {
         if (!parsedRoute) {
           return reply(senderId, '❌ Напишите маршрут в формате: Казань → Алабуга', {
             attachments: keyboard([[button('Назад', 'menu:field_trip'), button('Главное меню', 'menu:main')]]),
+            mechanicStage: 'field_trip',
             phone,
             callbackContext: uiContext.callbackContext,
             replaceMessage: Boolean(uiContext.callbackContext),
@@ -2635,6 +2785,7 @@ function createBotHandlers(deps) {
         });
         return reply(senderId, '📏 Напишите расстояние в километрах числом. Например: 200', {
           attachments: keyboard([[button('Назад', 'menu:field_trip'), button('Главное меню', 'menu:main')]]),
+          mechanicStage: 'field_trip',
           phone,
           callbackContext: uiContext.callbackContext,
           replaceMessage: Boolean(uiContext.callbackContext),
@@ -2646,6 +2797,7 @@ function createBotHandlers(deps) {
         if (!distanceKm) {
           return reply(senderId, '❌ Напишите расстояние числом в километрах. Например: 200', {
             attachments: keyboard([[button('Назад', 'menu:field_trip'), button('Главное меню', 'menu:main')]]),
+            mechanicStage: 'field_trip',
             phone,
             callbackContext: uiContext.callbackContext,
             replaceMessage: Boolean(uiContext.callbackContext),
@@ -2656,6 +2808,7 @@ function createBotHandlers(deps) {
           resetBotFlow(phone);
           return reply(senderId, formatFieldTripMessage(activeTrip, currentTicket), {
             attachments: fieldTripStatusKeyboard(activeTrip),
+            mechanicStage: 'field_trip',
             phone,
             callbackContext: uiContext.callbackContext,
             replaceMessage: Boolean(uiContext.callbackContext),
@@ -2674,6 +2827,7 @@ function createBotHandlers(deps) {
         setCurrentRepair(phone, currentTicket.id);
         return reply(senderId, formatFieldTripMessage(trip, currentTicket), {
           attachments: fieldTripStatusKeyboard(trip),
+          mechanicStage: 'field_trip',
           phone,
           callbackContext: uiContext.callbackContext,
           replaceMessage: Boolean(uiContext.callbackContext),
@@ -2692,6 +2846,7 @@ function createBotHandlers(deps) {
         const draft = getBotSession(phone).pendingPayload?.closeChecklistDraft || {};
         return reply(senderId, `${formatRepairCloseChecklist(currentTicket, buildRepairCloseChecklistStatus(currentTicket, draft))}\n\nИспользуйте кнопки ниже, чтобы продолжить чек-лист.`, {
           attachments: repairCloseChecklistKeyboard(currentTicket, buildRepairCloseChecklistStatus(currentTicket, draft)),
+          mechanicStage: 'complete',
           phone,
           callbackContext: uiContext.callbackContext,
           replaceMessage: Boolean(uiContext.callbackContext),
@@ -2716,18 +2871,21 @@ function createBotHandlers(deps) {
     if (lower === '/сервис' || lower === '/service' || lower === 'сервис' || lower === 'заявки') {
       return replyWithUi(canManageRepair ? formatServiceForUser(authUser) : formatService(readData('service') || []), {
         attachments: defaultKeyboardForRole(userRole),
+        mechanicStage: canManageRepair ? 'repairs' : null,
       });
     }
 
     if ((lower === '/моизаявки' || lower === '/myrepairs' || lower === 'мои заявки') && canManageRepair) {
       return replyWithUi(formatServiceForUser(authUser, 'assigned'), {
         attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
+        mechanicStage: 'repairs',
       });
     }
 
     if ((lower === '/меню' || lower === 'меню')) {
       return replyWithUi(getMainMenuText(authUser), {
         attachments: defaultKeyboardForRole(userRole),
+        mechanicStage: mechanicMainStageForRole(userRole),
       });
     }
 
@@ -2747,6 +2905,7 @@ function createBotHandlers(deps) {
       });
       return replyWithUi('🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.', {
         attachments: defaultKeyboardForRole(userRole),
+        mechanicStage: canManageRepair ? 'ticket' : null,
       });
     }
 
@@ -2758,6 +2917,7 @@ function createBotHandlers(deps) {
       });
       return replyWithUi('🚚 Напишите INV, SN, модель или производителя техники для отгрузки.', {
         attachments: mechanicKeyboard(),
+        mechanicStage: 'handoff',
       });
     }
 
@@ -2769,6 +2929,7 @@ function createBotHandlers(deps) {
       });
       return replyWithUi('📥 Напишите INV, SN, модель или производителя техники для приёмки с аренды.', {
         attachments: mechanicKeyboard(),
+        mechanicStage: 'handoff',
       });
     }
 
@@ -2779,6 +2940,7 @@ function createBotHandlers(deps) {
         updateBotSession(phone, { pendingAction: 'equipment_search', pendingPayload: { flow: 'service_ticket' } });
         return replyWithUi('🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.', {
           attachments: defaultKeyboardForRole(userRole),
+          mechanicStage: canManageRepair ? 'ticket' : null,
         });
       }
       return handleEquipmentSearchRequest(senderId, phone, query, uiContext);
@@ -2810,12 +2972,14 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return replyWithUi('ℹ️ Сначала откройте текущую заявку: /ремонт ID', {
           attachments: mechanicKeyboard(),
+          mechanicStage: 'repairs',
         });
       }
       const activeTrip = getActiveFieldTripForRepair(ticket.id, authUser.userName);
       if (activeTrip) {
         return replyWithUi(formatFieldTripMessage(activeTrip, ticket), {
           attachments: fieldTripStatusKeyboard(activeTrip),
+          mechanicStage: 'field_trip',
         });
       }
       const routes = getServiceRouteNorms();
@@ -2827,7 +2991,10 @@ function createBotHandlers(deps) {
         });
         return replyWithUi(
           `🚐 ${ticket.id}\n${ticket.equipment}\n\nСправочник маршрутов пока пуст. Напишите маршрут вручную в формате: Казань → Алабуга`,
-          { attachments: keyboard([[button('Назад', 'menu:repair_actions'), button('Главное меню', 'menu:main')]]) },
+          {
+            attachments: keyboard([[button('Назад', 'menu:repair_actions'), button('Главное меню', 'menu:main')]]),
+            mechanicStage: 'field_trip',
+          },
         );
       }
       updateBotSession(phone, {
@@ -2843,7 +3010,10 @@ function createBotHandlers(deps) {
           'Выберите маршрут из справочника или введите вручную.',
           'Нормо-часы будут рассчитаны автоматически по формуле км / 70.',
         ].join('\n'),
-        { attachments: fieldTripRouteKeyboard(routes) },
+        {
+          attachments: fieldTripRouteKeyboard(routes),
+          mechanicStage: 'field_trip',
+        },
       );
     }
 
@@ -2872,6 +3042,7 @@ function createBotHandlers(deps) {
         'Можно сразу работать в чате.',
       ].join('\n'), ['итог', 'работы гидравлика', 'запчасти фильтр', 'черновик', 'готово']), {
         attachments: currentRepairKeyboard(withStatus.id),
+        mechanicStage: 'repair',
       });
     }
 
@@ -2881,6 +3052,7 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return replyWithUi('❌ Заявка не найдена. Выберите заявку из списка ниже или откройте /моизаявки.', {
           attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
+          mechanicStage: 'repairs',
         });
       }
       setCurrentRepair(phone, ticket.id);
@@ -2893,12 +3065,14 @@ function createBotHandlers(deps) {
         'Теперь можно работать по заявке.',
       ].join('\n'), ['итог', 'работы поиск', 'запчасти поиск', 'черновик']), {
         attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'repair',
       });
     }
 
     if (lower === '/ремонт' && canManageRepair) {
       return replyWithUi(formatServiceForUser(authUser, 'assigned'), {
         attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
+        mechanicStage: 'repairs',
       });
     }
 
@@ -2907,10 +3081,12 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return replyWithUi('ℹ️ Сначала выберите заявку: /ремонт ID или /вработу ID', {
           attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
+          mechanicStage: 'repairs',
         });
       }
       return replyWithUi(formatCurrentRepairDraft(ticket), {
         attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'repair',
       });
     }
 
@@ -2933,6 +3109,7 @@ function createBotHandlers(deps) {
           : '🧹 Текущая заявка сброшена. Выберите новую из списка ниже или откройте /моизаявки.',
         {
           attachments: isRentalManager ? managerSummaryKeyboard() : (serviceTicketsKeyboard(authUser) || mechanicKeyboard()),
+          mechanicStage: isRentalManager ? null : 'main',
         },
       );
     }
@@ -3017,6 +3194,7 @@ function createBotHandlers(deps) {
       updateServiceTicketStatus(ticket, 'waiting_parts', authUser.userName, 'Заявка переведена в ожидание запчастей через MAX');
       return replyWithUi(`🟠 ${ticket.id} переведена в статус «Ожидание запчастей»`, {
         attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'parts',
       });
     }
 
@@ -3032,19 +3210,24 @@ function createBotHandlers(deps) {
         'Если нужно, можно посмотреть отчет: /черновик',
       ].join('\n'), ['черновик', 'мои заявки', 'меню']), {
         attachments: currentRepairKeyboard(updated.id),
+        mechanicStage: 'complete',
       });
     }
 
     if (lower === '/закрыть' && canManageRepair) {
       return replyWithUi(
         'ℹ️ Финальное закрытие из бота отключено. Переведите заявку в статус «Готово», а бригадир закроет её в программе или вернёт на доработку.',
-        { attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || '') },
+        {
+          attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || ''),
+          mechanicStage: 'complete',
+        },
       );
     }
 
     if ((lower === '/мойдень' || lower === '/отчётзадень' || lower === '/отчетзадень' || lower === 'отчёт за день' || lower === 'отчет за день') && canManageRepair) {
       return replyWithUi(withBotMenu(formatMechanicDayReport(authUser), ['мои заявки', 'черновик', 'меню']), {
         attachments: mechanicKeyboard(),
+        mechanicStage: 'main',
       });
     }
 

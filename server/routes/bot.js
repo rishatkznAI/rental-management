@@ -269,6 +269,69 @@ function registerBotRoutes(app, deps) {
     webhookPath = '/bot/webhook',
   } = deps;
 
+  async function processBotUpdate(update) {
+    if (update.update_type === 'bot_started') {
+      const user = update.user;
+      if (!user?.user_id) return;
+      const startReplyTarget = {
+        chat_id: update.chat_id || update.chatId || update.recipient?.chat_id || user.chat_id,
+        user_id: user.user_id,
+      };
+      logger.log(`[BOT] [${user.name || user.user_id}] bot_started target=${JSON.stringify(startReplyTarget)}`);
+      await handleBotStarted(startReplyTarget, String(user.user_id), update.payload);
+      return;
+    }
+
+    if (update.update_type === 'message_callback') {
+      const callback = update.callback || update.message_callback || update.messageCallback || {};
+      const callbackId = callback.callback_id || callback.callbackId || update.callback_id;
+      const payload = callback.payload || callback.data || update.payload || '';
+      const sender = callback.sender || callback.user || update.user || {};
+      const recipient = callback.recipient || update.recipient || {};
+      const callbackMessage = callback.message || update.message || {};
+      const callbackMessageId =
+        callbackMessage.message_id ||
+        callbackMessage.mid ||
+        callbackMessage.id ||
+        update.message_id ||
+        update.mid ||
+        null;
+      const replyTarget = {
+        chat_id: recipient.chat_id || recipient.chatId || update.chat_id || update.chatId,
+        user_id: sender.user_id || sender.userId || update.user_id,
+      };
+      const phone = String(replyTarget.user_id || '');
+
+      logger.log(`[BOT] callback payload=${payload} user=${replyTarget.user_id || 'unknown'}`);
+      await handleCallback(replyTarget, phone, String(payload || ''), {
+        callbackId,
+        messageId: callbackMessageId,
+        raw: callback,
+      });
+      return;
+    }
+
+    if (update.update_type !== 'message_created') return;
+
+    const msg = update.message;
+    const sender = msg?.sender;
+    if (!sender?.user_id) return;
+
+    const replyTarget = {
+      chat_id: msg?.recipient?.chat_id,
+      user_id: sender.user_id,
+    };
+    const senderId = replyTarget;
+    const phone = String(sender.user_id);
+    const text = msg?.body?.text || '';
+    const attachments = msg?.body?.attachments || msg?.attachments || [];
+
+    if (!text.trim() && (!Array.isArray(attachments) || attachments.length === 0)) return;
+
+    logger.log(`[BOT] message user=${sender.user_id} text=${describeIncomingText(text)} attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
+    await handleCommand(senderId, phone, text, { message: msg, body: msg?.body, attachments });
+  }
+
   app.post(webhookPath, async (req, res) => {
     res.sendStatus(200);
 
@@ -277,66 +340,12 @@ function registerBotRoutes(app, deps) {
       logger.log(`[BOT] webhook updates=${updates.length}`);
 
       for (const update of updates) {
-        if (update.update_type === 'bot_started') {
-          const user = update.user;
-          if (!user?.user_id) continue;
-          const startReplyTarget = {
-            chat_id: update.chat_id || update.chatId || update.recipient?.chat_id || user.chat_id,
-            user_id: user.user_id,
-          };
-          logger.log(`[BOT] [${user.name || user.user_id}] bot_started target=${JSON.stringify(startReplyTarget)}`);
-          await handleBotStarted(startReplyTarget, String(user.user_id), update.payload);
-          continue;
+        const startedAt = Date.now();
+        await processBotUpdate(update);
+        const elapsedMs = Date.now() - startedAt;
+        if (elapsedMs > 2000) {
+          logger.warn(`[BOT] Медленная обработка ${update.update_type || 'unknown'}: ${elapsedMs}ms`);
         }
-
-        if (update.update_type === 'message_callback') {
-          const callback = update.callback || update.message_callback || update.messageCallback || {};
-          const callbackId = callback.callback_id || callback.callbackId || update.callback_id;
-          const payload = callback.payload || callback.data || update.payload || '';
-          const sender = callback.sender || callback.user || update.user || {};
-          const recipient = callback.recipient || update.recipient || {};
-          const callbackMessage = callback.message || update.message || {};
-          const callbackMessageId =
-            callbackMessage.message_id ||
-            callbackMessage.mid ||
-            callbackMessage.id ||
-            update.message_id ||
-            update.mid ||
-            null;
-          const replyTarget = {
-            chat_id: recipient.chat_id || recipient.chatId || update.chat_id || update.chatId,
-            user_id: sender.user_id || sender.userId || update.user_id,
-          };
-          const phone = String(replyTarget.user_id || '');
-
-          logger.log(`[BOT] callback payload=${payload} user=${replyTarget.user_id || 'unknown'}`);
-          await handleCallback(replyTarget, phone, String(payload || ''), {
-            callbackId,
-            messageId: callbackMessageId,
-            raw: callback,
-          });
-          continue;
-        }
-
-        if (update.update_type !== 'message_created') continue;
-
-        const msg = update.message;
-        const sender = msg?.sender;
-        if (!sender?.user_id) continue;
-
-        const replyTarget = {
-          chat_id: msg?.recipient?.chat_id,
-          user_id: sender.user_id,
-        };
-        const senderId = replyTarget;
-        const phone = String(sender.user_id);
-        const text = msg?.body?.text || '';
-        const attachments = msg?.body?.attachments || msg?.attachments || [];
-
-        if (!text.trim() && (!Array.isArray(attachments) || attachments.length === 0)) continue;
-
-        logger.log(`[BOT] message user=${sender.user_id} text=${describeIncomingText(text)} attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
-        await handleCommand(senderId, phone, text, { message: msg, body: msg?.body, attachments });
       }
     } catch (err) {
       logger.error('[BOT] Ошибка обработки webhook:', err?.message || String(err));

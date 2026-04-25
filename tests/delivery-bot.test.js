@@ -1,12 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createBotHandlers } = require('../server/lib/bot-commands.js');
+const { attachMechanicStageImage } = require('../server/lib/bot-stage-images.js');
 const { createMaxApiClient } = require('../server/lib/max-api.js');
 
-function createMemoryBot(preferCarrierAutoLogin = false) {
+function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
   const state = {
     bot_users: {
       '100': {
@@ -56,8 +60,8 @@ function createMemoryBot(preferCarrierAutoLogin = false) {
       messages.push({ target, text, options });
       return { message: { message_id: `msg-${messages.length}` } };
     },
-    deleteMessage: async () => ({ success: true }),
-    answerCallback: async () => ({ success: true }),
+    deleteMessage: overrides.deleteMessage || (async () => ({ success: true })),
+    answerCallback: overrides.answerCallback || (async () => ({ success: true })),
     generateId: (prefix) => `${prefix}-1`,
     idPrefixes: { deliveries: 'DL' },
     nowIso: () => '2026-04-24T08:00:00.000Z',
@@ -113,4 +117,112 @@ test('MAX callback notification is sent as a string', async () => {
 
   assert.equal(requests.length, 1);
   assert.equal(requests[0].body.notification, 'Статус обновлён');
+});
+
+test('mechanic stage image is prepended to bot keyboard attachments', () => {
+  const attachments = attachMechanicStageImage('field_trip', [{ type: 'inline_keyboard', payload: { buttons: [] } }]);
+
+  assert.equal(attachments.length, 2);
+  assert.equal(attachments[0].type, 'image');
+  assert.match(attachments[0].payload.file, /field-trip\.jpg$/);
+  assert.equal(fs.existsSync(attachments[0].payload.file), true);
+  assert.equal(attachments[1].type, 'inline_keyboard');
+});
+
+test('MAX sendMessage uploads local image attachments before sending', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'max-stage-image-'));
+  const imagePath = path.join(tmpDir, 'stage.jpg');
+  fs.writeFileSync(imagePath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  const requests = [];
+
+  try {
+    const client = createMaxApiClient({
+      botToken: 'token',
+      maxApiBase: 'https://platform-api.example',
+      fetchImpl: async (url, options) => {
+        requests.push({ url, options });
+        if (url === 'https://platform-api.example/uploads?type=image') {
+          return { json: async () => ({ url: 'https://upload.example/stage' }) };
+        }
+        if (url === 'https://upload.example/stage') {
+          assert.equal(options.method, 'POST');
+          assert.match(options.headers['Content-Type'], /^multipart\/form-data; boundary=/);
+          assert.equal(Buffer.isBuffer(options.body), true);
+          return { json: async () => ({ token: 'stage-token' }) };
+        }
+        return { json: async () => ({ success: true }) };
+      },
+      logger: { log: () => {}, warn: () => {}, error: () => {} },
+    });
+
+    await client.sendMessage({ user_id: 100 }, 'Этап', {
+      attachments: [
+        { type: 'image', payload: { file: imagePath } },
+        { type: 'inline_keyboard', payload: { buttons: [] } },
+      ],
+    });
+
+    assert.equal(requests.length, 3);
+    const messageBody = JSON.parse(requests[2].options.body);
+    assert.deepEqual(messageBody.attachments, [
+      { type: 'image', payload: { token: 'stage-token' } },
+      { type: 'inline_keyboard', payload: { buttons: [] } },
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('bot callback sends the new message before slow cleanup finishes', async () => {
+  let deleteStarted = false;
+  let answerStarted = false;
+  const never = new Promise(() => {});
+  const { state, messages, handlers } = createMemoryBot(false, {
+    answerCallback: async () => {
+      answerStarted = true;
+      return never;
+    },
+    deleteMessage: async () => {
+      deleteStarted = true;
+      return never;
+    },
+  });
+  state.bot_sessions['100'] = { lastBotMessageId: 'old-message' };
+
+  const result = await Promise.race([
+    handlers.handleCallback({ user_id: 100, chat_id: null }, '100', 'menu:main', {
+      callbackId: 'callback-1',
+      messageId: 'old-message',
+    }).then(() => 'done'),
+    new Promise(resolve => setTimeout(() => resolve('timeout'), 50)),
+  ]);
+
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(result, 'done');
+  assert.equal(messages.length, 1);
+  assert.equal(state.bot_sessions['100'].lastBotMessageId, 'msg-1');
+  assert.equal(answerStarted, true);
+  assert.equal(deleteStarted, true);
+});
+
+test('MAX API request times out instead of hanging indefinitely', async () => {
+  const client = createMaxApiClient({
+    botToken: 'token',
+    maxApiBase: 'https://platform-api.example',
+    requestTimeoutMs: 10,
+    fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        reject(error);
+      });
+    }),
+  });
+
+  const startedAt = Date.now();
+  const result = await client.sendMessage({ user_id: 100 }, 'Проверка');
+
+  assert.equal(result, null);
+  assert.ok(Date.now() - startedAt < 500);
 });

@@ -1,5 +1,5 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -21,7 +21,6 @@ import {
   BadgeDollarSign,
   Route,
   Bot,
-  Briefcase,
   MapPinned,
   GraduationCap,
   Shield,
@@ -39,7 +38,6 @@ import {
   normalizeSidebarGroups,
   normalizeSidebarOrder,
 } from '../../lib/navigation';
-import { resolveCrmArchiveState } from '../../lib/crmArchive';
 import { getInvestorBinding, isInvestorUser } from '../../lib/userStorage';
 import { NotificationCenter } from './NotificationCenter';
 import { Input } from '../ui/input';
@@ -57,7 +55,6 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'GSM',          href: '/gsm',       icon: MapPinned,       section: 'gsm'        },
   { name: 'База знаний',  href: '/knowledge-base', icon: GraduationCap, section: 'knowledge_base' },
   { name: 'Продажи',      href: '/sales',     icon: BadgeDollarSign, section: 'sales'      },
-  { name: 'CRM',          href: '/crm',       icon: Briefcase,       section: 'crm'        },
   { name: 'Доставка',     href: '/deliveries',icon: Route,           section: 'deliveries' },
   { name: 'Аренды',       href: '/rentals',   icon: FileText,        section: 'rentals'    },
   { name: 'Планировщик',  href: '/planner',   icon: CalendarClock,   section: 'planner'    },
@@ -142,7 +139,6 @@ function highlightMatch(text: string, query: string): React.ReactNode {
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
   const { canView } = usePermissions();
@@ -151,7 +147,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { data: rentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: serviceTickets = [] } = useServiceTicketsList();
-  const { data: appSettings = [], isLoading: isLoadingAppSettings } = useQuery({
+  const { data: appSettings = [] } = useQuery({
     queryKey: ['app-settings'],
     queryFn: appSettingsService.getAll,
     staleTime: 1000 * 60 * 5,
@@ -388,43 +384,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     const groupSetting = appSettings.find(item => item.key === SIDEBAR_NAV_GROUP_SETTING_KEY);
     return normalizeSidebarGroups(groupSetting?.value);
   }, [appSettings]);
-  const crmArchiveState = useMemo(() => resolveCrmArchiveState(appSettings), [appSettings]);
-  const canManageArchivedCrm = canView('admin_panel') && crmArchiveState.isHidden;
-
-  const handleRestoreCrm = React.useCallback(async () => {
-    const now = new Date();
-
-    if (!crmArchiveState.setting) return;
-
-    await appSettingsService.update(crmArchiveState.setting.id, {
-      key: 'crm_archive_state',
-      value: {
-        status: 'active',
-        archivedAt: crmArchiveState.archivedAt,
-        deleteAfter: crmArchiveState.deleteAfter,
-        archivedBy: crmArchiveState.archivedBy,
-        restoredAt: now.toISOString(),
-        restoredBy: user?.name || 'Администратор',
-        deletedAt: null,
-        purgedDealsCount: crmArchiveState.purgedDealsCount,
-      },
-      updatedAt: now.toISOString(),
-    });
-
-    await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
-    navigate('/admin');
-    handleNavClick();
-  }, [
-    crmArchiveState.archivedAt,
-    crmArchiveState.archivedBy,
-    crmArchiveState.deleteAfter,
-    crmArchiveState.purgedDealsCount,
-    crmArchiveState.setting,
-    navigate,
-    queryClient,
-    user?.name,
-  ]);
-
   const orderIndex = useMemo(() => {
     const next = new Map<Section, number>();
     sidebarOrder.forEach((section, index) => next.set(section, index));
@@ -440,7 +399,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       .filter(item =>
         sidebarGroups[item.section] === group.id
         && canView(item.section)
-        && (item.section !== 'crm' || (!crmArchiveState.isHidden && !isLoadingAppSettings)),
       )
       .sort((a, b) => (orderIndex.get(a.section) ?? 999) - (orderIndex.get(b.section) ?? 999)),
   })).filter(group => group.items.length > 0);
@@ -600,41 +558,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </nav>
 
         <div className="border-t border-sidebar-border px-3 pb-3 pt-2">
-          {canManageArchivedCrm && (
-            <div className="mb-2 rounded-2xl border border-amber-500/20 bg-amber-500/8 p-3">
-              <div className="flex items-start gap-2">
-                <Shield className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-sidebar-foreground">
-                    {crmArchiveState.isDeleted ? 'CRM удалена' : 'CRM в архиве'}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    {crmArchiveState.isArchived && crmArchiveState.daysLeft !== null
-                      ? `Осталось ${crmArchiveState.daysLeft} дн. до автоудаления.`
-                      : 'Раздел скрыт из меню. Его можно быстро вернуть.'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-3 flex gap-2">
-                <Button size="sm" className="flex-1" onClick={() => void handleRestoreCrm()}>
-                  {crmArchiveState.isDeleted ? 'Включить CRM' : 'Восстановить CRM'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-sidebar-border bg-transparent text-sidebar-foreground hover:bg-sidebar-accent"
-                  onClick={() => {
-                    navigate('/admin');
-                    handleNavClick();
-                  }}
-                >
-                  В админку
-                </Button>
-              </div>
-            </div>
-          )}
-
           <div className={cn(
             'mb-2 flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors',
             theme === 'dark'

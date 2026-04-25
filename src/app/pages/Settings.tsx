@@ -72,7 +72,6 @@ import {
   normalizeSidebarOrder,
   type SidebarNavGroupId,
 } from '../lib/navigation';
-import { CRM_ARCHIVE_TTL_MS, resolveCrmArchiveState } from '../lib/crmArchive';
 import {
   ADMIN_FORMS_SETTING_KEY,
   ADMIN_LISTS_SETTING_KEY,
@@ -137,7 +136,6 @@ const EMPTY_FORM = {
 
 export default function Settings() {
   const { can } = usePermissions();
-  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = React.useState('users');
   const [users, setUsersState] = React.useState<SystemUser[]>([]);
@@ -166,7 +164,6 @@ export default function Settings() {
     () => appSettings.find(item => item.key === SIDEBAR_NAV_GROUP_SETTING_KEY) || null,
     [appSettings],
   );
-  const crmArchiveState = React.useMemo(() => resolveCrmArchiveState(appSettings), [appSettings]);
   const [sidebarOrder, setSidebarOrder] = React.useState(DEFAULT_SIDEBAR_ORDER);
   const [sidebarGroups, setSidebarGroups] = React.useState(() => normalizeSidebarGroups(null));
 
@@ -243,62 +240,6 @@ export default function Settings() {
 
     await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
   }, [queryClient, sidebarGroupSetting, sidebarGroups, sidebarOrder, sidebarOrderSetting]);
-
-  const handleArchiveCrm = React.useCallback(async () => {
-    const now = new Date();
-    const payload = {
-      key: 'crm_archive_state',
-      value: {
-        status: 'archived',
-        archivedAt: now.toISOString(),
-        deleteAfter: new Date(now.getTime() + CRM_ARCHIVE_TTL_MS).toISOString(),
-        archivedBy: user?.name || 'Администратор',
-        deletedAt: null,
-        restoredAt: null,
-        restoredBy: null,
-      },
-      createdAt: crmArchiveState.setting?.createdAt || now.toISOString(),
-      updatedAt: now.toISOString(),
-    };
-
-    if (crmArchiveState.setting) {
-      await appSettingsService.update(crmArchiveState.setting.id, payload);
-    } else {
-      await appSettingsService.create(payload);
-    }
-
-    await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
-  }, [crmArchiveState.setting, queryClient, user?.name]);
-
-  const handleRestoreCrm = React.useCallback(async () => {
-    const now = new Date();
-    if (!crmArchiveState.setting) return;
-
-    await appSettingsService.update(crmArchiveState.setting.id, {
-      key: 'crm_archive_state',
-      value: {
-        status: 'active',
-        archivedAt: crmArchiveState.archivedAt,
-        deleteAfter: crmArchiveState.deleteAfter,
-        archivedBy: crmArchiveState.archivedBy,
-        restoredAt: now.toISOString(),
-        restoredBy: user?.name || 'Администратор',
-        deletedAt: null,
-        purgedDealsCount: crmArchiveState.purgedDealsCount,
-      },
-      updatedAt: now.toISOString(),
-    });
-
-    await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
-  }, [
-    crmArchiveState.archivedAt,
-    crmArchiveState.archivedBy,
-    crmArchiveState.deleteAfter,
-    crmArchiveState.purgedDealsCount,
-    crmArchiveState.setting,
-    queryClient,
-    user?.name,
-  ]);
 
   // ── Диалог ──────────────────────────────────────────────────────────────────
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -395,58 +336,11 @@ export default function Settings() {
         <p className="mt-1 text-sm text-gray-500">Управление пользователями, справочниками, системными данными и порядком левого меню</p>
       </div>
 
-      <Card className="border-amber-500/20 bg-amber-500/5">
-        <CardHeader className="pb-3">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle className="text-base">CRM</CardTitle>
-              <CardDescription>
-                Быстрое управление архивом CRM. Раздел можно скрыть на 30 дней, а потом при необходимости восстановить.
-              </CardDescription>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant={crmArchiveState.isArchived ? 'warning' : crmArchiveState.isDeleted ? 'danger' : 'success'}>
-                {crmArchiveState.isArchived ? 'CRM в архиве' : crmArchiveState.isDeleted ? 'CRM удалена' : 'CRM активна'}
-              </Badge>
-              {crmArchiveState.isArchived && crmArchiveState.daysLeft !== null && (
-                <Badge variant="secondary">Осталось {crmArchiveState.daysLeft} дн.</Badge>
-              )}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <p className="text-sm text-gray-600 dark:text-gray-300">
-            {crmArchiveState.isArchived
-              ? 'CRM уже скрыта из приложения. Здесь её можно восстановить одним кликом.'
-              : crmArchiveState.isDeleted
-                ? 'Архив CRM истёк, и сделки были очищены. При желании можно включить раздел заново.'
-                : 'Если хотите временно убрать CRM из приложения, используйте кнопку архивации.'}
-          </p>
-          <div className="flex flex-wrap gap-3">
-            {!crmArchiveState.isArchived && !crmArchiveState.isDeleted && (
-              <Button variant="destructive" onClick={() => void handleArchiveCrm()}>
-                Архивировать CRM на 30 дней
-              </Button>
-            )}
-            {crmArchiveState.isArchived && (
-              <Button onClick={() => void handleRestoreCrm()}>
-                Восстановить CRM
-              </Button>
-            )}
-            {crmArchiveState.isDeleted && crmArchiveState.setting && (
-              <Button onClick={() => void handleRestoreCrm()}>
-                Включить CRM заново
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="flex h-auto w-full justify-start gap-4 rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
           {[
             { value: 'users',         label: 'Пользователи и роли' },
-            { value: 'menu',          label: 'Левое меню и CRM' },
+            { value: 'menu',          label: 'Левое меню' },
             { value: 'configuration', label: 'Списки и поля' },
             { value: 'reference',     label: 'Справочники' },
             { value: 'notifications', label: 'Уведомления' },
@@ -546,61 +440,6 @@ export default function Settings() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Архив CRM</CardTitle>
-                <CardDescription>
-                  CRM можно скрыть из приложения на 30 дней. Пока она в архиве, раздел не виден в меню и не открывается по прямой ссылке.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={crmArchiveState.isArchived ? 'warning' : crmArchiveState.isDeleted ? 'danger' : 'success'}>
-                    {crmArchiveState.isArchived ? 'CRM в архиве' : crmArchiveState.isDeleted ? 'CRM удалена' : 'CRM активна'}
-                  </Badge>
-                  {crmArchiveState.isArchived && crmArchiveState.daysLeft !== null && (
-                    <span className="text-sm text-gray-500">
-                      До автоочистки: {crmArchiveState.daysLeft} дн.
-                    </span>
-                  )}
-                </div>
-
-                <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
-                  {crmArchiveState.isArchived ? (
-                    <>
-                      CRM скрыта {crmArchiveState.archivedAt ? `с ${new Date(crmArchiveState.archivedAt).toLocaleDateString('ru-RU')}` : ''}.
-                      {crmArchiveState.deleteAfter ? ` Если не восстановить её до ${new Date(crmArchiveState.deleteAfter).toLocaleDateString('ru-RU')}, сделки будут удалены автоматически.` : ''}
-                    </>
-                  ) : crmArchiveState.isDeleted ? (
-                    <>
-                      Архив CRM истёк, и сделки были удалены автоматически.
-                      {typeof crmArchiveState.purgedDealsCount === 'number' ? ` Очищено сделок: ${crmArchiveState.purgedDealsCount}.` : ''}
-                    </>
-                  ) : (
-                    <>CRM сейчас доступна в приложении. При архивации раздел исчезнет из меню для всех пользователей.</>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  {!crmArchiveState.isArchived && !crmArchiveState.isDeleted && (
-                    <Button variant="destructive" onClick={() => void handleArchiveCrm()}>
-                      Архивировать CRM на 30 дней
-                    </Button>
-                  )}
-                  {crmArchiveState.isArchived && (
-                    <Button onClick={() => void handleRestoreCrm()}>
-                      Восстановить CRM
-                    </Button>
-                  )}
-                  {crmArchiveState.isDeleted && crmArchiveState.setting && (
-                    <Button onClick={() => void handleRestoreCrm()}>
-                      Включить CRM заново
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <LayoutPanelLeft className="h-5 w-5" />
                   Порядок левого меню
@@ -613,8 +452,7 @@ export default function Settings() {
                 <div className="grid gap-6 lg:grid-cols-2">
                   {SIDEBAR_NAV_GROUPS.map(group => {
                     const items = sidebarOrder.filter(section =>
-                      sidebarGroups[section] === group.id
-                      && !(crmArchiveState.isHidden && section === 'crm'),
+                      sidebarGroups[section] === group.id,
                     );
                     if (!items.length) return null;
                     return (

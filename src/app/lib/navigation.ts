@@ -11,7 +11,7 @@ export interface SidebarNavGroup {
 export const SIDEBAR_NAV_GROUP_SETTING_KEY = 'sidebar_navigation_groups';
 
 export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
-  { id: 'main', title: 'Главное', items: ['dashboard', 'equipment', 'gsm', 'knowledge_base', 'sales', 'crm', 'deliveries', 'rentals'] },
+  { id: 'main', title: 'Главное', items: ['dashboard', 'equipment', 'gsm', 'knowledge_base', 'sales', 'deliveries', 'rentals'] },
   { id: 'operations', title: 'Операции', items: ['planner', 'service', 'service_vehicles'] },
   { id: 'data', title: 'Данные', items: ['clients', 'documents', 'payments', 'finance'] },
   { id: 'other', title: 'Прочее', items: ['bots', 'reports', 'admin_panel'] },

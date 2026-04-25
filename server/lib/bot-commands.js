@@ -145,7 +145,7 @@ function createBotHandlers(deps) {
         ...(notification ? { notification: { text: notification } } : {}),
       }), 'Не удалось ответить на callback');
       const imagePayload = separateStageAttachment
-        ? await sendMessage(target, '', { attachments: [separateStageAttachment] })
+        ? await sendMessage(target, 'Навигация', { attachments: [separateStageAttachment] })
         : null;
       const replacementImageMessageId = await rememberBotImageMessage(phone, imagePayload);
       const payload = await sendMessage(target, text, {
@@ -171,7 +171,7 @@ function createBotHandlers(deps) {
       : null;
 
     const imagePayload = separateStageAttachment
-      ? await sendMessage(target, '', { attachments: [separateStageAttachment] })
+      ? await sendMessage(target, 'Навигация', { attachments: [separateStageAttachment] })
       : null;
     const replacementImageMessageId = await rememberBotImageMessage(phone, imagePayload);
     const payload = await sendMessage(target, text, {

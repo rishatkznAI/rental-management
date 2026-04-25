@@ -113,6 +113,7 @@ test('mechanic main navigation sends fallout-style stage image', async () => {
   await handlers.handleBotStarted({ user_id: 100 }, '100');
 
   assert.equal(messages.length, 2);
+  assert.equal(messages[0].text, 'Навигация');
   const imageAttachments = messages[0].options.attachments;
   const menuAttachments = messages[1].options.attachments;
   assert.equal(imageAttachments[0].type, 'image');

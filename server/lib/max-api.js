@@ -188,6 +188,7 @@ function createMaxApiClient({
         if (!payload || payload.error || (!payload.token && !payload.payload && !payload.url)) {
           throw new Error(`MAX не принял вложение ${path.basename(resolved)}: ${JSON.stringify(payload)}`);
         }
+        logger.log(`[MAX API] upload ${uploadType} ${path.basename(resolved)} accepted`);
         return payload.payload || payload;
       } catch (err) {
         const elapsedMs = Date.now() - startedAt;

@@ -204,6 +204,7 @@ function createBotHandlers(deps) {
 
   function mainMenuImageOptions(role) {
     const mechanicStage = mechanicMainStageForRole(role);
+    if (role === 'Перевозчик') return { mechanicStage: 'delivery_main' };
     return mechanicStage ? { mechanicStage } : { brandImage: true };
   }
 
@@ -433,19 +434,27 @@ function createBotHandlers(deps) {
   }
 
   function deliveryStatusKeyboard(delivery) {
-    if (!delivery || delivery.status === 'completed' || delivery.status === 'cancelled') return null;
+    if (!delivery || delivery.status === 'completed' || delivery.status === 'cancelled') {
+      return keyboard([
+        [button('Мои доставки', 'menu:deliveries')],
+        [button('Главное меню', 'menu:main')],
+      ]);
+    }
     if (delivery.status === 'accepted') {
       return keyboard([
         [button('Выехал', `delivery:status:${delivery.id}:in_transit`)],
+        [button('Мои доставки', 'menu:deliveries'), button('Главное меню', 'menu:main')],
       ]);
     }
     if (delivery.status === 'in_transit') {
       return keyboard([
         [button('Доставлено', `delivery:status:${delivery.id}:completed`)],
+        [button('Мои доставки', 'menu:deliveries'), button('Главное меню', 'menu:main')],
       ]);
     }
     return keyboard([
       [button('Принял', `delivery:status:${delivery.id}:accepted`)],
+      [button('Мои доставки', 'menu:deliveries'), button('Главное меню', 'menu:main')],
     ]);
   }
 
@@ -506,7 +515,12 @@ function createBotHandlers(deps) {
       return reply(
         senderId,
         getMainMenuText(existingUser),
-        { attachments: carrierKeyboard(), brandImage: true, phone, cleanupPrevious: true },
+        {
+          attachments: carrierKeyboard(),
+          ...mainMenuImageOptions(existingUser.userRole),
+          phone,
+          cleanupPrevious: true,
+        },
       );
     }
     if (existingUser) {
@@ -516,6 +530,18 @@ function createBotHandlers(deps) {
         {
           attachments: defaultKeyboardForRole(existingUser.userRole),
           ...mainMenuImageOptions(existingUser.userRole),
+          phone,
+          cleanupPrevious: true,
+        },
+      );
+    }
+    if (preferCarrierAutoLogin) {
+      return reply(
+        senderId,
+        formatUnlinkedCarrierMessage(),
+        {
+          attachments: carrierKeyboard(),
+          mechanicStage: 'delivery_main',
           phone,
           cleanupPrevious: true,
         },
@@ -576,6 +602,9 @@ function createBotHandlers(deps) {
   function authorizeCarrier(phone, replyTarget = null) {
     const existing = getAuthorizedUser(phone);
     const carrier = findCarrierByMaxKey(phone);
+    if (preferCarrierAutoLogin && !carrier) {
+      return existing?.userRole === 'Перевозчик' ? existing : null;
+    }
     if (existing && (!carrier || (!preferCarrierAutoLogin && existing.userRole !== 'Перевозчик'))) {
       return existing;
     }
@@ -678,6 +707,15 @@ function createBotHandlers(deps) {
       ...lines,
       deliveries.length > 10 ? `... и ещё ${deliveries.length - 10}` : '',
     ].filter(Boolean).join('\n');
+  }
+
+  function formatUnlinkedCarrierMessage() {
+    return [
+      '🚚 Бот доставки готов к работе.',
+      '',
+      'Ваш MAX-профиль ещё не привязан к перевозчику в системе.',
+      'Попросите администратора открыть настройки перевозчиков и выбрать ваш MAX ID.',
+    ].join('\n');
   }
   const {
     normalizeBotText,
@@ -1987,6 +2025,8 @@ function createBotHandlers(deps) {
       const result = updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName);
       if (!result) {
         return reply(senderId, '❌ Доставка не найдена.', {
+          attachments: carrierKeyboard(),
+          mechanicStage: 'delivery_status',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -1995,6 +2035,7 @@ function createBotHandlers(deps) {
       if (result.invalid) {
         return reply(senderId, formatDeliveryStatusMessage(result.delivery), {
           attachments: deliveryStatusKeyboard(result.delivery),
+          mechanicStage: 'delivery_status',
           phone,
           callbackContext,
           replaceMessage: true,
@@ -2003,6 +2044,7 @@ function createBotHandlers(deps) {
       }
       return reply(senderId, formatDeliveryStatusMessage(result.delivery), {
         attachments: deliveryStatusKeyboard(result.delivery),
+        mechanicStage: 'delivery_status',
         phone,
         callbackContext,
         replaceMessage: true,
@@ -2478,8 +2520,18 @@ function createBotHandlers(deps) {
         resetBotFlow(phone);
         return replyWithUi(
           getMainMenuText(carrierUser),
-          { attachments: carrierKeyboard(), brandImage: true },
+          {
+            attachments: carrierKeyboard(),
+            ...mainMenuImageOptions(carrierUser.userRole),
+          },
         );
+      }
+      if (preferCarrierAutoLogin && parts.length < 3) {
+        resetBotFlow(phone);
+        return replyWithUi(formatUnlinkedCarrierMessage(), {
+          attachments: carrierKeyboard(),
+          mechanicStage: 'delivery_main',
+        });
       }
       if (parts.length < 3) {
         updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
@@ -2581,6 +2633,16 @@ function createBotHandlers(deps) {
 
     const authUser = getAuthorizedUser(String(phone));
     if (!authUser) {
+      if (preferCarrierAutoLogin) {
+        return reply(senderId, formatUnlinkedCarrierMessage(), {
+          attachments: carrierKeyboard(),
+          mechanicStage: 'delivery_main',
+          phone,
+          callbackContext,
+          replaceMessage: Boolean(uiContext.replaceMessage),
+          cleanupPrevious: !callbackContext,
+        });
+      }
       return reply(senderId,
         '🔒 Вы не авторизованы.\n\nНажмите «Войти», и я попрошу логин и пароль по шагам.',
         { attachments: authKeyboard(), brandImage: true },
@@ -2935,6 +2997,7 @@ function createBotHandlers(deps) {
       const activeDelivery = deliveries.find(item => item.status !== 'completed' && item.status !== 'cancelled') || deliveries[0] || null;
       return replyWithUi(formatCarrierDeliveries(deliveries), {
         attachments: activeDelivery ? deliveryStatusKeyboard(activeDelivery) : carrierKeyboard(),
+        mechanicStage: 'delivery_list',
       });
     }
 

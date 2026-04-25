@@ -56,7 +56,7 @@ function createBotUi() {
 
   function carrierKeyboard() {
     return keyboard([
-      [button('Мои доставки', 'menu:deliveries')],
+      [button('Мои доставки', 'menu:deliveries'), button('Обновить', 'menu:deliveries')],
       [button('Помощь', 'menu:help')],
     ]);
   }

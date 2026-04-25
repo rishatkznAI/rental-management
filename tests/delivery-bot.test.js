@@ -100,6 +100,21 @@ test('dedicated delivery bot_started prefers linked carrier role', async () => {
   assert.equal(state.bot_users['100'].carrierId, 'carrier-1');
   assert.match(messages.at(-1).text, /Перевозчик/);
   assert.match(messages.at(-1).text, /доставки/);
+  assert.equal(messages.length, 2);
+  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+});
+
+test('dedicated delivery bot explains missing MAX carrier link', async () => {
+  const { state, messages, handlers } = createMemoryBot(true);
+  state.delivery_carriers = [];
+
+  await handlers.handleBotStarted({ user_id: 100 }, '100');
+
+  assert.equal(state.bot_users['100'].userRole, 'Менеджер по аренде');
+  assert.equal(messages.length, 2);
+  assert.match(messages.at(-1).text, /не привязан к перевозчику/);
+  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+  assert.equal(messages.at(-1).options.attachments[0].type, 'inline_keyboard');
 });
 
 test('mechanic main navigation sends fallout-style stage image', async () => {
@@ -120,6 +135,41 @@ test('mechanic main navigation sends fallout-style stage image', async () => {
   assert.match(imageAttachments[0].payload.file, /main-menu\.jpg$/);
   assert.doesNotMatch(imageAttachments[0].payload.file, /skytech-logo/);
   assert.equal(menuAttachments[0].type, 'inline_keyboard');
+});
+
+test('delivery menu shows image and status buttons for carrier', async () => {
+  const { state, messages, handlers } = createMemoryBot(true);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.deliveries = [{
+    id: 'DL-1',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Клиент',
+    cargo: 'Подъёмник',
+    client: 'ООО Клиент',
+    contactName: 'Иван',
+    contactPhone: '+7 900 000-00-00',
+    carrierKey: 'carrier-1',
+  }];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/доставки');
+
+  assert.equal(messages.length, 2);
+  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+  assert.match(messages[1].text, /Мои доставки/);
+  assert.deepEqual(messages[1].options.attachments[0].payload.buttons[0][0], {
+    type: 'callback',
+    text: 'Принял',
+    payload: 'delivery:status:DL-1:accepted',
+  });
 });
 
 test('MAX callback notification is sent as a string', async () => {

@@ -7,6 +7,9 @@ const BOT_ASSET_PUBLIC_PATH = '/bot-assets';
 const MECHANIC_STAGE_IMAGES = {
   main: 'main-menu.jpg',
   menu: 'main-menu.jpg',
+  delivery_main: 'handoff.jpg',
+  delivery_list: 'handoff.jpg',
+  delivery_status: 'field-trip.jpg',
   repairs: 'repair.jpg',
   repair: 'repair.jpg',
   ticket: 'repair.jpg',

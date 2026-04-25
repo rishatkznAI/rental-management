@@ -32,7 +32,13 @@ import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, type Section } from '../../lib/permissions';
-import { DEFAULT_SIDEBAR_ORDER, SIDEBAR_NAV_GROUPS } from '../../lib/navigation';
+import {
+  DEFAULT_SIDEBAR_ORDER,
+  SIDEBAR_NAV_GROUP_SETTING_KEY,
+  SIDEBAR_NAV_GROUPS,
+  normalizeSidebarGroups,
+  normalizeSidebarOrder,
+} from '../../lib/navigation';
 import { resolveCrmArchiveState } from '../../lib/crmArchive';
 import { getInvestorBinding, isInvestorUser } from '../../lib/userStorage';
 import { NotificationCenter } from './NotificationCenter';
@@ -376,8 +382,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   const sidebarOrder = useMemo(() => {
     const orderSetting = appSettings.find(item => item.key === 'sidebar_navigation_order');
-    const storedOrder = Array.isArray(orderSetting?.value) ? orderSetting.value.filter((value): value is Section => typeof value === 'string') : [];
-    return storedOrder.length ? storedOrder : DEFAULT_SIDEBAR_ORDER;
+    return normalizeSidebarOrder(orderSetting?.value);
+  }, [appSettings]);
+  const sidebarGroups = useMemo(() => {
+    const groupSetting = appSettings.find(item => item.key === SIDEBAR_NAV_GROUP_SETTING_KEY);
+    return normalizeSidebarGroups(groupSetting?.value);
   }, [appSettings]);
   const crmArchiveState = useMemo(() => resolveCrmArchiveState(appSettings), [appSettings]);
   const canManageArchivedCrm = canView('admin_panel') && crmArchiveState.isHidden;
@@ -429,7 +438,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     ...group,
     items: navigation
       .filter(item =>
-        group.items.includes(item.section)
+        sidebarGroups[item.section] === group.id
         && canView(item.section)
         && (item.section !== 'crm' || (!crmArchiveState.isHidden && !isLoadingAppSettings)),
       )

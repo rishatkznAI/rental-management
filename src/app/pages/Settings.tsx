@@ -63,7 +63,15 @@ import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
-import { DEFAULT_SIDEBAR_ORDER, SIDEBAR_NAV_GROUPS, SIDEBAR_SECTION_LABELS } from '../lib/navigation';
+import {
+  DEFAULT_SIDEBAR_ORDER,
+  SIDEBAR_NAV_GROUP_SETTING_KEY,
+  SIDEBAR_NAV_GROUPS,
+  SIDEBAR_SECTION_LABELS,
+  normalizeSidebarGroups,
+  normalizeSidebarOrder,
+  type SidebarNavGroupId,
+} from '../lib/navigation';
 import { CRM_ARCHIVE_TTL_MS, resolveCrmArchiveState } from '../lib/crmArchive';
 import {
   ADMIN_FORMS_SETTING_KEY,
@@ -154,19 +162,21 @@ export default function Settings() {
     () => appSettings.find(item => item.key === 'sidebar_navigation_order') || null,
     [appSettings],
   );
+  const sidebarGroupSetting = React.useMemo(
+    () => appSettings.find(item => item.key === SIDEBAR_NAV_GROUP_SETTING_KEY) || null,
+    [appSettings],
+  );
   const crmArchiveState = React.useMemo(() => resolveCrmArchiveState(appSettings), [appSettings]);
   const [sidebarOrder, setSidebarOrder] = React.useState(DEFAULT_SIDEBAR_ORDER);
+  const [sidebarGroups, setSidebarGroups] = React.useState(() => normalizeSidebarGroups(null));
 
   React.useEffect(() => {
-    const storedOrder = Array.isArray(sidebarOrderSetting?.value)
-      ? sidebarOrderSetting.value.filter((value): value is (typeof DEFAULT_SIDEBAR_ORDER)[number] => typeof value === 'string')
-      : [];
-    const merged = [
-      ...(storedOrder.length ? storedOrder : DEFAULT_SIDEBAR_ORDER),
-      ...DEFAULT_SIDEBAR_ORDER.filter(section => !(storedOrder.length ? storedOrder : DEFAULT_SIDEBAR_ORDER).includes(section)),
-    ];
-    setSidebarOrder(merged);
+    setSidebarOrder(normalizeSidebarOrder(sidebarOrderSetting?.value));
   }, [sidebarOrderSetting]);
+
+  React.useEffect(() => {
+    setSidebarGroups(normalizeSidebarGroups(sidebarGroupSetting?.value));
+  }, [sidebarGroupSetting]);
 
   // Синхронизируем с сервером
   const setUsers = React.useCallback(async (updater: (prev: SystemUser[]) => SystemUser[]) => {
@@ -179,32 +189,60 @@ export default function Settings() {
 
   const moveSidebarSection = React.useCallback((section: (typeof DEFAULT_SIDEBAR_ORDER)[number], direction: -1 | 1) => {
     setSidebarOrder(current => {
+      const groupId = sidebarGroups[section];
+      const groupSections = current.filter(item => sidebarGroups[item] === groupId);
+      const groupIndex = groupSections.indexOf(section);
+      const targetSection = groupSections[groupIndex + direction];
+      if (!targetSection) return current;
       const index = current.indexOf(section);
-      const targetIndex = index + direction;
-      if (index < 0 || targetIndex < 0 || targetIndex >= current.length) return current;
+      const targetIndex = current.indexOf(targetSection);
+      if (index < 0 || targetIndex < 0) return current;
       const next = [...current];
-      const [item] = next.splice(index, 1);
-      next.splice(targetIndex, 0, item);
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
       return next;
     });
-  }, []);
+  }, [sidebarGroups]);
+
+  const moveSidebarSectionToGroup = React.useCallback((section: (typeof DEFAULT_SIDEBAR_ORDER)[number], groupId: SidebarNavGroupId) => {
+    const nextGroups = { ...sidebarGroups, [section]: groupId };
+    setSidebarGroups(nextGroups);
+    setSidebarOrder(current => {
+      const withoutSection = current.filter(item => item !== section);
+      const lastTargetIndex = withoutSection.reduce((lastIndex, item, index) => (
+        nextGroups[item] === groupId ? index : lastIndex
+      ), -1);
+      const next = [...withoutSection];
+      next.splice(lastTargetIndex + 1, 0, section);
+      return next;
+    });
+  }, [sidebarGroups]);
 
   const handleSaveSidebarOrder = React.useCallback(async () => {
-    const payload = {
+    const now = new Date().toISOString();
+    const orderPayload = {
       key: 'sidebar_navigation_order',
       value: sidebarOrder,
-      createdAt: sidebarOrderSetting?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: sidebarOrderSetting?.createdAt || now,
+      updatedAt: now,
+    };
+    const groupPayload = {
+      key: SIDEBAR_NAV_GROUP_SETTING_KEY,
+      value: sidebarGroups,
+      createdAt: sidebarGroupSetting?.createdAt || now,
+      updatedAt: now,
     };
 
-    if (sidebarOrderSetting) {
-      await appSettingsService.update(sidebarOrderSetting.id, payload);
-    } else {
-      await appSettingsService.create(payload);
-    }
+    await Promise.all([
+      sidebarOrderSetting
+        ? appSettingsService.update(sidebarOrderSetting.id, orderPayload)
+        : appSettingsService.create(orderPayload),
+      sidebarGroupSetting
+        ? appSettingsService.update(sidebarGroupSetting.id, groupPayload)
+        : appSettingsService.create(groupPayload),
+    ]);
 
     await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
-  }, [queryClient, sidebarOrder, sidebarOrderSetting]);
+  }, [queryClient, sidebarGroupSetting, sidebarGroups, sidebarOrder, sidebarOrderSetting]);
 
   const handleArchiveCrm = React.useCallback(async () => {
     const now = new Date();
@@ -575,7 +613,7 @@ export default function Settings() {
                 <div className="grid gap-6 lg:grid-cols-2">
                   {SIDEBAR_NAV_GROUPS.map(group => {
                     const items = sidebarOrder.filter(section =>
-                      group.items.includes(section)
+                      sidebarGroups[section] === group.id
                       && !(crmArchiveState.isHidden && section === 'crm'),
                     );
                     if (!items.length) return null;
@@ -584,9 +622,8 @@ export default function Settings() {
                         <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{group.title}</div>
                         <div className="space-y-2">
                           {items.map((section, index) => {
-                            const absoluteIndex = sidebarOrder.indexOf(section);
                             return (
-                              <div key={section} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-700 dark:bg-gray-900">
+                              <div key={section} className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-700 dark:bg-gray-900 xl:flex-row xl:items-center">
                                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                                   {index + 1}
                                 </div>
@@ -594,13 +631,23 @@ export default function Settings() {
                                   <div className="font-medium text-gray-900 dark:text-white">{SIDEBAR_SECTION_LABELS[section]}</div>
                                   <div className="text-xs text-gray-500">{section}</div>
                                 </div>
-                                <div className="flex gap-2">
+                                <select
+                                  value={sidebarGroups[section]}
+                                  onChange={event => moveSidebarSectionToGroup(section, event.target.value as SidebarNavGroupId)}
+                                  className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-white xl:w-44"
+                                  title="Блок меню"
+                                >
+                                  {SIDEBAR_NAV_GROUPS.map(option => (
+                                    <option key={option.id} value={option.id}>{option.title}</option>
+                                  ))}
+                                </select>
+                                <div className="flex gap-2 self-end xl:self-auto">
                                   <Button
                                     type="button"
                                     size="icon"
                                     variant="outline"
                                     onClick={() => moveSidebarSection(section, -1)}
-                                    disabled={absoluteIndex <= 0}
+                                    disabled={index <= 0}
                                   >
                                     <ArrowUp className="h-4 w-4" />
                                   </Button>
@@ -609,7 +656,7 @@ export default function Settings() {
                                     size="icon"
                                     variant="outline"
                                     onClick={() => moveSidebarSection(section, 1)}
-                                    disabled={absoluteIndex === sidebarOrder.length - 1}
+                                    disabled={index === items.length - 1}
                                   >
                                     <ArrowDown className="h-4 w-4" />
                                   </Button>

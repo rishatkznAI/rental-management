@@ -5,6 +5,7 @@ const {
   attachBotBrandImage,
   attachMechanicStageImage,
   operationStageImageKey,
+  stageImageAttachment,
 } = require('./bot-stage-images');
 const { isMechanicRole } = require('./role-groups');
 
@@ -79,6 +80,13 @@ function createBotHandlers(deps) {
     return previousMessageId;
   }
 
+  function getPreviousBotImageMessageId(phone, preserveMessageId = null) {
+    if (!phone) return null;
+    const previousMessageId = getBotSession(phone).lastBotImageMessageId;
+    if (!previousMessageId || previousMessageId === preserveMessageId) return null;
+    return previousMessageId;
+  }
+
   function runBotSideEffect(task, label) {
     Promise.resolve()
       .then(task)
@@ -100,6 +108,14 @@ function createBotHandlers(deps) {
     return messageId;
   }
 
+  async function rememberBotImageMessage(phone, payload, fallbackMessageId = null) {
+    if (!phone) return;
+    const messageId = fallbackMessageId || extractMessageId(payload);
+    if (!messageId) return;
+    updateBotSession(phone, { lastBotImageMessageId: messageId });
+    return messageId;
+  }
+
   async function reply(target, text, options = {}) {
     const {
       attachments,
@@ -111,9 +127,10 @@ function createBotHandlers(deps) {
       cleanupPrevious = false,
       notification = null,
     } = options;
-    let messageAttachments = mechanicStage
-      ? attachMechanicStageImage(mechanicStage, attachments)
-      : attachments;
+    const separateStageAttachment = mechanicStage ? stageImageAttachment(mechanicStage) : null;
+    let messageAttachments = separateStageAttachment
+      ? attachments
+      : (mechanicStage ? attachMechanicStageImage(mechanicStage, attachments) : attachments);
     if (brandImage) {
       messageAttachments = attachBotBrandImage(messageAttachments);
     }
@@ -123,13 +140,19 @@ function createBotHandlers(deps) {
 
     if (replaceMessage && callbackContext?.callbackId) {
       const previousMessageId = getPreviousBotMessageId(phone) || callbackContext.messageId || null;
+      const previousImageMessageId = getPreviousBotImageMessageId(phone);
       runBotSideEffect(() => answerCallback(callbackContext.callbackId, {
         ...(notification ? { notification: { text: notification } } : {}),
       }), 'Не удалось ответить на callback');
+      const imagePayload = separateStageAttachment
+        ? await sendMessage(target, '', { attachments: [separateStageAttachment] })
+        : null;
+      const replacementImageMessageId = await rememberBotImageMessage(phone, imagePayload);
       const payload = await sendMessage(target, text, {
         ...(hasMessageAttachments ? { attachments: messageAttachments } : {}),
       });
       const replacementMessageId = await rememberBotMessage(phone, payload);
+      deleteBotMessageLater(previousImageMessageId, replacementImageMessageId);
       deleteBotMessageLater(previousMessageId, replacementMessageId);
       return payload;
     }
@@ -143,13 +166,21 @@ function createBotHandlers(deps) {
     const previousMessageId = cleanupPrevious
       ? getPreviousBotMessageId(phone, callbackContext?.messageId || null)
       : null;
+    const previousImageMessageId = cleanupPrevious
+      ? getPreviousBotImageMessageId(phone, callbackContext?.messageId || null)
+      : null;
 
+    const imagePayload = separateStageAttachment
+      ? await sendMessage(target, '', { attachments: [separateStageAttachment] })
+      : null;
+    const replacementImageMessageId = await rememberBotImageMessage(phone, imagePayload);
     const payload = await sendMessage(target, text, {
       ...(hasMessageAttachments ? { attachments: messageAttachments } : {}),
     });
     const replacementMessageId = await rememberBotMessage(phone, payload);
 
     if (cleanupPrevious && phone) {
+      deleteBotMessageLater(previousImageMessageId, replacementImageMessageId);
       deleteBotMessageLater(previousMessageId, replacementMessageId);
     }
 

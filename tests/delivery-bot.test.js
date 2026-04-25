@@ -112,10 +112,13 @@ test('mechanic main navigation sends fallout-style stage image', async () => {
 
   await handlers.handleBotStarted({ user_id: 100 }, '100');
 
-  const attachments = messages.at(-1).options.attachments;
-  assert.equal(attachments[0].type, 'image');
-  assert.match(attachments[0].payload.file, /main-menu\.jpg$/);
-  assert.doesNotMatch(attachments[0].payload.file, /skytech-logo/);
+  assert.equal(messages.length, 2);
+  const imageAttachments = messages[0].options.attachments;
+  const menuAttachments = messages[1].options.attachments;
+  assert.equal(imageAttachments[0].type, 'image');
+  assert.match(imageAttachments[0].payload.file, /main-menu\.jpg$/);
+  assert.doesNotMatch(imageAttachments[0].payload.file, /skytech-logo/);
+  assert.equal(menuAttachments[0].type, 'inline_keyboard');
 });
 
 test('MAX callback notification is sent as a string', async () => {

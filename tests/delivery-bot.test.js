@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createBotHandlers } = require('../server/lib/bot-commands.js');
-const { attachMechanicStageImage } = require('../server/lib/bot-stage-images.js');
+const { attachBotBrandImage, attachMechanicStageImage } = require('../server/lib/bot-stage-images.js');
 const { createMaxApiClient } = require('../server/lib/max-api.js');
 
 function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
@@ -125,6 +125,16 @@ test('mechanic stage image is prepended to bot keyboard attachments', () => {
   assert.equal(attachments.length, 2);
   assert.equal(attachments[0].type, 'image');
   assert.match(attachments[0].payload.file, /field-trip\.jpg$/);
+  assert.equal(fs.existsSync(attachments[0].payload.file), true);
+  assert.equal(attachments[1].type, 'inline_keyboard');
+});
+
+test('bot brand logo is prepended to bot keyboard attachments', () => {
+  const attachments = attachBotBrandImage([{ type: 'inline_keyboard', payload: { buttons: [] } }]);
+
+  assert.equal(attachments.length, 2);
+  assert.equal(attachments[0].type, 'image');
+  assert.match(attachments[0].payload.file, /skytech-logo\.png$/);
   assert.equal(fs.existsSync(attachments[0].payload.file), true);
   assert.equal(attachments[1].type, 'inline_keyboard');
 });

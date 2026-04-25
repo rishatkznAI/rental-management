@@ -2,6 +2,7 @@ const { createBotUi } = require('./bot-ui');
 const { createBotFormatters } = require('./bot-formatters');
 const { createBotOperations } = require('./bot-operations');
 const {
+  attachBotBrandImage,
   attachMechanicStageImage,
   operationStageImageKey,
 } = require('./bot-stage-images');
@@ -102,6 +103,7 @@ function createBotHandlers(deps) {
   async function reply(target, text, options = {}) {
     const {
       attachments,
+      brandImage = false,
       mechanicStage = null,
       phone = '',
       callbackContext = null,
@@ -109,9 +111,12 @@ function createBotHandlers(deps) {
       cleanupPrevious = false,
       notification = null,
     } = options;
-    const messageAttachments = mechanicStage
+    let messageAttachments = mechanicStage
       ? attachMechanicStageImage(mechanicStage, attachments)
       : attachments;
+    if (brandImage) {
+      messageAttachments = attachBotBrandImage(messageAttachments);
+    }
     const hasMessageAttachments = Array.isArray(messageAttachments)
       ? messageAttachments.length > 0
       : Boolean(messageAttachments);
@@ -465,7 +470,7 @@ function createBotHandlers(deps) {
       return reply(
         senderId,
         getMainMenuText(existingUser),
-        { attachments: carrierKeyboard(), phone, cleanupPrevious: true },
+        { attachments: carrierKeyboard(), brandImage: true, phone, cleanupPrevious: true },
       );
     }
     if (existingUser) {
@@ -474,7 +479,7 @@ function createBotHandlers(deps) {
         getMainMenuText(existingUser),
         {
           attachments: defaultKeyboardForRole(existingUser.userRole),
-          mechanicStage: mechanicMainStageForRole(existingUser.userRole),
+          brandImage: true,
           phone,
           cleanupPrevious: true,
         },
@@ -483,10 +488,10 @@ function createBotHandlers(deps) {
     return reply(
       senderId,
       withBotMenu(
-        `👋 Добро пожаловать в бот «Подъёмники»!${payloadLine}\n\nНажмите «Войти», затем бот по шагам попросит логин и пароль.`,
+        `👋 Добро пожаловать в бот «Скайтех»!${payloadLine}\n\nНажмите «Войти», затем бот по шагам попросит логин и пароль.`,
         ['если хотите вручную: /start email@company.ru пароль'],
       ),
-      { attachments: authKeyboard(), phone, cleanupPrevious: true },
+      { attachments: authKeyboard(), brandImage: true, phone, cleanupPrevious: true },
     );
   }
 
@@ -2437,7 +2442,7 @@ function createBotHandlers(deps) {
         resetBotFlow(phone);
         return replyWithUi(
           getMainMenuText(carrierUser),
-          { attachments: carrierKeyboard() },
+          { attachments: carrierKeyboard(), brandImage: true },
         );
       }
       if (parts.length < 3) {
@@ -2445,7 +2450,7 @@ function createBotHandlers(deps) {
         return reply(
           senderId,
           '👤 Напишите логин (email) следующим сообщением.',
-          { attachments: keyboard([backAndMainRow('menu:cancel_login')]), phone, callbackContext, replaceMessage: Boolean(uiContext.replaceMessage), cleanupPrevious: !callbackContext },
+          { attachments: keyboard([backAndMainRow('menu:cancel_login')]), brandImage: true, phone, callbackContext, replaceMessage: Boolean(uiContext.replaceMessage), cleanupPrevious: !callbackContext },
         );
       }
       const [, email, password] = parts;
@@ -2476,7 +2481,7 @@ function createBotHandlers(deps) {
         getMainMenuText(user),
         {
           attachments: defaultKeyboardForRole(user.role),
-          mechanicStage: mechanicMainStageForRole(user.role),
+          brandImage: true,
         },
       );
     }
@@ -2532,7 +2537,7 @@ function createBotHandlers(deps) {
           getMainMenuText(user),
           {
             attachments: defaultKeyboardForRole(user.role),
-            mechanicStage: mechanicMainStageForRole(user.role),
+            brandImage: true,
           },
         );
       }
@@ -2542,7 +2547,7 @@ function createBotHandlers(deps) {
     if (!authUser) {
       return reply(senderId,
         '🔒 Вы не авторизованы.\n\nНажмите «Войти», и я попрошу логин и пароль по шагам.',
-        { attachments: authKeyboard() },
+        { attachments: authKeyboard(), brandImage: true },
       );
     }
 
@@ -2885,7 +2890,7 @@ function createBotHandlers(deps) {
     if ((lower === '/меню' || lower === 'меню')) {
       return replyWithUi(getMainMenuText(authUser), {
         attachments: defaultKeyboardForRole(userRole),
-        mechanicStage: mechanicMainStageForRole(userRole),
+        brandImage: true,
       });
     }
 

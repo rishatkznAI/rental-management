@@ -1,5 +1,6 @@
 const path = require('path');
 
+const BOT_BRAND_IMAGE = path.join(__dirname, '..', 'assets', 'bot', 'brand', 'skytech-logo.png');
 const STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'mechanic-stages');
 
 const MECHANIC_STAGE_IMAGES = {
@@ -35,6 +36,20 @@ function normalizeAttachments(attachments) {
   return Array.isArray(attachments) ? attachments : [attachments];
 }
 
+function brandImageAttachment() {
+  return {
+    type: 'image',
+    payload: {
+      file: BOT_BRAND_IMAGE,
+      cacheKey: 'brand:skytech-logo',
+    },
+  };
+}
+
+function attachBotBrandImage(attachments) {
+  return [brandImageAttachment(), ...normalizeAttachments(attachments)];
+}
+
 function attachMechanicStageImage(stageKey, attachments) {
   const imageAttachment = stageImageAttachment(stageKey);
   const normalized = normalizeAttachments(attachments);
@@ -50,7 +65,9 @@ function operationStageImageKey(stepMeta) {
 
 module.exports = {
   MECHANIC_STAGE_IMAGES,
+  attachBotBrandImage,
   attachMechanicStageImage,
+  brandImageAttachment,
   operationStageImageKey,
   stageImageAttachment,
 };

@@ -84,9 +84,9 @@ export function Layout() {
         </button>
         <div className="flex items-center gap-2">
           <img
-            src="/skytech-logo.svg"
+            src="/lift-logo.svg"
             alt="Скайтех"
-            className="h-8 w-8 shrink-0 rounded-full object-contain shadow-[0_12px_30px_-16px_rgba(255,25,38,0.95)]"
+            className="h-8 w-8 shrink-0 rounded-xl object-contain shadow-[0_12px_30px_-16px_rgba(212,247,74,0.95)]"
           />
           <span className="app-shell-title text-base font-extrabold text-sidebar-foreground">Скайтех</span>
         </div>

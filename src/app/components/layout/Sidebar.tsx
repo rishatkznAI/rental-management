@@ -416,9 +416,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
           <img
-            src="/skytech-logo.svg"
+            src="/lift-logo.svg"
             alt="Скайтех"
-            className="h-9 w-9 shrink-0 rounded-full object-contain shadow-[0_12px_30px_-16px_rgba(255,25,38,0.95)]"
+            className="h-9 w-9 shrink-0 rounded-xl object-contain shadow-[0_12px_30px_-16px_rgba(212,247,74,0.95)]"
           />
           <div className="min-w-0">
             <div className="app-shell-title text-[15px] font-extrabold text-sidebar-foreground">Скайтех</div>

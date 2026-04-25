@@ -874,34 +874,32 @@ const {
   serviceStatusLabel,
 });
 
-const deliveryBotHandlers = hasDedicatedDeliveryBot
-  ? createBotHandlers({
-      readData,
-      writeData,
-      verifyPassword,
-      getBotUsers,
-      saveBotUsers,
-      getBotSessions,
-      saveBotSessions,
-      sendMessage: deliverySendMessage,
-      deleteMessage: deliveryDeleteMessage,
-      answerCallback: deliveryAnswerCallback,
-      generateId,
-      idPrefixes: ID_PREFIXES,
-      nowIso,
-      readServiceTickets,
-      writeServiceTickets,
-      findServiceTicketById,
-      saveServiceTicket,
-      appendServiceLog,
-      getMechanicReferenceByUser,
-      syncEquipmentStatusForService,
-      updateServiceTicketStatus,
-      getOpenTicketByEquipment,
-      serviceStatusLabel,
-      preferCarrierAutoLogin: true,
-    })
-  : null;
+const deliveryBotHandlers = createBotHandlers({
+  readData,
+  writeData,
+  verifyPassword,
+  getBotUsers,
+  saveBotUsers,
+  getBotSessions,
+  saveBotSessions,
+  sendMessage: deliverySendMessage,
+  deleteMessage: deliveryDeleteMessage,
+  answerCallback: deliveryAnswerCallback,
+  generateId,
+  idPrefixes: ID_PREFIXES,
+  nowIso,
+  readServiceTickets,
+  writeServiceTickets,
+  findServiceTicketById,
+  saveServiceTicket,
+  appendServiceLog,
+  getMechanicReferenceByUser,
+  syncEquipmentStatusForService,
+  updateServiceTicketStatus,
+  getOpenTicketByEquipment,
+  serviceStatusLabel,
+  preferCarrierAutoLogin: true,
+});
 
 function getMoscowDateParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -1861,16 +1859,14 @@ registerBotRoutes(app, {
   webhookPath: MAIN_BOT_WEBHOOK_PATH,
 });
 
-if (deliveryBotHandlers) {
-  registerBotRoutes(app, {
-    handleCommand: deliveryBotHandlers.handleCommand,
-    handleBotStarted: deliveryBotHandlers.handleBotStarted,
-    handleCallback: deliveryBotHandlers.handleCallback,
-    answerCallback: deliveryAnswerCallback,
-    logger: console,
-    webhookPath: DELIVERY_BOT_WEBHOOK_PATH,
-  });
-}
+registerBotRoutes(app, {
+  handleCommand: deliveryBotHandlers.handleCommand,
+  handleBotStarted: deliveryBotHandlers.handleBotStarted,
+  handleCallback: deliveryBotHandlers.handleCallback,
+  answerCallback: deliveryAnswerCallback,
+  logger: console,
+  webhookPath: DELIVERY_BOT_WEBHOOK_PATH,
+});
 
 registerSystemRoutes(app, {
   readData,

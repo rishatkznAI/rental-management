@@ -45,6 +45,13 @@ function registerGsmRoutes(router, deps) {
     }));
   });
 
+  router.get('/gsm/gateway/analytics', requireAuth, requireGsmView, (req, res) => {
+    res.json(gprsGateway.getAnalytics({
+      equipmentId: String(req.query.equipmentId || '').trim(),
+      deviceId: String(req.query.deviceId || '').trim(),
+    }));
+  });
+
   router.post('/gsm/gateway/send', requireAuth, requireWrite('gsm_commands'), async (req, res) => {
     try {
       const command = await gprsGateway.sendCommand({

@@ -1,6 +1,7 @@
 import { api } from '../lib/api';
 import type {
   GsmGatewayCommand,
+  GsmGatewayAnalytics,
   GsmGatewayConnection,
   GsmGatewayPacket,
   GsmGatewayStatus,
@@ -41,6 +42,9 @@ export const gsmGatewayService = {
 
   getCommands: (params?: PacketQuery): Promise<GsmGatewayCommand[]> =>
     api.get<GsmGatewayCommand[]>(`/api/gsm/gateway/commands${buildQuery(params)}`),
+
+  getAnalytics: (params?: PacketQuery): Promise<GsmGatewayAnalytics> =>
+    api.get<GsmGatewayAnalytics>(`/api/gsm/gateway/analytics${buildQuery(params)}`),
 
   sendCommand: (payload: SendGsmCommandPayload): Promise<GsmGatewayCommand> =>
     api.post<GsmGatewayCommand>('/api/gsm/gateway/send', payload),

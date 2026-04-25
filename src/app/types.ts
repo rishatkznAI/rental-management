@@ -131,6 +131,47 @@ export interface GsmGatewayStatus {
   lastPacketAt?: string | null;
 }
 
+export interface GsmGatewayCommandStatusSummary {
+  total: number;
+  queued: number;
+  sent: number;
+  failed: number;
+}
+
+export interface GsmGatewayProtocolStat {
+  protocol: string;
+  count: number;
+  lastPacketAt?: string | null;
+}
+
+export interface GsmGatewaySelectedAnalytics {
+  equipmentId?: string | null;
+  deviceId?: string | null;
+  packets24h: number;
+  inbound24h: number;
+  outbound24h: number;
+  lastPacketAt?: string | null;
+  lastProtocol?: string | null;
+  lastSummary?: string | null;
+  commandStatus: GsmGatewayCommandStatusSummary;
+  lastCommandAt?: string | null;
+  lastCommandStatus?: GsmCommandStatus | null;
+}
+
+export interface GsmGatewayAnalytics {
+  trackedEquipment: number;
+  configuredTrackers: number;
+  onlineTrackedEquipment: number;
+  staleTrackers: number;
+  unknownPackets24h: number;
+  packets24h: number;
+  inbound24h: number;
+  outbound24h: number;
+  commandStatus: GsmGatewayCommandStatusSummary;
+  protocols: GsmGatewayProtocolStat[];
+  selected: GsmGatewaySelectedAnalytics;
+}
+
 export interface GsmGatewayConnection {
   id: string;
   deviceId?: string | null;
@@ -248,6 +289,15 @@ export interface Rental {
 export type ServicePriority = 'low' | 'medium' | 'high' | 'critical';
 export type ServiceStatus = 'new' | 'in_progress' | 'waiting_parts' | 'ready' | 'closed';
 export type ServiceScenario = 'repair' | 'to' | 'chto' | 'pto';
+export type WarrantyClaimStatus =
+  | 'draft'
+  | 'sent_to_factory'
+  | 'factory_review'
+  | 'answer_received'
+  | 'approved'
+  | 'rejected'
+  | 'parts_shipping'
+  | 'closed';
 export type ReferenceStatus = 'active' | 'inactive';
 
 export interface Mechanic {
@@ -399,6 +449,40 @@ export interface ServiceTicket {
   createdAt: string;
   photos?: string[];
   serviceVehicleId?: string | null;   // Служебная машина, используемая в выезде
+}
+
+export interface WarrantyClaimHistoryEntry {
+  date: string;
+  text: string;
+  author: string;
+  type?: 'comment' | 'status_change' | 'factory_response' | 'document';
+}
+
+export interface WarrantyClaim {
+  id: string;
+  serviceTicketId?: string;
+  equipmentId?: string;
+  equipmentLabel: string;
+  inventoryNumber?: string;
+  serialNumber?: string;
+  manufacturer?: string;
+  factoryName: string;
+  factoryContact?: string;
+  factoryCaseNumber?: string;
+  failureDescription: string;
+  requestedResolution: string;
+  status: WarrantyClaimStatus;
+  priority: ServicePriority;
+  responseDueDate?: string;
+  sentAt?: string;
+  factoryResponse?: string;
+  decision?: string;
+  closedAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+  createdByUserId?: string;
+  createdByUserName?: string;
+  history?: WarrantyClaimHistoryEntry[];
 }
 
 export interface ServiceRouteNorm {

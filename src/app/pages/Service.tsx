@@ -12,6 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { getServiceStatusBadge, getServicePriorityBadge } from '../components/ui/badge';
 import { Search, Plus } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { WarrantyClaimsTab } from '../components/service/WarrantyClaimsTab';
 import { Link } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -28,6 +30,7 @@ function truncateText(value: string, maxLength: number) {
 export default function Service() {
   const { can } = usePermissions();
   const { data: ticketList = [] } = useServiceTicketsList();
+  const canManageWarrantyClaims = can('edit', 'service');
   const [search, setSearch] = React.useState('');
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
@@ -140,7 +143,7 @@ export default function Service() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Сервис</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Управление сервисными заявками</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Сервисные заявки и гарантийные рекламации</p>
         </div>
         {can('create', 'service') && (
           <Link to="/service/new">
@@ -151,10 +154,6 @@ export default function Service() {
             </Button>
           </Link>
         )}
-      </div>
-
-      <div className="flex justify-end">
-        <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
       </div>
 
       <FilterDialog
@@ -287,142 +286,171 @@ export default function Service() {
         </div>
       </FilterDialog>
 
-      {/* Mobile: card list */}
-      <div className="sm:hidden space-y-3">
-        {filteredTickets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-            <Search className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-3" />
-            <h3 className="text-base font-medium text-gray-900 dark:text-white">Заявки не найдены</h3>
+      <Tabs defaultValue="tickets" className="space-y-4">
+        <TabsList className="w-full justify-start overflow-x-auto rounded-lg bg-gray-100 p-1 dark:bg-gray-800 sm:w-fit">
+          <TabsTrigger value="tickets" className="flex-none px-4">
+            Заявки
+          </TabsTrigger>
+          {canManageWarrantyClaims && (
+            <TabsTrigger value="warranty" className="flex-none px-4">
+              Рекламации
+            </TabsTrigger>
+          )}
+        </TabsList>
+
+        <TabsContent value="tickets" className="space-y-4">
+          <div className="flex justify-end">
+            <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
           </div>
-        ) : filteredTickets.map((ticket) => (
-          <Link
-            key={ticket.id}
-            to={`/service/${ticket.id}`}
-            className="block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-[--color-primary] text-sm">{ticket.id}</span>
-                  {getServiceStatusBadge(ticket.status)}
-                  {getServicePriorityBadge(ticket.priority)}
-                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-200">
-                    {getServiceScenarioLabel(ticket)}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-700 dark:text-gray-200 mt-1 font-medium truncate">{ticket.equipment}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">{ticket.reason}</p>
+
+          {/* Mobile: card list */}
+          <div className="sm:hidden space-y-3">
+            {filteredTickets.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                <Search className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-3" />
+                <h3 className="text-base font-medium text-gray-900 dark:text-white">Заявки не найдены</h3>
               </div>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
-              <div><span className="font-medium text-gray-700 dark:text-gray-300">SLA:</span> {ticket.sla}</div>
-              {(ticket.assignedMechanicName || ticket.assignedTo) && <div><span className="font-medium text-gray-700 dark:text-gray-300">Назначен:</span> {ticket.assignedMechanicName || ticket.assignedTo}</div>}
-              <div><span className="font-medium text-gray-700 dark:text-gray-300">Автор:</span> {ticket.createdByUserName || ticket.createdBy || '—'}</div>
-              <div><span className="font-medium text-gray-700 dark:text-gray-300">Создана:</span> {formatDate(ticket.createdAt)}</div>
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {/* Desktop: Table */}
-      <div className="hidden sm:block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>ID заявки</TableHead>
-              <TableHead>Техника</TableHead>
-              <TableHead>Причина</TableHead>
-              <TableHead>Сценарий</TableHead>
-              <TableHead>Приоритет</TableHead>
-              <TableHead>SLA</TableHead>
-              <TableHead>Назначен</TableHead>
-              <TableHead>Автор</TableHead>
-              <TableHead>Дата создания</TableHead>
-              <TableHead>Статус</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredTickets.map((ticket) => (
-              <TableRow key={ticket.id}>
-                <TableCell>
-                  <Link
-                    to={`/service/${ticket.id}`}
-                    className="font-medium text-[--color-primary] hover:underline"
-                  >
-                    {ticket.id}
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  <p className="text-sm">{ticket.equipment}</p>
-                </TableCell>
-                <TableCell>
-                  <p
-                    className="max-w-[460px] truncate text-sm"
-                    title={ticket.reason}
-                  >
-                    {truncateText(ticket.reason, 90)}
-                  </p>
-                  {ticket.description && (
-                    <p
-                      className="max-w-[460px] truncate text-xs text-gray-500 dark:text-gray-400"
-                      title={ticket.description}
-                    >
-                      {truncateText(ticket.description, 110)}
-                    </p>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <p className="text-sm">{getServiceScenarioLabel(ticket)}</p>
-                </TableCell>
-                <TableCell>
-                  {getServicePriorityBadge(ticket.priority)}
-                </TableCell>
-                <TableCell>
-                  <p className="text-sm">{ticket.sla}</p>
-                </TableCell>
-                <TableCell>
-                  {ticket.assignedMechanicName || ticket.assignedTo ? (
-                    <p className="text-sm">{ticket.assignedMechanicName || ticket.assignedTo}</p>
-                  ) : (
-                    <span className="text-sm text-gray-400 dark:text-gray-500">Не назначен</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <p className="text-sm">{ticket.createdByUserName || ticket.createdBy || '—'}</p>
-                  {ticket.reporterContact && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{ticket.reporterContact}</p>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <p className="text-sm">{formatDate(ticket.createdAt)}</p>
-                </TableCell>
-                <TableCell>
-                  {getServiceStatusBadge(ticket.status)}
-                </TableCell>
-              </TableRow>
+            ) : filteredTickets.map((ticket) => (
+              <Link
+                key={ticket.id}
+                to={`/service/${ticket.id}`}
+                className="block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-[--color-primary] text-sm">{ticket.id}</span>
+                      {getServiceStatusBadge(ticket.status)}
+                      {getServicePriorityBadge(ticket.priority)}
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-200">
+                        {getServiceScenarioLabel(ticket)}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-700 dark:text-gray-200 mt-1 font-medium truncate">{ticket.equipment}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">{ticket.reason}</p>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <div><span className="font-medium text-gray-700 dark:text-gray-300">SLA:</span> {ticket.sla}</div>
+                  {(ticket.assignedMechanicName || ticket.assignedTo) && <div><span className="font-medium text-gray-700 dark:text-gray-300">Назначен:</span> {ticket.assignedMechanicName || ticket.assignedTo}</div>}
+                  <div><span className="font-medium text-gray-700 dark:text-gray-300">Автор:</span> {ticket.createdByUserName || ticket.createdBy || '—'}</div>
+                  <div><span className="font-medium text-gray-700 dark:text-gray-300">Создана:</span> {formatDate(ticket.createdAt)}</div>
+                </div>
+              </Link>
             ))}
-          </TableBody>
-        </Table>
-
-        {filteredTickets.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
-              <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
-            </div>
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Заявки не найдены</h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Попробуйте изменить параметры поиска или фильтры
-            </p>
           </div>
-        )}
-      </div>
 
-      {/* Results info */}
-      {filteredTickets.length > 0 && (
-        <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-          <p>Показано {filteredTickets.length} из {ticketList.length} заявок</p>
-        </div>
-      )}
+          {/* Desktop: Table */}
+          <div className="hidden sm:block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID заявки</TableHead>
+                  <TableHead>Техника</TableHead>
+                  <TableHead>Причина</TableHead>
+                  <TableHead>Сценарий</TableHead>
+                  <TableHead>Приоритет</TableHead>
+                  <TableHead>SLA</TableHead>
+                  <TableHead>Назначен</TableHead>
+                  <TableHead>Автор</TableHead>
+                  <TableHead>Дата создания</TableHead>
+                  <TableHead>Статус</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredTickets.map((ticket) => (
+                  <TableRow key={ticket.id}>
+                    <TableCell>
+                      <Link
+                        to={`/service/${ticket.id}`}
+                        className="font-medium text-[--color-primary] hover:underline"
+                      >
+                        {ticket.id}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{ticket.equipment}</p>
+                    </TableCell>
+                    <TableCell>
+                      <p
+                        className="max-w-[460px] truncate text-sm"
+                        title={ticket.reason}
+                      >
+                        {truncateText(ticket.reason, 90)}
+                      </p>
+                      {ticket.description && (
+                        <p
+                          className="max-w-[460px] truncate text-xs text-gray-500 dark:text-gray-400"
+                          title={ticket.description}
+                        >
+                          {truncateText(ticket.description, 110)}
+                        </p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{getServiceScenarioLabel(ticket)}</p>
+                    </TableCell>
+                    <TableCell>
+                      {getServicePriorityBadge(ticket.priority)}
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{ticket.sla}</p>
+                    </TableCell>
+                    <TableCell>
+                      {ticket.assignedMechanicName || ticket.assignedTo ? (
+                        <p className="text-sm">{ticket.assignedMechanicName || ticket.assignedTo}</p>
+                      ) : (
+                        <span className="text-sm text-gray-400 dark:text-gray-500">Не назначен</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{ticket.createdByUserName || ticket.createdBy || '—'}</p>
+                      {ticket.reporterContact && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{ticket.reporterContact}</p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{formatDate(ticket.createdAt)}</p>
+                    </TableCell>
+                    <TableCell>
+                      {getServiceStatusBadge(ticket.status)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            {filteredTickets.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+                  <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">Заявки не найдены</h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Попробуйте изменить параметры поиска или фильтры
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Results info */}
+          {filteredTickets.length > 0 && (
+            <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+              <p>Показано {filteredTickets.length} из {ticketList.length} заявок</p>
+            </div>
+          )}
+        </TabsContent>
+
+        {canManageWarrantyClaims && (
+          <TabsContent value="warranty">
+            <WarrantyClaimsTab
+              tickets={ticketList}
+              canEdit={canManageWarrantyClaims}
+              canDelete={can('delete', 'service')}
+            />
+          </TabsContent>
+        )}
+      </Tabs>
     </div>
   );
 }

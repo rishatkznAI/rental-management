@@ -144,6 +144,7 @@ function registerSystemRoutes(app, deps) {
         rentals,
         gantt_rentals,
         service,
+        warranty_claims,
         clients,
         payments,
         company_expenses,
@@ -159,6 +160,7 @@ function registerSystemRoutes(app, deps) {
       if (rentals) writeData('rentals', rentals);
       if (gantt_rentals) writeData('gantt_rentals', gantt_rentals);
       if (service) writeData('service', service);
+      if (warranty_claims) writeData('warranty_claims', warranty_claims);
       if (clients) writeData('clients', clients);
       if (payments) writeData('payments', payments);
       if (company_expenses) writeData('company_expenses', company_expenses);

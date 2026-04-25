@@ -305,6 +305,47 @@ function createGprsGateway({ readData, writeData, logger = console }) {
     };
   }
 
+  function identityValues(item = {}) {
+    return [item.deviceId, item.trackerId, item.imei]
+      .map(value => String(value || '').trim())
+      .filter(Boolean);
+  }
+
+  function matchesGatewayFilter(item, equipmentId = '', deviceId = '') {
+    if (equipmentId && item.equipmentId !== equipmentId) return false;
+    if (deviceId && !identityValues(item).includes(deviceId)) return false;
+    return true;
+  }
+
+  function isPacketRecent(packet, sinceMs) {
+    return new Date(packet?.createdAt || 0).getTime() >= sinceMs;
+  }
+
+  function countCommandsByStatus(commands) {
+    return commands.reduce((summary, command) => {
+      const status = command.status || 'queued';
+      summary.total += 1;
+      summary[status] = (summary[status] || 0) + 1;
+      return summary;
+    }, { total: 0, queued: 0, sent: 0, failed: 0 });
+  }
+
+  function protocolBreakdown(packets) {
+    const map = new Map();
+    for (const packet of packets) {
+      const protocol = String(packet.protocol || 'raw').trim() || 'raw';
+      const current = map.get(protocol) || { protocol, count: 0, lastPacketAt: null };
+      current.count += 1;
+      if (!current.lastPacketAt || new Date(packet.createdAt).getTime() > new Date(current.lastPacketAt).getTime()) {
+        current.lastPacketAt = packet.createdAt || null;
+      }
+      map.set(protocol, current);
+    }
+    return [...map.values()]
+      .sort((left, right) => right.count - left.count || String(right.lastPacketAt || '').localeCompare(String(left.lastPacketAt || '')))
+      .slice(0, 8);
+  }
+
   function findConnectionByIdentity(identity) {
     const deviceKey = identity.deviceId || identity.trackerId || identity.imei;
     if (!deviceKey) return null;
@@ -568,23 +609,67 @@ function createGprsGateway({ readData, writeData, logger = console }) {
   function listPackets({ limit = 50, equipmentId = '', deviceId = '' } = {}) {
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 300);
     return (readData('gsm_packets') || [])
-      .filter((item) => {
-        if (equipmentId && item.equipmentId !== equipmentId) return false;
-        if (deviceId && ![item.deviceId, item.trackerId, item.imei].includes(deviceId)) return false;
-        return true;
-      })
+      .filter(item => matchesGatewayFilter(item, equipmentId, deviceId))
       .slice(0, safeLimit);
   }
 
   function listCommands({ limit = 50, equipmentId = '', deviceId = '' } = {}) {
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 300);
     return (readData('gsm_commands') || [])
-      .filter((item) => {
-        if (equipmentId && item.equipmentId !== equipmentId) return false;
-        if (deviceId && ![item.deviceId, item.trackerId, item.imei].includes(deviceId)) return false;
-        return true;
-      })
+      .filter(item => matchesGatewayFilter(item, equipmentId, deviceId))
       .slice(0, safeLimit);
+  }
+
+  function getAnalytics({ equipmentId = '', deviceId = '' } = {}) {
+    ensureStorage();
+    trimCollection('gsm_packets', MAX_PACKET_LOG);
+    trimCollection('gsm_commands', MAX_COMMAND_LOG);
+
+    const packets = readData('gsm_packets') || [];
+    const commands = readData('gsm_commands') || [];
+    const equipment = readData('equipment') || [];
+    const onlineConnections = [...connections.values()].filter(item => !item.closedAt);
+    const since24hMs = Date.now() - 24 * 60 * 60 * 1000;
+    const configuredEquipment = equipment.filter(item =>
+      String(item.gsmTrackerId || '').trim() || String(item.gsmImei || '').trim(),
+    );
+    const onlineEquipmentIds = new Set(onlineConnections.map(item => item.equipmentId).filter(Boolean));
+    const recentPackets = packets.filter(packet => isPacketRecent(packet, since24hMs));
+    const filteredPackets = packets.filter(item => matchesGatewayFilter(item, equipmentId, deviceId));
+    const filteredCommands = commands.filter(item => matchesGatewayFilter(item, equipmentId, deviceId));
+    const selectedRecentPackets = filteredPackets.filter(packet => isPacketRecent(packet, since24hMs));
+    const staleTrackers = configuredEquipment.filter((item) => {
+      const signalAt = item.gsmLastSignalAt ? new Date(item.gsmLastSignalAt).getTime() : 0;
+      return !signalAt || signalAt < since24hMs;
+    });
+    const lastPacket = filteredPackets[0] || null;
+    const lastCommand = filteredCommands[0] || null;
+
+    return {
+      trackedEquipment: equipment.length,
+      configuredTrackers: configuredEquipment.length,
+      onlineTrackedEquipment: configuredEquipment.filter(item => onlineEquipmentIds.has(item.id)).length,
+      staleTrackers: staleTrackers.length,
+      unknownPackets24h: recentPackets.filter(packet => packet.direction === 'inbound' && !packet.equipmentId).length,
+      packets24h: recentPackets.length,
+      inbound24h: recentPackets.filter(packet => packet.direction === 'inbound').length,
+      outbound24h: recentPackets.filter(packet => packet.direction === 'outbound').length,
+      commandStatus: countCommandsByStatus(commands),
+      protocols: protocolBreakdown(recentPackets),
+      selected: {
+        equipmentId: equipmentId || null,
+        deviceId: deviceId || null,
+        packets24h: selectedRecentPackets.length,
+        inbound24h: selectedRecentPackets.filter(packet => packet.direction === 'inbound').length,
+        outbound24h: selectedRecentPackets.filter(packet => packet.direction === 'outbound').length,
+        lastPacketAt: lastPacket?.createdAt || null,
+        lastProtocol: lastPacket?.protocol || null,
+        lastSummary: lastPacket?.summary || null,
+        commandStatus: countCommandsByStatus(filteredCommands),
+        lastCommandAt: lastCommand?.createdAt || null,
+        lastCommandStatus: lastCommand?.status || null,
+      },
+    };
   }
 
   async function sendCommand({ equipmentId = '', deviceId = '', payload = '', encoding = 'text', appendNewline = true, createdBy = 'Оператор' }) {
@@ -654,6 +739,7 @@ function createGprsGateway({ readData, writeData, logger = console }) {
     listConnections,
     listPackets,
     listCommands,
+    getAnalytics,
     sendCommand,
   };
 }

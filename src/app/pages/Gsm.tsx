@@ -52,6 +52,7 @@ import {
 import type {
   EquipmentGsmSignalState,
   EquipmentStatus,
+  GsmGatewayAnalytics,
   GsmGatewayCommand,
   GsmGatewayConnection,
   GsmGatewayPacket,
@@ -87,6 +88,42 @@ const DEFAULT_GATEWAY_STATUS: GsmGatewayStatus = {
   sentToday: 0,
   failedCommands: 0,
   lastPacketAt: null,
+};
+
+const DEFAULT_GATEWAY_ANALYTICS: GsmGatewayAnalytics = {
+  trackedEquipment: 0,
+  configuredTrackers: 0,
+  onlineTrackedEquipment: 0,
+  staleTrackers: 0,
+  unknownPackets24h: 0,
+  packets24h: 0,
+  inbound24h: 0,
+  outbound24h: 0,
+  commandStatus: {
+    total: 0,
+    queued: 0,
+    sent: 0,
+    failed: 0,
+  },
+  protocols: [],
+  selected: {
+    equipmentId: null,
+    deviceId: null,
+    packets24h: 0,
+    inbound24h: 0,
+    outbound24h: 0,
+    lastPacketAt: null,
+    lastProtocol: null,
+    lastSummary: null,
+    commandStatus: {
+      total: 0,
+      queued: 0,
+      sent: 0,
+      failed: 0,
+    },
+    lastCommandAt: null,
+    lastCommandStatus: null,
+  },
 };
 
 const SIGNAL_META: Record<EquipmentGsmSignalState, {
@@ -171,6 +208,18 @@ function formatBytes(value: number | null | undefined) {
   if (amount >= 1024 * 1024) return `${(amount / (1024 * 1024)).toFixed(1)} МБ`;
   if (amount >= 1024) return `${(amount / 1024).toFixed(1)} КБ`;
   return `${amount} Б`;
+}
+
+function formatPercent(value: number, total: number) {
+  if (!total) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+function formatCommandStatus(value?: GsmGatewayAnalytics['selected']['lastCommandStatus']) {
+  if (value === 'sent') return 'Отправлено';
+  if (value === 'failed') return 'Ошибка';
+  if (value === 'queued') return 'В очереди';
+  return 'Нет команд';
 }
 
 function compactPayloadText(packet: GsmGatewayPacket | GsmGatewayCommand) {
@@ -517,6 +566,16 @@ export default function Gsm() {
     () => String(selectedSnapshot?.equipment.gsmTrackerId || selectedSnapshot?.equipment.gsmImei || '').trim(),
     [selectedSnapshot],
   );
+
+  const { data: gatewayAnalytics = DEFAULT_GATEWAY_ANALYTICS } = useQuery<GsmGatewayAnalytics>({
+    queryKey: ['gsmGateway', 'analytics', selectedSnapshot?.equipment.id || 'all', selectedTrackerId || 'none'],
+    queryFn: () => gsmGatewayService.getAnalytics({
+      equipmentId: selectedSnapshot?.equipment.id || undefined,
+      deviceId: selectedTrackerId || undefined,
+    }).catch(() => DEFAULT_GATEWAY_ANALYTICS),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
 
   React.useEffect(() => {
     setCommandDeviceId(selectedTrackerId);
@@ -1278,6 +1337,127 @@ export default function Gsm() {
                 </Card>
               </div>
 
+              <Card className="border-white/10 bg-slate-950/70 text-white">
+                <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <CardTitle className="text-xl font-bold text-white">Данные GSM</CardTitle>
+                    <CardDescription className="text-slate-400">
+                      Сводка по привязке трекеров, свежести сигналов, неопознанным пакетам, протоколам и доставке команд.
+                    </CardDescription>
+                  </div>
+                  <Badge variant={gatewayAnalytics.unknownPackets24h > 0 || gatewayAnalytics.staleTrackers > 0 ? 'warning' : 'success'}>
+                    {gatewayAnalytics.unknownPackets24h > 0 || gatewayAnalytics.staleTrackers > 0 ? 'Есть что проверить' : 'Данные в норме'}
+                  </Badge>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-cyan-300">
+                        <Cpu className="h-5 w-5" />
+                      </div>
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Привязано трекеров</div>
+                      <div className="mt-2 text-2xl font-black text-white">{gatewayAnalytics.configuredTrackers}</div>
+                      <div className="mt-1 text-sm text-slate-400">
+                        {formatPercent(gatewayAnalytics.configuredTrackers, gatewayAnalytics.trackedEquipment)} от парка
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-emerald-300">
+                        <Cable className="h-5 w-5" />
+                      </div>
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Онлайн сейчас</div>
+                      <div className="mt-2 text-2xl font-black text-white">{gatewayAnalytics.onlineTrackedEquipment}</div>
+                      <div className="mt-1 text-sm text-slate-400">из {gatewayAnalytics.configuredTrackers} привязанных</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-amber-300">
+                        <Clock3 className="h-5 w-5" />
+                      </div>
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Без свежего сигнала</div>
+                      <div className="mt-2 text-2xl font-black text-white">{gatewayAnalytics.staleTrackers}</div>
+                      <div className="mt-1 text-sm text-slate-400">нет пакета за 24 часа</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-rose-300">
+                        <AlertTriangle className="h-5 w-5" />
+                      </div>
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Неопознано за 24ч</div>
+                      <div className="mt-2 text-2xl font-black text-white">{gatewayAnalytics.unknownPackets24h}</div>
+                      <div className="mt-1 text-sm text-slate-400">пакеты без техники</div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Выбранная техника</div>
+                          <div className="mt-1 text-lg font-bold text-white">
+                            {selectedSnapshot ? buildEquipmentLabel(selectedSnapshot) : 'Не выбрана'}
+                          </div>
+                        </div>
+                        <Badge variant={gatewayAnalytics.selected.packets24h > 0 ? 'info' : 'default'}>
+                          {gatewayAnalytics.selected.packets24h} пакетов за 24ч
+                        </Badge>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вход / выход</div>
+                          <div className="mt-1 text-sm font-medium text-white">
+                            {gatewayAnalytics.selected.inbound24h} / {gatewayAnalytics.selected.outbound24h}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последний протокол</div>
+                          <div className="mt-1 text-sm font-medium text-white">{gatewayAnalytics.selected.lastProtocol || '—'}</div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последний пакет</div>
+                          <div className="mt-1 text-sm font-medium text-white">{formatDateTime(gatewayAnalytics.selected.lastPacketAt)}</div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последняя команда</div>
+                          <div className="mt-1 text-sm font-medium text-white">
+                            {formatCommandStatus(gatewayAnalytics.selected.lastCommandStatus)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {gatewayAnalytics.selected.lastSummary ? (
+                        <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-sm text-slate-300">
+                          {gatewayAnalytics.selected.lastSummary}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        <History className="h-4 w-4 text-cyan-300" />
+                        Протоколы за 24ч
+                      </div>
+                      {gatewayAnalytics.protocols.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/60 px-4 py-6 text-center text-sm text-slate-400">
+                          Пакетов за последние 24 часа нет.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {gatewayAnalytics.protocols.map(item => (
+                            <div key={item.protocol} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-2">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium text-white">{item.protocol}</div>
+                                <div className="text-xs text-slate-500">{formatDateTime(item.lastPacketAt)}</div>
+                              </div>
+                              <Badge variant="info">{item.count}</Badge>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_420px]">
                 <Card className="border-white/10 bg-slate-950/70 text-white">
                   <CardHeader>
@@ -1559,51 +1739,6 @@ export default function Gsm() {
           </TabsContent>
         </Tabs>
 
-        <Card className="border-white/10 bg-slate-950/70 text-white">
-          <CardHeader>
-            <CardTitle className="text-xl font-bold text-white">Что ещё можно усилить после запуска GPRS</CardTitle>
-            <CardDescription className="text-slate-400">
-              Базовый шлюз уже работает. Следующий шаг — углубить поддержку конкретных моделей трекеров и бизнес-сценариев.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {[
-                {
-                  icon: Cpu,
-                  title: 'Конкретные протоколы',
-                  text: 'Добавить отдельные декодеры под Teltonika, GT06, Arnavi, Galileo и другие реальные устройства без ручной настройки.',
-                },
-                {
-                  icon: Clock3,
-                  title: 'ACK и диалоги с устройством',
-                  text: 'Подтверждать приём пакетов по протоколу трекера, хранить ответы и показывать успешность каждой команды.',
-                },
-                {
-                  icon: AlertTriangle,
-                  title: 'Контроль отклонений',
-                  text: 'Если техника ушла не туда, где находится объект аренды, экран может поднимать тревогу и считать отклонение по расстоянию.',
-                },
-                {
-                  icon: History,
-                  title: 'Глубокая история пакетов',
-                  text: 'Хранить длинный журнал трафика, статус доставки команд и историю маршрутов по дням для технического разбора.',
-                },
-              ].map((item) => {
-                const Icon = item.icon;
-                return (
-                  <div key={item.title} className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-cyan-300">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div className="text-lg font-semibold text-white">{item.title}</div>
-                    <div className="mt-2 text-sm leading-6 text-slate-400">{item.text}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );

@@ -37,22 +37,17 @@ import { Textarea } from '../components/ui/textarea';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
+import {
+  getAdminForm,
+  getAdminListLabel,
+  getAdminListOptions,
+  useAdminSettings,
+  type AdminFormFieldSetting,
+  type AdminListOption,
+} from '../lib/adminConfig';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { COMPANY_EXPENSE_KEYS, companyExpensesService } from '../services/company-expenses.service';
 import type { CompanyExpense, CompanyExpenseFrequency, CompanyExpenseStatus } from '../types';
-
-const CATEGORY_OPTIONS = [
-  'Аренда офиса',
-  'Склад',
-  'Зарплата',
-  'Налоги',
-  'Лизинг',
-  'Связь и интернет',
-  'Бухгалтерия',
-  'Страхование',
-  'Маркетинг',
-  'Прочее',
-];
 
 const FREQUENCY_LABELS: Record<CompanyExpenseFrequency, string> = {
   monthly: 'Ежемесячно',
@@ -77,20 +72,24 @@ type ExpenseFormState = {
   account: string;
   status: CompanyExpenseStatus;
   comment: string;
+  customFields: Record<string, string>;
 };
 
-const EMPTY_FORM: ExpenseFormState = {
-  name: '',
-  category: 'Прочее',
-  amount: '',
-  frequency: 'monthly',
-  paymentDay: '',
-  nextPaymentDate: '',
-  counterparty: '',
-  account: '',
-  status: 'active',
-  comment: '',
-};
+function createEmptyForm(defaults?: Partial<Pick<ExpenseFormState, 'category' | 'frequency' | 'status'>>): ExpenseFormState {
+  return {
+    name: '',
+    category: defaults?.category || 'Прочее',
+    amount: '',
+    frequency: defaults?.frequency || 'monthly',
+    paymentDay: '',
+    nextPaymentDate: '',
+    counterparty: '',
+    account: '',
+    status: defaults?.status || 'active',
+    comment: '',
+    customFields: {},
+  };
+}
 
 function parseDateOnly(value?: string): Date | null {
   if (!value) return null;
@@ -104,9 +103,9 @@ function monthlyEquivalent(expense: CompanyExpense): number {
   return expense.amount;
 }
 
-function getStatusBadge(status: CompanyExpenseStatus) {
+function getStatusBadge(status: CompanyExpenseStatus, label: string) {
   const variant = status === 'active' ? 'success' : status === 'paused' ? 'warning' : 'default';
-  return <Badge variant={variant}>{STATUS_LABELS[status]}</Badge>;
+  return <Badge variant={variant}>{label}</Badge>;
 }
 
 function toForm(expense: CompanyExpense): ExpenseFormState {
@@ -121,6 +120,7 @@ function toForm(expense: CompanyExpense): ExpenseFormState {
     account: expense.account ?? '',
     status: expense.status,
     comment: expense.comment ?? '',
+    customFields: expense.customFields ?? {},
   };
 }
 
@@ -164,10 +164,22 @@ function FieldLabel({ children, required = false }: { children: React.ReactNode;
   );
 }
 
+function optionValues(options: AdminListOption[]) {
+  return options.map(option => option.value);
+}
+
+function optionsWithCurrent(activeOptions: AdminListOption[], allOptions: AdminListOption[], currentValue: string) {
+  if (!currentValue || activeOptions.some(option => option.value === currentValue)) return activeOptions;
+  const inactiveCurrent = allOptions.find(option => option.value === currentValue);
+  if (inactiveCurrent) return [...activeOptions, inactiveCurrent];
+  return [...activeOptions, { value: currentValue, label: currentValue, active: true }];
+}
+
 export default function Finance() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { can } = usePermissions();
+  const { appSettings } = useAdminSettings();
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<'current' | CompanyExpenseStatus | 'all'>('current');
   const [categoryFilter, setCategoryFilter] = React.useState('all');
@@ -175,7 +187,7 @@ export default function Finance() {
   const [showFilters, setShowFilters] = React.useState(false);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editingExpense, setEditingExpense] = React.useState<CompanyExpense | null>(null);
-  const [form, setForm] = React.useState<ExpenseFormState>(EMPTY_FORM);
+  const [form, setForm] = React.useState<ExpenseFormState>(() => createEmptyForm());
   const [formError, setFormError] = React.useState('');
 
   const { data: expenses = [], isLoading } = useQuery({
@@ -203,21 +215,81 @@ export default function Finance() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: COMPANY_EXPENSE_KEYS.all }),
   });
 
+  const expenseFormFields = React.useMemo(
+    () => getAdminForm(appSettings, 'finance_expense')?.fields || [],
+    [appSettings],
+  );
+  const fieldMap = React.useMemo(
+    () => new Map(expenseFormFields.map(field => [field.key, field])),
+    [expenseFormFields],
+  );
+  const customFields = React.useMemo(
+    () => expenseFormFields.filter(field => field.custom && field.visible !== false),
+    [expenseFormFields],
+  );
+  const categoryOptions = React.useMemo(
+    () => getAdminListOptions(appSettings, 'finance_expense_categories'),
+    [appSettings],
+  );
+  const allCategoryOptions = React.useMemo(
+    () => getAdminListOptions(appSettings, 'finance_expense_categories', { includeInactive: true }),
+    [appSettings],
+  );
+  const frequencyOptions = React.useMemo(
+    () => getAdminListOptions(appSettings, 'finance_expense_frequency'),
+    [appSettings],
+  );
+  const allFrequencyOptions = React.useMemo(
+    () => getAdminListOptions(appSettings, 'finance_expense_frequency', { includeInactive: true }),
+    [appSettings],
+  );
+  const statusOptions = React.useMemo(
+    () => getAdminListOptions(appSettings, 'finance_expense_statuses'),
+    [appSettings],
+  );
+  const allStatusOptions = React.useMemo(
+    () => getAdminListOptions(appSettings, 'finance_expense_statuses', { includeInactive: true }),
+    [appSettings],
+  );
+  const defaultCategory = categoryOptions[0]?.value || allCategoryOptions[0]?.value || 'Прочее';
+  const defaultFrequency = (frequencyOptions[0]?.value || allFrequencyOptions[0]?.value || 'monthly') as CompanyExpenseFrequency;
+  const defaultStatus = (statusOptions[0]?.value || allStatusOptions[0]?.value || 'active') as CompanyExpenseStatus;
+  const selectedCategoryOptions = React.useMemo(
+    () => optionsWithCurrent(categoryOptions, allCategoryOptions, form.category),
+    [allCategoryOptions, categoryOptions, form.category],
+  );
+  const selectedFrequencyOptions = React.useMemo(
+    () => optionsWithCurrent(frequencyOptions, allFrequencyOptions, form.frequency),
+    [allFrequencyOptions, form.frequency, frequencyOptions],
+  );
+  const selectedStatusOptions = React.useMemo(
+    () => optionsWithCurrent(statusOptions, allStatusOptions, form.status),
+    [allStatusOptions, form.status, statusOptions],
+  );
+
   const categories = React.useMemo(
-    () => Array.from(new Set([...CATEGORY_OPTIONS, ...expenses.map(item => item.category).filter(Boolean)])).sort((a, b) => a.localeCompare(b, 'ru')),
-    [expenses],
+    () => Array.from(new Set([...optionValues(categoryOptions), ...expenses.map(item => item.category).filter(Boolean)]))
+      .sort((a, b) =>
+        getAdminListLabel(appSettings, 'finance_expense_categories', a)
+          .localeCompare(getAdminListLabel(appSettings, 'finance_expense_categories', b), 'ru')
+      ),
+    [appSettings, categoryOptions, expenses],
   );
 
   const filteredExpenses = React.useMemo(
     () => expenses
       .filter((expense) => {
         const query = search.trim().toLowerCase();
+        const categoryLabel = getAdminListLabel(appSettings, 'finance_expense_categories', expense.category);
+        const customSearch = Object.values(expense.customFields ?? {}).join(' ');
         const matchesSearch = query === ''
           || expense.name.toLowerCase().includes(query)
           || expense.category.toLowerCase().includes(query)
+          || categoryLabel.toLowerCase().includes(query)
           || (expense.counterparty ?? '').toLowerCase().includes(query)
           || (expense.account ?? '').toLowerCase().includes(query)
-          || (expense.comment ?? '').toLowerCase().includes(query);
+          || (expense.comment ?? '').toLowerCase().includes(query)
+          || customSearch.toLowerCase().includes(query);
         const matchesStatus = statusFilter === 'all'
           || (statusFilter === 'current' ? expense.status !== 'archived' : expense.status === statusFilter);
         const matchesCategory = categoryFilter === 'all' || expense.category === categoryFilter;
@@ -225,7 +297,7 @@ export default function Finance() {
         return matchesSearch && matchesStatus && matchesCategory && matchesFrequency;
       })
       .sort(sortExpenses),
-    [categoryFilter, expenses, frequencyFilter, search, statusFilter],
+    [appSettings, categoryFilter, expenses, frequencyFilter, search, statusFilter],
   );
 
   const activeExpenses = expenses.filter(item => item.status === 'active');
@@ -251,9 +323,26 @@ export default function Finance() {
     setFormError('');
   };
 
+  const setCustomField = (key: string, value: string) => {
+    setForm(current => ({
+      ...current,
+      customFields: {
+        ...current.customFields,
+        [key]: value,
+      },
+    }));
+    setFormError('');
+  };
+
+  const getField = (key: string): AdminFormFieldSetting | undefined => fieldMap.get(key);
+  const isVisible = (key: string) => getField(key)?.visible !== false;
+  const isRequired = (key: string) => Boolean(getField(key)?.required);
+  const labelOf = (key: string, fallback: string) => getField(key)?.label || fallback;
+  const placeholderOf = (key: string, fallback = '') => getField(key)?.placeholder || fallback;
+
   const openCreateDialog = () => {
     setEditingExpense(null);
-    setForm(EMPTY_FORM);
+    setForm(createEmptyForm({ category: defaultCategory, frequency: defaultFrequency, status: defaultStatus }));
     setFormError('');
     setDialogOpen(true);
   };
@@ -269,6 +358,11 @@ export default function Finance() {
     const amount = Number(form.amount);
     const paymentDay = form.paymentDay ? Math.min(31, Math.max(1, Number(form.paymentDay))) : undefined;
     const now = new Date().toISOString();
+    const normalizedCustomFields = Object.fromEntries(
+      Object.entries(form.customFields)
+        .map(([key, value]) => [key, String(value ?? '').trim()])
+        .filter(([, value]) => value),
+    );
 
     if (!form.name.trim()) {
       setFormError('Укажите название расхода.');
@@ -281,7 +375,7 @@ export default function Finance() {
 
     return {
       name: form.name.trim(),
-      category: form.category.trim() || 'Прочее',
+      category: form.category.trim() || defaultCategory,
       amount,
       frequency: form.frequency,
       paymentDay,
@@ -290,6 +384,7 @@ export default function Finance() {
       account: form.account.trim() || undefined,
       status: form.status,
       comment: form.comment.trim() || undefined,
+      customFields: normalizedCustomFields,
       createdAt: editingExpense?.createdAt ?? now,
       updatedAt: now,
       createdBy: editingExpense?.createdBy ?? user?.name,
@@ -310,7 +405,7 @@ export default function Finance() {
       }
       setDialogOpen(false);
       setEditingExpense(null);
-      setForm(EMPTY_FORM);
+      setForm(createEmptyForm({ category: defaultCategory, frequency: defaultFrequency, status: defaultStatus }));
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Не удалось сохранить расход.');
     }
@@ -439,7 +534,9 @@ export default function Finance() {
                     <TableCell>
                       <div>
                         <p className="font-medium text-gray-900 dark:text-white">{expense.name}</p>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{expense.category}</p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {getAdminListLabel(appSettings, 'finance_expense_categories', expense.category)}
+                        </p>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -453,7 +550,7 @@ export default function Finance() {
                       </div>
                     </TableCell>
                     <TableCell className="text-sm text-gray-700 dark:text-gray-300">
-                      {FREQUENCY_LABELS[expense.frequency]}
+                      {getAdminListLabel(appSettings, 'finance_expense_frequency', expense.frequency) || FREQUENCY_LABELS[expense.frequency]}
                     </TableCell>
                     <TableCell>
                       <div className="text-sm text-gray-700 dark:text-gray-300">
@@ -467,7 +564,9 @@ export default function Finance() {
                         {expense.account && <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{expense.account}</p>}
                       </div>
                     </TableCell>
-                    <TableCell>{getStatusBadge(expense.status)}</TableCell>
+                    <TableCell>
+                      {getStatusBadge(expense.status, getAdminListLabel(appSettings, 'finance_expense_statuses', expense.status) || STATUS_LABELS[expense.status])}
+                    </TableCell>
                     <TableCell>
                       {canManageFinance ? (
                         <div className="flex flex-wrap gap-2">
@@ -546,7 +645,9 @@ export default function Finance() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="font-medium text-gray-900 dark:text-white">{expense.name}</p>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{getNextPaymentLabel(expense)} · {expense.category}</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {getNextPaymentLabel(expense)} · {getAdminListLabel(appSettings, 'finance_expense_categories', expense.category)}
+                      </p>
                     </div>
                     <p className="shrink-0 font-semibold text-gray-900 dark:text-white">{formatCurrency(expense.amount)}</p>
                   </div>
@@ -574,24 +675,26 @@ export default function Finance() {
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="app-filter-input">
               <option value="current">Текущие без архива</option>
               <option value="all">Все статусы</option>
-              <option value="active">Активен</option>
-              <option value="paused">Пауза</option>
-              <option value="archived">Архив</option>
+              {allStatusOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </FilterField>
           <FilterField label="Периодичность">
             <select value={frequencyFilter} onChange={(event) => setFrequencyFilter(event.target.value as typeof frequencyFilter)} className="app-filter-input">
               <option value="all">Любая</option>
-              <option value="monthly">Ежемесячно</option>
-              <option value="quarterly">Ежеквартально</option>
-              <option value="yearly">Ежегодно</option>
+              {allFrequencyOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </FilterField>
           <FilterField label="Категория" className="md:col-span-2">
             <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="app-filter-input">
               <option value="all">Все категории</option>
               {categories.map(category => (
-                <option key={category} value={category}>{category}</option>
+                <option key={category} value={category}>
+                  {getAdminListLabel(appSettings, 'finance_expense_categories', category)}
+                </option>
               ))}
             </select>
           </FilterField>
@@ -614,111 +717,166 @@ export default function Finance() {
             )}
 
             <div className="grid gap-4 md:grid-cols-2">
+              {isVisible('name') && (
               <div className="md:col-span-2">
-                <FieldLabel required>Название</FieldLabel>
+                <FieldLabel required={isRequired('name')}>{labelOf('name', 'Название')}</FieldLabel>
                 <Input
                   value={form.name}
                   onChange={(event) => set('name', event.target.value)}
-                  placeholder="Например: аренда офиса"
-                  required
+                  placeholder={placeholderOf('name', 'Например: аренда офиса')}
+                  required={isRequired('name')}
                 />
               </div>
+              )}
+              {isVisible('category') && (
               <div>
-                <FieldLabel required>Категория</FieldLabel>
-                <Input
-                  list="company-expense-categories"
+                <FieldLabel required={isRequired('category')}>{labelOf('category', 'Категория')}</FieldLabel>
+                <Select
                   value={form.category}
-                  onChange={(event) => set('category', event.target.value)}
-                  required
-                />
-                <datalist id="company-expense-categories">
-                  {categories.map(category => (
-                    <option key={category} value={category} />
-                  ))}
-                </datalist>
+                  onValueChange={(value) => set('category', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedCategoryOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+              )}
+              {isVisible('amount') && (
               <div>
-                <FieldLabel required>Сумма</FieldLabel>
+                <FieldLabel required={isRequired('amount')}>{labelOf('amount', 'Сумма')}</FieldLabel>
                 <Input
                   value={form.amount}
                   onChange={(event) => set('amount', event.target.value)}
                   type="number"
                   min="0"
                   step="1"
-                  placeholder="0"
-                  required
+                  placeholder={placeholderOf('amount', '0')}
+                  required={isRequired('amount')}
                 />
               </div>
+              )}
+              {isVisible('frequency') && (
               <div>
-                <FieldLabel>Периодичность</FieldLabel>
+                <FieldLabel required={isRequired('frequency')}>{labelOf('frequency', 'Периодичность')}</FieldLabel>
                 <Select value={form.frequency} onValueChange={(value) => set('frequency', value as CompanyExpenseFrequency)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="monthly">Ежемесячно</SelectItem>
-                    <SelectItem value="quarterly">Ежеквартально</SelectItem>
-                    <SelectItem value="yearly">Ежегодно</SelectItem>
+                    {selectedFrequencyOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
+              )}
+              {isVisible('status') && (
               <div>
-                <FieldLabel>Статус</FieldLabel>
+                <FieldLabel required={isRequired('status')}>{labelOf('status', 'Статус')}</FieldLabel>
                 <Select value={form.status} onValueChange={(value) => set('status', value as CompanyExpenseStatus)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="active">Активен</SelectItem>
-                    <SelectItem value="paused">Пауза</SelectItem>
-                    <SelectItem value="archived">Архив</SelectItem>
+                    {selectedStatusOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
+              )}
+              {isVisible('paymentDay') && (
               <div>
-                <FieldLabel>День оплаты</FieldLabel>
+                <FieldLabel required={isRequired('paymentDay')}>{labelOf('paymentDay', 'День оплаты')}</FieldLabel>
                 <Input
                   value={form.paymentDay}
                   onChange={(event) => set('paymentDay', event.target.value)}
                   type="number"
                   min="1"
                   max="31"
-                  placeholder="Например: 25"
+                  placeholder={placeholderOf('paymentDay', 'Например: 25')}
+                  required={isRequired('paymentDay')}
                 />
               </div>
+              )}
+              {isVisible('nextPaymentDate') && (
               <div>
-                <FieldLabel>Следующая дата оплаты</FieldLabel>
+                <FieldLabel required={isRequired('nextPaymentDate')}>{labelOf('nextPaymentDate', 'Следующая дата оплаты')}</FieldLabel>
                 <Input
                   value={form.nextPaymentDate}
                   onChange={(event) => set('nextPaymentDate', event.target.value)}
                   type="date"
+                  required={isRequired('nextPaymentDate')}
                 />
               </div>
+              )}
+              {isVisible('counterparty') && (
               <div>
-                <FieldLabel>Контрагент</FieldLabel>
+                <FieldLabel required={isRequired('counterparty')}>{labelOf('counterparty', 'Контрагент')}</FieldLabel>
                 <Input
                   value={form.counterparty}
                   onChange={(event) => set('counterparty', event.target.value)}
-                  placeholder="Кому платим"
+                  placeholder={placeholderOf('counterparty', 'Кому платим')}
+                  required={isRequired('counterparty')}
                 />
               </div>
+              )}
+              {isVisible('account') && (
               <div>
-                <FieldLabel>Счёт / источник оплаты</FieldLabel>
+                <FieldLabel required={isRequired('account')}>{labelOf('account', 'Счёт / источник оплаты')}</FieldLabel>
                 <Input
                   value={form.account}
                   onChange={(event) => set('account', event.target.value)}
-                  placeholder="Расчётный счёт, карта, касса"
+                  placeholder={placeholderOf('account', 'Расчётный счёт, карта, касса')}
+                  required={isRequired('account')}
                 />
               </div>
+              )}
+              {isVisible('comment') && (
               <div className="md:col-span-2">
-                <FieldLabel>Комментарий</FieldLabel>
+                <FieldLabel required={isRequired('comment')}>{labelOf('comment', 'Комментарий')}</FieldLabel>
                 <Textarea
                   value={form.comment}
                   onChange={(event) => set('comment', event.target.value)}
-                  placeholder="Детали договора, номер счёта, условия оплаты"
+                  placeholder={placeholderOf('comment', 'Детали договора, номер счёта, условия оплаты')}
                   rows={3}
+                  required={isRequired('comment')}
                 />
               </div>
+              )}
+              {customFields.map(field => (
+                <div key={field.key} className={field.type === 'textarea' ? 'md:col-span-2' : undefined}>
+                  <FieldLabel required={field.required}>{field.label}</FieldLabel>
+                  {field.type === 'textarea' ? (
+                    <Textarea
+                      value={form.customFields[field.key] || ''}
+                      onChange={(event) => setCustomField(field.key, event.target.value)}
+                      placeholder={field.placeholder}
+                      rows={3}
+                      required={field.required}
+                    />
+                  ) : (
+                    <Input
+                      value={form.customFields[field.key] || ''}
+                      onChange={(event) => setCustomField(field.key, event.target.value)}
+                      type={field.type === 'number' || field.type === 'date' ? field.type : 'text'}
+                      placeholder={field.placeholder}
+                      required={field.required}
+                    />
+                  )}
+                </div>
+              ))}
             </div>
 
             <DialogFooter>

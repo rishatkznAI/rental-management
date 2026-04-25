@@ -621,6 +621,7 @@ export interface CompanyExpense {
   account?: string;
   status: CompanyExpenseStatus;
   comment?: string;
+  customFields?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
   createdBy?: string;

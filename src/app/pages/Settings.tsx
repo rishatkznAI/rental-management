@@ -66,6 +66,17 @@ import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { DEFAULT_SIDEBAR_ORDER, SIDEBAR_NAV_GROUPS, SIDEBAR_SECTION_LABELS } from '../lib/navigation';
 import { CRM_ARCHIVE_TTL_MS, resolveCrmArchiveState } from '../lib/crmArchive';
 import {
+  ADMIN_FORMS_SETTING_KEY,
+  ADMIN_LISTS_SETTING_KEY,
+  DEFAULT_ADMIN_FORMS,
+  DEFAULT_ADMIN_LISTS,
+  resolveAdminForms,
+  resolveAdminLists,
+  type AdminFieldType,
+  type AdminFormConfig,
+  type AdminListConfig,
+} from '../lib/adminConfig';
+import {
   EQUIPMENT_TYPE_CATALOG_SETTING_KEY,
   makeCustomEquipmentTypeValue,
   resolveEquipmentTypeCatalog,
@@ -398,6 +409,7 @@ export default function Settings() {
           {[
             { value: 'users',         label: 'Пользователи и роли' },
             { value: 'menu',          label: 'Левое меню и CRM' },
+            { value: 'configuration', label: 'Списки и поля' },
             { value: 'reference',     label: 'Справочники' },
             { value: 'notifications', label: 'Уведомления' },
             { value: 'data',          label: 'Данные системы' },
@@ -620,6 +632,10 @@ export default function Settings() {
           </div>
         </TabsContent>
 
+        <TabsContent value="configuration">
+          <AdminConfigurationSection appSettings={appSettings} />
+        </TabsContent>
+
         {/* ── Справочники ──────────────────────────────────────────────────── */}
         <TabsContent value="reference">
           <div className="grid gap-6 lg:grid-cols-2">
@@ -803,6 +819,461 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1">
       <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
       {children}
+    </div>
+  );
+}
+
+function makeCustomFieldKey(label: string) {
+  const normalized = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-zа-яё0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '');
+  return `custom_${normalized || Date.now()}`;
+}
+
+function replaceAt<T>(items: T[], index: number, value: T) {
+  return items.map((item, itemIndex) => (itemIndex === index ? value : item));
+}
+
+function moveItem<T>(items: T[], index: number, direction: -1 | 1) {
+  const targetIndex = index + direction;
+  if (index < 0 || targetIndex < 0 || targetIndex >= items.length) return items;
+  const next = [...items];
+  const [item] = next.splice(index, 1);
+  next.splice(targetIndex, 0, item);
+  return next;
+}
+
+function AdminConfigurationSection({ appSettings }: { appSettings: AppSetting[] }) {
+  const queryClient = useQueryClient();
+  const savedLists = React.useMemo(() => resolveAdminLists(appSettings), [appSettings]);
+  const savedForms = React.useMemo(() => resolveAdminForms(appSettings), [appSettings]);
+  const [lists, setLists] = React.useState<AdminListConfig[]>(savedLists);
+  const [forms, setForms] = React.useState<AdminFormConfig[]>(savedForms);
+  const [selectedListId, setSelectedListId] = React.useState(savedLists[0]?.id || '');
+  const [selectedFormId, setSelectedFormId] = React.useState(savedForms[0]?.id || '');
+  const [newOptionLabel, setNewOptionLabel] = React.useState('');
+  const [newFieldLabel, setNewFieldLabel] = React.useState('');
+  const [newFieldType, setNewFieldType] = React.useState<AdminFieldType>('text');
+  const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    setLists(savedLists);
+  }, [savedLists]);
+
+  React.useEffect(() => {
+    setForms(savedForms);
+  }, [savedForms]);
+
+  React.useEffect(() => {
+    if (!lists.some(list => list.id === selectedListId)) {
+      setSelectedListId(lists[0]?.id || '');
+    }
+  }, [lists, selectedListId]);
+
+  React.useEffect(() => {
+    if (!forms.some(form => form.id === selectedFormId)) {
+      setSelectedFormId(forms[0]?.id || '');
+    }
+  }, [forms, selectedFormId]);
+
+  const selectedList = lists.find(list => list.id === selectedListId) || lists[0];
+  const selectedForm = forms.find(form => form.id === selectedFormId) || forms[0];
+
+  const saveSetting = React.useCallback(async (key: string, value: unknown) => {
+    const now = new Date().toISOString();
+    const existing = appSettings.find(item => item.key === key);
+    const payload = {
+      key,
+      value,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+
+    if (existing) {
+      await appSettingsService.update(existing.id, payload);
+    } else {
+      await appSettingsService.create(payload);
+    }
+  }, [appSettings]);
+
+  const saveAll = React.useCallback(async () => {
+    setIsSaving(true);
+    setMessage(null);
+    try {
+      await Promise.all([
+        saveSetting(ADMIN_LISTS_SETTING_KEY, lists),
+        saveSetting(ADMIN_FORMS_SETTING_KEY, forms),
+      ]);
+      await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
+      setMessage({ type: 'success', text: 'Настройки списков и полей сохранены.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось сохранить настройки.' });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [forms, lists, queryClient, saveSetting]);
+
+  const resetDefaults = React.useCallback(async () => {
+    const confirmed = window.confirm('Вернуть базовые настройки списков и полей? Текущие изменения в админке будут заменены.');
+    if (!confirmed) return;
+    setLists(DEFAULT_ADMIN_LISTS);
+    setForms(DEFAULT_ADMIN_FORMS);
+    setIsSaving(true);
+    setMessage(null);
+    try {
+      await Promise.all([
+        saveSetting(ADMIN_LISTS_SETTING_KEY, DEFAULT_ADMIN_LISTS),
+        saveSetting(ADMIN_FORMS_SETTING_KEY, DEFAULT_ADMIN_FORMS),
+      ]);
+      await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
+      setMessage({ type: 'success', text: 'Базовые настройки восстановлены.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось восстановить базовые настройки.' });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [queryClient, saveSetting]);
+
+  const updateSelectedList = React.useCallback((updater: (list: AdminListConfig) => AdminListConfig) => {
+    if (!selectedList) return;
+    setLists(current => current.map(list => list.id === selectedList.id ? updater(list) : list));
+    setMessage(null);
+  }, [selectedList]);
+
+  const updateSelectedForm = React.useCallback((updater: (form: AdminFormConfig) => AdminFormConfig) => {
+    if (!selectedForm) return;
+    setForms(current => current.map(form => form.id === selectedForm.id ? updater(form) : form));
+    setMessage(null);
+  }, [selectedForm]);
+
+  const addOption = React.useCallback(() => {
+    if (!selectedList?.allowCustomItems) return;
+    const label = newOptionLabel.replace(/\s+/g, ' ').trim();
+    if (!label) return;
+    const duplicate = selectedList.items.some(item =>
+      item.value.trim().toLowerCase() === label.toLowerCase() ||
+      item.label.trim().toLowerCase() === label.toLowerCase()
+    );
+    if (duplicate) {
+      setMessage({ type: 'error', text: 'Такое значение уже есть в выбранном списке.' });
+      return;
+    }
+    updateSelectedList(list => ({
+      ...list,
+      items: [...list.items, { value: label, label, active: true, locked: false }],
+    }));
+    setNewOptionLabel('');
+  }, [newOptionLabel, selectedList, updateSelectedList]);
+
+  const addCustomField = React.useCallback(() => {
+    if (!selectedForm) return;
+    const label = newFieldLabel.replace(/\s+/g, ' ').trim();
+    if (!label) return;
+    const baseKey = makeCustomFieldKey(label);
+    const keys = new Set(selectedForm.fields.map(field => field.key));
+    let key = baseKey;
+    let counter = 2;
+    while (keys.has(key)) {
+      key = `${baseKey}_${counter}`;
+      counter += 1;
+    }
+    updateSelectedForm(form => ({
+      ...form,
+      fields: [
+        ...form.fields,
+        {
+          key,
+          label,
+          type: newFieldType,
+          visible: true,
+          required: false,
+          placeholder: '',
+          custom: true,
+        },
+      ],
+    }));
+    setNewFieldLabel('');
+    setNewFieldType('text');
+  }, [newFieldLabel, newFieldType, selectedForm, updateSelectedForm]);
+
+  const totalLists = lists.length;
+  const totalFields = forms.reduce((sum, form) => sum + form.fields.length, 0);
+  const customFields = forms.reduce((sum, form) => sum + form.fields.filter(field => field.custom).length, 0);
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle>Центр настройки интерфейса</CardTitle>
+              <CardDescription>Единое место для справочников, выпадающих списков, подписей, обязательности и видимости полей.</CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => void resetDefaults()} disabled={isSaving}>
+                <RefreshCw className="h-4 w-4" />
+                Сбросить
+              </Button>
+              <Button onClick={() => void saveAll()} disabled={isSaving}>
+                {isSaving ? 'Сохраняем...' : 'Сохранить настройки'}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {message && (
+            <div className={`rounded-lg border px-4 py-3 text-sm ${
+              message.type === 'success'
+                ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300'
+                : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'
+            }`}>
+              {message.text}
+            </div>
+          )}
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+              <p className="text-xs uppercase tracking-[0.16em] text-gray-500">Списки</p>
+              <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{totalLists}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+              <p className="text-xs uppercase tracking-[0.16em] text-gray-500">Поля форм</p>
+              <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{totalFields}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+              <p className="text-xs uppercase tracking-[0.16em] text-gray-500">Доп. поля</p>
+              <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{customFields}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(280px,360px)_1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Списки</CardTitle>
+            <CardDescription>Справочники для фильтров, селектов и форм</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <select
+              value={selectedList?.id || ''}
+              onChange={event => setSelectedListId(event.target.value)}
+              className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+            >
+              {lists.map(list => (
+                <option key={list.id} value={list.id}>{list.section} · {list.title}</option>
+              ))}
+            </select>
+
+            {selectedList && (
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">{selectedList.title}</p>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{selectedList.description}</p>
+                  </div>
+                  <Badge variant={selectedList.allowCustomItems ? 'success' : 'secondary'}>
+                    {selectedList.allowCustomItems ? 'Можно добавлять' : 'Системный'}
+                  </Badge>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {selectedList.items.map((item, index) => (
+                    <div key={`${item.value}-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700 lg:grid-cols-[72px_minmax(140px,1fr)_minmax(120px,0.8fr)_110px_116px] lg:items-center">
+                      <div className="flex gap-1">
+                        <Button size="icon" variant="ghost" onClick={() => updateSelectedList(list => ({ ...list, items: moveItem(list.items, index, -1) }))} disabled={index === 0}>
+                          <ArrowUp className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => updateSelectedList(list => ({ ...list, items: moveItem(list.items, index, 1) }))} disabled={index === selectedList.items.length - 1}>
+                          <ArrowDown className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <Input
+                        value={item.label}
+                        onChange={event => updateSelectedList(list => ({
+                          ...list,
+                          items: replaceAt(list.items, index, { ...item, label: event.target.value }),
+                        }))}
+                        placeholder="Подпись"
+                      />
+                      <Input value={item.value} disabled className="font-mono text-xs" />
+                      <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={item.active}
+                          onChange={event => updateSelectedList(list => ({
+                            ...list,
+                            items: replaceAt(list.items, index, { ...item, active: event.target.checked }),
+                          }))}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                        Активен
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={item.locked}
+                        onClick={() => updateSelectedList(list => ({ ...list, items: list.items.filter((_, itemIndex) => itemIndex !== index) }))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Удалить
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                {selectedList.allowCustomItems && (
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={newOptionLabel}
+                      onChange={event => setNewOptionLabel(event.target.value)}
+                      onKeyDown={event => { if (event.key === 'Enter') addOption(); }}
+                      placeholder="Новое значение списка"
+                    />
+                    <Button type="button" onClick={addOption}>
+                      <Plus className="h-4 w-4" />
+                      Добавить
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Поля форм</CardTitle>
+            <CardDescription>Подписи, обязательность, видимость и порядок полей</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <select
+              value={selectedForm?.id || ''}
+              onChange={event => setSelectedFormId(event.target.value)}
+              className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+            >
+              {forms.map(form => (
+                <option key={form.id} value={form.id}>{form.section} · {form.title}</option>
+              ))}
+            </select>
+
+            {selectedForm && (
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div>
+                  <p className="font-medium text-gray-900 dark:text-white">{selectedForm.title}</p>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{selectedForm.description}</p>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {selectedForm.fields.map((field, index) => (
+                    <div key={`${field.key}-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700 xl:grid-cols-[72px_minmax(160px,1fr)_120px_minmax(160px,1fr)_96px_120px_96px] xl:items-center">
+                      <div className="flex gap-1">
+                        <Button size="icon" variant="ghost" onClick={() => updateSelectedForm(form => ({ ...form, fields: moveItem(form.fields, index, -1) }))} disabled={index === 0}>
+                          <ArrowUp className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => updateSelectedForm(form => ({ ...form, fields: moveItem(form.fields, index, 1) }))} disabled={index === selectedForm.fields.length - 1}>
+                          <ArrowDown className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <Input
+                        value={field.label}
+                        onChange={event => updateSelectedForm(form => ({
+                          ...form,
+                          fields: replaceAt(form.fields, index, { ...field, label: event.target.value }),
+                        }))}
+                        placeholder="Название поля"
+                      />
+                      <select
+                        value={field.type}
+                        onChange={event => updateSelectedForm(form => ({
+                          ...form,
+                          fields: replaceAt(form.fields, index, { ...field, type: event.target.value as AdminFieldType }),
+                        }))}
+                        disabled={!field.custom}
+                        className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+                      >
+                        <option value="text">Текст</option>
+                        <option value="number">Число</option>
+                        <option value="date">Дата</option>
+                        <option value="textarea">Текстовое поле</option>
+                        <option value="select">Список</option>
+                      </select>
+                      <Input
+                        value={field.placeholder || ''}
+                        onChange={event => updateSelectedForm(form => ({
+                          ...form,
+                          fields: replaceAt(form.fields, index, { ...field, placeholder: event.target.value }),
+                        }))}
+                        placeholder="Подсказка"
+                      />
+                      <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={field.visible}
+                          disabled={field.locked}
+                          onChange={event => updateSelectedForm(form => ({
+                            ...form,
+                            fields: replaceAt(form.fields, index, { ...field, visible: event.target.checked }),
+                          }))}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                        Видно
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={field.required}
+                          disabled={field.locked}
+                          onChange={event => updateSelectedForm(form => ({
+                            ...form,
+                            fields: replaceAt(form.fields, index, { ...field, required: event.target.checked }),
+                          }))}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                        Обязательно
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!field.custom}
+                        onClick={() => updateSelectedForm(form => ({ ...form, fields: form.fields.filter((_, fieldIndex) => fieldIndex !== index) }))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Удалить
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_auto]">
+                  <Input
+                    value={newFieldLabel}
+                    onChange={event => setNewFieldLabel(event.target.value)}
+                    onKeyDown={event => { if (event.key === 'Enter') addCustomField(); }}
+                    placeholder="Название дополнительного поля"
+                  />
+                  <select
+                    value={newFieldType}
+                    onChange={event => setNewFieldType(event.target.value as AdminFieldType)}
+                    className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+                  >
+                    <option value="text">Текст</option>
+                    <option value="number">Число</option>
+                    <option value="date">Дата</option>
+                    <option value="textarea">Текстовое поле</option>
+                  </select>
+                  <Button type="button" onClick={addCustomField}>
+                    <Plus className="h-4 w-4" />
+                    Добавить поле
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

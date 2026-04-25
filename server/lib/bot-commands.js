@@ -171,6 +171,11 @@ function createBotHandlers(deps) {
     return isMechanicMenuRole(role) ? 'main' : null;
   }
 
+  function mainMenuImageOptions(role) {
+    const mechanicStage = mechanicMainStageForRole(role);
+    return mechanicStage ? { mechanicStage } : { brandImage: true };
+  }
+
   function mechanicStageForOperation(operation, isReview = false) {
     if (isReview || operation?.currentStep === 'review') return 'complete';
     return operationStageImageKey(OPERATION_STEP_META[operation?.currentStep]);
@@ -479,7 +484,7 @@ function createBotHandlers(deps) {
         getMainMenuText(existingUser),
         {
           attachments: defaultKeyboardForRole(existingUser.userRole),
-          brandImage: true,
+          ...mainMenuImageOptions(existingUser.userRole),
           phone,
           cleanupPrevious: true,
         },
@@ -2481,7 +2486,7 @@ function createBotHandlers(deps) {
         getMainMenuText(user),
         {
           attachments: defaultKeyboardForRole(user.role),
-          brandImage: true,
+          ...mainMenuImageOptions(user.role),
         },
       );
     }
@@ -2537,7 +2542,7 @@ function createBotHandlers(deps) {
           getMainMenuText(user),
           {
             attachments: defaultKeyboardForRole(user.role),
-            brandImage: true,
+            ...mainMenuImageOptions(user.role),
           },
         );
       }
@@ -2890,7 +2895,7 @@ function createBotHandlers(deps) {
     if ((lower === '/меню' || lower === 'меню')) {
       return replyWithUi(getMainMenuText(authUser), {
         attachments: defaultKeyboardForRole(userRole),
-        brandImage: true,
+        ...mainMenuImageOptions(userRole),
       });
     }
 

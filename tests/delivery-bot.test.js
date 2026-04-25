@@ -102,6 +102,22 @@ test('dedicated delivery bot_started prefers linked carrier role', async () => {
   assert.match(messages.at(-1).text, /доставки/);
 });
 
+test('mechanic main navigation sends fallout-style stage image', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    ...state.bot_users['100'],
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+  };
+
+  await handlers.handleBotStarted({ user_id: 100 }, '100');
+
+  const attachments = messages.at(-1).options.attachments;
+  assert.equal(attachments[0].type, 'image');
+  assert.match(attachments[0].payload.file, /main-menu\.jpg$/);
+  assert.doesNotMatch(attachments[0].payload.file, /skytech-logo/);
+});
+
 test('MAX callback notification is sent as a string', async () => {
   const requests = [];
   const client = createMaxApiClient({

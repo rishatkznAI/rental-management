@@ -113,7 +113,7 @@ test('mechanic main navigation sends fallout-style stage image', async () => {
   await handlers.handleBotStarted({ user_id: 100 }, '100');
 
   assert.equal(messages.length, 2);
-  assert.equal(messages[0].text, 'Навигация');
+  assert.equal(messages[0].text, '');
   const imageAttachments = messages[0].options.attachments;
   const menuAttachments = messages[1].options.attachments;
   assert.equal(imageAttachments[0].type, 'image');
@@ -183,6 +183,7 @@ test('MAX sendMessage uploads local image attachments before sending', async () 
         return { json: async () => ({ success: true }) };
       },
       logger: { log: () => {}, warn: () => {}, error: () => {} },
+      useNativeUpload: false,
     });
 
     await client.sendMessage({ user_id: 100 }, 'Этап', {

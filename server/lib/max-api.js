@@ -10,6 +10,7 @@ function createMaxApiClient({
   logger = console,
   requestTimeoutMs = Number(process.env.MAX_API_TIMEOUT_MS || 8000),
   slowRequestMs = Number(process.env.MAX_API_SLOW_MS || 1500),
+  useNativeUpload = true,
 }) {
   const uploadPayloadCache = new Map();
 
@@ -131,6 +132,33 @@ function createMaxApiClient({
     };
   }
 
+  async function uploadWithNativeFormData(uploadUrl, resolved, uploadType, signal) {
+    if (
+      typeof globalThis.fetch !== 'function' ||
+      typeof globalThis.FormData !== 'function' ||
+      typeof globalThis.Blob !== 'function'
+    ) {
+      return null;
+    }
+
+    const formData = new globalThis.FormData();
+    const bytes = fs.readFileSync(resolved);
+    formData.append(
+      'data',
+      new globalThis.Blob([bytes], { type: mimeTypeForFile(resolved) }),
+      path.basename(resolved),
+    );
+
+    const res = await globalThis.fetch(uploadUrl, {
+      method: 'POST',
+      body: formData,
+      ...(signal ? { signal } : {}),
+    });
+    const payload = await readResponseJson(res);
+    logger.log(`[MAX API] native upload ${uploadType} ${path.basename(resolved)} status=${res.status}`);
+    return payload;
+  }
+
   function attachmentUploadType(attachment) {
     const type = String(attachment?.type || '').trim();
     return ['image', 'file', 'video', 'audio'].includes(type) ? type : 'image';
@@ -166,21 +194,36 @@ function createMaxApiClient({
       }
 
       const token = (botToken || '').trim();
-      const { body, contentType } = multipartFileBody(resolved);
       const { controller, timeout } = createAbortSignal();
       const startedAt = Date.now();
       try {
-        const res = await fetchImpl(uploadUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: token,
-            'Content-Type': contentType,
-            'Content-Length': String(body.length),
-          },
-          body,
-          ...(controller ? { signal: controller.signal } : {}),
-        });
-        const payload = await readResponseJson(res);
+        let payload = null;
+        if (useNativeUpload) {
+          try {
+            payload = await uploadWithNativeFormData(
+              uploadUrl,
+              resolved,
+              uploadType,
+              controller?.signal,
+            );
+          } catch (error) {
+            logger.warn(`[MAX API] native upload fallback ${path.basename(resolved)}: ${error.message}`);
+          }
+        }
+        if (!payload) {
+          const { body, contentType } = multipartFileBody(resolved);
+          const res = await fetchImpl(uploadUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: token,
+              'Content-Type': contentType,
+              'Content-Length': String(body.length),
+            },
+            body,
+            ...(controller ? { signal: controller.signal } : {}),
+          });
+          payload = await readResponseJson(res);
+        }
         const elapsedMs = Date.now() - startedAt;
         if (elapsedMs > slowRequestMs) {
           logger.warn(`[MAX API] Медленная загрузка ${uploadType} ${path.basename(resolved)}: ${elapsedMs}ms`);

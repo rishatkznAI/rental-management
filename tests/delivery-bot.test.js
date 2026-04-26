@@ -30,6 +30,7 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
         maxCarrierKey: '100',
       },
     ],
+    users: [],
     deliveries: [],
     equipment: [],
     gantt_rentals: [],
@@ -47,7 +48,7 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     writeData: (name, value) => {
       state[name] = value;
     },
-    verifyPassword: () => false,
+    verifyPassword: overrides.verifyPassword || (() => false),
     getBotUsers: () => state.bot_users,
     saveBotUsers: (value) => {
       state.bot_users = value;
@@ -89,6 +90,32 @@ test('regular bot_started keeps an existing non-carrier role menu', async () => 
   assert.equal(state.bot_users['100'].userRole, 'Менеджер по аренде');
   assert.match(messages.at(-1).text, /Менеджер по аренде/);
   assert.doesNotMatch(messages.at(-1).text, /Здесь вы видите свои доставки/);
+});
+
+test('manager login flow greets manager with rental manager menu', async () => {
+  const { state, messages, handlers } = createMemoryBot(false, {
+    verifyPassword: (password, stored) => password === stored,
+  });
+  state.bot_users = {};
+  state.users = [{
+    id: 'U-manager',
+    name: 'Руслан',
+    role: 'Менеджер по аренде',
+    email: 'manager@example.test',
+    status: 'Активен',
+    password: 'secret',
+  }];
+
+  await handlers.handleBotStarted({ user_id: 200 }, '200');
+  await handlers.handleCallback({ user_id: 200 }, '200', 'auth:start', { callbackId: 'cb-login' });
+  await handlers.handleCommand({ user_id: 200 }, '200', 'manager@example.test');
+  await handlers.handleCommand({ user_id: 200 }, '200', 'secret');
+
+  assert.match(messages.at(-1).text, /Менеджер по аренде \(Руслан\)/);
+  assert.doesNotMatch(messages.at(-1).text, /undefined/);
+  assert.equal(state.bot_users['200'].userRole, 'Менеджер по аренде');
+  const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.equal(menu.payload.buttons[1][1].text, 'Новая доставка');
 });
 
 test('dedicated delivery bot_started prefers linked carrier role', async () => {

@@ -2600,11 +2600,12 @@ function createBotHandlers(deps) {
       }
       console.log('[TRACE] sending welcome message for user');
       resetBotFlow(phone);
+      const authUser = getAuthorizedUser(String(phone));
       return replyWithUi(
-        getMainMenuText(user),
+        getMainMenuText(authUser),
         {
-          attachments: defaultKeyboardForRole(user.role),
-          ...mainMenuImageOptions(user.role),
+          attachments: defaultKeyboardForRole(authUser.userRole),
+          ...mainMenuImageOptions(authUser.userRole),
         },
       );
     }
@@ -2665,12 +2666,13 @@ function createBotHandlers(deps) {
           );
         }
         resetBotFlow(phone);
+        const authUser = getAuthorizedUser(String(phone));
         return reply(
           senderId,
-          getMainMenuText(user),
+          getMainMenuText(authUser),
           {
-            attachments: defaultKeyboardForRole(user.role),
-            ...mainMenuImageOptions(user.role),
+            attachments: defaultKeyboardForRole(authUser.userRole),
+            ...mainMenuImageOptions(authUser.userRole),
           },
         );
       }

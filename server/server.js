@@ -1965,10 +1965,10 @@ startServer({
     applyAdminResetFromEnv,
     registerWebhook: async () => {
       await registerMainWebhook();
-      if (typeof registerManagerWebhook === 'function') {
+      if (!managerAndDeliveryShareToken && typeof registerManagerWebhook === 'function') {
         await registerManagerWebhook();
       }
-      if (typeof registerDeliveryWebhook === 'function') {
+      if (!managerAndDeliveryShareToken && typeof registerDeliveryWebhook === 'function') {
         await registerDeliveryWebhook();
       }
     },

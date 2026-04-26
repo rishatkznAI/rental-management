@@ -722,7 +722,7 @@ export default function Rentals() {
   );
   const dayWidth = SCALE_CONFIG[scale].dayWidth;
   const timelineWidth = totalDays * dayWidth;
-  const rowHeight = densityMode === 'compact' ? 50 : 64;
+  const rowHeight = densityMode === 'compact' ? 44 : 56;
 
   // Generate day columns
   const days = useMemo(() => {
@@ -2874,17 +2874,15 @@ function EquipmentRow({
         style={{ width: LEFT_PANEL_WIDTH }}
       >
         <div className="min-w-0 flex-1">
-          <div className={`flex items-baseline ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
+          <div className={`flex items-center ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
             <span className={`truncate font-semibold text-gray-900 dark:text-white ${isCompact ? 'text-[12px]' : 'text-[13px]'}`}>{equipment.model}</span>
-            <span className={`rounded-full bg-slate-100 font-mono text-gray-500 dark:bg-white/8 dark:text-gray-400 ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'}`}>{equipment.inventoryNumber}</span>
+            <span className={`shrink-0 rounded-full bg-slate-100 font-mono text-gray-500 dark:bg-white/8 dark:text-gray-400 ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'}`}>{equipment.inventoryNumber}</span>
+            <span className={`inline-flex shrink-0 rounded-full font-medium ${eqStatus.color} ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'}`}>
+              {eqStatus.label}
+            </span>
           </div>
           <div className={`mt-0.5 flex items-center text-gray-500 dark:text-gray-400 ${isCompact ? 'gap-1 text-[9px]' : 'gap-1.5 text-[10px]'}`}>
             <span className="truncate uppercase tracking-[0.08em]">SN {equipment.serialNumber || 'не указан'}</span>
-          </div>
-          <div className={`mt-1 flex flex-wrap items-center ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
-            <span className={`inline-flex rounded-full font-medium ${eqStatus.color} ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'}`}>
-              {eqStatus.label}
-            </span>
           </div>
         </div>
         {/* Quick actions */}

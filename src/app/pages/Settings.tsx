@@ -337,7 +337,7 @@ export default function Settings() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="flex h-auto w-full justify-start gap-4 rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
+        <TabsList className="flex h-auto w-full justify-start gap-4 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
           {[
             { value: 'users',         label: 'Пользователи и роли' },
             { value: 'menu',          label: 'Левое меню' },
@@ -349,7 +349,7 @@ export default function Settings() {
             <TabsTrigger
               key={tab.value}
               value={tab.value}
-              className="border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary]"
+              className="shrink-0 whitespace-nowrap border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary]"
             >
               {tab.label}
             </TabsTrigger>
@@ -966,7 +966,7 @@ function AdminConfigurationSection({ appSettings }: { appSettings: AppSetting[] 
 
                 <div className="mt-4 space-y-2">
                   {selectedList.items.map((item, index) => (
-                    <div key={`${item.value}-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700 lg:grid-cols-[72px_minmax(140px,1fr)_minmax(120px,0.8fr)_110px_116px] lg:items-center">
+                    <div key={`${item.value}-${index}`} className="grid gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700 md:grid-cols-[72px_minmax(0,1fr)] xl:grid-cols-[72px_minmax(180px,1fr)_minmax(140px,0.8fr)_120px_120px] xl:items-center">
                       <div className="flex gap-1">
                         <Button size="icon" variant="ghost" onClick={() => updateSelectedList(list => ({ ...list, items: moveItem(list.items, index, -1) }))} disabled={index === 0}>
                           <ArrowUp className="h-4 w-4" />
@@ -975,16 +975,22 @@ function AdminConfigurationSection({ appSettings }: { appSettings: AppSetting[] 
                           <ArrowDown className="h-4 w-4" />
                         </Button>
                       </div>
-                      <Input
-                        value={item.label}
-                        onChange={event => updateSelectedList(list => ({
-                          ...list,
-                          items: replaceAt(list.items, index, { ...item, label: event.target.value }),
-                        }))}
-                        placeholder="Подпись"
-                      />
-                      <Input value={item.value} disabled className="font-mono text-xs" />
-                      <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                      <div className="min-w-0 space-y-1">
+                        <span className="text-xs font-medium uppercase tracking-[0.12em] text-gray-500 xl:hidden">Подпись</span>
+                        <Input
+                          value={item.label}
+                          onChange={event => updateSelectedList(list => ({
+                            ...list,
+                            items: replaceAt(list.items, index, { ...item, label: event.target.value }),
+                          }))}
+                          placeholder="Подпись"
+                        />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <span className="text-xs font-medium uppercase tracking-[0.12em] text-gray-500 xl:hidden">Ключ</span>
+                        <Input value={item.value} disabled className="font-mono text-xs" />
+                      </div>
+                      <label className="flex items-center gap-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
                         <input
                           type="checkbox"
                           checked={item.active}
@@ -999,6 +1005,7 @@ function AdminConfigurationSection({ appSettings }: { appSettings: AppSetting[] 
                       <Button
                         size="sm"
                         variant="ghost"
+                        className="justify-start whitespace-nowrap"
                         disabled={item.locked}
                         onClick={() => updateSelectedList(list => ({ ...list, items: list.items.filter((_, itemIndex) => itemIndex !== index) }))}
                       >
@@ -1053,7 +1060,7 @@ function AdminConfigurationSection({ appSettings }: { appSettings: AppSetting[] 
 
                 <div className="mt-4 space-y-2">
                   {selectedForm.fields.map((field, index) => (
-                    <div key={`${field.key}-${index}`} className="grid gap-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700 xl:grid-cols-[72px_minmax(160px,1fr)_120px_minmax(160px,1fr)_96px_120px_96px] xl:items-center">
+                    <div key={`${field.key}-${index}`} className="grid gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700 lg:grid-cols-2 2xl:grid-cols-[72px_minmax(180px,1.2fr)_140px_minmax(180px,1fr)_112px_144px_120px] 2xl:items-center">
                       <div className="flex gap-1">
                         <Button size="icon" variant="ghost" onClick={() => updateSelectedForm(form => ({ ...form, fields: moveItem(form.fields, index, -1) }))} disabled={index === 0}>
                           <ArrowUp className="h-4 w-4" />
@@ -1062,38 +1069,47 @@ function AdminConfigurationSection({ appSettings }: { appSettings: AppSetting[] 
                           <ArrowDown className="h-4 w-4" />
                         </Button>
                       </div>
-                      <Input
-                        value={field.label}
-                        onChange={event => updateSelectedForm(form => ({
-                          ...form,
-                          fields: replaceAt(form.fields, index, { ...field, label: event.target.value }),
-                        }))}
-                        placeholder="Название поля"
-                      />
-                      <select
-                        value={field.type}
-                        onChange={event => updateSelectedForm(form => ({
-                          ...form,
-                          fields: replaceAt(form.fields, index, { ...field, type: event.target.value as AdminFieldType }),
-                        }))}
-                        disabled={!field.custom}
-                        className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
-                      >
-                        <option value="text">Текст</option>
-                        <option value="number">Число</option>
-                        <option value="date">Дата</option>
-                        <option value="textarea">Текстовое поле</option>
-                        <option value="select">Список</option>
-                      </select>
-                      <Input
-                        value={field.placeholder || ''}
-                        onChange={event => updateSelectedForm(form => ({
-                          ...form,
-                          fields: replaceAt(form.fields, index, { ...field, placeholder: event.target.value }),
-                        }))}
-                        placeholder="Подсказка"
-                      />
-                      <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                      <div className="min-w-0 space-y-1">
+                        <span className="text-xs font-medium uppercase tracking-[0.12em] text-gray-500 2xl:hidden">Название поля</span>
+                        <Input
+                          value={field.label}
+                          onChange={event => updateSelectedForm(form => ({
+                            ...form,
+                            fields: replaceAt(form.fields, index, { ...field, label: event.target.value }),
+                          }))}
+                          placeholder="Название поля"
+                        />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <span className="text-xs font-medium uppercase tracking-[0.12em] text-gray-500 2xl:hidden">Тип</span>
+                        <select
+                          value={field.type}
+                          onChange={event => updateSelectedForm(form => ({
+                            ...form,
+                            fields: replaceAt(form.fields, index, { ...field, type: event.target.value as AdminFieldType }),
+                          }))}
+                          disabled={!field.custom}
+                          className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+                        >
+                          <option value="text">Текст</option>
+                          <option value="number">Число</option>
+                          <option value="date">Дата</option>
+                          <option value="textarea">Текстовое поле</option>
+                          <option value="select">Список</option>
+                        </select>
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <span className="text-xs font-medium uppercase tracking-[0.12em] text-gray-500 2xl:hidden">Подсказка</span>
+                        <Input
+                          value={field.placeholder || ''}
+                          onChange={event => updateSelectedForm(form => ({
+                            ...form,
+                            fields: replaceAt(form.fields, index, { ...field, placeholder: event.target.value }),
+                          }))}
+                          placeholder="Подсказка"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
                         <input
                           type="checkbox"
                           checked={field.visible}
@@ -1106,7 +1122,7 @@ function AdminConfigurationSection({ appSettings }: { appSettings: AppSetting[] 
                         />
                         Видно
                       </label>
-                      <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                      <label className="flex items-center gap-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
                         <input
                           type="checkbox"
                           checked={field.required}
@@ -1122,6 +1138,7 @@ function AdminConfigurationSection({ appSettings }: { appSettings: AppSetting[] 
                       <Button
                         size="sm"
                         variant="ghost"
+                        className="justify-start whitespace-nowrap"
                         disabled={!field.custom}
                         onClick={() => updateSelectedForm(form => ({ ...form, fields: form.fields.filter((_, fieldIndex) => fieldIndex !== index) }))}
                       >

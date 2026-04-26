@@ -12,11 +12,11 @@ import {
   Search,
   Send,
   Truck,
-  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { deliveriesService } from '../services/deliveries.service';
 import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
@@ -239,28 +239,23 @@ function DeliveryDialog({
     }));
   }, [editing, form.type, selectedRental, setForm]);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">{title}</h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Доставка связывается с арендой и сразу попадает в планировщик как отгрузка или приёмка.
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+    <Sheet open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen) onClose();
+    }}>
+      <SheetContent
+        side="right"
+        className="w-full gap-0 overflow-hidden border-gray-200 bg-white sm:max-w-3xl dark:border-gray-700 dark:bg-gray-900"
+      >
+        <SheetHeader className="border-b border-gray-200 px-6 py-5 pr-12 dark:border-gray-700">
+          <SheetTitle className="text-xl text-gray-900 dark:text-white">{title}</SheetTitle>
+          <SheetDescription className="text-sm text-gray-500 dark:text-gray-400">
+            Доставка связывается с арендой и сразу попадает в планировщик как отгрузка или приёмка.
+          </SheetDescription>
+        </SheetHeader>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="grid gap-4 md:grid-cols-2">
           <div className="md:col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Связанная аренда</label>
             <select
@@ -409,16 +404,17 @@ function DeliveryDialog({
               className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
             />
           </div>
+          </div>
         </div>
 
-        <div className="mt-6 flex items-center justify-end gap-3">
+        <SheetFooter className="border-t border-gray-200 bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-end dark:border-gray-700 dark:bg-gray-900">
           <Button variant="secondary" onClick={onClose}>Отмена</Button>
           <Button onClick={onSubmit} disabled={isSaving}>
             {isSaving ? 'Сохраняю…' : 'Сохранить доставку'}
           </Button>
-        </div>
-      </div>
-    </div>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }
 

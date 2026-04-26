@@ -177,12 +177,19 @@ app.use('/bot-assets', express.static(path.join(__dirname, 'assets', 'bot'), {
 // ── Конфигурация ───────────────────────────────────────────────────────────────
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const MANAGER_BOT_TOKEN = process.env.MANAGER_BOT_TOKEN || '';
 const DELIVERY_BOT_TOKEN = process.env.DELIVERY_BOT_TOKEN || '';
 const MAX_API   = 'https://platform-api.max.ru';
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const MANAGER_WEBHOOK_URL = process.env.MANAGER_WEBHOOK_URL || WEBHOOK_URL;
 const DELIVERY_WEBHOOK_URL = process.env.DELIVERY_WEBHOOK_URL || WEBHOOK_URL;
 const MAIN_BOT_WEBHOOK_PATH = '/bot/webhook';
+const MANAGER_BOT_WEBHOOK_PATH = '/bot/webhook/manager';
 const DELIVERY_BOT_WEBHOOK_PATH = '/bot/webhook/delivery';
+const hasDedicatedManagerBot = Boolean(
+  String(MANAGER_BOT_TOKEN || '').trim()
+  && String(MANAGER_BOT_TOKEN || '').trim() !== String(BOT_TOKEN || '').trim(),
+);
 const hasDedicatedDeliveryBot = Boolean(
   String(DELIVERY_BOT_TOKEN || '').trim()
   && String(DELIVERY_BOT_TOKEN || '').trim() !== String(BOT_TOKEN || '').trim(),
@@ -219,6 +226,17 @@ const {
   logger: console,
 });
 
+const managerMaxApiClient = hasDedicatedManagerBot
+  ? createMaxApiClient({
+      botToken: MANAGER_BOT_TOKEN,
+      maxApiBase: MAX_API,
+      fetchImpl: fetch,
+      webhookUrl: MANAGER_WEBHOOK_URL,
+      webhookPath: MANAGER_BOT_WEBHOOK_PATH,
+      logger: console,
+    })
+  : null;
+
 const deliveryMaxApiClient = hasDedicatedDeliveryBot
   ? createMaxApiClient({
       botToken: DELIVERY_BOT_TOKEN,
@@ -229,6 +247,11 @@ const deliveryMaxApiClient = hasDedicatedDeliveryBot
       logger: console,
     })
   : null;
+
+const managerSendMessage = managerMaxApiClient?.sendMessage || sendMessage;
+const managerDeleteMessage = managerMaxApiClient?.deleteMessage || deleteMessage;
+const managerAnswerCallback = managerMaxApiClient?.answerCallback || answerCallback;
+const registerManagerWebhook = managerMaxApiClient?.registerWebhook || null;
 
 const deliverySendMessage = deliveryMaxApiClient?.sendMessage || sendMessage;
 const deliveryDeleteMessage = deliveryMaxApiClient?.deleteMessage || deleteMessage;
@@ -838,6 +861,8 @@ registerBotApiRoutes(apiRouter, {
   getBotSessions,
   botToken: BOT_TOKEN,
   webhookUrl: WEBHOOK_URL,
+  managerBotToken: hasDedicatedManagerBot ? MANAGER_BOT_TOKEN : BOT_TOKEN,
+  managerWebhookUrl: hasDedicatedManagerBot ? MANAGER_WEBHOOK_URL : WEBHOOK_URL,
   deliveryBotToken: hasDedicatedDeliveryBot ? DELIVERY_BOT_TOKEN : BOT_TOKEN,
   deliveryWebhookUrl: hasDedicatedDeliveryBot ? DELIVERY_WEBHOOK_URL : WEBHOOK_URL,
 });
@@ -859,6 +884,32 @@ const {
   sendMessage,
   deleteMessage,
   answerCallback,
+  generateId,
+  idPrefixes: ID_PREFIXES,
+  nowIso,
+  readServiceTickets,
+  writeServiceTickets,
+  findServiceTicketById,
+  saveServiceTicket,
+  appendServiceLog,
+  getMechanicReferenceByUser,
+  syncEquipmentStatusForService,
+  updateServiceTicketStatus,
+  getOpenTicketByEquipment,
+  serviceStatusLabel,
+});
+
+const managerBotHandlers = createBotHandlers({
+  readData,
+  writeData,
+  verifyPassword,
+  getBotUsers,
+  saveBotUsers,
+  getBotSessions,
+  saveBotSessions,
+  sendMessage: managerSendMessage,
+  deleteMessage: managerDeleteMessage,
+  answerCallback: managerAnswerCallback,
   generateId,
   idPrefixes: ID_PREFIXES,
   nowIso,
@@ -1859,6 +1910,17 @@ registerBotRoutes(app, {
   webhookPath: MAIN_BOT_WEBHOOK_PATH,
 });
 
+if (hasDedicatedManagerBot) {
+  registerBotRoutes(app, {
+    handleCommand: managerBotHandlers.handleCommand,
+    handleBotStarted: managerBotHandlers.handleBotStarted,
+    handleCallback: managerBotHandlers.handleCallback,
+    answerCallback: managerAnswerCallback,
+    logger: console,
+    webhookPath: MANAGER_BOT_WEBHOOK_PATH,
+  });
+}
+
 registerBotRoutes(app, {
   handleCommand: deliveryBotHandlers.handleCommand,
   handleBotStarted: deliveryBotHandlers.handleBotStarted,
@@ -1897,6 +1959,9 @@ startServer({
     applyAdminResetFromEnv,
     registerWebhook: async () => {
       await registerMainWebhook();
+      if (typeof registerManagerWebhook === 'function') {
+        await registerManagerWebhook();
+      }
       if (typeof registerDeliveryWebhook === 'function') {
         await registerDeliveryWebhook();
       }

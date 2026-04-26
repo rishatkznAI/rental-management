@@ -175,6 +175,8 @@ function registerBotApiRoutes(router, deps) {
     getBotSessions,
     botToken,
     webhookUrl,
+    managerBotToken,
+    managerWebhookUrl,
     deliveryBotToken,
     deliveryWebhookUrl,
   } = deps;
@@ -192,6 +194,8 @@ function registerBotApiRoutes(router, deps) {
       id: 'manager',
       name: 'Бот менеджера аренды',
       description: 'Утренняя сводка, свободная техника, создание доставки и сервисных заявок для менеджеров аренды.',
+      botToken: managerBotToken || botToken || '',
+      webhookUrl: managerBotToken ? (managerWebhookUrl || null) : (webhookUrl || null),
       filterConnections: (connection) => connection.userRole === 'Менеджер по аренде',
       filterActivity: (entry) => entry.userRole === 'Менеджер по аренде',
     },

@@ -1,15 +1,13 @@
 const path = require('path');
 
 const BOT_BRAND_IMAGE = path.join(__dirname, '..', 'assets', 'bot', 'brand', 'skytech-logo.png');
-const STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'mechanic-stages');
 const BOT_ASSET_PUBLIC_PATH = '/bot-assets';
+const MECHANIC_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'mechanic-stages');
+const DELIVERY_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'delivery-stages');
 
 const MECHANIC_STAGE_IMAGES = {
   main: 'main-menu.jpg',
   menu: 'main-menu.jpg',
-  delivery_main: 'handoff.jpg',
-  delivery_list: 'handoff.jpg',
-  delivery_status: 'field-trip.jpg',
   repairs: 'repair.jpg',
   repair: 'repair.jpg',
   ticket: 'repair.jpg',
@@ -23,15 +21,41 @@ const MECHANIC_STAGE_IMAGES = {
   complete: 'complete.jpg',
 };
 
-function stageImageAttachment(stageKey) {
+const DELIVERY_STAGE_IMAGES = {
+  delivery_main: 'main-menu.jpg',
+  delivery_list: 'delivery-list.jpg',
+  delivery_status: 'delivery-status.jpg',
+};
+
+function stageImageConfig(stageKey) {
+  if (DELIVERY_STAGE_IMAGES[stageKey]) {
+    return {
+      fileName: DELIVERY_STAGE_IMAGES[stageKey],
+      dir: DELIVERY_STAGE_IMAGE_DIR,
+      publicDir: 'delivery-stages',
+      cachePrefix: 'delivery-stage',
+    };
+  }
+
   const fileName = MECHANIC_STAGE_IMAGES[stageKey];
   if (!fileName) return null;
   return {
+    fileName,
+    dir: MECHANIC_STAGE_IMAGE_DIR,
+    publicDir: 'mechanic-stages',
+    cachePrefix: 'mechanic-stage',
+  };
+}
+
+function stageImageAttachment(stageKey) {
+  const config = stageImageConfig(stageKey);
+  if (!config) return null;
+  return {
     type: 'image',
     payload: {
-      file: path.join(STAGE_IMAGE_DIR, fileName),
-      publicPath: `${BOT_ASSET_PUBLIC_PATH}/mechanic-stages/${fileName}`,
-      cacheKey: `mechanic-stage:${stageKey}`,
+      file: path.join(config.dir, config.fileName),
+      publicPath: `${BOT_ASSET_PUBLIC_PATH}/${config.publicDir}/${config.fileName}`,
+      cacheKey: `${config.cachePrefix}:${stageKey}`,
     },
   };
 }
@@ -70,6 +94,7 @@ function operationStageImageKey(stepMeta) {
 }
 
 module.exports = {
+  DELIVERY_STAGE_IMAGES,
   MECHANIC_STAGE_IMAGES,
   attachBotBrandImage,
   attachMechanicStageImage,

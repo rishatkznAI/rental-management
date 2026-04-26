@@ -101,7 +101,7 @@ test('dedicated delivery bot_started prefers linked carrier role', async () => {
   assert.match(messages.at(-1).text, /Перевозчик/);
   assert.match(messages.at(-1).text, /доставки/);
   assert.equal(messages.length, 2);
-  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
 });
 
 test('dedicated delivery bot explains missing MAX carrier link', async () => {
@@ -113,7 +113,7 @@ test('dedicated delivery bot explains missing MAX carrier link', async () => {
   assert.equal(state.bot_users['100'].userRole, 'Менеджер по аренде');
   assert.equal(messages.length, 2);
   assert.match(messages.at(-1).text, /не привязан к перевозчику/);
-  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
   assert.equal(messages.at(-1).options.attachments[0].type, 'inline_keyboard');
 });
 
@@ -131,7 +131,7 @@ test('dedicated delivery bot does not reuse an existing mechanic menu', async ()
   await handlers.handleCommand({ user_id: 100 }, '100', '/меню');
 
   assert.equal(messages.length, 2);
-  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
   assert.match(messages.at(-1).text, /не привязан к перевозчику/);
   assert.equal(messages.at(-1).options.attachments[0].payload.buttons[0][0].text, 'Мои доставки');
 });
@@ -150,12 +150,12 @@ test('dedicated delivery bot ignores stale mechanic callbacks', async () => {
   await handlers.handleCallback({ user_id: 100 }, '100', 'menu:new_ticket', { callbackId: 'cb-1' });
 
   assert.equal(messages.length, 2);
-  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
   assert.match(messages.at(-1).text, /не привязан к перевозчику/);
   assert.equal(messages.at(-1).options.attachments[0].payload.buttons[0][0].text, 'Мои доставки');
 });
 
-test('mechanic main navigation sends fallout-style stage image', async () => {
+test('mechanic main navigation sends friendly stage image', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users['100'] = {
     ...state.bot_users['100'],
@@ -201,7 +201,7 @@ test('delivery menu shows image and status buttons for carrier', async () => {
   await handlers.handleCommand({ user_id: 100 }, '100', '/доставки');
 
   assert.equal(messages.length, 2);
-  assert.match(messages[0].options.attachments[0].payload.file, /handoff\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/delivery-list\.jpg$/);
   assert.match(messages[1].text, /Мои доставки/);
   assert.deepEqual(messages[1].options.attachments[0].payload.buttons[0][0], {
     type: 'callback',
@@ -233,6 +233,18 @@ test('mechanic stage image is prepended to bot keyboard attachments', () => {
   assert.equal(attachments.length, 2);
   assert.equal(attachments[0].type, 'image');
   assert.match(attachments[0].payload.file, /field-trip\.jpg$/);
+  assert.equal(fs.existsSync(attachments[0].payload.file), true);
+  assert.equal(attachments[1].type, 'inline_keyboard');
+});
+
+test('delivery bot uses delivery-specific stage images', () => {
+  const attachments = attachMechanicStageImage('delivery_main', [{ type: 'inline_keyboard', payload: { buttons: [] } }]);
+
+  assert.equal(attachments.length, 2);
+  assert.equal(attachments[0].type, 'image');
+  assert.match(attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
+  assert.equal(attachments[0].payload.publicPath, '/bot-assets/delivery-stages/main-menu.jpg');
+  assert.equal(attachments[0].payload.cacheKey, 'delivery-stage:delivery_main');
   assert.equal(fs.existsSync(attachments[0].payload.file), true);
   assert.equal(attachments[1].type, 'inline_keyboard');
 });

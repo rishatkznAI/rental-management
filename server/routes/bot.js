@@ -1,4 +1,8 @@
 const express = require('express');
+const crypto = require('crypto');
+
+const processedWebhookUpdates = new Map();
+const WEBHOOK_UPDATE_DEDUPE_MS = 10 * 1000;
 
 function trimText(value, maxLength = 160) {
   const normalized = String(value || '').replace(/\s+/g, ' ').trim();
@@ -13,6 +17,51 @@ function describeIncomingText(text) {
   if (!value) return 'empty';
   if (value.toLowerCase().startsWith('/start')) return '/start [redacted]';
   return `len=${value.length}`;
+}
+
+function webhookUpdateFingerprint(update) {
+  const callback = update?.callback || update?.message_callback || update?.messageCallback || {};
+  const message = update?.message || callback?.message || {};
+  const sender = message?.sender || callback?.sender || callback?.user || update?.user || {};
+  const body = message?.body || {};
+  const stableParts = [
+    update?.update_type,
+    update?.update_id,
+    update?.timestamp,
+    update?.created_at,
+    message?.message_id,
+    message?.mid,
+    message?.id,
+    message?.created_at,
+    callback?.callback_id,
+    callback?.callbackId,
+    callback?.payload,
+    callback?.data,
+    sender?.user_id,
+    sender?.userId,
+    body?.text,
+  ].filter(value => value !== undefined && value !== null && value !== '');
+
+  if (stableParts.length > 1) return stableParts.map(String).join('|');
+
+  return crypto
+    .createHash('sha1')
+    .update(JSON.stringify(update || {}))
+    .digest('hex');
+}
+
+function shouldProcessWebhookUpdate(update) {
+  const now = Date.now();
+  for (const [key, timestamp] of processedWebhookUpdates.entries()) {
+    if (now - timestamp > WEBHOOK_UPDATE_DEDUPE_MS) {
+      processedWebhookUpdates.delete(key);
+    }
+  }
+
+  const key = webhookUpdateFingerprint(update);
+  if (processedWebhookUpdates.has(key)) return false;
+  processedWebhookUpdates.set(key, now);
+  return true;
 }
 
 function toFiniteNumber(value) {
@@ -272,6 +321,9 @@ function registerBotRoutes(app, deps) {
     logger = console,
     webhookPath = '/bot/webhook',
   } = deps;
+  const normalizedWebhookPath = String(webhookPath || '/bot/webhook').startsWith('/')
+    ? String(webhookPath || '/bot/webhook')
+    : `/${String(webhookPath || 'bot/webhook')}`;
 
   async function processBotUpdate(update) {
     if (update.update_type === 'bot_started') {
@@ -281,7 +333,7 @@ function registerBotRoutes(app, deps) {
         chat_id: update.chat_id || update.chatId || update.recipient?.chat_id || user.chat_id,
         user_id: user.user_id,
       };
-      logger.log(`[BOT] [${user.name || user.user_id}] bot_started target=${JSON.stringify(startReplyTarget)}`);
+      logger.log(`[BOT] ${normalizedWebhookPath} [${user.name || user.user_id}] bot_started target=${JSON.stringify(startReplyTarget)}`);
       await handleBotStarted(startReplyTarget, String(user.user_id), update.payload);
       return;
     }
@@ -306,7 +358,7 @@ function registerBotRoutes(app, deps) {
       };
       const phone = String(replyTarget.user_id || '');
 
-      logger.log(`[BOT] callback payload=${payload} user=${replyTarget.user_id || 'unknown'}`);
+      logger.log(`[BOT] ${normalizedWebhookPath} callback payload=${payload} user=${replyTarget.user_id || 'unknown'}`);
       await handleCallback(replyTarget, phone, String(payload || ''), {
         callbackId,
         messageId: callbackMessageId,
@@ -332,28 +384,32 @@ function registerBotRoutes(app, deps) {
 
     if (!text.trim() && (!Array.isArray(attachments) || attachments.length === 0)) return;
 
-    logger.log(`[BOT] message user=${sender.user_id} text=${describeIncomingText(text)} attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
+    logger.log(`[BOT] ${normalizedWebhookPath} message user=${sender.user_id} text=${describeIncomingText(text)} attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
     await handleCommand(senderId, phone, text, { message: msg, body: msg?.body, attachments });
   }
 
-  app.post(webhookPath, async (req, res) => {
+  app.post(normalizedWebhookPath, async (req, res) => {
     res.sendStatus(200);
 
     try {
       const updates = req.body?.updates || [req.body];
-      logger.log(`[BOT] webhook updates=${updates.length}`);
+      logger.log(`[BOT] ${normalizedWebhookPath} webhook updates=${updates.length}`);
 
       for (const update of updates) {
+        if (!shouldProcessWebhookUpdate(update)) {
+          logger.log(`[BOT] ${normalizedWebhookPath} duplicate update skipped`);
+          continue;
+        }
         const startedAt = Date.now();
         await processBotUpdate(update);
         const elapsedMs = Date.now() - startedAt;
         if (elapsedMs > 2000) {
-          logger.warn(`[BOT] Медленная обработка ${update.update_type || 'unknown'}: ${elapsedMs}ms`);
+          logger.warn(`[BOT] ${normalizedWebhookPath} Медленная обработка ${update.update_type || 'unknown'}: ${elapsedMs}ms`);
         }
       }
     } catch (err) {
-      logger.error('[BOT] Ошибка обработки webhook:', err?.message || String(err));
-      logger.error('[BOT] Stack:', err?.stack || 'no stack');
+      logger.error(`[BOT] ${normalizedWebhookPath} Ошибка обработки webhook:`, err?.message || String(err));
+      logger.error(`[BOT] ${normalizedWebhookPath} Stack:`, err?.stack || 'no stack');
     }
   });
 }

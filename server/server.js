@@ -186,13 +186,17 @@ const DELIVERY_WEBHOOK_URL = process.env.DELIVERY_WEBHOOK_URL || WEBHOOK_URL;
 const MAIN_BOT_WEBHOOK_PATH = '/bot/webhook';
 const MANAGER_BOT_WEBHOOK_PATH = '/bot/webhook/manager';
 const DELIVERY_BOT_WEBHOOK_PATH = '/bot/webhook/delivery';
-const hasDedicatedManagerBot = Boolean(
-  String(MANAGER_BOT_TOKEN || '').trim()
-  && String(MANAGER_BOT_TOKEN || '').trim() !== String(BOT_TOKEN || '').trim(),
-);
-const hasDedicatedDeliveryBot = Boolean(
-  String(DELIVERY_BOT_TOKEN || '').trim()
-  && String(DELIVERY_BOT_TOKEN || '').trim() !== String(BOT_TOKEN || '').trim(),
+
+function normalizeBotToken(value) {
+  return String(value || '').trim();
+}
+
+const MAIN_BOT_TOKEN = normalizeBotToken(BOT_TOKEN);
+const EFFECTIVE_MANAGER_BOT_TOKEN = normalizeBotToken(MANAGER_BOT_TOKEN) || MAIN_BOT_TOKEN;
+const EFFECTIVE_DELIVERY_BOT_TOKEN = normalizeBotToken(DELIVERY_BOT_TOKEN) || MAIN_BOT_TOKEN;
+const managerAndDeliveryShareToken = Boolean(
+  EFFECTIVE_MANAGER_BOT_TOKEN &&
+  EFFECTIVE_MANAGER_BOT_TOKEN === EFFECTIVE_DELIVERY_BOT_TOKEN,
 );
 
 function readData(name) {
@@ -226,9 +230,9 @@ const {
   logger: console,
 });
 
-const managerMaxApiClient = hasDedicatedManagerBot
+const managerMaxApiClient = EFFECTIVE_MANAGER_BOT_TOKEN
   ? createMaxApiClient({
-      botToken: MANAGER_BOT_TOKEN,
+      botToken: EFFECTIVE_MANAGER_BOT_TOKEN,
       maxApiBase: MAX_API,
       fetchImpl: fetch,
       webhookUrl: MANAGER_WEBHOOK_URL,
@@ -237,9 +241,9 @@ const managerMaxApiClient = hasDedicatedManagerBot
     })
   : null;
 
-const deliveryMaxApiClient = hasDedicatedDeliveryBot
+const deliveryMaxApiClient = EFFECTIVE_DELIVERY_BOT_TOKEN
   ? createMaxApiClient({
-      botToken: DELIVERY_BOT_TOKEN,
+      botToken: EFFECTIVE_DELIVERY_BOT_TOKEN,
       maxApiBase: MAX_API,
       fetchImpl: fetch,
       webhookUrl: DELIVERY_WEBHOOK_URL,
@@ -861,10 +865,10 @@ registerBotApiRoutes(apiRouter, {
   getBotSessions,
   botToken: BOT_TOKEN,
   webhookUrl: WEBHOOK_URL,
-  managerBotToken: hasDedicatedManagerBot ? MANAGER_BOT_TOKEN : BOT_TOKEN,
-  managerWebhookUrl: hasDedicatedManagerBot ? MANAGER_WEBHOOK_URL : WEBHOOK_URL,
-  deliveryBotToken: hasDedicatedDeliveryBot ? DELIVERY_BOT_TOKEN : BOT_TOKEN,
-  deliveryWebhookUrl: hasDedicatedDeliveryBot ? DELIVERY_WEBHOOK_URL : WEBHOOK_URL,
+  managerBotToken: EFFECTIVE_MANAGER_BOT_TOKEN,
+  managerWebhookUrl: MANAGER_WEBHOOK_URL,
+  deliveryBotToken: EFFECTIVE_DELIVERY_BOT_TOKEN,
+  deliveryWebhookUrl: DELIVERY_WEBHOOK_URL,
 });
 
 const {
@@ -1910,21 +1914,23 @@ registerBotRoutes(app, {
   webhookPath: MAIN_BOT_WEBHOOK_PATH,
 });
 
-if (hasDedicatedManagerBot) {
-  registerBotRoutes(app, {
-    handleCommand: managerBotHandlers.handleCommand,
-    handleBotStarted: managerBotHandlers.handleBotStarted,
-    handleCallback: managerBotHandlers.handleCallback,
-    answerCallback: managerAnswerCallback,
-    logger: console,
-    webhookPath: MANAGER_BOT_WEBHOOK_PATH,
-  });
-}
+registerBotRoutes(app, {
+  handleCommand: managerBotHandlers.handleCommand,
+  handleBotStarted: managerBotHandlers.handleBotStarted,
+  handleCallback: managerBotHandlers.handleCallback,
+  answerCallback: managerAnswerCallback,
+  logger: console,
+  webhookPath: MANAGER_BOT_WEBHOOK_PATH,
+});
+
+const deliveryRouteHandlers = managerAndDeliveryShareToken
+  ? managerBotHandlers
+  : deliveryBotHandlers;
 
 registerBotRoutes(app, {
-  handleCommand: deliveryBotHandlers.handleCommand,
-  handleBotStarted: deliveryBotHandlers.handleBotStarted,
-  handleCallback: deliveryBotHandlers.handleCallback,
+  handleCommand: deliveryRouteHandlers.handleCommand,
+  handleBotStarted: deliveryRouteHandlers.handleBotStarted,
+  handleCallback: deliveryRouteHandlers.handleCallback,
   answerCallback: deliveryAnswerCallback,
   logger: console,
   webhookPath: DELIVERY_BOT_WEBHOOK_PATH,

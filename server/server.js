@@ -70,7 +70,12 @@ const { createServiceCore } = require('./lib/service-core');
 const { MECHANIC_ROLES } = require('./lib/role-groups');
 const { startServer } = require('./lib/startup');
 const { registerAuthRoutes } = require('./routes/auth');
-const { registerBotApiRoutes, registerBotRoutes } = require('./routes/bot');
+const {
+  createBotUpdateProcessor,
+  registerBotApiRoutes,
+  registerBotRoutes,
+  shouldProcessWebhookUpdate,
+} = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
 const { registerFinanceRoutes } = require('./routes/finance');
@@ -198,6 +203,10 @@ const managerAndDeliveryShareToken = Boolean(
   EFFECTIVE_MANAGER_BOT_TOKEN &&
   EFFECTIVE_MANAGER_BOT_TOKEN === EFFECTIVE_DELIVERY_BOT_TOKEN,
 );
+const MAX_POLLING_ENABLED = process.env.MAX_POLLING_ENABLED !== '0';
+const MAX_POLL_INTERVAL_MS = Math.max(3000, Number(process.env.MAX_POLL_INTERVAL_MS || 5000));
+const MAX_POLL_INITIAL_REPLAY_MS = Math.max(0, Number(process.env.MAX_POLL_INITIAL_REPLAY_MS || 5 * 60 * 1000));
+const MAX_POLL_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.MAX_POLL_REQUEST_TIMEOUT_MS || 8000));
 
 function readData(name) {
   return getData(name);
@@ -1210,6 +1219,128 @@ async function auditedHandleCallback(senderId, phone, payload, callbackContext) 
   return result;
 }
 
+const pollingBotUpdateProcessor = createBotUpdateProcessor({
+  handleCommand: auditedHandleCommand,
+  handleBotStarted: auditedHandleBotStarted,
+  handleCallback: auditedHandleCallback,
+  logger: console,
+  webhookPath: '/bot/polling',
+});
+
+let maxPollingMarker = null;
+let maxPollingInitialized = false;
+let maxPollingInFlight = false;
+
+function getMaxUpdateTimestamp(update) {
+  return Number(
+    update?.timestamp ||
+    update?.message?.timestamp ||
+    update?.callback?.timestamp ||
+    update?.message_callback?.timestamp ||
+    0,
+  );
+}
+
+function isRecentMaxUpdate(update) {
+  const timestamp = getMaxUpdateTimestamp(update);
+  if (!timestamp) return false;
+  return Date.now() - timestamp <= MAX_POLL_INITIAL_REPLAY_MS;
+}
+
+async function requestMaxUpdates(endpoint) {
+  const controller = typeof AbortController !== 'undefined'
+    ? new AbortController()
+    : null;
+  const timeout = controller
+    ? setTimeout(() => controller.abort(), MAX_POLL_REQUEST_TIMEOUT_MS)
+    : null;
+  try {
+    const response = await fetch(`${MAX_API}${endpoint}`, {
+      method: 'GET',
+      headers: {
+        Authorization: MAIN_BOT_TOKEN,
+        'Content-Type': 'application/json',
+      },
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    const text = await response.text();
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { raw: text };
+    }
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function pollMaxBotUpdatesOnce() {
+  if (!MAIN_BOT_TOKEN || maxPollingInFlight) return;
+  maxPollingInFlight = true;
+  try {
+    const params = new URLSearchParams({
+      limit: '20',
+      timeout: maxPollingInitialized ? '1' : '0',
+    });
+    if (maxPollingMarker) {
+      params.set('marker', maxPollingMarker);
+    }
+
+    const payload = await requestMaxUpdates(`/updates?${params.toString()}`);
+    if (payload?.error || payload?.code) {
+      console.error('[BOT] /bot/polling Ошибка MAX updates:', payload.message || payload.error || payload.code);
+      return;
+    }
+
+    const updates = Array.isArray(payload?.updates) ? payload.updates : [];
+    const isInitialPoll = !maxPollingInitialized;
+    if (payload?.marker != null) {
+      maxPollingMarker = String(payload.marker);
+    }
+    maxPollingInitialized = true;
+
+    const processableUpdates = isInitialPoll
+      ? updates.filter(isRecentMaxUpdate)
+      : updates;
+
+    if (isInitialPoll && updates.length !== processableUpdates.length) {
+      console.log(`[BOT] /bot/polling marker=${maxPollingMarker || 'none'} skipped stale updates=${updates.length - processableUpdates.length}`);
+    }
+
+    for (const update of processableUpdates) {
+      if (!shouldProcessWebhookUpdate(update)) {
+        console.log('[BOT] /bot/polling duplicate update skipped');
+        continue;
+      }
+      const startedAt = Date.now();
+      await pollingBotUpdateProcessor(update);
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs > 2000) {
+        console.warn(`[BOT] /bot/polling Медленная обработка ${update.update_type || 'unknown'}: ${elapsedMs}ms`);
+      }
+    }
+  } catch (error) {
+    console.error('[BOT] /bot/polling Ошибка:', error?.message || String(error));
+  } finally {
+    maxPollingInFlight = false;
+  }
+}
+
+function startMaxBotPolling() {
+  if (!MAX_POLLING_ENABLED) {
+    console.log('[BOT] /bot/polling выключен через MAX_POLLING_ENABLED=0');
+    return null;
+  }
+  if (!MAIN_BOT_TOKEN) {
+    console.log('[BOT] /bot/polling пропущен: BOT_TOKEN не задан');
+    return null;
+  }
+  console.log(`[BOT] /bot/polling включён: interval=${MAX_POLL_INTERVAL_MS}ms`);
+  pollMaxBotUpdatesOnce();
+  return setInterval(pollMaxBotUpdatesOnce, MAX_POLL_INTERVAL_MS);
+}
+
 // ── Планировщик подготовки техники к аренде ──────────────────────────────────
 
 /**
@@ -1972,6 +2103,7 @@ startServer({
         await registerDeliveryWebhook();
       }
     },
+    startBotPolling: startMaxBotPolling,
     startGprsGateway: () => gprsGateway.start(),
     dbPath: DB_PATH,
     botToken: BOT_TOKEN,

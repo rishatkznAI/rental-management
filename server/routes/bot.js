@@ -64,6 +64,12 @@ function shouldProcessWebhookUpdate(update) {
   return true;
 }
 
+function normalizeWebhookPath(webhookPath = '/bot/webhook') {
+  return String(webhookPath || '/bot/webhook').startsWith('/')
+    ? String(webhookPath || '/bot/webhook')
+    : `/${String(webhookPath || 'bot/webhook')}`;
+}
+
 function toFiniteNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -312,20 +318,17 @@ function registerBotApiRoutes(router, deps) {
   router.use(botRouter);
 }
 
-function registerBotRoutes(app, deps) {
+function createBotUpdateProcessor(deps) {
   const {
     handleCommand,
     handleBotStarted,
     handleCallback,
-    answerCallback,
     logger = console,
     webhookPath = '/bot/webhook',
   } = deps;
-  const normalizedWebhookPath = String(webhookPath || '/bot/webhook').startsWith('/')
-    ? String(webhookPath || '/bot/webhook')
-    : `/${String(webhookPath || 'bot/webhook')}`;
+  const normalizedWebhookPath = normalizeWebhookPath(webhookPath);
 
-  async function processBotUpdate(update) {
+  return async function processBotUpdate(update) {
     if (update.update_type === 'bot_started') {
       const user = update.user;
       if (!user?.user_id) return;
@@ -386,7 +389,19 @@ function registerBotRoutes(app, deps) {
 
     logger.log(`[BOT] ${normalizedWebhookPath} message user=${sender.user_id} text=${describeIncomingText(text)} attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
     await handleCommand(senderId, phone, text, { message: msg, body: msg?.body, attachments });
-  }
+  };
+}
+
+function registerBotRoutes(app, deps) {
+  const {
+    logger = console,
+    webhookPath = '/bot/webhook',
+  } = deps;
+  const normalizedWebhookPath = normalizeWebhookPath(webhookPath);
+  const processBotUpdate = createBotUpdateProcessor({
+    ...deps,
+    webhookPath: normalizedWebhookPath,
+  });
 
   app.post(normalizedWebhookPath, async (req, res) => {
     res.sendStatus(200);
@@ -415,6 +430,8 @@ function registerBotRoutes(app, deps) {
 }
 
 module.exports = {
+  createBotUpdateProcessor,
   registerBotApiRoutes,
   registerBotRoutes,
+  shouldProcessWebhookUpdate,
 };

@@ -210,6 +210,57 @@ test('delivery menu shows image and status buttons for carrier', async () => {
   });
 });
 
+test('delivery menu hides completed deliveries for carrier', async () => {
+  const { state, messages, handlers } = createMemoryBot(true);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.deliveries = [
+    {
+      id: 'DL-active',
+      type: 'shipping',
+      status: 'sent',
+      transportDate: '2026-04-25',
+      origin: 'Новая база',
+      destination: 'Портовая',
+      cargo: 'Mantall XE120W',
+      client: 'ООО Актив',
+      contactName: 'Иван',
+      contactPhone: '+7 900 000-00-00',
+      carrierKey: 'carrier-1',
+    },
+    {
+      id: 'DL-done',
+      type: 'shipping',
+      status: 'completed',
+      transportDate: '2026-04-26',
+      origin: 'Склад',
+      destination: 'Клиент',
+      cargo: 'Mantall XE140W',
+      client: 'ООО Выполнено',
+      contactName: 'Петр',
+      contactPhone: '+7 900 111-11-11',
+      carrierKey: 'carrier-1',
+    },
+  ];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/доставки');
+
+  assert.match(messages[1].text, /Мои доставки \(1\)/);
+  assert.match(messages[1].text, /Mantall XE120W/);
+  assert.doesNotMatch(messages[1].text, /Mantall XE140W/);
+  assert.doesNotMatch(messages[1].text, /Выполнена/);
+  assert.deepEqual(messages[1].options.attachments[0].payload.buttons[0][0], {
+    type: 'callback',
+    text: 'Принял',
+    payload: 'delivery:status:DL-active:accepted',
+  });
+});
+
 test('MAX callback notification is sent as a string', async () => {
   const requests = [];
   const client = createMaxApiClient({

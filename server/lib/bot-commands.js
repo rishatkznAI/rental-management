@@ -433,6 +433,11 @@ function createBotHandlers(deps) {
     return map[status] || status;
   }
 
+  function isVisibleCarrierDelivery(delivery) {
+    const status = String(delivery?.status || '').trim().toLowerCase();
+    return status !== 'completed' && status !== 'cancelled';
+  }
+
   function deliveryStatusKeyboard(delivery) {
     if (!delivery || delivery.status === 'completed' || delivery.status === 'cancelled') {
       return keyboard([
@@ -693,7 +698,8 @@ function createBotHandlers(deps) {
       .filter(item => {
         const deliveryCarrierKey = item?.carrierKey ? String(item.carrierKey) : '';
         const deliveryCarrierUserId = item?.carrierUserId != null ? String(item.carrierUserId) : '';
-        return carrierKeys.has(deliveryCarrierKey) || (phoneValue && deliveryCarrierUserId === phoneValue);
+        return isVisibleCarrierDelivery(item)
+          && (carrierKeys.has(deliveryCarrierKey) || (phoneValue && deliveryCarrierUserId === phoneValue));
       })
       .sort((left, right) => new Date(right.transportDate || 0).getTime() - new Date(left.transportDate || 0).getTime());
   }
@@ -701,9 +707,9 @@ function createBotHandlers(deps) {
   function formatCarrierDeliveries(deliveries) {
     if (!deliveries.length) {
       return [
-        '🚚 У вас пока нет доставок.',
+        '🚚 У вас пока нет активных доставок.',
         '',
-        'Как только офис назначит вас на доставку, здесь появятся заявки и статусы.',
+        'Как только офис назначит новую доставку, здесь появятся заявки и статусы.',
       ].join('\n');
     }
 

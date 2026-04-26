@@ -7,6 +7,7 @@ import { NotificationCenter } from './NotificationCenter';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, pathToSection, pathToRequiredAction } from '../../lib/permissions';
 import { AppLoadingState } from '../ui/AppLoadingState';
+import { LiftLogo } from './LiftLogo';
 
 const BOTTOM_NAV = [
   { name: 'Дашборд', href: '/', icon: LayoutDashboard },
@@ -92,11 +93,7 @@ export function Layout() {
           <Menu className="h-5 w-5 text-sidebar-foreground" />
         </button>
         <div className="flex items-center gap-2">
-          <img
-            src="/lift-logo.svg"
-            alt="Скайтех"
-            className="h-8 w-8 shrink-0 rounded-xl object-contain shadow-[0_12px_30px_-16px_rgba(212,247,74,0.95)]"
-          />
+          <LiftLogo className="h-8 w-8" />
           <span className="app-shell-title text-base font-extrabold text-sidebar-foreground">Скайтех</span>
         </div>
         <NotificationCenter />

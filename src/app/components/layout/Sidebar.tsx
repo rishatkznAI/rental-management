@@ -48,6 +48,7 @@ import { useGanttData, useRentalsList } from '../../hooks/useRentals';
 import { useServiceTicketsList } from '../../hooks/useServiceTickets';
 import { appSettingsService } from '../../services/app-settings.service';
 import type { Client, Equipment, Rental, ServiceTicket } from '../../types';
+import { LiftLogo } from './LiftLogo';
 
 const navigation: { name: string; href: string; icon: React.ElementType; section: Section }[] = [
   { name: 'Дашборд',      href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
@@ -415,11 +416,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     >
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
-          <img
-            src="/lift-logo.svg"
-            alt="Скайтех"
-            className="h-9 w-9 shrink-0 rounded-xl object-contain shadow-[0_12px_30px_-16px_rgba(212,247,74,0.95)]"
-          />
+          <LiftLogo className="h-9 w-9" />
           <div className="min-w-0">
             <div className="app-shell-title text-[15px] font-extrabold text-sidebar-foreground">Скайтех</div>
           </div>

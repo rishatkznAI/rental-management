@@ -1,4 +1,6 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowDown, Plus, Search } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import {
@@ -8,23 +10,123 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { getServiceStatusBadge, getServicePriorityBadge } from '../components/ui/badge';
-import { Search, Plus } from 'lucide-react';
+import { getServicePriorityBadge, getServiceStatusBadge } from '../components/ui/badge';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { WarrantyClaimsTab } from '../components/service/WarrantyClaimsTab';
-import { Link } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
 import type { ServiceTicket } from '../types';
 import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
 
+const RESULT_BATCH_SIZE = 80;
+
+const SERVICE_PRIORITY_ORDER: Record<ServiceTicket['priority'], number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
+const SERVICE_STATUS_ORDER: Record<ServiceTicket['status'], number> = {
+  new: 0,
+  in_progress: 1,
+  waiting_parts: 2,
+  ready: 3,
+  closed: 4,
+};
+
+const WORKFLOW_FILTER_OPTIONS = [
+  { value: 'all', label: 'Все' },
+  { value: 'repair', label: 'Ремонт' },
+  { value: 'diagnostics', label: 'Диагностика' },
+  { value: 'receiving', label: 'Приёмка' },
+] as const;
+
+type ServiceWorkflowFilter = typeof WORKFLOW_FILTER_OPTIONS[number]['value'];
+type ServiceWorkflowKind = Exclude<ServiceWorkflowFilter, 'all'> | 'maintenance';
+
+function normalizeSearch(value: string) {
+  return value.toLowerCase().replaceAll('ё', 'е').trim();
+}
+
 function truncateText(value: string, maxLength: number) {
   const normalized = value.trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength).trimEnd()}...`;
+}
+
+function isActiveTicket(ticket: ServiceTicket) {
+  return ticket.status !== 'closed';
+}
+
+function getTicketSearchText(ticket: ServiceTicket) {
+  return normalizeSearch([
+    ticket.id,
+    ticket.equipment,
+    ticket.inventoryNumber,
+    ticket.serialNumber,
+    ticket.reason,
+    ticket.description,
+    ticket.assignedMechanicName,
+    ticket.assignedTo,
+    ticket.createdByUserName,
+    ticket.createdBy,
+    getServiceScenarioLabel(ticket),
+  ].filter(Boolean).join(' '));
+}
+
+function getTicketWorkflowKind(ticket: ServiceTicket): ServiceWorkflowKind {
+  const kind = inferServiceKind(ticket);
+  if (kind !== 'repair') return 'maintenance';
+
+  const text = normalizeSearch(`${ticket.reason} ${ticket.description}`);
+  if (text.includes('прием') || text.includes('возврат') || text.includes('аренд')) return 'receiving';
+  if (text.includes('диагност')) return 'diagnostics';
+  return 'repair';
+}
+
+function getTicketEquipmentTitle(ticket: ServiceTicket) {
+  const cleaned = ticket.equipment
+    .replace(/\s*\(INV:.*?\)\s*/gi, ' ')
+    .replace(/\s*·\s*INV.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || ticket.equipment || 'Техника не указана';
+}
+
+function getTicketInventory(ticket: ServiceTicket) {
+  if (ticket.inventoryNumber) return ticket.inventoryNumber;
+  const match = ticket.equipment.match(/INV[:\s]*([^)·\s]+)/i);
+  return match?.[1] || '—';
+}
+
+function ServiceMetricCard({
+  title,
+  value,
+  caption,
+  tone,
+}: {
+  title: string;
+  value: number;
+  caption: string;
+  tone: 'lime' | 'red' | 'amber' | 'neutral';
+}) {
+  const toneClass = {
+    lime: 'text-[--color-primary]',
+    red: 'text-red-400',
+    amber: 'text-amber-400',
+    neutral: 'text-gray-900 dark:text-white',
+  }[tone];
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="text-xs font-bold uppercase text-gray-500 dark:text-gray-500">{title}</div>
+      <div className={`mt-2 text-4xl font-black leading-none ${toneClass}`}>{value}</div>
+      <div className="mt-3 text-sm text-gray-500 dark:text-gray-500">{caption}</div>
+    </div>
+  );
 }
 
 export default function Service() {
@@ -36,11 +138,13 @@ export default function Service() {
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [scenarioFilter, setScenarioFilter] = React.useState<string>('all');
   const [mechanicFilter, setMechanicFilter] = React.useState<string>('all');
+  const [workflowFilter, setWorkflowFilter] = React.useState<ServiceWorkflowFilter>('all');
   const [preset, setPreset] = React.useState<'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'maintenance'>('all');
   const [datePreset, setDatePreset] = React.useState<'all' | 'today' | 'last7' | 'month'>('all');
   const [dateFrom, setDateFrom] = React.useState('');
   const [dateTo, setDateTo] = React.useState('');
   const [showFilters, setShowFilters] = React.useState(false);
+  const [visibleCount, setVisibleCount] = React.useState(RESULT_BATCH_SIZE);
 
   const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
   const monthStartIso = React.useMemo(() => {
@@ -63,18 +167,29 @@ export default function Service() {
     )).sort((left, right) => left.localeCompare(right, 'ru'))
   ), [ticketList]);
 
-  const filteredTickets = ticketList.filter(ticket => {
-    const matchesSearch = search === '' ||
-      ticket.id.toLowerCase().includes(search.toLowerCase()) ||
-      ticket.equipment.toLowerCase().includes(search.toLowerCase()) ||
-      ticket.reason.toLowerCase().includes(search.toLowerCase());
+  const activeTickets = React.useMemo(
+    () => ticketList.filter(isActiveTicket),
+    [ticketList],
+  );
 
-    const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
-    const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
-    const matchesScenario = scenarioFilter === 'all' || inferServiceKind(ticket) === scenarioFilter;
-    const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || '';
-    const matchesMechanic = mechanicFilter === 'all' || assignedMechanic === mechanicFilter;
-    const createdDate = typeof ticket.createdAt === 'string' ? ticket.createdAt.slice(0, 10) : '';
+  const workflowCounts = React.useMemo(() => (
+    WORKFLOW_FILTER_OPTIONS.reduce<Record<ServiceWorkflowFilter, number>>((acc, option) => {
+      acc[option.value] = option.value === 'all'
+        ? activeTickets.length
+        : activeTickets.filter(ticket => getTicketWorkflowKind(ticket) === option.value).length;
+      return acc;
+    }, { all: 0, repair: 0, diagnostics: 0, receiving: 0 })
+  ), [activeTickets]);
+
+  const metrics = React.useMemo(() => ({
+    total: activeTickets.length,
+    high: activeTickets.filter(ticket => ticket.priority === 'critical' || ticket.priority === 'high').length,
+    medium: activeTickets.filter(ticket => ticket.priority === 'medium').length,
+    low: activeTickets.filter(ticket => ticket.priority === 'low').length,
+  }), [activeTickets]);
+
+  const filteredTickets = React.useMemo(() => {
+    const query = normalizeSearch(search);
     const effectiveDateFrom = dateFrom || (
       datePreset === 'today'
         ? todayIso
@@ -85,18 +200,56 @@ export default function Service() {
             : ''
     );
     const effectiveDateTo = dateTo || (datePreset === 'all' ? '' : todayIso);
-    const matchesDate =
-      (!effectiveDateFrom || (createdDate && createdDate >= effectiveDateFrom))
-      && (!effectiveDateTo || (createdDate && createdDate <= effectiveDateTo));
-    const matchesPreset =
-      preset === 'all'
-      || (preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
-      || (preset === 'urgent' && ['high', 'critical'].includes(ticket.priority))
-      || (preset === 'waiting_parts' && ticket.status === 'waiting_parts')
-      || (preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
 
-    return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesMechanic && matchesDate && matchesPreset;
-  });
+    return ticketList
+      .filter(ticket => {
+        const matchesSearch = query === '' || getTicketSearchText(ticket).includes(query);
+        const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
+        const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
+        const matchesScenario = scenarioFilter === 'all' || inferServiceKind(ticket) === scenarioFilter;
+        const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || '';
+        const matchesMechanic = mechanicFilter === 'all' || assignedMechanic === mechanicFilter;
+        const matchesWorkflow = workflowFilter === 'all' || getTicketWorkflowKind(ticket) === workflowFilter;
+        const createdDate = typeof ticket.createdAt === 'string' ? ticket.createdAt.slice(0, 10) : '';
+        const matchesDate =
+          (!effectiveDateFrom || (createdDate && createdDate >= effectiveDateFrom))
+          && (!effectiveDateTo || (createdDate && createdDate <= effectiveDateTo));
+        const matchesPreset =
+          preset === 'all'
+          || (preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
+          || (preset === 'urgent' && ['high', 'critical'].includes(ticket.priority))
+          || (preset === 'waiting_parts' && ticket.status === 'waiting_parts')
+          || (preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
+
+        return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesMechanic && matchesWorkflow && matchesDate && matchesPreset;
+      })
+      .sort((left, right) => (
+        (SERVICE_STATUS_ORDER[left.status] ?? 99) - (SERVICE_STATUS_ORDER[right.status] ?? 99)
+        || (SERVICE_PRIORITY_ORDER[left.priority] ?? 99) - (SERVICE_PRIORITY_ORDER[right.priority] ?? 99)
+        || String(right.createdAt || '').localeCompare(String(left.createdAt || ''))
+      ));
+  }, [
+    dateFrom,
+    datePreset,
+    dateTo,
+    last7StartIso,
+    mechanicFilter,
+    monthStartIso,
+    preset,
+    priorityFilter,
+    scenarioFilter,
+    search,
+    statusFilter,
+    ticketList,
+    todayIso,
+    workflowFilter,
+  ]);
+
+  React.useEffect(() => {
+    setVisibleCount(RESULT_BATCH_SIZE);
+  }, [search, priorityFilter, statusFilter, scenarioFilter, mechanicFilter, workflowFilter, preset, datePreset, dateFrom, dateTo]);
+
+  const visibleTickets = filteredTickets.slice(0, visibleCount);
 
   const presetOptions = [
     { value: 'all', label: 'Все' },
@@ -119,6 +272,7 @@ export default function Service() {
     setStatusFilter('all');
     setScenarioFilter('all');
     setMechanicFilter('all');
+    setWorkflowFilter('all');
     setPreset('all');
     setDatePreset('all');
     setDateFrom('');
@@ -131,6 +285,7 @@ export default function Service() {
     statusFilter !== 'all',
     scenarioFilter !== 'all',
     mechanicFilter !== 'all',
+    workflowFilter !== 'all',
     preset !== 'all',
     datePreset !== 'all',
     dateFrom !== '',
@@ -138,9 +293,8 @@ export default function Service() {
   ].filter(Boolean).length;
 
   return (
-    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-5 p-4 sm:p-6 md:p-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Сервис</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Сервисные заявки и гарантийные рекламации</p>
@@ -286,157 +440,136 @@ export default function Service() {
         </div>
       </FilterDialog>
 
-      <Tabs defaultValue="tickets" className="space-y-4">
-        <TabsList className="w-full justify-start overflow-x-auto rounded-lg bg-gray-100 p-1 dark:bg-gray-800 sm:w-fit">
-          <TabsTrigger value="tickets" className="flex-none px-4">
+      <Tabs defaultValue="tickets" className="space-y-5">
+        <TabsList className="h-auto w-full justify-start gap-8 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-white/10">
+          <TabsTrigger
+            value="tickets"
+            className="flex-none rounded-none border-0 border-b-4 border-transparent bg-transparent px-0 pb-4 pt-0 text-xl font-black text-gray-500 data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:data-[state=active]:bg-transparent"
+          >
             Заявки
           </TabsTrigger>
           {canManageWarrantyClaims && (
-            <TabsTrigger value="warranty" className="flex-none px-4">
+            <TabsTrigger
+              value="warranty"
+              className="flex-none rounded-none border-0 border-b-4 border-transparent bg-transparent px-0 pb-4 pt-0 text-xl font-black text-gray-500 data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:data-[state=active]:bg-transparent"
+            >
               Рекламации
             </TabsTrigger>
           )}
         </TabsList>
 
-        <TabsContent value="tickets" className="space-y-4">
-          <div className="flex justify-end">
-            <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
+        <TabsContent value="tickets" className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ServiceMetricCard title="Всего заявок" value={metrics.total} caption="Активных сейчас" tone="lime" />
+            <ServiceMetricCard title="Высокий приоритет" value={metrics.high} caption="Требуют внимания" tone="red" />
+            <ServiceMetricCard title="Средний приоритет" value={metrics.medium} caption="SLA 24ч" tone="amber" />
+            <ServiceMetricCard title="Низкий приоритет" value={metrics.low} caption="В очереди" tone="neutral" />
           </div>
 
-          {/* Mobile: card list */}
-          <div className="sm:hidden space-y-3">
-            {filteredTickets.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-                <Search className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-3" />
-                <h3 className="text-base font-medium text-gray-900 dark:text-white">Заявки не найдены</h3>
-              </div>
-            ) : filteredTickets.map((ticket) => (
-              <Link
-                key={ticket.id}
-                to={`/service/${ticket.id}`}
-                className="block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-[--color-primary] text-sm">{ticket.id}</span>
-                      {getServiceStatusBadge(ticket.status)}
-                      {getServicePriorityBadge(ticket.priority)}
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-200">
-                        {getServiceScenarioLabel(ticket)}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-700 dark:text-gray-200 mt-1 font-medium truncate">{ticket.equipment}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">{ticket.reason}</p>
-                  </div>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
-                  <div><span className="font-medium text-gray-700 dark:text-gray-300">SLA:</span> {ticket.sla}</div>
-                  {(ticket.assignedMechanicName || ticket.assignedTo) && <div><span className="font-medium text-gray-700 dark:text-gray-300">Назначен:</span> {ticket.assignedMechanicName || ticket.assignedTo}</div>}
-                  <div><span className="font-medium text-gray-700 dark:text-gray-300">Автор:</span> {ticket.createdByUserName || ticket.createdBy || '—'}</div>
-                  <div><span className="font-medium text-gray-700 dark:text-gray-300">Создана:</span> {formatDate(ticket.createdAt)}</div>
-                </div>
-              </Link>
-            ))}
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {WORKFLOW_FILTER_OPTIONS.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setWorkflowFilter(option.value)}
+                  className={`inline-flex h-10 items-center rounded-full border px-4 text-sm font-bold transition-colors ${
+                    workflowFilter === option.value
+                      ? 'border-[--color-primary] bg-[--color-primary]/15 text-[--color-primary]'
+                      : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 hover:text-gray-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-gray-400 dark:hover:text-white'
+                  }`}
+                >
+                  {option.label}
+                  <span className="ml-2 text-xs opacity-70">{workflowCounts[option.value]}</span>
+                </button>
+              ))}
+            </div>
+
+            <FilterButton
+              activeCount={activeFilterCount}
+              onClick={() => setShowFilters(true)}
+              className="h-12 rounded-lg px-5 text-base font-bold"
+            />
           </div>
 
-          {/* Desktop: Table */}
-          <div className="hidden sm:block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID заявки</TableHead>
-                  <TableHead>Техника</TableHead>
-                  <TableHead>Причина</TableHead>
-                  <TableHead>Сценарий</TableHead>
-                  <TableHead>Приоритет</TableHead>
-                  <TableHead>SLA</TableHead>
-                  <TableHead>Назначен</TableHead>
-                  <TableHead>Автор</TableHead>
-                  <TableHead>Дата создания</TableHead>
-                  <TableHead>Статус</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredTickets.map((ticket) => (
-                  <TableRow key={ticket.id}>
-                    <TableCell>
-                      <Link
-                        to={`/service/${ticket.id}`}
-                        className="font-medium text-[--color-primary] hover:underline"
-                      >
-                        {ticket.id}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-sm">{ticket.equipment}</p>
-                    </TableCell>
-                    <TableCell>
-                      <p
-                        className="max-w-[460px] truncate text-sm"
-                        title={ticket.reason}
-                      >
-                        {truncateText(ticket.reason, 90)}
-                      </p>
-                      {ticket.description && (
-                        <p
-                          className="max-w-[460px] truncate text-xs text-gray-500 dark:text-gray-400"
-                          title={ticket.description}
-                        >
-                          {truncateText(ticket.description, 110)}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-sm">{getServiceScenarioLabel(ticket)}</p>
-                    </TableCell>
-                    <TableCell>
-                      {getServicePriorityBadge(ticket.priority)}
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-sm">{ticket.sla}</p>
-                    </TableCell>
-                    <TableCell>
-                      {ticket.assignedMechanicName || ticket.assignedTo ? (
-                        <p className="text-sm">{ticket.assignedMechanicName || ticket.assignedTo}</p>
-                      ) : (
-                        <span className="text-sm text-gray-400 dark:text-gray-500">Не назначен</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-sm">{ticket.createdByUserName || ticket.createdBy || '—'}</p>
-                      {ticket.reporterContact && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{ticket.reporterContact}</p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-sm">{formatDate(ticket.createdAt)}</p>
-                    </TableCell>
-                    <TableCell>
-                      {getServiceStatusBadge(ticket.status)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-
-            {filteredTickets.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
-                  <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
+            {visibleTickets.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-14 text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-white/8">
+                  <Search className="h-7 w-7 text-gray-400 dark:text-gray-500" />
                 </div>
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">Заявки не найдены</h3>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                   Попробуйте изменить параметры поиска или фильтры
                 </p>
               </div>
+            ) : (
+              visibleTickets.map((ticket, index) => {
+                const inventory = getTicketInventory(ticket);
+                const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || '';
+                const description = ticket.description ? truncateText(ticket.description, 95) : '';
+
+                return (
+                  <Link
+                    key={ticket.id}
+                    to={`/service/${ticket.id}`}
+                    className={`grid min-h-[72px] gap-2 border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 hover:bg-[--color-primary]/8 dark:border-white/6 dark:hover:bg-white/[0.05] md:grid-cols-[minmax(150px,0.75fr)_minmax(210px,1fr)_minmax(280px,1.4fr)_minmax(180px,0.85fr)] md:items-center ${
+                      index % 2 === 0 ? 'bg-gray-50/60 dark:bg-white/[0.015]' : 'bg-white dark:bg-transparent'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-mono text-sm text-gray-500 dark:text-gray-500">{ticket.id}</div>
+                      <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatDate(ticket.createdAt)}</div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-bold text-gray-900 dark:text-white">
+                        {getTicketEquipmentTitle(ticket)}
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-sm text-gray-500 dark:text-gray-500">
+                        INV: {inventory}{ticket.serialNumber ? ` · SN ${ticket.serialNumber}` : ''}
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-bold text-gray-900 dark:text-white">{ticket.reason}</div>
+                      {description && (
+                        <div className="mt-0.5 truncate text-sm text-gray-500 dark:text-gray-500">{description}</div>
+                      )}
+                    </div>
+
+                    <div className="flex min-w-0 flex-wrap items-center gap-2 md:justify-end">
+                      {getServicePriorityBadge(ticket.priority)}
+                      {getServiceStatusBadge(ticket.status)}
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/8 dark:text-gray-300">
+                        {getServiceScenarioLabel(ticket)}
+                      </span>
+                      {assignedMechanic && (
+                        <span className="max-w-[160px] truncate rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-white/8 dark:text-gray-400">
+                          {assignedMechanic}
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                );
+              })
             )}
           </div>
 
-          {/* Results info */}
           {filteredTickets.length > 0 && (
-            <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-              <p>Показано {filteredTickets.length} из {ticketList.length} заявок</p>
+            <div className="flex flex-col gap-3 text-sm text-gray-500 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
+              <p>Показано {visibleTickets.length} из {filteredTickets.length} заявок</p>
+              {visibleTickets.length < filteredTickets.length && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setVisibleCount(count => count + RESULT_BATCH_SIZE)}
+                  className="w-full rounded-full sm:w-auto"
+                >
+                  <ArrowDown className="h-4 w-4" />
+                  Показать ещё
+                </Button>
+              )}
             </div>
           )}
         </TabsContent>

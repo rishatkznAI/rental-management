@@ -5,6 +5,7 @@ import { Toaster } from 'sonner';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
+import { AppLoadingState } from './components/ui/AppLoadingState';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,9 +28,10 @@ export default function App() {
             <RouterProvider
               router={router}
               fallbackElement={
-                <div className="flex min-h-screen items-center justify-center text-sm text-gray-500">
-                  Загрузка...
-                </div>
+                <AppLoadingState
+                  title="Открываем раздел"
+                  description="Загружаем интерфейс и данные."
+                />
               }
             />
             <Toaster position="top-right" />

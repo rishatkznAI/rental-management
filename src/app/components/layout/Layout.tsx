@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate, useNavigation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { LayoutDashboard, Truck, FileText, Wrench, Users, Menu } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, pathToSection, pathToRequiredAction } from '../../lib/permissions';
+import { AppLoadingState } from '../ui/AppLoadingState';
 
 const BOTTOM_NAV = [
   { name: 'Дашборд', href: '/', icon: LayoutDashboard },
@@ -19,6 +20,7 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const navigation = useNavigation();
 
   const { isAuthenticated, isLoading } = useAuth();
   const { can, canView, defaultPath } = usePermissions();
@@ -53,8 +55,15 @@ export function Layout() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultPath, isAuthenticated, isLoading, location.pathname, navigate, requiredAction, section, shouldRedirectByAction, shouldRedirectBySection]);
 
-  // While checking auth — render nothing
-  if (isLoading) return null;
+  // While checking auth, show the same calm loading state as route transitions.
+  if (isLoading) {
+    return (
+      <AppLoadingState
+        title="Проверяем доступ"
+        description="Подготавливаем рабочее пространство."
+      />
+    );
+  }
   // Not authenticated yet — useEffect will redirect; render nothing in the meantime
   if (!isAuthenticated) return null;
   // Do not mount a forbidden screen even for one render tick.
@@ -101,6 +110,17 @@ export function Layout() {
         'relative',
       )}>
         <Outlet key={location.pathname} />
+        {navigation.state !== 'idle' && (
+          <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm sm:left-64">
+            <div className="w-full max-w-sm rounded-2xl border border-border bg-card/95 px-6 py-7 text-center shadow-xl">
+              <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Загружаем раздел</p>
+                <p className="text-sm text-muted-foreground">Получаем свежие данные. Это займёт несколько секунд.</p>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Mobile bottom navigation */}

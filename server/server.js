@@ -204,7 +204,10 @@ const managerAndDeliveryShareToken = Boolean(
   EFFECTIVE_MANAGER_BOT_TOKEN === EFFECTIVE_DELIVERY_BOT_TOKEN,
 );
 const MAX_POLLING_FORCE_ENABLED = process.env.MAX_POLLING_ENABLED === '1';
-const MAX_POLLING_ENABLED = MAX_POLLING_FORCE_ENABLED || (!WEBHOOK_URL && process.env.MAX_POLLING_ENABLED !== '0');
+const MAX_WEBHOOK_FALLBACK_POLLING = Boolean(WEBHOOK_URL) && process.env.MAX_WEBHOOK_FALLBACK_POLLING !== '0';
+const MAX_POLLING_DISABLED = process.env.MAX_POLLING_ENABLED === '0' && !MAX_WEBHOOK_FALLBACK_POLLING;
+const MAX_POLLING_ENABLED = MAX_POLLING_FORCE_ENABLED ||
+  (!MAX_POLLING_DISABLED && (!WEBHOOK_URL || MAX_WEBHOOK_FALLBACK_POLLING));
 const MAX_POLL_INTERVAL_MS = Math.max(3000, Number(process.env.MAX_POLL_INTERVAL_MS || 5000));
 const MAX_POLL_INITIAL_REPLAY_MS = Math.max(0, Number(process.env.MAX_POLL_INITIAL_REPLAY_MS || 5 * 60 * 1000));
 const MAX_POLL_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.MAX_POLL_REQUEST_TIMEOUT_MS || 8000));
@@ -1344,7 +1347,9 @@ function startMaxBotPolling() {
     console.log('[BOT] /bot/polling пропущен: BOT_TOKEN не задан');
     return null;
   }
-  console.log(`[BOT] /bot/polling включён: interval=${MAX_POLL_INTERVAL_MS}ms`);
+  console.log(MAX_WEBHOOK_FALLBACK_POLLING
+    ? `[BOT] /bot/polling fallback включён: interval=${MAX_POLL_INTERVAL_MS}ms`
+    : `[BOT] /bot/polling включён: interval=${MAX_POLL_INTERVAL_MS}ms`);
   pollMaxBotUpdatesOnce();
   return setInterval(pollMaxBotUpdatesOnce, MAX_POLL_INTERVAL_MS);
 }

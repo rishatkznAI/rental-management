@@ -203,7 +203,8 @@ const managerAndDeliveryShareToken = Boolean(
   EFFECTIVE_MANAGER_BOT_TOKEN &&
   EFFECTIVE_MANAGER_BOT_TOKEN === EFFECTIVE_DELIVERY_BOT_TOKEN,
 );
-const MAX_POLLING_ENABLED = process.env.MAX_POLLING_ENABLED !== '0';
+const MAX_POLLING_FORCE_ENABLED = process.env.MAX_POLLING_ENABLED === '1';
+const MAX_POLLING_ENABLED = MAX_POLLING_FORCE_ENABLED || (!WEBHOOK_URL && process.env.MAX_POLLING_ENABLED !== '0');
 const MAX_POLL_INTERVAL_MS = Math.max(3000, Number(process.env.MAX_POLL_INTERVAL_MS || 5000));
 const MAX_POLL_INITIAL_REPLAY_MS = Math.max(0, Number(process.env.MAX_POLL_INITIAL_REPLAY_MS || 5 * 60 * 1000));
 const MAX_POLL_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.MAX_POLL_REQUEST_TIMEOUT_MS || 8000));
@@ -1329,7 +1330,9 @@ async function pollMaxBotUpdatesOnce() {
 
 function startMaxBotPolling() {
   if (!MAX_POLLING_ENABLED) {
-    console.log('[BOT] /bot/polling выключен через MAX_POLLING_ENABLED=0');
+    console.log(WEBHOOK_URL
+      ? '[BOT] /bot/polling выключен: используется webhook MAX'
+      : '[BOT] /bot/polling выключен через MAX_POLLING_ENABLED=0');
     return null;
   }
   if (!MAIN_BOT_TOKEN) {

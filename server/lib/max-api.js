@@ -74,6 +74,14 @@ function createMaxApiClient({
     return `user_id=${encodeURIComponent(userId)}`;
   }
 
+  function getWebhookSubscriptionUrl() {
+    if (!webhookUrl) return '';
+    const normalizedPath = String(webhookPath || '/bot/webhook').startsWith('/')
+      ? String(webhookPath || '/bot/webhook')
+      : `/${String(webhookPath || 'bot/webhook')}`;
+    return `${webhookUrl}${normalizedPath}`;
+  }
+
   async function maxRequest(method, endpoint, body = null) {
     const token = (botToken || '').trim();
     const url = `${maxApiBase}${endpoint}`;
@@ -377,18 +385,41 @@ function createMaxApiClient({
       logger.log('[BOT] WEBHOOK_URL не задан — пропускаем регистрацию.');
       return;
     }
-    const normalizedPath = String(webhookPath || '/bot/webhook').startsWith('/')
-      ? String(webhookPath || '/bot/webhook')
-      : `/${String(webhookPath || 'bot/webhook')}`;
+    const subscriptionUrl = getWebhookSubscriptionUrl();
     const res = await maxRequest('POST', '/subscriptions', {
-      url: `${webhookUrl}${normalizedPath}`,
+      url: subscriptionUrl,
       update_types: ['message_created', 'bot_started', 'message_callback'],
     });
     if (res && !res.error) {
-      logger.log(`[BOT] Webhook зарегистрирован: ${webhookUrl}${normalizedPath}`);
+      logger.log(`[BOT] Webhook зарегистрирован: ${subscriptionUrl}`);
     } else {
       logger.error('[BOT] Ошибка регистрации webhook:', res?.message || res);
     }
+    return res;
+  }
+
+  async function ensureWebhookRegistered() {
+    if (!botToken || !webhookUrl) return null;
+    const subscriptionUrl = getWebhookSubscriptionUrl();
+    const res = await maxRequest('GET', '/subscriptions');
+    const subscriptions = Array.isArray(res?.subscriptions) ? res.subscriptions : [];
+    const existing = subscriptions.find(item => item?.url === subscriptionUrl);
+    if (existing) return existing;
+    logger.warn(`[BOT] Webhook ${subscriptionUrl} отсутствует в MAX — регистрируем заново`);
+    return registerWebhook();
+  }
+
+  function startWebhookWatchdog(intervalMs = Number(process.env.MAX_WEBHOOK_WATCHDOG_MS || 60_000)) {
+    if (!botToken || !webhookUrl || !Number.isFinite(intervalMs) || intervalMs <= 0) return null;
+    const tick = () => {
+      ensureWebhookRegistered().catch(error => {
+        logger.warn(`[BOT] Не удалось проверить webhook MAX: ${error.message}`);
+      });
+    };
+    const timer = setInterval(tick, intervalMs);
+    if (typeof timer.unref === 'function') timer.unref();
+    logger.log(`[BOT] Watchdog webhook MAX включён: ${Math.round(intervalMs / 1000)}с`);
+    return timer;
   }
 
   return {
@@ -397,6 +428,8 @@ function createMaxApiClient({
     deleteMessage,
     answerCallback,
     registerWebhook,
+    ensureWebhookRegistered,
+    startWebhookWatchdog,
   };
 }
 

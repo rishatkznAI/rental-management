@@ -125,6 +125,7 @@ async function startServer({ app, port, deps, logger = console }) {
     migrateLegacyRepairFacts,
     applyAdminResetFromEnv,
     registerWebhook,
+    startWebhookWatchdog,
     startBotPolling,
     startGprsGateway,
     dbPath,
@@ -232,6 +233,9 @@ async function startServer({ app, port, deps, logger = console }) {
     }
 
     await registerWebhook();
+    if (typeof startWebhookWatchdog === 'function') {
+      startWebhookWatchdog();
+    }
     if (typeof startBotPolling === 'function') {
       startBotPolling();
     }

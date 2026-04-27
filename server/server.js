@@ -231,6 +231,7 @@ const {
   deleteMessage,
   answerCallback,
   registerWebhook: registerMainWebhook,
+  startWebhookWatchdog: startMainWebhookWatchdog,
 } = createMaxApiClient({
   botToken: BOT_TOKEN,
   maxApiBase: MAX_API,
@@ -266,11 +267,13 @@ const managerSendMessage = managerMaxApiClient?.sendMessage || sendMessage;
 const managerDeleteMessage = managerMaxApiClient?.deleteMessage || deleteMessage;
 const managerAnswerCallback = managerMaxApiClient?.answerCallback || answerCallback;
 const registerManagerWebhook = managerMaxApiClient?.registerWebhook || null;
+const startManagerWebhookWatchdog = managerMaxApiClient?.startWebhookWatchdog || null;
 
 const deliverySendMessage = deliveryMaxApiClient?.sendMessage || sendMessage;
 const deliveryDeleteMessage = deliveryMaxApiClient?.deleteMessage || deleteMessage;
 const deliveryAnswerCallback = deliveryMaxApiClient?.answerCallback || answerCallback;
 const registerDeliveryWebhook = deliveryMaxApiClient?.registerWebhook || null;
+const startDeliveryWebhookWatchdog = deliveryMaxApiClient?.startWebhookWatchdog || null;
 
 const gprsGateway = createGprsGateway({
   readData,
@@ -2106,6 +2109,15 @@ startServer({
       }
       if (!managerAndDeliveryShareToken && typeof registerDeliveryWebhook === 'function') {
         await registerDeliveryWebhook();
+      }
+    },
+    startWebhookWatchdog: () => {
+      if (typeof startMainWebhookWatchdog === 'function') startMainWebhookWatchdog();
+      if (!managerAndDeliveryShareToken && typeof startManagerWebhookWatchdog === 'function') {
+        startManagerWebhookWatchdog();
+      }
+      if (!managerAndDeliveryShareToken && typeof startDeliveryWebhookWatchdog === 'function') {
+        startDeliveryWebhookWatchdog();
       }
     },
     startBotPolling: startMaxBotPolling,

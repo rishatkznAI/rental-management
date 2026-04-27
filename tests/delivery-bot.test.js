@@ -683,6 +683,60 @@ test('MAX sendMessage can explicitly fallback to user_id when chat_id is not fou
   assert.match(requests[1].url, /user_id=123946038/);
 });
 
+test('MAX webhook ensure registers when subscription is missing', async () => {
+  const requests = [];
+  const client = createMaxApiClient({
+    botToken: 'token',
+    maxApiBase: 'https://platform-api.example',
+    webhookUrl: 'https://app.example',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (options.method === 'GET') {
+        return { json: async () => ({ subscriptions: [] }) };
+      }
+      return { json: async () => ({ success: true }) };
+    },
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  const result = await client.ensureWebhookRegistered();
+
+  assert.equal(result.success, true);
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].url, /\/subscriptions$/);
+  assert.equal(requests[0].options.method, 'GET');
+  assert.match(requests[1].url, /\/subscriptions$/);
+  assert.equal(requests[1].options.method, 'POST');
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    url: 'https://app.example/bot/webhook',
+    update_types: ['message_created', 'bot_started', 'message_callback'],
+  });
+});
+
+test('MAX webhook ensure keeps existing subscription', async () => {
+  const requests = [];
+  const client = createMaxApiClient({
+    botToken: 'token',
+    maxApiBase: 'https://platform-api.example',
+    webhookUrl: 'https://app.example',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return {
+        json: async () => ({
+          subscriptions: [{ url: 'https://app.example/bot/webhook' }],
+        }),
+      };
+    },
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  const result = await client.ensureWebhookRegistered();
+
+  assert.deepEqual(result, { url: 'https://app.example/bot/webhook' });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].options.method, 'GET');
+});
+
 test('bot callback sends the new message before slow cleanup finishes', async () => {
   let deleteStarted = false;
   let answerStarted = false;

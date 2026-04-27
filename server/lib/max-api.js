@@ -63,6 +63,13 @@ function createMaxApiClient({
     return `user_id=${encodeURIComponent(target)}`;
   }
 
+  function resolveUserRecipientQuery(target) {
+    if (!target || typeof target !== 'object') return null;
+    const userId = target.userId ?? target.user_id;
+    if (!userId) return null;
+    return `user_id=${encodeURIComponent(userId)}`;
+  }
+
   async function maxRequest(method, endpoint, body = null) {
     const token = (botToken || '').trim();
     const url = `${maxApiBase}${endpoint}`;
@@ -302,8 +309,13 @@ function createMaxApiClient({
     return code === 'attachment.not.ready';
   }
 
+  function isChatNotFound(response) {
+    const code = response?.code || response?.error?.code || response?.error;
+    return code === 'chat.not.found';
+  }
+
   async function sendMessage(target, text, options = {}) {
-    const recipientQuery = resolveRecipientQuery(target);
+    let recipientQuery = resolveRecipientQuery(target);
     logger.log(`[MAX API] sendMessage → ${recipientQuery} text="${String(text).slice(0, 60)}"`);
     const attachments = await prepareAttachments(options.attachments);
     const body = {
@@ -313,6 +325,14 @@ function createMaxApiClient({
       ...(options.notify != null ? { notify: options.notify } : {}),
     };
     let res = await maxRequest('POST', `/messages?${recipientQuery}`, body);
+    if (isChatNotFound(res)) {
+      const userRecipientQuery = resolveUserRecipientQuery(target);
+      if (userRecipientQuery && userRecipientQuery !== recipientQuery) {
+        logger.warn(`[MAX API] ${recipientQuery} не найден, повторяем отправку через ${userRecipientQuery}`);
+        recipientQuery = userRecipientQuery;
+        res = await maxRequest('POST', `/messages?${recipientQuery}`, body);
+      }
+    }
     for (const delayMs of options.attachmentRetryDelaysMs || [800, 1600]) {
       if (!isAttachmentNotReady(res)) break;
       logger.warn(`[MAX API] Вложение ещё обрабатывается, повтор отправки через ${delayMs}ms`);

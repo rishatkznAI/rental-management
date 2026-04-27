@@ -24,25 +24,47 @@ export function useBotById(botId: string) {
   });
 }
 
-export function useUpdateBotConnection(botId: string) {
+type UpdateBotConnectionInput = {
+  botId?: string;
+  phone: string;
+  userRole: BotConnectionRole;
+};
+
+function resolveBotId(explicitBotId?: string, fallbackBotId?: string) {
+  const botId = explicitBotId || fallbackBotId || '';
+  if (!botId) {
+    throw new Error('Бот не выбран.');
+  }
+  return botId;
+}
+
+export function useUpdateBotConnection(botId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ phone, userRole }: { phone: string; userRole: BotConnectionRole }) =>
-      botsService.updateConnection(botId, phone, { userRole }),
-    onSuccess: () => {
+    mutationFn: ({ botId: targetBotId, phone, userRole }: UpdateBotConnectionInput) =>
+      botsService.updateConnection(resolveBotId(targetBotId, botId), phone, { userRole }),
+    onSuccess: (_data, variables) => {
+      const targetBotId = resolveBotId(variables.botId, botId);
       queryClient.invalidateQueries({ queryKey: BOT_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: BOT_KEYS.detail(botId) });
+      queryClient.invalidateQueries({ queryKey: BOT_KEYS.detail(targetBotId) });
     },
   });
 }
 
-export function useDisconnectBotConnection(botId: string) {
+type DisconnectBotConnectionInput = {
+  botId?: string;
+  phone: string;
+};
+
+export function useDisconnectBotConnection(botId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (phone: string) => botsService.disconnectConnection(botId, phone),
-    onSuccess: () => {
+    mutationFn: ({ botId: targetBotId, phone }: DisconnectBotConnectionInput) =>
+      botsService.disconnectConnection(resolveBotId(targetBotId, botId), phone),
+    onSuccess: (_data, variables) => {
+      const targetBotId = resolveBotId(variables.botId, botId);
       queryClient.invalidateQueries({ queryKey: BOT_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: BOT_KEYS.detail(botId) });
+      queryClient.invalidateQueries({ queryKey: BOT_KEYS.detail(targetBotId) });
     },
   });
 }

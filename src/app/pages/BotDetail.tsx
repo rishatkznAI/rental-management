@@ -10,20 +10,9 @@ import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { BOT_CONNECTION_ROLES, getSelectableBotConnectionRole } from '../lib/botRoles';
 import { formatDateTime } from '../lib/utils';
 import type { BotActivityEntry, BotActivityType, BotConnection, BotConnectionRole, BotStatus } from '../types';
-
-const BOT_CONNECTION_ROLES: BotConnectionRole[] = [
-  'Администратор',
-  'Офис-менеджер',
-  'Менеджер по аренде',
-  'Менеджер по продажам',
-  'Механик',
-  'Младший стационарный механик',
-  'Выездной механик',
-  'Старший стационарный механик',
-  'Перевозчик',
-];
 
 function formatDateTimeSafe(value: string | null): string {
   return value ? formatDateTime(value) : '—';
@@ -59,10 +48,6 @@ function renderConnectionState(connection: BotConnection) {
   return <Badge>Без активного сценария</Badge>;
 }
 
-function getSelectableRole(role: string | null): BotConnectionRole | undefined {
-  return BOT_CONNECTION_ROLES.find(item => item === role);
-}
-
 export default function BotDetail() {
   const { botId = '' } = useParams();
   const { data, isLoading, error } = useBotById(botId);
@@ -87,7 +72,7 @@ export default function BotDetail() {
     if (!window.confirm(`Отключить ${label} от бота? Пользователь сможет войти заново через авторизацию.`)) return;
 
     try {
-      await disconnectConnection.mutateAsync(connection.phone);
+      await disconnectConnection.mutateAsync({ phone: connection.phone });
       toast.success('Пользователь отключён от бота.');
     } catch (mutationError) {
       toast.error(mutationError instanceof Error ? mutationError.message : 'Не удалось отключить пользователя.');
@@ -123,7 +108,7 @@ export default function BotDetail() {
     return (
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <Select
-          value={getSelectableRole(connection.userRole) || undefined}
+          value={getSelectableBotConnectionRole(connection.userRole) || undefined}
           onValueChange={(value) => handleRoleChange(connection, value as BotConnectionRole)}
           disabled={busy}
         >

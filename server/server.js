@@ -211,6 +211,9 @@ const MAX_POLLING_ENABLED = MAX_POLLING_FORCE_ENABLED ||
 const MAX_POLL_INTERVAL_MS = Math.max(3000, Number(process.env.MAX_POLL_INTERVAL_MS || 5000));
 const MAX_POLL_INITIAL_REPLAY_MS = Math.max(0, Number(process.env.MAX_POLL_INITIAL_REPLAY_MS || 5 * 60 * 1000));
 const MAX_POLL_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.MAX_POLL_REQUEST_TIMEOUT_MS || 8000));
+const MAX_REGISTER_WEBHOOK_WITH_POLLING = process.env.MAX_REGISTER_WEBHOOK_WITH_POLLING === '1';
+const SHOULD_REGISTER_MAX_WEBHOOKS = Boolean(WEBHOOK_URL) &&
+  (!MAX_POLLING_ENABLED || MAX_REGISTER_WEBHOOK_WITH_POLLING);
 
 function readData(name) {
   return getData(name);
@@ -2108,6 +2111,10 @@ startServer({
     migrateLegacyRepairFacts,
     applyAdminResetFromEnv,
     registerWebhook: async () => {
+      if (!SHOULD_REGISTER_MAX_WEBHOOKS) {
+        console.log('[BOT] Webhook MAX пропущен: используется polling');
+        return;
+      }
       await registerMainWebhook();
       if (!managerAndDeliveryShareToken && typeof registerManagerWebhook === 'function') {
         await registerManagerWebhook();
@@ -2117,6 +2124,7 @@ startServer({
       }
     },
     startWebhookWatchdog: () => {
+      if (!SHOULD_REGISTER_MAX_WEBHOOKS) return;
       if (typeof startMainWebhookWatchdog === 'function') startMainWebhookWatchdog();
       if (!managerAndDeliveryShareToken && typeof startManagerWebhookWatchdog === 'function') {
         startManagerWebhookWatchdog();

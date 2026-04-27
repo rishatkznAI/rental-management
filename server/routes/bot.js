@@ -19,20 +19,67 @@ function describeIncomingText(text) {
   return `len=${value.length}`;
 }
 
+function getUpdateType(update) {
+  return update?.update_type || update?.updateType || update?.type || '';
+}
+
+function extractUpdateMessage(update) {
+  return update?.message ||
+    update?.message_created?.message ||
+    update?.messageCreated?.message ||
+    update?.payload?.message ||
+    null;
+}
+
+function extractUpdateSender(update, message, callback = null) {
+  return message?.sender ||
+    callback?.sender ||
+    callback?.user ||
+    update?.sender ||
+    update?.user ||
+    {};
+}
+
+function extractUpdateRecipient(update, message, callback = null) {
+  return message?.recipient ||
+    callback?.recipient ||
+    update?.recipient ||
+    {};
+}
+
+function extractUpdateText(update, message) {
+  const body = message?.body;
+  if (typeof body === 'string') return body;
+  return body?.text ||
+    message?.text ||
+    update?.text ||
+    update?.payload?.text ||
+    '';
+}
+
+function extractUpdateAttachments(message) {
+  const body = message?.body;
+  return body?.attachments || message?.attachments || [];
+}
+
 function webhookUpdateFingerprint(update) {
   const callback = update?.callback || update?.message_callback || update?.messageCallback || {};
-  const message = update?.message || callback?.message || {};
-  const sender = message?.sender || callback?.sender || callback?.user || update?.user || {};
+  const message = extractUpdateMessage(update) || callback?.message || {};
+  const sender = extractUpdateSender(update, message, callback);
   const body = message?.body || {};
   const stableParts = [
-    update?.update_type,
+    getUpdateType(update),
     update?.update_id,
+    update?.updateId,
     update?.timestamp,
     update?.created_at,
+    update?.createdAt,
     message?.message_id,
+    message?.messageId,
     message?.mid,
     message?.id,
     message?.created_at,
+    message?.createdAt,
     callback?.callback_id,
     callback?.callbackId,
     callback?.payload,
@@ -329,8 +376,10 @@ function createBotUpdateProcessor(deps) {
   const normalizedWebhookPath = normalizeWebhookPath(webhookPath);
 
   return async function processBotUpdate(update) {
-    if (update.update_type === 'bot_started') {
-      const user = update.user;
+    const updateType = getUpdateType(update);
+
+    if (updateType === 'bot_started') {
+      const user = update.user || update.sender || {};
       if (!user?.user_id) return;
       const startReplyTarget = {
         chat_id: update.chat_id || update.chatId || update.recipient?.chat_id || user.chat_id,
@@ -342,13 +391,13 @@ function createBotUpdateProcessor(deps) {
       return;
     }
 
-    if (update.update_type === 'message_callback') {
+    if (updateType === 'message_callback') {
       const callback = update.callback || update.message_callback || update.messageCallback || {};
       const callbackId = callback.callback_id || callback.callbackId || update.callback_id;
       const payload = callback.payload || callback.data || update.payload || '';
-      const sender = callback.sender || callback.user || update.user || {};
-      const recipient = callback.recipient || update.recipient || {};
       const callbackMessage = callback.message || update.message || {};
+      const sender = extractUpdateSender(update, callbackMessage, callback);
+      const recipient = extractUpdateRecipient(update, callbackMessage, callback);
       const callbackMessageId =
         callbackMessage.message_id ||
         callbackMessage.mid ||
@@ -372,25 +421,33 @@ function createBotUpdateProcessor(deps) {
       return;
     }
 
-    if (update.update_type !== 'message_created') return;
+    if (updateType !== 'message_created') {
+      logger.log(`[BOT] ${normalizedWebhookPath} unhandled update type=${updateType || 'unknown'}`);
+      return;
+    }
 
-    const msg = update.message;
-    const sender = msg?.sender;
-    if (!sender?.user_id) return;
+    const msg = extractUpdateMessage(update);
+    const sender = extractUpdateSender(update, msg);
+    const userId = sender?.user_id || sender?.userId || update?.user_id || update?.userId;
+    if (!userId) {
+      logger.log(`[BOT] ${normalizedWebhookPath} message без user_id keys=${Object.keys(update || {}).join(',')}`);
+      return;
+    }
+    const recipient = extractUpdateRecipient(update, msg);
 
     const replyTarget = {
-      chat_id: msg?.recipient?.chat_id,
-      user_id: sender.user_id,
+      chat_id: recipient?.chat_id || recipient?.chatId || update?.chat_id || update?.chatId,
+      user_id: userId,
       prefer_user_id: true,
     };
     const senderId = replyTarget;
-    const phone = String(sender.user_id);
-    const text = msg?.body?.text || '';
-    const attachments = msg?.body?.attachments || msg?.attachments || [];
+    const phone = String(userId);
+    const text = extractUpdateText(update, msg);
+    const attachments = extractUpdateAttachments(msg);
 
     if (!text.trim() && (!Array.isArray(attachments) || attachments.length === 0)) return;
 
-    logger.log(`[BOT] ${normalizedWebhookPath} message user=${sender.user_id} text=${describeIncomingText(text)} attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
+    logger.log(`[BOT] ${normalizedWebhookPath} message user=${userId} text=${describeIncomingText(text)} attachments=${Array.isArray(attachments) ? attachments.length : 0}`);
     await handleCommand(senderId, phone, text, { message: msg, body: msg?.body, attachments });
   };
 }

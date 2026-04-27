@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const { createBotHandlers } = require('../server/lib/bot-commands.js');
 const { attachBotBrandImage, attachMechanicStageImage } = require('../server/lib/bot-stage-images.js');
 const { createMaxApiClient } = require('../server/lib/max-api.js');
+const { createBotUpdateProcessor } = require('../server/routes/bot.js');
 
 function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
   const state = {
@@ -200,6 +201,34 @@ test('unknown command reports an error before authorization', async () => {
 
   assert.equal(state.bot_sessions['100']?.pendingAction, undefined);
   assert.match(messages.at(-1).text, /Неизвестная команда/);
+});
+
+test('MAX update processor accepts camelCase message updates', async () => {
+  const calls = [];
+  const processor = createBotUpdateProcessor({
+    handleCommand: async (...args) => calls.push(args),
+    handleBotStarted: async () => {},
+    handleCallback: async () => {},
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+    webhookPath: '/bot/polling',
+  });
+
+  await processor({
+    updateType: 'message_created',
+    chatId: 555,
+    userId: 100,
+    messageCreated: {
+      message: {
+        body: '/start',
+        recipient: { chatId: 555 },
+      },
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0][0], { chat_id: 555, user_id: 100, prefer_user_id: true });
+  assert.equal(calls[0][1], '100');
+  assert.equal(calls[0][2], '/start');
 });
 
 test('shared bot blocks service commands while delivery mode is active', async () => {

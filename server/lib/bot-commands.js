@@ -515,8 +515,20 @@ function createBotHandlers(deps) {
       pendingAction: null,
       pendingPayload: null,
     });
-    const existingUser = authorizeCarrier(phone, senderId);
+    const existingUser = getAuthorizedUserForCurrentBot(phone, senderId);
     if (existingUser?.userRole === 'Перевозчик') {
+      if (!preferCarrierAutoLogin) {
+        return reply(
+          senderId,
+          getSharedBotEntryText(payloadLine),
+          {
+            attachments: sharedBotEntryKeyboard(),
+            brandImage: true,
+            phone,
+            cleanupPrevious: true,
+          },
+        );
+      }
       return reply(
         senderId,
         getMainMenuText(existingUser),
@@ -552,13 +564,16 @@ function createBotHandlers(deps) {
         },
       );
     }
+    const linkedCarrier = !preferCarrierAutoLogin ? findCarrierByMaxKey(phone) : null;
     return reply(
       senderId,
       withBotMenu(
         `👋 Добро пожаловать в бот «Скайтех»!${payloadLine}\n\nНажмите «Войти», затем бот по шагам попросит логин и пароль.`,
-        ['если хотите вручную: /start email@company.ru пароль'],
+        linkedCarrier
+          ? ['если нужна доставка: нажмите «Мои доставки»', 'ручной вход: /start email@company.ru пароль']
+          : ['если хотите вручную: /start email@company.ru пароль'],
       ),
-      { attachments: authKeyboard(), brandImage: true, phone, cleanupPrevious: true },
+      { attachments: linkedCarrier ? sharedBotEntryKeyboard() : authKeyboard(), brandImage: true, phone, cleanupPrevious: true },
     );
   }
 
@@ -736,6 +751,54 @@ function createBotHandlers(deps) {
       'Попросите администратора открыть настройки перевозчиков и выбрать ваш MAX ID.',
     ].join('\n');
   }
+
+  function sharedBotEntryKeyboard() {
+    return keyboard([
+      [button('Войти', 'auth:start'), button('Мои доставки', 'menu:deliveries')],
+      [button('Помощь', 'menu:help')],
+    ]);
+  }
+
+  function getSharedBotEntryText(payloadLine = '') {
+    return withBotMenu(
+      `👋 Выберите режим работы в боте «Скайтех».${payloadLine}\n\nМожно войти как сотрудник или открыть доставки перевозчика.`,
+      ['вход сотрудника: «Войти»', 'доставка: «Мои доставки»'],
+    );
+  }
+
+  function normalizeCommandText(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^\/+/, '')
+      .replace(/ё/g, 'е')
+      .replace(/[.,!?;:]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function compactCommandText(value) {
+    return normalizeCommandText(value).replace(/\s+/g, '');
+  }
+
+  function isDeliveriesCommand(commandText, commandCompact) {
+    return commandText === 'доставки' ||
+      commandText === 'мои доставки' ||
+      commandCompact === 'deliveries';
+  }
+
+  function isServiceCommand(commandText, commandCompact) {
+    return commandText === 'сервис' ||
+      commandText === 'заявки' ||
+      commandCompact === 'service';
+  }
+
+  function isMyRepairsCommand(commandText, commandCompact) {
+    return commandText === 'мои заявки' ||
+      commandCompact === 'моизаявки' ||
+      commandCompact === 'myrepairs';
+  }
+
   const {
     normalizeBotText,
     botSearchMatches,
@@ -2528,6 +2591,8 @@ function createBotHandlers(deps) {
   async function handleCommand(senderId, phone, text) {
     const trimmed = text.trim();
     const lower = trimmed.toLowerCase();
+    const commandText = normalizeCommandText(trimmed);
+    const commandCompact = compactCommandText(trimmed);
     const parts = trimmed.split(/\s+/);
     const session = getBotSession(phone);
     const messageMeta = arguments[3] || {};
@@ -2550,14 +2615,25 @@ function createBotHandlers(deps) {
 
     if (lower.startsWith('/start')) {
       console.log('[TRACE] /start matched, parts=%d', parts.length);
-      const carrierUser = activeBotUser;
-      if (carrierUser?.userRole === 'Перевозчик' && parts.length < 3) {
+      if (activeBotUser && parts.length < 3) {
+        if (!preferCarrierAutoLogin && activeBotUser.userRole === 'Перевозчик') {
+          resetBotFlow(phone);
+          return replyWithUi(
+            getSharedBotEntryText(),
+            {
+              attachments: sharedBotEntryKeyboard(),
+              brandImage: true,
+            },
+          );
+        }
         resetBotFlow(phone);
         return replyWithUi(
-          getMainMenuText(carrierUser),
+          getMainMenuText(activeBotUser),
           {
-            attachments: carrierKeyboard(),
-            ...mainMenuImageOptions(carrierUser.userRole),
+            attachments: activeBotUser.userRole === 'Перевозчик'
+              ? carrierKeyboard()
+              : defaultKeyboardForRole(activeBotUser.userRole),
+            ...mainMenuImageOptions(activeBotUser.userRole),
           },
         );
       }
@@ -2569,6 +2645,17 @@ function createBotHandlers(deps) {
         });
       }
       if (parts.length < 3) {
+        const linkedCarrier = !preferCarrierAutoLogin ? findCarrierByMaxKey(phone) : null;
+        if (linkedCarrier) {
+          resetBotFlow(phone);
+          return replyWithUi(
+            getSharedBotEntryText(),
+            {
+              attachments: sharedBotEntryKeyboard(),
+              brandImage: true,
+            },
+          );
+        }
         updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
         return reply(
           senderId,
@@ -2680,6 +2767,17 @@ function createBotHandlers(deps) {
 
     const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
     if (!authUser) {
+      if (isDeliveriesCommand(commandText, commandCompact)) {
+        const carrierUser = authorizeCarrier(String(phone), senderId);
+        if (carrierUser?.userRole === 'Перевозчик') {
+          const deliveries = getCarrierDeliveries(phone, carrierUser);
+          const activeDelivery = deliveries.find(item => item.status !== 'completed' && item.status !== 'cancelled') || deliveries[0] || null;
+          return replyWithUi(formatCarrierDeliveries(deliveries), {
+            attachments: activeDelivery ? deliveryStatusKeyboard(activeDelivery) : carrierKeyboard(),
+            mechanicStage: 'delivery_list',
+          });
+        }
+      }
       if (preferCarrierAutoLogin) {
         return reply(senderId, formatUnlinkedCarrierMessage(), {
           attachments: carrierKeyboard(),
@@ -3018,28 +3116,30 @@ function createBotHandlers(deps) {
       });
     }
 
-    if (lower === '/сервис' || lower === '/service' || lower === 'сервис' || lower === 'заявки') {
+    if (isServiceCommand(commandText, commandCompact)) {
       return replyWithUi(canManageRepair ? formatServiceForUser(authUser) : formatService(readData('service') || []), {
         attachments: defaultKeyboardForRole(userRole),
         mechanicStage: canManageRepair ? 'repairs' : null,
       });
     }
 
-    if ((lower === '/моизаявки' || lower === '/myrepairs' || lower === 'мои заявки') && canManageRepair) {
-      return replyWithUi(formatServiceForUser(authUser, 'assigned'), {
-        attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
-        mechanicStage: 'repairs',
+    if (isMyRepairsCommand(commandText, commandCompact)) {
+      return replyWithUi(canManageRepair ? formatServiceForUser(authUser, 'assigned') : formatService(readData('service') || []), {
+        attachments: canManageRepair
+          ? (serviceTicketsKeyboard(authUser) || mechanicKeyboard())
+          : defaultKeyboardForRole(userRole),
+        mechanicStage: canManageRepair ? 'repairs' : null,
       });
     }
 
-    if ((lower === '/меню' || lower === 'меню')) {
+    if (commandText === 'меню') {
       return replyWithUi(getMainMenuText(authUser), {
         attachments: defaultKeyboardForRole(userRole),
         ...mainMenuImageOptions(userRole),
       });
     }
 
-    if ((lower === '/доставки' || lower === 'доставки' || lower === 'мои доставки') && isCarrier) {
+    if (isDeliveriesCommand(commandText, commandCompact) && isCarrier) {
       const deliveries = getCarrierDeliveries(phone, authUser);
       const activeDelivery = deliveries.find(item => item.status !== 'completed' && item.status !== 'cancelled') || deliveries[0] || null;
       return replyWithUi(formatCarrierDeliveries(deliveries), {

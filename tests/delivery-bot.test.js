@@ -66,7 +66,7 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     generateId: (prefix) => `${prefix}-1`,
     idPrefixes: { deliveries: 'DL' },
     nowIso: () => '2026-04-24T08:00:00.000Z',
-    readServiceTickets: () => [],
+    readServiceTickets: overrides.readServiceTickets || (() => state.service || []),
     writeServiceTickets: () => {},
     findServiceTicketById: () => null,
     saveServiceTicket: () => {},
@@ -90,6 +90,71 @@ test('regular bot_started keeps an existing non-carrier role menu', async () => 
   assert.equal(state.bot_users['100'].userRole, 'Менеджер по аренде');
   assert.match(messages.at(-1).text, /Менеджер по аренде/);
   assert.doesNotMatch(messages.at(-1).text, /Здесь вы видите свои доставки/);
+});
+
+test('regular bot_started does not auto-authorize a linked carrier', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users = {};
+
+  await handlers.handleBotStarted({ user_id: 100 }, '100');
+
+  assert.equal(state.bot_users['100'], undefined);
+  assert.match(messages.at(-1).text, /Добро пожаловать/);
+  const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.equal(menu.payload.buttons[0][1].text, 'Мои доставки');
+});
+
+test('shared bot delivery command can authorize a linked carrier explicitly', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users = {};
+  state.deliveries = [{
+    id: 'DL-1',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Клиент',
+    cargo: 'Подъёмник',
+    client: 'ООО Клиент',
+    contactName: 'Иван',
+    contactPhone: '+7 900 000-00-00',
+    carrierKey: 'carrier-1',
+  }];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/доставки');
+
+  assert.equal(state.bot_users['100'].userRole, 'Перевозчик');
+  assert.match(messages.at(-1).text, /Мои доставки \(1\)/);
+  assert.match(messages.at(-1).text, /Подъёмник/);
+});
+
+test('start command returns menu for an authorized manager', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/start');
+
+  assert.equal(state.bot_users['100'].userRole, 'Менеджер по аренде');
+  assert.match(messages.at(-1).text, /Менеджер по аренде/);
+  const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.equal(menu.payload.buttons[1][1].text, 'Новая доставка');
+});
+
+test('shared bot start lets a stale carrier session switch to employee login', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/start');
+
+  assert.match(messages.at(-1).text, /Выберите режим работы/);
+  const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.equal(menu.payload.buttons[0][0].text, 'Войти');
+  assert.equal(menu.payload.buttons[0][1].text, 'Мои доставки');
 });
 
 test('manager login flow greets manager with rental manager menu', async () => {
@@ -200,6 +265,30 @@ test('mechanic main navigation sends friendly stage image', async () => {
   assert.match(imageAttachments[0].payload.file, /main-menu\.jpg$/);
   assert.doesNotMatch(imageAttachments[0].payload.file, /skytech-logo/);
   assert.equal(menuAttachments[0].type, 'inline_keyboard');
+});
+
+test('mechanic my repairs command accepts spaced slash alias', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.service = [{
+    id: 'S-1',
+    status: 'in_progress',
+    equipment: 'Mantall HZ160JRT',
+    reason: 'Полная диагностика',
+    assignedMechanicName: 'Дмитрий',
+  }];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/мои заявки');
+
+  assert.match(messages.at(-1).text, /Мои сервисные заявки \(1\)/);
+  assert.match(messages.at(-1).text, /S-1/);
+  assert.doesNotMatch(messages.at(-1).text, /Неизвестная команда/);
 });
 
 test('delivery menu shows image and status buttons for carrier', async () => {

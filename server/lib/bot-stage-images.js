@@ -5,7 +5,7 @@ const BOT_ASSET_PUBLIC_PATH = '/bot-assets';
 const MECHANIC_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'mechanic-stages');
 const DELIVERY_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'delivery-stages');
 const MANAGER_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'manager-stages');
-const BOT_STAGE_IMAGE_VERSION = 'optimistic-manager-2026-04-27';
+const BOT_STAGE_IMAGE_VERSION = 'manager-custom-2026-04-27';
 
 const MECHANIC_STAGE_IMAGES = {
   main: 'main-menu-optimistic.jpg',

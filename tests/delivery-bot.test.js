@@ -107,6 +107,25 @@ test('regular bot_started asks for login when user is not authorized', async () 
   assert.equal(menu.payload.buttons[0][1].text, 'Главное меню');
 });
 
+test('regular bot_started asks employee login for an existing carrier session', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    botMode: 'delivery',
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+
+  await handlers.handleBotStarted({ user_id: 100 }, '100');
+
+  assert.equal(state.bot_users['100'].userRole, 'Перевозчик');
+  assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
+  assert.match(messages.at(-1).text, /основной бот/i);
+  assert.match(messages.at(-1).text, /Напишите логин/);
+});
+
 test('shared bot delivery command asks for login when user is not authorized', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users = {};
@@ -143,7 +162,7 @@ test('start command returns menu for an authorized manager', async () => {
   assert.equal(menu.payload.buttons[1][1].text, 'Новая доставка');
 });
 
-test('start command returns menu for an authorized carrier', async () => {
+test('regular start asks employee login for an authorized carrier session', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users['100'] = {
     userId: 'carrier-1',
@@ -155,6 +174,18 @@ test('start command returns menu for an authorized carrier', async () => {
 
   await handlers.handleCommand({ user_id: 100 }, '100', '/start');
 
+  assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
+  assert.match(messages.at(-1).text, /Основной бот/);
+  assert.match(messages.at(-1).text, /Напишите логин/);
+});
+
+test('dedicated delivery start returns menu for an authorized carrier', async () => {
+  const { state, messages, handlers } = createMemoryBot(true);
+  state.bot_users = {};
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/start');
+
+  assert.equal(state.bot_users['100'].userRole, 'Перевозчик');
   assert.match(messages.at(-1).text, /Перевозчик/);
   const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
   assert.equal(menu.payload.buttons[0][0].text, 'Мои доставки');

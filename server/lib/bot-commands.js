@@ -517,6 +517,14 @@ function createBotHandlers(deps) {
     });
     const existingUser = getAuthorizedUserForCurrentBot(phone, senderId);
     if (existingUser?.userRole === 'Перевозчик') {
+      if (!preferCarrierAutoLogin) {
+        updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
+        return reply(
+          senderId,
+          `👋 Добро пожаловать в основной бот «Скайтех»!${payloadLine}\n\nДля работы с сервисом и заявками войдите как сотрудник.\n\n${getLoginPromptText()}`,
+          { attachments: loginPromptKeyboard(), brandImage: true, phone, cleanupPrevious: true },
+        );
+      }
       return reply(
         senderId,
         getMainMenuText(existingUser),
@@ -2761,6 +2769,16 @@ function createBotHandlers(deps) {
     if (lower.startsWith('/start')) {
       console.log('[TRACE] /start matched, parts=%d', parts.length);
       if (activeBotUser && parts.length < 3) {
+        if (!preferCarrierAutoLogin && activeBotUser.userRole === 'Перевозчик') {
+          updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
+          return replyWithUi(
+            `👋 Основной бот «Скайтех» работает для сотрудников.\n\n${getLoginPromptText()}`,
+            {
+              attachments: loginPromptKeyboard(),
+              brandImage: true,
+            },
+          );
+        }
         resetBotFlow(phone);
         return replyWithUi(
           getMainMenuText(activeBotUser),

@@ -573,6 +573,7 @@ function createBotHandlers(deps) {
       return {
         chat_id: target.chat_id ?? target.chatId ?? null,
         user_id: target.user_id ?? target.userId ?? (fallbackPhone ? Number(fallbackPhone) : null),
+        prefer_user_id: target.prefer_user_id ?? target.preferUserId ?? false,
       };
     }
     return {

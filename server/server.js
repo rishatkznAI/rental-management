@@ -1056,9 +1056,11 @@ function syncBotConnection(phone, senderId, previousUser = null) {
     maxUserId: current.maxUserId ?? toBotNumber(phoneKey) ?? toBotNumber(current.replyTarget?.user_id),
     connectedAt: current.connectedAt || previousUser?.connectedAt || nowIso(),
     lastSeenAt: nowIso(),
-    replyTarget: current.replyTarget || {
-      chat_id: senderId?.chat_id ?? null,
-      user_id: senderId?.user_id ?? toBotNumber(phoneKey),
+    replyTarget: {
+      ...(current.replyTarget || {}),
+      chat_id: senderId?.chat_id ?? current.replyTarget?.chat_id ?? null,
+      user_id: senderId?.user_id ?? current.replyTarget?.user_id ?? toBotNumber(phoneKey),
+      prefer_user_id: senderId?.prefer_user_id ?? senderId?.preferUserId ?? current.replyTarget?.prefer_user_id ?? true,
     },
   };
 

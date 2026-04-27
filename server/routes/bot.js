@@ -335,6 +335,7 @@ function createBotUpdateProcessor(deps) {
       const startReplyTarget = {
         chat_id: update.chat_id || update.chatId || update.recipient?.chat_id || user.chat_id,
         user_id: user.user_id,
+        prefer_user_id: true,
       };
       logger.log(`[BOT] ${normalizedWebhookPath} [${user.name || user.user_id}] bot_started target=${JSON.stringify(startReplyTarget)}`);
       await handleBotStarted(startReplyTarget, String(user.user_id), update.payload);
@@ -358,6 +359,7 @@ function createBotUpdateProcessor(deps) {
       const replyTarget = {
         chat_id: recipient.chat_id || recipient.chatId || update.chat_id || update.chatId,
         user_id: sender.user_id || sender.userId || update.user_id,
+        prefer_user_id: true,
       };
       const phone = String(replyTarget.user_id || '');
 
@@ -379,6 +381,7 @@ function createBotUpdateProcessor(deps) {
     const replyTarget = {
       chat_id: msg?.recipient?.chat_id,
       user_id: sender.user_id,
+      prefer_user_id: true,
     };
     const senderId = replyTarget;
     const phone = String(sender.user_id);

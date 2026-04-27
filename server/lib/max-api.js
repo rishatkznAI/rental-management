@@ -53,10 +53,14 @@ function createMaxApiClient({
 
   function resolveRecipientQuery(target) {
     if (target && typeof target === 'object') {
+      const userId = target.userId ?? target.user_id;
+      if ((target.preferUserId || target.prefer_user_id) && userId) {
+        return `user_id=${encodeURIComponent(userId)}`;
+      }
+
       const chatId = target.chatId ?? target.chat_id;
       if (chatId) return `chat_id=${encodeURIComponent(chatId)}`;
 
-      const userId = target.userId ?? target.user_id;
       if (userId) return `user_id=${encodeURIComponent(userId)}`;
     }
 

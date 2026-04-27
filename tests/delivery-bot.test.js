@@ -632,6 +632,30 @@ test('MAX sendMessage keeps chat_id errors in the current bot chat by default', 
   assert.match(requests[0].url, /chat_id=399385588/);
 });
 
+test('MAX sendMessage can prefer user_id for private bot updates', async () => {
+  const requests = [];
+  const client = createMaxApiClient({
+    botToken: 'token',
+    maxApiBase: 'https://platform-api.example',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { json: async () => ({ success: true, message_id: 'msg-1' }) };
+    },
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  const result = await client.sendMessage({
+    chat_id: 399385588,
+    user_id: 123946038,
+    prefer_user_id: true,
+  }, 'Проверка');
+
+  assert.equal(result.success, true);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, /user_id=123946038/);
+  assert.doesNotMatch(requests[0].url, /chat_id=399385588/);
+});
+
 test('MAX sendMessage can explicitly fallback to user_id when chat_id is not found', async () => {
   const requests = [];
   const client = createMaxApiClient({

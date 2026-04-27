@@ -517,18 +517,6 @@ function createBotHandlers(deps) {
     });
     const existingUser = getAuthorizedUserForCurrentBot(phone, senderId);
     if (existingUser?.userRole === 'Перевозчик') {
-      if (!preferCarrierAutoLogin) {
-        return reply(
-          senderId,
-          getSharedBotEntryText(payloadLine),
-          {
-            attachments: sharedBotEntryKeyboard(),
-            brandImage: true,
-            phone,
-            cleanupPrevious: true,
-          },
-        );
-      }
       return reply(
         senderId,
         getMainMenuText(existingUser),
@@ -564,16 +552,11 @@ function createBotHandlers(deps) {
         },
       );
     }
-    const linkedCarrier = !preferCarrierAutoLogin ? findCarrierByMaxKey(phone) : null;
+    updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
     return reply(
       senderId,
-      withBotMenu(
-        `👋 Добро пожаловать в бот «Скайтех»!${payloadLine}\n\nНажмите «Войти», затем бот по шагам попросит логин и пароль.`,
-        linkedCarrier
-          ? ['если нужна доставка: нажмите «Мои доставки»', 'ручной вход: /start email@company.ru пароль']
-          : ['если хотите вручную: /start email@company.ru пароль'],
-      ),
-      { attachments: linkedCarrier ? sharedBotEntryKeyboard() : authKeyboard(), brandImage: true, phone, cleanupPrevious: true },
+      `👋 Добро пожаловать в бот «Скайтех»!${payloadLine}\n\n${getLoginPromptText()}`,
+      { attachments: loginPromptKeyboard(), brandImage: true, phone, cleanupPrevious: true },
     );
   }
 
@@ -804,6 +787,14 @@ function createBotHandlers(deps) {
     ].join('\n');
   }
 
+  function getLoginPromptText() {
+    return '👤 Напишите логин (email) следующим сообщением.';
+  }
+
+  function loginPromptKeyboard() {
+    return keyboard([backAndMainRow('menu:cancel_login')]);
+  }
+
   function normalizeCommandText(value) {
     return String(value || '')
       .trim()
@@ -903,6 +894,15 @@ function createBotHandlers(deps) {
 
   function isDeliveryModeCallback(payload) {
     return payload === 'menu:deliveries' || payload.startsWith('delivery:status:');
+  }
+
+  function isKnownBotCommand(lower, commandText, commandCompact) {
+    return lower.startsWith('/start') ||
+      commandText === 'меню' ||
+      commandText === 'помощь' ||
+      commandCompact === 'help' ||
+      isDeliveriesCommand(commandText, commandCompact) ||
+      isStaffCommand(lower, commandText, commandCompact);
   }
 
   const {
@@ -2761,16 +2761,6 @@ function createBotHandlers(deps) {
     if (lower.startsWith('/start')) {
       console.log('[TRACE] /start matched, parts=%d', parts.length);
       if (activeBotUser && parts.length < 3) {
-        if (!preferCarrierAutoLogin && activeBotUser.userRole === 'Перевозчик') {
-          resetBotFlow(phone);
-          return replyWithUi(
-            getSharedBotEntryText(),
-            {
-              attachments: sharedBotEntryKeyboard(),
-              brandImage: true,
-            },
-          );
-        }
         resetBotFlow(phone);
         return replyWithUi(
           getMainMenuText(activeBotUser),
@@ -2790,22 +2780,11 @@ function createBotHandlers(deps) {
         });
       }
       if (parts.length < 3) {
-        const linkedCarrier = !preferCarrierAutoLogin ? findCarrierByMaxKey(phone) : null;
-        if (linkedCarrier) {
-          resetBotFlow(phone);
-          return replyWithUi(
-            getSharedBotEntryText(),
-            {
-              attachments: sharedBotEntryKeyboard(),
-              brandImage: true,
-            },
-          );
-        }
         updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
         return reply(
           senderId,
-          '👤 Напишите логин (email) следующим сообщением.',
-          { attachments: keyboard([backAndMainRow('menu:cancel_login')]), brandImage: true, phone, callbackContext, replaceMessage: Boolean(uiContext.replaceMessage), cleanupPrevious: !callbackContext },
+          getLoginPromptText(),
+          { attachments: loginPromptKeyboard(), brandImage: true, phone, callbackContext, replaceMessage: Boolean(uiContext.replaceMessage), cleanupPrevious: !callbackContext },
         );
       }
       const [, email, password] = parts;
@@ -2912,16 +2891,11 @@ function createBotHandlers(deps) {
 
     const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
     if (!authUser) {
-      if (isDeliveriesCommand(commandText, commandCompact)) {
-        const carrierUser = authorizeCarrier(String(phone), senderId);
-        if (carrierUser?.userRole === 'Перевозчик') {
-          const deliveries = getCarrierDeliveries(phone, carrierUser);
-          const activeDelivery = deliveries.find(item => item.status !== 'completed' && item.status !== 'cancelled') || deliveries[0] || null;
-          return replyWithUi(formatCarrierDeliveries(deliveries), {
-            attachments: activeDelivery ? deliveryStatusKeyboard(activeDelivery) : carrierKeyboard(),
-            mechanicStage: 'delivery_list',
-          });
-        }
+      if (trimmed.startsWith('/') && !isKnownBotCommand(lower, commandText, commandCompact)) {
+        return replyWithUi('❓ Неизвестная команда. Напишите /start, чтобы войти в бот.', {
+          attachments: authKeyboard(),
+          brandImage: true,
+        });
       }
       if (preferCarrierAutoLogin) {
         return reply(senderId, formatUnlinkedCarrierMessage(), {
@@ -2933,10 +2907,11 @@ function createBotHandlers(deps) {
           cleanupPrevious: !callbackContext,
         });
       }
-      return reply(senderId,
-        '🔒 Вы не авторизованы.\n\nНажмите «Войти», и я попрошу логин и пароль по шагам.',
-        { attachments: authKeyboard(), brandImage: true },
-      );
+      updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
+      return replyWithUi(`🔒 Вы не авторизованы.\n\n${getLoginPromptText()}`, {
+        attachments: loginPromptKeyboard(),
+        brandImage: true,
+      });
     }
 
     const botUsers = getBotUsers();

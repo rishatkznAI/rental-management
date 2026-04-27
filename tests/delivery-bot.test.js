@@ -92,7 +92,7 @@ test('regular bot_started keeps an existing non-carrier role menu', async () => 
   assert.doesNotMatch(messages.at(-1).text, /Здесь вы видите свои доставки/);
 });
 
-test('regular bot_started does not auto-authorize a linked carrier', async () => {
+test('regular bot_started asks for login when user is not authorized', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users = {};
 
@@ -100,11 +100,14 @@ test('regular bot_started does not auto-authorize a linked carrier', async () =>
 
   assert.equal(state.bot_users['100'], undefined);
   assert.match(messages.at(-1).text, /Добро пожаловать/);
+  assert.match(messages.at(-1).text, /Напишите логин/);
+  assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
   const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
-  assert.equal(menu.payload.buttons[0][1].text, 'Мои доставки');
+  assert.equal(menu.payload.buttons[0][0].text, 'Назад');
+  assert.equal(menu.payload.buttons[0][1].text, 'Главное меню');
 });
 
-test('shared bot delivery command can authorize a linked carrier explicitly', async () => {
+test('shared bot delivery command asks for login when user is not authorized', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users = {};
   state.deliveries = [{
@@ -123,9 +126,10 @@ test('shared bot delivery command can authorize a linked carrier explicitly', as
 
   await handlers.handleCommand({ user_id: 100 }, '100', '/доставки');
 
-  assert.equal(state.bot_users['100'].userRole, 'Перевозчик');
-  assert.match(messages.at(-1).text, /Мои доставки \(1\)/);
-  assert.match(messages.at(-1).text, /Подъёмник/);
+  assert.equal(state.bot_users['100'], undefined);
+  assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
+  assert.match(messages.at(-1).text, /Вы не авторизованы/);
+  assert.match(messages.at(-1).text, /Напишите логин/);
 });
 
 test('start command returns menu for an authorized manager', async () => {
@@ -139,7 +143,7 @@ test('start command returns menu for an authorized manager', async () => {
   assert.equal(menu.payload.buttons[1][1].text, 'Новая доставка');
 });
 
-test('shared bot start lets a stale carrier session switch to employee login', async () => {
+test('start command returns menu for an authorized carrier', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users['100'] = {
     userId: 'carrier-1',
@@ -151,10 +155,20 @@ test('shared bot start lets a stale carrier session switch to employee login', a
 
   await handlers.handleCommand({ user_id: 100 }, '100', '/start');
 
-  assert.match(messages.at(-1).text, /Выберите режим работы/);
+  assert.match(messages.at(-1).text, /Перевозчик/);
   const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
-  assert.equal(menu.payload.buttons[0][0].text, 'Войти');
-  assert.equal(menu.payload.buttons[0][1].text, 'Мои доставки');
+  assert.equal(menu.payload.buttons[0][0].text, 'Мои доставки');
+  assert.equal(menu.payload.buttons[0][1].text, 'Обновить');
+});
+
+test('unknown command reports an error before authorization', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users = {};
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/непонятно');
+
+  assert.equal(state.bot_sessions['100']?.pendingAction, undefined);
+  assert.match(messages.at(-1).text, /Неизвестная команда/);
 });
 
 test('shared bot blocks service commands while delivery mode is active', async () => {
@@ -213,14 +227,15 @@ test('shared bot blocks delivery commands while staff mode is active', async () 
   assert.equal(menu.payload.buttons[0][0].text, 'Перейти в доставку');
 });
 
-test('shared bot can switch from staff mode to delivery explicitly', async () => {
+test('shared bot switch to delivery starts authorization when user is not logged in', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
 
   await handlers.handleCallback({ user_id: 100 }, '100', 'mode:switch_delivery', { callbackId: 'cb-switch' });
 
-  assert.equal(state.bot_users['100'].userRole, 'Перевозчик');
-  assert.equal(state.bot_users['100'].botMode, 'delivery');
-  assert.match(messages.at(-1).text, /достав/);
+  assert.equal(state.bot_users['100'], undefined);
+  assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
+  assert.match(messages.at(-1).text, /Вы не авторизованы/);
+  assert.match(messages.at(-1).text, /Напишите логин/);
 });
 
 test('manager login flow greets manager with rental manager menu', async () => {

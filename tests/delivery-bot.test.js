@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const { createBotHandlers } = require('../server/lib/bot-commands.js');
 const {
   BOT_STAGE_IMAGE_VERSION,
+  MANAGER_STAGE_IMAGES,
   attachBotBrandImage,
   attachMechanicStageImage,
 } = require('../server/lib/bot-stage-images.js');
@@ -445,6 +446,7 @@ test('manager free equipment command shows category buttons', async () => {
   const menu = message.options.attachments.find((item) => item.type === 'inline_keyboard');
   assert.equal(menu.payload.buttons[0][0].text, 'Ножничный · 2');
   assert.equal(menu.payload.buttons[0][0].payload, 'equipmentcat:0:0');
+  assert.match(messages[0].options.attachments[0].payload.file, /manager-stages\/equipment-optimistic\.jpg$/);
 });
 
 test('manager free equipment category opens paged equipment list', async () => {
@@ -708,6 +710,19 @@ test('delivery bot uses delivery-specific stage images', () => {
   assert.equal(attachments[1].type, 'inline_keyboard');
 });
 
+test('rental manager bot uses manager-specific stage images', () => {
+  const attachments = attachMechanicStageImage('manager_summary', [{ type: 'inline_keyboard', payload: { buttons: [] } }]);
+
+  assert.equal(attachments.length, 2);
+  assert.equal(attachments[0].type, 'image');
+  assert.equal(MANAGER_STAGE_IMAGES.manager_summary, 'summary-optimistic.jpg');
+  assert.match(attachments[0].payload.file, /manager-stages\/summary-optimistic\.jpg$/);
+  assert.equal(attachments[0].payload.publicPath, '/bot-assets/manager-stages/summary-optimistic.jpg');
+  assert.equal(attachments[0].payload.cacheKey, `manager-stage:manager_summary:${BOT_STAGE_IMAGE_VERSION}`);
+  assert.equal(fs.existsSync(attachments[0].payload.file), true);
+  assert.equal(attachments[1].type, 'inline_keyboard');
+});
+
 test('bot brand logo is prepended to bot keyboard attachments', () => {
   const attachments = attachBotBrandImage([{ type: 'inline_keyboard', payload: { buttons: [] } }]);
 
@@ -944,8 +959,10 @@ test('bot callback sends the new message before slow cleanup finishes', async ()
   await new Promise(resolve => setImmediate(resolve));
 
   assert.equal(result, 'done');
-  assert.equal(messages.length, 1);
-  assert.equal(state.bot_sessions['100'].lastBotMessageId, 'msg-1');
+  assert.equal(messages.length, 2);
+  assert.match(messages[0].options.attachments[0].payload.file, /manager-stages\/main-menu-optimistic\.jpg$/);
+  assert.equal(state.bot_sessions['100'].lastBotImageMessageId, 'msg-1');
+  assert.equal(state.bot_sessions['100'].lastBotMessageId, 'msg-2');
   assert.equal(answerStarted, true);
   assert.equal(deleteStarted, true);
 });

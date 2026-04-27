@@ -4,7 +4,8 @@ const BOT_BRAND_IMAGE = path.join(__dirname, '..', 'assets', 'bot', 'brand', 'sk
 const BOT_ASSET_PUBLIC_PATH = '/bot-assets';
 const MECHANIC_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'mechanic-stages');
 const DELIVERY_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'delivery-stages');
-const BOT_STAGE_IMAGE_VERSION = 'optimistic-2026-04-27';
+const MANAGER_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'manager-stages');
+const BOT_STAGE_IMAGE_VERSION = 'optimistic-manager-2026-04-27';
 
 const MECHANIC_STAGE_IMAGES = {
   main: 'main-menu-optimistic.jpg',
@@ -28,6 +29,15 @@ const DELIVERY_STAGE_IMAGES = {
   delivery_status: 'delivery-status-optimistic.jpg',
 };
 
+const MANAGER_STAGE_IMAGES = {
+  manager_main: 'main-menu-optimistic.jpg',
+  manager_rentals: 'rentals-optimistic.jpg',
+  manager_equipment: 'equipment-optimistic.jpg',
+  manager_summary: 'summary-optimistic.jpg',
+  manager_delivery: 'delivery-create-optimistic.jpg',
+  manager_service: 'service-create-optimistic.jpg',
+};
+
 function stageImageConfig(stageKey) {
   if (DELIVERY_STAGE_IMAGES[stageKey]) {
     return {
@@ -35,6 +45,15 @@ function stageImageConfig(stageKey) {
       dir: DELIVERY_STAGE_IMAGE_DIR,
       publicDir: 'delivery-stages',
       cachePrefix: 'delivery-stage',
+    };
+  }
+
+  if (MANAGER_STAGE_IMAGES[stageKey]) {
+    return {
+      fileName: MANAGER_STAGE_IMAGES[stageKey],
+      dir: MANAGER_STAGE_IMAGE_DIR,
+      publicDir: 'manager-stages',
+      cachePrefix: 'manager-stage',
     };
   }
 
@@ -98,6 +117,7 @@ function operationStageImageKey(stepMeta) {
 module.exports = {
   BOT_STAGE_IMAGE_VERSION,
   DELIVERY_STAGE_IMAGES,
+  MANAGER_STAGE_IMAGES,
   MECHANIC_STAGE_IMAGES,
   attachBotBrandImage,
   attachMechanicStageImage,

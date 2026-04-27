@@ -610,7 +610,7 @@ test('MAX sendMessage can use public URL for bot stage images', async () => {
   ]);
 });
 
-test('MAX sendMessage falls back to user_id when chat_id is not found', async () => {
+test('MAX sendMessage keeps chat_id errors in the current bot chat by default', async () => {
   const requests = [];
   const client = createMaxApiClient({
     botToken: 'token',
@@ -626,6 +626,32 @@ test('MAX sendMessage falls back to user_id when chat_id is not found', async ()
   });
 
   const result = await client.sendMessage({ chat_id: 399385588, user_id: 123946038 }, 'Проверка');
+
+  assert.equal(result.code, 'chat.not.found');
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, /chat_id=399385588/);
+});
+
+test('MAX sendMessage can explicitly fallback to user_id when chat_id is not found', async () => {
+  const requests = [];
+  const client = createMaxApiClient({
+    botToken: 'token',
+    maxApiBase: 'https://platform-api.example',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (url.includes('chat_id=399385588')) {
+        return { json: async () => ({ code: 'chat.not.found', message: 'Chat 399385588 not found' }) };
+      }
+      return { json: async () => ({ success: true, message_id: 'msg-1' }) };
+    },
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  const result = await client.sendMessage(
+    { chat_id: 399385588, user_id: 123946038 },
+    'Проверка',
+    { fallbackToUserIdOnChatNotFound: true },
+  );
 
   assert.equal(result.success, true);
   assert.equal(requests.length, 2);

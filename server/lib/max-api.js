@@ -327,10 +327,16 @@ function createMaxApiClient({
     let res = await maxRequest('POST', `/messages?${recipientQuery}`, body);
     if (isChatNotFound(res)) {
       const userRecipientQuery = resolveUserRecipientQuery(target);
-      if (userRecipientQuery && userRecipientQuery !== recipientQuery) {
+      if (
+        options.fallbackToUserIdOnChatNotFound === true &&
+        userRecipientQuery &&
+        userRecipientQuery !== recipientQuery
+      ) {
         logger.warn(`[MAX API] ${recipientQuery} не найден, повторяем отправку через ${userRecipientQuery}`);
         recipientQuery = userRecipientQuery;
         res = await maxRequest('POST', `/messages?${recipientQuery}`, body);
+      } else if (userRecipientQuery && userRecipientQuery !== recipientQuery) {
+        logger.warn(`[MAX API] ${recipientQuery} не найден, отправка через ${userRecipientQuery} отключена`);
       }
     }
     for (const delayMs of options.attachmentRetryDelaysMs || [800, 1600]) {

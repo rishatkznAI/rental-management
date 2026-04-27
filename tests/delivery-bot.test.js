@@ -7,7 +7,11 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createBotHandlers } = require('../server/lib/bot-commands.js');
-const { attachBotBrandImage, attachMechanicStageImage } = require('../server/lib/bot-stage-images.js');
+const {
+  BOT_STAGE_IMAGE_VERSION,
+  attachBotBrandImage,
+  attachMechanicStageImage,
+} = require('../server/lib/bot-stage-images.js');
 const { createMaxApiClient } = require('../server/lib/max-api.js');
 const { createBotUpdateProcessor } = require('../server/routes/bot.js');
 
@@ -595,8 +599,8 @@ test('delivery bot uses delivery-specific stage images', () => {
   assert.equal(attachments.length, 2);
   assert.equal(attachments[0].type, 'image');
   assert.match(attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
-  assert.equal(attachments[0].payload.publicPath, '/bot-assets/delivery-stages/main-menu.jpg');
-  assert.equal(attachments[0].payload.cacheKey, 'delivery-stage:delivery_main');
+  assert.equal(attachments[0].payload.publicPath, `/bot-assets/delivery-stages/main-menu.jpg?v=${BOT_STAGE_IMAGE_VERSION}`);
+  assert.equal(attachments[0].payload.cacheKey, `delivery-stage:delivery_main:${BOT_STAGE_IMAGE_VERSION}`);
   assert.equal(fs.existsSync(attachments[0].payload.file), true);
   assert.equal(attachments[1].type, 'inline_keyboard');
 });
@@ -678,7 +682,7 @@ test('MAX sendMessage can use public URL for bot stage images', async () => {
   assert.deepEqual(messageBody.attachments, [
     {
       type: 'image',
-      payload: { url: 'https://bot.example/bot-assets/mechanic-stages/main-menu.jpg' },
+      payload: { url: `https://bot.example/bot-assets/mechanic-stages/main-menu.jpg?v=${BOT_STAGE_IMAGE_VERSION}` },
     },
   ]);
 });

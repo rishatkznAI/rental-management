@@ -4,6 +4,7 @@ const BOT_BRAND_IMAGE = path.join(__dirname, '..', 'assets', 'bot', 'brand', 'sk
 const BOT_ASSET_PUBLIC_PATH = '/bot-assets';
 const MECHANIC_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'mechanic-stages');
 const DELIVERY_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'delivery-stages');
+const BOT_STAGE_IMAGE_VERSION = 'optimistic-2026-04-27';
 
 const MECHANIC_STAGE_IMAGES = {
   main: 'main-menu.jpg',
@@ -50,12 +51,13 @@ function stageImageConfig(stageKey) {
 function stageImageAttachment(stageKey) {
   const config = stageImageConfig(stageKey);
   if (!config) return null;
+  const publicPath = `${BOT_ASSET_PUBLIC_PATH}/${config.publicDir}/${config.fileName}?v=${BOT_STAGE_IMAGE_VERSION}`;
   return {
     type: 'image',
     payload: {
       file: path.join(config.dir, config.fileName),
-      publicPath: `${BOT_ASSET_PUBLIC_PATH}/${config.publicDir}/${config.fileName}`,
-      cacheKey: `${config.cachePrefix}:${stageKey}`,
+      publicPath,
+      cacheKey: `${config.cachePrefix}:${stageKey}:${BOT_STAGE_IMAGE_VERSION}`,
     },
   };
 }
@@ -94,6 +96,7 @@ function operationStageImageKey(stepMeta) {
 }
 
 module.exports = {
+  BOT_STAGE_IMAGE_VERSION,
   DELIVERY_STAGE_IMAGES,
   MECHANIC_STAGE_IMAGES,
   attachBotBrandImage,

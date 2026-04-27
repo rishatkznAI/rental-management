@@ -182,12 +182,8 @@ app.use('/bot-assets', express.static(path.join(__dirname, 'assets', 'bot'), {
 // ── Конфигурация ───────────────────────────────────────────────────────────────
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const MANAGER_BOT_TOKEN = process.env.MANAGER_BOT_TOKEN || '';
-const DELIVERY_BOT_TOKEN = process.env.DELIVERY_BOT_TOKEN || '';
 const MAX_API   = 'https://platform-api.max.ru';
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
-const MANAGER_WEBHOOK_URL = process.env.MANAGER_WEBHOOK_URL || WEBHOOK_URL;
-const DELIVERY_WEBHOOK_URL = process.env.DELIVERY_WEBHOOK_URL || WEBHOOK_URL;
 const MAIN_BOT_WEBHOOK_PATH = '/bot/webhook';
 const MANAGER_BOT_WEBHOOK_PATH = '/bot/webhook/manager';
 const DELIVERY_BOT_WEBHOOK_PATH = '/bot/webhook/delivery';
@@ -197,23 +193,16 @@ function normalizeBotToken(value) {
 }
 
 const MAIN_BOT_TOKEN = normalizeBotToken(BOT_TOKEN);
-const EFFECTIVE_MANAGER_BOT_TOKEN = normalizeBotToken(MANAGER_BOT_TOKEN) || MAIN_BOT_TOKEN;
-const EFFECTIVE_DELIVERY_BOT_TOKEN = normalizeBotToken(DELIVERY_BOT_TOKEN) || MAIN_BOT_TOKEN;
-const managerAndDeliveryShareToken = Boolean(
-  EFFECTIVE_MANAGER_BOT_TOKEN &&
-  EFFECTIVE_MANAGER_BOT_TOKEN === EFFECTIVE_DELIVERY_BOT_TOKEN,
-);
-const MAX_POLLING_FORCE_ENABLED = process.env.MAX_POLLING_ENABLED === '1';
-const MAX_WEBHOOK_FALLBACK_POLLING = Boolean(WEBHOOK_URL) && process.env.MAX_WEBHOOK_FALLBACK_POLLING !== '0';
-const MAX_POLLING_DISABLED = process.env.MAX_POLLING_ENABLED === '0' && !MAX_WEBHOOK_FALLBACK_POLLING;
-const MAX_POLLING_ENABLED = MAX_POLLING_FORCE_ENABLED ||
-  (!MAX_POLLING_DISABLED && (!WEBHOOK_URL || MAX_WEBHOOK_FALLBACK_POLLING));
+const EFFECTIVE_MANAGER_BOT_TOKEN = MAIN_BOT_TOKEN;
+const EFFECTIVE_DELIVERY_BOT_TOKEN = MAIN_BOT_TOKEN;
+const managerAndDeliveryShareToken = true;
+const MAX_BOT_TRANSPORT = String(process.env.MAX_BOT_TRANSPORT || (WEBHOOK_URL ? 'webhook' : 'polling')).toLowerCase();
+const MAX_POLLING_ENABLED = MAX_BOT_TRANSPORT === 'polling';
 const MAX_POLL_INTERVAL_MS = Math.max(3000, Number(process.env.MAX_POLL_INTERVAL_MS || 5000));
 const MAX_POLL_INITIAL_REPLAY_MS = Math.max(0, Number(process.env.MAX_POLL_INITIAL_REPLAY_MS || 5 * 60 * 1000));
 const MAX_POLL_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.MAX_POLL_REQUEST_TIMEOUT_MS || 8000));
-const MAX_REGISTER_WEBHOOK_WITH_POLLING = process.env.MAX_REGISTER_WEBHOOK_WITH_POLLING === '1';
 const SHOULD_REGISTER_MAX_WEBHOOKS = Boolean(WEBHOOK_URL) &&
-  (!MAX_POLLING_ENABLED || MAX_REGISTER_WEBHOOK_WITH_POLLING);
+  MAX_BOT_TRANSPORT !== 'polling';
 
 function readData(name) {
   return getData(name);
@@ -247,39 +236,13 @@ const {
   logger: console,
 });
 
-const managerMaxApiClient = EFFECTIVE_MANAGER_BOT_TOKEN
-  ? createMaxApiClient({
-      botToken: EFFECTIVE_MANAGER_BOT_TOKEN,
-      maxApiBase: MAX_API,
-      fetchImpl: fetch,
-      webhookUrl: MANAGER_WEBHOOK_URL,
-      webhookPath: MANAGER_BOT_WEBHOOK_PATH,
-      logger: console,
-    })
-  : null;
+const managerSendMessage = sendMessage;
+const managerDeleteMessage = deleteMessage;
+const managerAnswerCallback = answerCallback;
 
-const deliveryMaxApiClient = EFFECTIVE_DELIVERY_BOT_TOKEN
-  ? createMaxApiClient({
-      botToken: EFFECTIVE_DELIVERY_BOT_TOKEN,
-      maxApiBase: MAX_API,
-      fetchImpl: fetch,
-      webhookUrl: DELIVERY_WEBHOOK_URL,
-      webhookPath: DELIVERY_BOT_WEBHOOK_PATH,
-      logger: console,
-    })
-  : null;
-
-const managerSendMessage = managerMaxApiClient?.sendMessage || sendMessage;
-const managerDeleteMessage = managerMaxApiClient?.deleteMessage || deleteMessage;
-const managerAnswerCallback = managerMaxApiClient?.answerCallback || answerCallback;
-const registerManagerWebhook = managerMaxApiClient?.registerWebhook || null;
-const startManagerWebhookWatchdog = managerMaxApiClient?.startWebhookWatchdog || null;
-
-const deliverySendMessage = deliveryMaxApiClient?.sendMessage || sendMessage;
-const deliveryDeleteMessage = deliveryMaxApiClient?.deleteMessage || deleteMessage;
-const deliveryAnswerCallback = deliveryMaxApiClient?.answerCallback || answerCallback;
-const registerDeliveryWebhook = deliveryMaxApiClient?.registerWebhook || null;
-const startDeliveryWebhookWatchdog = deliveryMaxApiClient?.startWebhookWatchdog || null;
+const deliverySendMessage = sendMessage;
+const deliveryDeleteMessage = deleteMessage;
+const deliveryAnswerCallback = answerCallback;
 
 const gprsGateway = createGprsGateway({
   readData,
@@ -885,9 +848,9 @@ registerBotApiRoutes(apiRouter, {
   botToken: BOT_TOKEN,
   webhookUrl: WEBHOOK_URL,
   managerBotToken: EFFECTIVE_MANAGER_BOT_TOKEN,
-  managerWebhookUrl: MANAGER_WEBHOOK_URL,
+  managerWebhookUrl: WEBHOOK_URL,
   deliveryBotToken: EFFECTIVE_DELIVERY_BOT_TOKEN,
-  deliveryWebhookUrl: DELIVERY_WEBHOOK_URL,
+  deliveryWebhookUrl: WEBHOOK_URL,
 });
 
 const {
@@ -1343,16 +1306,14 @@ function startMaxBotPolling() {
   if (!MAX_POLLING_ENABLED) {
     console.log(WEBHOOK_URL
       ? '[BOT] /bot/polling выключен: используется webhook MAX'
-      : '[BOT] /bot/polling выключен через MAX_POLLING_ENABLED=0');
+      : '[BOT] /bot/polling выключен: транспорт webhook без WEBHOOK_URL');
     return null;
   }
   if (!MAIN_BOT_TOKEN) {
     console.log('[BOT] /bot/polling пропущен: BOT_TOKEN не задан');
     return null;
   }
-  console.log(MAX_WEBHOOK_FALLBACK_POLLING
-    ? `[BOT] /bot/polling fallback включён: interval=${MAX_POLL_INTERVAL_MS}ms`
-    : `[BOT] /bot/polling включён: interval=${MAX_POLL_INTERVAL_MS}ms`);
+  console.log(`[BOT] /bot/polling включён: interval=${MAX_POLL_INTERVAL_MS}ms`);
   pollMaxBotUpdatesOnce();
   return setInterval(pollMaxBotUpdatesOnce, MAX_POLL_INTERVAL_MS);
 }
@@ -2062,23 +2023,19 @@ registerBotRoutes(app, {
 });
 
 registerBotRoutes(app, {
-  handleCommand: managerBotHandlers.handleCommand,
-  handleBotStarted: managerBotHandlers.handleBotStarted,
-  handleCallback: managerBotHandlers.handleCallback,
-  answerCallback: managerAnswerCallback,
+  handleCommand: auditedHandleCommand,
+  handleBotStarted: auditedHandleBotStarted,
+  handleCallback: auditedHandleCallback,
+  answerCallback,
   logger: console,
   webhookPath: MANAGER_BOT_WEBHOOK_PATH,
 });
 
-const deliveryRouteHandlers = managerAndDeliveryShareToken
-  ? managerBotHandlers
-  : deliveryBotHandlers;
-
 registerBotRoutes(app, {
-  handleCommand: deliveryRouteHandlers.handleCommand,
-  handleBotStarted: deliveryRouteHandlers.handleBotStarted,
-  handleCallback: deliveryRouteHandlers.handleCallback,
-  answerCallback: deliveryAnswerCallback,
+  handleCommand: auditedHandleCommand,
+  handleBotStarted: auditedHandleBotStarted,
+  handleCallback: auditedHandleCallback,
+  answerCallback,
   logger: console,
   webhookPath: DELIVERY_BOT_WEBHOOK_PATH,
 });
@@ -2112,26 +2069,14 @@ startServer({
     applyAdminResetFromEnv,
     registerWebhook: async () => {
       if (!SHOULD_REGISTER_MAX_WEBHOOKS) {
-        console.log('[BOT] Webhook MAX пропущен: используется polling');
+        console.log(`[BOT] Webhook MAX пропущен: транспорт ${MAX_BOT_TRANSPORT}`);
         return;
       }
       await registerMainWebhook();
-      if (!managerAndDeliveryShareToken && typeof registerManagerWebhook === 'function') {
-        await registerManagerWebhook();
-      }
-      if (!managerAndDeliveryShareToken && typeof registerDeliveryWebhook === 'function') {
-        await registerDeliveryWebhook();
-      }
     },
     startWebhookWatchdog: () => {
       if (!SHOULD_REGISTER_MAX_WEBHOOKS) return;
       if (typeof startMainWebhookWatchdog === 'function') startMainWebhookWatchdog();
-      if (!managerAndDeliveryShareToken && typeof startManagerWebhookWatchdog === 'function') {
-        startManagerWebhookWatchdog();
-      }
-      if (!managerAndDeliveryShareToken && typeof startDeliveryWebhookWatchdog === 'function') {
-        startDeliveryWebhookWatchdog();
-      }
     },
     startBotPolling: startMaxBotPolling,
     startGprsGateway: () => gprsGateway.start(),

@@ -382,7 +382,7 @@ test('dedicated delivery bot_started prefers linked carrier role', async () => {
   assert.match(messages.at(-1).text, /Перевозчик/);
   assert.match(messages.at(-1).text, /доставки/);
   assert.equal(messages.length, 2);
-  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu-optimistic\.jpg$/);
 });
 
 test('dedicated delivery bot explains missing MAX carrier link', async () => {
@@ -394,7 +394,7 @@ test('dedicated delivery bot explains missing MAX carrier link', async () => {
   assert.equal(state.bot_users['100'].userRole, 'Менеджер по аренде');
   assert.equal(messages.length, 2);
   assert.match(messages.at(-1).text, /не привязан к перевозчику/);
-  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu-optimistic\.jpg$/);
   assert.equal(messages.at(-1).options.attachments[0].type, 'inline_keyboard');
 });
 
@@ -412,7 +412,7 @@ test('dedicated delivery bot does not reuse an existing mechanic menu', async ()
   await handlers.handleCommand({ user_id: 100 }, '100', '/меню');
 
   assert.equal(messages.length, 2);
-  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu-optimistic\.jpg$/);
   assert.match(messages.at(-1).text, /не привязан к перевозчику/);
   assert.equal(messages.at(-1).options.attachments[0].payload.buttons[0][0].text, 'Мои доставки');
 });
@@ -431,7 +431,7 @@ test('dedicated delivery bot ignores stale mechanic callbacks', async () => {
   await handlers.handleCallback({ user_id: 100 }, '100', 'menu:new_ticket', { callbackId: 'cb-1' });
 
   assert.equal(messages.length, 2);
-  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu-optimistic\.jpg$/);
   assert.match(messages.at(-1).text, /не привязан к перевозчику/);
   assert.equal(messages.at(-1).options.attachments[0].payload.buttons[0][0].text, 'Мои доставки');
 });
@@ -451,7 +451,7 @@ test('mechanic main navigation sends friendly stage image', async () => {
   const imageAttachments = messages[0].options.attachments;
   const menuAttachments = messages[1].options.attachments;
   assert.equal(imageAttachments[0].type, 'image');
-  assert.match(imageAttachments[0].payload.file, /main-menu\.jpg$/);
+  assert.match(imageAttachments[0].payload.file, /main-menu-optimistic\.jpg$/);
   assert.doesNotMatch(imageAttachments[0].payload.file, /skytech-logo/);
   assert.equal(menuAttachments[0].type, 'inline_keyboard');
 });
@@ -506,7 +506,7 @@ test('delivery menu shows image and status buttons for carrier', async () => {
   await handlers.handleCommand({ user_id: 100 }, '100', '/доставки');
 
   assert.equal(messages.length, 2);
-  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/delivery-list\.jpg$/);
+  assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/delivery-list-optimistic\.jpg$/);
   assert.match(messages[1].text, /Мои доставки/);
   assert.deepEqual(messages[1].options.attachments[0].payload.buttons[0][0], {
     type: 'callback',
@@ -588,7 +588,7 @@ test('mechanic stage image is prepended to bot keyboard attachments', () => {
 
   assert.equal(attachments.length, 2);
   assert.equal(attachments[0].type, 'image');
-  assert.match(attachments[0].payload.file, /field-trip\.jpg$/);
+  assert.match(attachments[0].payload.file, /field-trip-optimistic\.jpg$/);
   assert.equal(fs.existsSync(attachments[0].payload.file), true);
   assert.equal(attachments[1].type, 'inline_keyboard');
 });
@@ -598,8 +598,8 @@ test('delivery bot uses delivery-specific stage images', () => {
 
   assert.equal(attachments.length, 2);
   assert.equal(attachments[0].type, 'image');
-  assert.match(attachments[0].payload.file, /delivery-stages\/main-menu\.jpg$/);
-  assert.equal(attachments[0].payload.publicPath, `/bot-assets/delivery-stages/main-menu.jpg?v=${BOT_STAGE_IMAGE_VERSION}`);
+  assert.match(attachments[0].payload.file, /delivery-stages\/main-menu-optimistic\.jpg$/);
+  assert.equal(attachments[0].payload.publicPath, '/bot-assets/delivery-stages/main-menu-optimistic.jpg');
   assert.equal(attachments[0].payload.cacheKey, `delivery-stage:delivery_main:${BOT_STAGE_IMAGE_VERSION}`);
   assert.equal(fs.existsSync(attachments[0].payload.file), true);
   assert.equal(attachments[1].type, 'inline_keyboard');
@@ -682,7 +682,7 @@ test('MAX sendMessage can use public URL for bot stage images', async () => {
   assert.deepEqual(messageBody.attachments, [
     {
       type: 'image',
-      payload: { url: `https://bot.example/bot-assets/mechanic-stages/main-menu.jpg?v=${BOT_STAGE_IMAGE_VERSION}` },
+      payload: { url: 'https://bot.example/bot-assets/mechanic-stages/main-menu-optimistic.jpg' },
     },
   ]);
 });

@@ -7,25 +7,25 @@ const DELIVERY_STAGE_IMAGE_DIR = path.join(__dirname, '..', 'assets', 'bot', 'de
 const BOT_STAGE_IMAGE_VERSION = 'optimistic-2026-04-27';
 
 const MECHANIC_STAGE_IMAGES = {
-  main: 'main-menu.jpg',
-  menu: 'main-menu.jpg',
-  repairs: 'repair.jpg',
-  repair: 'repair.jpg',
-  ticket: 'repair.jpg',
-  work: 'repair.jpg',
-  parts: 'parts.jpg',
-  photo: 'photo.jpg',
-  field_trip: 'field-trip.jpg',
-  handoff: 'handoff.jpg',
-  operation_check: 'handoff.jpg',
-  operation_photo: 'photo.jpg',
-  complete: 'complete.jpg',
+  main: 'main-menu-optimistic.jpg',
+  menu: 'main-menu-optimistic.jpg',
+  repairs: 'repair-optimistic.jpg',
+  repair: 'repair-optimistic.jpg',
+  ticket: 'repair-optimistic.jpg',
+  work: 'repair-optimistic.jpg',
+  parts: 'parts-optimistic.jpg',
+  photo: 'photo-optimistic.jpg',
+  field_trip: 'field-trip-optimistic.jpg',
+  handoff: 'handoff-optimistic.jpg',
+  operation_check: 'handoff-optimistic.jpg',
+  operation_photo: 'photo-optimistic.jpg',
+  complete: 'complete-optimistic.jpg',
 };
 
 const DELIVERY_STAGE_IMAGES = {
-  delivery_main: 'main-menu.jpg',
-  delivery_list: 'delivery-list.jpg',
-  delivery_status: 'delivery-status.jpg',
+  delivery_main: 'main-menu-optimistic.jpg',
+  delivery_list: 'delivery-list-optimistic.jpg',
+  delivery_status: 'delivery-status-optimistic.jpg',
 };
 
 function stageImageConfig(stageKey) {
@@ -51,7 +51,7 @@ function stageImageConfig(stageKey) {
 function stageImageAttachment(stageKey) {
   const config = stageImageConfig(stageKey);
   if (!config) return null;
-  const publicPath = `${BOT_ASSET_PUBLIC_PATH}/${config.publicDir}/${config.fileName}?v=${BOT_STAGE_IMAGE_VERSION}`;
+  const publicPath = `${BOT_ASSET_PUBLIC_PATH}/${config.publicDir}/${config.fileName}`;
   return {
     type: 'image',
     payload: {

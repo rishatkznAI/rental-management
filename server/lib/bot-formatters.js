@@ -94,6 +94,104 @@ function createBotFormatters(deps) {
     ].filter(Boolean).join(' · ');
   }
 
+  function cleanEquipmentType(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function getEquipmentTypeCatalogLabels() {
+    const labels = new Map([
+      ['scissor', 'Ножничный'],
+      ['articulated', 'Коленчатый'],
+      ['telescopic', 'Телескопический'],
+      ['mast', 'Мачтовый'],
+    ]);
+    const setting = (readData('app_settings') || []).find(item => item.key === 'equipment_type_catalog');
+    const rawItems = Array.isArray(setting?.value)
+      ? setting.value
+      : (Array.isArray(setting?.value?.items) ? setting.value.items : []);
+
+    rawItems.forEach(item => {
+      const value = typeof item === 'string' ? item : item?.value;
+      const label = typeof item === 'string' ? item : (item?.label || item?.value);
+      const normalizedValue = cleanEquipmentType(value);
+      const normalizedLabel = cleanEquipmentType(label);
+      if (normalizedValue && normalizedLabel) {
+        labels.set(normalizedValue, normalizedLabel);
+      }
+    });
+
+    return labels;
+  }
+
+  function getEquipmentTypeLabel(type) {
+    const value = cleanEquipmentType(type);
+    if (!value) return 'Без типа';
+    return getEquipmentTypeCatalogLabels().get(value) || value;
+  }
+
+  function compareEquipmentForBot(left, right) {
+    return `${left.inventoryNumber || ''} ${left.model || ''}`.localeCompare(
+      `${right.inventoryNumber || ''} ${right.model || ''}`,
+      'ru',
+      { numeric: true },
+    );
+  }
+
+  function getFreeEquipmentCategories(equipment) {
+    const groups = new Map();
+    (equipment || [])
+      .filter(item => item?.status === 'available')
+      .forEach(item => {
+        const type = cleanEquipmentType(item.type) || 'unknown';
+        const label = getEquipmentTypeLabel(item.type);
+        const current = groups.get(type) || { type, label, items: [] };
+        current.items.push(item);
+        groups.set(type, current);
+      });
+
+    return [...groups.values()]
+      .map(group => ({
+        ...group,
+        items: group.items.sort(compareEquipmentForBot),
+      }))
+      .sort((left, right) => right.items.length - left.items.length || left.label.localeCompare(right.label, 'ru'));
+  }
+
+  function formatEquipmentCategories(equipment) {
+    const categories = getFreeEquipmentCategories(equipment);
+    const total = categories.reduce((sum, category) => sum + category.items.length, 0);
+    if (!total) return '🚧 Свободной техники нет.';
+
+    return [
+      `🟢 Свободная техника (${total})`,
+      '',
+      'Выберите категорию кнопкой ниже:',
+      ...categories.map(category => `• ${category.label}: ${category.items.length}`),
+    ].join('\n');
+  }
+
+  function formatEquipmentCategory(category, page = 0, pageSize = 8) {
+    if (!category) return '🚧 Категория не найдена.';
+    const safePageSize = Math.max(1, pageSize);
+    const totalPages = Math.max(1, Math.ceil(category.items.length / safePageSize));
+    const safePage = Math.min(Math.max(Number(page) || 0, 0), totalPages - 1);
+    const start = safePage * safePageSize;
+    const lines = category.items
+      .slice(start, start + safePageSize)
+      .map(item => `• ${formatEquipmentForBot(item)}`);
+
+    return [
+      `🟢 ${category.label}: свободно ${category.items.length}`,
+      `Страница ${safePage + 1} из ${totalPages}`,
+      '',
+      ...lines,
+      '',
+      category.items.length > safePageSize
+        ? 'Используйте кнопки «Назад» и «Далее», чтобы листать список.'
+        : 'Это весь список в категории.',
+    ].join('\n');
+  }
+
   function formatTicketLine(ticket) {
     const assigned = ticket.assignedMechanicName ? ` · ${ticket.assignedMechanicName}` : '';
     return `• ${ticket.id} · ${serviceStatusLabel(ticket.status)} · ${ticket.equipment}\n  ${ticket.reason}${assigned}`;
@@ -500,6 +598,9 @@ function createBotFormatters(deps) {
     extractPhotoUrlsFromMessage,
     formatRentals,
     formatEquipment,
+    formatEquipmentCategories,
+    formatEquipmentCategory,
+    getFreeEquipmentCategories,
     formatEquipmentActionMenu,
     formatEquipmentHistoryForBot,
     equipmentSearchKeyboard,

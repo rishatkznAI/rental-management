@@ -426,6 +426,55 @@ test('manager login flow greets manager with rental manager menu', async () => {
   assert.equal(menu.payload.buttons[1][1].text, 'Новая доставка');
 });
 
+test('manager free equipment command shows category buttons', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.equipment = [
+    { id: 'E-1', status: 'available', inventoryNumber: '026', manufacturer: 'Mantall', model: '1932R', type: 'scissor' },
+    { id: 'E-2', status: 'available', inventoryNumber: '027', manufacturer: 'JLG', model: '2632R', type: 'scissor' },
+    { id: 'E-3', status: 'available', inventoryNumber: '056', manufacturer: 'Genie', model: 'Z45', type: 'articulated' },
+    { id: 'E-4', status: 'rented', inventoryNumber: '999', manufacturer: 'Busy', model: 'Lift', type: 'scissor' },
+  ];
+
+  await handlers.handleCommand(100, '100', '/техника');
+
+  const message = messages.at(-1);
+  assert.match(message.text, /Свободная техника \(3\)/);
+  assert.match(message.text, /Ножничный: 2/);
+  assert.match(message.text, /Коленчатый: 1/);
+  assert.doesNotMatch(message.text, /026 —/);
+  const menu = message.options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.equal(menu.payload.buttons[0][0].text, 'Ножничный · 2');
+  assert.equal(menu.payload.buttons[0][0].payload, 'equipmentcat:0:0');
+});
+
+test('manager free equipment category opens paged equipment list', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.equipment = Array.from({ length: 10 }, (_, index) => ({
+    id: `E-${index + 1}`,
+    status: 'available',
+    inventoryNumber: String(index + 1).padStart(3, '0'),
+    manufacturer: 'Mantall',
+    model: `XE${index + 1}`,
+    type: 'scissor',
+  }));
+
+  await handlers.handleCallback(100, '100', 'equipmentcat:0:0');
+
+  const firstPage = messages.at(-1);
+  assert.match(firstPage.text, /Ножничный: свободно 10/);
+  assert.match(firstPage.text, /Страница 1 из 2/);
+  assert.match(firstPage.text, /001 · Mantall XE1/);
+  assert.doesNotMatch(firstPage.text, /009 · Mantall XE9/);
+  const firstPageMenu = firstPage.options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.ok(firstPageMenu.payload.buttons.some(row => row.some(item => item.payload === 'equipmentcat:0:1')));
+
+  await handlers.handleCallback(100, '100', 'equipmentcat:0:1');
+
+  const secondPage = messages.at(-1);
+  assert.match(secondPage.text, /Страница 2 из 2/);
+  assert.match(secondPage.text, /009 · Mantall XE9/);
+});
+
 test('dedicated delivery bot_started prefers linked carrier role', async () => {
   const { state, messages, handlers } = createMemoryBot(true);
 

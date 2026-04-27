@@ -891,6 +891,7 @@ function createBotHandlers(deps) {
     }
     return payload.startsWith('ticket:') ||
       payload.startsWith('deliverycreate:') ||
+      payload.startsWith('equipmentcat:') ||
       payload.startsWith('operation:') ||
       payload.startsWith('reason:') ||
       payload.startsWith('equipmentmenu:') ||
@@ -929,6 +930,9 @@ function createBotHandlers(deps) {
     extractPhotoUrlsFromMessage,
     formatRentals,
     formatEquipment,
+    formatEquipmentCategories,
+    formatEquipmentCategory,
+    getFreeEquipmentCategories,
     formatEquipmentActionMenu,
     formatEquipmentHistoryForBot,
     equipmentSearchKeyboard,
@@ -949,6 +953,42 @@ function createBotHandlers(deps) {
     MAINTENANCE_REASON_LABELS,
     REPAIR_CLOSE_CHECKLIST_ORDER,
   });
+
+  const FREE_EQUIPMENT_PAGE_SIZE = 8;
+
+  function freeEquipmentCategoryKeyboard(categories, selectedIndex = null, page = 0) {
+    const categoryButtons = categories.map((category, index) =>
+      button(`${category.label} · ${category.items.length}`, `equipmentcat:${index}:0`),
+    );
+    const rows = chunkButtons(categoryButtons, 1);
+    const selectedCategory = Number.isInteger(selectedIndex) ? categories[selectedIndex] : null;
+
+    if (selectedCategory) {
+      const totalPages = Math.max(1, Math.ceil(selectedCategory.items.length / FREE_EQUIPMENT_PAGE_SIZE));
+      const safePage = Math.min(Math.max(Number(page) || 0, 0), totalPages - 1);
+      const pager = [];
+      if (safePage > 0) pager.push(button('← Назад', `equipmentcat:${selectedIndex}:${safePage - 1}`));
+      if (safePage < totalPages - 1) pager.push(button('Далее →', `equipmentcat:${selectedIndex}:${safePage + 1}`));
+      if (pager.length) rows.push(pager);
+    }
+
+    rows.push([button('Обновить категории', 'menu:equipment'), button('Главное меню', 'menu:main')]);
+    return keyboard(rows);
+  }
+
+  function getFreeEquipmentCategoriesFromStore() {
+    return getFreeEquipmentCategories(readData('equipment') || []);
+  }
+
+  function formatFreeEquipmentCategoryByIndex(index, page = 0) {
+    const categories = getFreeEquipmentCategoriesFromStore();
+    const safeIndex = Math.min(Math.max(Number(index) || 0, 0), Math.max(categories.length - 1, 0));
+    return {
+      categories,
+      selectedIndex: safeIndex,
+      text: formatEquipmentCategory(categories[safeIndex], page, FREE_EQUIPMENT_PAGE_SIZE),
+    };
+  }
 
   const {
     getOperationSteps,
@@ -1716,6 +1756,30 @@ function createBotHandlers(deps) {
         callbackContext,
         replaceMessage: true,
         cleanupPrevious: !callbackContext,
+      });
+    }
+
+    if (normalized.startsWith('equipmentcat:')) {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+
+      const [, indexRaw, pageRaw] = normalized.split(':');
+      const { categories, selectedIndex, text } = formatFreeEquipmentCategoryByIndex(indexRaw, pageRaw);
+      return reply(senderId, text, {
+        attachments: categories.length
+          ? freeEquipmentCategoryKeyboard(categories, selectedIndex, Number(pageRaw) || 0)
+          : defaultKeyboardForRole(authUser.userRole),
+        brandImage: !categories.length,
+        phone,
+        callbackContext,
+        replaceMessage: true,
       });
     }
 
@@ -3264,8 +3328,9 @@ function createBotHandlers(deps) {
 
     if (lower === '/техника' || lower === '/equipment' || lower === 'техника') {
       const equipment = readData('equipment') || [];
-      return replyWithUi(formatEquipment(equipment), {
-        attachments: defaultKeyboardForRole(userRole),
+      const categories = getFreeEquipmentCategories(equipment);
+      return replyWithUi(formatEquipmentCategories(equipment), {
+        attachments: categories.length ? freeEquipmentCategoryKeyboard(categories) : defaultKeyboardForRole(userRole),
       });
     }
 

@@ -31,6 +31,7 @@ export type Section =
   | 'documents'
   | 'payments'
   | 'finance'
+  | 'approvals'
   | 'bots'
   | 'reports'
   | 'profile_settings'
@@ -63,6 +64,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     documents:        ALL,
     payments:         ALL,
     finance:          ALL,
+    approvals:        ALL,
     bots:             VIEW,
     reports:          ALL,
     profile_settings: ['view', 'edit'],
@@ -80,13 +82,13 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     sales:            VIEW,
     crm:              ['view', 'create', 'edit'],
     deliveries:       ['view', 'create', 'edit'],
-    rentals:          VIEW,
+    rentals:          ['view', 'edit'],
     planner:          VIEW,
     service:          VIEW_CREATE,
     service_vehicles: VIEW,        // видит машины, но не редактирует
     clients:          VIEW,
-    documents:        VIEW,
-    payments:         VIEW,
+    documents:        VIEW_CREATE,
+    payments:         ['view', 'create', 'edit'],
     profile_settings: ['view', 'edit'],
   },
   'Офис-менеджер': {
@@ -161,6 +163,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname.startsWith('/documents'))      return 'documents';
   if (pathname.startsWith('/payments'))       return 'payments';
   if (pathname.startsWith('/finance'))        return 'finance';
+  if (pathname.startsWith('/approvals'))      return 'approvals';
   if (pathname.startsWith('/bots'))           return 'bots';
   if (pathname.startsWith('/reports'))        return 'reports';
   if (pathname.startsWith('/settings'))       return 'profile_settings';
@@ -185,6 +188,7 @@ const SECTION_PATHS: Array<[Section, string]> = [
   ['documents',  '/documents'],
   ['payments',   '/payments'],
   ['finance',    '/finance'],
+  ['approvals',  '/approvals'],
   ['bots',       '/bots'],
   ['reports',    '/reports'],
   ['profile_settings', '/settings'],

@@ -12,6 +12,7 @@ const JSON_COLLECTIONS = [
   'equipment',
   'rentals',
   'gantt_rentals',
+  'rental_change_requests',
   'service',
   'warranty_claims',
   'clients',

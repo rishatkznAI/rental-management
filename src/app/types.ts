@@ -284,6 +284,48 @@ export interface Rental {
   risk?: string;
   documents?: string[];
   comments?: string;
+  history?: AuditEntry[];
+}
+
+export type RentalChangeRequestStatus = 'pending' | 'approved' | 'rejected';
+export type RentalChangeEntityType = 'rental' | 'payment' | 'document';
+
+export interface RentalChangeRequestFinancialImpact {
+  amount: number;
+  description: string;
+}
+
+export interface RentalChangeRequest {
+  id: string;
+  entityType: RentalChangeEntityType;
+  entityId?: string;
+  rentalId: string;
+  linkedGanttRentalId?: string;
+  client: string;
+  equipment: string[];
+  initiatorId: string;
+  initiatorName: string;
+  initiatorRole: string;
+  createdAt: string;
+  status: RentalChangeRequestStatus;
+  statusLabel?: string;
+  operation?: 'update' | 'delete';
+  type: string;
+  field: string;
+  fieldLabel: string;
+  oldValue: unknown;
+  newValue: unknown;
+  reason: string;
+  systemReason?: string;
+  comment?: string;
+  attachments?: string[];
+  financialImpact?: RentalChangeRequestFinancialImpact;
+  decidedAt?: string;
+  appliedAt?: string;
+  decidedById?: string;
+  decidedByName?: string;
+  adminComment?: string;
+  rejectionReason?: string;
 }
 
 export type ServicePriority = 'low' | 'medium' | 'high' | 'critical';

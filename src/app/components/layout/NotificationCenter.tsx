@@ -1,14 +1,16 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useQueries } from '@tanstack/react-query';
-import { AlertTriangle, Bell, CalendarClock, CreditCard, Wrench } from 'lucide-react';
+import { AlertTriangle, Bell, CalendarClock, CreditCard, FileCheck, Wrench } from 'lucide-react';
 import { rentalsService } from '../../services/rentals.service';
 import { serviceTicketsService } from '../../services/service-tickets.service';
 import { equipmentService } from '../../services/equipment.service';
 import { paymentsService } from '../../services/payments.service';
+import { rentalChangeRequestsService } from '../../services/rental-change-requests.service';
 import { buildAppNotifications, type AppNotification, type NotificationPriority } from '../../lib/notifications';
 import { cn, formatDate } from '../../lib/utils';
 import { usePermissions } from '../../lib/permissions';
+import { useAuth } from '../../contexts/AuthContext';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '../ui/sheet';
 
 const READ_KEY = 'app_notification_reads_v1';
@@ -49,6 +51,8 @@ function getIcon(notification: AppNotification) {
       return CreditCard;
     case 'rentals':
       return CalendarClock;
+    case 'approvals':
+      return FileCheck;
     default:
       return AlertTriangle;
   }
@@ -56,6 +60,7 @@ function getIcon(notification: AppNotification) {
 
 export function NotificationCenter() {
   const { canView } = usePermissions();
+  const { user } = useAuth();
   const [open, setOpen] = React.useState(false);
   const [readIds, setReadIds] = React.useState<string[]>(() => readIdsFromStorage());
 
@@ -66,10 +71,11 @@ export function NotificationCenter() {
       { queryKey: ['notif-equipment'], queryFn: equipmentService.getAll },
       { queryKey: ['notif-payments'], queryFn: paymentsService.getAll },
       { queryKey: ['notif-shipping-photos'], queryFn: equipmentService.getAllShippingPhotos },
+      { queryKey: ['notif-rental-change-requests'], queryFn: rentalChangeRequestsService.getAll },
     ],
   });
 
-  const [rentalsResult, serviceResult, equipmentResult, paymentsResult, shippingPhotosResult] = results;
+  const [rentalsResult, serviceResult, equipmentResult, paymentsResult, shippingPhotosResult, changeRequestsResult] = results;
 
   const notifications = React.useMemo(() => {
     const items = buildAppNotifications({
@@ -78,6 +84,8 @@ export function NotificationCenter() {
       equipment: equipmentResult.data ?? [],
       payments: paymentsResult.data ?? [],
       shippingPhotos: shippingPhotosResult.data ?? [],
+      changeRequests: changeRequestsResult.data ?? [],
+      currentUser: user ? { id: user.id, role: user.role, name: user.name } : null,
     });
 
     return items.filter(item => {
@@ -85,15 +93,18 @@ export function NotificationCenter() {
       if (item.section === 'service') return canView('service');
       if (item.section === 'payments') return canView('payments');
       if (item.section === 'equipment') return canView('equipment');
+      if (item.section === 'approvals') return canView('approvals');
       return true;
     });
   }, [
     canView,
+    changeRequestsResult.data,
     rentalsResult.data,
     serviceResult.data,
     equipmentResult.data,
     paymentsResult.data,
     shippingPhotosResult.data,
+    user,
   ]);
 
   React.useEffect(() => {

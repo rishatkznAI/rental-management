@@ -5,6 +5,7 @@ import { useClientsList } from '../hooks/useClients';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { usePaymentsList } from '../hooks/usePayments';
+import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
 import { RENTAL_KEYS, useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,10 +33,10 @@ import { rentalsService } from '../services/rentals.service';
 import { documentsService } from '../services/documents.service';
 import { paymentsService } from '../services/payments.service';
 import { equipmentService } from '../services/equipment.service';
-import { appendRentalHistory, buildRentalUpdateHistory } from '../lib/rental-history';
+import { appendRentalHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
-import type { DocumentType, Equipment, PaymentStatus, RentalStatus } from '../types';
+import type { DocumentType, Equipment, PaymentStatus, Rental, RentalStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
 const statusLabels: Record<RentalStatus, string> = {
@@ -60,6 +61,15 @@ type RentalFormState = {
   discount: string;
   deliveryAddress: string;
   comments: string;
+};
+
+type RentalSaveResponse = Rental & {
+  changeRequestSummary?: {
+    appliedFields: string[];
+    pendingCount: number;
+    pendingRequestIds: string[];
+    pendingDescriptions: string[];
+  };
 };
 
 function buildInitialFormState(rental: {
@@ -118,10 +128,12 @@ export default function RentalDetail() {
   const { data: payments = [] } = usePaymentsList();
   const { data: clients = [] } = useClientsList();
   const { data: documents = [] } = useDocumentsList();
+  const { data: changeRequests = [] } = useRentalChangeRequestsList();
 
   const rental = rentals.find(r => r.id === id);
   const canEditRentals = can('edit', 'rentals');
-  const canEditRentalDates = user?.role === 'Администратор';
+  const canEditRentalDates = canEditRentals;
+  const isAdmin = user?.role === 'Администратор';
   const canCreateDocuments = can('create', 'documents');
   const canCreatePayments = can('create', 'payments');
   const canRestoreRentals = user?.role === 'Администратор';
@@ -129,6 +141,8 @@ export default function RentalDetail() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveInfo, setSaveInfo] = useState('');
+  const [approvalReason, setApprovalReason] = useState('');
+  const [approvalComment, setApprovalComment] = useState('');
   const [formState, setFormState] = useState<RentalFormState | null>(null);
   const [documentDialogOpen, setDocumentDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -159,6 +173,8 @@ export default function RentalDetail() {
     setIsSaving(false);
     setSaveError('');
     setSaveInfo('');
+    setApprovalReason('');
+    setApprovalComment('');
   }, [rental]);
 
   const inventoryCounts = useMemo(() => {
@@ -199,6 +215,7 @@ export default function RentalDetail() {
 
   const selectedClient = clients.find(c => c.company === ((isEditing ? formState?.client : rental?.client) || ''));
   const relatedDocs = documents.filter(d => d.rental === rental?.id);
+  const pendingChangeRequests = changeRequests.filter(request => request.rentalId === rental?.id && request.status === 'pending');
   const relatedInvoices = relatedDocs.filter(doc => doc.type === 'invoice');
   const relatedPayments = payments.filter(p => p.rentalId === rental?.id);
   const paidAmount = relatedPayments.reduce((sum, p) => sum + (p.paidAmount ?? (p.status === 'paid' ? p.amount : 0)), 0);
@@ -268,6 +285,11 @@ export default function RentalDetail() {
     ...((!linkedGanttRental?.comments?.some(entry => entry.type === 'system') && rental)
       ? [{ date: rental.startDate, action: 'Аренда создана', user: rental.manager || 'Система' }]
       : []),
+    ...((rental?.history || []).map(entry => ({
+      date: entry.date,
+      action: entry.text,
+      user: entry.author,
+    }))),
     ...(relatedDocs.map(doc => ({
       date: doc.date,
       action: `Документ: ${doc.number}`,
@@ -375,7 +397,7 @@ export default function RentalDetail() {
 
   const handleSave = async () => {
     if (!canEditRentals) {
-      setSaveError('Редактировать аренду может только администратор.');
+      setSaveError('Редактировать аренду могут администратор, офис-менеджер и менеджер по аренде.');
       return;
     }
     if (!rental || !formState) return;
@@ -385,14 +407,6 @@ export default function RentalDetail() {
     }
     if (!formState.startDate || !formState.plannedReturnDate) {
       setSaveError('Укажите дату начала и окончания аренды.');
-      return;
-    }
-    if (!canEditRentalDates && (
-      formState.startDate !== rental.startDate
-      || formState.plannedReturnDate !== rental.plannedReturnDate
-      || (formState.actualReturnDate || '') !== (rental.actualReturnDate || '')
-    )) {
-      setSaveError('Изменять даты аренды может только администратор.');
       return;
     }
     if (new Date(formState.startDate).getTime() > new Date(formState.plannedReturnDate).getTime()) {
@@ -407,7 +421,7 @@ export default function RentalDetail() {
       setSaveError('Скидка должна быть числом не меньше 0.');
       return;
     }
-    if (conflictingRental) {
+    if (conflictingRental && isAdmin) {
       setSaveError(`Конфликт по технике: ${conflictingRental.client} · ${conflictingRental.startDate} — ${conflictingRental.endDate}`);
       return;
     }
@@ -416,7 +430,7 @@ export default function RentalDetail() {
     setSaveError('');
     setSaveInfo('');
     try {
-      await rentalsService.update(rental.id, {
+      const savedRental = await rentalsService.update(rental.id, {
         client: formState.client.trim(),
         contact: formState.contact.trim(),
         startDate: formState.startDate,
@@ -429,31 +443,16 @@ export default function RentalDetail() {
         manager: formState.manager.trim(),
         status: formState.status,
         comments: formState.comments.trim(),
-      });
+        __linkedGanttRentalId: linkedGanttRental?.id || '',
+        __changeReason: approvalReason.trim(),
+        __changeComment: approvalComment.trim(),
+      } as Partial<Rental> & Record<string, unknown>) as RentalSaveResponse;
 
-      if (linkedGanttRental) {
-        const nextGanttStatus: GanttRentalData['status'] = formState.status === 'closed'
-          ? 'closed'
-          : formState.status === 'active'
-            ? 'active'
-            : 'created';
-        const nextGanttRental: GanttRentalData = {
-          ...linkedGanttRental,
-          client: formState.client.trim(),
-          clientShort: formState.client.trim().substring(0, 20),
-          startDate: formState.startDate,
-          endDate: formState.plannedReturnDate,
-          manager: formState.manager.trim(),
-          managerInitials: managerInitials(formState.manager),
-          status: nextGanttStatus,
-          amount: priceValue,
-        };
-        await rentalsService.updateGanttEntry(linkedGanttRental.id, {
-          ...appendRentalHistory(
-            nextGanttRental,
-            ...buildRentalUpdateHistory(linkedGanttRental, nextGanttRental, historyAuthor),
-          ),
-        });
+      const summary = savedRental.changeRequestSummary;
+      if (summary?.pendingCount) {
+        const appliedText = summary.appliedFields.length > 0 ? 'Часть изменений применена сразу. ' : '';
+        setSaveInfo(`${appliedText}${summary.pendingCount} измен. отправлено на согласование.`);
+      } else if (linkedGanttRental) {
         setSaveInfo('Изменения сохранены и синхронизированы с планировщиком.');
       } else if (linkedGanttCandidates.length > 1) {
         setSaveInfo('Карточка аренды сохранена, но запись в планировщике не обновлена автоматически: найдено несколько похожих аренд.');
@@ -465,8 +464,11 @@ export default function RentalDetail() {
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail(rental.id) }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
       ]);
       setIsEditing(false);
+      setApprovalReason('');
+      setApprovalComment('');
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Не удалось сохранить аренду.');
     } finally {
@@ -669,6 +671,9 @@ export default function RentalDetail() {
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">{rental.id}</h1>
               {getRentalStatusBadge(isEditing ? formState.status : rental.status)}
+              {pendingChangeRequests.length > 0 && (
+                <Badge variant="warning">Есть изменения на согласовании</Badge>
+              )}
             </div>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{isEditing ? formState.client : rental.client}</p>
           </div>
@@ -711,7 +716,7 @@ export default function RentalDetail() {
             : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300'
         }`}>
           {saveError || (conflictingRental
-            ? `Есть пересечение по технике: ${conflictingRental.client} · ${conflictingRental.startDate} — ${conflictingRental.endDate}`
+            ? `${isAdmin ? 'Есть пересечение по технике' : 'Продление пересекается с будущей арендой и будет отправлено на согласование'}: ${conflictingRental.client} · ${conflictingRental.startDate} — ${conflictingRental.endDate}`
             : saveInfo)}
         </div>
       )}
@@ -724,6 +729,29 @@ export default function RentalDetail() {
             <p className="text-sm text-red-700 dark:text-red-300">{rental.risk}</p>
           </div>
         </div>
+      )}
+
+      {isEditing && !isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Причина для согласования</CardTitle>
+            <CardDescription>Заполняется, если часть изменений потребует решения администратора</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2">
+            <Textarea
+              value={approvalReason}
+              onChange={(event) => setApprovalReason(event.target.value)}
+              placeholder="Причина изменения"
+              className="min-h-24"
+            />
+            <Textarea
+              value={approvalComment}
+              onChange={(event) => setApprovalComment(event.target.value)}
+              placeholder="Комментарий для администратора"
+              className="min-h-24"
+            />
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
@@ -888,9 +916,9 @@ export default function RentalDetail() {
                   </p>
                 </div>
               )}
-              {isEditing && !canEditRentalDates && (
+              {isEditing && !isAdmin && (
                 <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-                  Изменять даты аренды может только администратор.
+                  Изменение дат может потребовать согласования администратора.
                 </p>
               )}
             </CardContent>

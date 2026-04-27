@@ -1,5 +1,10 @@
 const express = require('express');
 const { syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
+const {
+  RENTAL_CHANGE_REQUEST_STATUS,
+  buildRequestDecisionNotificationStatus,
+  displayValue,
+} = require('../lib/rental-change-requests');
 
 function registerCrudRoutes(deps) {
   const {
@@ -86,6 +91,70 @@ function registerCrudRoutes(deps) {
     if (affectedIds.length > 0) {
       deleteSessionsForUserIds(affectedIds);
     }
+  }
+
+  function createEntityChangeRequest(req, {
+    entityType,
+    entity,
+    rentalId,
+    operation,
+    type,
+    field,
+    oldValue,
+    newValue,
+    financialImpact,
+  }) {
+    const rentals = readData('rentals') || [];
+    const rental = rentals.find(item => item.id === rentalId);
+    const requests = readData('rental_change_requests') || [];
+    const request = {
+      id: generateId(idPrefixes.rental_change_requests || 'RCR'),
+      entityType,
+      entityId: entity?.id || '',
+      rentalId: rentalId || '',
+      client: rental?.client || entity?.client || '',
+      equipment: Array.isArray(rental?.equipment) ? rental.equipment : [],
+      initiatorId: req.user?.userId || '',
+      initiatorName: req.user?.userName || 'Система',
+      initiatorRole: req.user?.userRole || '',
+      createdAt: nowIso(),
+      status: RENTAL_CHANGE_REQUEST_STATUS.PENDING,
+      statusLabel: buildRequestDecisionNotificationStatus(RENTAL_CHANGE_REQUEST_STATUS.PENDING),
+      operation,
+      type,
+      field,
+      fieldLabel: field,
+      oldValue,
+      newValue,
+      reason: `${type} требует согласования администратора.`,
+      comment: '',
+      attachments: [],
+      financialImpact: financialImpact || { amount: 0, description: 'Без прямого изменения суммы' },
+    };
+    writeData('rental_change_requests', [...requests, request]);
+    return request;
+  }
+
+  function buildPaymentFinancialImpact(payment, nextValue, operation) {
+    if (operation === 'delete') {
+      const amount = -(payment?.paidAmount ?? payment?.amount ?? 0);
+      return { amount, description: `${amount}` };
+    }
+    const oldAmount = Number(payment?.paidAmount ?? payment?.amount ?? 0) || 0;
+    const nextAmount = Number(nextValue?.paidAmount ?? nextValue?.amount ?? oldAmount) || 0;
+    const amount = nextAmount - oldAmount;
+    return {
+      amount,
+      description: amount === 0 ? 'Без прямого изменения суммы' : `${amount > 0 ? '+' : ''}${amount}`,
+    };
+  }
+
+  function isPaymentStatusOnlyPatch(previousPayment, patch) {
+    const changedFields = Object.keys(patch || {}).filter(field => {
+      if (field === 'id') return false;
+      return JSON.stringify(previousPayment?.[field] ?? null) !== JSON.stringify(patch[field] ?? null);
+    });
+    return changedFields.length === 1 && changedFields[0] === 'status';
   }
 
   function officeManagerCanOnlyCreateRental(req, collection, method) {
@@ -328,6 +397,25 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
       }
 
+      if (collection === 'payments' && req.user?.userRole !== 'Администратор' && !isPaymentStatusOnlyPatch(data[idx], req.body)) {
+        const request = createEntityChangeRequest(req, {
+          entityType: 'payment',
+          entity: data[idx],
+          rentalId: data[idx].rentalId,
+          operation: 'update',
+          type: 'Удаление или корректировка платежей',
+          field: 'Платёж',
+          oldValue: data[idx],
+          newValue: { ...data[idx], ...req.body, id: data[idx].id },
+          financialImpact: buildPaymentFinancialImpact(data[idx], req.body, 'update'),
+        });
+        return res.status(202).json({
+          ok: true,
+          changeRequest: request,
+          message: `Изменение платежа отправлено на согласование: ${displayValue(request.oldValue?.invoiceNumber || request.entityId)}`,
+        });
+      }
+
       try {
         const previousItem = collection === 'users' ? { ...data[idx] } : null;
         if (collection === 'rentals' || collection === 'gantt_rentals') {
@@ -421,6 +509,34 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
       }
       const removedItem = data[idx];
+      if (collection === 'payments' && req.user?.userRole !== 'Администратор') {
+        const request = createEntityChangeRequest(req, {
+          entityType: 'payment',
+          entity: removedItem,
+          rentalId: removedItem.rentalId,
+          operation: 'delete',
+          type: 'Удаление или корректировка платежей',
+          field: 'Платёж',
+          oldValue: removedItem,
+          newValue: null,
+          financialImpact: buildPaymentFinancialImpact(removedItem, null, 'delete'),
+        });
+        return res.status(202).json({ ok: true, changeRequest: request });
+      }
+      if (collection === 'documents' && req.user?.userRole !== 'Администратор') {
+        const request = createEntityChangeRequest(req, {
+          entityType: 'document',
+          entity: removedItem,
+          rentalId: removedItem.rental,
+          operation: 'delete',
+          type: 'Удаление документов',
+          field: 'Документ',
+          oldValue: removedItem,
+          newValue: null,
+          financialImpact: { amount: 0, description: 'Без прямого изменения суммы' },
+        });
+        return res.status(202).json({ ok: true, changeRequest: request });
+      }
       if (collection === 'service') {
         const repairId = data[idx].id;
         writeData('repair_work_items', (readData('repair_work_items') || []).filter(item => item.repairId !== repairId));

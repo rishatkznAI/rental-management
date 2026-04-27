@@ -80,6 +80,7 @@ const { registerCrudRoutes } = require('./routes/crud');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
 const { registerFinanceRoutes } = require('./routes/finance');
 const { registerGsmRoutes } = require('./routes/gsm');
+const { registerRentalChangeRequestRoutes } = require('./routes/rental-change-requests');
 const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
 const { registerSystemRoutes } = require('./routes/system');
@@ -290,6 +291,7 @@ const WRITE_PERMISSIONS = {
   equipment:      ['Администратор', 'Офис-менеджер'],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  rental_change_requests: ['Администратор'],
   deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   delivery_carriers: ['Администратор'],
   service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
@@ -325,6 +327,7 @@ const READ_PERMISSIONS = {
   equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...MECHANIC_ROLES],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
+  rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   delivery_carriers: ['Администратор'],
   service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
@@ -448,6 +451,7 @@ const ID_PREFIXES = {
   equipment:      'eq',
   rentals:        'R',
   gantt_rentals:  'GR',
+  rental_change_requests: 'RCR',
   service:        'S',
   warranty_claims: 'WCL',
   clients:        'C',
@@ -737,6 +741,15 @@ apiRouter.use(registerRentalRoutes({
   mergeRentalHistory,
   normalizeGanttRentalList,
   normalizeGanttRentalStatus,
+  generateId,
+  idPrefixes: ID_PREFIXES,
+}));
+
+apiRouter.use(registerRentalChangeRequestRoutes({
+  readData,
+  writeData,
+  requireAuth,
+  validateRentalPayload,
   generateId,
   idPrefixes: ID_PREFIXES,
 }));

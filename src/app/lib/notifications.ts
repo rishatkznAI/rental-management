@@ -1,9 +1,9 @@
 import type { GanttRentalData } from '../mock-data';
-import type { Equipment, Payment, ServiceTicket, ShippingPhoto } from '../types';
+import type { Equipment, Payment, RentalChangeRequest, ServiceTicket, ShippingPhoto } from '../types';
 import { buildRentalDebtRows } from './finance';
 import { formatCurrency, formatDate } from './utils';
 
-export type NotificationSection = 'rentals' | 'service' | 'equipment' | 'payments';
+export type NotificationSection = 'rentals' | 'service' | 'equipment' | 'payments' | 'approvals';
 export type NotificationPriority = 'critical' | 'high' | 'medium';
 
 export interface AppNotification {
@@ -46,12 +46,16 @@ export function buildAppNotifications({
   equipment,
   payments,
   shippingPhotos,
+  changeRequests = [],
+  currentUser,
 }: {
   rentals: GanttRentalData[];
   serviceTickets: ServiceTicket[];
   equipment: Equipment[];
   payments: Payment[];
   shippingPhotos: ShippingPhoto[];
+  changeRequests?: RentalChangeRequest[];
+  currentUser?: { id?: string; role?: string; name?: string } | null;
 }): AppNotification[] {
   const notifications: AppNotification[] = [];
   const today = toDateOnly(dateOnlyString(new Date()));
@@ -209,6 +213,45 @@ export function buildAppNotifications({
       });
     });
   });
+
+  changeRequests
+    .filter(item => item.status === 'pending' && currentUser?.role === 'Администратор')
+    .forEach(item => {
+      notifications.push({
+        id: `approval-pending-${item.id}`,
+        section: 'approvals',
+        priority: 'high',
+        category: 'На согласовании',
+        title: item.type,
+        entity: item.rentalId || item.client,
+        detail: `${item.initiatorName} · ${item.fieldLabel || item.field}`,
+        link: '/approvals',
+        linkLabel: 'К согласованиям',
+        date: item.createdAt,
+      });
+    });
+
+  changeRequests
+    .filter(item =>
+      item.initiatorId === currentUser?.id &&
+      (item.status === 'approved' || item.status === 'rejected')
+    )
+    .forEach(item => {
+      notifications.push({
+        id: `approval-decision-${item.id}-${item.status}`,
+        section: 'rentals',
+        priority: item.status === 'rejected' ? 'high' : 'medium',
+        category: item.status === 'approved' ? 'Изменение согласовано' : 'Изменение отклонено',
+        title: item.type,
+        entity: item.rentalId,
+        detail: item.status === 'approved'
+          ? 'Новое значение применено к аренде'
+          : `Причина: ${item.rejectionReason || 'не указана'}`,
+        link: item.rentalId ? `/rentals/${item.rentalId}` : '/rentals',
+        linkLabel: 'Открыть аренду',
+        date: item.decidedAt || item.createdAt,
+      });
+    });
 
   const priorities: Record<NotificationPriority, number> = { critical: 0, high: 1, medium: 2 };
   return notifications

@@ -13,7 +13,11 @@ const {
   attachMechanicStageImage,
 } = require('../server/lib/bot-stage-images.js');
 const { createMaxApiClient } = require('../server/lib/max-api.js');
-const { createBotUpdateProcessor } = require('../server/routes/bot.js');
+const {
+  createBotUpdateProcessor,
+  disconnectBotConnection,
+  updateBotConnectionRole,
+} = require('../server/routes/bot.js');
 
 function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
   const state = {
@@ -277,6 +281,56 @@ test('MAX update processor routes callbacks to the user who clicked the button',
       },
     },
   });
+});
+
+test('admin bot role switch updates bot mode and clears active flow', () => {
+  const result = updateBotConnectionRole(
+    {
+      '100': {
+        userId: 'carrier-1',
+        userName: 'Быстрая доставка',
+        userRole: 'Перевозчик',
+        botMode: 'delivery',
+        carrierId: 'carrier-1',
+      },
+    },
+    {
+      '100': {
+        pendingAction: 'operation_step',
+        activeRepairId: 'S-1',
+      },
+    },
+    '100',
+    'Механик',
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.botUsers['100'].userRole, 'Механик');
+  assert.equal(result.botUsers['100'].botMode, 'staff');
+  assert.equal(result.botUsers['100'].carrierId, undefined);
+  assert.equal(result.botSessions['100'], undefined);
+});
+
+test('admin bot disconnect removes authorization and session', () => {
+  const result = disconnectBotConnection(
+    {
+      '100': {
+        userId: 'U-manager',
+        userName: 'Руслан',
+        userRole: 'Менеджер по аренде',
+      },
+    },
+    {
+      '100': {
+        pendingAction: 'login_password',
+      },
+    },
+    '100',
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.botUsers['100'], undefined);
+  assert.equal(result.botSessions['100'], undefined);
 });
 
 test('shared bot blocks service commands while delivery mode is active', async () => {

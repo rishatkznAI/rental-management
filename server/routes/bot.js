@@ -3,6 +3,17 @@ const crypto = require('crypto');
 
 const processedWebhookUpdates = new Map();
 const WEBHOOK_UPDATE_DEDUPE_MS = 10 * 1000;
+const BOT_CONNECTION_ROLES = [
+  'Администратор',
+  'Офис-менеджер',
+  'Менеджер по аренде',
+  'Менеджер по продажам',
+  'Механик',
+  'Младший стационарный механик',
+  'Выездной механик',
+  'Старший стационарный механик',
+  'Перевозчик',
+];
 
 function trimText(value, maxLength = 160) {
   const normalized = String(value || '').replace(/\s+/g, ' ').trim();
@@ -209,6 +220,69 @@ function requireBotAdmin(req, res, next) {
   return next();
 }
 
+function normalizeBotConnectionRole(value) {
+  const role = String(value || '').trim();
+  return BOT_CONNECTION_ROLES.includes(role) ? role : '';
+}
+
+function clearBotConnectionSession(botSessions = {}, phone = '') {
+  const nextSessions = { ...(botSessions || {}) };
+  delete nextSessions[String(phone || '')];
+  return nextSessions;
+}
+
+function updateBotConnectionRole(botUsers = {}, botSessions = {}, phone = '', userRole = '') {
+  const phoneKey = String(phone || '').trim();
+  if (!phoneKey || !botUsers?.[phoneKey]) {
+    return { ok: false, status: 404, error: 'Подключение к боту не найдено.' };
+  }
+
+  const normalizedRole = normalizeBotConnectionRole(userRole);
+  if (!normalizedRole) {
+    return { ok: false, status: 400, error: 'Укажите корректную роль пользователя в боте.' };
+  }
+
+  const current = botUsers[phoneKey] || {};
+  const nextUsers = { ...(botUsers || {}) };
+  const nextUser = {
+    ...current,
+    userRole: normalizedRole,
+    botMode: normalizedRole === 'Перевозчик' ? 'delivery' : 'staff',
+    lastSeenAt: new Date().toISOString(),
+  };
+
+  if (normalizedRole !== 'Перевозчик') {
+    delete nextUser.carrierId;
+  }
+
+  nextUsers[phoneKey] = nextUser;
+
+  return {
+    ok: true,
+    botUsers: nextUsers,
+    botSessions: clearBotConnectionSession(botSessions, phoneKey),
+    user: nextUser,
+  };
+}
+
+function disconnectBotConnection(botUsers = {}, botSessions = {}, phone = '') {
+  const phoneKey = String(phone || '').trim();
+  if (!phoneKey || !botUsers?.[phoneKey]) {
+    return { ok: false, status: 404, error: 'Подключение к боту не найдено.' };
+  }
+
+  const nextUsers = { ...(botUsers || {}) };
+  const removed = nextUsers[phoneKey];
+  delete nextUsers[phoneKey];
+
+  return {
+    ok: true,
+    botUsers: nextUsers,
+    botSessions: clearBotConnectionSession(botSessions, phoneKey),
+    removed,
+  };
+}
+
 function buildBotConnections(botId, botUsers = {}, botSessions = {}, activity = []) {
   const latestActivityByPhone = new Map();
   const authorizationByPhone = new Map();
@@ -311,6 +385,8 @@ function registerBotApiRoutes(router, deps) {
   const {
     requireAuth,
     readData,
+    saveBotUsers,
+    saveBotSessions,
     getBotUsers,
     getBotSessions,
     botToken,
@@ -381,15 +457,22 @@ function registerBotApiRoutes(router, deps) {
     return { summary, connections, activity };
   }
 
+  function findBotConfig(req, res) {
+    const config = BOT_CONFIGS.find(item => item.id === req.params.botId);
+    if (!config) {
+      res.status(404).json({ ok: false, error: 'Бот не найден.' });
+      return null;
+    }
+    return config;
+  }
+
   botRouter.get('/bots', requireAuth, requireBotAdmin, (_req, res) => {
     return res.json(BOT_CONFIGS.map(config => buildBotPayload(config).summary));
   });
 
   botRouter.get('/bots/:botId', requireAuth, requireBotAdmin, (req, res) => {
-    const config = BOT_CONFIGS.find(item => item.id === req.params.botId);
-    if (!config) {
-      return res.status(404).json({ ok: false, error: 'Бот не найден.' });
-    }
+    const config = findBotConfig(req, res);
+    if (!config) return;
 
     const { summary, connections, activity } = buildBotPayload(config);
 
@@ -398,6 +481,45 @@ function registerBotApiRoutes(router, deps) {
       connections,
       activity,
     });
+  });
+
+  botRouter.patch('/bots/:botId/connections/:phone', requireAuth, requireBotAdmin, (req, res) => {
+    const config = findBotConfig(req, res);
+    if (!config) return;
+
+    const result = updateBotConnectionRole(
+      getBotUsers() || {},
+      getBotSessions() || {},
+      req.params.phone,
+      req.body?.userRole,
+    );
+    if (!result.ok) {
+      return res.status(result.status || 400).json({ ok: false, error: result.error });
+    }
+
+    saveBotUsers(result.botUsers);
+    saveBotSessions(result.botSessions);
+    const payload = buildBotPayload(config);
+    const connection = payload.connections.find(item => item.phone === String(req.params.phone));
+    return res.json({ ok: true, connection: connection || null });
+  });
+
+  botRouter.delete('/bots/:botId/connections/:phone', requireAuth, requireBotAdmin, (req, res) => {
+    const config = findBotConfig(req, res);
+    if (!config) return;
+
+    const result = disconnectBotConnection(
+      getBotUsers() || {},
+      getBotSessions() || {},
+      req.params.phone,
+    );
+    if (!result.ok) {
+      return res.status(result.status || 400).json({ ok: false, error: result.error });
+    }
+
+    saveBotUsers(result.botUsers);
+    saveBotSessions(result.botSessions);
+    return res.json({ ok: true });
   });
 
   router.use(botRouter);
@@ -528,8 +650,11 @@ function registerBotRoutes(app, deps) {
 }
 
 module.exports = {
+  BOT_CONNECTION_ROLES,
   createBotUpdateProcessor,
+  disconnectBotConnection,
   registerBotApiRoutes,
   registerBotRoutes,
   shouldProcessWebhookUpdate,
+  updateBotConnectionRole,
 };

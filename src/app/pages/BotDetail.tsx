@@ -1,15 +1,29 @@
 import React from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Bot, Clock3, History, Search, ShieldCheck, UserRound, Workflow } from 'lucide-react';
-import { useBotById } from '../hooks/useBots';
+import { ArrowLeft, Bot, Clock3, History, LogOut, Search, ShieldCheck, UserRound, Workflow } from 'lucide-react';
+import { toast } from 'sonner';
+import { useBotById, useDisconnectBotConnection, useUpdateBotConnection } from '../hooks/useBots';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { formatDateTime } from '../lib/utils';
-import type { BotActivityEntry, BotActivityType, BotConnection, BotStatus } from '../types';
+import type { BotActivityEntry, BotActivityType, BotConnection, BotConnectionRole, BotStatus } from '../types';
+
+const BOT_CONNECTION_ROLES: BotConnectionRole[] = [
+  'Администратор',
+  'Офис-менеджер',
+  'Менеджер по аренде',
+  'Менеджер по продажам',
+  'Механик',
+  'Младший стационарный механик',
+  'Выездной механик',
+  'Старший стационарный механик',
+  'Перевозчик',
+];
 
 function formatDateTimeSafe(value: string | null): string {
   return value ? formatDateTime(value) : '—';
@@ -45,12 +59,40 @@ function renderConnectionState(connection: BotConnection) {
   return <Badge>Без активного сценария</Badge>;
 }
 
+function getSelectableRole(role: string | null): BotConnectionRole | undefined {
+  return BOT_CONNECTION_ROLES.find(item => item === role);
+}
+
 export default function BotDetail() {
   const { botId = '' } = useParams();
   const { data, isLoading, error } = useBotById(botId);
+  const updateConnection = useUpdateBotConnection(botId);
+  const disconnectConnection = useDisconnectBotConnection(botId);
   const [search, setSearch] = React.useState('');
   const [tab, setTab] = React.useState('history');
   const normalizedSearch = search.trim().toLowerCase();
+
+  const handleRoleChange = React.useCallback(async (connection: BotConnection, userRole: BotConnectionRole) => {
+    if (connection.userRole === userRole) return;
+    try {
+      await updateConnection.mutateAsync({ phone: connection.phone, userRole });
+      toast.success('Роль пользователя в боте обновлена.');
+    } catch (mutationError) {
+      toast.error(mutationError instanceof Error ? mutationError.message : 'Не удалось обновить роль пользователя.');
+    }
+  }, [updateConnection]);
+
+  const handleDisconnect = React.useCallback(async (connection: BotConnection) => {
+    const label = connection.userName || connection.email || connection.phone;
+    if (!window.confirm(`Отключить ${label} от бота? Пользователь сможет войти заново через авторизацию.`)) return;
+
+    try {
+      await disconnectConnection.mutateAsync(connection.phone);
+      toast.success('Пользователь отключён от бота.');
+    } catch (mutationError) {
+      toast.error(mutationError instanceof Error ? mutationError.message : 'Не удалось отключить пользователя.');
+    }
+  }, [disconnectConnection]);
 
   const filteredConnections = React.useMemo(() => (
     (data?.connections || []).filter(connection => matchesSearch([
@@ -75,6 +117,41 @@ export default function BotDetail() {
       entry.eventType,
     ], normalizedSearch))
   ), [data?.activity, normalizedSearch]);
+
+  const renderConnectionActions = (connection: BotConnection) => {
+    const busy = updateConnection.isPending || disconnectConnection.isPending;
+    return (
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Select
+          value={getSelectableRole(connection.userRole) || undefined}
+          onValueChange={(value) => handleRoleChange(connection, value as BotConnectionRole)}
+          disabled={busy}
+        >
+          <SelectTrigger className="w-full sm:w-[230px]" size="sm">
+            <SelectValue placeholder="Выберите роль" />
+          </SelectTrigger>
+          <SelectContent className="max-h-80">
+            {BOT_CONNECTION_ROLES.map((role) => (
+              <SelectItem key={role} value={role}>
+                {role}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          onClick={() => handleDisconnect(connection)}
+          disabled={busy}
+          className="w-full sm:w-auto"
+        >
+          <LogOut className="h-4 w-4" />
+          Отключить
+        </Button>
+      </div>
+    );
+  };
 
   if (isLoading) {
     return (
@@ -281,6 +358,9 @@ export default function BotDetail() {
                           <p>Последнее действие: {formatDateTimeSafe(connection.lastSeenAt)}</p>
                           <p>Текущая заявка: {connection.activeRepairId || '—'}</p>
                         </div>
+                        <div className="mt-4">
+                          {renderConnectionActions(connection)}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -296,6 +376,7 @@ export default function BotDetail() {
                           <TableHead>Текущая заявка</TableHead>
                           <TableHead>Подключён</TableHead>
                           <TableHead>Последняя активность</TableHead>
+                          <TableHead>Управление</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -313,6 +394,7 @@ export default function BotDetail() {
                             <TableCell className="break-all text-sm">{connection.activeRepairId || '—'}</TableCell>
                             <TableCell className="whitespace-nowrap text-sm">{formatDateTimeSafe(connection.connectedAt)}</TableCell>
                             <TableCell className="whitespace-nowrap text-sm">{formatDateTimeSafe(connection.lastSeenAt)}</TableCell>
+                            <TableCell>{renderConnectionActions(connection)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

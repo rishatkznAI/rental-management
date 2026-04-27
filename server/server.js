@@ -845,6 +845,8 @@ registerBotApiRoutes(apiRouter, {
   readData,
   getBotUsers,
   getBotSessions,
+  saveBotUsers,
+  saveBotSessions,
   botToken: BOT_TOKEN,
   webhookUrl: WEBHOOK_URL,
   managerBotToken: EFFECTIVE_MANAGER_BOT_TOKEN,

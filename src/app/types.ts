@@ -805,6 +805,16 @@ export interface AppSetting {
 
 export type BotStatus = 'online' | 'offline';
 export type BotActivityType = 'session_started' | 'authorization' | 'command' | 'message' | 'callback';
+export type BotConnectionRole =
+  | 'Администратор'
+  | 'Офис-менеджер'
+  | 'Менеджер по аренде'
+  | 'Менеджер по продажам'
+  | 'Механик'
+  | 'Младший стационарный механик'
+  | 'Выездной механик'
+  | 'Старший стационарный механик'
+  | 'Перевозчик';
 
 export interface BotReplyTarget {
   chat_id?: number | null;
@@ -818,7 +828,7 @@ export interface BotConnection {
   maxUserId: number | null;
   userId: string | null;
   userName: string | null;
-  userRole: string | null;
+  userRole: BotConnectionRole | string | null;
   email: string | null;
   replyTarget: BotReplyTarget | null;
   connectedAt: string | null;
@@ -864,6 +874,11 @@ export interface BotDetailResponse {
   bot: BotSummary;
   connections: BotConnection[];
   activity: BotActivityEntry[];
+}
+
+export interface BotConnectionMutationResponse {
+  ok: boolean;
+  connection?: BotConnection | null;
 }
 
 // ── Доставка ──────────────────────────────────────────────────────────────────

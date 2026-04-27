@@ -157,6 +157,72 @@ test('shared bot start lets a stale carrier session switch to employee login', a
   assert.equal(menu.payload.buttons[0][1].text, 'Мои доставки');
 });
 
+test('shared bot blocks service commands while delivery mode is active', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    botMode: 'delivery',
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.service = [{
+    id: 'S-1',
+    status: 'in_progress',
+    equipment: 'Mantall HZ160JRT',
+    reason: 'Полная диагностика',
+    assignedMechanicName: 'Дмитрий',
+  }];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/мои заявки');
+
+  assert.match(messages.at(-1).text, /режиме доставки/);
+  assert.doesNotMatch(messages.at(-1).text, /Мои сервисные заявки/);
+  const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.equal(menu.payload.buttons[0][0].text, 'Войти как сотрудник');
+});
+
+test('shared bot blocks stale mechanic callbacks while delivery mode is active', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    botMode: 'delivery',
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'menu:new_ticket', { callbackId: 'cb-stale' });
+
+  assert.match(messages.at(-1).text, /режиме доставки/);
+  assert.equal(state.bot_sessions['100']?.pendingAction, undefined);
+  const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.equal(menu.payload.buttons[0][0].text, 'Войти как сотрудник');
+});
+
+test('shared bot blocks delivery commands while staff mode is active', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/доставки');
+
+  assert.equal(state.bot_users['100'].userRole, 'Менеджер по аренде');
+  assert.match(messages.at(-1).text, /режиме сотрудника/);
+  const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.equal(menu.payload.buttons[0][0].text, 'Перейти в доставку');
+});
+
+test('shared bot can switch from staff mode to delivery explicitly', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'mode:switch_delivery', { callbackId: 'cb-switch' });
+
+  assert.equal(state.bot_users['100'].userRole, 'Перевозчик');
+  assert.equal(state.bot_users['100'].botMode, 'delivery');
+  assert.match(messages.at(-1).text, /достав/);
+});
+
 test('manager login flow greets manager with rental manager menu', async () => {
   const { state, messages, handlers } = createMemoryBot(false, {
     verifyPassword: (password, stored) => password === stored,

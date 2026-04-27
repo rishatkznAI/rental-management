@@ -604,6 +604,7 @@ function createBotHandlers(deps) {
       userId: found.id,
       userName: found.name,
       userRole: found.role,
+      botMode: 'staff',
       email: found.email,
       replyTarget: normalizeReplyTarget(replyTarget, phone),
     };
@@ -635,6 +636,7 @@ function createBotHandlers(deps) {
       userId: carrier.id || `carrier:${phone}`,
       userName: carrier.name || 'Перевозчик',
       userRole: 'Перевозчик',
+      botMode: 'delivery',
       email: null,
       carrierId: carrier.id || null,
       replyTarget: normalizeReplyTarget(replyTarget, phone),
@@ -646,6 +648,12 @@ function createBotHandlers(deps) {
 
   function getAuthorizedUser(phone) {
     return getBotUsers()[phone] || null;
+  }
+
+  function getUserBotMode(user) {
+    if (!user) return null;
+    if (user.botMode === 'delivery' || user.userRole === 'Перевозчик') return 'delivery';
+    return 'staff';
   }
 
   function getAuthorizedUserForCurrentBot(phone, replyTarget = null) {
@@ -759,11 +767,41 @@ function createBotHandlers(deps) {
     ]);
   }
 
+  function switchToStaffKeyboard() {
+    return keyboard([
+      [button('Войти как сотрудник', 'auth:start')],
+      [button('Остаться в доставке', 'menu:deliveries')],
+    ]);
+  }
+
+  function switchToDeliveryKeyboard() {
+    return keyboard([
+      [button('Перейти в доставку', 'mode:switch_delivery')],
+      [button('Остаться сотрудником', 'menu:main')],
+    ]);
+  }
+
   function getSharedBotEntryText(payloadLine = '') {
     return withBotMenu(
       `👋 Выберите режим работы в боте «Скайтех».${payloadLine}\n\nМожно войти как сотрудник или открыть доставки перевозчика.`,
       ['вход сотрудника: «Войти»', 'доставка: «Мои доставки»'],
     );
+  }
+
+  function getStaffModeRequiredText() {
+    return [
+      '🔒 Сейчас эта MAX-учётка работает в режиме доставки.',
+      '',
+      'Одновременно работать в доставке и в сервисе/менеджерском боте нельзя. Чтобы перейти к заявкам или менеджерским функциям, нажмите «Войти как сотрудник».',
+    ].join('\n');
+  }
+
+  function getDeliveryModeRequiredText() {
+    return [
+      '🔒 Сейчас эта MAX-учётка работает в режиме сотрудника.',
+      '',
+      'Одновременно работать в сервисе/менеджерском боте и в доставке нельзя. Чтобы открыть доставки, переключитесь в режим доставки.',
+    ].join('\n');
   }
 
   function normalizeCommandText(value) {
@@ -797,6 +835,74 @@ function createBotHandlers(deps) {
     return commandText === 'мои заявки' ||
       commandCompact === 'моизаявки' ||
       commandCompact === 'myrepairs';
+  }
+
+  function isStaffCommand(lower, commandText, commandCompact) {
+    if (isServiceCommand(commandText, commandCompact) || isMyRepairsCommand(commandText, commandCompact)) {
+      return true;
+    }
+    if ([
+      'аренды',
+      'мои',
+      'техника',
+      'новая заявка',
+      'создать заявку',
+      'отгрузка',
+      'приемка',
+      'приёмка',
+      'моя сводка',
+      'новая доставка',
+      'выезд',
+      'черновик',
+      'итог',
+      'работы',
+      'запчасти',
+      'фото до',
+      'фото после',
+      'отчет за день',
+      'отчёт за день',
+    ].includes(commandText)) {
+      return true;
+    }
+    return [
+      '/rentals',
+      '/equipment',
+      '/новаязаявка',
+      '/создатьзаявку',
+      '/найтитехнику',
+      '/техпоиск',
+      '/моясводка',
+      '/новаядоставка',
+      '/мойдень',
+      '/отчётзадень',
+      '/отчетзадень',
+      '/фотодо',
+      '/фотопосле',
+      '/добавитьработу',
+      '/добавитьзапчасть',
+      '/вработу',
+      '/ремонт',
+    ].some(prefix => lower === prefix || lower.startsWith(`${prefix} `));
+  }
+
+  function isStaffBotCallback(payload) {
+    if (payload.startsWith('menu:')) {
+      return !['menu:main', 'menu:help', 'menu:deliveries'].includes(payload);
+    }
+    return payload.startsWith('ticket:') ||
+      payload.startsWith('deliverycreate:') ||
+      payload.startsWith('operation:') ||
+      payload.startsWith('reason:') ||
+      payload.startsWith('equipmentmenu:') ||
+      payload.startsWith('work:') ||
+      payload.startsWith('part:') ||
+      payload.startsWith('qty:') ||
+      payload.startsWith('fieldtrip:') ||
+      payload.startsWith('repairclose:');
+  }
+
+  function isDeliveryModeCallback(payload) {
+    return payload === 'menu:deliveries' || payload.startsWith('delivery:status:');
   }
 
   const {
@@ -1555,6 +1661,22 @@ function createBotHandlers(deps) {
       );
     }
 
+    if (normalized === 'mode:switch_delivery') {
+      const carrier = findCarrierByMaxKey(phone);
+      if (!carrier) {
+        return reply(senderId, formatUnlinkedCarrierMessage(), {
+          attachments: authKeyboard(),
+          mechanicStage: 'delivery_main',
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      clearAuthorizedUser(phone);
+      resetBotFlow(phone);
+      return handleCommand(senderId, phone, '/доставки', {}, { callbackContext, replaceMessage: true });
+    }
+
     if (normalized === 'menu:cancel_login') {
       resetBotFlow(phone);
       return reply(senderId, '❎ Вход отменён.', {
@@ -1562,6 +1684,29 @@ function createBotHandlers(deps) {
         phone,
         callbackContext,
         replaceMessage: true,
+      });
+    }
+
+    const currentBotUser = getAuthorizedUser(String(phone));
+    const currentBotMode = getUserBotMode(currentBotUser);
+    if (!preferCarrierAutoLogin && currentBotMode === 'delivery' && isStaffBotCallback(normalized)) {
+      return reply(senderId, getStaffModeRequiredText(), {
+        attachments: switchToStaffKeyboard(),
+        brandImage: true,
+        phone,
+        callbackContext,
+        replaceMessage: true,
+        cleanupPrevious: !callbackContext,
+      });
+    }
+    if (!preferCarrierAutoLogin && currentBotMode === 'staff' && isDeliveryModeCallback(normalized)) {
+      return reply(senderId, getDeliveryModeRequiredText(), {
+        attachments: switchToDeliveryKeyboard(),
+        mechanicStage: mechanicMainStageForRole(currentBotUser?.userRole || ''),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+        cleanupPrevious: !callbackContext,
       });
     }
 
@@ -2802,6 +2947,20 @@ function createBotHandlers(deps) {
     saveBotUsers(botUsers);
 
     const { userName, userRole } = authUser;
+    const activeBotMode = getUserBotMode(authUser);
+    if (!preferCarrierAutoLogin && activeBotMode === 'delivery' && isStaffCommand(lower, commandText, commandCompact)) {
+      return replyWithUi(getStaffModeRequiredText(), {
+        attachments: switchToStaffKeyboard(),
+        brandImage: true,
+      });
+    }
+    if (!preferCarrierAutoLogin && activeBotMode === 'staff' && isDeliveriesCommand(commandText, commandCompact)) {
+      return replyWithUi(getDeliveryModeRequiredText(), {
+        attachments: switchToDeliveryKeyboard(),
+        mechanicStage: mechanicMainStageForRole(userRole),
+      });
+    }
+
     const canManageRepair = isMechanicRole(userRole) || userRole === 'Администратор';
     const canCreateServiceRequest = canManageRepair || userRole === 'Менеджер по аренде' || userRole === 'Офис-менеджер';
     const isRentalManager = userRole === 'Менеджер по аренде';

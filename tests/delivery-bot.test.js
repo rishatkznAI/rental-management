@@ -231,6 +231,50 @@ test('MAX update processor accepts camelCase message updates', async () => {
   assert.equal(calls[0][2], '/start');
 });
 
+test('MAX update processor routes callbacks to the user who clicked the button', async () => {
+  const calls = [];
+  const processor = createBotUpdateProcessor({
+    handleCommand: async () => {},
+    handleBotStarted: async () => {},
+    handleCallback: async (...args) => calls.push(args),
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+    webhookPath: '/bot/webhook',
+  });
+
+  await processor({
+    update_type: 'message_callback',
+    callback: {
+      callback_id: 'cb-1',
+      payload: 'menu:main',
+      user: { user_id: 100, name: 'Ришат' },
+      message: {
+        message_id: 'msg-1',
+        sender: { user_id: 999, name: 'Скайтех бот' },
+        recipient: { chat_id: 555 },
+      },
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0][0], { chat_id: 555, user_id: 100, prefer_user_id: true });
+  assert.equal(calls[0][1], '100');
+  assert.equal(calls[0][2], 'menu:main');
+  assert.deepEqual(calls[0][3], {
+    callbackId: 'cb-1',
+    messageId: 'msg-1',
+    raw: {
+      callback_id: 'cb-1',
+      payload: 'menu:main',
+      user: { user_id: 100, name: 'Ришат' },
+      message: {
+        message_id: 'msg-1',
+        sender: { user_id: 999, name: 'Скайтех бот' },
+        recipient: { chat_id: 555 },
+      },
+    },
+  });
+});
+
 test('shared bot blocks service commands while delivery mode is active', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users['100'] = {

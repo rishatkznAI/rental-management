@@ -40,11 +40,47 @@ function extractUpdateSender(update, message, callback = null) {
     {};
 }
 
+function extractCallbackSender(update, callback = {}) {
+  return callback?.user ||
+    callback?.sender ||
+    update?.user ||
+    update?.sender ||
+    callback?.message?.sender ||
+    update?.message?.sender ||
+    {};
+}
+
 function extractUpdateRecipient(update, message, callback = null) {
   return message?.recipient ||
     callback?.recipient ||
     update?.recipient ||
     {};
+}
+
+function firstTextValue(values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  }
+  return '';
+}
+
+function extractCallbackPayload(update, callback = {}) {
+  return firstTextValue([
+    callback?.payload,
+    callback?.data,
+    callback?.button?.payload,
+    callback?.button?.data,
+    callback?.action?.payload,
+    callback?.action?.data,
+    update?.payload?.payload,
+    update?.payload?.data,
+    update?.callback_payload,
+    update?.callbackPayload,
+    update?.data,
+    update?.payload,
+  ]);
 }
 
 function extractUpdateText(update, message) {
@@ -65,8 +101,11 @@ function extractUpdateAttachments(message) {
 function webhookUpdateFingerprint(update) {
   const callback = update?.callback || update?.message_callback || update?.messageCallback || {};
   const message = extractUpdateMessage(update) || callback?.message || {};
-  const sender = extractUpdateSender(update, message, callback);
+  const sender = getUpdateType(update) === 'message_callback'
+    ? extractCallbackSender(update, callback)
+    : extractUpdateSender(update, message, callback);
   const body = message?.body || {};
+  const callbackPayload = extractCallbackPayload(update, callback);
   const stableParts = [
     getUpdateType(update),
     update?.update_id,
@@ -82,8 +121,7 @@ function webhookUpdateFingerprint(update) {
     message?.createdAt,
     callback?.callback_id,
     callback?.callbackId,
-    callback?.payload,
-    callback?.data,
+    callbackPayload,
     sender?.user_id,
     sender?.userId,
     body?.text,
@@ -394,9 +432,9 @@ function createBotUpdateProcessor(deps) {
     if (updateType === 'message_callback') {
       const callback = update.callback || update.message_callback || update.messageCallback || {};
       const callbackId = callback.callback_id || callback.callbackId || update.callback_id;
-      const payload = callback.payload || callback.data || update.payload || '';
+      const payload = extractCallbackPayload(update, callback);
       const callbackMessage = callback.message || update.message || {};
-      const sender = extractUpdateSender(update, callbackMessage, callback);
+      const sender = extractCallbackSender(update, callback);
       const recipient = extractUpdateRecipient(update, callbackMessage, callback);
       const callbackMessageId =
         callbackMessage.message_id ||
@@ -407,12 +445,12 @@ function createBotUpdateProcessor(deps) {
         null;
       const replyTarget = {
         chat_id: recipient.chat_id || recipient.chatId || update.chat_id || update.chatId,
-        user_id: sender.user_id || sender.userId || update.user_id,
+        user_id: sender.user_id || sender.userId || update.user_id || update.userId,
         prefer_user_id: true,
       };
       const phone = String(replyTarget.user_id || '');
 
-      logger.log(`[BOT] ${normalizedWebhookPath} callback payload=${payload} user=${replyTarget.user_id || 'unknown'}`);
+      logger.log(`[BOT] ${normalizedWebhookPath} callback payload=${payload || 'empty'} user=${replyTarget.user_id || 'unknown'}`);
       await handleCallback(replyTarget, phone, String(payload || ''), {
         callbackId,
         messageId: callbackMessageId,

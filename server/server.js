@@ -63,6 +63,8 @@ const {
   mergeEntityHistory,
   mergeRentalHistory,
 } = require('./lib/audit-history');
+const { createAccessControl } = require('./lib/access-control');
+const { createAuditLogger } = require('./lib/security-audit');
 const { createBotHandlers } = require('./lib/bot-commands');
 const { createGprsGateway } = require('./lib/gprs-gateway');
 const { createMaxApiClient } = require('./lib/max-api');
@@ -152,21 +154,76 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '20mb' }));
 
+function buildSecurityHeadersMiddleware() {
+  const csp = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self'",
+    "connect-src 'self' https:",
+    "form-action 'self'",
+  ].join('; ');
+
+  return (req, res, next) => {
+    res.setHeader('Content-Security-Policy', csp);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    if (isProductionRuntime()) {
+      res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+    }
+    next();
+  };
+}
+
+try {
+  const helmet = require('helmet');
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        fontSrc: ["'self'", 'data:'],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        connectSrc: ["'self'", 'https:'],
+        formAction: ["'self'"],
+      },
+    },
+    referrerPolicy: { policy: 'no-referrer' },
+    hsts: isProductionRuntime() ? { maxAge: 15552000, includeSubDomains: true } : false,
+  }));
+} catch {
+  app.use(buildSecurityHeadersMiddleware());
+}
+
 const ALLOWED_ORIGINS = [
   'https://rishatkznai.github.io',        // GitHub Pages (production)
-  'http://localhost:5173',                 // Vite dev server
-  'http://127.0.0.1:5173',                 // Vite dev server (Playwright / local)
-  'http://localhost:4173',                 // Vite preview
-  'http://127.0.0.1:4173',                 // Vite preview (Playwright / local)
+  ...(!isProductionRuntime() ? [
+    'http://localhost:5173',               // Vite dev server
+    'http://127.0.0.1:5173',               // Vite dev server (Playwright / local)
+    'http://localhost:4173',               // Vite preview
+    'http://127.0.0.1:4173',               // Vite preview (Playwright / local)
+  ] : []),
   ...(process.env.CORS_ORIGIN             // Railway / любой другой домен через env
-    ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+    ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()).filter(origin => origin && origin !== '*')
     : []),
 ];
 const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i;
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true); // curl / server-to-server
-    if (ALLOWED_ORIGINS.includes(origin) || LOCAL_ORIGIN_PATTERN.test(origin)) {
+    const allowLocalOrigin = !isProductionRuntime() || process.env.CORS_ALLOW_LOCAL === '1';
+    if (ALLOWED_ORIGINS.includes(origin) || (allowLocalOrigin && LOCAL_ORIGIN_PATTERN.test(origin))) {
       return callback(null, true);
     }
     console.warn(`[CORS] Blocked origin: ${origin}`);
@@ -185,6 +242,7 @@ app.use('/bot-assets', express.static(path.join(__dirname, 'assets', 'bot'), {
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const MAX_API   = 'https://platform-api.max.ru';
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const MAX_WEBHOOK_SECRET = String(process.env.MAX_WEBHOOK_SECRET || '').trim();
 const MAIN_BOT_WEBHOOK_PATH = '/bot/webhook';
 const MANAGER_BOT_WEBHOOK_PATH = '/bot/webhook/manager';
 const DELIVERY_BOT_WEBHOOK_PATH = '/bot/webhook/delivery';
@@ -213,6 +271,15 @@ function writeData(name, data) {
   setData(name, data);
 }
 
+const accessControl = createAccessControl({ readData });
+const auditLog = createAuditLogger({
+  readData,
+  writeData,
+  generateId: prefix => `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+  nowIso: () => new Date().toISOString(),
+  logger: console,
+});
+
 function getBotUsers()    { return readData('bot_users') || {}; }
 function saveBotUsers(u)  { writeData('bot_users', u); }
 function getBotSessions() { return readData('bot_sessions') || {}; }
@@ -234,6 +301,7 @@ const {
   fetchImpl: fetch,
   webhookUrl: WEBHOOK_URL,
   webhookPath: MAIN_BOT_WEBHOOK_PATH,
+  webhookSecret: MAX_WEBHOOK_SECRET,
   logger: console,
 });
 
@@ -253,7 +321,7 @@ const gprsGateway = createGprsGateway({
 
 // ── Сессии (SQLite-backed, Bearer-токен) ──────────────────────────────────────
 
-const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 часа
+const SESSION_TTL = Math.max(15 * 60 * 1000, Number(process.env.SESSION_TTL_MS || 8 * 60 * 60 * 1000));
 
 function createSession(user) {
   const token = crypto.randomBytes(32).toString('hex');
@@ -265,6 +333,8 @@ function createSession(user) {
     profilePhoto: user.profilePhoto || null,
     ownerId:   user.ownerId || null,
     ownerName: user.ownerName || null,
+    tokenVersion: Number(user.tokenVersion) || 0,
+    passwordChangedAt: user.passwordChangedAt || null,
     createdAt: Date.now(),
   };
   saveSession(token, session, session.createdAt + SESSION_TTL);
@@ -303,7 +373,7 @@ const WRITE_PERMISSIONS = {
   gsm_commands:  ['Администратор', 'Офис-менеджер'],
   documents:      ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
-  payments:       ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  payments:       ['Администратор', 'Офис-менеджер'],
   company_expenses: ['Администратор'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
@@ -328,14 +398,14 @@ const READ_PERMISSIONS = {
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
-  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Перевозчик'],
   delivery_carriers: ['Администратор'],
   service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   warranty_claims: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
   clients:        ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   knowledge_base_modules: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
   knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
-  app_settings: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...MECHANIC_ROLES],
+  app_settings: ['Администратор'],
   gsm_packets: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
   gsm_commands: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
   documents:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
@@ -379,6 +449,14 @@ function requireAuth(req, res, next) {
     destroySession(token);
     return res.status(401).json({ ok: false, error: 'Аккаунт отключён или удалён' });
   }
+  if ((Number(currentUser.tokenVersion) || 0) !== (Number(session.tokenVersion) || 0)) {
+    destroySession(token);
+    return res.status(401).json({ ok: false, error: 'Session expired or invalid' });
+  }
+  if ((currentUser.passwordChangedAt || null) !== (session.passwordChangedAt || null)) {
+    destroySession(token);
+    return res.status(401).json({ ok: false, error: 'Session expired or invalid' });
+  }
   req.user = {
     ...session,
     userName: currentUser.name,
@@ -387,6 +465,8 @@ function requireAuth(req, res, next) {
     profilePhoto: currentUser.profilePhoto || null,
     ownerId: currentUser.ownerId || null,
     ownerName: currentUser.ownerName || null,
+    tokenVersion: Number(currentUser.tokenVersion) || 0,
+    passwordChangedAt: currentUser.passwordChangedAt || null,
   };
   next();
 }
@@ -395,6 +475,16 @@ function requireWrite(collection) {
   return (req, res, next) => {
     const allowed = WRITE_PERMISSIONS[collection] || ['Администратор'];
     if (!allowed.includes(req.user.userRole)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden: insufficient role' });
+    }
+    next();
+  };
+}
+
+function requireRole(...roles) {
+  const allowedRoles = roles.flat().filter(Boolean);
+  return (req, res, next) => {
+    if (!allowedRoles.includes(req.user?.userRole)) {
       return res.status(403).json({ ok: false, error: 'Forbidden: insufficient role' });
     }
     next();
@@ -413,6 +503,10 @@ function requireRead(collection) {
     }
     next();
   };
+}
+
+function requirePermission(collection, action = 'read') {
+  return action === 'write' ? requireWrite(collection) : requireRead(collection);
 }
 
 function requireAdmin(req, res, next) {
@@ -730,6 +824,8 @@ registerAuthRoutes(app, {
   requireAuth,
   destroySession,
   deleteSessionsForUserIds,
+  auditLog,
+  nowIso,
 });
 
 apiRouter.use(registerRentalRoutes({
@@ -743,6 +839,8 @@ apiRouter.use(registerRentalRoutes({
   normalizeGanttRentalStatus,
   generateId,
   idPrefixes: ID_PREFIXES,
+  accessControl,
+  auditLog,
 }));
 
 apiRouter.use(registerRentalChangeRequestRoutes({
@@ -758,6 +856,7 @@ registerFinanceRoutes(apiRouter, {
   requireAuth,
   requireRead,
   readData,
+  accessControl,
   getRentalDebtOverdueDays,
   buildRentalDebtRows,
   buildClientReceivables,
@@ -784,6 +883,8 @@ registerDeliveryRoutes(apiRouter, {
   nowIso,
   generateId,
   idPrefixes: ID_PREFIXES,
+  accessControl,
+  auditLog,
 });
 
 const serviceCore = createServiceCore({
@@ -829,6 +930,8 @@ apiRouter.use(registerCrudRoutes({
   generateId,
   nowIso,
   applyServiceTicketCreationEffects,
+  accessControl,
+  auditLog,
 }));
 
 function requireNonEmptyString(value, fieldName) {
@@ -851,6 +954,8 @@ registerServiceRoutes(apiRouter, {
   idPrefixes: ID_PREFIXES,
   findServiceTicketOr404,
   migrateLegacyRepairFacts,
+  accessControl,
+  auditLog,
 });
 
 registerBotApiRoutes(apiRouter, {
@@ -898,6 +1003,8 @@ const {
   updateServiceTicketStatus,
   getOpenTicketByEquipment,
   serviceStatusLabel,
+  accessControl,
+  auditLog,
 });
 
 const managerBotHandlers = createBotHandlers({
@@ -924,6 +1031,8 @@ const managerBotHandlers = createBotHandlers({
   updateServiceTicketStatus,
   getOpenTicketByEquipment,
   serviceStatusLabel,
+  accessControl,
+  auditLog,
 });
 
 const deliveryBotHandlers = createBotHandlers({
@@ -951,6 +1060,8 @@ const deliveryBotHandlers = createBotHandlers({
   getOpenTicketByEquipment,
   serviceStatusLabel,
   preferCarrierAutoLogin: true,
+  accessControl,
+  auditLog,
 });
 
 function getMoscowDateParts(date = new Date()) {
@@ -1887,7 +1998,8 @@ function isProductionRuntime() {
     Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
 }
 
-function getDefaultUsers() {
+function getDefaultUsers(seedPassword) {
+  const password = String(seedPassword || crypto.randomBytes(12).toString('base64url'));
   return [
     {
       id:       'U-default-admin',
@@ -1895,7 +2007,7 @@ function getDefaultUsers() {
       email:    'admin@rental.local',
       role:     'Администратор',
       status:   'Активен',
-      password: hashPassword('admin123'),
+      password: hashPassword(password),
     },
     {
       id:       'U-default-mp2',
@@ -1903,7 +2015,7 @@ function getDefaultUsers() {
       email:    'mp2@mantall.ru',
       role:     'Менеджер по аренде',
       status:   'Активен',
-      password: hashPassword('1234'),
+      password: hashPassword(password),
     },
     {
       id:       'U-default-smirnova',
@@ -1911,7 +2023,7 @@ function getDefaultUsers() {
       email:    'smirnova@company.ru',
       role:     'Менеджер по аренде',
       status:   'Активен',
-      password: hashPassword('1234'),
+      password: hashPassword(password),
     },
     {
       id:       'U-default-kozlov',
@@ -1919,7 +2031,7 @@ function getDefaultUsers() {
       email:    'kozlov@company.ru',
       role:     'Менеджер по аренде',
       status:   'Активен',
-      password: hashPassword('1234'),
+      password: hashPassword(password),
     },
     {
       id:       'U-default-petrov',
@@ -1927,15 +2039,7 @@ function getDefaultUsers() {
       email:    'petrov@company.ru',
       role:     'Механик',
       status:   'Активен',
-      password: hashPassword('1234'),
-    },
-    {
-      id:       'U-default-hrrkzn',
-      name:     'Администратор',
-      email:    'hrrkzn@yandex.ru',
-      role:     'Администратор',
-      status:   'Активен',
-      password: hashPassword('kazan2013'),
+      password: hashPassword(password),
     },
   ];
 }
@@ -1966,15 +2070,30 @@ function seedDefaultUsers() {
     return;
   }
 
-  const defaults = getDefaultUsers();
+  const devSeedEnabled = process.env.ENABLE_DEV_DEFAULT_USERS === '1' || process.env.NODE_ENV === 'test';
+  const seedPassword = process.env.DEV_SEED_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD;
+  if (!seedPassword) {
+    console.warn('[INIT] Development seed не создан: задайте DEV_SEED_PASSWORD или BOOTSTRAP_ADMIN_PASSWORD.');
+    return;
+  }
+  const defaults = devSeedEnabled
+    ? getDefaultUsers(seedPassword)
+    : [{
+        id:       'U-dev-admin',
+        name:     'Администратор',
+        email:    (process.env.DEV_ADMIN_EMAIL || 'admin@rental.local').trim().toLowerCase(),
+        role:     'Администратор',
+        status:   'Активен',
+        password: hashPassword(seedPassword),
+      }];
   writeData('users', defaults);
-  console.log('[INIT] Созданы стандартные пользователи для первого входа');
-  console.log('[INIT] Администратор по умолчанию: admin@rental.local / admin123');
-  console.log('[INIT] ⚠️  Обязательно смените пароли в настройках!');
+  console.log('[INIT] Создан development/test bootstrap-пользователь без hardcoded пароля.');
+  console.log('[INIT] Смените пароль после первого входа.');
 }
 
 function ensureLegacyDefaultUsers() {
   if (isProductionRuntime()) return;
+  if (process.env.ENABLE_DEV_DEFAULT_USERS !== '1' && process.env.NODE_ENV !== 'test') return;
 
   const users = readData('users') || [];
   const isSingleDefaultAdmin =
@@ -1984,7 +2103,9 @@ function ensureLegacyDefaultUsers() {
   if (!isSingleDefaultAdmin) return;
 
   const existingEmails = new Set(users.map(u => String(u.email || '').trim().toLowerCase()));
-  const missingDefaults = getDefaultUsers().filter(
+  const seedPassword = process.env.DEV_SEED_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD;
+  if (!seedPassword) return;
+  const missingDefaults = getDefaultUsers(seedPassword).filter(
     user => !existingEmails.has(String(user.email || '').trim().toLowerCase())
   );
 
@@ -2035,6 +2156,7 @@ registerBotRoutes(app, {
   answerCallback,
   logger: console,
   webhookPath: MAIN_BOT_WEBHOOK_PATH,
+  webhookSecret: MAX_WEBHOOK_SECRET,
 });
 
 registerBotRoutes(app, {
@@ -2044,6 +2166,7 @@ registerBotRoutes(app, {
   answerCallback,
   logger: console,
   webhookPath: MANAGER_BOT_WEBHOOK_PATH,
+  webhookSecret: MAX_WEBHOOK_SECRET,
 });
 
 registerBotRoutes(app, {
@@ -2053,6 +2176,7 @@ registerBotRoutes(app, {
   answerCallback,
   logger: console,
   webhookPath: DELIVERY_BOT_WEBHOOK_PATH,
+  webhookSecret: MAX_WEBHOOK_SECRET,
 });
 
 registerSystemRoutes(app, {
@@ -2069,6 +2193,7 @@ registerSystemRoutes(app, {
   requireAuth,
   requireAdmin,
   fetchImpl: fetch,
+  auditLog,
 });
 
 startServer({

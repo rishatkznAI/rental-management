@@ -22,9 +22,18 @@ function registerRentalRoutes(deps) {
     normalizeGanttRentalStatus,
     generateId,
     idPrefixes,
+    accessControl,
+    auditLog,
   } = deps;
 
   const router = express.Router();
+  const requiredAccessMethods = ['filterCollectionByScope', 'canAccessEntity', 'assertCanUpdateEntity', 'splitForbiddenRentalManagerPatch'];
+  const missingAccessMethods = !accessControl
+    ? requiredAccessMethods
+    : requiredAccessMethods.filter(name => typeof accessControl[name] !== 'function');
+  if (missingAccessMethods.length > 0) {
+    throw new Error(`Rental routes require access-control methods: ${missingAccessMethods.join(', ')}`);
+  }
 
   function rentalWriteForbiddenReason(req, collection, method) {
     const role = req.user?.userRole;
@@ -140,13 +149,17 @@ function registerRentalRoutes(deps) {
     }
 
     router.get(`/${collection}`, requireAuth, requireRead(collection), (req, res) => {
-      return res.json(readData(collection) || []);
+      const data = readData(collection) || [];
+      return res.json(accessControl.filterCollectionByScope(collection, data, req.user));
     });
 
     router.get(`/${collection}/:id`, requireAuth, requireRead(collection), (req, res) => {
       const data = readData(collection) || [];
       const item = data.find(entry => entry.id === req.params.id);
       if (!item) return res.status(404).json({ ok: false, error: 'Not found' });
+      if (!accessControl.canAccessEntity(collection, item, req.user)) {
+        return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
       return res.json(item);
     });
 
@@ -170,6 +183,12 @@ function registerRentalRoutes(deps) {
       }
       data.push(newItem);
       writeData(collection, data);
+      auditLog?.(req, {
+        action: `${collection}.create`,
+        entityType: collection,
+        entityId: newItem.id,
+        after: newItem,
+      });
       return res.status(201).json(newItem);
     });
 
@@ -183,14 +202,32 @@ function registerRentalRoutes(deps) {
       const data = readData(collection) || [];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+      try {
+        accessControl.assertCanUpdateEntity(collection, data[idx], req.user);
+      } catch (error) {
+        return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+      }
 
       if (collection === 'rentals' && req.user?.userRole !== 'Администратор') {
         const previousRental = data[idx];
+        const managerSplit = req.user?.userRole === 'Менеджер по аренде'
+          ? accessControl.splitForbiddenRentalManagerPatch(previousRental, patch)
+          : { immediatePatch: patch, approvalFields: [] };
         const { immediatePatch, approvalChanges } = splitRentalPatch({
           previousRental,
-          patch,
+          patch: managerSplit.immediatePatch,
           payments: readData('payments') || [],
         });
+        for (const field of managerSplit.approvalFields || []) {
+          approvalChanges.push({
+            field,
+            label: getFieldLabel(field),
+            oldValue: previousRental?.[field],
+            newValue: patch[field],
+            type: 'Критичное изменение аренды',
+            reason: 'Критичные поля аренды меняются через согласование администратора.',
+          });
+        }
 
         const immediateValidation = validateImmediateRentalPatch(previousRental, immediatePatch, data, approvalChanges, meta, req.user.userName);
         if (!immediateValidation.ok) {
@@ -207,9 +244,22 @@ function registerRentalRoutes(deps) {
           );
           data[idx] = nextItem;
           writeData(collection, data);
+          auditLog?.(req, {
+            action: 'rentals.update',
+            entityType: 'rentals',
+            entityId: nextItem.id,
+            before: previousRental,
+            after: nextItem,
+          });
           syncLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, req.user.userName);
         } else if (createdRequests.length > 0) {
           writeData(collection, data);
+          auditLog?.(req, {
+            action: 'rentals.change_request',
+            entityType: 'rentals',
+            entityId: previousRental.id,
+            after: { requestIds: createdRequests.map(item => item.id) },
+          });
         }
 
         return res.json({
@@ -249,6 +299,13 @@ function registerRentalRoutes(deps) {
       const previousRental = data[idx];
       data[idx] = nextItem;
       writeData(collection, data);
+      auditLog?.(req, {
+        action: `${collection}.update`,
+        entityType: collection,
+        entityId: nextItem.id,
+        before: previousRental,
+        after: nextItem,
+      });
       if (collection === 'rentals') {
         syncLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, req.user.userName);
       }
@@ -267,6 +324,11 @@ function registerRentalRoutes(deps) {
 
       data.splice(idx, 1);
       writeData(collection, data);
+      auditLog?.(req, {
+        action: `${collection}.delete`,
+        entityType: collection,
+        entityId: req.params.id,
+      });
       return res.json({ ok: true });
     });
 
@@ -295,6 +357,11 @@ function registerRentalRoutes(deps) {
         : list;
 
       writeData(collection, nextList);
+      auditLog?.(req, {
+        action: `${collection}.bulk_replace`,
+        entityType: collection,
+        after: { count: nextList.length },
+      });
       return res.json({ ok: true, count: nextList.length });
     });
   }

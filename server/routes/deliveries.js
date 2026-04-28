@@ -12,7 +12,16 @@ function registerDeliveryRoutes(router, deps) {
     nowIso,
     generateId,
     idPrefixes,
+    accessControl,
+    auditLog,
   } = deps;
+  const requiredAccessMethods = ['filterCollectionByScope', 'canAccessEntity', 'assertCanUpdateEntity', 'assertCanDeleteEntity'];
+  const missingAccessMethods = !accessControl
+    ? requiredAccessMethods
+    : requiredAccessMethods.filter(name => typeof accessControl[name] !== 'function');
+  if (missingAccessMethods.length > 0) {
+    throw new Error(`Delivery routes require access-control methods: ${missingAccessMethods.join(', ')}`);
+  }
 
   function ensureNonEmpty(value, fieldName) {
     if (!String(value || '').trim()) {
@@ -116,6 +125,38 @@ function registerDeliveryRoutes(router, deps) {
     }
 
     return next;
+  }
+
+  function sanitizeDeliveryBody(body = {}, existing = null, req) {
+    if (req.user?.userRole === 'Администратор' || req.user?.userRole === 'Офис-менеджер') {
+      return { ...body };
+    }
+
+    const allowed = new Set([
+      'type',
+      'transportDate',
+      'neededBy',
+      'origin',
+      'destination',
+      'cargo',
+      'contactName',
+      'contactPhone',
+      'comment',
+      'client',
+      'clientId',
+      'carrierKey',
+      'ganttRentalId',
+      'classicRentalId',
+      'equipmentId',
+      'equipmentInv',
+      'equipmentLabel',
+    ]);
+    const safe = Object.entries(body || {}).reduce((acc, [field, value]) => {
+      if (allowed.has(field)) acc[field] = value;
+      return acc;
+    }, {});
+    safe.manager = existing?.manager || req.user?.userName || 'Система';
+    return safe;
   }
 
   function button(text, payload) {
@@ -393,6 +434,7 @@ function registerDeliveryRoutes(router, deps) {
 
   router.get('/deliveries', requireAuth, requireRead('deliveries'), (req, res) => {
     let deliveries = readData('deliveries') || [];
+    deliveries = accessControl.filterCollectionByScope('deliveries', deliveries, req.user);
     if (req.query.status) {
       deliveries = deliveries.filter((item) => item.status === req.query.status);
     }
@@ -413,13 +455,16 @@ function registerDeliveryRoutes(router, deps) {
     if (!found) {
       return res.status(404).json({ ok: false, error: 'Доставка не найдена' });
     }
+    if (!accessControl.canAccessEntity('deliveries', found, req.user)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
     return res.json(found);
   });
 
   router.post('/deliveries', requireAuth, requireWrite('deliveries'), async (req, res) => {
     try {
       const author = req.user.userName;
-      let delivery = normalizeDeliveryPayload(req.body, null, author);
+      let delivery = normalizeDeliveryPayload(sanitizeDeliveryBody(req.body, null, req), null, author);
       const carrier = resolveCarrierSelection(delivery.carrierKey);
       if (carrier) {
         delivery = {
@@ -445,6 +490,12 @@ function registerDeliveryRoutes(router, deps) {
       const deliveries = readData('deliveries') || [];
       deliveries.push(delivery);
       writeData('deliveries', deliveries);
+      auditLog?.(req, {
+        action: 'deliveries.create',
+        entityType: 'deliveries',
+        entityId: delivery.id,
+        after: delivery,
+      });
       return res.status(201).json(delivery);
     } catch (error) {
       return res.status(400).json({ ok: false, error: error.message });
@@ -460,8 +511,14 @@ function registerDeliveryRoutes(router, deps) {
       }
 
       const current = deliveries[idx];
+      try {
+        accessControl.assertCanUpdateEntity('deliveries', current, req.user);
+      } catch (error) {
+        return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+      }
       const author = req.user.userName;
-      let delivery = normalizeDeliveryPayload({ ...current, ...req.body }, current, author);
+      const safeBody = sanitizeDeliveryBody(req.body, current, req);
+      let delivery = normalizeDeliveryPayload({ ...current, ...safeBody }, current, author);
       const carrier = resolveCarrierSelection(delivery.carrierKey);
       if (carrier) {
         delivery = {
@@ -497,6 +554,13 @@ function registerDeliveryRoutes(router, deps) {
       syncLinkedRentals(delivery, author);
       deliveries[idx] = delivery;
       writeData('deliveries', deliveries);
+      auditLog?.(req, {
+        action: 'deliveries.update',
+        entityType: 'deliveries',
+        entityId: delivery.id,
+        before: current,
+        after: delivery,
+      });
       return res.json(delivery);
     } catch (error) {
       return res.status(400).json({ ok: false, error: error.message });
@@ -510,6 +574,11 @@ function registerDeliveryRoutes(router, deps) {
       if (idx === -1) {
         return res.status(404).json({ ok: false, error: 'Доставка не найдена' });
       }
+      try {
+        accessControl.assertCanUpdateEntity('deliveries', deliveries[idx], req.user);
+      } catch (error) {
+        return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+      }
 
       const updated = await trySendToCarrier(deliveries[idx]);
       deliveries[idx] = {
@@ -517,6 +586,12 @@ function registerDeliveryRoutes(router, deps) {
         updatedAt: nowIso(),
       };
       writeData('deliveries', deliveries);
+      auditLog?.(req, {
+        action: 'deliveries.send_to_carrier',
+        entityType: 'deliveries',
+        entityId: deliveries[idx].id,
+        after: deliveries[idx],
+      });
       return res.json(deliveries[idx]);
     } catch (error) {
       return res.status(400).json({ ok: false, error: error.message });
@@ -529,8 +604,20 @@ function registerDeliveryRoutes(router, deps) {
     if (idx === -1) {
       return res.status(404).json({ ok: false, error: 'Доставка не найдена' });
     }
+    const removed = deliveries[idx];
+    try {
+      accessControl.assertCanDeleteEntity('deliveries', removed, req.user);
+    } catch (error) {
+      return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+    }
     deliveries.splice(idx, 1);
     writeData('deliveries', deliveries);
+    auditLog?.(req, {
+      action: 'deliveries.delete',
+      entityType: 'deliveries',
+      entityId: removed.id,
+      before: removed,
+    });
     return res.json({ ok: true });
   });
 }

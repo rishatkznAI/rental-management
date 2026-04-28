@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { api, setToken, clearToken, AUTH_TOKEN_KEY } from '../lib/api';
+import { api, setToken, clearToken, getToken } from '../lib/api';
 
 export interface AuthUser {
   id: string;
@@ -50,26 +50,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState({ user, isAuthenticated: true, isLoading: false });
   }, []);
 
-  // При монтировании проверяем, есть ли сохранённый токен, и если да — подтверждаем сессию
+  // Bearer token is memory-only. On reload we intentionally drop the session
+  // until backend refresh cookies are introduced.
   useEffect(() => {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
-    if (!token) {
-      setState({ user: null, isAuthenticated: false, isLoading: false });
-      return;
-    }
-
-    refreshUser()
-      .catch((err: unknown) => {
-        // Удаляем токен ТОЛЬКО если сервер явно ответил 401 (сессия истекла / невалидна).
-        // Сетевые ошибки, 502/503 и другие временные сбои (например, Railway redeploy)
-        // НЕ должны уничтожать токен — при следующем открытии страницы сессия
-        // восстановится автоматически, как только бэкенд снова поднимется.
-        const status = (err as { status?: number })?.status;
-        if (status === 401) {
-          clearToken(); // api.ts уже вызвал clearToken(), но на всякий случай повторяем
-        }
-        setState({ user: null, isAuthenticated: false, isLoading: false });
-      });
+    clearToken();
+    setState({ user: null, isAuthenticated: false, isLoading: false });
   }, [refreshUser]);
 
   // Слушаем событие из api.ts: любой запрос получил 401 в рантайме (не только bootstrap).
@@ -125,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    const token = getToken();
     // Fire-and-forget — don't block UI
     if (token) {
       api.post('/api/auth/logout', {}).catch(() => {});

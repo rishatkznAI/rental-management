@@ -144,45 +144,13 @@ export async function verifyPassword(plain: string, stored: string): Promise<boo
   return plain === stored;
 }
 
-// ── Демо-пользователи по умолчанию ───────────────────────────────────────────
+// ── Локальные пользователи legacy-режима ─────────────────────────────────────
 //
-// Используются ТОЛЬКО если в localStorage нет сохранённых пользователей.
-// Пароли здесь в plain-text чтобы быть захешированными при первой загрузке
-// через migratePasswordsToHash(). После миграции в localStorage будут только хеши.
+// Production-аутентификация идёт через backend. Frontend больше не содержит
+// hardcoded пользователей и паролей.
 
 function getDefaultUsers(): SystemUser[] {
-  return [
-    {
-      id: '0', name: 'Администратор',
-      email: 'hrrkzn@yandex.ru',
-      role: 'Администратор', status: 'Активен',
-      password: 'kazan2013',
-    },
-    {
-      id: '5', name: 'mp2',
-      email: 'mp2@mantall.ru',
-      role: 'Менеджер по аренде', status: 'Активен',
-      password: '1234',
-    },
-    {
-      id: '1', name: 'Смирнова Анна Петровна',
-      email: 'smirnova@company.ru',
-      role: 'Менеджер по аренде', status: 'Активен',
-      password: '1234',
-    },
-    {
-      id: '2', name: 'Козлов Дмитрий Владимирович',
-      email: 'kozlov@company.ru',
-      role: 'Менеджер по аренде', status: 'Активен',
-      password: '1234',
-    },
-    {
-      id: '3', name: 'Петров Иван Сергеевич',
-      email: 'petrov@company.ru',
-      role: 'Механик', status: 'Активен',
-      password: '1234',
-    },
-  ];
+  return [];
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────

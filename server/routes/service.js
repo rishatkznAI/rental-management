@@ -13,7 +13,16 @@ function registerServiceRoutes(router, deps) {
     idPrefixes,
     findServiceTicketOr404,
     migrateLegacyRepairFacts,
+    accessControl,
+    auditLog,
   } = deps;
+  const requiredAccessMethods = ['filterCollectionByScope', 'assertCanUpdateEntity'];
+  const missingAccessMethods = !accessControl
+    ? requiredAccessMethods
+    : requiredAccessMethods.filter(name => typeof accessControl[name] !== 'function');
+  if (missingAccessMethods.length > 0) {
+    throw new Error(`Service routes require access-control methods: ${missingAccessMethods.join(', ')}`);
+  }
 
   const SERVICE_SCENARIO_LABELS = {
     repair: 'Ремонт',
@@ -103,7 +112,15 @@ function registerServiceRoutes(router, deps) {
         quantity: Number.isNaN(item.quantity) || item.quantity == null ? 1 : Number(item.quantity),
       };
     });
-    res.json(repairId ? sanitized.filter(item => item.repairId === repairId) : sanitized);
+    const scoped = accessControl.filterCollectionByScope('repair_work_items', sanitized, req.user);
+    if (repairId) {
+      const rows = scoped.filter(item => item.repairId === repairId);
+      if (rows.length === 0 && sanitized.some(item => item.repairId === repairId)) {
+        return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
+      return res.json(rows);
+    }
+    res.json(scoped);
   });
 
   router.post('/repair_work_items', requireAuth, requireWrite('repair_work_items'), (req, res) => {
@@ -115,7 +132,13 @@ function registerServiceRoutes(router, deps) {
       if (!Number.isFinite(quantity) || quantity <= 0) {
         throw new Error('Количество работы должно быть больше 0');
       }
-      if (!findServiceTicketOr404(repairId, res)) return;
+      const ticket = findServiceTicketOr404(repairId, res);
+      if (!ticket) return;
+      try {
+        accessControl.assertCanUpdateEntity('service', ticket, req.user);
+      } catch (error) {
+        return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+      }
 
       const work = (readData('service_works') || []).find(item => item.id === workId && item.isActive !== false);
       if (!work) {
@@ -136,6 +159,12 @@ function registerServiceRoutes(router, deps) {
       };
       list.push(item);
       writeData('repair_work_items', list);
+      auditLog?.(req, {
+        action: 'service.work_item.create',
+        entityType: 'repair_work_items',
+        entityId: item.id,
+        after: item,
+      });
       res.status(201).json(item);
     } catch (error) {
       res.status(400).json({ ok: false, error: error.message });
@@ -148,8 +177,22 @@ function registerServiceRoutes(router, deps) {
     if (index === -1) {
       return res.status(404).json({ ok: false, error: 'Строка работы не найдена' });
     }
+    const removed = list[index];
+    const ticket = (readData('service') || []).find(item => item.id === removed.repairId);
+    if (!ticket) return res.status(404).json({ ok: false, error: 'Заявка на ремонт не найдена' });
+    try {
+      accessControl.assertCanUpdateEntity('service', ticket, req.user);
+    } catch (error) {
+      return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+    }
     list.splice(index, 1);
     writeData('repair_work_items', list);
+    auditLog?.(req, {
+      action: 'service.work_item.delete',
+      entityType: 'repair_work_items',
+      entityId: removed.id,
+      before: removed,
+    });
     res.json({ ok: true });
   });
 
@@ -170,7 +213,15 @@ function registerServiceRoutes(router, deps) {
         unitSnapshot: item.unitSnapshot || ref?.unit || 'шт',
       };
     });
-    res.json(repairId ? sanitized.filter(item => item.repairId === repairId) : sanitized);
+    const scoped = accessControl.filterCollectionByScope('repair_part_items', sanitized, req.user);
+    if (repairId) {
+      const rows = scoped.filter(item => item.repairId === repairId);
+      if (rows.length === 0 && sanitized.some(item => item.repairId === repairId)) {
+        return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
+      return res.json(rows);
+    }
+    res.json(scoped);
   });
 
   router.post('/repair_part_items', requireAuth, requireWrite('repair_part_items'), (req, res) => {
@@ -183,7 +234,13 @@ function registerServiceRoutes(router, deps) {
       if (!Number.isFinite(quantity) || quantity <= 0) {
         throw new Error('Количество запчастей должно быть больше 0');
       }
-      if (!findServiceTicketOr404(repairId, res)) return;
+      const ticket = findServiceTicketOr404(repairId, res);
+      if (!ticket) return;
+      try {
+        accessControl.assertCanUpdateEntity('service', ticket, req.user);
+      } catch (error) {
+        return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+      }
 
       const part = (readData('spare_parts') || []).find(item => item.id === partId && item.isActive !== false);
       if (!part) {
@@ -208,6 +265,12 @@ function registerServiceRoutes(router, deps) {
       };
       list.push(item);
       writeData('repair_part_items', list);
+      auditLog?.(req, {
+        action: 'service.part_item.create',
+        entityType: 'repair_part_items',
+        entityId: item.id,
+        after: item,
+      });
       res.status(201).json(item);
     } catch (error) {
       res.status(400).json({ ok: false, error: error.message });
@@ -220,18 +283,32 @@ function registerServiceRoutes(router, deps) {
     if (index === -1) {
       return res.status(404).json({ ok: false, error: 'Строка запчасти не найдена' });
     }
+    const removed = list[index];
+    const ticket = (readData('service') || []).find(item => item.id === removed.repairId);
+    if (!ticket) return res.status(404).json({ ok: false, error: 'Заявка на ремонт не найдена' });
+    try {
+      accessControl.assertCanUpdateEntity('service', ticket, req.user);
+    } catch (error) {
+      return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+    }
     list.splice(index, 1);
     writeData('repair_part_items', list);
+    auditLog?.(req, {
+      action: 'service.part_item.delete',
+      entityType: 'repair_part_items',
+      entityId: removed.id,
+      before: removed,
+    });
     res.json({ ok: true });
   });
 
   router.get('/reports/mechanics-workload', requireAuth, requireRead('reports'), (req, res) => {
     const mechanics = readData('mechanics') || [];
-    const tickets = readData('service') || [];
+    const tickets = accessControl.filterCollectionByScope('service', readData('service') || [], req.user);
     const equipment = readData('equipment') || [];
-    const workItems = readData('repair_work_items') || [];
-    const partItems = readData('repair_part_items') || [];
-    const fieldTrips = readData('service_field_trips') || [];
+    const workItems = accessControl.filterCollectionByScope('repair_work_items', readData('repair_work_items') || [], req.user);
+    const partItems = accessControl.filterCollectionByScope('repair_part_items', readData('repair_part_items') || [], req.user);
+    const fieldTrips = accessControl.filterCollectionByScope('service_field_trips', readData('service_field_trips') || [], req.user);
 
     const ticketMap = new Map(tickets.map(item => [item.id, item]));
     const equipmentMap = new Map(equipment.map(item => [item.id, item]));

@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createBotHandlers } = require('../server/lib/bot-commands.js');
+const { createAccessControl } = require('../server/lib/access-control.js');
 const {
   BOT_STAGE_IMAGE_VERSION,
   MANAGER_STAGE_IMAGES,
@@ -53,8 +54,9 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     equipment_operation_sessions: [],
   };
   const messages = [];
+  const readData = (name) => state[name] ?? [];
   const handlers = createBotHandlers({
-    readData: (name) => state[name] ?? [],
+    readData,
     writeData: (name, value) => {
       state[name] = value;
     },
@@ -77,16 +79,25 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     idPrefixes: { deliveries: 'DL' },
     nowIso: () => '2026-04-24T08:00:00.000Z',
     readServiceTickets: overrides.readServiceTickets || (() => state.service || []),
-    writeServiceTickets: () => {},
-    findServiceTicketById: () => null,
-    saveServiceTicket: () => {},
-    appendServiceLog: () => {},
+    writeServiceTickets: overrides.writeServiceTickets || ((tickets) => {
+      state.service = tickets;
+    }),
+    findServiceTicketById: overrides.findServiceTicketById || ((ticketId) =>
+      (state.service || []).find(ticket => String(ticket.id).toLowerCase() === String(ticketId).toLowerCase()) || null),
+    saveServiceTicket: overrides.saveServiceTicket || ((updatedTicket) => {
+      state.service = (state.service || []).map(ticket => ticket.id === updatedTicket.id ? updatedTicket : ticket);
+    }),
+    appendServiceLog: overrides.appendServiceLog || ((ticket, text, author, type = 'comment') => ({
+      ...ticket,
+      workLog: [...(ticket.workLog || []), { date: '2026-04-24T08:00:00.000Z', text, author, type }],
+    })),
     getMechanicReferenceByUser: () => null,
     syncEquipmentStatusForService: () => {},
     updateServiceTicketStatus: () => null,
     getOpenTicketByEquipment: () => null,
     serviceStatusLabel: (status) => status,
     preferCarrierAutoLogin,
+    accessControl: createAccessControl({ readData }),
   });
 
   return { state, messages, handlers };
@@ -585,6 +596,101 @@ test('mechanic my repairs command accepts spaced slash alias', async () => {
   assert.doesNotMatch(messages.at(-1).text, /Неизвестная команда/);
 });
 
+test('mechanic new ticket search opens equipment action menu before repair reason', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.equipment = [{
+    id: 'EQ-1',
+    inventoryNumber: '083',
+    serialNumber: 'SN-083',
+    manufacturer: 'Mantall',
+    model: 'HZ160JRT',
+    type: 'scissor',
+    status: 'available',
+  }];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/новаязаявка');
+  await handlers.handleCommand({ user_id: 100 }, '100', '083');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'equipment:choose:EQ-1', { callbackId: 'cb-1' });
+
+  assert.equal(state.bot_sessions['100'].pendingAction, 'equipment_action_menu');
+  assert.doesNotMatch(messages.at(-1).text, /Напишите причину/);
+  assert.match(messages.at(-1).text, /Выберите действие/);
+  const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  const buttonTexts = menu.payload.buttons.flat().map((item) => item.text);
+  assert.deepEqual(buttonTexts.slice(1, 5), ['Ремонт', 'ТО', 'ЧТО', 'ПТО']);
+});
+
+test('mechanic parts menu asks for search query instead of showing default parts', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.service = [{
+    id: 'S-1',
+    status: 'in_progress',
+    equipment: 'Mantall HZ160JRT',
+    reason: 'Полная диагностика',
+    assignedMechanicName: 'Дмитрий',
+    workLog: [],
+  }];
+  state.bot_sessions['100'] = { activeRepairId: 'S-1' };
+  state.spare_parts = [
+    { id: 'P-1', name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200, unit: 'шт', isActive: true },
+    { id: 'P-2', name: 'Колесо ведущее', article: 'W-200', defaultPrice: 8000, unit: 'шт', isActive: true },
+  ];
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'menu:parts', { callbackId: 'cb-1' });
+
+  assert.equal(state.bot_sessions['100'].pendingAction, 'part_search');
+  assert.match(messages.at(-1).text, /Напишите название запчасти/);
+  assert.doesNotMatch(messages.at(-1).text, /Найденные запчасти/);
+});
+
+test('mechanic can run a new text search while choosing parts', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.service = [{
+    id: 'S-1',
+    status: 'in_progress',
+    equipment: 'Mantall HZ160JRT',
+    reason: 'Полная диагностика',
+    assignedMechanicName: 'Дмитрий',
+    workLog: [],
+  }];
+  state.bot_sessions['100'] = { activeRepairId: 'S-1' };
+  state.spare_parts = [
+    { id: 'P-1', name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200, unit: 'шт', isActive: true },
+    { id: 'P-2', name: 'Джойстик управления', article: 'J-200', defaultPrice: 9500, unit: 'шт', isActive: true },
+  ];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти фильтр');
+  assert.match(messages.at(-1).text, /Фильтр масляный/);
+  assert.equal(state.bot_sessions['100'].pendingAction, 'part_pick');
+
+  await handlers.handleCommand({ user_id: 100 }, '100', 'джойстик');
+
+  assert.equal(state.bot_sessions['100'].pendingAction, 'part_pick');
+  assert.match(messages.at(-1).text, /Джойстик управления/);
+  assert.doesNotMatch(messages.at(-1).text, /Количество запчасти/);
+});
+
 test('delivery menu shows image and status buttons for carrier', async () => {
   const { state, messages, handlers } = createMemoryBot(true);
   state.bot_users['100'] = {
@@ -986,4 +1092,29 @@ test('MAX API request times out instead of hanging indefinitely', async () => {
 
   assert.equal(result, null);
   assert.ok(Date.now() - startedAt < 500);
+});
+
+test('carrier cannot update another carrier delivery via callback payload', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    botMode: 'delivery',
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.delivery_carriers = [
+    { id: 'carrier-1', name: 'Быстрая доставка', status: 'active', maxCarrierKey: '100' },
+    { id: 'carrier-2', name: 'Чужая доставка', status: 'active', maxCarrierKey: '200' },
+  ];
+  state.deliveries = [
+    { id: 'DL-own', status: 'sent', carrierKey: 'carrier-1', transportDate: '2026-04-25', origin: 'А', destination: 'Б', cargo: 'Подъёмник', client: 'Клиент', contactName: 'Иван', contactPhone: '+7' },
+    { id: 'DL-other', status: 'sent', carrierKey: 'carrier-2', transportDate: '2026-04-25', origin: 'В', destination: 'Г', cargo: 'Подъёмник', client: 'Клиент', contactName: 'Петр', contactPhone: '+7' },
+  ];
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'delivery:status:DL-other:accepted');
+
+  assert.equal(state.deliveries.find(item => item.id === 'DL-other').status, 'sent');
+  assert.match(messages.at(-1).text, /не назначена/i);
 });

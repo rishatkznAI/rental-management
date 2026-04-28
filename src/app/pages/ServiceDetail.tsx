@@ -491,7 +491,7 @@ export default function ServiceDetail() {
         rentalsService.getGanttData(),
       ]);
 
-      const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'ready'];
+      const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts'];
       const ticketInventoryIsUnique = ticket.inventoryNumber
         ? allEquipment.filter(item => item.inventoryNumber === ticket.inventoryNumber).length === 1
         : false;
@@ -619,7 +619,7 @@ export default function ServiceDetail() {
           rentalsService.getGanttData(),
         ]);
 
-        const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'ready'];
+        const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts'];
         const inventoryIsUnique = deletedTicket.inventoryNumber
           ? allEquipment.filter(item => item.inventoryNumber === deletedTicket.inventoryNumber).length === 1
           : false;

@@ -29,7 +29,7 @@ function createServiceCore(deps) {
   }
 
   function openServiceStatuses() {
-    return ['new', 'in_progress', 'waiting_parts', 'ready'];
+    return ['new', 'in_progress', 'waiting_parts'];
   }
 
   function readServiceTickets() {

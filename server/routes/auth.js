@@ -9,6 +9,8 @@ function registerAuthRoutes(app, deps) {
     requireAuth,
     destroySession,
     deleteSessionsForUserIds,
+    auditLog,
+    nowIso = () => new Date().toISOString(),
   } = deps;
 
   const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -42,6 +44,22 @@ function registerAuthRoutes(app, deps) {
     loginAttempts.delete(loginAttemptKey(req, email));
   }
 
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function rejectLogin(req, res, email, status = 401, auditMetadata = {}) {
+    recordFailedLogin(req, email);
+    auditLog?.(req, {
+      action: 'login.fail',
+      entityType: 'auth',
+      entityId: String(email || '').trim().toLowerCase() || null,
+      metadata: auditMetadata,
+    });
+    await sleep(Number(process.env.LOGIN_FAILURE_DELAY_MS || 250));
+    return res.status(status).json({ ok: false, error: 'Неверный email или пароль' });
+  }
+
   function buildSessionUser(user) {
     return {
       userId: user.id,
@@ -54,11 +72,11 @@ function registerAuthRoutes(app, deps) {
     };
   }
 
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     try {
       const { email, password } = req.body || {};
       if (!email || !password) {
-        return res.status(400).json({ ok: false, error: 'email and password required' });
+        return rejectLogin(req, res, email, 401, { reason: 'missing_credentials' });
       }
 
       const { attempt } = getLoginAttempt(req, email);
@@ -73,17 +91,15 @@ function registerAuthRoutes(app, deps) {
       );
 
       if (!user) {
-        recordFailedLogin(req, email);
-        return res.status(401).json({ ok: false, error: 'Пользователь с таким email не найден' });
+        return rejectLogin(req, res, email, 401, { reason: 'invalid_credentials' });
       }
 
       if (user.status !== 'Активен') {
-        return res.status(403).json({ ok: false, error: 'Аккаунт деактивирован. Обратитесь к администратору' });
+        return rejectLogin(req, res, email, 401, { reason: 'inactive_account' });
       }
 
       if (!verifyPassword(password, user.password)) {
-        recordFailedLogin(req, email);
-        return res.status(401).json({ ok: false, error: 'Неверный пароль' });
+        return rejectLogin(req, res, email, 401, { reason: 'invalid_credentials' });
       }
 
       clearLoginAttempts(req, email);
@@ -101,6 +117,12 @@ function registerAuthRoutes(app, deps) {
 
       const token = createSession(user);
       console.log(`[AUTH] Вход: ${user.name} (${user.role})`);
+      auditLog?.({ ...req, user: buildSessionUser(user) }, {
+        action: 'login.success',
+        entityType: 'auth',
+        entityId: user.id,
+        after: { userId: user.id, email: user.email, role: user.role },
+      });
 
       return res.json({
         ok: true,
@@ -117,7 +139,7 @@ function registerAuthRoutes(app, deps) {
       });
     } catch (err) {
       console.error('[AUTH] login error:', err.message);
-      return res.status(500).json({ ok: false, error: err.message });
+      return res.status(500).json({ ok: false, error: 'Internal server error' });
     }
   });
 
@@ -180,14 +202,29 @@ function registerAuthRoutes(app, deps) {
     users[idx] = {
       ...users[idx],
       password: hashPassword(String(newPassword)),
+      tokenVersion: (Number(users[idx].tokenVersion) || 0) + 1,
+      passwordChangedAt: nowIso(),
     };
     writeData('users', users);
+    deleteSessionsForUserIds([req.user.userId]);
+    auditLog?.(req, {
+      action: 'password.change',
+      entityType: 'users',
+      entityId: req.user.userId,
+      before: { tokenVersion: req.user.tokenVersion || 0 },
+      after: { tokenVersion: users[idx].tokenVersion, passwordChangedAt: users[idx].passwordChangedAt },
+    });
     return res.json({ ok: true });
   });
 
   app.post('/api/auth/logout', requireAuth, (req, res) => {
     const token = req.headers['authorization'].slice(7);
     destroySession(token);
+    auditLog?.(req, {
+      action: 'logout',
+      entityType: 'auth',
+      entityId: req.user.userId,
+    });
     res.json({ ok: true });
   });
 
@@ -196,6 +233,12 @@ function registerAuthRoutes(app, deps) {
       return res.status(403).json({ ok: false, error: 'Forbidden' });
     }
     const count = deleteSessionsForUserIds([req.params.userId]);
+    auditLog?.(req, {
+      action: 'sessions.revoke',
+      entityType: 'users',
+      entityId: req.params.userId,
+      after: { revokedSessions: count },
+    });
     return res.json({ ok: true, count });
   });
 }

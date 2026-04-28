@@ -40,7 +40,7 @@ import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
 import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
-import { AUTH_TOKEN_KEY } from '../lib/api';
+import { getToken } from '../lib/api';
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
@@ -495,7 +495,7 @@ function getShippingPhotoAssets(event: ShippingPhoto): ShippingPhotoAsset[] {
 }
 
 async function fetchPhotoBytes(url: string) {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  const token = getToken();
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
 
   if (url.startsWith('data:')) {

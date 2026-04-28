@@ -128,7 +128,20 @@ function registerSystemRoutes(app, deps) {
     requireAuth,
     requireAdmin,
     fetchImpl,
+    auditLog,
   } = deps;
+
+  function getSafePublicSettings() {
+    const allowedKeys = new Set(
+      String(process.env.PUBLIC_APP_SETTING_KEYS || 'crm_archive_state,equipment_type_settings,theme')
+        .split(',')
+        .map(key => key.trim())
+        .filter(Boolean),
+    );
+    return (readData('app_settings') || [])
+      .filter(item => allowedKeys.has(String(item?.key || '').trim()))
+      .map(item => ({ key: item.key, value: item.value }));
+  }
 
   app.post('/api/sync', requireAuth, requireAdmin, async (req, res) => {
     if (process.env.ENABLE_LEGACY_SYNC !== '1') {
@@ -230,6 +243,11 @@ function registerSystemRoutes(app, deps) {
       }
 
       res.json({ ok: true, synced: now, notifications: notifications.length });
+      auditLog?.(req, {
+        action: 'sync.bulk',
+        entityType: 'sync',
+        after: { collections: Object.keys(req.body || {}), notifications: notifications.length },
+      });
     } catch (err) {
       console.error('[SYNC] Ошибка:', err.message);
       res.status(500).json({ ok: false, error: err.message });
@@ -242,6 +260,10 @@ function registerSystemRoutes(app, deps) {
 
   app.get('/', (req, res) => {
     res.json({ ok: true, service: 'rental-management-api', uptime: Math.round(process.uptime()) });
+  });
+
+  app.get('/api/public-settings', (_req, res) => {
+    res.json(getSafePublicSettings());
   });
 
   app.get('/api/bot-test', requireAuth, requireAdmin, async (req, res) => {

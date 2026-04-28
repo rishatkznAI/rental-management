@@ -35,7 +35,16 @@ function createBotHandlers(deps) {
     getOpenTicketByEquipment,
     serviceStatusLabel,
     preferCarrierAutoLogin = false,
+    accessControl = null,
+    auditLog = null,
   } = deps;
+  const requiredAccessMethods = ['canAccessEntity', 'isCarrierDelivery'];
+  const missingAccessMethods = !accessControl
+    ? requiredAccessMethods
+    : requiredAccessMethods.filter(name => typeof accessControl[name] !== 'function');
+  if (missingAccessMethods.length > 0) {
+    throw new Error(`Bot handlers require access-control methods: ${missingAccessMethods.join(', ')}`);
+  }
   const {
     button,
     keyboard,
@@ -214,6 +223,10 @@ function createBotHandlers(deps) {
     if (isMechanicMenuRole(role)) return 'ticket';
     if (isRentalManagerRole(role)) return 'manager_service';
     return 'ticket';
+  }
+
+  function shouldOpenEquipmentActionMenuForServiceTicket(authUser) {
+    return isMechanicMenuRole(authUser?.userRole || '');
   }
 
   function mainMenuImageOptions(role) {
@@ -493,11 +506,14 @@ function createBotHandlers(deps) {
     ].filter(Boolean).join('\n');
   }
 
-  function updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName) {
+  function updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName, phone = '', authUser = null) {
     const deliveries = readData('deliveries') || [];
     const index = deliveries.findIndex(item => item.id === deliveryId);
     if (index === -1) return null;
     const current = deliveries[index];
+    if (!canBotUserAccessDelivery(current, phone, authUser)) {
+      return { delivery: current, changed: false, invalid: false, forbidden: true };
+    }
     const allowedTransitions = {
       sent: ['accepted'],
       accepted: ['in_transit'],
@@ -521,6 +537,14 @@ function createBotHandlers(deps) {
     };
     deliveries[index] = delivery;
     writeData('deliveries', deliveries);
+    auditLog?.(authUser || {}, {
+      action: 'deliveries.bot_status_update',
+      entityType: 'deliveries',
+      entityId: delivery.id,
+      before: current,
+      after: delivery,
+      metadata: { actorName, phone, source: 'max_bot' },
+    });
     return { delivery, changed: current.status !== nextStatus, invalid: false };
   }
 
@@ -667,6 +691,20 @@ function createBotHandlers(deps) {
     if (!preferCarrierAutoLogin) return getAuthorizedUser(phone);
     const carrierUser = authorizeCarrier(String(phone), replyTarget);
     return carrierUser?.userRole === 'Перевозчик' ? carrierUser : null;
+  }
+
+  function canBotUserAccessServiceTicket(ticket, authUser) {
+    if (!ticket || !authUser) return false;
+    if (authUser.userRole === 'Администратор' || authUser.userRole === 'Офис-менеджер') return true;
+    return accessControl.canAccessEntity('service', ticket, authUser);
+  }
+
+  function canBotUserAccessDelivery(delivery, phone, authUser) {
+    if (!delivery || !authUser) return false;
+    if (authUser.userRole === 'Администратор' || authUser.userRole === 'Офис-менеджер') return true;
+    if (authUser.userRole !== 'Перевозчик') return false;
+    if (accessControl.isCarrierDelivery(delivery, { ...authUser, phone })) return true;
+    return getCarrierDeliveries(phone, authUser).some(item => item.id === delivery.id);
   }
 
   function isDeliveryBotCallback(payload) {
@@ -877,6 +915,9 @@ function createBotHandlers(deps) {
       'отчет за день',
       'отчёт за день',
     ].includes(commandText)) {
+      return true;
+    }
+    if (lower.startsWith('запчасти ')) {
       return true;
     }
     return [
@@ -1131,6 +1172,7 @@ function createBotHandlers(deps) {
     });
     const isPhotoFlow = flow === 'photo_event';
     const isServiceTicketFlow = flow === 'service_ticket';
+    const serviceTicketUsesActionMenu = isServiceTicketFlow && shouldOpenEquipmentActionMenuForServiceTicket(botUser);
     return reply(senderId, withBotMenu([
       '🚜 Найденная техника:',
       ...matches.map((item, index) => `${index + 1}. ${formatEquipmentForBot(item)}`),
@@ -1139,7 +1181,9 @@ function createBotHandlers(deps) {
       isPhotoFlow
         ? `После выбора начнётся пошаговая ${photoEventType === 'shipping' ? 'отгрузка' : 'приёмка'}.`
         : isServiceTicketFlow
-          ? 'После выбора бот попросит написать причину сервисной заявки.'
+          ? (serviceTicketUsesActionMenu
+            ? 'После выбора откроется меню: ремонт, ТО, ЧТО или ПТО.'
+            : 'После выбора бот попросит написать причину сервисной заявки.')
           : 'После выбора откроется меню действий по технике.',
     ].join('\n'), ['новый поиск: найти технику', 'отмена: /сброс']), {
       attachments: equipmentSearchKeyboard(matches),
@@ -1511,7 +1555,11 @@ function createBotHandlers(deps) {
   }
 
   async function handlePartSearchRequest(senderId, phone, ticket, query, uiContext = {}) {
-    const matches = searchSpareParts(query);
+    const normalizedQuery = String(query || '').trim();
+    if (!normalizedQuery) {
+      return promptPartSearch(senderId, phone, ticket, uiContext);
+    }
+    const matches = searchSpareParts(normalizedQuery);
     if (!matches.length) {
       updateBotSession(phone, { pendingAction: 'part_search', activeRepairId: ticket.id });
       return reply(senderId, '🔎 По этому запросу активные запчасти не найдены. Напишите другой запрос.', {
@@ -1533,9 +1581,7 @@ function createBotHandlers(deps) {
       '📦 Найденные запчасти:',
       ...matches.map((item, index) => `${index + 1}. ${item.name}${item.article ? ` · ${item.article}` : ''} · ${Number(item.defaultPrice || 0).toLocaleString('ru-RU')} ₽/${item.unit || 'шт'}`),
       '',
-      query
-        ? 'Нажмите кнопку с запчастью ниже и выберите количество. По кнопке возьмётся базовая цена.'
-        : 'Показываю популярные запчасти. Можно сразу нажать кнопку или выполнить новый текстовый поиск.',
+      'Нажмите кнопку с запчастью ниже и выберите количество. По кнопке возьмётся базовая цена.',
       'Если нужна своя цена, после выбора нажмите «Ввести руками».',
     ].join('\n'), ['новый поиск запчастей', 'черновик', 'отмена: /сброс']), {
       attachments: partSearchKeyboard(matches),
@@ -1547,10 +1593,45 @@ function createBotHandlers(deps) {
     });
   }
 
+  async function promptPartSearch(senderId, phone, ticket, uiContext = {}) {
+    updateBotSession(phone, {
+      pendingAction: 'part_search',
+      activeRepairId: ticket.id,
+      pendingPayload: null,
+      lastPartSearch: [],
+    });
+    return reply(
+      senderId,
+      withBotMenu(
+        [
+          '📦 Напишите название запчасти, артикул или часть названия.',
+          'Я найду подходящие позиции в справочнике и предложу выбрать кнопку.',
+          '',
+          'Примеры:',
+          '• фильтр',
+          '• колесо',
+          '• джойстик',
+        ].join('\n'),
+        ['черновик', 'работы', 'готово'],
+      ),
+      {
+        attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'parts',
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      },
+    );
+  }
+
   async function handleAddPartRequest(senderId, phone, authUser, ticket, selectionText, uiContext = {}) {
     const [firstRaw, secondRaw, thirdRaw] = selectionText.trim().split(/\s+/);
     const session = getBotSession(phone);
     const selectedPartId = session.pendingPayload?.selectedPartId;
+    if (!selectedPartId && firstRaw && Number.isNaN(Number(firstRaw))) {
+      return handlePartSearchRequest(senderId, phone, ticket, selectionText.trim(), uiContext);
+    }
     const quantity = Number(selectedPartId ? firstRaw : secondRaw);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       return reply(senderId, '❌ Количество запчасти должно быть числом больше 0.');
@@ -2363,9 +2444,18 @@ function createBotHandlers(deps) {
       const [, , deliveryId, nextStatus] = normalized.split(':');
       const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
       const actorName = authUser?.userName || 'Перевозчик';
-      const result = updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName);
+      const result = updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName, String(phone), authUser);
       if (!result) {
         return reply(senderId, '❌ Доставка не найдена.', {
+          attachments: carrierKeyboard(),
+          mechanicStage: 'delivery_status',
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      if (result.forbidden) {
+        return reply(senderId, '⛔ Эта доставка не назначена вам.', {
           attachments: carrierKeyboard(),
           mechanicStage: 'delivery_status',
           phone,
@@ -2512,6 +2602,24 @@ function createBotHandlers(deps) {
         return startEquipmentOperationRequest(senderId, phone, authUser, equipment, photoEventType, { callbackContext });
       }
       if (flow === 'service_ticket') {
+        const authUser = getAuthorizedUser(String(phone));
+        if (shouldOpenEquipmentActionMenuForServiceTicket(authUser)) {
+          updateBotSession(phone, {
+            pendingAction: 'equipment_action_menu',
+            pendingPayload: { selectedEquipmentId: equipment.id, flow },
+          });
+          return reply(
+            senderId,
+            formatEquipmentActionMenu(equipment),
+            {
+              attachments: equipmentActionKeyboard(equipment.id),
+              mechanicStage: 'repair',
+              phone,
+              callbackContext,
+              replaceMessage: true,
+            },
+          );
+        }
         updateBotSession(phone, {
           pendingAction: 'ticket_reason',
           pendingPayload: { selectedEquipmentId: equipment.id },
@@ -2854,7 +2962,10 @@ function createBotHandlers(deps) {
 
     const activeBotUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
 
-    console.log('[TRACE] handleCommand phone=%s command=%s', phone, lower.startsWith('/start') ? '/start' : lower.split(/\s+/)[0] || 'message');
+    const traceCommand = lower.startsWith('/start')
+      ? '/start'
+      : (trimmed.startsWith('/') ? lower.split(/\s+/)[0] : (session.pendingAction ? `[${session.pendingAction}]` : 'message'));
+    console.log('[TRACE] handleCommand phone=%s command=%s', phone, traceCommand);
 
     if (lower.startsWith('/start')) {
       console.log('[TRACE] /start matched, parts=%d', parts.length);
@@ -2896,7 +3007,7 @@ function createBotHandlers(deps) {
         );
       }
       const [, email, password] = parts;
-      console.log('[TRACE] authorizing email=%s', email);
+      console.log('[TRACE] authorizing via /start credentials');
       let user;
       try {
         user = authorizeUser(String(phone), email, password, senderId);
@@ -3530,6 +3641,9 @@ function createBotHandlers(deps) {
       if (!ticket) {
         return sendMessage(senderId, '❌ Заявка не найдена. Используйте /моизаявки или /сервис.');
       }
+      if (!canBotUserAccessServiceTicket(ticket, authUser)) {
+        return sendMessage(senderId, '⛔ Эта сервисная заявка не назначена вам.');
+      }
       const mechanicRef = getMechanicReferenceByUser(authUser);
       const assignedName = mechanicRef?.name || authUser.userName;
       const updated = appendServiceLog({
@@ -3558,6 +3672,12 @@ function createBotHandlers(deps) {
       const ticket = findServiceTicketById(repairId);
       if (!ticket) {
         return replyWithUi('❌ Заявка не найдена. Выберите заявку из списка ниже или откройте /моизаявки.', {
+          attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
+          mechanicStage: 'repairs',
+        });
+      }
+      if (!canBotUserAccessServiceTicket(ticket, authUser)) {
+        return replyWithUi('⛔ Эта сервисная заявка не назначена вам.', {
           attachments: serviceTicketsKeyboard(authUser) || mechanicKeyboard(),
           mechanicStage: 'repairs',
         });
@@ -3657,14 +3777,16 @@ function createBotHandlers(deps) {
       return handleAddWorkRequest(senderId, phone, authUser, ticket, trimmed.slice('/добавитьработу'.length).trim(), uiContext);
     }
 
-    if (lower.startsWith('/запчасти') && canManageRepair) {
+    if ((lower.startsWith('/запчасти') || commandText === 'запчасти' || lower.startsWith('запчасти ') || commandText === 'еще запчасти') && canManageRepair) {
       const ticket = getCurrentRepair(phone);
       if (!ticket) {
         return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
       }
-      const query = trimmed.slice('/запчасти'.length).trim();
+      const query = lower.startsWith('/запчасти')
+        ? trimmed.slice('/запчасти'.length).trim()
+        : (lower.startsWith('запчасти ') ? trimmed.slice('запчасти'.length).trim() : '');
       if (!query) {
-        return handlePartSearchRequest(senderId, phone, ticket, '', uiContext);
+        return promptPartSearch(senderId, phone, ticket, uiContext);
       }
       return handlePartSearchRequest(senderId, phone, ticket, query, uiContext);
     }

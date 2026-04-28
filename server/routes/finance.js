@@ -5,6 +5,7 @@ function registerFinanceRoutes(router, deps) {
     requireAuth,
     requireRead,
     readData,
+    accessControl,
     buildRentalDebtRows,
     getRentalDebtOverdueDays,
     buildClientReceivables,
@@ -13,51 +14,60 @@ function registerFinanceRoutes(router, deps) {
     buildOverdueBuckets,
     buildFinanceReport,
   } = deps;
+  if (!accessControl || typeof accessControl.filterCollectionByScope !== 'function') {
+    throw new Error('Finance routes require access-control method: filterCollectionByScope');
+  }
 
-  function getFinanceCollections() {
+  function getFinanceCollections(user) {
+    const clients = readData('clients') || [];
+    const rentals = readData('gantt_rentals') || [];
+    const payments = readData('payments') || [];
     return {
-      clients: readData('clients') || [],
-      rentals: readData('gantt_rentals') || [],
-      payments: readData('payments') || [],
+      clients: accessControl.filterCollectionByScope('clients', clients, user),
+      rentals: accessControl.filterCollectionByScope('gantt_rentals', rentals, user),
+      payments: accessControl.filterCollectionByScope('payments', payments, user),
     };
   }
 
   router.get('/finance/debt-rows', requireAuth, requireRead('payments'), (req, res) => {
-    const { rentals, payments } = getFinanceCollections();
+    const { rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildRentalDebtRows(rentals, payments, today);
     res.json(rows);
   });
 
   router.get('/finance/clients', requireAuth, requireRead('payments'), (req, res) => {
-    const { clients, rentals, payments } = getFinanceCollections();
+    const { clients, rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildClientReceivables(clients, buildRentalDebtRows(rentals, payments), today);
     res.json(rows);
   });
 
   router.get('/finance/client-snapshots', requireAuth, requireRead('payments'), (req, res) => {
-    const { clients, rentals, payments } = getFinanceCollections();
+    const { clients, rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildClientFinancialSnapshots(clients, rentals, payments, today);
     res.json(rows);
   });
 
   router.get('/finance/managers', requireAuth, requireRead('payments'), (req, res) => {
-    const { rentals, payments } = getFinanceCollections();
+    const { rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildManagerReceivables(buildRentalDebtRows(rentals, payments), today);
     res.json(rows);
   });
 
   router.get('/finance/manager-breakdown', requireAuth, requireRead('payments'), (req, res) => {
-    const { rentals, payments } = getFinanceCollections();
-    const documents = readData('documents') || [];
+    const { rentals, payments } = getFinanceCollections(req.user);
+    const documents = accessControl.filterCollectionByScope('documents', readData('documents') || [], req.user);
     const manager = String(req.query.manager || '').trim();
     const today = String(req.query.today || '').trim() || new Date().toISOString().slice(0, 10);
 
     if (!manager) {
       return res.status(400).json({ ok: false, error: 'manager is required' });
+    }
+    if (!['Администратор', 'Офис-менеджер'].includes(req.user?.userRole) && manager !== req.user?.userName) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
     }
 
     const monthStart = new Date(today);
@@ -167,14 +177,14 @@ function registerFinanceRoutes(router, deps) {
   });
 
   router.get('/finance/aging', requireAuth, requireRead('payments'), (req, res) => {
-    const { rentals, payments } = getFinanceCollections();
+    const { rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildOverdueBuckets(buildRentalDebtRows(rentals, payments), today);
     res.json(rows);
   });
 
   router.get('/finance/report', requireAuth, requireRead('payments'), (req, res) => {
-    const { clients, rentals, payments } = getFinanceCollections();
+    const { clients, rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     res.json(buildFinanceReport({ clients, rentals, payments }, today));
   });

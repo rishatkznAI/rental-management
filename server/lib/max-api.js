@@ -7,6 +7,7 @@ function createMaxApiClient({
   fetchImpl,
   webhookUrl,
   webhookPath = '/bot/webhook',
+  webhookSecret = '',
   logger = console,
   requestTimeoutMs = Number(process.env.MAX_API_TIMEOUT_MS || 8000),
   slowRequestMs = Number(process.env.MAX_API_SLOW_MS || 1500),
@@ -79,13 +80,20 @@ function createMaxApiClient({
     const normalizedPath = String(webhookPath || '/bot/webhook').startsWith('/')
       ? String(webhookPath || '/bot/webhook')
       : `/${String(webhookPath || 'bot/webhook')}`;
-    return `${webhookUrl}${normalizedPath}`;
+    const secret = String(webhookSecret || '').trim();
+    const secretPath = secret ? `${normalizedPath}/${encodeURIComponent(secret)}` : normalizedPath;
+    return `${webhookUrl}${secretPath}`;
+  }
+
+  function redactWebhookUrl(url) {
+    const secret = String(webhookSecret || '').trim();
+    return secret ? String(url || '').replace(encodeURIComponent(secret), '[redacted]') : url;
   }
 
   async function maxRequest(method, endpoint, body = null) {
     const token = (botToken || '').trim();
     const url = `${maxApiBase}${endpoint}`;
-    logger.log(`[MAX API] token prefix="${token.slice(0, 8)}" len=${token.length}`);
+    logger.log(`[MAX API] bot token configured: ${Boolean(token)}`);
     const { controller, timeout } = createAbortSignal();
     const opts = {
       method,
@@ -391,7 +399,7 @@ function createMaxApiClient({
       update_types: ['message_created', 'bot_started', 'message_callback'],
     });
     if (res && !res.error) {
-      logger.log(`[BOT] Webhook зарегистрирован: ${subscriptionUrl}`);
+      logger.log(`[BOT] Webhook зарегистрирован: ${redactWebhookUrl(subscriptionUrl)}`);
     } else {
       logger.error('[BOT] Ошибка регистрации webhook:', res?.message || res);
     }
@@ -405,7 +413,7 @@ function createMaxApiClient({
     const subscriptions = Array.isArray(res?.subscriptions) ? res.subscriptions : [];
     const existing = subscriptions.find(item => item?.url === subscriptionUrl);
     if (existing) return existing;
-    logger.warn(`[BOT] Webhook ${subscriptionUrl} отсутствует в MAX — регистрируем заново`);
+    logger.warn(`[BOT] Webhook ${redactWebhookUrl(subscriptionUrl)} отсутствует в MAX — регистрируем заново`);
     return registerWebhook();
   }
 

@@ -2,7 +2,10 @@ const express = require('express');
 const crypto = require('crypto');
 
 const processedWebhookUpdates = new Map();
+const webhookRateLimits = new Map();
 const WEBHOOK_UPDATE_DEDUPE_MS = 10 * 1000;
+const WEBHOOK_RATE_WINDOW_MS = 60 * 1000;
+const WEBHOOK_RATE_MAX = Number(process.env.MAX_WEBHOOK_RATE_LIMIT || 120);
 const BOT_CONNECTION_ROLES = [
   'Администратор',
   'Офис-менеджер',
@@ -164,6 +167,48 @@ function normalizeWebhookPath(webhookPath = '/bot/webhook') {
   return String(webhookPath || '/bot/webhook').startsWith('/')
     ? String(webhookPath || '/bot/webhook')
     : `/${String(webhookPath || 'bot/webhook')}`;
+}
+
+function timingSafeEqualString(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function getRequestIp(req) {
+  return String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.ip
+    || req.socket?.remoteAddress
+    || 'unknown';
+}
+
+function checkWebhookRateLimit(req) {
+  const key = getRequestIp(req);
+  const now = Date.now();
+  const current = webhookRateLimits.get(key);
+  if (!current || current.expiresAt <= now) {
+    webhookRateLimits.set(key, { count: 1, expiresAt: now + WEBHOOK_RATE_WINDOW_MS });
+    return true;
+  }
+  current.count += 1;
+  return current.count <= WEBHOOK_RATE_MAX;
+}
+
+function verifyWebhookRequest(req, webhookSecret = '') {
+  const secret = String(webhookSecret || '').trim();
+  const secretRequired = Boolean(secret) || process.env.NODE_ENV === 'production';
+  if (!secretRequired) return { ok: true };
+  if (!secret) {
+    return { ok: false, status: 503, error: 'Webhook secret is not configured' };
+  }
+
+  const candidates = [
+    req.params?.webhookSecret,
+    req.headers?.['x-max-webhook-secret'],
+    req.headers?.['x-webhook-secret'],
+  ];
+  const ok = candidates.some(value => value && timingSafeEqualString(value, secret));
+  return ok ? { ok: true } : { ok: false, status: 401, error: 'Unauthorized webhook' };
 }
 
 function toFiniteNumber(value) {
@@ -616,6 +661,7 @@ function registerBotRoutes(app, deps) {
   const {
     logger = console,
     webhookPath = '/bot/webhook',
+    webhookSecret = '',
   } = deps;
   const normalizedWebhookPath = normalizeWebhookPath(webhookPath);
   const processBotUpdate = createBotUpdateProcessor({
@@ -623,11 +669,21 @@ function registerBotRoutes(app, deps) {
     webhookPath: normalizedWebhookPath,
   });
 
-  app.post(normalizedWebhookPath, async (req, res) => {
+  async function webhookHandler(req, res) {
+    if (!checkWebhookRateLimit(req)) {
+      return res.status(429).json({ ok: false, error: 'Too many webhook requests' });
+    }
+
+    const verification = verifyWebhookRequest(req, webhookSecret);
+    if (!verification.ok) {
+      logger.warn(`[BOT] ${normalizedWebhookPath} rejected webhook: ${verification.error}`);
+      return res.status(verification.status || 401).json({ ok: false, error: verification.error });
+    }
+
     res.sendStatus(200);
 
     try {
-      const updates = req.body?.updates || [req.body];
+      const updates = Array.isArray(req.body?.updates) ? req.body.updates : [req.body];
       logger.log(`[BOT] ${normalizedWebhookPath} webhook updates=${updates.length}`);
 
       for (const update of updates) {
@@ -646,7 +702,10 @@ function registerBotRoutes(app, deps) {
       logger.error(`[BOT] ${normalizedWebhookPath} Ошибка обработки webhook:`, err?.message || String(err));
       logger.error(`[BOT] ${normalizedWebhookPath} Stack:`, err?.stack || 'no stack');
     }
-  });
+  }
+
+  app.post(normalizedWebhookPath, webhookHandler);
+  app.post(`${normalizedWebhookPath}/:webhookSecret`, webhookHandler);
 }
 
 module.exports = {
@@ -655,6 +714,7 @@ module.exports = {
   disconnectBotConnection,
   registerBotApiRoutes,
   registerBotRoutes,
+  verifyWebhookRequest,
   shouldProcessWebhookUpdate,
   updateBotConnectionRole,
 };

@@ -6,23 +6,26 @@
  *  - Development (vite dev server): empty string, vite proxy forwards /api → localhost:3000
  *
  * Auth:
- *  Token is stored in localStorage under AUTH_TOKEN_KEY.
- *  Every request adds Authorization: Bearer <token> header if a token exists.
+ *  Temporary hardening: bearer token is kept in memory only.
+ *  Reloading the page drops the session until the backend moves to httpOnly cookies.
  */
 
 export const AUTH_TOKEN_KEY = 'app_auth_token';
 
 const BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
+let authToken: string | null = null;
 
-function getToken(): string | null {
-  return localStorage.getItem(AUTH_TOKEN_KEY);
+export function getToken(): string | null {
+  return authToken;
 }
 
 export function setToken(token: string): void {
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
+  authToken = token;
+  localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
 export function clearToken(): void {
+  authToken = null;
   localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
@@ -51,6 +54,7 @@ async function request<T>(
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers,
+    credentials: 'include',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 

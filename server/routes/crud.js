@@ -28,9 +28,40 @@ function registerCrudRoutes(deps) {
     generateId,
     nowIso,
     applyServiceTicketCreationEffects,
+    accessControl,
+    auditLog,
   } = deps;
 
   const router = express.Router();
+  const requiredAccessMethods = [
+    'assertCanReadCollection',
+    'assertCanCreateCollection',
+    'assertCanUpdateEntity',
+    'assertCanDeleteEntity',
+    'assertCanBulkReplace',
+    'canAccessEntity',
+    'filterCollectionByScope',
+    'sanitizeCreateInput',
+    'sanitizeUpdateInput',
+  ];
+  const missingAccessMethods = !accessControl
+    ? requiredAccessMethods
+    : requiredAccessMethods.filter(name => typeof accessControl[name] !== 'function');
+  if (missingAccessMethods.length > 0) {
+    throw new Error(`Generic CRUD requires access-control methods: ${missingAccessMethods.join(', ')}`);
+  }
+
+  function sendAccessError(res, error) {
+    return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+  }
+
+  function isOfficeManager(req) {
+    return req.user?.userRole === 'Офис-менеджер';
+  }
+
+  function isCriticalAuditCollection(collection) {
+    return ['payments', 'rentals', 'gantt_rentals', 'equipment', 'service', 'users', 'app_settings'].includes(collection);
+  }
 
   function syncPaymentStatusesAfterPaymentWrite(payments) {
     const currentGanttRentals = readData('gantt_rentals') || [];
@@ -40,7 +71,13 @@ function registerCrudRoutes(deps) {
 
   function hasReadAccess(req, collection) {
     if (collection === 'users') return true;
-    if (typeof requireRead !== 'function') return true;
+    if (typeof requireRead !== 'function') {
+      return Promise.resolve({
+        denied: true,
+        statusCode: 403,
+        payload: { ok: false, error: 'Forbidden' },
+      });
+    }
     return new Promise((resolve) => {
       requireRead(collection)(req, {
         status(statusCode) {
@@ -235,6 +272,11 @@ function registerCrudRoutes(deps) {
       if (crmForbiddenReason) {
         return res.status(410).json({ ok: false, error: crmForbiddenReason });
       }
+      try {
+        accessControl.assertCanReadCollection(collection, req.user);
+      } catch (error) {
+        return sendAccessError(res, error);
+      }
       let data = readData(collection) || [];
       if (collection === 'service_works') {
         data = data
@@ -261,6 +303,7 @@ function registerCrudRoutes(deps) {
       if (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req)) {
         return res.json(data.filter(item => item.userId === req.user.userId));
       }
+      data = accessControl.filterCollectionByScope(collection, data, req.user);
       return res.json(data);
     });
 
@@ -272,6 +315,11 @@ function registerCrudRoutes(deps) {
       const crmForbiddenReason = crmArchiveForbiddenReason(collection);
       if (crmForbiddenReason) {
         return res.status(410).json({ ok: false, error: crmForbiddenReason });
+      }
+      try {
+        accessControl.assertCanReadCollection(collection, req.user);
+      } catch (error) {
+        return sendAccessError(res, error);
       }
       const data = readData(collection) || [];
       let item = data.find(entry => entry.id === req.params.id);
@@ -285,6 +333,9 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
       if (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req) && item.userId !== req.user.userId) {
+        return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
+      if (!accessControl.canAccessEntity(collection, item, req.user)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
       return res.json(item);
@@ -312,23 +363,25 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
       }
       try {
+        accessControl.assertCanCreateCollection(collection, req.user, req.body);
+        const input = accessControl.sanitizeCreateInput(collection, req.body, req.user);
         if (collection === 'rentals' || collection === 'gantt_rentals') {
-          const validation = validateRentalPayload(collection, req.body, readData(collection) || []);
+          const validation = validateRentalPayload(collection, input, readData(collection) || []);
           if (!validation.ok) {
             return res.status(validation.status).json({ ok: false, error: validation.error });
           }
         }
 
         if (collection === 'service_works') {
-          requireNonEmptyString(req.body?.name, 'Название работы');
+          requireNonEmptyString(input?.name, 'Название работы');
         }
         if (collection === 'spare_parts') {
-          requireNonEmptyString(req.body?.name, 'Название запчасти');
-          requireNonEmptyString(req.body?.unit, 'Единица измерения');
+          requireNonEmptyString(input?.name, 'Название запчасти');
+          requireNonEmptyString(input?.unit, 'Единица измерения');
         }
 
         const data = readData(collection) || [];
-        let newItem = { ...req.body, id: req.body.id || generateId(prefix) };
+        let newItem = { ...input, id: input.id || generateId(prefix) };
         if (collection === 'users') {
           newItem = normalizeUserPasswordForWrite(newItem);
         }
@@ -351,6 +404,14 @@ function registerCrudRoutes(deps) {
         }
         data.push(newItem);
         writeData(collection, data);
+        if (isCriticalAuditCollection(collection)) {
+          auditLog?.(req, {
+            action: `${collection}.create`,
+            entityType: collection,
+            entityId: newItem.id,
+            after: newItem,
+          });
+        }
         if (collection === 'users' && newItem.status !== 'Активен') {
           invalidateAffectedUserSessions([], [newItem]);
         }
@@ -365,6 +426,7 @@ function registerCrudRoutes(deps) {
         }
         return res.status(201).json(newItem);
       } catch (error) {
+        if (error?.status) return sendAccessError(res, error);
         return res.status(400).json({ ok: false, error: error.message });
       }
     });
@@ -388,6 +450,11 @@ function registerCrudRoutes(deps) {
       const data = readData(collection) || [];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+      try {
+        accessControl.assertCanUpdateEntity(collection, data[idx], req.user);
+      } catch (error) {
+        return sendAccessError(res, error);
+      }
       const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'PATCH', data[idx]);
       if (knowledgeProgressForbiddenReason) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
@@ -397,7 +464,7 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
       }
 
-      if (collection === 'payments' && req.user?.userRole !== 'Администратор' && !isPaymentStatusOnlyPatch(data[idx], req.body)) {
+      if (collection === 'payments' && req.user?.userRole !== 'Администратор' && !isOfficeManager(req)) {
         const request = createEntityChangeRequest(req, {
           entityType: 'payment',
           entity: data[idx],
@@ -417,11 +484,12 @@ function registerCrudRoutes(deps) {
       }
 
       try {
-        const previousItem = collection === 'users' ? { ...data[idx] } : null;
+        const safePatch = accessControl.sanitizeUpdateInput(collection, req.body, req.user, data[idx]);
+        const previousItem = { ...data[idx] };
         if (collection === 'rentals' || collection === 'gantt_rentals') {
           const validation = validateRentalPayload(
             collection,
-            { ...data[idx], ...req.body },
+            { ...data[idx], ...safePatch },
             data,
             data[idx].id,
           );
@@ -431,27 +499,36 @@ function registerCrudRoutes(deps) {
         }
 
         if (collection === 'service_works') {
-          requireNonEmptyString(req.body?.name ?? data[idx].name, 'Название работы');
+          requireNonEmptyString(safePatch?.name ?? data[idx].name, 'Название работы');
           data[idx] = normalizeServiceWorkRecord({
             ...data[idx],
-            ...req.body,
+            ...safePatch,
             id: data[idx].id,
             createdAt: data[idx].createdAt,
             updatedAt: nowIso(),
           });
         } else if (collection === 'spare_parts') {
-          requireNonEmptyString(req.body?.name ?? data[idx].name, 'Название запчасти');
-          requireNonEmptyString(req.body?.unit ?? data[idx].unit, 'Единица измерения');
+          requireNonEmptyString(safePatch?.name ?? data[idx].name, 'Название запчасти');
+          requireNonEmptyString(safePatch?.unit ?? data[idx].unit, 'Единица измерения');
           data[idx] = normalizeSparePartRecord({
             ...data[idx],
-            ...req.body,
+            ...safePatch,
             id: data[idx].id,
             createdAt: data[idx].createdAt,
             updatedAt: nowIso(),
           });
         } else {
-          let nextItem = { ...data[idx], ...req.body, id: data[idx].id };
+          let nextItem = { ...data[idx], ...safePatch, id: data[idx].id };
           if (collection === 'users') {
+            if (
+              safePatch.password ||
+              safePatch.role !== undefined ||
+              safePatch.status !== undefined ||
+              safePatch.email !== undefined
+            ) {
+              nextItem.tokenVersion = (Number(data[idx].tokenVersion) || 0) + 1;
+              nextItem.passwordChangedAt = safePatch.password ? nowIso() : data[idx].passwordChangedAt;
+            }
             nextItem = normalizeUserPasswordForWrite(nextItem, data[idx]);
           }
           data[idx] = collection === 'clients' || collection === 'equipment'
@@ -466,6 +543,15 @@ function registerCrudRoutes(deps) {
               : nextItem);
         }
         writeData(collection, data);
+        if (isCriticalAuditCollection(collection)) {
+          auditLog?.(req, {
+            action: `${collection}.update`,
+            entityType: collection,
+            entityId: data[idx].id,
+            before: previousItem,
+            after: data[idx],
+          });
+        }
         if (collection === 'users' && previousItem) {
           invalidateAffectedUserSessions([previousItem], [data[idx]]);
         }
@@ -504,6 +590,11 @@ function registerCrudRoutes(deps) {
       const data = readData(collection) || [];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+      try {
+        accessControl.assertCanDeleteEntity(collection, data[idx], req.user);
+      } catch (error) {
+        return sendAccessError(res, error);
+      }
       const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'DELETE', data[idx]);
       if (knowledgeProgressForbiddenReason) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
@@ -544,6 +635,14 @@ function registerCrudRoutes(deps) {
       }
       data.splice(idx, 1);
       writeData(collection, data);
+      if (isCriticalAuditCollection(collection)) {
+        auditLog?.(req, {
+          action: `${collection}.delete`,
+          entityType: collection,
+          entityId: removedItem.id,
+          before: removedItem,
+        });
+      }
       if (collection === 'users') {
         invalidateAffectedUserSessions([removedItem], []);
       }
@@ -582,6 +681,11 @@ function registerCrudRoutes(deps) {
       if (!Array.isArray(list)) {
         return res.status(400).json({ ok: false, error: 'Expected array' });
       }
+      try {
+        accessControl.assertCanBulkReplace(collection, req.user);
+      } catch (error) {
+        return sendAccessError(res, error);
+      }
 
       if (collection === 'rentals' || collection === 'gantt_rentals') {
         for (const item of list) {
@@ -594,11 +698,21 @@ function registerCrudRoutes(deps) {
 
       if (collection === 'service_works') {
         writeData(collection, list.map(item => normalizeServiceWorkRecord({ ...item, updatedAt: nowIso() })));
+        auditLog?.(req, {
+          action: `${collection}.bulk_replace`,
+          entityType: collection,
+          after: { count: list.length },
+        });
         return res.json({ ok: true, count: list.length });
       }
 
       if (collection === 'spare_parts') {
         writeData(collection, list.map(item => normalizeSparePartRecord({ ...item, updatedAt: nowIso() })));
+        auditLog?.(req, {
+          action: `${collection}.bulk_replace`,
+          entityType: collection,
+          after: { count: list.length },
+        });
         return res.json({ ok: true, count: list.length });
       }
 
@@ -614,10 +728,20 @@ function registerCrudRoutes(deps) {
         });
         writeData('users', merged);
         invalidateAffectedUserSessions(existing, merged);
+        auditLog?.(req, {
+          action: `${collection}.bulk_replace`,
+          entityType: collection,
+          after: { count: merged.length },
+        });
         return res.json({ ok: true, count: merged.length });
       }
 
       writeData(collection, list);
+      auditLog?.(req, {
+        action: `${collection}.bulk_replace`,
+        entityType: collection,
+        after: { count: list.length },
+      });
       if (collection === 'payments') {
         syncPaymentStatusesAfterPaymentWrite(list);
       }

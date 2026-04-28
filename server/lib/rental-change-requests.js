@@ -283,7 +283,6 @@ function ganttMatchesClassicRental(ganttRental, rental, options = {}) {
   const sameClient = ganttClientId && rentalClientId
     ? ganttClientId === rentalClientId
     : normalizedText(ganttRental.client) === normalizedText(rental.client);
-  if (!sameClient) return false;
 
   const classicRange = rentalDateRange(rental, 'classic');
   const ganttRange = rentalDateRange(ganttRental, 'gantt');
@@ -297,6 +296,8 @@ function ganttMatchesClassicRental(ganttRental, rental, options = {}) {
     ganttRange.endDate,
   );
   if (!compatibleDates) return false;
+  if (!sameClient && !options.allowClientMismatch) return false;
+  if (!sameClient && !sameDates) return false;
 
   return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
 }
@@ -465,11 +466,13 @@ function resolveRentalForChangeRequest({
       },
     );
   }
-  const shapeMatches = uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
+  const findShapeMatches = (allowClientMismatch = false) => uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
     (rentals || [])
       .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
-      .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental, { equipmentList: equipment })),
+      .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental, { equipmentList: equipment, allowClientMismatch })),
   ));
+  const strictShapeMatches = findShapeMatches(false);
+  const shapeMatches = strictShapeMatches.length > 0 ? strictShapeMatches : findShapeMatches(true);
   if (shapeMatches.length === 1) {
     return buildRentalResolutionSuccess(
       shapeMatches[0],

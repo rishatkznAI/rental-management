@@ -148,11 +148,19 @@ function matchesClassicRentalForGantt(ganttRental: GanttRentalData, rental: Rent
   const sameClient = ganttRental.clientId && rental.clientId
     ? ganttRental.clientId === rental.clientId
     : ganttRental.client === rental.client;
-  if (!sameClient) return false;
   const rentalEndDate = rental.plannedReturnDate || (rental as Rental & { endDate?: string }).endDate || '';
   const exactDates = rental.startDate === ganttRental.startDate && rentalEndDate === ganttRental.endDate;
   const overlappingDates = dateRangesOverlap(rental.startDate, rentalEndDate, ganttRental.startDate, ganttRental.endDate);
   if (!exactDates && !overlappingDates) return false;
+  if (!sameClient) return false;
+  return hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
+}
+
+function matchesClassicRentalForGanttByShape(ganttRental: GanttRentalData, rental: Rental, equipmentList: Equipment[] = []): boolean {
+  const linkedRentalId = getGanttRentalSourceId(ganttRental);
+  if (linkedRentalId) return String(rental.id) === linkedRentalId;
+  const rentalEndDate = rental.plannedReturnDate || (rental as Rental & { endDate?: string }).endDate || '';
+  if (rental.startDate !== ganttRental.startDate || rentalEndDate !== ganttRental.endDate) return false;
   return hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
 }
 
@@ -619,7 +627,10 @@ export default function Rentals() {
           (item.clientId && ganttRental.clientId ? item.clientId === ganttRental.clientId : item.client === ganttRental.client)
         ) ||
         ganttRental;
-      const linkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(currentGanttRental, item, equipmentList));
+      const strictLinkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(currentGanttRental, item, equipmentList));
+      const linkedRentals = strictLinkedRentals.length > 0
+        ? strictLinkedRentals
+        : classicRentals.filter(item => matchesClassicRentalForGanttByShape(currentGanttRental, item, equipmentList));
       const sourceRentalId = getGanttRentalSourceId(currentGanttRental);
       if (!sourceRentalId && linkedRentals.length > 1) {
         showToast(

@@ -231,6 +231,36 @@ test('resolveRentalForChangeRequest recovers stale GR by equipmentId and invento
   assert.equal(result.sourceRentalId, 'GR-1776254974522');
 });
 
+test('resolveRentalForChangeRequest recovers stale GR when client snapshot differs but equipment and dates are unique', () => {
+  const result = resolveRentalForChangeRequest({
+    rentalId: 'GR-1776254974522',
+    linkedGanttRentalId: 'GR-1776254974522',
+    fallbackGanttRental: {
+      id: 'GR-1776254974522',
+      client: 'Стройтрест Алабуга',
+      startDate: '2026-04-10',
+      endDate: '2026-04-20',
+      equipmentInv: '03291436',
+    },
+    rentals: [{
+      id: 'R-032',
+      client: 'ООО Стройтрест-Алабуга',
+      startDate: '2026-04-10',
+      plannedReturnDate: '2026-04-20',
+      equipment: ['03291436'],
+    }],
+    ganttRentals: [],
+    equipment: [{
+      id: 'EQ-032',
+      inventoryNumber: '03291436',
+      serialNumber: 'SN-032',
+    }],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rentalId, 'R-032');
+});
+
 test('resolveRentalForChangeRequest returns 409 for ambiguous fallback matches', () => {
   const result = resolveRentalForChangeRequest({
     rentalId: 'GR-ambiguous',
@@ -678,6 +708,7 @@ test('PATCH /api/rentals/:id resolves stale GR route id through request Gantt sn
 
 test('PATCH /api/rentals/:id resolves real stale GR for equipment 03291436 through snapshot aliases', async () => {
   const { app, state } = createApprovalApp();
+  state.rentals.find(item => item.id === 'R-032').client = 'ООО Стройтрест-Алабуга';
 
   await withServer(app, async (baseUrl) => {
     const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1776254974522', 'manager-token', {

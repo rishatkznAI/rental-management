@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin } from './helpers/auth';
+import { loginAsAdmin, navigateInApp } from './helpers/auth';
 
 test('sidebar navigation updates content without page refresh', async ({ page }) => {
   await loginAsAdmin(page);
@@ -19,7 +19,7 @@ test('sidebar navigation updates content without page refresh', async ({ page })
 
 test('rentals page survives direct open on hash route', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('./#/rentals');
+  await navigateInApp(page, '/rentals');
 
   await expect(page).toHaveURL(/#\/rentals$/);
   await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();

@@ -83,6 +83,7 @@ const DEFAULT_GATEWAY_STATUS: GsmGatewayStatus = {
   connectionsActive: 0,
   packetsReceivedTotal: 0,
   enabled: true,
+  disabled: false,
   host: '0.0.0.0',
   port: 5023,
   startedAt: null,
@@ -266,6 +267,12 @@ function formatGsmStatus(status?: string | null) {
   if (status === 'online') return 'Онлайн';
   if (status === 'offline') return 'Офлайн';
   return 'Неизвестно';
+}
+
+function formatGatewayState(status: GsmGatewayStatus) {
+  if (status.gatewayEnabled) return 'Активен';
+  if (status.disabled) return 'Отключён';
+  return 'Ошибка';
 }
 
 function getParseStatusBadge(status?: string | null): 'success' | 'warning' | 'danger' | 'default' {
@@ -925,7 +932,7 @@ export default function Gsm() {
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">GPRS-шлюз</div>
                     <div className="mt-2 text-2xl font-black text-white">
-                      {gatewayStatus.gatewayEnabled ? 'Активен' : 'Ошибка'}
+                      {formatGatewayState(gatewayStatus)}
                     </div>
                     <div className="mt-1 text-sm text-slate-400">TCP :{gatewayStatus.tcpPort}</div>
                   </CardContent>
@@ -1741,7 +1748,7 @@ export default function Gsm() {
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Шлюз GPRS</div>
                     <div className="mt-2 text-2xl font-black text-white">
-                      {gatewayStatus.startError ? 'Ошибка' : 'Активен'}
+                      {formatGatewayState(gatewayStatus)}
                     </div>
                     <div className="mt-1 text-sm text-slate-400">
                       {gatewayStatus.host}:{gatewayStatus.port}

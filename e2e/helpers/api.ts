@@ -176,26 +176,6 @@ export async function createRentalPair(
 ): Promise<{ rental: RentalRecord; ganttId: string }> {
   const amount = options.amount ?? 10000;
   const manager = options.manager ?? 'E2E';
-  const ganttRes = await api.post('/api/gantt_rentals', {
-    data: {
-      client: options.client,
-      clientShort: options.client.slice(0, 20),
-      equipmentId: options.equipment.id,
-      equipmentInv: options.equipment.inventoryNumber,
-      startDate: options.startDate,
-      endDate: options.endDate,
-      manager,
-      managerInitials: 'E2E',
-      status: 'created',
-      paymentStatus: 'unpaid',
-      updSigned: false,
-      amount,
-      comments: [],
-    },
-  });
-  expect(ganttRes.ok()).toBeTruthy();
-  const gantt = (await ganttRes.json()) as { id: string };
-
   const rentalRes = await api.post('/api/rentals', {
     data: {
       client: options.client,
@@ -214,6 +194,27 @@ export async function createRentalPair(
   });
   expect(rentalRes.ok()).toBeTruthy();
   const rental = (await rentalRes.json()) as RentalRecord;
+
+  const ganttRes = await api.post('/api/gantt_rentals', {
+    data: {
+      rentalId: rental.id,
+      client: options.client,
+      clientShort: options.client.slice(0, 20),
+      equipmentId: options.equipment.id,
+      equipmentInv: options.equipment.inventoryNumber,
+      startDate: options.startDate,
+      endDate: options.endDate,
+      manager,
+      managerInitials: 'E2E',
+      status: 'created',
+      paymentStatus: 'unpaid',
+      updSigned: false,
+      amount,
+      comments: [],
+    },
+  });
+  expect(ganttRes.ok()).toBeTruthy();
+  const gantt = (await ganttRes.json()) as { id: string };
 
   return { rental, ganttId: gantt.id };
 }

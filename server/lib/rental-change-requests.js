@@ -88,13 +88,228 @@ function getChangedFields(previous, patch) {
   return Object.keys(patch || {}).filter(field => !valuesEqual(previous?.[field], patch[field]));
 }
 
+function normalizeRentalIdentifier(value) {
+  if (value === undefined || value === null) return '';
+  const normalized = String(value).trim();
+  if (!normalized || normalized === 'undefined' || normalized === 'null') return '';
+  return normalized;
+}
+
+function sameRentalIdentifier(left, right) {
+  const normalizedLeft = normalizeRentalIdentifier(left);
+  const normalizedRight = normalizeRentalIdentifier(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+function uniqueIdentifiers(values) {
+  return [...new Set((values || []).map(normalizeRentalIdentifier).filter(Boolean))];
+}
+
+function rentalLinkIdsFromGantt(ganttRental) {
+  return uniqueIdentifiers([
+    ganttRental?.rentalId,
+    ganttRental?.sourceRentalId,
+    ganttRental?.originalRentalId,
+    ganttRental?.classicRentalId,
+    ganttRental?.entityId,
+    ganttRental?.approvalEntityId,
+  ]);
+}
+
+function rentalEquipmentRefs(rental) {
+  return uniqueIdentifiers([
+    rental?.equipmentId,
+    rental?.equipmentInv,
+    rental?.inventoryNumber,
+    ...(Array.isArray(rental?.equipment) ? rental.equipment : []),
+  ]);
+}
+
+function normalizedText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function ganttMatchesClassicRental(ganttRental, rental) {
+  if (!ganttRental || !rental) return false;
+
+  const linkedIds = rentalLinkIdsFromGantt(ganttRental);
+  if (linkedIds.length > 0) {
+    if (linkedIds.some(id => sameRentalIdentifier(id, rental.id))) return true;
+  }
+
+  const ganttClientId = normalizeRentalIdentifier(ganttRental.clientId);
+  const rentalClientId = normalizeRentalIdentifier(rental.clientId);
+  const sameClient = ganttClientId && rentalClientId
+    ? ganttClientId === rentalClientId
+    : normalizedText(ganttRental.client) === normalizedText(rental.client);
+  if (!sameClient) return false;
+
+  const sameDates =
+    String(rental.startDate || '') === String(ganttRental.startDate || '') &&
+    String(rental.plannedReturnDate || rental.endDate || '') === String(ganttRental.endDate || ganttRental.plannedReturnDate || '');
+  if (!sameDates) return false;
+
+  const ganttRefs = rentalEquipmentRefs(ganttRental);
+  const classicRefs = rentalEquipmentRefs(rental);
+  return ganttRefs.some(ref => classicRefs.includes(ref));
+}
+
+function uniqueRentalMatches(matches) {
+  const byId = new Map();
+  for (const match of matches || []) {
+    const id = normalizeRentalIdentifier(match?.rental?.id);
+    if (!id || byId.has(id)) continue;
+    byId.set(id, match);
+  }
+  return [...byId.values()];
+}
+
+function findRentalsByIds(rentals, ids) {
+  const normalizedIds = uniqueIdentifiers(ids);
+  if (normalizedIds.length === 0) return [];
+  return (rentals || [])
+    .map((rental, index) => ({ rental, index }))
+    .filter(({ rental }) => normalizedIds.some(id => sameRentalIdentifier(id, rental?.id)));
+}
+
+function buildRentalResolutionFailure(status, message, searchedIds) {
+  return {
+    ok: false,
+    status,
+    error: message,
+    details: {
+      searchedIds: uniqueIdentifiers(searchedIds),
+      searchedCollections: [
+        'rentals.id',
+        'gantt_rentals.id',
+        'gantt_rentals.rentalId',
+        'gantt_rentals.sourceRentalId',
+        'gantt_rentals.originalRentalId',
+      ],
+    },
+  };
+}
+
+function buildRentalResolutionSuccess(match, sourceRentalId, linkedGanttRental) {
+  const sourceId = normalizeRentalIdentifier(sourceRentalId);
+  return {
+    ok: true,
+    rental: match.rental,
+    rentalIndex: match.index,
+    rentalId: normalizeRentalIdentifier(match.rental?.id),
+    sourceRentalId: sourceId && !sameRentalIdentifier(sourceId, match.rental?.id) ? sourceId : '',
+    linkedGanttRental: linkedGanttRental || null,
+    linkedGanttRentalId: normalizeRentalIdentifier(linkedGanttRental?.id),
+  };
+}
+
+function resolveRentalForChangeRequest({
+  rentalId,
+  linkedGanttRentalId,
+  rentals = [],
+  ganttRentals = [],
+} = {}) {
+  const requestedRentalId = normalizeRentalIdentifier(rentalId);
+  const requestedGanttId = normalizeRentalIdentifier(linkedGanttRentalId);
+  const searchedIds = uniqueIdentifiers([requestedRentalId, requestedGanttId]);
+
+  if (!requestedRentalId && !requestedGanttId) {
+    return buildRentalResolutionFailure(
+      400,
+      'Не передан rentalId для согласования аренды.',
+      searchedIds,
+    );
+  }
+
+  const directMatches = findRentalsByIds(rentals, [requestedRentalId]);
+  if (directMatches.length === 1) {
+    const linkedGanttRental = (ganttRentals || []).find(item => sameRentalIdentifier(item?.id, requestedGanttId)) || null;
+    return buildRentalResolutionSuccess(directMatches[0], requestedRentalId, linkedGanttRental);
+  }
+  if (directMatches.length > 1) {
+    return buildRentalResolutionFailure(
+      409,
+      `Найдено несколько карточек аренды с id "${requestedRentalId}". Откройте карточку аренды вручную.`,
+      searchedIds,
+    );
+  }
+
+  const ganttCandidates = uniqueRentalMatches((ganttRentals || [])
+    .map((ganttRental, index) => ({ rental: ganttRental, index }))
+    .filter(({ rental: ganttRental }) => {
+      const byGanttId =
+        sameRentalIdentifier(ganttRental?.id, requestedGanttId) ||
+        sameRentalIdentifier(ganttRental?.id, requestedRentalId);
+      const byLinkedId = rentalLinkIdsFromGantt(ganttRental)
+        .some(id => sameRentalIdentifier(id, requestedRentalId));
+      return byGanttId || byLinkedId;
+    }));
+
+  const linkedIds = uniqueIdentifiers(ganttCandidates.flatMap(({ rental: ganttRental }) => rentalLinkIdsFromGantt(ganttRental)));
+  const explicitMatches = findRentalsByIds(rentals, linkedIds);
+  if (explicitMatches.length === 1) {
+    const linkedGanttRental = ganttCandidates.find(({ rental: ganttRental }) =>
+      rentalLinkIdsFromGantt(ganttRental).some(id => sameRentalIdentifier(id, explicitMatches[0].rental.id)),
+    )?.rental || ganttCandidates[0]?.rental || null;
+    return buildRentalResolutionSuccess(
+      explicitMatches[0],
+      requestedRentalId || requestedGanttId || linkedGanttRental?.id,
+      linkedGanttRental,
+    );
+  }
+  if (explicitMatches.length > 1) {
+    return buildRentalResolutionFailure(
+      409,
+      `Найдено несколько карточек аренды по связи gantt_rentals для id "${requestedRentalId || requestedGanttId}". Откройте карточку аренды вручную.`,
+      [...searchedIds, ...linkedIds],
+    );
+  }
+  if (linkedIds.length > 0) {
+    return buildRentalResolutionFailure(
+      404,
+      `Связанная карточка аренды для "${requestedRentalId || requestedGanttId}" не найдена: в gantt_rentals указана связь ${linkedIds.join(', ')}, но такой rentals.id нет.`,
+      [...searchedIds, ...linkedIds],
+    );
+  }
+
+  const shapeMatches = uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
+    (rentals || [])
+      .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
+      .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental)),
+  ));
+  if (shapeMatches.length === 1) {
+    return buildRentalResolutionSuccess(
+      shapeMatches[0],
+      requestedRentalId || requestedGanttId || shapeMatches[0].linkedGanttRental?.id,
+      shapeMatches[0].linkedGanttRental,
+    );
+  }
+  if (shapeMatches.length > 1) {
+    return buildRentalResolutionFailure(
+      409,
+      `Найдено несколько похожих карточек аренды для id "${requestedRentalId || requestedGanttId}". Откройте карточку аренды вручную.`,
+      [...searchedIds, ...linkedIds],
+    );
+  }
+
+  return buildRentalResolutionFailure(
+    404,
+    `Не найдена карточка аренды для согласования: id "${requestedRentalId || requestedGanttId}", искали в rentals.id и связях gantt_rentals.`,
+    [...searchedIds, ...linkedIds],
+  );
+}
+
 function stripRentalPatchMeta(body = {}) {
   const {
     __linkedGanttRentalId,
+    __sourceRentalId,
+    __rentalId,
     __changeReason,
     __changeComment,
     __changeAttachments,
     linkedGanttRentalId,
+    sourceRentalId,
+    rentalId,
     changeRequestSummary,
     ...patch
   } = body || {};
@@ -102,12 +317,101 @@ function stripRentalPatchMeta(body = {}) {
   return {
     patch,
     meta: {
+      rentalId: __rentalId || rentalId || '',
+      sourceRentalId: __sourceRentalId || sourceRentalId || '',
       linkedGanttRentalId: __linkedGanttRentalId || linkedGanttRentalId || '',
       reason: __changeReason || '',
       comment: __changeComment || '',
       attachments: Array.isArray(__changeAttachments) ? __changeAttachments : [],
     },
   };
+}
+
+function hasGanttRentalLink(ganttRental) {
+  return rentalLinkIdsFromGantt(ganttRental).length > 0;
+}
+
+function compactGanttRentalProblem(ganttRental, resolution) {
+  return {
+    id: normalizeRentalIdentifier(ganttRental?.id),
+    client: ganttRental?.client || '',
+    clientId: normalizeRentalIdentifier(ganttRental?.clientId),
+    startDate: ganttRental?.startDate || '',
+    endDate: ganttRental?.endDate || ganttRental?.plannedReturnDate || '',
+    equipmentId: normalizeRentalIdentifier(ganttRental?.equipmentId),
+    equipmentInv: normalizeRentalIdentifier(ganttRental?.equipmentInv),
+    status: resolution?.status || 0,
+    error: resolution?.error || 'Не удалось восстановить связь с rentals.',
+  };
+}
+
+function logGanttRentalLinkProblems(logger, label, list) {
+  if (!logger || typeof logger.warn !== 'function' || !list.length) return;
+  logger.warn(`[rental-links] ${label}: ${list.length}`);
+  for (const item of list.slice(0, 20)) {
+    logger.warn(
+      `[rental-links] ${label}: id=${item.id || '—'} client="${item.client || '—'}" ` +
+      `period=${item.startDate || '—'}..${item.endDate || '—'} equipment=${item.equipmentInv || item.equipmentId || '—'} ` +
+      `reason="${item.error}"`,
+    );
+  }
+  if (list.length > 20) {
+    logger.warn(`[rental-links] ${label}: ещё ${list.length - 20} записей скрыто из лога`);
+  }
+}
+
+function backfillGanttRentalLinks({ readData, writeData, logger = console, dryRun = false } = {}) {
+  const rentals = typeof readData === 'function' ? (readData('rentals') || []) : [];
+  const ganttRentals = typeof readData === 'function' ? (readData('gantt_rentals') || []) : [];
+  const result = {
+    checked: Array.isArray(ganttRentals) ? ganttRentals.length : 0,
+    missingLink: 0,
+    linked: 0,
+    ambiguous: [],
+    unresolved: [],
+    dryRun: Boolean(dryRun),
+  };
+
+  if (!Array.isArray(ganttRentals) || ganttRentals.length === 0) return result;
+
+  let changed = false;
+  const nextGanttRentals = ganttRentals.map(ganttRental => {
+    if (!ganttRental || hasGanttRentalLink(ganttRental)) return ganttRental;
+    result.missingLink += 1;
+
+    const resolution = resolveRentalForChangeRequest({
+      rentalId: ganttRental.id,
+      linkedGanttRentalId: ganttRental.id,
+      rentals,
+      ganttRentals: [ganttRental],
+    });
+
+    if (resolution.ok && resolution.rentalId) {
+      result.linked += 1;
+      changed = true;
+      return { ...ganttRental, rentalId: resolution.rentalId };
+    }
+
+    const problem = compactGanttRentalProblem(ganttRental, resolution);
+    if (resolution.status === 409) {
+      result.ambiguous.push(problem);
+    } else {
+      result.unresolved.push(problem);
+    }
+    return ganttRental;
+  });
+
+  if (changed && !dryRun && typeof writeData === 'function') {
+    writeData('gantt_rentals', nextGanttRentals);
+  }
+
+  if (result.linked > 0 && logger && typeof logger.log === 'function') {
+    logger.log(`[rental-links] Gantt rental backfill: linked ${result.linked}/${result.missingLink}`);
+  }
+  logGanttRentalLinkProblems(logger, 'Неоднозначная связь gantt_rentals', result.ambiguous);
+  logGanttRentalLinkProblems(logger, 'Не найдена связь gantt_rentals', result.unresolved);
+
+  return result;
 }
 
 function calculateRentalDebt(rental, payments = []) {
@@ -270,6 +574,7 @@ function buildRentalChangeRequest({
   id,
   rental,
   linkedGanttRentalId,
+  sourceRentalId,
   change,
   initiator,
   reason,
@@ -280,11 +585,14 @@ function buildRentalChangeRequest({
   return {
     id,
     entityType: 'rental',
+    entityId: rental.id,
     rentalId: rental.id,
+    sourceRentalId: sourceRentalId || '',
     linkedGanttRentalId: linkedGanttRentalId || '',
     clientId: rental.clientId || '',
     client: rental.client,
     equipment: Array.isArray(rental.equipment) ? rental.equipment : [],
+    requestedBy: initiator?.userId || '',
     initiatorId: initiator?.userId || '',
     initiatorName: initiator?.userName || 'Система',
     initiatorRole: initiator?.userRole || '',
@@ -296,6 +604,16 @@ function buildRentalChangeRequest({
     fieldLabel: change.label,
     oldValue: change.oldValue,
     newValue: change.newValue,
+    oldValues: { [change.field]: change.oldValue },
+    newValues: { [change.field]: change.newValue },
+    changes: [{
+      field: change.field,
+      label: change.label,
+      oldValue: change.oldValue,
+      newValue: change.newValue,
+      type: change.type,
+      reason: change.reason,
+    }],
     reason: String(reason || '').trim() || change.reason,
     systemReason: change.reason,
     comment: String(comment || '').trim(),
@@ -314,6 +632,13 @@ function buildRentalImmediateHistoryEntries(previousRental, nextRental, author) 
     ));
   }
   return entries;
+}
+
+function buildRentalPendingApprovalHistoryEntries(requests = [], author) {
+  return (requests || []).map(request => createRentalHistoryEntry(
+    author,
+    `Изменение отправлено на согласование: ${request.fieldLabel || getFieldLabel(request.field)}: ${displayValue(request.oldValue)} → ${displayValue(request.newValue)}`,
+  ));
 }
 
 function appendRentalHistory(rental, entries = []) {
@@ -398,8 +723,10 @@ module.exports = {
   RENTAL_CHANGE_FIELD_LABELS,
   appendRentalHistory,
   applyApprovedRentalChangeToGantt,
+  backfillGanttRentalLinks,
   buildRentalChangeRequest,
   buildRentalImmediateHistoryEntries,
+  buildRentalPendingApprovalHistoryEntries,
   buildRequestDecisionNotificationStatus,
   calculateFinancialImpact,
   calculateRentalDebt,
@@ -407,6 +734,8 @@ module.exports = {
   displayValue,
   getChangedFields,
   getFieldLabel,
+  normalizeRentalIdentifier,
+  resolveRentalForChangeRequest,
   splitRentalPatch,
   stripRentalPatchMeta,
   syncGanttRentalFields,

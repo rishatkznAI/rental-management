@@ -72,7 +72,19 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
 
 const LEFT_PANEL_WIDTH = 236;
 
+function getGanttRentalSourceId(ganttRental: GanttRentalData): string {
+  return String(
+    ganttRental.rentalId ||
+    ganttRental.sourceRentalId ||
+    ganttRental.originalRentalId ||
+    ''
+  ).trim();
+}
+
 function matchesClassicRentalForGantt(ganttRental: GanttRentalData, rental: Rental): boolean {
+  const linkedRentalId = getGanttRentalSourceId(ganttRental);
+  if (linkedRentalId) return String(rental.id) === linkedRentalId;
+
   const sameClient = ganttRental.clientId && rental.clientId
     ? ganttRental.clientId === rental.clientId
     : ganttRental.client === rental.client;
@@ -528,19 +540,20 @@ export default function Rentals() {
     try {
       const classicRentals = await rentalsService.getAll();
       const linkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(ganttRental, item));
-      if (linkedRentals.length !== 1) {
+      const sourceRentalId = getGanttRentalSourceId(ganttRental);
+      if (!sourceRentalId && linkedRentals.length > 1) {
         showToast(
-          linkedRentals.length === 0
-            ? 'Не найдена карточка аренды для согласования'
-            : 'Найдено несколько похожих карточек аренды, откройте карточку аренды',
+          'Найдено несколько похожих карточек аренды, откройте карточку аренды',
           'error',
         );
         return false;
       }
+      const targetRentalId = sourceRentalId || linkedRentals[0]?.id || ganttRental.id;
 
-      const saved = await rentalsService.update(linkedRentals[0].id, {
+      const saved = await rentalsService.update(targetRentalId, {
         ...patch,
         __linkedGanttRentalId: ganttRental.id,
+        __sourceRentalId: sourceRentalId || '',
         __changeReason: reason,
       } as Partial<Rental> & Record<string, unknown>);
       const summary = (saved as Rental & {
@@ -549,13 +562,13 @@ export default function Rentals() {
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
-        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail(linkedRentals[0].id) }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail((saved as Rental).id || targetRentalId) }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
         queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
       ]);
 
       if (summary?.pendingCount) {
-        showToast(`Изменение отправлено на согласование: ${summary.pendingCount}`);
+        showToast('Изменения отправлены администратору на согласование');
       } else {
         showToast('Изменение аренды применено');
       }
@@ -2766,10 +2779,8 @@ export default function Rentals() {
           };
 
           try {
-            const savedRental = await rentalsService.createGanttEntry(newRental);
-
             // Сохраняем и "классическую" аренду, чтобы она была видна в связанных разделах и карточках.
-            await rentalsService.create({
+            const savedClassicRental = await rentalsService.create({
               clientId: data.clientId,
               client: data.client || '',
               contact: '',
@@ -2785,6 +2796,10 @@ export default function Rentals() {
               manager: data.manager || '',
               status: 'new',
               comments: '',
+            });
+            const savedRental = await rentalsService.createGanttEntry({
+              ...newRental,
+              rentalId: savedClassicRental.id,
             });
 
             setGanttRentals((prev) => [...prev, savedRental]);

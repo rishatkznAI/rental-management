@@ -6,7 +6,9 @@ const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const express = serverRequire('express');
 const {
+  backfillGanttRentalLinks,
   classifyRentalFieldChange,
+  resolveRentalForChangeRequest,
   splitRentalPatch,
 } = require('../server/lib/rental-change-requests.js');
 const { createAccessControl } = require('../server/lib/access-control.js');
@@ -95,6 +97,110 @@ test('splitRentalPatch sends closing with debt to approval', () => {
   assert.equal(result.approvalChanges[0].type, 'Закрытие аренды с долгом');
 });
 
+test('resolveRentalForChangeRequest accepts numeric and string rental ids', () => {
+  const result = resolveRentalForChangeRequest({
+    rentalId: 101,
+    rentals: [{ ...rental, id: '101' }],
+    ganttRentals: [],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rental.id, '101');
+});
+
+test('resolveRentalForChangeRequest finds classic rental through gantt_rentals link', () => {
+  const result = resolveRentalForChangeRequest({
+    rentalId: 'GR-101',
+    rentals: [{ ...rental, id: 'R-101' }],
+    ganttRentals: [{
+      id: 'GR-101',
+      rentalId: 'R-101',
+      client: rental.client,
+      startDate: rental.startDate,
+      endDate: rental.plannedReturnDate,
+      equipmentInv: '083',
+    }],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rental.id, 'R-101');
+  assert.equal(result.linkedGanttRentalId, 'GR-101');
+});
+
+test('resolveRentalForChangeRequest returns useful errors for missing and unknown ids', () => {
+  const missing = resolveRentalForChangeRequest({ rentalId: 'undefined', rentals: [], ganttRentals: [] });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.status, 400);
+  assert.match(missing.error, /rentalId/);
+
+  const unknown = resolveRentalForChangeRequest({ rentalId: 'R-404', rentals: [], ganttRentals: [] });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.status, 404);
+  assert.match(unknown.error, /R-404/);
+  assert.deepEqual(unknown.details.searchedCollections.slice(0, 2), ['rentals.id', 'gantt_rentals.id']);
+});
+
+test('resolveRentalForChangeRequest returns 409 for ambiguous fallback matches', () => {
+  const result = resolveRentalForChangeRequest({
+    rentalId: 'GR-ambiguous',
+    rentals: [
+      { ...rental, id: 'R-ambiguous-1' },
+      { ...rental, id: 'R-ambiguous-2' },
+    ],
+    ganttRentals: [{
+      id: 'GR-ambiguous',
+      client: rental.client,
+      startDate: rental.startDate,
+      endDate: rental.plannedReturnDate,
+      equipmentInv: '083',
+    }],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 409);
+});
+
+test('backfillGanttRentalLinks links only unambiguous legacy gantt records', () => {
+  const state = {
+    rentals: [
+      { ...rental, id: 'R-linked' },
+      { ...rental, id: 'R-ambiguous-1', client: 'Дубль' },
+      { ...rental, id: 'R-ambiguous-2', client: 'Дубль' },
+    ],
+    gantt_rentals: [
+      {
+        id: 'GR-linked',
+        client: rental.client,
+        startDate: rental.startDate,
+        endDate: rental.plannedReturnDate,
+        equipmentInv: '083',
+      },
+      {
+        id: 'GR-ambiguous',
+        client: 'Дубль',
+        startDate: rental.startDate,
+        endDate: rental.plannedReturnDate,
+        equipmentInv: '083',
+      },
+    ],
+  };
+  const warnings = [];
+  const result = backfillGanttRentalLinks({
+    readData: name => state[name] || [],
+    writeData: (name, value) => {
+      state[name] = value;
+    },
+    logger: { log: () => {}, warn: message => warnings.push(message) },
+  });
+
+  assert.equal(result.missingLink, 2);
+  assert.equal(result.linked, 1);
+  assert.equal(result.ambiguous.length, 1);
+  assert.equal(state.gantt_rentals[0].rentalId, 'R-linked');
+  assert.equal(state.gantt_rentals[1].rentalId, undefined);
+  assert.ok(warnings.some(message => message.includes('Неоднозначная связь')));
+});
+
 function createApprovalApp() {
   const state = {
     users: [
@@ -141,6 +247,7 @@ function createApprovalApp() {
         manager: 'Руслан',
         managerId: 'U-manager',
         status: 'active',
+        amount: 100000,
         comments: [],
       },
       {
@@ -153,6 +260,7 @@ function createApprovalApp() {
         manager: 'Руслан',
         managerId: 'U-manager',
         status: 'created',
+        amount: 100000,
         comments: [],
       },
     ],
@@ -268,5 +376,153 @@ test('approved rental date change applies even when it originally required confl
     assert.equal(approved.body.status, 'approved');
     assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-04-24');
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, '2026-04-24');
+  });
+});
+
+test('editing existing rental through gantt id creates approval without losing rental card', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1', 'manager-token', {
+      price: 120000,
+      __linkedGanttRentalId: 'GR-1',
+      __changeReason: 'Изменение цены из планировщика',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.id, 'R-1');
+    assert.equal(update.body.changeRequestSummary.pendingCount, 1);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').price, 100000);
+    assert.equal(state.rental_change_requests.length, 1);
+    assert.equal(state.rental_change_requests[0].entityType, 'rental');
+    assert.equal(state.rental_change_requests[0].rentalId, 'R-1');
+    assert.equal(state.rental_change_requests[0].sourceRentalId, 'GR-1');
+    assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-1');
+    assert.equal(state.rental_change_requests[0].status, 'pending');
+    assert.equal(state.rental_change_requests[0].requestedBy, 'U-manager');
+    assert.deepEqual(state.rental_change_requests[0].oldValues, { price: 100000 });
+    assert.deepEqual(state.rental_change_requests[0].newValues, { price: 120000 });
+    assert.equal(state.rental_change_requests[0].changes[0].field, 'price');
+    assert.match(
+      state.rentals.find(item => item.id === 'R-1').history.at(-1).text,
+      /отправлено на согласование/i,
+    );
+
+    const approved = await request(baseUrl, 'POST', `/api/rental_change_requests/${state.rental_change_requests[0].id}/approve`, 'admin-token', {});
+    assert.equal(approved.status, 200);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').price, 120000);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').amount, 120000);
+    assert.match(
+      state.rentals.find(item => item.id === 'R-1').history.at(-1).text,
+      /Согласовано и применено/,
+    );
+  });
+});
+
+test('rentals PATCH returns clear 400 and 404 for bad approval ids', async () => {
+  const { app } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const missing = await request(baseUrl, 'PATCH', '/api/rentals/undefined', 'manager-token', {
+      price: 120000,
+    });
+    assert.equal(missing.status, 400);
+    assert.match(missing.body.error, /rentalId/);
+
+    const unknown = await request(baseUrl, 'PATCH', '/api/rentals/R-404', 'manager-token', {
+      price: 120000,
+    });
+    assert.equal(unknown.status, 404);
+    assert.match(unknown.body.error, /R-404/);
+    assert.deepEqual(unknown.body.details.searchedCollections.slice(0, 2), ['rentals.id', 'gantt_rentals.id']);
+  });
+});
+
+test('conflict-free extension applies immediately and does not create approval', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-2', 'manager-token', {
+      plannedReturnDate: '2026-04-30',
+      __linkedGanttRentalId: 'GR-2',
+      __changeReason: 'Клиент продлил аренду',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.plannedReturnDate, '2026-04-30');
+    assert.equal(update.body.changeRequestSummary.pendingCount, 0);
+    assert.equal(state.rental_change_requests.length, 0);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').endDate, '2026-04-30');
+  });
+});
+
+test('downtime change creates approval and does not mutate rental before approval', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'manager-token', {
+      downtimeDays: 2,
+      downtimeReason: 'Простой на объекте',
+      __linkedGanttRentalId: 'GR-1',
+      __changeReason: 'Простой техники',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.changeRequestSummary.pendingCount, 2);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').downtimeDays, undefined);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').downtimeReason, undefined);
+    assert.deepEqual(
+      state.rental_change_requests.map(item => item.field).sort(),
+      ['downtimeDays', 'downtimeReason'],
+    );
+  });
+});
+
+test('comments and attachment additions apply immediately without approval', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'manager-token', {
+      comments: 'Добавлен комментарий',
+      documents: ['UPD-1'],
+      photos: ['PHOTO-1'],
+      __linkedGanttRentalId: 'GR-1',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.changeRequestSummary.pendingCount, 0);
+    assert.equal(state.rental_change_requests.length, 0);
+    const updatedRental = state.rentals.find(item => item.id === 'R-1');
+    assert.equal(updatedRental.comments, 'Добавлен комментарий');
+    assert.deepEqual(updatedRental.documents, ['UPD-1']);
+    assert.deepEqual(updatedRental.photos, ['PHOTO-1']);
+    assert.match(updatedRental.history.at(-1).text, /Изменение применено сразу/);
+  });
+});
+
+test('rejected approval keeps rental unchanged and writes history entry', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'manager-token', {
+      price: 130000,
+      __linkedGanttRentalId: 'GR-1',
+      __changeReason: 'Изменение цены',
+    });
+    assert.equal(update.status, 200);
+    const requestId = state.rental_change_requests[0].id;
+
+    const rejected = await request(baseUrl, 'POST', `/api/rental_change_requests/${requestId}/reject`, 'admin-token', {
+      reason: 'Цена не согласована',
+    });
+
+    assert.equal(rejected.status, 200);
+    assert.equal(rejected.body.status, 'rejected');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').price, 100000);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').amount, 100000);
+    assert.match(
+      state.rentals.find(item => item.id === 'R-1').history.at(-1).text,
+      /Отклонено изменение/,
+    );
   });
 });

@@ -2015,8 +2015,8 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
     validRows.forEach((row, index) => {
       const ganttId = `GR-IMPORT-${Date.now()}-${index}`;
       const rentalId = `R-IMPORT-${Date.now()}-${index}`;
-      nextGanttRentals.push({ ...row.ganttPayload!, id: ganttId });
       nextClassicRentals.push({ ...row.classicPayload!, id: rentalId });
+      nextGanttRentals.push({ ...row.ganttPayload!, id: ganttId, rentalId });
       if (row.equipmentId) {
         nextEquipment = nextEquipment.map(item => {
           if (item.id !== row.equipmentId) return item;

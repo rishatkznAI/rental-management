@@ -51,6 +51,9 @@ const {
   normalizeGanttRentalStatus,
 } = require('./lib/gantt-rental-status');
 const {
+  backfillGanttRentalLinks,
+} = require('./lib/rental-change-requests');
+const {
   getRentalDebtOverdueDays,
   buildRentalDebtRows,
   buildClientReceivables,
@@ -2253,6 +2256,7 @@ startServer({
     readData,
     writeData,
     normalizeClientLinks,
+    backfillGanttRentalLinks,
     normalizeServiceWorkRecord,
     normalizeSparePartRecord,
     seedsDir: path.join(__dirname, 'seeds'),

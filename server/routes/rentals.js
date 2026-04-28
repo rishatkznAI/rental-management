@@ -3,8 +3,10 @@ const {
   appendRentalHistory,
   buildRentalChangeRequest,
   buildRentalImmediateHistoryEntries,
+  buildRentalPendingApprovalHistoryEntries,
   displayValue,
   getFieldLabel,
+  resolveRentalForChangeRequest,
   splitRentalPatch,
   stripRentalPatchMeta,
   syncGanttRentalFields,
@@ -110,6 +112,7 @@ function registerRentalRoutes(deps) {
         id: generateId(requestPrefix),
         rental: previousRental,
         linkedGanttRentalId: meta.linkedGanttRentalId,
+        sourceRentalId: meta.sourceRentalId,
         change,
         initiator: req.user,
         reason: meta.reason,
@@ -207,9 +210,31 @@ function registerRentalRoutes(deps) {
         return res.status(403).json({ ok: false, error: forbiddenReason });
       }
 
-      const { patch, meta } = stripRentalPatchMeta(req.body);
+      const { patch, meta: rawMeta } = stripRentalPatchMeta(req.body);
+      let meta = rawMeta;
       const data = readData(collection) || [];
-      const idx = data.findIndex(entry => entry.id === req.params.id);
+      let idx = data.findIndex(entry => String(entry.id) === String(req.params.id));
+      if (collection === 'rentals') {
+        const resolution = resolveRentalForChangeRequest({
+          rentalId: rawMeta.rentalId || req.params.id,
+          linkedGanttRentalId: rawMeta.linkedGanttRentalId,
+          rentals: data,
+          ganttRentals: readData('gantt_rentals') || [],
+        });
+        if (!resolution.ok) {
+          return res.status(resolution.status).json({
+            ok: false,
+            error: resolution.error,
+            details: resolution.details,
+          });
+        }
+        idx = resolution.rentalIndex;
+        meta = {
+          ...rawMeta,
+          sourceRentalId: rawMeta.sourceRentalId || resolution.sourceRentalId || '',
+          linkedGanttRentalId: rawMeta.linkedGanttRentalId || resolution.linkedGanttRentalId || '',
+        };
+      }
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
         accessControl.assertCanUpdateEntity(collection, data[idx], req.user);
@@ -246,10 +271,14 @@ function registerRentalRoutes(deps) {
         const createdRequests = createApprovalRequests(previousRental, approvalChanges, meta, req);
         let nextItem = immediateValidation.nextItem;
         const appliedFields = Object.keys(immediateValidation.patch || {});
+        const pendingHistoryEntries = buildRentalPendingApprovalHistoryEntries(createdRequests, req.user.userName);
         if (appliedFields.length > 0) {
           nextItem = appendRentalHistory(
             nextItem,
-            buildRentalImmediateHistoryEntries(previousRental, nextItem, req.user.userName),
+            [
+              ...buildRentalImmediateHistoryEntries(previousRental, nextItem, req.user.userName),
+              ...pendingHistoryEntries,
+            ],
           );
           data[idx] = nextItem;
           writeData(collection, data);
@@ -262,6 +291,7 @@ function registerRentalRoutes(deps) {
           });
           syncLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, req.user.userName);
         } else if (createdRequests.length > 0) {
+          data[idx] = appendRentalHistory(previousRental, pendingHistoryEntries);
           writeData(collection, data);
           auditLog?.(req, {
             action: 'rentals.change_request',

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin } from './helpers/auth';
+import { loginAsAdmin, navigateInApp } from './helpers/auth';
 import { findServiceTicketByReason, getAnyRentableEquipment, withAdminApi } from './helpers/api';
 
 async function selectEquipment(page: import('@playwright/test').Page, query: string) {
@@ -18,7 +18,7 @@ test('admin can create a service ticket from the service form', async ({ page })
   const description = `E2E description ${suffix}`;
 
   await loginAsAdmin(page);
-  await page.goto('./#/service/new');
+  await navigateInApp(page, '/service/new');
 
   await expect(page.getByRole('heading', { name: 'Новая заявка в сервис' })).toBeVisible();
   await selectEquipment(page, equipment.serialNumber || equipment.inventoryNumber);

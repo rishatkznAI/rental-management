@@ -4,6 +4,7 @@ const { bufferToReadableText, parsePacket: fallbackParsePacket } = require('./gs
 
 const DEFAULT_GPRS_PORT = Number(process.env.GPRS_PORT || 5023);
 const DEFAULT_GPRS_HOST = process.env.GPRS_HOST || '0.0.0.0';
+const DEFAULT_GPRS_ENABLED = !['0', 'false', 'off', 'disabled'].includes(String(process.env.GPRS_ENABLED || '1').toLowerCase());
 const DEFAULT_MAX_PACKET_BYTES = Number(process.env.GPRS_MAX_PACKET_BYTES || 16 * 1024);
 const DEFAULT_MAX_PACKETS_PER_MINUTE = Number(process.env.GPRS_MAX_PACKETS_PER_MINUTE || 120);
 const DEFAULT_CONNECTION_TIMEOUT_MS = Number(process.env.GPRS_CONNECTION_TIMEOUT_MS || 120_000);
@@ -134,6 +135,7 @@ function createGprsGateway({
   logger = console,
   host = DEFAULT_GPRS_HOST,
   port = DEFAULT_GPRS_PORT,
+  enabled = DEFAULT_GPRS_ENABLED,
   parsePacket = fallbackParsePacket,
   maxPacketBytes = DEFAULT_MAX_PACKET_BYTES,
   maxPacketsPerMinute = DEFAULT_MAX_PACKETS_PER_MINUTE,
@@ -425,6 +427,12 @@ function createGprsGateway({
   function start() {
     ensureStorage();
     if (tcpServer) return tcpServer;
+    if (!enabled) {
+      gatewayStartedAt = null;
+      startError = '';
+      logger.log(`[GPRS] Gateway disabled by GPRS_ENABLED=0, TCP ${host}:${port} is not listening`);
+      return null;
+    }
 
     tcpServer = net.createServer((socket) => {
       const sourceIp = normalizeRemoteAddress(socket.remoteAddress);
@@ -510,7 +518,8 @@ function createGprsGateway({
 
     tcpServer.on('error', (error) => {
       startError = error.message;
-      logger.error('[GPRS] Gateway server error:', error.message);
+      gatewayStartedAt = null;
+      logger.error(`[GPRS] Gateway server error on ${host}:${port}:`, error.message);
     });
 
     tcpServer.listen(port, host, () => {
@@ -543,6 +552,7 @@ function createGprsGateway({
     if (!tcpServer) return Promise.resolve();
     const server = tcpServer;
     tcpServer = null;
+    if (!server.listening) return Promise.resolve();
     return new Promise((resolve) => {
       server.close(() => resolve());
     });
@@ -568,13 +578,14 @@ function createGprsGateway({
       : 0;
 
     return {
-      gatewayEnabled: !startError,
+      gatewayEnabled: Boolean(enabled && gatewayStartedAt && !startError),
       tcpPort: currentTcpPort(),
       uptimeSeconds,
       connectionsActive: onlineConnections.length,
       packetsReceivedTotal: Math.max(packetsReceivedTotal, packets.filter(item => item.direction !== 'outbound').length),
       lastPacketAt,
-      enabled: !startError,
+      enabled: Boolean(enabled && gatewayStartedAt && !startError),
+      disabled: !enabled,
       host,
       port: currentTcpPort(),
       startedAt: gatewayStartedAt,

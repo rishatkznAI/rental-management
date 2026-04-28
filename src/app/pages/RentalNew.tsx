@@ -123,8 +123,26 @@ export default function RentalNew() {
     const todayStr = new Date().toISOString().split('T')[0];
     const initialStatus: GanttRentalData['status'] = startDate <= todayStr ? 'active' : 'created';
 
+    // Classic rental
+    const savedClassicRental = await rentalsService.create({
+      client: selectedClient.company,
+      clientId: selectedClient.id,
+      contact: '',
+      startDate,
+      plannedReturnDate: endDate,
+      equipment: [selectedEquipment.inventoryNumber],
+      rate: `${dailyRate} ₽/день`,
+      price: totalPrice,
+      discount: 0,
+      deliveryAddress: '',
+      manager: '',
+      status: 'new' as const,
+      comments: notes,
+    });
+
     // Gantt entry
     await rentalsService.createGanttEntry({
+      rentalId: savedClassicRental.id,
       clientId: selectedClient.id,
       client: selectedClient.company,
       clientShort: selectedClient.company.substring(0, 20),
@@ -152,23 +170,6 @@ export default function RentalNew() {
           ? [createRentalHistoryEntry(user?.name || 'Система', notes.trim(), 'comment')]
           : []),
       ],
-    });
-
-    // Classic rental
-    await rentalsService.create({
-      client: selectedClient.company,
-      clientId: selectedClient.id,
-      contact: '',
-      startDate,
-      plannedReturnDate: endDate,
-      equipment: [selectedEquipment.inventoryNumber],
-      rate: `${dailyRate} ₽/день`,
-      price: totalPrice,
-      discount: 0,
-      deliveryAddress: '',
-      manager: '',
-      status: 'new' as const,
-      comments: notes,
     });
 
     // Update equipment status

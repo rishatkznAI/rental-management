@@ -34,6 +34,19 @@ npm run dev
 - `npm test` — run the Node test suite from `tests/`
 - `npm run test:e2e` — run Playwright end-to-end tests
 
+If the current shell has Node but does not expose `npm`, Playwright can be started directly:
+
+```bash
+node node_modules/.bin/playwright test
+```
+
+The Playwright web servers use the current Node executable and local `node_modules/.bin/vite`, so the e2e config does not require `npm` to be available inside the test runner environment.
+If that Node cannot load native backend modules, point the web servers at another compatible Node:
+
+```bash
+PLAYWRIGHT_NODE_PATH=/path/to/node node node_modules/.bin/playwright test
+```
+
 ## Deployment
 
 - Frontend supports static deployment (`vite build`) and includes `public/404.html` for SPA routing on GitHub Pages

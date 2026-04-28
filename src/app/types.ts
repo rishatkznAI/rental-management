@@ -136,6 +136,7 @@ export interface GsmGatewayStatus {
   enabled: boolean;
   host: string;
   port: number;
+  disabled?: boolean;
   startedAt?: string | null;
   startError?: string;
   onlineConnections: number;
@@ -368,10 +369,12 @@ export interface RentalChangeRequest {
   entityType: RentalChangeEntityType;
   entityId?: string;
   rentalId: string;
+  sourceRentalId?: string;
   linkedGanttRentalId?: string;
   clientId?: string;
   client: string;
   equipment: string[];
+  requestedBy?: string;
   initiatorId: string;
   initiatorName: string;
   initiatorRole: string;
@@ -384,6 +387,16 @@ export interface RentalChangeRequest {
   fieldLabel: string;
   oldValue: unknown;
   newValue: unknown;
+  oldValues?: Record<string, unknown>;
+  newValues?: Record<string, unknown>;
+  changes?: Array<{
+    field: string;
+    label?: string;
+    oldValue: unknown;
+    newValue: unknown;
+    type?: string;
+    reason?: string;
+  }>;
   reason: string;
   systemReason?: string;
   comment?: string;

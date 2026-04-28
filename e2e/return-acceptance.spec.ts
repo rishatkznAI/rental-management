@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin } from './helpers/auth';
+import { loginAsAdmin, navigateInApp } from './helpers/auth';
 import {
   createClient,
   createRentalPair,
@@ -29,7 +29,7 @@ test('admin can return equipment into service from the rentals planner', async (
   });
 
   await loginAsAdmin(page);
-  await page.goto('./#/rentals');
+  await navigateInApp(page, '/rentals');
 
   await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
   await page.getByRole('button', { name: 'Возврат техники' }).click();

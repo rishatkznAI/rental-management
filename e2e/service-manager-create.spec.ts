@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsRentalManager } from './helpers/auth';
+import { loginAsRentalManager, navigateInApp } from './helpers/auth';
 import { findServiceTicketByReason, getAnyRentableEquipment, withAdminApi } from './helpers/api';
 
 async function selectEquipment(page: import('@playwright/test').Page, query: string) {
@@ -18,7 +18,7 @@ test('rental manager can create a service ticket from the service form', async (
   const description = `E2E manager description ${suffix}`;
 
   await loginAsRentalManager(page);
-  await page.goto('./#/service/new');
+  await navigateInApp(page, '/service/new');
 
   await expect(page.getByRole('heading', { name: 'Новая заявка в сервис' })).toBeVisible();
   await selectEquipment(page, equipment.serialNumber || equipment.inventoryNumber);

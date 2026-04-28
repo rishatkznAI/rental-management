@@ -37,6 +37,9 @@ const SERVICE_STATUS_ORDER: Record<ServiceTicket['status'], number> = {
   closed: 4,
 };
 
+const SERVICE_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
+const SERVICE_STATUSES = ['new', 'in_progress', 'waiting_parts', 'ready', 'closed'] as const;
+
 const WORKFLOW_FILTER_OPTIONS = [
   { value: 'all', label: 'Все' },
   { value: 'repair', label: 'Ремонт' },
@@ -58,7 +61,15 @@ function truncateText(value: string, maxLength: number) {
 }
 
 function isActiveTicket(ticket: ServiceTicket) {
-  return ticket.status !== 'closed';
+  return normalizeServiceStatus(ticket.status) !== 'closed';
+}
+
+function normalizeServicePriority(priority: ServiceTicket['priority']): ServiceTicket['priority'] {
+  return SERVICE_PRIORITIES.includes(priority as typeof SERVICE_PRIORITIES[number]) ? priority : 'medium';
+}
+
+function normalizeServiceStatus(status: ServiceTicket['status']): ServiceTicket['status'] {
+  return SERVICE_STATUSES.includes(status as typeof SERVICE_STATUSES[number]) ? status : 'new';
 }
 
 function getTicketSearchText(ticket: ServiceTicket) {
@@ -88,18 +99,24 @@ function getTicketWorkflowKind(ticket: ServiceTicket): ServiceWorkflowKind {
 }
 
 function getTicketEquipmentTitle(ticket: ServiceTicket) {
-  const cleaned = ticket.equipment
+  const equipment = ticket.equipment || '';
+  const cleaned = equipment
     .replace(/\s*\(INV:.*?\)\s*/gi, ' ')
     .replace(/\s*·\s*INV.*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned || ticket.equipment || 'Техника не указана';
+  return cleaned || equipment || 'Техника не указана';
 }
 
 function getTicketInventory(ticket: ServiceTicket) {
   if (ticket.inventoryNumber) return ticket.inventoryNumber;
-  const match = ticket.equipment.match(/INV[:\s]*([^)·\s]+)/i);
+  const match = (ticket.equipment || '').match(/INV[:\s]*([^)·\s]+)/i);
   return match?.[1] || '—';
+}
+
+function formatTicketDate(value: ServiceTicket['createdAt']) {
+  const timestamp = Date.parse(String(value || ''));
+  return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : '—';
 }
 
 function ServiceMetricCard({
@@ -183,9 +200,9 @@ export default function Service() {
 
   const metrics = React.useMemo(() => ({
     total: activeTickets.length,
-    high: activeTickets.filter(ticket => ticket.priority === 'critical' || ticket.priority === 'high').length,
-    medium: activeTickets.filter(ticket => ticket.priority === 'medium').length,
-    low: activeTickets.filter(ticket => ticket.priority === 'low').length,
+    high: activeTickets.filter(ticket => ['critical', 'high'].includes(normalizeServicePriority(ticket.priority))).length,
+    medium: activeTickets.filter(ticket => normalizeServicePriority(ticket.priority) === 'medium').length,
+    low: activeTickets.filter(ticket => normalizeServicePriority(ticket.priority) === 'low').length,
   }), [activeTickets]);
 
   const filteredTickets = React.useMemo(() => {
@@ -204,8 +221,10 @@ export default function Service() {
     return ticketList
       .filter(ticket => {
         const matchesSearch = query === '' || getTicketSearchText(ticket).includes(query);
-        const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
-        const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
+        const ticketPriority = normalizeServicePriority(ticket.priority);
+        const ticketStatus = normalizeServiceStatus(ticket.status);
+        const matchesPriority = priorityFilter === 'all' || ticketPriority === priorityFilter;
+        const matchesStatus = statusFilter === 'all' || ticketStatus === statusFilter;
         const matchesScenario = scenarioFilter === 'all' || inferServiceKind(ticket) === scenarioFilter;
         const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || '';
         const matchesMechanic = mechanicFilter === 'all' || assignedMechanic === mechanicFilter;
@@ -217,15 +236,15 @@ export default function Service() {
         const matchesPreset =
           preset === 'all'
           || (preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
-          || (preset === 'urgent' && ['high', 'critical'].includes(ticket.priority))
-          || (preset === 'waiting_parts' && ticket.status === 'waiting_parts')
+          || (preset === 'urgent' && ['high', 'critical'].includes(ticketPriority))
+          || (preset === 'waiting_parts' && ticketStatus === 'waiting_parts')
           || (preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
 
         return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesMechanic && matchesWorkflow && matchesDate && matchesPreset;
       })
       .sort((left, right) => (
-        (SERVICE_STATUS_ORDER[left.status] ?? 99) - (SERVICE_STATUS_ORDER[right.status] ?? 99)
-        || (SERVICE_PRIORITY_ORDER[left.priority] ?? 99) - (SERVICE_PRIORITY_ORDER[right.priority] ?? 99)
+        (SERVICE_STATUS_ORDER[normalizeServiceStatus(left.status)] ?? 99) - (SERVICE_STATUS_ORDER[normalizeServiceStatus(right.status)] ?? 99)
+        || (SERVICE_PRIORITY_ORDER[normalizeServicePriority(left.priority)] ?? 99) - (SERVICE_PRIORITY_ORDER[normalizeServicePriority(right.priority)] ?? 99)
         || String(right.createdAt || '').localeCompare(String(left.createdAt || ''))
       ));
   }, [
@@ -519,7 +538,7 @@ export default function Service() {
                   >
                     <div className="min-w-0">
                       <div className="truncate font-mono text-sm text-gray-500 dark:text-gray-500">{ticket.id}</div>
-                      <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatDate(ticket.createdAt)}</div>
+                      <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                     </div>
 
                     <div className="min-w-0">
@@ -539,8 +558,8 @@ export default function Service() {
                     </div>
 
                     <div className="flex min-w-0 flex-wrap items-center gap-2 md:justify-end">
-                      {getServicePriorityBadge(ticket.priority)}
-                      {getServiceStatusBadge(ticket.status)}
+                      {getServicePriorityBadge(normalizeServicePriority(ticket.priority))}
+                      {getServiceStatusBadge(normalizeServiceStatus(ticket.status))}
                       <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/8 dark:text-gray-300">
                         {getServiceScenarioLabel(ticket)}
                       </span>

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin } from './helpers/auth';
+import { loginAsAdmin, navigateInApp } from './helpers/auth';
 import { createClient, createRentalPair, findRentalByClient, getAnyRentableEquipment, withAdminApi } from './helpers/api';
 
 async function selectEquipment(page: import('@playwright/test').Page, query: string) {
@@ -17,7 +17,7 @@ test('admin can create rental from the rental form', async ({ page }) => {
   }));
 
   await loginAsAdmin(page);
-  await page.goto('./#/rentals/new');
+  await navigateInApp(page, '/rentals/new');
 
   await expect(page.getByRole('heading', { name: 'Новая аренда' })).toBeVisible();
 
@@ -48,7 +48,7 @@ test('admin can open rental detail page for an existing rental', async ({ page }
   });
 
   await loginAsAdmin(page);
-  await page.goto(`./#/rentals/${rental.id}`);
+  await navigateInApp(page, `/rentals/${rental.id}`);
 
   await expect(page.getByRole('heading', { name: rental.id })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Клиент' })).toBeVisible();

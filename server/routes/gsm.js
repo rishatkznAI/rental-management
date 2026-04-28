@@ -22,16 +22,25 @@ function registerGsmRoutes(router, deps) {
   }
 
   function packetFilters(req) {
+    const parseStatus = String(req.query.parseStatus || '').trim();
     return {
       limit: Number(req.query.limit) || 50,
       offset: Number(req.query.offset) || 0,
       equipmentId: String(req.query.equipmentId || '').trim(),
       imei: String(req.query.imei || '').trim(),
       deviceId: String(req.query.deviceId || '').trim(),
-      parseStatus: String(req.query.parseStatus || '').trim(),
+      parseStatus,
       from: String(req.query.from || '').trim(),
       to: String(req.query.to || '').trim(),
     };
+  }
+
+  function validatePacketFilters(filters, res) {
+    if (filters.parseStatus && !['pending', 'parsed', 'failed'].includes(filters.parseStatus)) {
+      res.status(400).json({ ok: false, error: 'Некорректный parseStatus' });
+      return false;
+    }
+    return true;
   }
 
   router.get('/gsm/status', requireAuth, requireGsmView, (_req, res) => {
@@ -39,7 +48,9 @@ function registerGsmRoutes(router, deps) {
   });
 
   router.get('/gsm/packets', requireAuth, requireGsmView, (req, res) => {
-    res.json(gprsGateway.listPackets(packetFilters(req)));
+    const filters = packetFilters(req);
+    if (!validatePacketFilters(filters, res)) return;
+    res.json(gprsGateway.listPackets(filters));
   });
 
   router.get('/gsm/devices', requireAuth, requireGsmView, (_req, res) => {
@@ -79,7 +90,9 @@ function registerGsmRoutes(router, deps) {
   });
 
   router.get('/gsm/gateway/packets', requireAuth, requireGsmView, (req, res) => {
-    res.json(gprsGateway.listPackets(packetFilters(req)));
+    const filters = packetFilters(req);
+    if (!validatePacketFilters(filters, res)) return;
+    res.json(gprsGateway.listPackets(filters));
   });
 
   router.get('/gsm/gateway/commands', requireAuth, requireGsmView, (req, res) => {

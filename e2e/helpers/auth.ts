@@ -27,6 +27,13 @@ export async function loginAsAdmin(page: Page) {
   await expect(page.getByRole('heading', { name: 'Дашборд' })).toBeVisible();
 }
 
+export async function navigateInApp(page: Page, route: string) {
+  const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
+  await page.evaluate((nextRoute) => {
+    window.location.hash = nextRoute;
+  }, normalizedRoute);
+}
+
 async function expectAuthenticatedShell(page: Page) {
   await expect(async () => {
     const currentUrl = page.url();

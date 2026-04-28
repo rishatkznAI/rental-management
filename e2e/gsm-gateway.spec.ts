@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import net from 'node:net';
-import { loginAsAdmin } from './helpers/auth';
+import { loginAsAdmin, navigateInApp } from './helpers/auth';
 import { createEquipment, withAdminApi } from './helpers/api';
 
 function sendTcpPacket(payload: string, port = 5023) {
@@ -17,7 +17,7 @@ test('GSM page shows gateway status, latest packets and packet details', async (
   await loginAsAdmin(page);
   await sendTcpPacket('IMEI:866123456789012 LAT:55.796 LNG:49.108 SPEED:0');
 
-  await page.goto('./#/gsm');
+  await navigateInApp(page, '/gsm');
   await expect(page.getByRole('heading', { name: /Геозоны, уведомления и маршруты техники/ })).toBeVisible();
   await expect(page.getByText('GPRS-шлюз')).toBeVisible();
   await expect(page.getByText('Последние входящие пакеты')).toBeVisible();
@@ -26,7 +26,7 @@ test('GSM page shows gateway status, latest packets and packet details', async (
   await expect(page.getByText('866123456789012').first()).toBeVisible();
   await page.getByRole('button', { name: 'Детали' }).first().click();
   await expect(page.getByRole('heading', { name: 'Детали пакета' })).toBeVisible();
-  await expect(page.getByText('rawHex')).toBeVisible();
+  await expect(page.getByText('rawHex').last()).toBeVisible();
 });
 
 test('equipment card shows GSM block with editable IMEI data', async ({ page }) => {
@@ -46,7 +46,7 @@ test('equipment card shows GSM block with editable IMEI data', async ({ page }) 
   });
 
   await loginAsAdmin(page);
-  await page.goto(`./#/equipment/${equipment.id}`);
+  await navigateInApp(page, `/equipment/${equipment.id}`);
   await expect(page.getByText('GSM IMEI')).toBeVisible();
   await expect(page.getByText('866123456789012')).toBeVisible();
   await expect(page.getByText('TRACKER-E2E')).toBeVisible();

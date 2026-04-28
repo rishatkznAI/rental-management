@@ -124,6 +124,7 @@ async function startServer({ app, port, deps, logger = console }) {
     migrateReferenceCollections,
     migrateLegacyRepairFacts,
     normalizeClientLinks,
+    backfillGanttRentalLinks,
     applyAdminResetFromEnv,
     registerWebhook,
     startWebhookWatchdog,
@@ -142,6 +143,13 @@ async function startServer({ app, port, deps, logger = console }) {
     migrateLegacyRepairFacts();
     if (typeof normalizeClientLinks === 'function') {
       normalizeClientLinks({
+        readData: deps.readData,
+        writeData: deps.writeData,
+        logger,
+      });
+    }
+    if (typeof backfillGanttRentalLinks === 'function') {
+      backfillGanttRentalLinks({
         readData: deps.readData,
         writeData: deps.writeData,
         logger,

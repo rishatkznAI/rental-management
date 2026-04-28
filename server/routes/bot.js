@@ -211,16 +211,16 @@ function checkWebhookRateLimit(req) {
 
 function verifyWebhookRequest(req, webhookSecret = '') {
   const secret = String(webhookSecret || '').trim();
-  const secretRequired = Boolean(secret);
+  const secretRequired = Boolean(secret) || process.env.NODE_ENV === 'production';
   if (!secretRequired) return { ok: true };
+  if (!secret) {
+    return { ok: false, status: 503, error: 'Webhook secret is not configured' };
+  }
 
   const candidates = [
     req.params?.webhookSecret,
     req.headers?.['x-max-webhook-secret'],
     req.headers?.['x-webhook-secret'],
-    req.headers?.['x-max-bot-secret'],
-    req.headers?.['x-bot-webhook-secret'],
-    req.headers?.['x-webhook-token'],
   ];
   const ok = candidates.some(value => value && timingSafeEqualString(value, secret));
   return ok ? { ok: true } : { ok: false, status: 401, error: 'Unauthorized webhook' };

@@ -270,7 +270,7 @@ test('unknown command reports an error before authorization', async () => {
   assert.match(messages.at(-1).text, /Неизвестная команда/);
 });
 
-test('MAX webhook POST with /start sends a login response even without secret in production', async () => {
+test('MAX webhook without configured secret is disabled in production', async () => {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
   const { state, messages, handlers } = createMemoryBot(false);
@@ -286,10 +286,10 @@ test('MAX webhook POST with /start sends a login response even without secret in
       },
     });
 
-    assert.equal(response.statusCode, 200);
-    assert.equal(messages.length, 1);
-    assert.match(messages[0].text, /Напишите логин|email/i);
-    assert.equal(state.bot_sessions['200'].pendingAction, 'login_email');
+    assert.equal(response.statusCode, 503);
+    assert.equal(response.body.error, 'Webhook secret is not configured');
+    assert.equal(messages.length, 0);
+    assert.equal(state.bot_sessions['200'], undefined);
   } finally {
     if (previousNodeEnv === undefined) {
       delete process.env.NODE_ENV;

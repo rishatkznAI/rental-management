@@ -23,7 +23,7 @@ import {
   PackageX, ClipboardX, Zap,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { formatCurrency, formatDate } from '../lib/utils';
+import { formatCurrency, formatDate, getRentalDays } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
 import { useQueryClient } from '@tanstack/react-query';
 import { useQuery } from '@tanstack/react-query';
@@ -2622,7 +2622,26 @@ export default function Dashboard() {
           };
 
           // Persist via API then invalidate queries to refresh all panels
-          rentalsService.createGanttEntry(newRental).then(() => {
+          rentalsService.create({
+            clientId: formData.clientId,
+            client: formData.client || '',
+            contact: '',
+            startDate: formData.startDate || '',
+            plannedReturnDate: formData.endDate || '',
+            equipment: [formData.equipmentInv || ''],
+            rate: formData.amount && formData.startDate && formData.endDate
+              ? `${Math.round(Number(formData.amount) / Math.max(1, getRentalDays(formData.startDate, formData.endDate)))} ₽/день`
+              : '0 ₽/день',
+            price: Number(formData.amount) || 0,
+            discount: 0,
+            deliveryAddress: '',
+            manager: formData.manager || '',
+            status: 'new',
+            comments: '',
+          }).then((savedClassicRental) => rentalsService.createGanttEntry({
+            ...newRental,
+            rentalId: savedClassicRental.id,
+          })).then(() => {
             if (formData.equipmentId) {
               const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
               const eq = equipmentList.find(e => e.id === formData.equipmentId);

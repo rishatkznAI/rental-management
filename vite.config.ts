@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import path from 'path'
 import react from '@vitejs/plugin-react'
 
+process.env.CSS_TRANSFORMER_WASM ||= '1'
+process.env.NAPI_RS_FORCE_WASI ||= '1'
+
 export default defineConfig({
   base: '/rental-management/',
   plugins: [

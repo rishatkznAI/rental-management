@@ -180,6 +180,16 @@ test('GET /api/gsm/packets returns stored packets', async () => {
   });
 });
 
+test('GET /api/gsm/packets rejects invalid parseStatus', async () => {
+  const { app } = createGsmApiApp();
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'GET', '/api/gsm/packets?parseStatus=unknown', 'viewer-token');
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /parseStatus/);
+  });
+});
+
 test('GET /api/gsm/status returns gateway state', async () => {
   const { app, gateway } = createGsmApiApp();
   gateway.processRawPacket(Buffer.from('PING'), { sourceIp: '127.0.0.1' });
@@ -191,6 +201,88 @@ test('GET /api/gsm/status returns gateway state', async () => {
     assert.equal(response.body.packetsReceivedTotal, 1);
     assert.ok(response.body.lastPacketAt);
   });
+});
+
+test('GSM API enforces authentication and command write permissions', async () => {
+  const { app } = createGsmApiApp({
+    equipment: [
+      { id: 'EQ-1', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '044', gsmImei: '866123456789012' },
+    ],
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const noAuth = await request(baseUrl, 'GET', '/api/gsm/status', '');
+    assert.equal(noAuth.status, 401);
+
+    const forbidden = await request(baseUrl, 'POST', '/api/gsm/commands', 'viewer-token', {
+      equipmentId: 'EQ-1',
+      command: 'PING',
+    });
+    assert.equal(forbidden.status, 403);
+  });
+});
+
+test('GET /api/gsm/devices and route tolerate empty data', async () => {
+  const { app } = createGsmApiApp();
+
+  await withExpressApp(app, async (baseUrl) => {
+    const devices = await request(baseUrl, 'GET', '/api/gsm/devices', 'viewer-token');
+    assert.equal(devices.status, 200);
+    assert.deepEqual(devices.body, []);
+
+    const route = await request(baseUrl, 'GET', '/api/gsm/route?equipmentId=missing', 'viewer-token');
+    assert.equal(route.status, 200);
+    assert.deepEqual(route.body, []);
+  });
+});
+
+test('GET /api/gsm/route returns coordinate packets for equipment', async () => {
+  const { app, gateway } = createGsmApiApp({
+    equipment: [
+      { id: 'EQ-1', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '044', gsmImei: '866123456789012' },
+    ],
+  });
+  gateway.processRawPacket(Buffer.from('IMEI:866123456789012 LAT:55.796 LNG:49.108 SPEED:0 COURSE:120'), {
+    sourceIp: '127.0.0.1',
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'GET', '/api/gsm/route?equipmentId=EQ-1', 'viewer-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.length, 1);
+    assert.equal(response.body[0].lat, 55.796);
+    assert.equal(response.body[0].lng, 49.108);
+    assert.equal(response.body[0].speed, 0);
+  });
+});
+
+test('GPRS gateway can be disabled without breaking status API', async () => {
+  const { gateway } = createMemoryGateway({}, { enabled: false });
+  const server = gateway.start();
+
+  assert.equal(server, null);
+  const status = gateway.getStatus();
+  assert.equal(status.gatewayEnabled, false);
+  assert.equal(status.disabled, true);
+  assert.equal(status.tcpPort, 5023);
+});
+
+test('occupied GPRS port records a clear startup error without throwing', async () => {
+  const { gateway: firstGateway } = createMemoryGateway({}, { host: '127.0.0.1', port: 0 });
+  const firstServer = firstGateway.start();
+  await once(firstServer, 'listening');
+  const { port } = firstServer.address();
+
+  const { gateway: secondGateway } = createMemoryGateway({}, { host: '127.0.0.1', port });
+  const secondServer = secondGateway.start();
+  await once(secondServer, 'error');
+
+  const status = secondGateway.getStatus();
+  assert.equal(status.gatewayEnabled, false);
+  assert.match(status.startError, /EADDRINUSE|address already in use/i);
+
+  await secondGateway.stop();
+  await firstGateway.stop();
 });
 
 test('POST /api/gsm/commands creates queued command', async () => {

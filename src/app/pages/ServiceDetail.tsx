@@ -166,6 +166,11 @@ function normalizeWorkPerformed(work: Partial<ServiceWorkPerformed> | undefined)
   };
 }
 
+function formatServiceDate(value: string | null | undefined) {
+  const timestamp = Date.parse(String(value || ''));
+  return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : '—';
+}
+
 function buildRepairResult(ticket: ServiceTicket, workItems: RepairWorkItem[], partItems: RepairPartItem[]): ServiceRepairResult {
   return {
     summary: getRepairSummary(ticket),
@@ -276,7 +281,7 @@ function RepairPhotoGroup({
           <p className="text-sm font-medium text-gray-900 dark:text-white">{title}</p>
           {hasMeta && (
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              {[uploadedBy, uploadedAt ? formatDate(uploadedAt) : null].filter(Boolean).join(' · ')}
+              {[uploadedBy, uploadedAt ? formatServiceDate(uploadedAt) : null].filter(Boolean).join(' · ')}
             </p>
           )}
         </div>
@@ -1030,9 +1035,9 @@ export default function ServiceDetail() {
               <Field label="Статус" value={STATUS_LABELS[ticket.status]} />
                 <Field label="Приоритет" value={PRIORITY_LABELS[ticket.priority] ?? ticket.priority} />
                 <Field label="SLA" value={ticket.sla} />
-                <Field label="Дата создания" value={formatDate(ticket.createdAt)} />
-                {ticket.plannedDate && <Field label="Плановая дата" value={formatDate(ticket.plannedDate)} />}
-                {ticket.closedAt && <Field label="Фактическое закрытие" value={formatDate(ticket.closedAt)} />}
+                <Field label="Дата создания" value={formatServiceDate(ticket.createdAt)} />
+                {ticket.plannedDate && <Field label="Плановая дата" value={formatServiceDate(ticket.plannedDate)} />}
+                {ticket.closedAt && <Field label="Фактическое закрытие" value={formatServiceDate(ticket.closedAt)} />}
                 <Field label="Источник" value={ticket.source ? SOURCE_LABELS[ticket.source] : undefined} />
                 <Field label="Кто создал" value={ticket.createdByUserName ?? ticket.createdBy} />
                 <Field label="Контактное лицо" value={ticket.reporterContact} />
@@ -1557,9 +1562,9 @@ export default function ServiceDetail() {
             </CardHeader>
             <CardContent className="space-y-4">
               <Field label="SLA" value={ticket.sla} />
-              <Field label="Дата создания" value={formatDate(ticket.createdAt)} />
+              <Field label="Дата создания" value={formatServiceDate(ticket.createdAt)} />
               {ticket.plannedDate
-                ? <Field label="Плановая дата" value={formatDate(ticket.plannedDate)} />
+                ? <Field label="Плановая дата" value={formatServiceDate(ticket.plannedDate)} />
                 : canEditTicketFields && (
                   <>
                     <Divider />
@@ -1577,7 +1582,7 @@ export default function ServiceDetail() {
                   </>
                 )
               }
-              {ticket.closedAt && <Field label="Фактически закрыта" value={formatDate(ticket.closedAt)} />}
+              {ticket.closedAt && <Field label="Фактически закрыта" value={formatServiceDate(ticket.closedAt)} />}
             </CardContent>
           </Card>
 

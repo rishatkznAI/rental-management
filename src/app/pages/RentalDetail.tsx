@@ -73,6 +73,15 @@ type RentalSaveResponse = Rental & {
   };
 };
 
+function getGanttRentalSourceId(ganttRental: GanttRentalData): string {
+  return String(
+    ganttRental.rentalId ||
+    ganttRental.sourceRentalId ||
+    ganttRental.originalRentalId ||
+    ''
+  ).trim();
+}
+
 function buildInitialFormState(rental: {
   clientId?: string;
   client: string;
@@ -242,6 +251,8 @@ export default function RentalDetail() {
   const linkedGanttCandidates = useMemo(() => {
     return ganttRentals.filter(entry => {
       if (!rental) return false;
+      const sourceRentalId = getGanttRentalSourceId(entry);
+      if (sourceRentalId) return sourceRentalId === rental.id;
       const sameClient = entry.clientId && rental.clientId
         ? entry.clientId === rental.clientId
         : entry.client === rental.client;

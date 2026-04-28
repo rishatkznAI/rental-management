@@ -219,7 +219,6 @@ const NON_ADMIN_CREATE_FIELDS = {
 const RENTAL_MANAGER_APPROVAL_FIELDS = new Set([
   'startDate',
   'endDate',
-  'plannedReturnDate',
   'actualReturnDate',
   'price',
   'amount',
@@ -234,7 +233,6 @@ const RENTAL_MANAGER_APPROVAL_FIELDS = new Set([
   'paymentStatus',
   'discount',
   'debt',
-  'documents',
   'approvedBy',
 ]);
 

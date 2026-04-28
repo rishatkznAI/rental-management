@@ -6,6 +6,7 @@ const {
   applyApprovedRentalChangeToGantt,
   buildRequestDecisionNotificationStatus,
   displayValue,
+  resolveRentalForChangeRequest,
 } = require('../lib/rental-change-requests');
 const { createRentalHistoryEntry } = require('../lib/audit-history');
 
@@ -60,19 +61,34 @@ function registerRentalChangeRequestRoutes(deps) {
   function appendRelatedRentalHistory(rentalId, entry) {
     if (!rentalId || !entry) return;
     const rentals = readData('rentals') || [];
-    const idx = rentals.findIndex(item => item.id === rentalId);
-    if (idx === -1) return;
+    const resolution = resolveRentalForChangeRequest({
+      rentalId,
+      rentals,
+      ganttRentals: readData('gantt_rentals') || [],
+    });
+    if (!resolution.ok) return;
+    const idx = resolution.rentalIndex;
     rentals[idx] = appendRentalHistory(rentals[idx], [entry]);
     writeData('rentals', rentals);
   }
 
   function applyRentalRequest(request, adminName) {
     const rentals = readData('rentals') || [];
-    const rentalIdx = rentals.findIndex(item => item.id === request.rentalId);
-    if (rentalIdx === -1) {
-      return { ok: false, status: 404, error: 'Аренда для заявки не найдена' };
+    const resolution = resolveRentalForChangeRequest({
+      rentalId: request.rentalId || request.entityId || request.sourceRentalId,
+      linkedGanttRentalId: request.linkedGanttRentalId,
+      rentals,
+      ganttRentals: readData('gantt_rentals') || [],
+    });
+    if (!resolution.ok) {
+      return {
+        ok: false,
+        status: resolution.status,
+        error: resolution.error || 'Аренда для заявки не найдена',
+      };
     }
 
+    const rentalIdx = resolution.rentalIndex;
     const previousRental = rentals[rentalIdx];
     const nextRental = {
       ...previousRental,
@@ -246,6 +262,13 @@ function registerRentalChangeRequestRoutes(deps) {
       rejectionReason,
     };
     writeRequests(requests);
+    appendRelatedRentalHistory(
+      request.rentalId || request.entityId || request.sourceRentalId,
+      createRentalHistoryEntry(
+        req.user?.userName || 'Администратор',
+        `Отклонено изменение: ${request.fieldLabel || request.field}: ${displayValue(request.oldValue)} → ${displayValue(request.newValue)}. Причина: ${rejectionReason}`,
+      ),
+    );
     return res.json(requests[idx]);
   });
 

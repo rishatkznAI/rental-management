@@ -104,6 +104,16 @@ type RoleFocusCard = {
   icon: React.ElementType;
 };
 
+function getKnownRentalEquipmentKey(
+  rental: Pick<GanttRentalData, 'equipmentId' | 'equipmentInv'>,
+  equipmentById: Map<string, Equipment>,
+  uniqueEquipmentByInventory: Map<string, Equipment>,
+) {
+  if (rental.equipmentId && equipmentById.has(rental.equipmentId)) return rental.equipmentId;
+  if (!rental.equipmentInv) return '';
+  return uniqueEquipmentByInventory.get(rental.equipmentInv)?.id || '';
+}
+
 // ─── main component ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -213,17 +223,45 @@ export default function Dashboard() {
     ? ganttRentals.filter(r => r.manager === currentUserName)
     : ganttRentals;
 
+  // Dashboard operational KPIs should use planner rentals as the source of truth.
+  const activeRentalsList = useMemo(
+    () => viewPlannerRentals.filter(r => r.status === 'active'),
+    [viewPlannerRentals],
+  );
+  const reservedRentalsList = useMemo(
+    () => viewPlannerRentals.filter(r => r.status === 'created'),
+    [viewPlannerRentals],
+  );
+  const rentedEquipmentKeys = useMemo(() => {
+    const keys = new Set<string>();
+    activeRentalsList.forEach(rental => {
+      const key = getKnownRentalEquipmentKey(rental, equipmentById, uniqueEquipmentByInventory);
+      if (key) keys.add(key);
+    });
+    return keys;
+  }, [activeRentalsList, equipmentById, uniqueEquipmentByInventory]);
+  const reservedEquipmentKeys = useMemo(() => {
+    const keys = new Set<string>();
+    reservedRentalsList.forEach(rental => {
+      const key = getKnownRentalEquipmentKey(rental, equipmentById, uniqueEquipmentByInventory);
+      if (key && !rentedEquipmentKeys.has(key)) keys.add(key);
+    });
+    return keys;
+  }, [equipmentById, rentedEquipmentKeys, reservedRentalsList, uniqueEquipmentByInventory]);
+
   // Utilization
   const totalEquipment = equipment.length;
   const activeEquipment = equipment.filter(e => e.status !== 'inactive').length;
-  const rentedEquipment = equipment.filter(e => e.status === 'rented').length;
-  const availableEquipment = equipment.filter(e => e.status === 'available').length;
+  const rentedEquipment = rentedEquipmentKeys.size;
+  const availableEquipment = equipmentList.filter(e =>
+    e.status !== 'inactive'
+    && e.status !== 'in_service'
+    && !rentedEquipmentKeys.has(e.id)
+    && !reservedEquipmentKeys.has(e.id),
+  ).length;
   const utilization = totalEquipment === 0
     ? 0
     : Math.round(safeDiv(rentedEquipment, activeEquipment > 0 ? activeEquipment : totalEquipment) * 100);
-
-  // Dashboard operational KPIs should use planner rentals as the source of truth.
-  const activeRentalsList = viewPlannerRentals.filter(r => r.status === 'active');
 
   const overdueRentalsList = viewPlannerRentals.filter(r =>
     isOpenRentalStatus(r.status) && isOverdue(r.endDate)
@@ -253,7 +291,7 @@ export default function Dashboard() {
   const overduePayments = rentalDebtRows.filter(row =>
     (row.expectedPaymentDate && row.expectedPaymentDate < todayKey) || row.endDate < todayKey,
   );
-  const totalDebt = rentalDebtRows.reduce((sum, row) => sum + row.outstanding, 0);
+  const totalDebt = clientFinancials.reduce((sum, row) => sum + row.currentDebt, 0);
   const {
     data: managerBreakdown,
     isLoading: managerBreakdownLoading,
@@ -306,10 +344,16 @@ export default function Dashboard() {
   const myMonthRevenue = myMonthRentals.reduce((sum, r) => sum + (r.amount || 0), 0);
 
   // Debt for current manager
+  const myManualDebt = currentUserName
+    ? clientFinancials.reduce((sum, row) => {
+      const sourceClient = clients.find(client => client.id === row.clientId);
+      return sourceClient?.manager === currentUserName ? sum + (row.manualDebt || 0) : sum;
+    }, 0)
+    : 0;
   const myClientDebt = currentUserName
     ? rentalDebtRows
       .filter(row => row.manager === currentUserName)
-      .reduce((sum, row) => sum + row.outstanding, 0)
+      .reduce((sum, row) => sum + row.outstanding, myManualDebt)
     : 0;
   const myOverduePayments = currentUserName
     ? overduePayments.filter(row => row.manager === currentUserName)
@@ -709,6 +753,7 @@ export default function Dashboard() {
       ...ganttRentals.map(item => item.manager).filter(Boolean),
       ...rentalDebtRows.map(item => item.manager).filter(Boolean),
       ...documents.map(item => item.manager).filter(Boolean),
+      ...clients.map(item => item.manager).filter(Boolean),
     ])).sort((a, b) => a.localeCompare(b, 'ru'));
 
     return names.map(name => {
@@ -716,6 +761,10 @@ export default function Dashboard() {
       const managerActiveRentals = managerRentals.filter(item => item.status === 'active');
       const managerMonthRentals = managerRentals.filter(item => new Date(item.startDate) >= monthStart);
       const managerDebtRows = rentalDebtRows.filter(item => item.manager === name);
+      const managerManualDebt = clientFinancials.reduce((sum, row) => {
+        const sourceClient = clients.find(item => item.id === row.clientId);
+        return sourceClient?.manager === name ? sum + (row.manualDebt || 0) : sum;
+      }, 0);
       const managerOverdueRows = overduePayments.filter(item => item.manager === name);
       const managerUnsignedDocs = documents.filter(item =>
         item.manager === name && (item.type === 'contract' || item.type === 'act') && item.status !== 'signed',
@@ -730,7 +779,7 @@ export default function Dashboard() {
         activeRentals: managerActiveRentals.length,
         monthRentals: managerMonthRentals.length,
         monthRevenue: managerMonthRentals.reduce((sum, item) => sum + (item.amount || 0), 0),
-        currentDebt: managerDebtRows.reduce((sum, item) => sum + item.outstanding, 0),
+        currentDebt: managerDebtRows.reduce((sum, item) => sum + item.outstanding, managerManualDebt),
         overdueDebt: managerOverdueRows.reduce((sum, item) => sum + item.outstanding, 0),
         returnsSoon: managerReturnsSoon,
         unsignedDocs: managerUnsignedDocs.length,
@@ -741,7 +790,7 @@ export default function Dashboard() {
       || b.currentDebt - a.currentDebt
       || a.name.localeCompare(b.name, 'ru')
     );
-  }, [dayAfterTomorrowStart, documents, ganttRentals, monthStart, overduePayments, rentalDebtRows, today, tomorrowStart]);
+  }, [clients, clientFinancials, dayAfterTomorrowStart, documents, ganttRentals, monthStart, overduePayments, rentalDebtRows, today, tomorrowStart]);
 
   const adminMechanicRows = useMemo(() => {
     const workloadSummary = mechanicWorkload?.summary ?? [];
@@ -784,8 +833,8 @@ export default function Dashboard() {
   const utilizationDeviation = utilization - UTILIZATION_TARGET;
 
   // Equipment in active use (rented + reserved)
-  const rentedOrReservedEquipment = equipment.filter(e => e.status === 'rented' || e.status === 'reserved').length;
-  const reservedEquipment = equipment.filter(e => e.status === 'reserved').length;
+  const rentedOrReservedEquipment = rentedEquipment + reservedEquipmentKeys.size;
+  const reservedEquipment = reservedEquipmentKeys.size;
   const inactiveEquipment = equipment.filter(e => e.status === 'inactive').length;
 
   // Rentals ending today
@@ -808,7 +857,14 @@ export default function Dashboard() {
 
   // Service tickets waiting for parts
   const repeatFailureRows = (mechanicWorkload?.repeatFailures ?? []).filter(item => item.repairsCount > 1);
-  const idleEquipmentList = equipment.filter(e => e.status === 'available' || e.status === 'inactive');
+  const idleEquipmentList = equipmentList.filter(e =>
+    e.status === 'inactive'
+    || (
+      e.status !== 'in_service'
+      && !rentedEquipmentKeys.has(e.id)
+      && !reservedEquipmentKeys.has(e.id)
+    ),
+  );
   const serviceInDaysRows = openServiceTickets
     .map(ticket => {
       const createdAt = new Date(ticket.createdAt);
@@ -1064,7 +1120,7 @@ export default function Dashboard() {
 
   // ── KPI data objects for modal ──────────────────────────────────────────────
   const kpiData = {
-    utilization: { totalEquipment, rentedEquipment, availableEquipment, utilization },
+    utilization: { totalEquipment, activeEquipment, rentedEquipment, availableEquipment, utilization },
     activeRentals: {
       activeRentals: activeRentalsList.map(rental => ({
         ...rental,

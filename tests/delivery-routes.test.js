@@ -144,7 +144,9 @@ async function request(baseUrl, method, path, body) {
 }
 
 test('updating a delivery with a carrier sends the previously unsent request to MAX', async () => {
-  const { app, state, messages } = createDeliveryApp();
+  const { app, state, messages } = createDeliveryApp({
+    comment: 'Забрать у охраны пропуск и комплект документов.',
+  });
 
   await withServer(app, async (baseUrl) => {
     const response = await request(baseUrl, 'PATCH', '/api/deliveries/DL-1', {
@@ -160,7 +162,32 @@ test('updating a delivery with a carrier sends the previously unsent request to 
     assert.equal(messages.length, 1);
     assert.deepEqual(messages[0].target, { user_id: 555, chat_id: null });
     assert.match(messages[0].text, /^Появилась новая заявка на отгрузку/);
+    assert.match(messages[0].text, /Комментарий менеджера: Забрать у охраны пропуск и комплект документов\./);
     assert.equal(state.deliveries[0].botSendError, null);
+  });
+});
+
+test('updating manager comment on a sent delivery notifies carrier again', async () => {
+  const { app, messages } = createDeliveryApp({
+    status: 'sent',
+    carrierId: 'carrier-1',
+    carrierKey: 'carrier-1',
+    carrierName: 'ИП Сабитов Алмаз',
+    carrierPhone: '+7 900 000-00-00',
+    botSentAt: '2026-04-28T08:10:00.000Z',
+    botSendError: null,
+    comment: 'Старый комментарий',
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'PATCH', '/api/deliveries/DL-1', {
+      comment: 'Новый комментарий менеджера: въезд через КПП-2.',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.botSendError, null);
+    assert.equal(messages.length, 1);
+    assert.match(messages[0].text, /Комментарий менеджера: Новый комментарий менеджера: въезд через КПП-2\./);
   });
 });
 

@@ -448,12 +448,17 @@ function registerDeliveryRoutes(router, deps) {
     if (next.status === 'completed' || next.status === 'cancelled') return false;
 
     const carrierChanged = previousCarrierId !== nextCarrierId;
-    if (next.botSentAt && !carrierChanged) return false;
+    const commentWasSubmitted = Object.prototype.hasOwnProperty.call(patch, 'comment');
+    const commentChanged = commentWasSubmitted &&
+      String(previous?.comment || '').trim() !== String(next?.comment || '').trim();
+
+    if (next.botSentAt && !carrierChanged && !commentChanged) return false;
 
     const carrierFieldWasSubmitted = Object.prototype.hasOwnProperty.call(patch, 'carrierId') ||
       Object.prototype.hasOwnProperty.call(patch, 'carrierKey');
 
     return carrierFieldWasSubmitted ||
+      commentChanged ||
       !previousCarrierId ||
       carrierChanged ||
       previous?.botSendError === 'Перевозчик не выбран';

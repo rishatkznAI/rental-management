@@ -111,6 +111,7 @@ export default function ClientDetail() {
   const { can } = usePermissions();
   const { user } = useAuth();
   const canEdit = can('edit', 'clients');
+  const canEditDebt = user?.role === 'Администратор';
 
   const { data: fetchedClient } = useClientById(id ?? '');
   const updateClient = useUpdateClient();
@@ -168,7 +169,14 @@ export default function ClientDetail() {
 
   const saveEdit = () => {
     if (!client || !canEdit) return;
-    const nextClient = { ...client, ...editData };
+    const nextClient = {
+      ...client,
+      ...editData,
+      creditLimit: Math.max(0, Number(editData.creditLimit ?? client.creditLimit) || 0),
+      debt: canEditDebt
+        ? Math.max(0, Number(editData.debt ?? client.debt) || 0)
+        : client.debt,
+    };
     const historyEntries = buildFieldDiffHistory(
       client,
       nextClient,
@@ -430,22 +438,30 @@ export default function ClientDetail() {
                     onValueChange={v => setEditData({ ...editData, paymentTerms: v })}
                     options={PAYMENT_TERMS_OPTIONS}
                   />
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input
-                      label="Кредитный лимит (₽)"
-                      type="number"
-                      value={String(editData.creditLimit ?? 0)}
-                      onChange={e => setEditData({ ...editData, creditLimit: Number(e.target.value) })}
-                    />
-                    <Input
-                      label="Задолженность (₽)"
-                      type="number"
-                      value={String(editData.debt ?? 0)}
-                      onChange={e => setEditData({ ...editData, debt: Number(e.target.value) })}
-                    />
+                  <div className={`grid gap-4 ${canEditDebt ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
+                    <div>
+                      <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Кредитный лимит, ₽</label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={String(editData.creditLimit ?? 0)}
+                        onChange={e => setEditData({ ...editData, creditLimit: Number(e.target.value) })}
+                      />
+                    </div>
+                    {canEditDebt && (
+                      <div>
+                        <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Ручная дебиторка, ₽</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={String(editData.debt ?? 0)}
+                          onChange={e => setEditData({ ...editData, debt: Number(e.target.value) })}
+                        />
+                      </div>
+                    )}
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Текущая задолженность в интерфейсе рассчитывается автоматически по арендам и оплатам.
+                    Итоговая задолженность складывается из ручной дебиторки и неоплаченных аренд.
                   </p>
                   <Input
                     label="Ответственный менеджер"
@@ -477,6 +493,12 @@ export default function ClientDetail() {
                       <Badge variant={debtVariant(displayedDebt)}>{debtLabel(displayedDebt)}</Badge>
                     </div>
                   </div>
+                  {(canEditDebt || (client.debt ?? 0) > 0) && (
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Ручная дебиторка</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(client.debt ?? 0)}</p>
+                    </div>
+                  )}
                   {client.manager && <Field label="Менеджер" value={client.manager} />}
                   {client.notes && (
                     <div className="col-span-3">

@@ -244,8 +244,8 @@ export default function Reports() {
     [clients, ganttRentals, payments],
   );
   const financeManagerSnapshots = useMemo(
-    () => buildManagerReceivables(financeDebtRows),
-    [financeDebtRows],
+    () => buildManagerReceivables(financeDebtRows, undefined, clients),
+    [financeDebtRows, clients],
   );
   const financeOverdueBuckets = useMemo(
     () => buildOverdueBuckets(financeDebtRows),

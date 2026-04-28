@@ -51,14 +51,14 @@ function registerFinanceRoutes(router, deps) {
   });
 
   router.get('/finance/managers', requireAuth, requireRead('payments'), (req, res) => {
-    const { rentals, payments } = getFinanceCollections(req.user);
+    const { clients, rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildManagerReceivables(buildRentalDebtRows(rentals, payments), today);
+    const rows = buildManagerReceivables(buildRentalDebtRows(rentals, payments), today, clients);
     res.json(rows);
   });
 
   router.get('/finance/manager-breakdown', requireAuth, requireRead('payments'), (req, res) => {
-    const { rentals, payments } = getFinanceCollections(req.user);
+    const { clients, rentals, payments } = getFinanceCollections(req.user);
     const documents = accessControl.filterCollectionByScope('documents', readData('documents') || [], req.user);
     const manager = String(req.query.manager || '').trim();
     const today = String(req.query.today || '').trim() || new Date().toISOString().slice(0, 10);
@@ -92,6 +92,12 @@ function registerFinanceRoutes(router, deps) {
     const debtRows = buildRentalDebtRows(rentals, payments);
     const managerDebtRows = debtRows.filter(item => item.manager === manager);
     const managerOverdueRows = managerDebtRows.filter(item => getRentalDebtOverdueDays(item, today) > 0);
+    const managerManualDebt = clients
+      .filter(item => item?.manager === manager)
+      .reduce((sum, item) => {
+        const debt = Number(item?.debt);
+        return sum + (Number.isFinite(debt) && debt > 0 ? debt : 0);
+      }, 0);
     const paymentsByRentalId = new Map();
 
     payments.forEach(payment => {
@@ -129,7 +135,7 @@ function registerFinanceRoutes(router, deps) {
         activeRentals: managerActiveRentals.length,
         monthRentals: managerMonthRentals.length,
         monthRevenue: managerMonthRentals.reduce((sum, item) => sum + (item.amount || 0), 0),
-        currentDebt: managerDebtRows.reduce((sum, item) => sum + item.outstanding, 0),
+        currentDebt: managerDebtRows.reduce((sum, item) => sum + item.outstanding, managerManualDebt),
         overdueDebt: managerOverdueRows.reduce((sum, item) => sum + item.outstanding, 0),
         returnsSoon: managerReturnsSoonRentals.length,
         unsignedDocs: managerUnsignedDocuments.length,

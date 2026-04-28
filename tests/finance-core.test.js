@@ -169,6 +169,36 @@ test('buildFinanceReport returns aggregated totals and slices', () => {
   assert.equal(report.totals.overdueDebt, 60000);
 });
 
+test('manual client debt contributes to receivables and manager totals', () => {
+  const report = buildFinanceReport(
+    {
+      clients: [{
+        id: 'c-manual-1',
+        company: 'ООО Ручной долг',
+        creditLimit: 20000,
+        debt: 35000,
+        manager: 'Анна',
+      }],
+      rentals: [],
+      payments: [],
+    },
+    '2026-04-18',
+  );
+
+  assert.equal(report.clientReceivables.length, 1);
+  assert.equal(report.clientReceivables[0].currentDebt, 35000);
+  assert.equal(report.clientReceivables[0].manualDebt, 35000);
+  assert.equal(report.clientReceivables[0].unpaidRentals, 0);
+  assert.equal(report.clientReceivables[0].exceededLimit, true);
+  assert.equal(report.clientSnapshots[0].currentDebt, 35000);
+  assert.equal(report.clientSnapshots[0].manualDebt, 35000);
+  assert.equal(report.managerReceivables.length, 1);
+  assert.equal(report.managerReceivables[0].manager, 'Анна');
+  assert.equal(report.managerReceivables[0].currentDebt, 35000);
+  assert.equal(report.managerReceivables[0].overdueDebt, 0);
+  assert.equal(report.totals.debt, 35000);
+});
+
 test('client rename keeps receivables linked by clientId', () => {
   const clients = [{ id: 'c-1', company: 'ООО Ромашка Казань', creditLimit: 0 }];
   const rentals = [

@@ -107,13 +107,13 @@ function stripInternalCommentLines(value) {
 }
 
 function driverCommentForCarrier(delivery) {
-  return stripInternalCommentLines(
-    delivery?.driverComment ??
-    delivery?.driverNote ??
-    delivery?.carrierComment ??
-    delivery?.comment ??
-    '',
-  );
+  return uniq([
+    delivery?.managerComment,
+    delivery?.comment,
+    delivery?.driverComment,
+    delivery?.driverNote,
+    delivery?.carrierComment,
+  ].map(stripInternalCommentLines)).join('\n');
 }
 
 function toCarrierDeliveryDto(delivery, options = {}) {
@@ -147,7 +147,7 @@ function formatCarrierDeliveryMessage(delivery, options = {}) {
     `Откуда: ${dto.origin || 'не указано'}`,
     `Куда: ${dto.destination || 'не указано'}`,
     `Контакт: ${[dto.contactName, dto.contactPhone].filter(Boolean).join(' · ') || 'не указан'}`,
-    dto.driverComment ? `Комментарий: ${dto.driverComment}` : null,
+    dto.driverComment ? `Комментарий менеджера: ${dto.driverComment}` : null,
   ].filter(Boolean).join('\n');
 }
 
@@ -170,8 +170,9 @@ function formatCarrierDeliveryList(deliveries, options = {}) {
       `   Техника: ${dto.equipment}`,
       `   ${dto.origin || 'не указано'} -> ${dto.destination || 'не указано'}`,
       `   Контакт: ${[dto.contactName, dto.contactPhone].filter(Boolean).join(' · ') || 'не указан'}`,
+      dto.driverComment ? `   Комментарий менеджера: ${dto.driverComment}` : null,
       `   Статус: ${dto.statusLabel}`,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   });
 
   return [

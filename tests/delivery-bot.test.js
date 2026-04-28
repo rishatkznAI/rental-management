@@ -255,6 +255,7 @@ test('shared bot delivery command asks for login when user is not authorized', a
     client: 'ООО Клиент',
     contactName: 'Иван',
     contactPhone: '+7 900 000-00-00',
+    comment: 'Позвонить менеджеру за час до прибытия.',
     carrierKey: 'carrier-1',
   }];
 
@@ -1060,6 +1061,7 @@ test('delivery menu shows image and status buttons for carrier', async () => {
     client: 'ООО Клиент',
     contactName: 'Иван',
     contactPhone: '+7 900 000-00-00',
+    comment: 'Позвонить менеджеру за час до прибытия.',
     carrierKey: 'carrier-1',
   }];
 
@@ -1068,6 +1070,7 @@ test('delivery menu shows image and status buttons for carrier', async () => {
   assert.equal(messages.length, 2);
   assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/delivery-list-optimistic\.jpg$/);
   assert.match(messages[1].text, /Мои доставки/);
+  assert.match(messages[1].text, /Комментарий менеджера: Позвонить менеджеру за час до прибытия\./);
   assert.deepEqual(messages[1].options.attachments[0].payload.buttons[0][0], {
     type: 'callback',
     text: 'Принять доставку',
@@ -1159,6 +1162,7 @@ test('carrier sees only assigned deliveries without client or financial fields',
       margin: 555555,
       contactName: 'Иван',
       contactPhone: '+7 900 000-00-00',
+      comment: 'Передать комплект закрывающих документов.',
       carrierId: 'carrier-1',
       carrierKey: 'carrier-1',
     },
@@ -1187,8 +1191,10 @@ test('carrier sees only assigned deliveries without client or financial fields',
   assert.doesNotMatch(text, /JLG 1930ES/);
   assert.doesNotMatch(text, /Секретный клиент|Чужой клиент|C-secret|R-secret|GR-secret/);
   assert.doesNotMatch(text, /987654321|7654321|1234567|555555/);
+  assert.match(text, /Комментарий менеджера: Передать комплект закрывающих документов\./);
 
   const dto = toCarrierDeliveryDto(state.deliveries[0]);
+  assert.equal(dto.driverComment, 'Передать комплект закрывающих документов.');
   assert.equal('client' in dto, false);
   assert.equal('clientName' in dto, false);
   assert.equal('clientId' in dto, false);

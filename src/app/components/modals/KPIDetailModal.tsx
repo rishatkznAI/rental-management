@@ -58,7 +58,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
               <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Расчёт утилизации за месяц:</p>
                 <p className="text-sm text-gray-900 dark:text-white font-mono">
-                  ({data.rentedEquipment} / {data.totalEquipment}) × 100 = {data.utilization}%
+                  ({data.rentedEquipment} / {data.activeEquipment || data.totalEquipment}) × 100 = {data.utilization}%
                 </p>
               </div>
             </div>

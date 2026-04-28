@@ -22,6 +22,7 @@ export interface ClientReceivableRow {
   client: string;
   creditLimit: number;
   currentDebt: number;
+  manualDebt: number;
   unpaidRentals: number;
   overdueRentals: number;
   exceededLimit: boolean;
@@ -70,6 +71,11 @@ function getClientName(record: unknown): string {
   if (!record || typeof record !== 'object') return '';
   const item = record as { client?: unknown; clientName?: unknown; company?: unknown; customerName?: unknown };
   return String(item.client || item.clientName || item.company || item.customerName || '').trim();
+}
+
+function toMoney(value: unknown): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
 }
 
 function receivableKey(row: RentalDebtRow): string {
@@ -153,6 +159,7 @@ export function buildClientReceivables(
       client: client?.company ?? (row.client || 'Клиент не привязан'),
       creditLimit: client?.creditLimit ?? 0,
       currentDebt: 0,
+      manualDebt: 0,
       unpaidRentals: 0,
       overdueRentals: 0,
       exceededLimit: false,
@@ -163,6 +170,26 @@ export function buildClientReceivables(
     if ((row.expectedPaymentDate && row.expectedPaymentDate < today) || row.endDate < today) {
       existing.overdueRentals += 1;
     }
+    existing.exceededLimit = existing.creditLimit > 0 && existing.currentDebt > existing.creditLimit;
+    map.set(key, existing);
+  });
+
+  clients.forEach(client => {
+    const manualDebt = toMoney(client.debt);
+    if (manualDebt <= 0) return;
+    const key = client.id ? `id:${client.id}` : `manual:${normalizeText(client.company) || 'unknown'}`;
+    const existing = map.get(key) ?? {
+      clientId: client.id || undefined,
+      client: client.company || 'Клиент не привязан',
+      creditLimit: client.creditLimit ?? 0,
+      currentDebt: 0,
+      manualDebt: 0,
+      unpaidRentals: 0,
+      overdueRentals: 0,
+      exceededLimit: false,
+    };
+    existing.currentDebt += manualDebt;
+    existing.manualDebt += manualDebt;
     existing.exceededLimit = existing.creditLimit > 0 && existing.currentDebt > existing.creditLimit;
     map.set(key, existing);
   });
@@ -190,10 +217,11 @@ export function buildClientFinancialSnapshots(
         clientId: client.id,
         client: client.company,
         creditLimit: client.creditLimit ?? 0,
-        currentDebt: receivable?.currentDebt ?? 0,
+        currentDebt: receivable?.currentDebt ?? toMoney(client.debt),
+        manualDebt: receivable?.manualDebt ?? toMoney(client.debt),
         unpaidRentals: receivable?.unpaidRentals ?? 0,
         overdueRentals: receivable?.overdueRentals ?? 0,
-        exceededLimit: receivable?.exceededLimit ?? false,
+        exceededLimit: receivable?.exceededLimit ?? ((client.creditLimit ?? 0) > 0 && toMoney(client.debt) > (client.creditLimit ?? 0)),
         totalRentals: clientRentals.length,
         activeRentals: clientRentals.filter(item => item.status === 'active' || item.status === 'created').length,
         lastRentalDate: latestRental?.startDate ?? client.lastRentalDate,
@@ -205,6 +233,7 @@ export function buildClientFinancialSnapshots(
 export function buildManagerReceivables(
   rentalDebtRows: RentalDebtRow[],
   today = new Date().toISOString().slice(0, 10),
+  clients: Client[] = [],
 ): ManagerReceivableRow[] {
   const map = new Map<string, ManagerReceivableRow & { clients: Set<string> }>();
 
@@ -227,6 +256,25 @@ export function buildManagerReceivables(
       item.overdueDebt += row.outstanding;
     }
     item.clients.add(stableClientId(row) || row.client || 'Клиент не привязан');
+    item.clientsCount = item.clients.size;
+    map.set(key, item);
+  });
+
+  clients.forEach(client => {
+    const manualDebt = toMoney(client.debt);
+    if (manualDebt <= 0) return;
+    const key = client.manager || 'Не назначен';
+    const item = map.get(key) ?? {
+      manager: key,
+      currentDebt: 0,
+      overdueDebt: 0,
+      unpaidRentals: 0,
+      overdueRentals: 0,
+      clientsCount: 0,
+      clients: new Set<string>(),
+    };
+    item.currentDebt += manualDebt;
+    item.clients.add(client.id || client.company || 'Клиент не привязан');
     item.clientsCount = item.clients.size;
     map.set(key, item);
   });

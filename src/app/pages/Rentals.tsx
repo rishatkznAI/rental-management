@@ -564,8 +564,8 @@ export default function Rentals() {
     return map;
   }, [payments, ganttRentals]);
   const clientReceivables = useMemo(
-    () => buildClientReceivables(computedClients, rentalDebtRows),
-    [computedClients, rentalDebtRows],
+    () => buildClientReceivables(clientsData, rentalDebtRows),
+    [clientsData, rentalDebtRows],
   );
 
   // Менеджеры для фильтра (динамически из базы пользователей)

@@ -129,6 +129,8 @@ function registerSystemRoutes(app, deps) {
     requireAdmin,
     fetchImpl,
     auditLog,
+    analyzeGanttRentalLinks,
+    backfillGanttRentalLinks,
   } = deps;
 
   function getSafePublicSettings() {
@@ -305,6 +307,55 @@ function registerSystemRoutes(app, deps) {
       botUsers: Object.keys(botUsers).length,
       webhook: webhookUrl || '(не задан)',
     });
+  });
+
+  app.get('/api/admin/rental-link-diagnostics', requireAuth, requireAdmin, (req, res) => {
+    if (typeof analyzeGanttRentalLinks !== 'function') {
+      return res.status(500).json({ ok: false, error: 'Rental link diagnostics unavailable' });
+    }
+    const diagnostics = analyzeGanttRentalLinks({
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      targetId: req.query.id || '',
+      limit: req.query.limit || 100,
+    });
+    return res.json({ ok: true, diagnostics });
+  });
+
+  app.post('/api/admin/rental-link-diagnostics/backfill', requireAuth, requireAdmin, (req, res) => {
+    if (typeof backfillGanttRentalLinks !== 'function' || typeof analyzeGanttRentalLinks !== 'function') {
+      return res.status(500).json({ ok: false, error: 'Rental link backfill unavailable' });
+    }
+    const before = analyzeGanttRentalLinks({
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      targetId: req.body?.id || req.query.id || '',
+      limit: req.body?.limit || req.query.limit || 100,
+    });
+    const backfill = backfillGanttRentalLinks({
+      readData,
+      writeData,
+      logger: console,
+      dryRun: req.body?.dryRun === true || req.query.dryRun === '1',
+    });
+    const after = analyzeGanttRentalLinks({
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      targetId: req.body?.id || req.query.id || '',
+      limit: req.body?.limit || req.query.limit || 100,
+    });
+    auditLog?.(req, {
+      action: 'rental_links.backfill',
+      entityType: 'rental_links',
+      after: {
+        dryRun: backfill.dryRun,
+        linked: backfill.linked,
+        missingLink: backfill.missingLink,
+        ambiguous: backfill.ambiguous.length,
+        unresolved: backfill.unresolved.length,
+      },
+    });
+    return res.json({ ok: true, before, backfill, after });
   });
 
   app.get('/api/media/fetch', requireAuth, async (req, res) => {

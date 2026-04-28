@@ -83,6 +83,15 @@ const selectClass =
   'focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] ' +
   'dark:border-gray-600 dark:bg-gray-700 dark:text-white';
 
+function getGanttRentalSourceId(rental: GanttRentalData): string {
+  return String(
+    rental.rentalId ||
+    rental.sourceRentalId ||
+    rental.originalRentalId ||
+    ''
+  ).trim();
+}
+
 // ─── LabeledInput — Input с заголовком (Input сам по себе не рендерит label) ─
 function LabeledInput({
   label,
@@ -105,7 +114,7 @@ interface ReturnModalProps {
   /** Список всех аренд из React-состояния родителя (единый источник истины). */
   ganttRentals?: GanttRentalData[];
   onClose: () => void;
-  onConfirm: (data: { rentalId: string; returnDate: string; result: string }) => void;
+  onConfirm: (data: { rentalId: string; ganttRentalId: string; returnDate: string; result: string }) => void;
 }
 
 export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRentalsProp, onClose, onConfirm }: ReturnModalProps) {
@@ -249,7 +258,12 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
             <Button
               onClick={() => {
                 if (!rental) return;
-                onConfirm({ rentalId: rental.id, returnDate, result });
+                onConfirm({
+                  rentalId: getGanttRentalSourceId(rental),
+                  ganttRentalId: rental.id,
+                  returnDate,
+                  result,
+                });
               }}
               disabled={!rental}
             >

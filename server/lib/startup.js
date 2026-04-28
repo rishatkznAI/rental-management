@@ -125,6 +125,7 @@ async function startServer({ app, port, deps, logger = console }) {
     migrateLegacyRepairFacts,
     normalizeClientLinks,
     backfillGanttRentalLinks,
+    logGanttRentalLinkDiagnostics,
     applyAdminResetFromEnv,
     registerWebhook,
     startWebhookWatchdog,
@@ -153,6 +154,13 @@ async function startServer({ app, port, deps, logger = console }) {
         readData: deps.readData,
         writeData: deps.writeData,
         logger,
+      });
+    }
+    if (typeof logGanttRentalLinkDiagnostics === 'function') {
+      logGanttRentalLinkDiagnostics({
+        readData: deps.readData,
+        logger,
+        targetId: process.env.GANTT_RENTAL_DIAG_TARGET || '',
       });
     }
     seedServiceWorks({

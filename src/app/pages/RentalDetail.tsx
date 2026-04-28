@@ -452,7 +452,7 @@ export default function RentalDetail() {
     setSaveError('');
     setSaveInfo('');
     try {
-      const savedRental = await rentalsService.update(rental.id, {
+      const rentalPatch = {
         clientId: formState.clientId,
         client: formState.client.trim(),
         contact: formState.contact.trim(),
@@ -466,7 +466,25 @@ export default function RentalDetail() {
         manager: formState.manager.trim(),
         status: formState.status,
         comments: formState.comments.trim(),
+      } satisfies Partial<Rental>;
+      const oldValues = Object.fromEntries(Object.keys(rentalPatch).map(field => [field, rental[field as keyof Rental]]));
+      const savedRental = await rentalsService.update(rental.id, {
+        ...rentalPatch,
+        rentalId: rental.id,
+        ganttRentalId: linkedGanttRental?.id || '',
+        entityType: 'rental',
+        actionType: 'rental_detail_update',
+        oldValues,
+        newValues: rentalPatch,
+        changes: Object.keys(rentalPatch).map(field => ({
+          field,
+          oldValue: oldValues[field],
+          newValue: rentalPatch[field as keyof typeof rentalPatch],
+        })),
+        __rentalId: rental.id,
         __linkedGanttRentalId: linkedGanttRental?.id || '',
+        __ganttRentalId: linkedGanttRental?.id || '',
+        __sourceRentalId: linkedGanttRental?.id || '',
         __changeReason: approvalReason.trim(),
         __changeComment: approvalComment.trim(),
       } as Partial<Rental> & Record<string, unknown>) as RentalSaveResponse;

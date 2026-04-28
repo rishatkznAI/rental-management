@@ -105,6 +105,27 @@ function registerRentalRoutes(deps) {
       writeData('gantt_rentals', ganttRentals);
     }
 
+    function logRentalResolutionFailure(req, resolution, rawMeta) {
+      if (resolution.status !== 404 && resolution.status !== 409) return;
+      const details = resolution.details || {};
+      console.warn('[rental-approval] rental resolver failed', JSON.stringify({
+        route: `${req.method} ${req.originalUrl || req.url}`,
+        paramsId: req.params.id,
+        rentalId: rawMeta.rentalId || '',
+        linkedGanttRentalId: rawMeta.linkedGanttRentalId || rawMeta.ganttRentalId || '',
+        sourceRentalId: rawMeta.sourceRentalId || '',
+        status: resolution.status,
+        searchedIds: details.searchedIds || [],
+        foundRentalById: details.foundRentalById ?? 0,
+        foundGanttById: details.foundGanttById ?? 0,
+        foundGanttByLink: details.foundGanttByLink ?? 0,
+        fallbackCandidateCount: details.fallbackCandidateCount ?? 0,
+        rentalCandidateIds: details.rentalCandidateIds || [],
+        ganttCandidateIds: details.ganttCandidateIds || [],
+        fallbackCandidateIds: details.fallbackCandidateIds || [],
+      }));
+    }
+
     function createApprovalRequests(previousRental, changes, meta, req) {
       if (!changes.length) return [];
       const requests = readData('rental_change_requests') || [];
@@ -215,13 +236,18 @@ function registerRentalRoutes(deps) {
       const data = readData(collection) || [];
       let idx = data.findIndex(entry => String(entry.id) === String(req.params.id));
       if (collection === 'rentals') {
+        const linkedGanttRentalId = rawMeta.linkedGanttRentalId ||
+          rawMeta.ganttRentalId ||
+          (String(req.params.id || '').startsWith('GR-') ? req.params.id : '');
         const resolution = resolveRentalForChangeRequest({
-          rentalId: rawMeta.rentalId || req.params.id,
-          linkedGanttRentalId: rawMeta.linkedGanttRentalId,
+          rentalId: rawMeta.rentalId || rawMeta.sourceRentalId || req.params.id,
+          linkedGanttRentalId,
           rentals: data,
           ganttRentals: readData('gantt_rentals') || [],
+          context: `${req.method} ${req.originalUrl || req.url}`,
         });
         if (!resolution.ok) {
+          logRentalResolutionFailure(req, resolution, rawMeta);
           return res.status(resolution.status).json({
             ok: false,
             error: resolution.error,
@@ -232,7 +258,7 @@ function registerRentalRoutes(deps) {
         meta = {
           ...rawMeta,
           sourceRentalId: rawMeta.sourceRentalId || resolution.sourceRentalId || '',
-          linkedGanttRentalId: rawMeta.linkedGanttRentalId || resolution.linkedGanttRentalId || '',
+          linkedGanttRentalId: rawMeta.linkedGanttRentalId || rawMeta.ganttRentalId || resolution.linkedGanttRentalId || '',
         };
       }
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });

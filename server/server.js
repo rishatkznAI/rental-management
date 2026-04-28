@@ -51,7 +51,9 @@ const {
   normalizeGanttRentalStatus,
 } = require('./lib/gantt-rental-status');
 const {
+  analyzeGanttRentalLinks,
   backfillGanttRentalLinks,
+  logGanttRentalLinkDiagnostics,
 } = require('./lib/rental-change-requests');
 const {
   getRentalDebtOverdueDays,
@@ -915,6 +917,8 @@ registerDeliveryRoutes(apiRouter, {
   idPrefixes: ID_PREFIXES,
   accessControl,
   auditLog,
+  analyzeGanttRentalLinks,
+  backfillGanttRentalLinks,
 });
 
 const serviceCore = createServiceCore({
@@ -2225,6 +2229,8 @@ registerSystemRoutes(app, {
   requireAdmin,
   fetchImpl: fetch,
   auditLog,
+  analyzeGanttRentalLinks,
+  backfillGanttRentalLinks,
 });
 
 startServer({
@@ -2257,6 +2263,7 @@ startServer({
     writeData,
     normalizeClientLinks,
     backfillGanttRentalLinks,
+    logGanttRentalLinkDiagnostics,
     normalizeServiceWorkRecord,
     normalizeSparePartRecord,
     seedsDir: path.join(__dirname, 'seeds'),

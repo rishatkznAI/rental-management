@@ -548,12 +548,37 @@ export default function Rentals() {
         );
         return false;
       }
-      const targetRentalId = sourceRentalId || linkedRentals[0]?.id || ganttRental.id;
+      const resolvedRentalId = sourceRentalId || linkedRentals[0]?.id || '';
+      const targetRentalId = resolvedRentalId || ganttRental.id;
+      const previousRental = linkedRentals.find(item => item.id === resolvedRentalId) || linkedRentals[0] || null;
+      const oldValues = Object.fromEntries(Object.keys(patch).map(field => {
+        if (previousRental && field in previousRental) return [field, previousRental[field as keyof Rental]];
+        if (field === 'plannedReturnDate') return [field, ganttRental.endDate];
+        if (field === 'startDate') return [field, ganttRental.startDate];
+        if (field === 'price') return [field, ganttRental.amount];
+        if (field === 'clientId') return [field, ganttRental.clientId || ''];
+        if (field === 'client') return [field, ganttRental.client];
+        if (field === 'manager') return [field, ganttRental.manager];
+        return [field, undefined];
+      }));
 
       const saved = await rentalsService.update(targetRentalId, {
         ...patch,
+        rentalId: resolvedRentalId,
+        ganttRentalId: ganttRental.id,
+        entityType: 'rental',
+        actionType: 'gantt_rental_update',
+        oldValues,
+        newValues: patch,
+        changes: Object.keys(patch).map(field => ({
+          field,
+          oldValue: oldValues[field],
+          newValue: patch[field as keyof Rental],
+        })),
+        __rentalId: resolvedRentalId,
         __linkedGanttRentalId: ganttRental.id,
-        __sourceRentalId: sourceRentalId || '',
+        __ganttRentalId: ganttRental.id,
+        __sourceRentalId: ganttRental.id,
         __changeReason: reason,
       } as Partial<Rental> & Record<string, unknown>);
       const summary = (saved as Rental & {
@@ -2623,9 +2648,10 @@ export default function Rentals() {
           onClose={() => { setShowReturnModal(false); setReturnRental(null); }}
           onConfirm={async (data) => {
           if (!canEditRentals) return;
+          const ganttRentalId = data.ganttRentalId || data.rentalId;
           // Обновляем статус аренды на 'returned'
           const updated = ganttRentals.map(r =>
-            r.id === data.rentalId
+            r.id === ganttRentalId
               ? appendRentalHistory(
                   { ...r, status: 'returned' as const },
                   createRentalHistoryEntry(
@@ -2640,13 +2666,13 @@ export default function Rentals() {
           void persistGanttRentals(updated);
 
           // Обновляем статус техники, если нет других активных аренд
-          const rental = ganttRentals.find(r => r.id === data.rentalId);
+          const rental = ganttRentals.find(r => r.id === ganttRentalId);
           if (rental) {
             const currentEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
             const hasOtherActive = updated.some(
               r =>
                 !!currentEquipment
-                && r.id !== data.rentalId
+                && r.id !== ganttRentalId
                 && matchesEquipmentRow(r, currentEquipment)
                 && r.status !== 'returned'
                 && r.status !== 'closed',
@@ -2724,7 +2750,7 @@ export default function Rentals() {
               }
             }
           }
-          showToast(`Возврат оформлен: ${rental?.equipmentInv ?? data.rentalId}`);
+          showToast(`Возврат оформлен: ${rental?.equipmentInv ?? ganttRentalId}`);
           setShowReturnModal(false);
           setReturnRental(null);
         }}

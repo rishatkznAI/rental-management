@@ -2589,8 +2589,7 @@ export default function Dashboard() {
           const initialStatus: GanttRentalData['status'] =
             (formData.startDate || '') <= todayStr ? 'active' : 'created';
 
-          const newRental: GanttRentalData = {
-            id: `GR-${Date.now()}`,
+          const newRental: Omit<GanttRentalData, 'id'> = {
             clientId: formData.clientId,
             client: formData.client || '',
             clientShort: (formData.client || '').substring(0, 20),

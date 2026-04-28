@@ -81,7 +81,67 @@ function getGanttRentalSourceId(ganttRental: GanttRentalData): string {
   ).trim();
 }
 
-function matchesClassicRentalForGantt(ganttRental: GanttRentalData, rental: Rental): boolean {
+function normalizeMatchRef(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+type EquipmentAliasRecord = Partial<GanttRentalData> & Partial<Rental> & {
+  inventoryNumber?: string;
+  serialNumber?: string;
+};
+
+function equipmentAliasSet(record: EquipmentAliasRecord, equipmentList: Equipment[]): Set<string> {
+  const aliases = new Set<string>();
+  const add = (value: unknown) => {
+    const normalized = normalizeMatchRef(value);
+    if (normalized) aliases.add(normalized);
+  };
+  const addEquipment = (equipment?: Equipment) => {
+    if (!equipment) return;
+    add(equipment.id);
+    add(equipment.inventoryNumber);
+    add(equipment.serialNumber);
+  };
+
+  add(record.equipmentId);
+  add(record.equipmentInv);
+  add(record.inventoryNumber);
+  add(record.serialNumber);
+  if (Array.isArray(record.equipment)) record.equipment.forEach(add);
+
+  const directRefs = [...aliases];
+  const inventoryCounts = equipmentList.reduce((acc, equipment) => {
+    const inventory = normalizeMatchRef(equipment.inventoryNumber);
+    if (inventory) acc.set(inventory, (acc.get(inventory) || 0) + 1);
+    return acc;
+  }, new Map<string, number>());
+
+  for (const ref of directRefs) {
+    const byId = equipmentList.find(equipment => equipment.id === ref);
+    if (byId) addEquipment(byId);
+
+    if ((inventoryCounts.get(ref) || 0) === 1) {
+      addEquipment(equipmentList.find(equipment => equipment.inventoryNumber === ref));
+    }
+
+    const bySerial = equipmentList.filter(equipment => normalizeMatchRef(equipment.serialNumber) === ref);
+    if (bySerial.length === 1) addEquipment(bySerial[0]);
+  }
+
+  return aliases;
+}
+
+function hasEquipmentAliasOverlap(
+  ganttRental: GanttRentalData,
+  rental: Rental,
+  equipmentList: Equipment[],
+): boolean {
+  const left = equipmentAliasSet(ganttRental, equipmentList);
+  const right = equipmentAliasSet(rental, equipmentList);
+  return [...left].some(value => right.has(value));
+}
+
+function matchesClassicRentalForGantt(ganttRental: GanttRentalData, rental: Rental, equipmentList: Equipment[] = []): boolean {
   const linkedRentalId = getGanttRentalSourceId(ganttRental);
   if (linkedRentalId) return String(rental.id) === linkedRentalId;
 
@@ -89,8 +149,11 @@ function matchesClassicRentalForGantt(ganttRental: GanttRentalData, rental: Rent
     ? ganttRental.clientId === rental.clientId
     : ganttRental.client === rental.client;
   if (!sameClient) return false;
-  if (rental.startDate !== ganttRental.startDate || rental.plannedReturnDate !== ganttRental.endDate) return false;
-  return Array.isArray(rental.equipment) && rental.equipment.includes(ganttRental.equipmentInv);
+  const rentalEndDate = rental.plannedReturnDate || (rental as Rental & { endDate?: string }).endDate || '';
+  const exactDates = rental.startDate === ganttRental.startDate && rentalEndDate === ganttRental.endDate;
+  const overlappingDates = dateRangesOverlap(rental.startDate, rentalEndDate, ganttRental.startDate, ganttRental.endDate);
+  if (!exactDates && !overlappingDates) return false;
+  return hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
 }
 
 function dateRangesOverlap(startA: string, endA: string, startB: string, endB: string): boolean {
@@ -556,7 +619,7 @@ export default function Rentals() {
           (item.clientId && ganttRental.clientId ? item.clientId === ganttRental.clientId : item.client === ganttRental.client)
         ) ||
         ganttRental;
-      const linkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(currentGanttRental, item));
+      const linkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(currentGanttRental, item, equipmentList));
       const sourceRentalId = getGanttRentalSourceId(currentGanttRental);
       if (!sourceRentalId && linkedRentals.length > 1) {
         showToast(
@@ -621,7 +684,7 @@ export default function Rentals() {
       showToast(error instanceof Error ? error.message : 'Не удалось отправить изменение на согласование', 'error');
       return false;
     }
-  }, [queryClient, showToast]);
+  }, [equipmentList, queryClient, showToast]);
 
   // Очистка только «призрачных» черновиков:
   // - 'created' с прошедшей endDate → 'closed'

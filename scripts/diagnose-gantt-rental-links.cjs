@@ -39,8 +39,8 @@ function sqliteJson(dbPath, sql) {
 }
 
 function loadCollections(dbPath) {
-  const rows = sqliteJson(dbPath, "select name,json from app_data where name in ('rentals','gantt_rentals')");
-  const state = { rentals: [], gantt_rentals: [] };
+  const rows = sqliteJson(dbPath, "select name,json from app_data where name in ('rentals','gantt_rentals','equipment')");
+  const state = { rentals: [], gantt_rentals: [], equipment: [] };
   for (const row of rows) {
     state[row.name] = row.json ? JSON.parse(row.json) : [];
   }
@@ -91,6 +91,7 @@ function main() {
   const before = analyzeGanttRentalLinks({
     rentals: state.rentals,
     ganttRentals: state.gantt_rentals,
+    equipment: state.equipment,
     targetId: args.id,
     limit: args.limit,
   });
@@ -114,6 +115,7 @@ function main() {
     after = analyzeGanttRentalLinks({
       rentals: persistedState.rentals,
       ganttRentals: persistedState.gantt_rentals,
+      equipment: persistedState.equipment,
       targetId: args.id,
       limit: args.limit,
     });

@@ -291,6 +291,7 @@ function registerRentalRoutes(deps) {
           fallbackGanttRental: rawMeta.ganttSnapshot,
           rentals: data,
           ganttRentals: readData('gantt_rentals') || [],
+          equipment: readData('equipment') || [],
           context: `${req.method} ${req.originalUrl || req.url}`,
         });
         if (!resolution.ok) {

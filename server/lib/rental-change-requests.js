@@ -129,7 +129,148 @@ function normalizedText(value) {
   return String(value || '').trim().toLowerCase();
 }
 
-function ganttMatchesClassicRental(ganttRental, rental) {
+function setHasIntersection(left, right) {
+  for (const value of left || []) {
+    if (right?.has(value)) return true;
+  }
+  return false;
+}
+
+function equipmentIndexes(equipmentList = []) {
+  const byId = new Map();
+  const byInventory = new Map();
+  const inventoryCounts = new Map();
+  const bySerial = new Map();
+  const serialCounts = new Map();
+
+  for (const item of equipmentList || []) {
+    const id = normalizeRentalIdentifier(item?.id);
+    const inventory = normalizeRentalIdentifier(item?.inventoryNumber || item?.equipmentInv || item?.inv);
+    const serial = normalizeRentalIdentifier(item?.serialNumber);
+    if (id) byId.set(id, item);
+    if (inventory) {
+      if (!byInventory.has(inventory)) byInventory.set(inventory, item);
+      inventoryCounts.set(inventory, (inventoryCounts.get(inventory) || 0) + 1);
+    }
+    if (serial) {
+      if (!bySerial.has(serial)) bySerial.set(serial, item);
+      serialCounts.set(serial, (serialCounts.get(serial) || 0) + 1);
+    }
+  }
+
+  return {
+    byId,
+    byInventory,
+    inventoryCounts,
+    bySerial,
+    serialCounts,
+    hasEquipment: byId.size > 0 || byInventory.size > 0 || bySerial.size > 0,
+  };
+}
+
+function addEquipmentAliases(target, equipment) {
+  if (!equipment) return;
+  const id = normalizeRentalIdentifier(equipment.id);
+  const inventory = normalizeRentalIdentifier(equipment.inventoryNumber || equipment.equipmentInv || equipment.inv);
+  const serial = normalizeRentalIdentifier(equipment.serialNumber);
+  if (id) target.ids.add(id);
+  if (inventory) target.inventoryNumbers.add(inventory);
+  if (serial) target.serialNumbers.add(serial);
+}
+
+function buildEquipmentAliases(record, equipmentList = []) {
+  const indexes = equipmentIndexes(equipmentList);
+  const aliases = {
+    ids: new Set(),
+    inventoryNumbers: new Set(),
+    serialNumbers: new Set(),
+    raw: new Set(),
+    indexes,
+  };
+
+  const explicitEquipmentId = normalizeRentalIdentifier(record?.equipmentId);
+  const explicitInventory = normalizeRentalIdentifier(record?.equipmentInv || record?.inventoryNumber);
+  const explicitSerial = normalizeRentalIdentifier(record?.serialNumber);
+
+  if (explicitEquipmentId) aliases.ids.add(explicitEquipmentId);
+  if (explicitInventory) aliases.inventoryNumbers.add(explicitInventory);
+  if (explicitSerial) aliases.serialNumbers.add(explicitSerial);
+
+  const refs = uniqueIdentifiers([
+    explicitEquipmentId,
+    explicitInventory,
+    explicitSerial,
+    ...(Array.isArray(record?.equipment) ? record.equipment : []),
+  ]);
+
+  for (const ref of refs) {
+    aliases.raw.add(ref);
+    if (indexes.byId.has(ref)) {
+      addEquipmentAliases(aliases, indexes.byId.get(ref));
+      continue;
+    }
+    if ((indexes.inventoryCounts.get(ref) || 0) === 1) {
+      aliases.inventoryNumbers.add(ref);
+      addEquipmentAliases(aliases, indexes.byInventory.get(ref));
+      continue;
+    }
+    if ((indexes.serialCounts.get(ref) || 0) === 1) {
+      aliases.serialNumbers.add(ref);
+      addEquipmentAliases(aliases, indexes.bySerial.get(ref));
+    }
+  }
+
+  if (explicitEquipmentId && indexes.byId.has(explicitEquipmentId)) {
+    addEquipmentAliases(aliases, indexes.byId.get(explicitEquipmentId));
+  }
+  if (explicitInventory && (indexes.inventoryCounts.get(explicitInventory) || 0) === 1) {
+    addEquipmentAliases(aliases, indexes.byInventory.get(explicitInventory));
+  }
+  if (explicitSerial && (indexes.serialCounts.get(explicitSerial) || 0) === 1) {
+    addEquipmentAliases(aliases, indexes.bySerial.get(explicitSerial));
+  }
+
+  return aliases;
+}
+
+function equipmentAliasesOverlap(leftRecord, rightRecord, equipmentList = []) {
+  const left = buildEquipmentAliases(leftRecord, equipmentList);
+  const right = buildEquipmentAliases(rightRecord, equipmentList);
+
+  if (setHasIntersection(left.ids, right.ids)) return true;
+  if (setHasIntersection(left.serialNumbers, right.serialNumbers)) return true;
+
+  for (const inventory of left.inventoryNumbers) {
+    if (!right.inventoryNumbers.has(inventory)) continue;
+    if (!left.indexes.hasEquipment || (left.indexes.inventoryCounts.get(inventory) || 0) <= 1) {
+      return true;
+    }
+  }
+
+  if (!left.indexes.hasEquipment && setHasIntersection(left.raw, right.raw)) return true;
+  return false;
+}
+
+function rentalDateRange(record, type) {
+  if (!record) return { startDate: '', endDate: '' };
+  if (type === 'classic') {
+    return {
+      startDate: String(record.startDate || ''),
+      endDate: String(record.plannedReturnDate || record.endDate || ''),
+    };
+  }
+  return {
+    startDate: String(record.startDate || ''),
+    endDate: String(record.endDate || record.plannedReturnDate || ''),
+  };
+}
+
+function dateRangesOverlap(startA, endA, startB, endB) {
+  if (!startA || !endA || !startB || !endB) return false;
+  return startA <= endB && startB <= endA;
+}
+
+function ganttMatchesClassicRental(ganttRental, rental, options = {}) {
   if (!ganttRental || !rental) return false;
 
   const linkedIds = rentalLinkIdsFromGantt(ganttRental);
@@ -144,14 +285,20 @@ function ganttMatchesClassicRental(ganttRental, rental) {
     : normalizedText(ganttRental.client) === normalizedText(rental.client);
   if (!sameClient) return false;
 
+  const classicRange = rentalDateRange(rental, 'classic');
+  const ganttRange = rentalDateRange(ganttRental, 'gantt');
   const sameDates =
-    String(rental.startDate || '') === String(ganttRental.startDate || '') &&
-    String(rental.plannedReturnDate || rental.endDate || '') === String(ganttRental.endDate || ganttRental.plannedReturnDate || '');
-  if (!sameDates) return false;
+    classicRange.startDate === ganttRange.startDate &&
+    classicRange.endDate === ganttRange.endDate;
+  const compatibleDates = sameDates || dateRangesOverlap(
+    classicRange.startDate,
+    classicRange.endDate,
+    ganttRange.startDate,
+    ganttRange.endDate,
+  );
+  if (!compatibleDates) return false;
 
-  const ganttRefs = rentalEquipmentRefs(ganttRental);
-  const classicRefs = rentalEquipmentRefs(rental);
-  return ganttRefs.some(ref => classicRefs.includes(ref));
+  return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
 }
 
 function uniqueRentalMatches(matches) {
@@ -214,6 +361,7 @@ function resolveRentalForChangeRequest({
   fallbackGanttRental,
   rentals = [],
   ganttRentals = [],
+  equipment = [],
   context = '',
 } = {}) {
   const requestedRentalId = normalizeRentalIdentifier(rentalId);
@@ -317,22 +465,10 @@ function resolveRentalForChangeRequest({
       },
     );
   }
-  if (linkedIds.length > 0) {
-    return buildRentalResolutionFailure(
-      404,
-      `Связанная карточка аренды для "${requestedRentalId || requestedGanttId}" не найдена: в gantt_rentals указана связь ${linkedIds.join(', ')}, но такой rentals.id нет.`,
-      [...searchedIds, ...linkedIds],
-      {
-        ...diagnosticsBase,
-        linkedIds,
-      },
-    );
-  }
-
   const shapeMatches = uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
     (rentals || [])
       .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
-      .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental)),
+      .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental, { equipmentList: equipment })),
   ));
   if (shapeMatches.length === 1) {
     return buildRentalResolutionSuccess(
@@ -345,6 +481,19 @@ function resolveRentalForChangeRequest({
     return buildRentalResolutionFailure(
       409,
       `Найдено несколько похожих карточек аренды для id "${requestedRentalId || requestedGanttId}". Откройте карточку аренды вручную.`,
+      [...searchedIds, ...linkedIds],
+      {
+        ...diagnosticsBase,
+        linkedIds,
+        fallbackCandidateCount: shapeMatches.length,
+        fallbackCandidateIds: compactResolutionIds(shapeMatches, match => match.rental?.id),
+      },
+    );
+  }
+  if (linkedIds.length > 0) {
+    return buildRentalResolutionFailure(
+      404,
+      `Связанная карточка аренды для "${requestedRentalId || requestedGanttId}" не найдена: в gantt_rentals указана связь ${linkedIds.join(', ')}, но такой rentals.id нет.`,
       [...searchedIds, ...linkedIds],
       {
         ...diagnosticsBase,
@@ -481,7 +630,7 @@ function compactRentalDiagnostic(rental, extra = {}) {
   };
 }
 
-function analyzeGanttRentalLinks({ rentals = [], ganttRentals = [], targetId = '', limit = 50 } = {}) {
+function analyzeGanttRentalLinks({ rentals = [], ganttRentals = [], equipment = [], targetId = '', limit = 50 } = {}) {
   const rentalIds = new Set((rentals || []).map(item => normalizeRentalIdentifier(item?.id)).filter(Boolean));
   const safeLimit = Math.max(1, Number(limit) || 50);
   const target = normalizeRentalIdentifier(targetId);
@@ -572,7 +721,7 @@ function analyzeGanttRentalLinks({ rentals = [], ganttRentals = [], targetId = '
     const fallbackCandidates = uniqueRentalMatches(exactGanttRecords.flatMap(ganttRental =>
       (rentals || [])
         .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
-        .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental)),
+        .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental, { equipmentList: equipment })),
     ));
 
     result.target.linkedIds = targetLinkedIds;
@@ -596,6 +745,7 @@ function logGanttRentalLinkDiagnostics({ readData, logger = console, targetId = 
   const diagnostics = analyzeGanttRentalLinks({
     rentals: readData('rentals') || [],
     ganttRentals: readData('gantt_rentals') || [],
+    equipment: readData('equipment') || [],
     targetId,
   });
   if (logger && typeof logger.log === 'function') {
@@ -619,6 +769,7 @@ function logGanttRentalLinkDiagnostics({ readData, logger = console, targetId = 
 function backfillGanttRentalLinks({ readData, writeData, logger = console, dryRun = false } = {}) {
   const rentals = typeof readData === 'function' ? (readData('rentals') || []) : [];
   const ganttRentals = typeof readData === 'function' ? (readData('gantt_rentals') || []) : [];
+  const equipment = typeof readData === 'function' ? (readData('equipment') || []) : [];
   const result = {
     checked: Array.isArray(ganttRentals) ? ganttRentals.length : 0,
     missingLink: 0,
@@ -640,6 +791,7 @@ function backfillGanttRentalLinks({ readData, writeData, logger = console, dryRu
       linkedGanttRentalId: ganttRental.id,
       rentals,
       ganttRentals: [ganttRental],
+      equipment,
     });
 
     if (resolution.ok && resolution.rentalId) {

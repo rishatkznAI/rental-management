@@ -199,6 +199,38 @@ test('resolveRentalForChangeRequest can recover a virtual GR id from a safe Gant
   assert.equal(result.linkedGanttRentalId, 'GR-virtual');
 });
 
+test('resolveRentalForChangeRequest recovers stale GR by equipmentId and inventory aliases', () => {
+  const result = resolveRentalForChangeRequest({
+    rentalId: 'GR-1776254974522',
+    linkedGanttRentalId: 'GR-1776254974522',
+    fallbackGanttRental: {
+      id: 'GR-1776254974522',
+      client: 'Стройтрест Алабуга',
+      startDate: '2026-04-10',
+      endDate: '2026-04-20',
+      equipmentId: 'EQ-032',
+      equipmentInv: '03291436',
+    },
+    rentals: [{
+      id: 'R-032',
+      client: 'Стройтрест Алабуга',
+      startDate: '2026-04-10',
+      plannedReturnDate: '2026-04-20',
+      equipment: ['03291436'],
+    }],
+    ganttRentals: [],
+    equipment: [{
+      id: 'EQ-032',
+      inventoryNumber: '03291436',
+      serialNumber: 'SN-032',
+    }],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rentalId, 'R-032');
+  assert.equal(result.sourceRentalId, 'GR-1776254974522');
+});
+
 test('resolveRentalForChangeRequest returns 409 for ambiguous fallback matches', () => {
   const result = resolveRentalForChangeRequest({
     rentalId: 'GR-ambiguous',
@@ -217,6 +249,47 @@ test('resolveRentalForChangeRequest returns 409 for ambiguous fallback matches',
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 409);
+});
+
+test('resolveRentalForChangeRequest returns 409 when equipment alias fallback is ambiguous', () => {
+  const result = resolveRentalForChangeRequest({
+    rentalId: 'GR-ambiguous-equipment',
+    linkedGanttRentalId: 'GR-ambiguous-equipment',
+    fallbackGanttRental: {
+      id: 'GR-ambiguous-equipment',
+      client: 'Стройтрест Алабуга',
+      startDate: '2026-04-10',
+      endDate: '2026-04-20',
+      equipmentId: 'EQ-032',
+      equipmentInv: '03291436',
+    },
+    rentals: [
+      {
+        id: 'R-032-A',
+        client: 'Стройтрест Алабуга',
+        startDate: '2026-04-10',
+        plannedReturnDate: '2026-04-20',
+        equipment: ['03291436'],
+      },
+      {
+        id: 'R-032-B',
+        client: 'Стройтрест Алабуга',
+        startDate: '2026-04-10',
+        plannedReturnDate: '2026-04-20',
+        equipmentId: 'EQ-032',
+      },
+    ],
+    ganttRentals: [],
+    equipment: [{
+      id: 'EQ-032',
+      inventoryNumber: '03291436',
+      serialNumber: 'SN-032',
+    }],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 409);
+  assert.deepEqual(result.details.fallbackCandidateIds, ['R-032-A', 'R-032-B']);
 });
 
 test('backfillGanttRentalLinks links only unambiguous legacy gantt records', () => {
@@ -321,6 +394,7 @@ function createApprovalApp() {
     ],
     equipment: [
       { id: 'EQ-1', inventoryNumber: '083', category: 'own', activeInFleet: true },
+      { id: 'EQ-032', inventoryNumber: '03291436', serialNumber: 'SN-032', category: 'own', activeInFleet: true },
     ],
     rentals: [
       {
@@ -346,6 +420,19 @@ function createApprovalApp() {
         manager: 'Руслан',
         managerId: 'U-manager',
         status: 'created',
+      },
+      {
+        id: 'R-032',
+        client: 'Стройтрест Алабуга',
+        startDate: '2026-04-10',
+        plannedReturnDate: '2026-04-20',
+        equipment: ['03291436'],
+        manager: 'Руслан',
+        managerId: 'U-manager',
+        status: 'active',
+        price: 90000,
+        discount: 0,
+        history: [],
       },
     ],
     gantt_rentals: [
@@ -586,6 +673,39 @@ test('PATCH /api/rentals/:id resolves stale GR route id through request Gantt sn
     assert.equal(state.rental_change_requests[0].sourceRentalId, 'GR-stale-browser');
     assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-stale-browser');
     assert.equal(state.rentals.find(item => item.id === 'R-1').price, 100000);
+  });
+});
+
+test('PATCH /api/rentals/:id resolves real stale GR for equipment 03291436 through snapshot aliases', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1776254974522', 'manager-token', {
+      price: 95000,
+      ganttRentalId: 'GR-1776254974522',
+      __ganttSnapshot: {
+        id: 'GR-1776254974522',
+        client: 'Стройтрест Алабуга',
+        startDate: '2026-04-10',
+        endDate: '2026-04-20',
+        equipmentId: 'EQ-032',
+        equipmentInv: '03291436',
+      },
+      entityType: 'rental',
+      actionType: 'gantt_rental_update',
+      oldValues: { price: 90000 },
+      newValues: { price: 95000 },
+      changes: [{ field: 'price', oldValue: 90000, newValue: 95000 }],
+      __changeReason: 'Изменение цены из проблемной карточки',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.id, 'R-032');
+    assert.equal(state.rental_change_requests.length, 1);
+    assert.equal(state.rental_change_requests[0].rentalId, 'R-032');
+    assert.equal(state.rental_change_requests[0].sourceRentalId, 'GR-1776254974522');
+    assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-1776254974522');
+    assert.equal(state.rentals.find(item => item.id === 'R-032').price, 90000);
   });
 });
 

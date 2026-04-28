@@ -326,6 +326,7 @@ function registerSystemRoutes(app, deps) {
     const diagnostics = analyzeGanttRentalLinks({
       rentals: readData('rentals') || [],
       ganttRentals: readData('gantt_rentals') || [],
+      equipment: readData('equipment') || [],
       targetId: req.query.id || '',
       limit: req.query.limit || 100,
     });
@@ -339,6 +340,7 @@ function registerSystemRoutes(app, deps) {
     const before = analyzeGanttRentalLinks({
       rentals: readData('rentals') || [],
       ganttRentals: readData('gantt_rentals') || [],
+      equipment: readData('equipment') || [],
       targetId: req.body?.id || req.query.id || '',
       limit: req.body?.limit || req.query.limit || 100,
     });
@@ -351,6 +353,7 @@ function registerSystemRoutes(app, deps) {
     const after = analyzeGanttRentalLinks({
       rentals: readData('rentals') || [],
       ganttRentals: readData('gantt_rentals') || [],
+      equipment: readData('equipment') || [],
       targetId: req.body?.id || req.query.id || '',
       limit: req.body?.limit || req.query.limit || 100,
     });

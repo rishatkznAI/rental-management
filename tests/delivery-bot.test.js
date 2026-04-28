@@ -898,6 +898,27 @@ test('mechanic parts menu shows first page from spare_parts and pagination', asy
   assert.ok(keyboardTexts(lastKeyboard(messages)).includes('Следующие 10'));
 });
 
+test('mechanic parts menu suggests popular spare parts first', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Редкая прокладка' }),
+    makePart(2, { name: 'Фильтр масляный' }),
+    makePart(3, { name: 'Колесо ведущее' }),
+  ]);
+  state.repair_part_items = [
+    { id: 'RPI-old-1', repairId: 'S-old-1', partId: 'P-3', quantity: 5, createdAt: '2026-04-20T08:00:00.000Z' },
+    { id: 'RPI-old-2', repairId: 'S-old-2', partId: 'P-2', quantity: 1, createdAt: '2026-04-21T08:00:00.000Z' },
+    { id: 'RPI-old-3', repairId: 'S-old-3', partId: 'P-2', quantity: 3, createdAt: '2026-04-22T08:00:00.000Z' },
+  ];
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'menu:parts', { callbackId: 'cb-1' });
+
+  assert.equal(state.bot_sessions['100'].pendingAction, 'part_pick');
+  assert.deepEqual(state.bot_sessions['100'].lastPartSearch.map((item) => item.id), ['P-2', 'P-3', 'P-1']);
+  assert.match(messages.at(-1).text, /Популярные запчасти/);
+  assert.match(messages.at(-1).text, /Фильтр масляный/);
+  assert.match(messages.at(-1).text, /использовали в 2 ремонт/);
+});
+
 test('mechanic parts pagination opens next and previous pages', async () => {
   const { state, messages, handlers } = setupMechanicRepairWithParts(
     Array.from({ length: 12 }, (_, index) => makePart(index + 1)),

@@ -1801,10 +1801,17 @@ function createBotHandlers(deps) {
       pendingPayload: null,
     });
     return reply(senderId, withBotMenu([
-      normalizedQuery ? '📦 Найденные запчасти:' : '📦 Запчасти из справочника:',
+      normalizedQuery
+        ? '📦 Найденные запчасти:'
+        : (pageInfo.mode === 'popular' ? '📦 Популярные запчасти:' : '📦 Запчасти из справочника:'),
       `Показаны ${pageInfo.start + 1}-${pageInfo.end} из ${pageInfo.total}${normalizedQuery ? ` по запросу «${normalizedQuery}»` : ''}.`,
       '',
-      ...pageInfo.items.map((item, index) => `${pageInfo.start + index + 1}. ${item.name}${item.article ? ` · ${item.article}` : item.sku ? ` · ${item.sku}` : ''} · ${Number(item.defaultPrice || 0).toLocaleString('ru-RU')} ₽/${item.unit || 'шт'}`),
+      ...pageInfo.items.map((item, index) => {
+        const popularity = item.popularity?.repairsCount
+          ? ` · использовали в ${item.popularity.repairsCount} ремонт${item.popularity.repairsCount === 1 ? 'е' : 'ах'}`
+          : '';
+        return `${pageInfo.start + index + 1}. ${item.name}${item.article ? ` · ${item.article}` : item.sku ? ` · ${item.sku}` : ''} · ${Number(item.defaultPrice || 0).toLocaleString('ru-RU')} ₽/${item.unit || 'шт'}${popularity}`;
+      }),
       '',
       'Нажмите кнопку с запчастью ниже и выберите количество. По кнопке возьмётся базовая цена.',
       'Для поиска просто напишите название, артикул, категорию или производителя.',

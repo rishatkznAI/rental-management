@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import {
   Plus, ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightSmall, SlidersHorizontal, RotateCcw, CirclePause as PauseCircle,
   Search, CircleCheck, CircleAlert, CreditCard, ArrowRightLeft,
-  AlertTriangle, Wrench
+  AlertTriangle, ClipboardCheck, Wrench
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import {
@@ -18,6 +18,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { RentalDrawer } from '../components/gantt/RentalDrawer';
 import { ReturnModal, DowntimeModal, NewRentalModal } from '../components/gantt/GanttModals';
+import { RentalApprovalHistorySheet } from '../components/gantt/RentalApprovalHistorySheet';
 import {
   mockDowntimes,
   mockServicePeriods,
@@ -37,6 +38,7 @@ import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
+import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
 import { canEquipmentParticipateInRentals, compareEquipmentByPriority } from '../lib/equipmentClassification';
 import { buildClientReceivables, buildRentalDebtRows, mergeClientsWithFinancials } from '../lib/finance';
 import {
@@ -481,6 +483,11 @@ export default function Rentals() {
     ownerName: user?.ownerName,
     name: user?.name,
   });
+  const {
+    data: rentalChangeRequests = [],
+    isLoading: isRentalApprovalsLoading,
+    error: rentalApprovalsError,
+  } = useRentalChangeRequestsList(!isInvestorRole);
   const investorEquipmentIds = useMemo(() => {
     if (!isInvestorRole || !investorBinding) return null;
     return new Set(
@@ -566,6 +573,20 @@ export default function Rentals() {
   const clientReceivables = useMemo(
     () => buildClientReceivables(clientsData, rentalDebtRows),
     [clientsData, rentalDebtRows],
+  );
+  const rentalApprovalRequests = useMemo(() => {
+    const statusOrder = { pending: 0, approved: 1, rejected: 1 };
+    return rentalChangeRequests
+      .filter(request => request.entityType === 'rental')
+      .sort((a, b) => {
+        const byStatus = statusOrder[a.status] - statusOrder[b.status];
+        if (byStatus !== 0) return byStatus;
+        return String(b.decidedAt || b.createdAt).localeCompare(String(a.decidedAt || a.createdAt));
+      });
+  }, [rentalChangeRequests]);
+  const pendingRentalApprovalCount = useMemo(
+    () => rentalApprovalRequests.filter(request => request.status === 'pending').length,
+    [rentalApprovalRequests],
   );
 
   // Менеджеры для фильтра (динамически из базы пользователей)
@@ -763,6 +784,7 @@ export default function Rentals() {
   const [showDowntimeModal, setShowDowntimeModal] = useState(false);
   const [showNewRentalModal, setShowNewRentalModal] = useState(false);
   const [showMovementSheet, setShowMovementSheet] = useState(false);
+  const [showApprovalHistorySheet, setShowApprovalHistorySheet] = useState(false);
   const [preselectedEquipmentInv, setPreselectedEquipmentInv] = useState('');
   const [preselectedEquipmentId, setPreselectedEquipmentId] = useState('');
   const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
@@ -1815,6 +1837,20 @@ export default function Rentals() {
               )}
               {!isInvestorRole && (
                 <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="app-button-outline h-10 rounded-xl px-4"
+                    onClick={() => setShowApprovalHistorySheet(true)}
+                  >
+                    <ClipboardCheck className="h-4 w-4" />
+                    Согласование
+                    {pendingRentalApprovalCount > 0 && (
+                      <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-900/50 dark:text-amber-200">
+                        {pendingRentalApprovalCount}
+                      </span>
+                    )}
+                  </Button>
                   <Button
                     size="sm"
                     variant="secondary"
@@ -3023,6 +3059,13 @@ export default function Rentals() {
             showToast(message, 'error');
           }
         }}
+      />
+      <RentalApprovalHistorySheet
+        open={showApprovalHistorySheet}
+        onOpenChange={setShowApprovalHistorySheet}
+        requests={rentalApprovalRequests}
+        isLoading={isRentalApprovalsLoading}
+        error={rentalApprovalsError}
       />
       <Sheet open={showMovementSheet} onOpenChange={setShowMovementSheet}>
         <SheetContent side="right" className="w-full overflow-y-auto border-gray-200 bg-white sm:max-w-2xl dark:border-gray-700 dark:bg-gray-950">

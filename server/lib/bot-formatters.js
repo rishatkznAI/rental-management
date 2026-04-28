@@ -351,6 +351,76 @@ function createBotFormatters(deps) {
     ].filter(Boolean).join(' ');
   }
 
+  function getSparePartUsageStats() {
+    const stats = new Map();
+    const add = (key, item) => {
+      if (!key) return;
+      const current = stats.get(key) || {
+        repairs: new Set(),
+        rows: 0,
+        quantity: 0,
+        lastUsedAt: '',
+      };
+      const repairId = String(item.repairId || '').trim();
+      if (repairId) current.repairs.add(repairId);
+      current.rows += 1;
+      current.quantity += Math.max(0, Number(item.quantity) || 0);
+      const createdAt = String(item.createdAt || item.updatedAt || '').trim();
+      if (createdAt && createdAt > current.lastUsedAt) current.lastUsedAt = createdAt;
+      stats.set(key, current);
+    };
+
+    for (const item of readData('repair_part_items') || []) {
+      const partId = String(item.partId || item.catalogId || '').trim();
+      const name = normalizeBotText(item.nameSnapshot || item.name || '');
+      add(partId ? `id:${partId}` : '', item);
+      add(name ? `name:${name}` : '', item);
+    }
+
+    return stats;
+  }
+
+  function getSparePartUsage(part, stats) {
+    const byId = stats.get(`id:${String(part.id || '').trim()}`);
+    const byName = stats.get(`name:${normalizeBotText(part.name || '')}`);
+    const value = byId || byName || { repairs: new Set(), rows: 0, quantity: 0, lastUsedAt: '' };
+    return {
+      repairsCount: value.repairs.size,
+      rows: value.rows,
+      quantity: value.quantity,
+      lastUsedAt: value.lastUsedAt,
+    };
+  }
+
+  function rankSparePartsByPopularity(parts) {
+    const stats = getSparePartUsageStats();
+    const ranked = parts.map((part, index) => ({
+      part,
+      index,
+      usage: getSparePartUsage(part, stats),
+    }));
+    const hasPopularItems = ranked.some(item => item.usage.repairsCount > 0 || item.usage.rows > 0);
+    if (!hasPopularItems) {
+      return { items: parts, mode: 'catalog' };
+    }
+
+    return {
+      mode: 'popular',
+      items: ranked
+        .sort((left, right) =>
+          right.usage.repairsCount - left.usage.repairsCount ||
+          right.usage.quantity - left.usage.quantity ||
+          right.usage.rows - left.usage.rows ||
+          String(right.usage.lastUsedAt).localeCompare(String(left.usage.lastUsedAt)) ||
+          left.index - right.index,
+        )
+        .map(item => ({
+          ...item.part,
+          popularity: item.usage,
+        })),
+    };
+  }
+
   function searchSpareParts(query) {
     const parts = getAvailableSpareParts();
     if (!normalizeBotText(query)) return parts;
@@ -358,7 +428,12 @@ function createBotFormatters(deps) {
   }
 
   function getSparePartSearchPage(query = '', page = 0, pageSize = PART_SEARCH_PAGE_SIZE) {
-    const matches = searchSpareParts(query);
+    const normalizedQuery = String(query || '').trim();
+    const searched = searchSpareParts(normalizedQuery);
+    const ranked = normalizeBotText(normalizedQuery)
+      ? { items: searched, mode: 'search' }
+      : rankSparePartsByPopularity(searched);
+    const matches = ranked.items;
     const safePageSize = Math.max(1, Number(pageSize) || PART_SEARCH_PAGE_SIZE);
     const totalPages = Math.max(1, Math.ceil(matches.length / safePageSize));
     const requestedPage = Math.max(0, Number(page) || 0);
@@ -366,7 +441,8 @@ function createBotFormatters(deps) {
     const start = safePage * safePageSize;
     const items = matches.slice(start, start + safePageSize);
     return {
-      query: String(query || '').trim(),
+      query: normalizedQuery,
+      mode: ranked.mode,
       page: safePage,
       pageSize: safePageSize,
       total: matches.length,

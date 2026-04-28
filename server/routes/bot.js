@@ -211,10 +211,8 @@ function checkWebhookRateLimit(req) {
 
 function verifyWebhookRequest(req, webhookSecret = '') {
   const secret = String(webhookSecret || '').trim();
-  const secretRequired = Boolean(secret) || process.env.NODE_ENV === 'production';
-  if (!secretRequired) return { ok: true };
   if (!secret) {
-    return { ok: false, status: 503, error: 'Webhook secret is not configured' };
+    return { ok: true };
   }
 
   const candidates = [

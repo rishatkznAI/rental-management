@@ -150,18 +150,26 @@ async function startServer({ app, port, deps, logger = console }) {
       });
     }
     if (typeof backfillGanttRentalLinks === 'function') {
-      backfillGanttRentalLinks({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        logger,
-      });
+      try {
+        backfillGanttRentalLinks({
+          readData: deps.readData,
+          writeData: deps.writeData,
+          logger,
+        });
+      } catch (error) {
+        logger.warn(`[rental-links] Gantt rental backfill skipped: ${error?.message || String(error)}`);
+      }
     }
     if (typeof logGanttRentalLinkDiagnostics === 'function') {
-      logGanttRentalLinkDiagnostics({
-        readData: deps.readData,
-        logger,
-        targetId: process.env.GANTT_RENTAL_DIAG_TARGET || '',
-      });
+      try {
+        logGanttRentalLinkDiagnostics({
+          readData: deps.readData,
+          logger,
+          targetId: process.env.GANTT_RENTAL_DIAG_TARGET || '',
+        });
+      } catch (error) {
+        logger.warn(`[rental-links] diagnostics skipped: ${error?.message || String(error)}`);
+      }
     }
     seedServiceWorks({
       readData: deps.readData,

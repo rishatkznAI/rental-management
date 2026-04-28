@@ -77,7 +77,7 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     deleteMessage: overrides.deleteMessage || (async () => ({ success: true })),
     answerCallback: overrides.answerCallback || (async () => ({ success: true })),
     generateId: (prefix) => `${prefix}-1`,
-    idPrefixes: { deliveries: 'DL' },
+    idPrefixes: { deliveries: 'DL', repair_part_items: 'RPI', repair_work_items: 'RWI' },
     nowIso: () => '2026-04-24T08:00:00.000Z',
     readServiceTickets: overrides.readServiceTickets || (() => state.service || []),
     writeServiceTickets: overrides.writeServiceTickets || ((tickets) => {
@@ -122,6 +122,51 @@ function createMockResponse() {
       return this;
     },
   };
+}
+
+function setupMechanicRepairWithParts(parts = []) {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.service = [{
+    id: 'S-1',
+    status: 'in_progress',
+    equipment: 'Mantall HZ160JRT',
+    reason: 'Полная диагностика',
+    assignedMechanicName: 'Дмитрий',
+    workLog: [],
+  }];
+  state.bot_sessions['100'] = { activeRepairId: 'S-1' };
+  state.spare_parts = parts;
+  return { state, messages, handlers };
+}
+
+function makePart(index, overrides = {}) {
+  return {
+    id: `P-${index}`,
+    name: `Запчасть ${String(index).padStart(2, '0')}`,
+    article: `ART-${String(index).padStart(2, '0')}`,
+    sku: `ART-${String(index).padStart(2, '0')}`,
+    category: 'Категория',
+    manufacturer: 'Skytech',
+    defaultPrice: 1000 + index,
+    unit: 'шт',
+    isActive: true,
+    ...overrides,
+  };
+}
+
+function lastKeyboard(messages) {
+  return messages.at(-1)?.options?.attachments?.find((item) => item.type === 'inline_keyboard') || null;
+}
+
+function keyboardTexts(keyboardAttachment) {
+  return keyboardAttachment?.payload?.buttons?.flat().map((item) => item.text) || [];
 }
 
 async function postBotWebhook(handlers, body, options = {}) {
@@ -741,68 +786,170 @@ test('mechanic new ticket search opens equipment action menu before repair reaso
   assert.deepEqual(buttonTexts.slice(1, 5), ['Ремонт', 'ТО', 'ЧТО', 'ПТО']);
 });
 
-test('mechanic parts menu asks for search query instead of showing default parts', async () => {
-  const { state, messages, handlers } = createMemoryBot(false);
-  state.bot_users['100'] = {
-    userId: 'U-mechanic',
-    userName: 'Дмитрий',
-    userRole: 'Механик',
-    email: 'mechanic@example.test',
-    replyTarget: { user_id: 100, chat_id: null },
-  };
-  state.service = [{
-    id: 'S-1',
-    status: 'in_progress',
-    equipment: 'Mantall HZ160JRT',
-    reason: 'Полная диагностика',
-    assignedMechanicName: 'Дмитрий',
-    workLog: [],
-  }];
-  state.bot_sessions['100'] = { activeRepairId: 'S-1' };
-  state.spare_parts = [
-    { id: 'P-1', name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200, unit: 'шт', isActive: true },
-    { id: 'P-2', name: 'Колесо ведущее', article: 'W-200', defaultPrice: 8000, unit: 'шт', isActive: true },
-  ];
+test('mechanic parts menu shows first page from spare_parts and pagination', async () => {
+  const parts = Array.from({ length: 12 }, (_, index) => makePart(index + 1));
+  parts.push(
+    makePart(99, { id: 'P-inactive', name: 'Скрытая запчасть', isActive: false }),
+    makePart(100, { id: 'P-1', name: 'Дубликат запчасти' }),
+    makePart(101, { id: 'P-empty', name: '' }),
+  );
+  const { state, messages, handlers } = setupMechanicRepairWithParts(parts);
 
   await handlers.handleCallback({ user_id: 100 }, '100', 'menu:parts', { callbackId: 'cb-1' });
 
-  assert.equal(state.bot_sessions['100'].pendingAction, 'part_search');
-  assert.match(messages.at(-1).text, /Напишите название запчасти/);
-  assert.doesNotMatch(messages.at(-1).text, /Найденные запчасти/);
+  assert.equal(state.bot_sessions['100'].pendingAction, 'part_pick');
+  assert.equal(state.bot_sessions['100'].lastPartSearch.length, 10);
+  assert.match(messages.at(-1).text, /Запчасти из справочника/);
+  assert.match(messages.at(-1).text, /Показаны 1-10 из 12/);
+  assert.match(messages.at(-1).text, /Запчасть 01/);
+  assert.match(messages.at(-1).text, /Запчасть 10/);
+  assert.doesNotMatch(messages.at(-1).text, /Запчасть 11/);
+  assert.doesNotMatch(messages.at(-1).text, /Скрытая запчасть/);
+  assert.doesNotMatch(messages.at(-1).text, /Дубликат запчасти/);
+  assert.ok(keyboardTexts(lastKeyboard(messages)).includes('Следующие 10'));
 });
 
-test('mechanic can run a new text search while choosing parts', async () => {
-  const { state, messages, handlers } = createMemoryBot(false);
-  state.bot_users['100'] = {
-    userId: 'U-mechanic',
-    userName: 'Дмитрий',
-    userRole: 'Механик',
-    email: 'mechanic@example.test',
-    replyTarget: { user_id: 100, chat_id: null },
-  };
-  state.service = [{
-    id: 'S-1',
-    status: 'in_progress',
-    equipment: 'Mantall HZ160JRT',
-    reason: 'Полная диагностика',
-    assignedMechanicName: 'Дмитрий',
-    workLog: [],
-  }];
-  state.bot_sessions['100'] = { activeRepairId: 'S-1' };
-  state.spare_parts = [
-    { id: 'P-1', name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200, unit: 'шт', isActive: true },
-    { id: 'P-2', name: 'Джойстик управления', article: 'J-200', defaultPrice: 9500, unit: 'шт', isActive: true },
-  ];
+test('mechanic parts pagination opens next and previous pages', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts(
+    Array.from({ length: 12 }, (_, index) => makePart(index + 1)),
+  );
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'menu:parts', { callbackId: 'cb-1' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:page:1', { callbackId: 'cb-2' });
+
+  assert.match(messages.at(-1).text, /Показаны 11-12 из 12/);
+  assert.match(messages.at(-1).text, /Запчасть 11/);
+  assert.match(messages.at(-1).text, /Запчасть 12/);
+  assert.deepEqual(state.bot_sessions['100'].lastPartSearch.map((item) => item.id), ['P-11', 'P-12']);
+  let texts = keyboardTexts(lastKeyboard(messages));
+  assert.ok(texts.includes('Предыдущие 10'));
+  assert.ok(!texts.includes('Следующие 10'));
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:page:0', { callbackId: 'cb-3' });
+
+  assert.match(messages.at(-1).text, /Показаны 1-10 из 12/);
+  texts = keyboardTexts(lastKeyboard(messages));
+  assert.ok(texts.includes('Следующие 10'));
+});
+
+test('mechanic can add part by absolute number from a later page', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts(
+    Array.from({ length: 12 }, (_, index) => makePart(index + 1)),
+  );
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'menu:parts', { callbackId: 'cb-1' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:page:1', { callbackId: 'cb-2' });
+  await handlers.handleCommand({ user_id: 100 }, '100', '11 1');
+
+  assert.equal(state.repair_part_items.length, 1);
+  assert.equal(state.repair_part_items[0].partId, 'P-11');
+  assert.match(messages.at(-1).text, /Добавлена запчасть: Запчасть 11 × 1/);
+});
+
+test('mechanic parts search finds item outside first page', async () => {
+  const parts = Array.from({ length: 12 }, (_, index) => makePart(index + 1));
+  parts[11] = makePart(12, { name: 'Редкий гидрофильтр', article: 'RARE-12' });
+  const { state, messages, handlers } = setupMechanicRepairWithParts(parts);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти редкий');
+
+  assert.equal(state.bot_sessions['100'].pendingAction, 'part_pick');
+  assert.deepEqual(state.bot_sessions['100'].lastPartSearch.map((item) => item.id), ['P-12']);
+  assert.match(messages.at(-1).text, /Редкий гидрофильтр/);
+  assert.ok(!keyboardTexts(lastKeyboard(messages)).includes('Следующие 10'));
+});
+
+test('mechanic parts search works by name', async () => {
+  const { messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Фильтр масляный', article: 'F-100' }),
+    makePart(2, { name: 'Джойстик управления', article: 'J-200' }),
+  ]);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти масляный');
+
+  assert.match(messages.at(-1).text, /Фильтр масляный/);
+  assert.doesNotMatch(messages.at(-1).text, /Джойстик управления/);
+});
+
+test('mechanic parts search works by article with punctuation-insensitive query', async () => {
+  const { messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Плата контроллера', article: 'ZX-999' }),
+    makePart(2, { name: 'Колесо ведущее', article: 'W-200' }),
+  ]);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти zx999');
+
+  assert.match(messages.at(-1).text, /Плата контроллера/);
+  assert.match(messages.at(-1).text, /ZX-999/);
+  assert.doesNotMatch(messages.at(-1).text, /Колесо ведущее/);
+});
+
+test('mechanic sees part without category when it has a name', async () => {
+  const { messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Реле стартера', article: 'REL-1', category: '' }),
+  ]);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти реле');
+
+  assert.match(messages.at(-1).text, /Реле стартера/);
+});
+
+test('new spare part appears in bot without restart', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Старый фильтр', article: 'OLD-1' }),
+  ]);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти новый');
+  assert.match(messages.at(-1).text, /По вашему запросу запчасти не найдены/);
+
+  state.spare_parts.push(makePart(2, { name: 'Новый датчик наклона', article: 'NEW-2' }));
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти new-2');
+
+  assert.match(messages.at(-1).text, /Новый датчик наклона/);
+});
+
+test('mechanic can add selected spare part to service ticket', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200 }),
+  ]);
 
   await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти фильтр');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:choose:P-1', { callbackId: 'cb-1' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'qty:part:2', { callbackId: 'cb-2' });
+
+  assert.equal(state.repair_part_items.length, 1);
+  assert.equal(state.repair_part_items[0].repairId, 'S-1');
+  assert.equal(state.repair_part_items[0].partId, 'P-1');
+  assert.equal(state.repair_part_items[0].quantity, 2);
+  assert.match(messages.at(-1).text, /Добавлена запчасть: Фильтр масляный × 2/);
+});
+
+test('mechanic parts menu explains empty catalog', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([]);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти');
+
+  assert.equal(state.bot_sessions['100'].lastPartSearch.length, 0);
+  assert.match(messages.at(-1).text, /Запчасти не найдены. Проверьте справочник запчастей в системе/);
+});
+
+test('mechanic parts search with several similar matches asks to choose', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Фильтр масляный', article: 'F-100' }),
+    makePart(2, { name: 'Фильтр воздушный', article: 'F-200' }),
+    makePart(3, { name: 'Колесо ведущее', article: 'W-300' }),
+  ]);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти фильтр');
+
+  assert.equal(state.bot_sessions['100'].pendingAction, 'part_pick');
+  assert.deepEqual(state.bot_sessions['100'].lastPartSearch.map((item) => item.id), ['P-1', 'P-2']);
   assert.match(messages.at(-1).text, /Фильтр масляный/);
-  assert.equal(state.bot_sessions['100'].pendingAction, 'part_pick');
-
-  await handlers.handleCommand({ user_id: 100 }, '100', 'джойстик');
-
-  assert.equal(state.bot_sessions['100'].pendingAction, 'part_pick');
-  assert.match(messages.at(-1).text, /Джойстик управления/);
-  assert.doesNotMatch(messages.at(-1).text, /Количество запчасти/);
+  assert.match(messages.at(-1).text, /Фильтр воздушный/);
+  assert.doesNotMatch(messages.at(-1).text, /Колесо ведущее/);
+  const texts = keyboardTexts(lastKeyboard(messages));
+  assert.ok(texts.includes('1. Фильтр масляный'));
+  assert.ok(texts.includes('2. Фильтр воздушный'));
 });
 
 test('delivery menu shows image and status buttons for carrier', async () => {

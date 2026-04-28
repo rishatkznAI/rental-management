@@ -13,6 +13,7 @@ function createBotFormatters(deps) {
     MAINTENANCE_REASON_LABELS,
     REPAIR_CLOSE_CHECKLIST_ORDER,
   } = deps;
+  const PART_SEARCH_PAGE_SIZE = 10;
 
   function createEmptyRepairPhotos() {
     return {
@@ -56,16 +57,29 @@ function createBotFormatters(deps) {
   }
 
   function normalizeBotText(value) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || '')
+      .normalize('NFKC')
+      .trim()
+      .toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/[‐‑‒–—−]/g, '-')
+      .replace(/\s+/g, ' ');
+  }
+
+  function compactBotText(value) {
+    return normalizeBotText(value).replace(/[^\p{L}\p{N}]+/gu, '');
   }
 
   function botSearchMatches(haystack, query) {
     const text = normalizeBotText(haystack);
     const normalizedQuery = normalizeBotText(query);
     if (!normalizedQuery) return true;
-    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    const compactText = compactBotText(haystack);
+    const tokens = normalizedQuery.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
     return tokens.every(token => {
+      const compactToken = compactBotText(token);
       if (text.includes(token)) return true;
+      if (compactToken && compactText.includes(compactToken)) return true;
       if (token.length >= 5 && text.includes(token.slice(0, -1))) return true;
       if (token.length >= 6 && text.includes(token.slice(0, -2))) return true;
       return false;
@@ -314,15 +328,55 @@ function createBotFormatters(deps) {
     }).slice(0, 7);
   }
 
+  function getAvailableSpareParts() {
+    const seen = new Set();
+    return (readData('spare_parts') || [])
+      .filter(item => item && item.isActive !== false && item.active !== false && item.enabled !== false)
+      .filter(item => String(item.id || '').trim() && String(item.name || '').trim())
+      .filter(item => {
+        const id = String(item.id).trim();
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+  }
+
+  function buildSparePartSearchText(item) {
+    return [
+      item.name,
+      item.article,
+      item.sku,
+      item.category,
+      item.manufacturer,
+    ].filter(Boolean).join(' ');
+  }
+
   function searchSpareParts(query) {
-    const parts = (readData('spare_parts') || []).filter(item => item.isActive !== false);
-    if (!normalizeBotText(query)) return parts.slice(0, 7);
-    return parts.filter(item =>
-      botSearchMatches(item.name, query) ||
-      botSearchMatches(item.article, query) ||
-      botSearchMatches(item.category, query) ||
-      botSearchMatches(item.manufacturer, query)
-    ).slice(0, 7);
+    const parts = getAvailableSpareParts();
+    if (!normalizeBotText(query)) return parts;
+    return parts.filter(item => botSearchMatches(buildSparePartSearchText(item), query));
+  }
+
+  function getSparePartSearchPage(query = '', page = 0, pageSize = PART_SEARCH_PAGE_SIZE) {
+    const matches = searchSpareParts(query);
+    const safePageSize = Math.max(1, Number(pageSize) || PART_SEARCH_PAGE_SIZE);
+    const totalPages = Math.max(1, Math.ceil(matches.length / safePageSize));
+    const requestedPage = Math.max(0, Number(page) || 0);
+    const safePage = Math.min(requestedPage, totalPages - 1);
+    const start = safePage * safePageSize;
+    const items = matches.slice(start, start + safePageSize);
+    return {
+      query: String(query || '').trim(),
+      page: safePage,
+      pageSize: safePageSize,
+      total: matches.length,
+      totalPages,
+      start,
+      end: start + items.length,
+      hasPrev: safePage > 0,
+      hasNext: start + items.length < matches.length,
+      items,
+    };
   }
 
   function searchEquipmentForBot(query) {
@@ -468,13 +522,27 @@ function createBotFormatters(deps) {
     ]);
   }
 
-  function partSearchKeyboard(matches) {
-    if (!matches.length) return null;
-    const buttons = matches.slice(0, 6).map((item, index) =>
-      button(`${index + 1}. ${item.name}`, `part:choose:${item.id}`),
+  function partSearchKeyboard(pageInfoOrMatches) {
+    const pageInfo = Array.isArray(pageInfoOrMatches)
+      ? {
+          items: pageInfoOrMatches,
+          start: 0,
+          page: 0,
+          hasPrev: false,
+          hasNext: false,
+        }
+      : pageInfoOrMatches;
+    const items = Array.isArray(pageInfo?.items) ? pageInfo.items : [];
+    if (!items.length) return null;
+    const buttons = items.map((item, index) =>
+      button(`${pageInfo.start + index + 1}. ${item.name}`, `part:choose:${item.id}`),
     );
+    const navigation = [];
+    if (pageInfo.hasPrev) navigation.push(button('Предыдущие 10', `part:page:${Math.max(0, pageInfo.page - 1)}`));
+    if (pageInfo.hasNext) navigation.push(button('Следующие 10', `part:page:${pageInfo.page + 1}`));
     return keyboard([
       ...chunkButtons(buttons, 2),
+      ...(navigation.length ? [navigation] : []),
       [button('Новый поиск запчастей', 'menu:parts')],
       backAndMainRow('menu:draft'),
     ]);
@@ -594,6 +662,7 @@ function createBotFormatters(deps) {
     equipmentActionKeyboard,
     searchServiceWorks,
     searchSpareParts,
+    getSparePartSearchPage,
     searchEquipmentForBot,
     extractPhotoUrlsFromMessage,
     formatRentals,

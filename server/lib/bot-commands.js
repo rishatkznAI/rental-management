@@ -1005,7 +1005,7 @@ function createBotHandlers(deps) {
     serviceTicketsKeyboard,
     equipmentActionKeyboard,
     searchServiceWorks,
-    searchSpareParts,
+    getSparePartSearchPage,
     searchEquipmentForBot,
     extractPhotoUrlsFromMessage,
     formatRentals,
@@ -1580,13 +1580,19 @@ function createBotHandlers(deps) {
 
   async function handlePartSearchRequest(senderId, phone, ticket, query, uiContext = {}) {
     const normalizedQuery = String(query || '').trim();
-    if (!normalizedQuery) {
-      return promptPartSearch(senderId, phone, ticket, uiContext);
-    }
-    const matches = searchSpareParts(normalizedQuery);
-    if (!matches.length) {
-      updateBotSession(phone, { pendingAction: 'part_search', activeRepairId: ticket.id });
-      return reply(senderId, '🔎 По этому запросу активные запчасти не найдены. Напишите другой запрос.', {
+    const pageInfo = getSparePartSearchPage(normalizedQuery, uiContext.page || 0);
+    if (!pageInfo.total) {
+      updateBotSession(phone, {
+        pendingAction: normalizedQuery ? 'part_search' : 'part_pick',
+        activeRepairId: ticket.id,
+        lastPartSearch: [],
+        lastPartSearchStart: 0,
+        lastPartQuery: normalizedQuery,
+      });
+      const text = normalizedQuery
+        ? '🔎 По вашему запросу запчасти не найдены. Попробуйте изменить запрос.'
+        : '📦 Запчасти не найдены. Проверьте справочник запчастей в системе.';
+      return reply(senderId, text, {
         attachments: currentRepairKeyboard(ticket.id),
         mechanicStage: 'parts',
         phone,
@@ -1597,18 +1603,23 @@ function createBotHandlers(deps) {
     }
     updateBotSession(phone, {
       activeRepairId: ticket.id,
-      lastPartSearch: matches.map(item => ({ id: item.id, name: item.name })),
+      lastPartSearch: pageInfo.items.map(item => ({ id: item.id, name: item.name })),
+      lastPartSearchStart: pageInfo.start,
+      lastPartQuery: normalizedQuery,
       pendingAction: 'part_pick',
       pendingPayload: null,
     });
     return reply(senderId, withBotMenu([
-      '📦 Найденные запчасти:',
-      ...matches.map((item, index) => `${index + 1}. ${item.name}${item.article ? ` · ${item.article}` : ''} · ${Number(item.defaultPrice || 0).toLocaleString('ru-RU')} ₽/${item.unit || 'шт'}`),
+      normalizedQuery ? '📦 Найденные запчасти:' : '📦 Запчасти из справочника:',
+      `Показаны ${pageInfo.start + 1}-${pageInfo.end} из ${pageInfo.total}${normalizedQuery ? ` по запросу «${normalizedQuery}»` : ''}.`,
+      '',
+      ...pageInfo.items.map((item, index) => `${pageInfo.start + index + 1}. ${item.name}${item.article ? ` · ${item.article}` : item.sku ? ` · ${item.sku}` : ''} · ${Number(item.defaultPrice || 0).toLocaleString('ru-RU')} ₽/${item.unit || 'шт'}`),
       '',
       'Нажмите кнопку с запчастью ниже и выберите количество. По кнопке возьмётся базовая цена.',
+      'Для поиска просто напишите название, артикул, категорию или производителя.',
       'Если нужна своя цена, после выбора нажмите «Ввести руками».',
-    ].join('\n'), ['новый поиск запчастей', 'черновик', 'отмена: /сброс']), {
-      attachments: partSearchKeyboard(matches),
+    ].join('\n'), ['фильтр', 'колесо', 'черновик', 'отмена: /сброс']), {
+      attachments: partSearchKeyboard(pageInfo),
       mechanicStage: 'parts',
       phone,
       callbackContext: uiContext.callbackContext,
@@ -1662,15 +1673,30 @@ function createBotHandlers(deps) {
     }
     let part = null;
     if (selectedPartId) {
-      part = (readData('spare_parts') || []).find(item => item.id === selectedPartId && item.isActive !== false);
+      part = (readData('spare_parts') || []).find(item =>
+        item.id === selectedPartId &&
+        item.isActive !== false &&
+        item.active !== false &&
+        item.enabled !== false &&
+        String(item.name || '').trim(),
+      );
     } else {
       const index = Number(firstRaw);
       const lastPartSearch = Array.isArray(session.lastPartSearch) ? session.lastPartSearch : [];
-      if (!Number.isInteger(index) || index <= 0 || index > lastPartSearch.length) {
+      const searchStart = Math.max(0, Number(session.lastPartSearchStart) || 0);
+      const localIndex = index - 1;
+      const absoluteIndex = index - searchStart - 1;
+      const selected = lastPartSearch[localIndex] || lastPartSearch[absoluteIndex] || null;
+      if (!Number.isInteger(index) || index <= 0 || !selected) {
         return reply(senderId, '❌ Номер запчасти указан неверно. Сначала выполните поиск запчастей.');
       }
-      const selected = lastPartSearch[index - 1];
-      part = (readData('spare_parts') || []).find(item => item.id === selected.id && item.isActive !== false);
+      part = (readData('spare_parts') || []).find(item =>
+        item.id === selected.id &&
+        item.isActive !== false &&
+        item.active !== false &&
+        item.enabled !== false &&
+        String(item.name || '').trim(),
+      );
     }
     if (!part) {
       return reply(senderId, '❌ Запчасть больше недоступна в справочнике. Выполните поиск заново.');
@@ -2823,9 +2849,32 @@ function createBotHandlers(deps) {
       });
     }
 
+    if (normalized.startsWith('part:page:')) {
+      const page = Number(normalized.slice('part:page:'.length));
+      const ticket = getCurrentRepair(phone);
+      if (!ticket) {
+        return reply(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID', {
+          attachments: mechanicKeyboard(),
+          mechanicStage: 'repairs',
+        });
+      }
+      const query = getBotSession(phone).lastPartQuery || '';
+      return handlePartSearchRequest(senderId, phone, ticket, query, {
+        callbackContext,
+        replaceMessage: true,
+        page: Number.isFinite(page) ? page : 0,
+      });
+    }
+
     if (normalized.startsWith('part:choose:')) {
       const partId = normalized.slice('part:choose:'.length);
-      const part = (readData('spare_parts') || []).find(item => item.id === partId && item.isActive !== false);
+      const part = (readData('spare_parts') || []).find(item =>
+        item.id === partId &&
+        item.isActive !== false &&
+        item.active !== false &&
+        item.enabled !== false &&
+        String(item.name || '').trim(),
+      );
       if (!part) {
         return reply(senderId, '❌ Запчасть больше недоступна. Выполните поиск запчастей заново.', {
           attachments: currentRepairKeyboard(getCurrentRepair(phone)?.id || ''),
@@ -3821,9 +3870,6 @@ function createBotHandlers(deps) {
       const query = lower.startsWith('/запчасти')
         ? trimmed.slice('/запчасти'.length).trim()
         : (lower.startsWith('запчасти ') ? trimmed.slice('запчасти'.length).trim() : '');
-      if (!query) {
-        return promptPartSearch(senderId, phone, ticket, uiContext);
-      }
       return handlePartSearchRequest(senderId, phone, ticket, query, uiContext);
     }
 

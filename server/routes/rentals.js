@@ -108,6 +108,7 @@ function registerRentalRoutes(deps) {
     function logRentalResolutionFailure(req, resolution, rawMeta) {
       if (resolution.status !== 404 && resolution.status !== 409) return;
       const details = resolution.details || {};
+      const debug = buildRentalResolutionDebug(req, resolution, rawMeta);
       console.warn('[rental-approval] rental resolver failed', JSON.stringify({
         route: `${req.method} ${req.originalUrl || req.url}`,
         paramsId: req.params.id,
@@ -123,7 +124,52 @@ function registerRentalRoutes(deps) {
         rentalCandidateIds: details.rentalCandidateIds || [],
         ganttCandidateIds: details.ganttCandidateIds || [],
         fallbackCandidateIds: details.fallbackCandidateIds || [],
+        possibleReason: debug.possibleReason,
+        frontendAction: debug.frontendAction,
       }));
+    }
+
+    function buildRentalResolutionDebug(req, resolution, rawMeta) {
+      const details = resolution.details || {};
+      const receivedId = String(req.params.id || '');
+      const receivedRentalId = String(rawMeta.rentalId || rawMeta.sourceRentalId || '');
+      const receivedGanttRentalId = String(rawMeta.linkedGanttRentalId || rawMeta.ganttRentalId || '');
+      const frontendAction = String(rawMeta.actionType || rawMeta.entityType || '').trim();
+      const idLooksLikeGantt = /^GR-/i.test(receivedId);
+      let possibleReason = 'Аренда не найдена по переданным идентификаторам.';
+      let recommendation = 'Снимите Network body этого PATCH-запроса и проверьте production DB через /api/admin/rental-link-diagnostics?id=' + encodeURIComponent(receivedId);
+
+      if (idLooksLikeGantt && !receivedRentalId && !receivedGanttRentalId && (details.foundGanttById ?? 0) === 0) {
+        possibleReason = 'Frontend отправил только GR-id, которого нет в production gantt_rentals. Возможен старый frontend build, stale state/cache или временный клиентский GR-id.';
+        recommendation = 'Очистите frontend cache/localStorage/sessionStorage, проверьте commit frontend и найдите источник GR-id в Network initiator.';
+      } else if (idLooksLikeGantt && (details.foundGanttById ?? 0) === 0) {
+        possibleReason = 'GR-id из URL не найден в production gantt_rentals.';
+        recommendation = 'Проверьте, существует ли этот GR-id в рабочей DB и совпадает ли frontend с backend deployment.';
+      } else if ((details.foundGanttById ?? 0) > 0 && Array.isArray(details.linkedIds) && details.linkedIds.length === 0) {
+        possibleReason = 'gantt_rentals найден, но у него нет rentalId/sourceRentalId/originalRentalId.';
+        recommendation = 'Запустите backfill и проверьте fallback-кандидаты. Если кандидатов несколько, исправьте связь вручную.';
+      } else if (Array.isArray(details.linkedIds) && details.linkedIds.length > 0 && (details.foundRentalById ?? 0) === 0) {
+        possibleReason = 'gantt_rentals содержит связь, но связанная rentals.id отсутствует.';
+        recommendation = 'Проверьте целостность rentals/gantt_rentals и восстановите исходную карточку аренды или связь.';
+      } else if ((details.fallbackCandidateCount ?? 0) > 1) {
+        possibleReason = 'Fallback нашёл несколько похожих аренд, backend не может безопасно выбрать одну.';
+        recommendation = 'Проставьте точный rentalId в gantt_rentals или отправьте rentalId из frontend.';
+      }
+
+      return {
+        receivedId,
+        receivedRentalId,
+        receivedGanttRentalId,
+        receivedSourceRentalId: String(rawMeta.sourceRentalId || ''),
+        receivedGanttSnapshotId: String(rawMeta.ganttSnapshot?.id || ''),
+        hasGanttSnapshot: Boolean(rawMeta.ganttSnapshot),
+        searchedCollections: details.searchedCollections || [],
+        possibleReason,
+        frontendAction,
+        bodyKeys: Object.keys(req.body || {}).sort(),
+        requestRoute: `${req.method} ${req.originalUrl || req.url}`,
+        recommendation,
+      };
     }
 
     function createApprovalRequests(previousRental, changes, meta, req) {
@@ -242,16 +288,21 @@ function registerRentalRoutes(deps) {
         const resolution = resolveRentalForChangeRequest({
           rentalId: rawMeta.rentalId || rawMeta.sourceRentalId || req.params.id,
           linkedGanttRentalId,
+          fallbackGanttRental: rawMeta.ganttSnapshot,
           rentals: data,
           ganttRentals: readData('gantt_rentals') || [],
           context: `${req.method} ${req.originalUrl || req.url}`,
         });
         if (!resolution.ok) {
+          const debug = buildRentalResolutionDebug(req, resolution, rawMeta);
           logRentalResolutionFailure(req, resolution, rawMeta);
           return res.status(resolution.status).json({
             ok: false,
             error: resolution.error,
-            details: resolution.details,
+            details: {
+              ...resolution.details,
+              ...debug,
+            },
           });
         }
         idx = resolution.rentalIndex;

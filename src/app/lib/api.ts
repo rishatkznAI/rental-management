@@ -12,7 +12,7 @@
 
 export const AUTH_TOKEN_KEY = 'app_auth_token';
 
-const BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
+export const API_BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 let authToken: string | null = null;
 
 export function getToken(): string | null {
@@ -51,7 +51,7 @@ async function request<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers,
     credentials: 'include',

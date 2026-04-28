@@ -6,6 +6,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { AppLoadingState } from './components/ui/AppLoadingState';
+import { BuildDebugBadge } from './components/ui/BuildDebugBadge';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,6 +35,7 @@ export default function App() {
                 />
               }
             />
+            <BuildDebugBadge />
             <Toaster position="top-right" />
           </ThemeProvider>
         </AuthProvider>

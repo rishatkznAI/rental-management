@@ -93,6 +93,11 @@ function matchesClassicRentalForGantt(ganttRental: GanttRentalData, rental: Rent
   return Array.isArray(rental.equipment) && rental.equipment.includes(ganttRental.equipmentInv);
 }
 
+function dateRangesOverlap(startA: string, endA: string, startB: string, endB: string): boolean {
+  if (!startA || !endA || !startB || !endB) return false;
+  return startA <= endB && startB <= endA;
+}
+
 const TYPE_LABELS: Record<string, string> = {
   scissor: 'Ножничный',
   articulated: 'Коленчатый',
@@ -360,7 +365,7 @@ export default function Rentals() {
   const canEditRentals = can('edit', 'rentals');
   const canDeleteRentals = can('delete', 'rentals');
   const canCreatePayments = can('create', 'payments');
-  const canEditRentalDates = isAdminRole || user?.role === 'Офис-менеджер';
+  const canEditRentalDates = canEditRentals;
   const canRestoreRentals = isAdminRole;
   const today = useMemo(() => startOfDay(new Date()), []);
   const todayStr = format(today, 'yyyy-MM-dd');
@@ -538,9 +543,21 @@ export default function Rentals() {
     reason: string,
   ): Promise<boolean> => {
     try {
-      const classicRentals = await rentalsService.getAll();
-      const linkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(ganttRental, item));
-      const sourceRentalId = getGanttRentalSourceId(ganttRental);
+      const [classicRentals, freshGanttRentals] = await Promise.all([
+        rentalsService.getAll(),
+        rentalsService.getGanttData().catch(() => [] as GanttRentalData[]),
+      ]);
+      const currentGanttRental =
+        freshGanttRentals.find(item => item.id === ganttRental.id) ||
+        freshGanttRentals.find(item =>
+          item.equipmentInv === ganttRental.equipmentInv &&
+          item.startDate === ganttRental.startDate &&
+          item.endDate === ganttRental.endDate &&
+          (item.clientId && ganttRental.clientId ? item.clientId === ganttRental.clientId : item.client === ganttRental.client)
+        ) ||
+        ganttRental;
+      const linkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(currentGanttRental, item));
+      const sourceRentalId = getGanttRentalSourceId(currentGanttRental);
       if (!sourceRentalId && linkedRentals.length > 1) {
         showToast(
           'Найдено несколько похожих карточек аренды, откройте карточку аренды',
@@ -549,23 +566,24 @@ export default function Rentals() {
         return false;
       }
       const resolvedRentalId = sourceRentalId || linkedRentals[0]?.id || '';
-      const targetRentalId = resolvedRentalId || ganttRental.id;
+      const targetRentalId = resolvedRentalId || currentGanttRental.id;
       const previousRental = linkedRentals.find(item => item.id === resolvedRentalId) || linkedRentals[0] || null;
       const oldValues = Object.fromEntries(Object.keys(patch).map(field => {
         if (previousRental && field in previousRental) return [field, previousRental[field as keyof Rental]];
-        if (field === 'plannedReturnDate') return [field, ganttRental.endDate];
-        if (field === 'startDate') return [field, ganttRental.startDate];
-        if (field === 'price') return [field, ganttRental.amount];
-        if (field === 'clientId') return [field, ganttRental.clientId || ''];
-        if (field === 'client') return [field, ganttRental.client];
-        if (field === 'manager') return [field, ganttRental.manager];
+        if (field === 'plannedReturnDate') return [field, currentGanttRental.endDate];
+        if (field === 'startDate') return [field, currentGanttRental.startDate];
+        if (field === 'price') return [field, currentGanttRental.amount];
+        if (field === 'clientId') return [field, currentGanttRental.clientId || ''];
+        if (field === 'client') return [field, currentGanttRental.client];
+        if (field === 'manager') return [field, currentGanttRental.manager];
         return [field, undefined];
       }));
 
       const saved = await rentalsService.update(targetRentalId, {
         ...patch,
         rentalId: resolvedRentalId,
-        ganttRentalId: ganttRental.id,
+        ganttRentalId: currentGanttRental.id,
+        ganttSnapshot: currentGanttRental,
         entityType: 'rental',
         actionType: 'gantt_rental_update',
         oldValues,
@@ -576,9 +594,10 @@ export default function Rentals() {
           newValue: patch[field as keyof Rental],
         })),
         __rentalId: resolvedRentalId,
-        __linkedGanttRentalId: ganttRental.id,
-        __ganttRentalId: ganttRental.id,
-        __sourceRentalId: ganttRental.id,
+        __linkedGanttRentalId: currentGanttRental.id,
+        __ganttRentalId: currentGanttRental.id,
+        __sourceRentalId: currentGanttRental.id,
+        __ganttSnapshot: currentGanttRental,
         __changeReason: reason,
       } as Partial<Rental> & Record<string, unknown>);
       const summary = (saved as Rental & {
@@ -1120,6 +1139,7 @@ export default function Rentals() {
   };
 
   const handleOpenDowntime = (equipmentInv?: string) => {
+    if (!canEditRentals) return;
     setPreselectedEquipmentInv(equipmentInv || '');
     setShowDowntimeModal(true);
   };
@@ -1570,8 +1590,18 @@ export default function Rentals() {
   }, [appendEquipmentHistoryEntry, equipmentList, persistEquipment, showToast]);
 
   // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
-  const handleEarlyReturn = useCallback((rental: GanttRentalData, actualReturnDate: string) => {
+  const handleEarlyReturn = useCallback(async (rental: GanttRentalData, actualReturnDate: string) => {
     if (!canEditRentals || !canEditRentalDates) return;
+    if (!isAdminRole) {
+      const ok = await requestClassicRentalChange(
+        rental,
+        { plannedReturnDate: actualReturnDate },
+        `Досрочный возврат из планировщика: ${rental.endDate} → ${actualReturnDate}`,
+      );
+      if (ok) setSelectedRental(null);
+      return;
+    }
+
     const currentEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
     const updatedRentals = ganttRentals.map(r =>
       r.id === rental.id
@@ -1613,7 +1643,20 @@ export default function Rentals() {
     }
 
     setSelectedRental(null);
-  }, [appendEquipmentHistoryEntry, canEditRentals, canEditRentalDates, ganttRentals, equipmentList, historyAuthor, matchesEquipmentRow, persistEquipment, persistGanttRentals, serviceTickets]);
+  }, [
+    appendEquipmentHistoryEntry,
+    canEditRentals,
+    canEditRentalDates,
+    equipmentList,
+    ganttRentals,
+    historyAuthor,
+    isAdminRole,
+    matchesEquipmentRow,
+    persistEquipment,
+    persistGanttRentals,
+    requestClassicRentalChange,
+    serviceTickets,
+  ]);
 
   // ===== Today line position =====
   const todayOffset = useMemo(() => {
@@ -2649,6 +2692,23 @@ export default function Rentals() {
           onConfirm={async (data) => {
           if (!canEditRentals) return;
           const ganttRentalId = data.ganttRentalId || data.rentalId;
+          const rental = ganttRentals.find(r => r.id === ganttRentalId);
+          if (!rental) {
+            showToast('Не найдена аренда для возврата. Обновите планировщик и повторите действие.', 'error');
+            return;
+          }
+          if (!isAdminRole) {
+            const ok = await requestClassicRentalChange(
+              rental,
+              { actualReturnDate: data.returnDate },
+              `Возврат техники из планировщика: ${rental.endDate} → ${data.returnDate}`,
+            );
+            if (ok) {
+              setShowReturnModal(false);
+              setReturnRental(null);
+            }
+            return;
+          }
           // Обновляем статус аренды на 'returned'
           const updated = ganttRentals.map(r =>
             r.id === ganttRentalId
@@ -2666,7 +2726,6 @@ export default function Rentals() {
           void persistGanttRentals(updated);
 
           // Обновляем статус техники, если нет других активных аренд
-          const rental = ganttRentals.find(r => r.id === ganttRentalId);
           if (rental) {
             const currentEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
             const hasOtherActive = updated.some(
@@ -2759,8 +2818,39 @@ export default function Rentals() {
           open={showDowntimeModal}
           preselectedEquipment={preselectedEquipmentInv}
           onClose={() => setShowDowntimeModal(false)}
-        onConfirm={(data) => {
-          console.log('Downtime created:', data);
+        onConfirm={async (data) => {
+          if (!canEditRentals) return;
+          const affectedRentals = ganttRentals.filter(rental =>
+            rental.equipmentInv === data.equipmentInv &&
+            rental.status !== 'returned' &&
+            rental.status !== 'closed' &&
+            dateRangesOverlap(rental.startDate, rental.endDate, data.startDate, data.endDate)
+          );
+          if (affectedRentals.length !== 1) {
+            showToast(
+              affectedRentals.length > 1
+                ? 'Найдено несколько аренд для простоя. Откройте нужную аренду и повторите действие.'
+                : 'Не найдена аренда для простоя в выбранный период.',
+              'error',
+            );
+            return;
+          }
+
+          if (!isAdminRole) {
+            const downtimeDays = getRentalDays(data.startDate, data.endDate);
+            const ok = await requestClassicRentalChange(
+              affectedRentals[0],
+              {
+                downtimeDays,
+                downtimeReason: data.reason,
+              } as Partial<Rental>,
+              `Простой техники ${data.equipmentInv}: ${data.startDate} → ${data.endDate}. ${data.reason}`,
+            );
+            if (ok) setShowDowntimeModal(false);
+            return;
+          }
+
+          showToast('Простой зафиксирован');
           setShowDowntimeModal(false);
         }}
       />

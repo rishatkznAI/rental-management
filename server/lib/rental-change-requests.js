@@ -211,6 +211,7 @@ function buildRentalResolutionSuccess(match, sourceRentalId, linkedGanttRental) 
 function resolveRentalForChangeRequest({
   rentalId,
   linkedGanttRentalId,
+  fallbackGanttRental,
   rentals = [],
   ganttRentals = [],
   context = '',
@@ -219,7 +220,17 @@ function resolveRentalForChangeRequest({
   const requestedGanttId = normalizeRentalIdentifier(linkedGanttRentalId);
   const searchedIds = uniqueIdentifiers([requestedRentalId, requestedGanttId]);
   const idForDiagnostics = requestedRentalId || requestedGanttId;
-  const directGanttMatches = (ganttRentals || [])
+  const snapshotGanttRental = fallbackGanttRental && typeof fallbackGanttRental === 'object'
+    ? fallbackGanttRental
+    : null;
+  const snapshotMatchesRequestedId = snapshotGanttRental && (
+    sameRentalIdentifier(snapshotGanttRental.id, requestedGanttId) ||
+    sameRentalIdentifier(snapshotGanttRental.id, requestedRentalId)
+  );
+  const resolverGanttRentals = snapshotMatchesRequestedId
+    ? [...(ganttRentals || []), snapshotGanttRental]
+    : (ganttRentals || []);
+  const directGanttMatches = resolverGanttRentals
     .filter(ganttRental =>
       sameRentalIdentifier(ganttRental?.id, requestedGanttId) ||
       sameRentalIdentifier(ganttRental?.id, requestedRentalId),
@@ -259,7 +270,7 @@ function resolveRentalForChangeRequest({
     );
   }
 
-  const ganttCandidates = uniqueRentalMatches((ganttRentals || [])
+  const ganttCandidates = uniqueRentalMatches(resolverGanttRentals
     .map((ganttRental, index) => ({ rental: ganttRental, index }))
     .filter(({ rental: ganttRental }) => {
       const byGanttId =
@@ -277,6 +288,7 @@ function resolveRentalForChangeRequest({
     incomingRentalIdType: typeof rentalId,
     foundRentalById: directMatches.length,
     foundGanttById: directGanttMatches.length,
+    foundGanttSnapshotById: snapshotMatchesRequestedId ? 1 : 0,
     foundGanttByLink: Math.max(0, ganttCandidates.length - directGanttMatches.length),
     ganttCandidateIds: compactResolutionIds(ganttCandidates, match => match.rental?.id),
   };
@@ -369,6 +381,9 @@ function stripRentalPatchMeta(body = {}) {
     ganttRentalId,
     sourceRentalId,
     rentalId,
+    __ganttSnapshot,
+    ganttSnapshot,
+    ganttRentalSnapshot,
     entityType,
     actionType,
     oldValues,
@@ -385,6 +400,9 @@ function stripRentalPatchMeta(body = {}) {
       sourceRentalId: __sourceRentalId || sourceRentalId || '',
       linkedGanttRentalId: __linkedGanttRentalId || __ganttRentalId || linkedGanttRentalId || ganttRentalId || '',
       ganttRentalId: __ganttRentalId || ganttRentalId || linkedGanttRentalId || '',
+      ganttSnapshot: (__ganttSnapshot || ganttSnapshot || ganttRentalSnapshot) && typeof (__ganttSnapshot || ganttSnapshot || ganttRentalSnapshot) === 'object'
+        ? (__ganttSnapshot || ganttSnapshot || ganttRentalSnapshot)
+        : null,
       entityType: entityType || '',
       actionType: actionType || '',
       oldValues: oldValues && typeof oldValues === 'object' ? oldValues : null,
@@ -446,6 +464,23 @@ function compactGanttRentalDiagnostic(ganttRental, extra = {}) {
   };
 }
 
+function compactRentalDiagnostic(rental, extra = {}) {
+  return {
+    id: normalizeRentalIdentifier(rental?.id),
+    client: rental?.client || '',
+    clientId: normalizeRentalIdentifier(rental?.clientId),
+    equipment: Array.isArray(rental?.equipment) ? rental.equipment : [],
+    equipmentId: normalizeRentalIdentifier(rental?.equipmentId),
+    equipmentInv: normalizeRentalIdentifier(rental?.equipmentInv),
+    inventoryNumber: normalizeRentalIdentifier(rental?.inventoryNumber),
+    startDate: rental?.startDate || '',
+    plannedReturnDate: rental?.plannedReturnDate || '',
+    endDate: rental?.endDate || '',
+    status: rental?.status || '',
+    ...extra,
+  };
+}
+
 function analyzeGanttRentalLinks({ rentals = [], ganttRentals = [], targetId = '', limit = 50 } = {}) {
   const rentalIds = new Set((rentals || []).map(item => normalizeRentalIdentifier(item?.id)).filter(Boolean));
   const safeLimit = Math.max(1, Number(limit) || 50);
@@ -467,6 +502,12 @@ function analyzeGanttRentalLinks({ rentals = [], ganttRentals = [], targetId = '
       foundInRentals: false,
       foundInGanttRentals: false,
       foundInGanttLinks: false,
+      linkedIds: [],
+      linkedRentalId: '',
+      exactRentalRecord: null,
+      exactGanttRecord: null,
+      linkedRentals: [],
+      fallbackCandidates: [],
       rentals: [],
       ganttRentals: [],
     } : null,
@@ -476,8 +517,9 @@ function analyzeGanttRentalLinks({ rentals = [], ganttRentals = [], targetId = '
     result.target.rentals = (rentals || [])
       .filter(item => sameRentalIdentifier(item?.id, target))
       .slice(0, safeLimit)
-      .map(item => ({ id: normalizeRentalIdentifier(item?.id), client: item?.client || '', startDate: item?.startDate || '', plannedReturnDate: item?.plannedReturnDate || '' }));
+      .map(item => compactRentalDiagnostic(item));
     result.target.foundInRentals = result.target.rentals.length > 0;
+    result.target.exactRentalRecord = result.target.rentals[0] || null;
   }
 
   for (const ganttRental of (ganttRentals || [])) {
@@ -518,6 +560,32 @@ function analyzeGanttRentalLinks({ rentals = [], ganttRentals = [], targetId = '
       if (isTargetGantt) result.target.foundInGanttRentals = true;
       if (isTargetLink) result.target.foundInGanttLinks = true;
     }
+  }
+
+  if (target) {
+    const exactGanttRecords = (ganttRentals || [])
+      .filter(ganttRental => sameRentalIdentifier(ganttRental?.id, target));
+    const targetLinkedIds = uniqueIdentifiers(exactGanttRecords.flatMap(ganttRental => rentalLinkIdsFromGantt(ganttRental)));
+    const linkedRentals = (rentals || [])
+      .filter(rental => targetLinkedIds.some(id => sameRentalIdentifier(id, rental?.id)))
+      .slice(0, safeLimit);
+    const fallbackCandidates = uniqueRentalMatches(exactGanttRecords.flatMap(ganttRental =>
+      (rentals || [])
+        .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
+        .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental)),
+    ));
+
+    result.target.linkedIds = targetLinkedIds;
+    result.target.linkedRentalId = normalizeRentalIdentifier(linkedRentals[0]?.id);
+    result.target.exactGanttRecord = exactGanttRecords[0]
+      ? compactGanttRentalDiagnostic(exactGanttRecords[0], { linkedIds: targetLinkedIds })
+      : null;
+    result.target.linkedRentals = linkedRentals.map(rental => compactRentalDiagnostic(rental));
+    result.target.fallbackCandidates = fallbackCandidates
+      .slice(0, safeLimit)
+      .map(match => compactRentalDiagnostic(match.rental, {
+        linkedGanttRentalId: normalizeRentalIdentifier(match.linkedGanttRental?.id),
+      }));
   }
 
   return result;
@@ -857,6 +925,7 @@ function applyRentalFieldToGantt(ganttRental, field, value) {
   }
   if (field === 'startDate') return { ...ganttRental, startDate: value };
   if (field === 'plannedReturnDate') return { ...ganttRental, endDate: value };
+  if (field === 'actualReturnDate') return { ...ganttRental, endDate: value || ganttRental.endDate, status: 'returned' };
   if (field === 'manager') return { ...ganttRental, manager: value, managerInitials: managerInitials(value) };
   if (field === 'status') return { ...ganttRental, status: rentalStatusToGanttStatus(value) };
   if (field === 'price') return { ...ganttRental, amount: Number(value) || 0 };

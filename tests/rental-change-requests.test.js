@@ -179,6 +179,26 @@ test('resolveRentalForChangeRequest reports when a GR id is not present in gantt
   assert.deepEqual(result.details.searchedIds, ['GR-missing']);
 });
 
+test('resolveRentalForChangeRequest can recover a virtual GR id from a safe Gantt snapshot', () => {
+  const result = resolveRentalForChangeRequest({
+    rentalId: 'GR-virtual',
+    linkedGanttRentalId: 'GR-virtual',
+    fallbackGanttRental: {
+      id: 'GR-virtual',
+      client: rental.client,
+      startDate: rental.startDate,
+      endDate: rental.plannedReturnDate,
+      equipmentInv: '083',
+    },
+    rentals: [{ ...rental, id: 'R-1' }],
+    ganttRentals: [],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rentalId, 'R-1');
+  assert.equal(result.linkedGanttRentalId, 'GR-virtual');
+});
+
 test('resolveRentalForChangeRequest returns 409 for ambiguous fallback matches', () => {
   const result = resolveRentalForChangeRequest({
     rentalId: 'GR-ambiguous',
@@ -286,6 +306,11 @@ test('analyzeGanttRentalLinks reports missing rentalId, broken links and target 
   assert.equal(diagnostics.target.foundInGanttRentals, true);
   assert.equal(diagnostics.target.foundInRentals, false);
   assert.equal(diagnostics.target.ganttRentals[0].id, 'GR-broken');
+  assert.equal(diagnostics.target.linkedRentalId, '');
+  assert.deepEqual(diagnostics.target.linkedIds, ['R-missing']);
+  assert.equal(diagnostics.target.exactGanttRecord.id, 'GR-broken');
+  assert.deepEqual(diagnostics.target.linkedRentals, []);
+  assert.equal(diagnostics.target.fallbackCandidates[0].id, 'R-linked');
 });
 
 function createApprovalApp() {
@@ -532,6 +557,38 @@ test('PATCH /api/rentals/:id resolves GR route id through gantt_rentals.rentalId
   });
 });
 
+test('PATCH /api/rentals/:id resolves stale GR route id through request Gantt snapshot', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-stale-browser', 'manager-token', {
+      price: 127000,
+      ganttRentalId: 'GR-stale-browser',
+      __ganttSnapshot: {
+        id: 'GR-stale-browser',
+        client: 'ЭМ-СТРОЙ',
+        startDate: '2026-04-10',
+        endDate: '2026-04-20',
+        equipmentInv: '083',
+      },
+      entityType: 'rental',
+      actionType: 'gantt_rental_update',
+      oldValues: { price: 100000 },
+      newValues: { price: 127000 },
+      changes: [{ field: 'price', oldValue: 100000, newValue: 127000 }],
+      __changeReason: 'Изменение цены из stale Gantt',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.id, 'R-1');
+    assert.equal(state.rental_change_requests.length, 1);
+    assert.equal(state.rental_change_requests[0].rentalId, 'R-1');
+    assert.equal(state.rental_change_requests[0].sourceRentalId, 'GR-stale-browser');
+    assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-stale-browser');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').price, 100000);
+  });
+});
+
 test('rentals PATCH returns clear 400 and 404 for bad approval ids', async () => {
   const { app } = createApprovalApp();
 
@@ -549,6 +606,16 @@ test('rentals PATCH returns clear 400 and 404 for bad approval ids', async () =>
     assert.match(unknown.body.error, /R-404/);
     assert.deepEqual(unknown.body.details.searchedCollections.slice(0, 2), ['rentals.id', 'gantt_rentals.id']);
     assert.equal(unknown.body.details.foundGanttById, 0);
+    assert.equal(unknown.body.details.receivedId, 'R-404');
+    assert.equal(unknown.body.details.receivedRentalId, '');
+    assert.match(unknown.body.details.recommendation, /rental-link-diagnostics/);
+
+    const unknownGantt = await request(baseUrl, 'PATCH', '/api/rentals/GR-live-missing', 'manager-token', {
+      price: 120000,
+    });
+    assert.equal(unknownGantt.status, 404);
+    assert.equal(unknownGantt.body.details.receivedId, 'GR-live-missing');
+    assert.match(unknownGantt.body.details.possibleReason, /GR-id/);
   });
 });
 

@@ -75,6 +75,7 @@ const {
 const { createAccessControl } = require('./lib/access-control');
 const { createAuditLogger } = require('./lib/security-audit');
 const { createBotHandlers } = require('./lib/bot-commands');
+const { getBuildInfo } = require('./lib/build-info');
 const { createGprsGateway } = require('./lib/gprs-gateway');
 const { createMaxApiClient } = require('./lib/max-api');
 const { createServiceCore } = require('./lib/service-core');
@@ -429,7 +430,7 @@ const READ_PERMISSIONS = {
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
-  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Перевозчик'],
+  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   delivery_carriers: ['Администратор'],
   service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   warranty_claims: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
@@ -487,6 +488,15 @@ function requireAuth(req, res, next) {
   if ((currentUser.passwordChangedAt || null) !== (session.passwordChangedAt || null)) {
     destroySession(token);
     return res.status(401).json({ ok: false, error: 'Session expired or invalid' });
+  }
+  const currentRole = String(currentUser.role || '').trim().toLowerCase();
+  const isBotOnlyCarrier = (currentRole === 'перевозчик' || currentRole === 'carrier') &&
+    currentUser.botOnly !== false &&
+    currentUser.allowFrontendLogin !== true &&
+    currentUser.frontendAccess !== true;
+  if (isBotOnlyCarrier) {
+    destroySession(token);
+    return res.status(401).json({ ok: false, error: 'Carrier account is available in MAX bot only' });
   }
   req.user = {
     ...session,
@@ -912,6 +922,7 @@ registerDeliveryRoutes(apiRouter, {
   requireWrite,
   sendMessage: deliverySendMessage,
   getBotUsers,
+  saveBotUsers,
   nowIso,
   generateId,
   idPrefixes: ID_PREFIXES,
@@ -1217,6 +1228,7 @@ function recordBotActivity({
 }) {
   const phoneKey = String(phone || '');
   const linkedUser = user || getBotUsers()[phoneKey] || null;
+  const timestamp = nowIso();
 
   appendBotActivity({
     id: generateId('botact'),
@@ -1226,11 +1238,14 @@ function recordBotActivity({
     userId: linkedUser?.userId || null,
     userName: linkedUser?.userName || null,
     userRole: linkedUser?.userRole || null,
+    role: linkedUser?.role || null,
+    carrierId: linkedUser?.carrierId || null,
     email: linkedUser?.email || null,
     eventType,
     action: trimBotAuditText(action),
     details: details ? trimBotAuditText(details, 220) : null,
-    createdAt: nowIso(),
+    timestamp,
+    createdAt: timestamp,
   });
 }
 
@@ -2231,6 +2246,7 @@ registerSystemRoutes(app, {
   auditLog,
   analyzeGanttRentalLinks,
   backfillGanttRentalLinks,
+  getBuildInfo,
 });
 
 startServer({

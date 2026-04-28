@@ -131,7 +131,12 @@ function registerSystemRoutes(app, deps) {
     auditLog,
     analyzeGanttRentalLinks,
     backfillGanttRentalLinks,
+    getBuildInfo,
   } = deps;
+
+  function buildInfo() {
+    return typeof getBuildInfo === 'function' ? getBuildInfo() : null;
+  }
 
   function getSafePublicSettings() {
     const allowedKeys = new Set(
@@ -257,11 +262,15 @@ function registerSystemRoutes(app, deps) {
   });
 
   app.get('/health', (req, res) => {
-    res.json({ ok: true, uptime: Math.round(process.uptime()) });
+    res.json({ ok: true, uptime: Math.round(process.uptime()), build: buildInfo() });
   });
 
   app.get('/', (req, res) => {
-    res.json({ ok: true, service: 'rental-management-api', uptime: Math.round(process.uptime()) });
+    res.json({ ok: true, service: 'rental-management-api', uptime: Math.round(process.uptime()), build: buildInfo() });
+  });
+
+  app.get('/api/version', (_req, res) => {
+    res.json({ ok: true, build: buildInfo() });
   });
 
   app.get('/api/public-settings', (_req, res) => {
@@ -292,6 +301,7 @@ function registerSystemRoutes(app, deps) {
     res.json({
       ok: true,
       uptime: Math.round(process.uptime()),
+      build: buildInfo(),
       sessions: countActiveSessions(),
       storage: {
         driver: 'sqlite',

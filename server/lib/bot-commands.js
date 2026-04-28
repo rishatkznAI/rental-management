@@ -782,6 +782,29 @@ function createBotHandlers(deps) {
     }) || null;
   }
 
+  function ensureCarrierForSystemUser(user) {
+    const existing = findCarrierBySystemUser(user);
+    if (existing) return existing;
+    if (!isCarrierSystemUser(user) || user?.status !== 'Активен') return null;
+
+    const carrierId = String(user.carrierId || user.id || generateId('carrier')).trim();
+    if (!carrierId) return null;
+
+    const carriers = readData('delivery_carriers') || [];
+    const carrier = {
+      id: carrierId,
+      key: carrierId,
+      name: user.name || user.email || 'Перевозчик',
+      phone: user.phone || undefined,
+      notes: user.email ? `Пользователь системы: ${user.email}` : undefined,
+      status: 'active',
+      systemUserId: user.id || null,
+      maxCarrierKey: user.maxUserId ? String(user.maxUserId) : null,
+    };
+    writeData('delivery_carriers', [...carriers, carrier]);
+    return carrier;
+  }
+
   function normalizeMaxUserId(phone) {
     return Number.isFinite(Number(phone)) ? Number(phone) : String(phone || '');
   }
@@ -847,7 +870,7 @@ function createBotHandlers(deps) {
     );
     if (!found) return null;
     if (isCarrierSystemUser(found)) {
-      const carrier = findCarrierBySystemUser(found);
+      const carrier = ensureCarrierForSystemUser(found);
       if (!carrier) return null;
       const linkedCarrier = saveCarrierMaxBinding(carrier, phone, found);
       const botUsers = getBotUsers();

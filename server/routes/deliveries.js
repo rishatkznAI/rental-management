@@ -320,16 +320,14 @@ function registerDeliveryRoutes(router, deps) {
   function listCarrierDirectory() {
     const rawConnections = listRawCarrierConnections();
     const rawByKey = new Map(rawConnections.map((item) => [item.key, item]));
+    const rawBySystemUserId = new Map(rawConnections.map((item) => [item.id, item]));
     const users = readData('users') || [];
-    const carrierUsersById = new Map(
-      users
-        .filter((user) => user?.role === 'Перевозчик')
-        .map((user) => [String(user.id), user]),
-    );
+    const carrierUsers = users.filter((user) => user?.role === 'Перевозчик' && user?.status !== 'Неактивен');
+    const carrierUsersById = new Map(carrierUsers.map((user) => [String(user.id), user]));
     const directory = (readData('delivery_carriers') || []).map(normalizeCarrierRecord);
 
     if (directory.length === 0) {
-      return rawConnections.map((item) => ({
+      const connectionCarriers = rawConnections.map((item) => ({
         id: item.key,
         key: item.key,
         name: item.name,
@@ -344,11 +342,40 @@ function registerDeliveryRoutes(router, deps) {
         chatId: item.chatId ?? null,
         userId: item.userId ?? null,
       }));
+      const existingIds = new Set(connectionCarriers.map((item) => String(item.id)));
+      const userCarriers = carrierUsers
+        .filter((user) => !existingIds.has(String(user.carrierId || user.id)))
+        .map((user) => {
+          const linked = rawBySystemUserId.get(String(user.id));
+          const id = String(user.carrierId || user.id);
+          return {
+            id,
+            key: id,
+            name: user.name || user.email || 'Перевозчик',
+            phone: user.phone,
+            notes: undefined,
+            status: 'active',
+            systemUserId: user.id,
+            systemUserName: user.name || null,
+            systemUserEmail: user.email || null,
+            maxCarrierKey: linked?.key || (user.maxUserId ? String(user.maxUserId) : null),
+            maxUserName: linked?.name || null,
+            email: linked?.email || user.email || undefined,
+            role: linked?.role || user.role,
+            maxConnected: Boolean(linked || user.maxUserId),
+            chatId: linked?.chatId ?? null,
+            userId: linked?.userId ?? null,
+          };
+        });
+      return [...connectionCarriers, ...userCarriers].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
     }
 
-    return directory
+    const directoryCarriers = directory
       .map((item) => {
-        const linked = item.maxCarrierKey ? rawByKey.get(item.maxCarrierKey) : null;
+        const linked = item.maxCarrierKey
+          ? rawByKey.get(item.maxCarrierKey)
+          : rawBySystemUserId.get(String(item.systemUserId || ''));
+        const systemUser = carrierUsersById.get(String(item.systemUserId || ''));
         return {
           id: item.id,
           key: item.id,
@@ -357,11 +384,11 @@ function registerDeliveryRoutes(router, deps) {
           notes: item.notes,
           status: item.status,
           systemUserId: item.systemUserId || null,
-          systemUserName: carrierUsersById.get(String(item.systemUserId || ''))?.name || null,
-          systemUserEmail: carrierUsersById.get(String(item.systemUserId || ''))?.email || null,
-          maxCarrierKey: item.maxCarrierKey || null,
+          systemUserName: systemUser?.name || null,
+          systemUserEmail: systemUser?.email || null,
+          maxCarrierKey: item.maxCarrierKey || linked?.key || null,
           maxUserName: linked?.name || null,
-          email: linked?.email || carrierUsersById.get(String(item.systemUserId || ''))?.email || undefined,
+          email: linked?.email || systemUser?.email || undefined,
           role: linked?.role || undefined,
           maxConnected: Boolean(linked),
           chatId: linked?.chatId ?? null,
@@ -372,6 +399,37 @@ function registerDeliveryRoutes(router, deps) {
         if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
         return a.name.localeCompare(b.name, 'ru');
       });
+    const knownCarrierIds = new Set(directoryCarriers.map((item) => String(item.id)));
+    const knownSystemUserIds = new Set(directoryCarriers.map((item) => String(item.systemUserId || '')).filter(Boolean));
+    const virtualUserCarriers = carrierUsers
+      .filter((user) => !knownSystemUserIds.has(String(user.id)) && !knownCarrierIds.has(String(user.carrierId || user.id)))
+      .map((user) => {
+        const linked = rawBySystemUserId.get(String(user.id));
+        const id = String(user.carrierId || user.id);
+        return {
+          id,
+          key: id,
+          name: user.name || user.email || 'Перевозчик',
+          phone: user.phone,
+          notes: undefined,
+          status: 'active',
+          systemUserId: user.id,
+          systemUserName: user.name || null,
+          systemUserEmail: user.email || null,
+          maxCarrierKey: linked?.key || (user.maxUserId ? String(user.maxUserId) : null),
+          maxUserName: linked?.name || null,
+          email: linked?.email || user.email || undefined,
+          role: linked?.role || user.role,
+          maxConnected: Boolean(linked || user.maxUserId),
+          chatId: linked?.chatId ?? null,
+          userId: linked?.userId ?? null,
+        };
+      });
+
+    return [...directoryCarriers, ...virtualUserCarriers].sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+      return a.name.localeCompare(b.name, 'ru');
+    });
   }
 
   function resolveCarrierSelection(carrierKey) {

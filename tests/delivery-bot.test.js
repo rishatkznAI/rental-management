@@ -731,6 +731,36 @@ test('carrier system user login links MAX user to delivery carrier', async () =>
   assert.match(messages.at(-1).text, /Перевозчик/);
 });
 
+test('carrier system user login creates missing carrier record', async () => {
+  const { state, messages, handlers } = createMemoryBot(true, {
+    verifyPassword: (plain, stored) => plain === stored,
+  });
+  state.bot_users = {};
+  state.delivery_carriers = [];
+  state.users = [{
+    id: 'U-carrier-missing',
+    name: 'Тестовый перевозчик',
+    email: '123@yandex.ru',
+    role: 'Перевозчик',
+    status: 'Активен',
+    password: 'qweqwe',
+  }];
+
+  await handlers.handleCallback({ user_id: 777 }, '777', 'auth:start', { callbackId: 'cb-1' });
+  await handlers.handleCommand({ user_id: 777 }, '777', '123@yandex.ru');
+  await handlers.handleCommand({ user_id: 777 }, '777', 'qweqwe');
+
+  assert.equal(state.bot_users['777'].userRole, 'Перевозчик');
+  assert.equal(state.bot_users['777'].carrierId, 'U-carrier-missing');
+  assert.equal(state.delivery_carriers.length, 1);
+  assert.equal(state.delivery_carriers[0].id, 'U-carrier-missing');
+  assert.equal(state.delivery_carriers[0].systemUserId, 'U-carrier-missing');
+  assert.equal(state.delivery_carriers[0].maxCarrierKey, '777');
+  assert.equal(state.users[0].botOnly, true);
+  assert.equal(state.users[0].carrierId, 'U-carrier-missing');
+  assert.match(messages.at(-1).text, /Перевозчик/);
+});
+
 test('dedicated delivery bot does not reuse an existing mechanic menu', async () => {
   const { state, messages, handlers } = createMemoryBot(true);
   state.delivery_carriers = [];

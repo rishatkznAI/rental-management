@@ -784,7 +784,15 @@ export default function Dashboard() {
         returnsSoon: managerReturnsSoon,
         unsignedDocs: managerUnsignedDocs.length,
       };
-    }).sort((a, b) =>
+    }).filter(row =>
+      row.activeRentals > 0 ||
+      row.monthRentals > 0 ||
+      row.monthRevenue > 0 ||
+      row.currentDebt > 0 ||
+      row.overdueDebt > 0 ||
+      row.returnsSoon > 0 ||
+      row.unsignedDocs > 0
+    ).sort((a, b) =>
       b.activeRentals - a.activeRentals
       || b.monthRevenue - a.monthRevenue
       || b.currentDebt - a.currentDebt

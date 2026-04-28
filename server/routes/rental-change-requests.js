@@ -85,6 +85,7 @@ function registerRentalChangeRequestRoutes(deps) {
       rentals,
       readData('equipment') || [],
       previousRental.id,
+      { skipConflictCheck: true },
     );
     if (!validation.ok) {
       return validation;
@@ -101,6 +102,7 @@ function registerRentalChangeRequestRoutes(deps) {
           ganttRentals,
           readData('equipment') || [],
           nextGanttRental.id,
+          { skipConflictCheck: true },
         );
         if (!ganttValidation.ok) return ganttValidation;
       }

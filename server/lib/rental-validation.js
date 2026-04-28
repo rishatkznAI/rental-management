@@ -90,7 +90,7 @@ function formatConflictError(conflict, collection) {
   return `Техника уже занята в период ${startDate} — ${endDate} (${client})`;
 }
 
-function validateRentalPayload(collection, payload, rentals = [], equipment = [], excludeRentalId = '') {
+function validateRentalPayload(collection, payload, rentals = [], equipment = [], excludeRentalId = '', options = {}) {
   const equipmentList = (equipment || []).map(normalizeEquipmentRecord);
   const equipmentId = payload?.equipmentId;
   const inventoryNumber =
@@ -126,9 +126,11 @@ function validateRentalPayload(collection, payload, rentals = [], equipment = []
     return { ok: false, status: 400, error: 'Дата окончания аренды не может быть раньше даты начала' };
   }
 
-  const conflict = findConflictingRental(collection, payload, rentals, equipmentList, excludeRentalId);
-  if (conflict) {
-    return { ok: false, status: 409, error: formatConflictError(conflict, collection) };
+  if (!options.skipConflictCheck) {
+    const conflict = findConflictingRental(collection, payload, rentals, equipmentList, excludeRentalId);
+    if (conflict) {
+      return { ok: false, status: 409, error: formatConflictError(conflict, collection) };
+    }
   }
 
   return { ok: true };

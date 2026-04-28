@@ -441,6 +441,24 @@ function registerDeliveryRoutes(router, deps) {
     ) || null;
   }
 
+  function shouldSendAfterDeliveryUpdate(previous, next, patch = {}) {
+    const previousCarrierId = resolveDeliveryCarrierId(previous);
+    const nextCarrierId = resolveDeliveryCarrierId(next);
+    if (!nextCarrierId) return false;
+    if (next.status === 'completed' || next.status === 'cancelled') return false;
+
+    const carrierChanged = previousCarrierId !== nextCarrierId;
+    if (next.botSentAt && !carrierChanged) return false;
+
+    const carrierFieldWasSubmitted = Object.prototype.hasOwnProperty.call(patch, 'carrierId') ||
+      Object.prototype.hasOwnProperty.call(patch, 'carrierKey');
+
+    return carrierFieldWasSubmitted ||
+      !previousCarrierId ||
+      carrierChanged ||
+      previous?.botSendError === 'Перевозчик не выбран';
+  }
+
   async function trySendToCarrier(delivery) {
     const selectedCarrierId = resolveDeliveryCarrierId(delivery);
     if (!selectedCarrierId) {
@@ -508,7 +526,9 @@ function registerDeliveryRoutes(router, deps) {
       ? (readData('equipment') || []).find(item => item.id === delivery.equipmentId)
       : null;
     const text = [
-      delivery.type === 'shipping' ? 'Новая заявка на отгрузку' : 'Новая заявка на приёмку',
+      delivery.type === 'shipping'
+        ? 'Появилась новая заявка на отгрузку'
+        : 'Появилась новая заявка на приёмку',
       '',
       formatCarrierDeliveryMessage({ ...delivery, carrierId: carrier.id }, { equipment }),
     ].join('\n');
@@ -673,6 +693,9 @@ function registerDeliveryRoutes(router, deps) {
       }
 
       syncLinkedRentals(delivery, author);
+      if (shouldSendAfterDeliveryUpdate(current, delivery, safeBody)) {
+        delivery = await trySendToCarrier(delivery);
+      }
       deliveries[idx] = delivery;
       writeData('deliveries', deliveries);
       auditLog?.(req, {

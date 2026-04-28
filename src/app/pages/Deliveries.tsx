@@ -583,7 +583,14 @@ export default function Deliveries() {
 
       if (editingDelivery) {
         const updated = await deliveriesService.update(editingDelivery.id, payload);
-        toast.success('Доставка обновлена');
+        const sentToCarrierNow = Boolean(updated.botSentAt) &&
+          updated.botSentAt !== (editingDelivery.botSentAt || null) &&
+          !updated.botSendError;
+        if (sentToCarrierNow) {
+          toast.success('Доставка обновлена и отправлена перевозчику');
+        } else {
+          toast.success('Доставка обновлена');
+        }
         if (updated.botSendError) {
           toast.warning(`MAX: ${updated.botSendError}`);
         }
@@ -620,9 +627,13 @@ export default function Deliveries() {
 
   async function resendToCarrier(delivery: Delivery) {
     try {
-      await deliveriesService.resendToCarrier(delivery.id);
+      const updated = await deliveriesService.resendToCarrier(delivery.id);
       await invalidateDeliveryContext();
-      toast.success('Заявка повторно отправлена перевозчику');
+      if (updated.botSendError) {
+        toast.warning(`MAX: ${updated.botSendError}`);
+      } else {
+        toast.success('Заявка повторно отправлена перевозчику');
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Не удалось отправить перевозчику');
     }

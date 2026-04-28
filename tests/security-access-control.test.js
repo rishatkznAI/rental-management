@@ -86,12 +86,14 @@ test('mechanic sees and mutates only assigned service tickets', () => {
   assert.equal(access.canMutateEntity('service', state.service[1], mechanic), false);
 });
 
-test('carrier delivery scope is tied to carrier id or MAX user id', () => {
+test('carrier delivery scope is tied to carrierId', () => {
   const access = createAccess({});
   const carrier = { userId: 'carrier-1', userName: 'Быстрая доставка', userRole: 'Перевозчик', carrierId: 'carrier-1', phone: '100' };
 
-  assert.equal(access.isCarrierDelivery({ id: 'DL-1', carrierKey: 'carrier-1' }, carrier), true);
+  assert.equal(access.isCarrierDelivery({ id: 'DL-1', carrierId: 'carrier-1' }, carrier), true);
+  assert.equal(access.isCarrierDelivery({ id: 'DL-legacy', carrierKey: 'carrier-1' }, carrier), true);
   assert.equal(access.isCarrierDelivery({ id: 'DL-2', carrierKey: 'carrier-2', carrierUserId: '200' }, carrier), false);
+  assert.equal(access.isCarrierDelivery({ id: 'DL-max-only', carrierUserId: '100' }, carrier), false);
 });
 
 test('non-admin cannot read app_settings or use generic payments mutation', () => {

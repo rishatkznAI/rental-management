@@ -955,6 +955,9 @@ export interface BotConnection {
   userId: string | null;
   userName: string | null;
   userRole: BotConnectionRole | string | null;
+  role?: string | null;
+  carrierId?: string | null;
+  isActive?: boolean;
   email: string | null;
   replyTarget: BotReplyTarget | null;
   connectedAt: string | null;
@@ -973,6 +976,12 @@ export interface BotActivityEntry {
   userId: string | null;
   userName: string | null;
   userRole: string | null;
+  role?: string | null;
+  carrierId?: string | null;
+  deliveryId?: string | null;
+  oldStatus?: string | null;
+  newStatus?: string | null;
+  timestamp?: string | null;
   email: string | null;
   eventType: BotActivityType;
   action: string;
@@ -1028,6 +1037,7 @@ export interface Delivery {
   client: string;
   clientId?: string | null;
   manager: string;
+  carrierId?: string | null;
   carrierKey?: string | null;
   carrierName?: string | null;
   carrierPhone?: string | null;
@@ -1059,6 +1069,9 @@ export interface DeliveryCarrier {
   notes?: string;
   status: ReferenceStatus;
   key: string;
+  systemUserId?: string | null;
+  systemUserName?: string | null;
+  systemUserEmail?: string | null;
   maxCarrierKey?: string | null;
   maxUserName?: string | null;
   email?: string;

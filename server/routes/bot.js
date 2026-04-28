@@ -254,6 +254,7 @@ function pendingActionLabel(action) {
     repair_photo_before: 'Фото до ремонта',
     repair_photo_after: 'Фото после ремонта',
     repair_close_checklist: 'Чек-лист закрытия',
+    carrier_delivery_comment: 'Комментарий перевозчика',
   };
   return map[action] || (action ? trimText(action, 80) : null);
 }
@@ -265,6 +266,9 @@ function byDateDesc(left, right) {
 }
 
 function matchesDeliveryActivity(entry) {
+  if (entry?.role === 'carrier' || entry?.userRole === 'Перевозчик' || entry?.carrierId) {
+    return true;
+  }
   const haystack = [
     entry?.action,
     entry?.details,
@@ -289,6 +293,7 @@ function requireBotAdmin(req, res, next) {
 
 function normalizeBotConnectionRole(value) {
   const role = String(value || '').trim();
+  if (role.toLowerCase() === 'carrier') return 'Перевозчик';
   return BOT_CONNECTION_ROLES.includes(role) ? role : '';
 }
 
@@ -314,12 +319,15 @@ function updateBotConnectionRole(botUsers = {}, botSessions = {}, phone = '', us
   const nextUser = {
     ...current,
     userRole: normalizedRole,
+    role: normalizedRole === 'Перевозчик' ? 'carrier' : undefined,
     botMode: normalizedRole === 'Перевозчик' ? 'delivery' : 'staff',
+    isActive: true,
     lastSeenAt: new Date().toISOString(),
   };
 
   if (normalizedRole !== 'Перевозчик') {
     delete nextUser.carrierId;
+    delete nextUser.role;
   }
 
   nextUsers[phoneKey] = nextUser;
@@ -378,6 +386,9 @@ function buildBotConnections(botId, botUsers = {}, botSessions = {}, activity = 
         userId: user?.userId || null,
         userName: user?.userName || null,
         userRole: user?.userRole || null,
+        role: user?.role || null,
+        carrierId: user?.carrierId || null,
+        isActive: user?.isActive !== false,
         email: user?.email || null,
         replyTarget: user?.replyTarget || null,
         connectedAt: user?.connectedAt || authorization?.createdAt || null,
@@ -404,10 +415,16 @@ function buildBotActivity(botId, botUsers = {}, activity = []) {
         userId: entry.userId || linkedUser.userId || null,
         userName: entry.userName || linkedUser.userName || null,
         userRole: entry.userRole || linkedUser.userRole || null,
+        role: entry.role || linkedUser.role || null,
+        carrierId: entry.carrierId || linkedUser.carrierId || null,
         email: entry.email || linkedUser.email || null,
         eventType: entry.eventType || 'message',
         action: trimText(entry.action || 'Действие без описания'),
         details: entry.details ? trimText(entry.details, 220) : null,
+        deliveryId: entry.deliveryId || null,
+        oldStatus: entry.oldStatus || null,
+        newStatus: entry.newStatus || null,
+        timestamp: entry.timestamp || entry.createdAt || null,
         createdAt: entry.createdAt || null,
       };
     })
@@ -558,7 +575,7 @@ function registerBotApiRoutes(router, deps) {
       getBotUsers() || {},
       getBotSessions() || {},
       req.params.phone,
-      req.body?.userRole,
+      req.body?.userRole || req.body?.role,
     );
     if (!result.ok) {
       return res.status(result.status || 400).json({ ok: false, error: result.error });

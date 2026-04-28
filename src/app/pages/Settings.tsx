@@ -119,6 +119,7 @@ function roleBadgeVariant(role: UserRole): BadgeVariant {
   if (role === 'Администратор') return 'danger';
   if (role === 'Менеджер по продажам') return 'success';
   if (isMechanicRole(role)) return 'warning';
+  if (role === 'Перевозчик') return 'secondary';
   return 'info';
 }
 
@@ -308,6 +309,9 @@ export default function Settings() {
           email: form.email,
           role: form.role,
           status: form.status,
+          ...(form.role === 'Перевозчик'
+            ? { botOnly: true, allowFrontendLogin: false, frontendAccess: false }
+            : {}),
           ...ownerPayload,
           ...(nextPassword ? { password: nextPassword } : {}),
         };
@@ -321,6 +325,9 @@ export default function Settings() {
         role: form.role,
         status: form.status,
         password: form.password,
+        ...(form.role === 'Перевозчик'
+          ? { botOnly: true, allowFrontendLogin: false, frontendAccess: false }
+          : {}),
         ...ownerPayload,
       };
       await setUsers(prev => [...prev, newUser]);
@@ -664,6 +671,12 @@ export default function Settings() {
                   </SelectContent>
                 </Select>
               </Field>
+            )}
+
+            {form.role === 'Перевозчик' && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                Пользователь-перевозчик работает только через MAX-бот. Вход во frontend для этой роли будет закрыт автоматически.
+              </div>
             )}
 
             {/* Статус */}
@@ -3189,13 +3202,17 @@ function DeliveryCarriersReferenceList() {
     queryKey: ['deliveryCarriers'],
     queryFn: deliveryCarriersService.getAll,
   });
+  const { data: users = [] } = useQuery<SystemUser[]>({
+    queryKey: ['users'],
+    queryFn: usersService.getAll,
+  });
   const { data: connections = [] } = useQuery<DeliveryCarrierConnection[]>({
     queryKey: ['deliveryCarrierConnections'],
     queryFn: deliveryCarriersService.getConnections,
   });
   const [carriers, setCarriers] = React.useState<DeliveryCarrier[]>([]);
   const [showOnlyConnected, setShowOnlyConnected] = React.useState(false);
-  const [draft, setDraft] = React.useState({ name: '', company: '', inn: '', phone: '', notes: '', maxCarrierKey: '' });
+  const [draft, setDraft] = React.useState({ name: '', company: '', inn: '', phone: '', notes: '', systemUserId: '', maxCarrierKey: '' });
 
   React.useEffect(() => {
     setCarriers(
@@ -3219,13 +3236,20 @@ function DeliveryCarriersReferenceList() {
       phone: item.phone,
       notes: item.notes,
       status: item.status,
+      systemUserId: item.systemUserId || null,
       maxCarrierKey: item.maxCarrierKey || null,
     } as DeliveryCarrier)));
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['deliveryCarriers'] }),
       queryClient.invalidateQueries({ queryKey: ['delivery-carriers'] }),
+      queryClient.invalidateQueries({ queryKey: ['users'] }),
     ]);
   };
+
+  const carrierUsers = React.useMemo(
+    () => users.filter((user) => user.role === 'Перевозчик' && user.status === 'Активен'),
+    [users],
+  );
 
   const visibleCarriers = React.useMemo(() => {
     if (!showOnlyConnected) return carriers;
@@ -3254,6 +3278,9 @@ function DeliveryCarriersReferenceList() {
           const linkedConnection = carrier.maxCarrierKey
             ? connections.find((item) => item.key === carrier.maxCarrierKey)
             : null;
+          const linkedSystemUser = carrier.systemUserId
+            ? users.find((item) => item.id === carrier.systemUserId)
+            : null;
           const isConnected = Boolean(linkedConnection);
 
           return (
@@ -3269,12 +3296,21 @@ function DeliveryCarriersReferenceList() {
                   )}
                   <div className="flex flex-wrap gap-2">
                     <Badge variant={statusVariant(carrier.status)}>{statusLabel(carrier.status)}</Badge>
+                    <Badge variant={linkedSystemUser ? 'success' : 'warning'}>
+                      {linkedSystemUser ? 'Пользователь привязан' : 'Без пользователя'}
+                    </Badge>
                     <Badge variant={isConnected ? 'success' : 'warning'}>
                       {isConnected ? 'MAX подключён' : 'Без MAX'}
                     </Badge>
                   </div>
                   {carrier.phone && <p className="text-xs text-gray-500">{carrier.phone}</p>}
                   {carrier.notes && <p className="text-xs text-gray-500">{carrier.notes}</p>}
+                  {linkedSystemUser && (
+                    <p className="text-xs text-emerald-600 dark:text-emerald-300">
+                      Пользователь: {linkedSystemUser.name}
+                      {linkedSystemUser.email ? ` · ${linkedSystemUser.email}` : ''}
+                    </p>
+                  )}
                   {linkedConnection && (
                     <p className="text-xs text-blue-600 dark:text-blue-300">
                       Привязка MAX: {linkedConnection.name}
@@ -3283,6 +3319,25 @@ function DeliveryCarriersReferenceList() {
                   )}
                 </div>
                 <div className="w-full max-w-[260px] space-y-2">
+                  <select
+                    value={carrier.systemUserId || '__none__'}
+                    onChange={(e) => {
+                      const value = e.target.value === '__none__' ? null : e.target.value;
+                      void persist(carriers.map((item) =>
+                        item.id === carrier.id
+                          ? { ...item, systemUserId: value }
+                          : item,
+                      ));
+                    }}
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                  >
+                    <option value="__none__">Без пользователя системы</option>
+                    {carrierUsers.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name}{user.email ? ` · ${user.email}` : ''}
+                      </option>
+                    ))}
+                  </select>
                   <select
                     value={carrier.maxCarrierKey || '__none__'}
                     onChange={(e) => {
@@ -3333,6 +3388,18 @@ function DeliveryCarriersReferenceList() {
             <Input placeholder="Телефон" value={draft.phone} onChange={e => setDraft(prev => ({ ...prev, phone: e.target.value }))} />
             <Input placeholder="Примечание" value={draft.notes} onChange={e => setDraft(prev => ({ ...prev, notes: e.target.value }))} />
             <select
+              value={draft.systemUserId || '__none__'}
+              onChange={(e) => setDraft((prev) => ({ ...prev, systemUserId: e.target.value === '__none__' ? '' : e.target.value }))}
+              className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+            >
+              <option value="__none__">Привязать пользователя позже</option>
+              {carrierUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}{user.email ? ` · ${user.email}` : ''}
+                </option>
+              ))}
+            </select>
+            <select
               value={draft.maxCarrierKey || '__none__'}
               onChange={(e) => setDraft((prev) => ({ ...prev, maxCarrierKey: e.target.value === '__none__' ? '' : e.target.value }))}
               className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
@@ -3358,11 +3425,12 @@ function DeliveryCarriersReferenceList() {
                   phone: draft.phone.trim() || undefined,
                   notes: draft.notes.trim() || undefined,
                   status: 'active',
+                  systemUserId: draft.systemUserId || null,
                   maxCarrierKey: draft.maxCarrierKey || null,
                   maxConnected: Boolean(draft.maxCarrierKey && connections.some((entry) => entry.key === draft.maxCarrierKey)),
                 };
                 void persist([...carriers, next]);
-                setDraft({ name: '', company: '', inn: '', phone: '', notes: '', maxCarrierKey: '' });
+                setDraft({ name: '', company: '', inn: '', phone: '', notes: '', systemUserId: '', maxCarrierKey: '' });
               }}
             >
               Добавить

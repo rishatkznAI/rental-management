@@ -500,28 +500,12 @@ function matchesScopedRental(entity, user, readData) {
 function isCarrierDelivery(delivery, user) {
   const carrierKeys = compact([
     user?.carrierId,
-    user?.carrierKey,
-    user?.maxCarrierKey,
-  ]);
-  const userKeys = compact([
-    userId(user),
-    user?.maxId,
-    user?.maxUserId,
-    user?.phone,
   ]);
   const deliveryCarrierKeys = compact([
     delivery?.carrierId,
     delivery?.carrierKey,
-    delivery?.maxCarrierKey,
   ]);
-  const deliveryUserKeys = compact([
-    delivery?.carrierUserId,
-    delivery?.assignedUserId,
-    delivery?.maxId,
-    delivery?.carrierChatId,
-  ]);
-  return carrierKeys.some(left => deliveryCarrierKeys.some(right => sameText(left, right))) ||
-    userKeys.some(left => deliveryUserKeys.some(right => sameText(left, right)));
+  return carrierKeys.some(left => deliveryCarrierKeys.some(right => sameText(left, right)));
 }
 
 function canAccessEntity(collection, entity, user, readData) {

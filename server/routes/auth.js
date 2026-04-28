@@ -72,6 +72,13 @@ function registerAuthRoutes(app, deps) {
     };
   }
 
+  function isBotOnlyCarrierAccount(user) {
+    const role = String(user?.role || '').trim().toLowerCase();
+    const isCarrierRole = role === 'перевозчик' || role === 'carrier';
+    if (!isCarrierRole) return false;
+    return user.botOnly !== false && user.allowFrontendLogin !== true && user.frontendAccess !== true;
+  }
+
   app.post('/api/auth/login', async (req, res) => {
     try {
       const { email, password } = req.body || {};
@@ -96,6 +103,10 @@ function registerAuthRoutes(app, deps) {
 
       if (user.status !== 'Активен') {
         return rejectLogin(req, res, email, 401, { reason: 'inactive_account' });
+      }
+
+      if (isBotOnlyCarrierAccount(user)) {
+        return rejectLogin(req, res, email, 401, { reason: 'carrier_bot_only' });
       }
 
       if (!verifyPassword(password, user.password)) {

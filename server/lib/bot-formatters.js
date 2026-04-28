@@ -610,7 +610,7 @@ function createBotFormatters(deps) {
       ...(isMechanic ? mechanicLines : []),
       ...(isRentalManager ? rentalManagerLines : []),
       ...(isCarrier ? carrierLines : []),
-      ...commonLines,
+      ...(isCarrier ? [] : commonLines),
       '',
       'Полный список команд доступен по кнопке «Помощь».',
     ].join('\n');
@@ -637,7 +637,7 @@ function createBotFormatters(deps) {
       return [
         `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
         '',
-        'Здесь вы видите свои доставки и можете менять их статусы: Принял, Выехал, Доставлено.',
+        'Здесь вы видите свои доставки и можете менять их статусы: Принять доставку, В пути, Выполнено.',
       ].join('\n');
     }
 

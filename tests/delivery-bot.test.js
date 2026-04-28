@@ -8,6 +8,7 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const { createBotHandlers } = require('../server/lib/bot-commands.js');
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { toCarrierDeliveryDto } = require('../server/lib/carrier-delivery-dto.js');
 const {
   BOT_STAGE_IMAGE_VERSION,
   MANAGER_STAGE_IMAGES,
@@ -53,6 +54,7 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     repair_work_items: [],
     repair_part_items: [],
     equipment_operation_sessions: [],
+    bot_activity: [],
   };
   const messages = [];
   const readData = (name) => state[name] ?? [];
@@ -220,7 +222,7 @@ test('regular bot_started asks for login when user is not authorized', async () 
   assert.equal(menu.payload.buttons[0][1].text, 'Главное меню');
 });
 
-test('regular bot_started asks employee login for an existing carrier session', async () => {
+test('regular bot_started keeps an existing carrier in delivery mode', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users['100'] = {
     userId: 'carrier-1',
@@ -234,9 +236,9 @@ test('regular bot_started asks employee login for an existing carrier session', 
   await handlers.handleBotStarted({ user_id: 100 }, '100');
 
   assert.equal(state.bot_users['100'].userRole, 'Перевозчик');
-  assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
-  assert.match(messages.at(-1).text, /основной бот/i);
-  assert.match(messages.at(-1).text, /Напишите логин/);
+  assert.equal(state.bot_sessions['100'].pendingAction, null);
+  assert.match(messages.at(-1).text, /Перевозчик/);
+  assert.match(messages.at(-1).text, /доставки/);
 });
 
 test('shared bot delivery command asks for login when user is not authorized', async () => {
@@ -275,7 +277,7 @@ test('start command returns menu for an authorized manager', async () => {
   assert.equal(menu.payload.buttons[1][1].text, 'Новая доставка');
 });
 
-test('regular start asks employee login for an authorized carrier session', async () => {
+test('regular start returns delivery menu for an authorized carrier session', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users['100'] = {
     userId: 'carrier-1',
@@ -287,9 +289,9 @@ test('regular start asks employee login for an authorized carrier session', asyn
 
   await handlers.handleCommand({ user_id: 100 }, '100', '/start');
 
-  assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
-  assert.match(messages.at(-1).text, /Основной бот/);
-  assert.match(messages.at(-1).text, /Напишите логин/);
+  assert.equal(state.bot_sessions['100'].pendingAction, null);
+  assert.match(messages.at(-1).text, /Перевозчик/);
+  assert.match(messages.at(-1).text, /доставки/);
 });
 
 test('dedicated delivery start returns menu for an authorized carrier', async () => {
@@ -481,6 +483,28 @@ test('admin bot role switch updates bot mode and clears active flow', () => {
   assert.equal(result.botSessions['100'], undefined);
 });
 
+test('admin bot role switch accepts carrier role alias and marks bot-only carrier fields', () => {
+  const result = updateBotConnectionRole(
+    {
+      '100': {
+        userId: 'carrier-1',
+        userName: 'Быстрая доставка',
+        userRole: 'Менеджер по аренде',
+        botMode: 'staff',
+      },
+    },
+    {},
+    '100',
+    'carrier',
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.botUsers['100'].userRole, 'Перевозчик');
+  assert.equal(result.botUsers['100'].role, 'carrier');
+  assert.equal(result.botUsers['100'].botMode, 'delivery');
+  assert.equal(result.botUsers['100'].isActive, true);
+});
+
 test('admin bot disconnect removes authorization and session', () => {
   const result = disconnectBotConnection(
     {
@@ -670,6 +694,41 @@ test('dedicated delivery bot explains missing MAX carrier link', async () => {
   assert.match(messages.at(-1).text, /не привязан к перевозчику/);
   assert.match(messages[0].options.attachments[0].payload.file, /delivery-stages\/main-menu-optimistic\.jpg$/);
   assert.equal(messages.at(-1).options.attachments[0].type, 'inline_keyboard');
+});
+
+test('carrier system user login links MAX user to delivery carrier', async () => {
+  const { state, messages, handlers } = createMemoryBot(true, {
+    verifyPassword: (plain, stored) => plain === stored,
+  });
+  state.bot_users = {};
+  state.delivery_carriers = [{
+    id: 'carrier-1',
+    name: 'Быстрая доставка',
+    status: 'active',
+    systemUserId: 'U-carrier',
+  }];
+  state.users = [{
+    id: 'U-carrier',
+    name: 'Водитель перевозчика',
+    email: 'carrier@example.test',
+    role: 'Перевозчик',
+    status: 'Активен',
+    password: 'secret',
+  }];
+
+  await handlers.handleCallback({ user_id: 555 }, '555', 'auth:start', { callbackId: 'cb-1' });
+  await handlers.handleCommand({ user_id: 555 }, '555', 'carrier@example.test');
+  await handlers.handleCommand({ user_id: 555 }, '555', 'secret');
+
+  assert.equal(state.bot_users['555'].userRole, 'Перевозчик');
+  assert.equal(state.bot_users['555'].role, 'carrier');
+  assert.equal(state.bot_users['555'].botMode, 'delivery');
+  assert.equal(state.bot_users['555'].carrierId, 'carrier-1');
+  assert.equal(state.bot_users['555'].userId, 'U-carrier');
+  assert.equal(state.delivery_carriers[0].maxCarrierKey, '555');
+  assert.equal(state.users[0].botOnly, true);
+  assert.equal(state.users[0].carrierId, 'carrier-1');
+  assert.match(messages.at(-1).text, /Перевозчик/);
 });
 
 test('dedicated delivery bot does not reuse an existing mechanic menu', async () => {
@@ -981,7 +1040,7 @@ test('delivery menu shows image and status buttons for carrier', async () => {
   assert.match(messages[1].text, /Мои доставки/);
   assert.deepEqual(messages[1].options.attachments[0].payload.buttons[0][0], {
     type: 'callback',
-    text: 'Принял',
+    text: 'Принять доставку',
     payload: 'delivery:status:DL-1:accepted',
   });
 });
@@ -1032,9 +1091,178 @@ test('delivery menu hides completed deliveries for carrier', async () => {
   assert.doesNotMatch(messages[1].text, /Выполнена/);
   assert.deepEqual(messages[1].options.attachments[0].payload.buttons[0][0], {
     type: 'callback',
-    text: 'Принял',
+    text: 'Принять доставку',
     payload: 'delivery:status:DL-active:accepted',
   });
+});
+
+test('carrier sees only assigned deliveries without client or financial fields', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    role: 'carrier',
+    botMode: 'delivery',
+    isActive: true,
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.deliveries = [
+    {
+      id: 'DL-own',
+      type: 'shipping',
+      status: 'sent',
+      transportDate: '2026-04-25',
+      neededBy: '2026-04-26',
+      origin: 'Склад',
+      destination: 'Точка монтажа',
+      cargo: 'Mantall XE120W',
+      client: 'ООО Секретный клиент',
+      clientName: 'ООО Секретный клиент',
+      clientId: 'C-secret',
+      rentalId: 'R-secret',
+      ganttRentalId: 'GR-secret',
+      cost: 987654321,
+      amount: 7654321,
+      debt: 1234567,
+      margin: 555555,
+      contactName: 'Иван',
+      contactPhone: '+7 900 000-00-00',
+      carrierId: 'carrier-1',
+      carrierKey: 'carrier-1',
+    },
+    {
+      id: 'DL-other',
+      type: 'shipping',
+      status: 'sent',
+      transportDate: '2026-04-25',
+      origin: 'Чужой склад',
+      destination: 'Чужая точка',
+      cargo: 'JLG 1930ES',
+      client: 'ООО Чужой клиент',
+      clientId: 'C-other',
+      contactName: 'Петр',
+      contactPhone: '+7 900 111-11-11',
+      carrierId: 'carrier-2',
+      carrierKey: 'carrier-2',
+    },
+  ];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/доставки');
+
+  const text = messages.at(-1).text;
+  assert.match(text, /Мои доставки \(1\)/);
+  assert.match(text, /Mantall XE120W/);
+  assert.doesNotMatch(text, /JLG 1930ES/);
+  assert.doesNotMatch(text, /Секретный клиент|Чужой клиент|C-secret|R-secret|GR-secret/);
+  assert.doesNotMatch(text, /987654321|7654321|1234567|555555/);
+
+  const dto = toCarrierDeliveryDto(state.deliveries[0]);
+  assert.equal('client' in dto, false);
+  assert.equal('clientName' in dto, false);
+  assert.equal('clientId' in dto, false);
+  assert.equal('rentalId' in dto, false);
+  assert.equal('cost' in dto, false);
+  assert.equal('amount' in dto, false);
+  assert.equal('debt' in dto, false);
+  assert.equal('margin' in dto, false);
+});
+
+test('carrier status callback checks role, carrierId and writes bot activity audit', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    role: 'carrier',
+    botMode: 'delivery',
+    isActive: true,
+    carrierId: 'carrier-1',
+    maxUserId: 100,
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.deliveries = [{
+    id: 'DL-1',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Точка',
+    cargo: 'Mantall XE120W',
+    client: 'ООО Клиент',
+    clientId: 'C-1',
+    contactName: 'Иван',
+    contactPhone: '+7',
+    carrierId: 'carrier-1',
+    carrierKey: 'carrier-1',
+  }];
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'delivery:status:DL-1:accepted');
+
+  assert.equal(state.deliveries[0].status, 'accepted');
+  assert.doesNotMatch(messages.at(-1).text, /ООО Клиент|C-1/);
+  const audit = state.bot_activity.find(item => item.action === 'carrier.delivery_status');
+  assert.ok(audit);
+  assert.equal(audit.carrierId, 'carrier-1');
+  assert.equal(audit.maxUserId, 100);
+  assert.equal(audit.deliveryId, 'DL-1');
+  assert.equal(audit.oldStatus, 'sent');
+  assert.equal(audit.newStatus, 'accepted');
+  assert.equal(audit.timestamp, '2026-04-24T08:00:00.000Z');
+});
+
+test('employee with another role cannot perform carrier delivery callback', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.deliveries = [{
+    id: 'DL-1',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Точка',
+    cargo: 'Mantall XE120W',
+    contactName: 'Иван',
+    contactPhone: '+7',
+    carrierId: 'carrier-1',
+    carrierKey: 'carrier-1',
+  }];
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'delivery:status:DL-1:accepted');
+
+  assert.equal(state.deliveries[0].status, 'sent');
+  assert.equal(messages.at(-1).text, 'Эта доставка вам недоступна или уже закрыта.');
+});
+
+test('carrier without carrierId does not receive deliveries', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'carrier-legacy',
+    userName: 'Без привязки',
+    userRole: 'Перевозчик',
+    role: 'carrier',
+    botMode: 'delivery',
+    isActive: true,
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.deliveries = [{
+    id: 'DL-1',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Точка',
+    cargo: 'Mantall XE120W',
+    contactName: 'Иван',
+    contactPhone: '+7',
+    carrierId: 'carrier-1',
+    carrierKey: 'carrier-1',
+  }];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/доставки');
+
+  assert.match(messages.at(-1).text, /нет активных доставок/);
+  assert.doesNotMatch(messages.at(-1).text, /Mantall XE120W/);
 });
 
 test('MAX callback notification is sent as a string', async () => {
@@ -1369,12 +1597,12 @@ test('carrier cannot update another carrier delivery via callback payload', asyn
     { id: 'carrier-2', name: 'Чужая доставка', status: 'active', maxCarrierKey: '200' },
   ];
   state.deliveries = [
-    { id: 'DL-own', status: 'sent', carrierKey: 'carrier-1', transportDate: '2026-04-25', origin: 'А', destination: 'Б', cargo: 'Подъёмник', client: 'Клиент', contactName: 'Иван', contactPhone: '+7' },
-    { id: 'DL-other', status: 'sent', carrierKey: 'carrier-2', transportDate: '2026-04-25', origin: 'В', destination: 'Г', cargo: 'Подъёмник', client: 'Клиент', contactName: 'Петр', contactPhone: '+7' },
+    { id: 'DL-own', status: 'sent', carrierId: 'carrier-1', carrierKey: 'carrier-1', transportDate: '2026-04-25', origin: 'А', destination: 'Б', cargo: 'Подъёмник', client: 'Клиент', contactName: 'Иван', contactPhone: '+7' },
+    { id: 'DL-other', status: 'sent', carrierId: 'carrier-2', carrierKey: 'carrier-2', transportDate: '2026-04-25', origin: 'В', destination: 'Г', cargo: 'Подъёмник', client: 'Клиент', contactName: 'Петр', contactPhone: '+7' },
   ];
 
   await handlers.handleCallback({ user_id: 100 }, '100', 'delivery:status:DL-other:accepted');
 
   assert.equal(state.deliveries.find(item => item.id === 'DL-other').status, 'sent');
-  assert.match(messages.at(-1).text, /не назначена/i);
+  assert.equal(messages.at(-1).text, 'Эта доставка вам недоступна или уже закрыта.');
 });

@@ -28,7 +28,8 @@ export type UserRole =
   | 'Младший стационарный механик'
   | 'Выездной механик'
   | 'Старший стационарный механик'
-  | 'Офис-менеджер';
+  | 'Офис-менеджер'
+  | 'Перевозчик';
 export type UserStatus = 'Активен' | 'Неактивен';
 
 export interface SystemUser {
@@ -40,6 +41,11 @@ export interface SystemUser {
   profilePhoto?: string;
   ownerId?: string;
   ownerName?: string;
+  carrierId?: string;
+  botOnly?: boolean;
+  allowFrontendLogin?: boolean;
+  frontendAccess?: boolean;
+  maxUserId?: number | string | null;
   /**
    * Пароль хранится как 'h1:<sha256-hex>' после первой миграции.
    * Устаревший plain-text автоматически мигрируется при входе.
@@ -61,6 +67,7 @@ export const ROLES: UserRole[] = [
   'Менеджер по продажам',
   ...MECHANIC_ROLES,
   'Офис-менеджер',
+  'Перевозчик',
 ];
 
 export const RENTAL_MANAGER_ROLES: UserRole[] = [

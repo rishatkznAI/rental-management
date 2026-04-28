@@ -117,6 +117,13 @@ function registerCrudRoutes(deps) {
     } else if (next.password && !String(next.password).startsWith('h1:') && !String(next.password).startsWith('h2:scrypt:')) {
       next.password = hashPassword(String(next.password));
     }
+    const role = String(next.role || '').trim().toLowerCase();
+    if (role === 'перевозчик' || role === 'carrier') {
+      next.role = 'Перевозчик';
+      next.botOnly = true;
+      next.allowFrontendLogin = false;
+      next.frontendAccess = false;
+    }
     return next;
   }
 

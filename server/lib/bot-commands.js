@@ -2,6 +2,17 @@ const { createBotUi } = require('./bot-ui');
 const { createBotFormatters } = require('./bot-formatters');
 const { createBotOperations } = require('./bot-operations');
 const {
+  DELIVERY_STATUS_LABELS,
+  canCarrierAccessDelivery,
+  deliveryTypeLabel: carrierDeliveryTypeLabel,
+  formatCarrierDeliveryList,
+  formatCarrierDeliveryMessage,
+  isCarrierBotUser,
+  isClosedDelivery,
+  resolveBotUserCarrierId,
+  resolveDeliveryCarrierId,
+} = require('./carrier-delivery-dto');
+const {
   attachBotBrandImage,
   attachMechanicStageImage,
   operationStageImageKey,
@@ -372,7 +383,7 @@ function createBotHandlers(deps) {
   }
 
   function deliveryTypeLabel(type) {
-    return type === 'receiving' ? 'Приёмка' : 'Отгрузка';
+    return carrierDeliveryTypeLabel(type);
   }
 
   function getManagerSummaryData(managerName) {
@@ -447,6 +458,7 @@ function createBotHandlers(deps) {
       client: draft.client,
       clientId: null,
       manager: authUser.userName,
+      carrierId: null,
       carrierKey: null,
       carrierName: null,
       carrierPhone: null,
@@ -474,20 +486,11 @@ function createBotHandlers(deps) {
   }
 
   function deliveryStatusLabel(status) {
-    const map = {
-      new: 'Новая',
-      sent: 'Отправлена',
-      accepted: 'Принята',
-      in_transit: 'Выехал',
-      completed: 'Выполнена',
-      cancelled: 'Отменена',
-    };
-    return map[status] || status;
+    return DELIVERY_STATUS_LABELS[status] || status;
   }
 
   function isVisibleCarrierDelivery(delivery) {
-    const status = String(delivery?.status || '').trim().toLowerCase();
-    return status !== 'completed' && status !== 'cancelled';
+    return !isClosedDelivery(delivery);
   }
 
   function deliveryStatusKeyboard(delivery) {
@@ -499,68 +502,117 @@ function createBotHandlers(deps) {
     }
     if (delivery.status === 'accepted') {
       return keyboard([
-        [button('Выехал', `delivery:status:${delivery.id}:in_transit`)],
+        [button('В пути', `delivery:status:${delivery.id}:in_transit`)],
+        [button('Проблема/отмена', `delivery:status:${delivery.id}:cancelled`)],
+        [button('Комментарий/фото', `delivery:comment:${delivery.id}`)],
         [button('Мои доставки', 'menu:deliveries'), button('Главное меню', 'menu:main')],
       ]);
     }
     if (delivery.status === 'in_transit') {
       return keyboard([
-        [button('Доставлено', `delivery:status:${delivery.id}:completed`)],
+        [button('Выполнено', `delivery:status:${delivery.id}:completed`)],
+        [button('Проблема/отмена', `delivery:status:${delivery.id}:cancelled`)],
+        [button('Комментарий/фото', `delivery:comment:${delivery.id}`)],
         [button('Мои доставки', 'menu:deliveries'), button('Главное меню', 'menu:main')],
       ]);
     }
     return keyboard([
-      [button('Принял', `delivery:status:${delivery.id}:accepted`)],
+      [button('Принять доставку', `delivery:status:${delivery.id}:accepted`)],
+      [button('Проблема/отмена', `delivery:status:${delivery.id}:cancelled`)],
+      [button('Комментарий/фото', `delivery:comment:${delivery.id}`)],
       [button('Мои доставки', 'menu:deliveries'), button('Главное меню', 'menu:main')],
     ]);
   }
 
   function formatDeliveryStatusMessage(delivery) {
-    return [
-      delivery.type === 'shipping' ? '🚚 Заявка на отгрузку' : '📥 Заявка на приёмку',
-      `Статус: ${deliveryStatusLabel(delivery.status)}`,
-      `Дата перевозки: ${delivery.transportDate}`,
-      delivery.neededBy ? `Когда нужно: ${delivery.neededBy}` : null,
-      `Маршрут: ${delivery.origin} → ${delivery.destination}`,
-      `Что перевозим: ${delivery.cargo}`,
-      `Клиент: ${delivery.client}`,
-      `Контакт: ${delivery.contactName} · ${delivery.contactPhone}`,
-      delivery.cost > 0 ? `Стоимость: ${delivery.cost.toLocaleString('ru-RU')} ₽` : null,
-      delivery.comment ? `Комментарий: ${delivery.comment}` : null,
-    ].filter(Boolean).join('\n');
+    const equipment = delivery?.equipmentId
+      ? (readData('equipment') || []).find(item => item.id === delivery.equipmentId)
+      : null;
+    return formatCarrierDeliveryMessage(delivery, { equipment });
+  }
+
+  function getCarrierMaxUserId(phone, authUser = null) {
+    return authUser?.maxUserId ??
+      authUser?.replyTarget?.user_id ??
+      (Number.isFinite(Number(phone)) ? Number(phone) : String(phone || ''));
+  }
+
+  function appendCarrierBotActivity({ phone = '', authUser = null, deliveryId = '', action = '', oldStatus = null, newStatus = null }) {
+    const timestamp = nowIso();
+    const activity = readData('bot_activity') || [];
+    const entry = {
+      id: generateId('botact'),
+      botId: 'max',
+      phone: String(phone || '') || null,
+      carrierId: resolveBotUserCarrierId(authUser) || null,
+      maxUserId: getCarrierMaxUserId(phone, authUser),
+      userId: authUser?.userId || null,
+      userName: authUser?.userName || null,
+      userRole: authUser?.userRole || null,
+      deliveryId: deliveryId || null,
+      eventType: 'callback',
+      action,
+      oldStatus,
+      newStatus,
+      timestamp,
+      createdAt: timestamp,
+    };
+    writeData('bot_activity', [...activity, entry].slice(-1000));
+    return entry;
   }
 
   function updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName, phone = '', authUser = null) {
     const deliveries = readData('deliveries') || [];
     const index = deliveries.findIndex(item => item.id === deliveryId);
-    if (index === -1) return null;
+    if (index === -1) return { delivery: null, changed: false, unavailable: true };
     const current = deliveries[index];
-    if (!canBotUserAccessDelivery(current, phone, authUser)) {
-      return { delivery: current, changed: false, invalid: false, forbidden: true };
+    if (!isCarrierBotUser(authUser) || !canCarrierAccessDelivery(current, authUser) || isClosedDelivery(current)) {
+      return { delivery: current, changed: false, unavailable: true };
     }
+    const normalizedNextStatus = String(nextStatus || '').trim();
     const allowedTransitions = {
-      sent: ['accepted'],
-      accepted: ['in_transit'],
-      in_transit: ['completed'],
-      new: ['accepted'],
+      new: ['accepted', 'cancelled'],
+      sent: ['accepted', 'cancelled'],
+      accepted: ['in_transit', 'cancelled'],
+      in_transit: ['completed', 'cancelled'],
     };
     const currentAllowed = allowedTransitions[current.status] || [];
-    if (!currentAllowed.includes(nextStatus) && current.status !== nextStatus) {
-      return { delivery: current, changed: false, invalid: true };
+    if (!currentAllowed.includes(normalizedNextStatus) && current.status !== normalizedNextStatus) {
+      return { delivery: current, changed: false, unavailable: true };
     }
     const timestamp = nowIso();
     const delivery = {
       ...current,
-      status: nextStatus,
+      status: normalizedNextStatus,
       updatedAt: timestamp,
-      completedAt: nextStatus === 'completed' ? (current.completedAt || timestamp) : null,
+      completedAt: normalizedNextStatus === 'completed' ? (current.completedAt || timestamp) : null,
+      cancelledAt: normalizedNextStatus === 'cancelled' ? (current.cancelledAt || timestamp) : current.cancelledAt || null,
+      carrierStatusHistory: [
+        ...(Array.isArray(current.carrierStatusHistory) ? current.carrierStatusHistory : []),
+        {
+          at: timestamp,
+          carrierId: resolveBotUserCarrierId(authUser) || null,
+          maxUserId: getCarrierMaxUserId(phone, authUser),
+          oldStatus: current.status,
+          newStatus: normalizedNextStatus,
+          actorName,
+        },
+      ],
       comment: [
         String(current.comment || '').trim(),
-        `[${new Date().toLocaleString('ru-RU')}] Статус через MAX: ${deliveryStatusLabel(nextStatus)} (${actorName})`,
+        `[${new Date().toLocaleString('ru-RU')}] Статус через MAX: ${deliveryStatusLabel(normalizedNextStatus)} (${actorName})`,
       ].filter(Boolean).join('\n'),
     };
     deliveries[index] = delivery;
     writeData('deliveries', deliveries);
+    appendCarrierBotActivity({
+      phone,
+      authUser,
+      deliveryId: delivery.id,
+      action: 'carrier.delivery_status',
+      oldStatus: current.status,
+      newStatus: delivery.status,
+    });
     auditLog?.(authUser || {}, {
       action: 'deliveries.bot_status_update',
       entityType: 'deliveries',
@@ -569,7 +621,70 @@ function createBotHandlers(deps) {
       after: delivery,
       metadata: { actorName, phone, source: 'max_bot' },
     });
-    return { delivery, changed: current.status !== nextStatus, invalid: false };
+    return { delivery, changed: current.status !== normalizedNextStatus, invalid: false };
+  }
+
+  function addCarrierDeliveryCommentFromBot(deliveryId, messageText, messageMeta = {}, phone = '', authUser = null) {
+    const deliveries = readData('deliveries') || [];
+    const index = deliveries.findIndex(item => item.id === deliveryId);
+    if (index === -1) return { delivery: null, changed: false, unavailable: true };
+    const current = deliveries[index];
+    if (!isCarrierBotUser(authUser) || !canCarrierAccessDelivery(current, authUser) || isClosedDelivery(current)) {
+      return { delivery: current, changed: false, unavailable: true };
+    }
+
+    const text = String(messageText || '').trim();
+    const photoUrls = extractPhotoUrlsFromMessage(messageMeta);
+    if (!text && !photoUrls.length) {
+      return { delivery: current, changed: false, empty: true };
+    }
+
+    const timestamp = nowIso();
+    const actorName = authUser?.userName || 'Перевозчик';
+    const entry = {
+      at: timestamp,
+      carrierId: resolveBotUserCarrierId(authUser) || null,
+      maxUserId: getCarrierMaxUserId(phone, authUser),
+      actorName,
+      text,
+      photos: photoUrls,
+    };
+    const delivery = {
+      ...current,
+      updatedAt: timestamp,
+      carrierComments: [
+        ...(Array.isArray(current.carrierComments) ? current.carrierComments : []),
+        entry,
+      ],
+      resultPhotos: [
+        ...(Array.isArray(current.resultPhotos) ? current.resultPhotos : []),
+        ...photoUrls,
+      ],
+      comment: [
+        String(current.comment || '').trim(),
+        text ? `[${new Date().toLocaleString('ru-RU')}] Комментарий перевозчика через MAX (${actorName}): ${text}` : null,
+        photoUrls.length ? `[${new Date().toLocaleString('ru-RU')}] Фото результата через MAX (${actorName}): ${photoUrls.length}` : null,
+      ].filter(Boolean).join('\n'),
+    };
+    deliveries[index] = delivery;
+    writeData('deliveries', deliveries);
+    appendCarrierBotActivity({
+      phone,
+      authUser,
+      deliveryId: delivery.id,
+      action: photoUrls.length ? 'carrier.delivery_comment_photo' : 'carrier.delivery_comment',
+      oldStatus: current.status,
+      newStatus: delivery.status,
+    });
+    auditLog?.(authUser || {}, {
+      action: 'deliveries.bot_carrier_comment',
+      entityType: 'deliveries',
+      entityId: delivery.id,
+      before: current,
+      after: delivery,
+      metadata: { actorName, phone, source: 'max_bot', photos: photoUrls.length },
+    });
+    return { delivery, changed: true, empty: false };
   }
 
   async function handleBotStarted(senderId, phone, payload) {
@@ -580,14 +695,6 @@ function createBotHandlers(deps) {
     });
     const existingUser = getAuthorizedUserForCurrentBot(phone, senderId);
     if (existingUser?.userRole === 'Перевозчик') {
-      if (!preferCarrierAutoLogin) {
-        updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
-        return reply(
-          senderId,
-          `👋 Добро пожаловать в основной бот «Скайтех»!${payloadLine}\n\nДля работы с сервисом и заявками войдите как сотрудник.\n\n${getLoginPromptText()}`,
-          { attachments: loginPromptKeyboard(), brandImage: true, phone, cleanupPrevious: true },
-        );
-      }
       return reply(
         senderId,
         getMainMenuText(existingUser),
@@ -616,7 +723,7 @@ function createBotHandlers(deps) {
         senderId,
         formatUnlinkedCarrierMessage(),
         {
-          attachments: carrierKeyboard(),
+          attachments: sharedBotEntryKeyboard(),
           mechanicStage: 'delivery_main',
           phone,
           cleanupPrevious: true,
@@ -645,14 +752,110 @@ function createBotHandlers(deps) {
     };
   }
 
+  function isBotOnlyCarrierAccount(user) {
+    const role = String(user?.role || '').trim().toLowerCase();
+    const isCarrierRole = role === 'перевозчик' || role === 'carrier';
+    if (!isCarrierRole) return false;
+    return user.botOnly !== false && user.allowFrontendLogin !== true && user.frontendAccess !== true;
+  }
+
+  function isCarrierSystemUser(user) {
+    const role = String(user?.role || '').trim().toLowerCase();
+    return role === 'перевозчик' || role === 'carrier';
+  }
+
+  function findCarrierSystemUser(carrier = {}) {
+    const systemUserId = String(carrier.systemUserId || carrier.system_user_id || '').trim();
+    if (!systemUserId) return null;
+    return (readData('users') || []).find(user => String(user?.id || '') === systemUserId) || null;
+  }
+
+  function findCarrierBySystemUser(user) {
+    const userId = String(user?.id || user?.userId || '').trim();
+    const carrierId = String(user?.carrierId || '').trim();
+    const email = String(user?.email || '').trim().toLowerCase();
+    return (readData('delivery_carriers') || []).find(item => {
+      if (!item || item.status === 'inactive') return false;
+      if (carrierId && String(item.id || '').trim() === carrierId) return true;
+      if (userId && String(item.systemUserId || item.system_user_id || '').trim() === userId) return true;
+      return email && String(item.email || '').trim().toLowerCase() === email;
+    }) || null;
+  }
+
+  function normalizeMaxUserId(phone) {
+    return Number.isFinite(Number(phone)) ? Number(phone) : String(phone || '');
+  }
+
+  function buildCarrierBotUser(carrier, phone, replyTarget = null, systemUser = null) {
+    return {
+      userId: systemUser?.id || carrier.id || `carrier:${phone}`,
+      userName: systemUser?.name || carrier.name || 'Перевозчик',
+      userRole: 'Перевозчик',
+      role: 'carrier',
+      botMode: 'delivery',
+      isActive: true,
+      botOnly: true,
+      email: systemUser?.email || null,
+      carrierId: carrier.id || null,
+      maxUserId: normalizeMaxUserId(phone),
+      replyTarget: normalizeReplyTarget(replyTarget, phone),
+    };
+  }
+
+  function saveCarrierMaxBinding(carrier, phone, systemUser = null) {
+    const carrierId = String(carrier?.id || '').trim();
+    if (!carrierId) return carrier;
+
+    const carriers = readData('delivery_carriers') || [];
+    let nextCarrier = carrier;
+    const nextCarriers = carriers.map(item => {
+      if (String(item?.id || '').trim() !== carrierId) return item;
+      nextCarrier = {
+        ...item,
+        systemUserId: systemUser?.id || item.systemUserId || null,
+        maxCarrierKey: String(phone || '').trim(),
+      };
+      return nextCarrier;
+    });
+    writeData('delivery_carriers', nextCarriers);
+
+    if (systemUser?.id) {
+      const users = readData('users') || [];
+      const nextUsers = users.map(user => String(user?.id || '') === String(systemUser.id)
+        ? {
+            ...user,
+            role: 'Перевозчик',
+            botOnly: true,
+            allowFrontendLogin: false,
+            frontendAccess: false,
+            carrierId,
+            maxUserId: normalizeMaxUserId(phone),
+          }
+        : user);
+      writeData('users', nextUsers);
+    }
+
+    return nextCarrier;
+  }
+
   function authorizeUser(phone, email, password, replyTarget = null) {
     const users = readData('users') || [];
     const found = users.find(
-      user => user.email.toLowerCase() === email.toLowerCase() &&
+      user => String(user.email || '').toLowerCase() === String(email || '').toLowerCase() &&
         verifyPassword(password, user.password) &&
         user.status === 'Активен'
     );
     if (!found) return null;
+    if (isCarrierSystemUser(found)) {
+      const carrier = findCarrierBySystemUser(found);
+      if (!carrier) return null;
+      const linkedCarrier = saveCarrierMaxBinding(carrier, phone, found);
+      const botUsers = getBotUsers();
+      botUsers[phone] = buildCarrierBotUser(linkedCarrier, phone, replyTarget, found);
+      saveBotUsers(botUsers);
+      return found;
+    }
+    if (isBotOnlyCarrierAccount(found)) return null;
 
     const botUsers = getBotUsers();
     botUsers[phone] = {
@@ -687,15 +890,7 @@ function createBotHandlers(deps) {
     if (!carrier) return existing || null;
 
     const botUsers = getBotUsers();
-    const linkedCarrier = {
-      userId: carrier.id || `carrier:${phone}`,
-      userName: carrier.name || 'Перевозчик',
-      userRole: 'Перевозчик',
-      botMode: 'delivery',
-      email: null,
-      carrierId: carrier.id || null,
-      replyTarget: normalizeReplyTarget(replyTarget, phone),
-    };
+    const linkedCarrier = buildCarrierBotUser(carrier, phone, replyTarget, findCarrierSystemUser(carrier));
     botUsers[phone] = linkedCarrier;
     saveBotUsers(botUsers);
     return linkedCarrier;
@@ -725,16 +920,17 @@ function createBotHandlers(deps) {
 
   function canBotUserAccessDelivery(delivery, phone, authUser) {
     if (!delivery || !authUser) return false;
-    if (authUser.userRole === 'Администратор' || authUser.userRole === 'Офис-менеджер') return true;
-    if (authUser.userRole !== 'Перевозчик') return false;
-    if (accessControl.isCarrierDelivery(delivery, { ...authUser, phone })) return true;
-    return getCarrierDeliveries(phone, authUser).some(item => item.id === delivery.id);
+    if (!isCarrierBotUser(authUser)) return false;
+    return canCarrierAccessDelivery(delivery, authUser);
   }
 
   function isDeliveryBotCallback(payload) {
     return payload === 'menu:main' ||
       payload === 'menu:deliveries' ||
       payload === 'menu:help' ||
+      payload === 'auth:start' ||
+      payload === 'menu:cancel_login' ||
+      payload.startsWith('delivery:comment:') ||
       payload.startsWith('delivery:status:');
   }
 
@@ -774,50 +970,20 @@ function createBotHandlers(deps) {
   }
 
   function getCarrierDeliveries(phone, authUser) {
-    const carrier = authUser?.carrierId
-      ? (readData('delivery_carriers') || []).find(item => item.id === authUser.carrierId)
-      : findCarrierByMaxKey(phone);
-    if (!carrier) return [];
-
-    const carrierKeys = new Set(
-      [carrier.id, carrier.key, carrier.maxCarrierKey]
-        .filter(Boolean)
-        .map(value => String(value)),
-    );
-    const phoneValue = String(phone || '').trim();
+    if (!isCarrierBotUser(authUser)) return [];
+    const carrierId = resolveBotUserCarrierId(authUser);
 
     return (readData('deliveries') || [])
-      .filter(item => {
-        const deliveryCarrierKey = item?.carrierKey ? String(item.carrierKey) : '';
-        const deliveryCarrierUserId = item?.carrierUserId != null ? String(item.carrierUserId) : '';
-        return isVisibleCarrierDelivery(item)
-          && (carrierKeys.has(deliveryCarrierKey) || (phoneValue && deliveryCarrierUserId === phoneValue));
-      })
+      .filter(item => isVisibleCarrierDelivery(item) && resolveDeliveryCarrierId(item) === carrierId)
       .sort((left, right) => new Date(right.transportDate || 0).getTime() - new Date(left.transportDate || 0).getTime());
   }
 
   function formatCarrierDeliveries(deliveries) {
-    if (!deliveries.length) {
-      return [
-        '🚚 У вас пока нет активных доставок.',
-        '',
-        'Как только офис назначит новую доставку, здесь появятся заявки и статусы.',
-      ].join('\n');
-    }
-
-    const lines = deliveries.slice(0, 10).map((delivery, index) => (
-      `${index + 1}. ${deliveryTypeLabel(delivery.type)} · ${delivery.transportDate}\n` +
-      `   ${delivery.origin} → ${delivery.destination}\n` +
-      `   ${delivery.cargo} · ${delivery.client}\n` +
-      `   Статус: ${deliveryStatusLabel(delivery.status)}`
-    ));
-
-    return [
-      `🚚 Мои доставки (${deliveries.length})`,
-      '',
-      ...lines,
-      deliveries.length > 10 ? `... и ещё ${deliveries.length - 10}` : '',
-    ].filter(Boolean).join('\n');
+    return formatCarrierDeliveryList(deliveries, {
+      getEquipment: delivery => delivery?.equipmentId
+        ? (readData('equipment') || []).find(item => item.id === delivery.equipmentId)
+        : null,
+    });
   }
 
   function formatUnlinkedCarrierMessage() {
@@ -825,13 +991,13 @@ function createBotHandlers(deps) {
       '🚚 Бот доставки готов к работе.',
       '',
       'Ваш MAX-профиль ещё не привязан к перевозчику в системе.',
-      'Попросите администратора открыть настройки перевозчиков и выбрать ваш MAX ID.',
+      'Если администратор уже создал пользователя с ролью «Перевозчик» и привязал его в справочнике, нажмите «Войти» и введите email/пароль.',
     ].join('\n');
   }
 
   function sharedBotEntryKeyboard() {
     return keyboard([
-      [button('Войти', 'auth:start'), button('Мои доставки', 'menu:deliveries')],
+      [button('Мои доставки', 'menu:deliveries'), button('Войти', 'auth:start')],
       [button('Помощь', 'menu:help')],
     ]);
   }
@@ -983,7 +1149,9 @@ function createBotHandlers(deps) {
   }
 
   function isDeliveryModeCallback(payload) {
-    return payload === 'menu:deliveries' || payload.startsWith('delivery:status:');
+    return payload === 'menu:deliveries' ||
+      payload.startsWith('delivery:comment:') ||
+      payload.startsWith('delivery:status:');
   }
 
   function isKnownBotCommand(lower, commandText, commandCompact) {
@@ -1834,7 +2002,7 @@ function createBotHandlers(deps) {
         senderId,
         carrierUser ? getMainMenuText(carrierUser) : formatUnlinkedCarrierMessage(),
         {
-          attachments: carrierKeyboard(),
+          attachments: carrierUser ? carrierKeyboard() : sharedBotEntryKeyboard(),
           mechanicStage: 'delivery_main',
           phone,
           callbackContext,
@@ -1863,7 +2031,7 @@ function createBotHandlers(deps) {
       const carrier = findCarrierByMaxKey(phone);
       if (!carrier) {
         return reply(senderId, formatUnlinkedCarrierMessage(), {
-          attachments: authKeyboard(),
+          attachments: sharedBotEntryKeyboard(),
           mechanicStage: 'delivery_main',
           phone,
           callbackContext,
@@ -1903,6 +2071,16 @@ function createBotHandlers(deps) {
       });
     }
     if (!preferCarrierAutoLogin && currentBotMode === 'staff' && isDeliveryModeCallback(normalized)) {
+      if (normalized.startsWith('delivery:status:') || normalized.startsWith('delivery:comment:')) {
+        return reply(senderId, 'Эта доставка вам недоступна или уже закрыта.', {
+          attachments: defaultKeyboardForRole(currentBotUser?.userRole || ''),
+          mechanicStage: mechanicMainStageForRole(currentBotUser?.userRole || ''),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+          cleanupPrevious: !callbackContext,
+        });
+      }
       return reply(senderId, getDeliveryModeRequiredText(), {
         attachments: switchToDeliveryKeyboard(),
         mechanicStage: mechanicMainStageForRole(currentBotUser?.userRole || ''),
@@ -2495,13 +2673,12 @@ function createBotHandlers(deps) {
       return handleCommand(senderId, phone, `/ремонт ${ticketId}`, {}, { callbackContext, replaceMessage: true });
     }
 
-    if (normalized.startsWith('delivery:status:')) {
-      const [, , deliveryId, nextStatus] = normalized.split(':');
+    if (normalized.startsWith('delivery:comment:')) {
+      const deliveryId = normalized.slice('delivery:comment:'.length);
       const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
-      const actorName = authUser?.userName || 'Перевозчик';
-      const result = updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName, String(phone), authUser);
-      if (!result) {
-        return reply(senderId, '❌ Доставка не найдена.', {
+      const delivery = (readData('deliveries') || []).find(item => item.id === deliveryId) || null;
+      if (!isCarrierBotUser(authUser) || !delivery || !canCarrierAccessDelivery(delivery, authUser) || isClosedDelivery(delivery)) {
+        return reply(senderId, 'Эта доставка вам недоступна или уже закрыта.', {
           attachments: carrierKeyboard(),
           mechanicStage: 'delivery_status',
           phone,
@@ -2509,8 +2686,26 @@ function createBotHandlers(deps) {
           replaceMessage: true,
         });
       }
-      if (result.forbidden) {
-        return reply(senderId, '⛔ Эта доставка не назначена вам.', {
+      updateBotSession(phone, {
+        pendingAction: 'carrier_delivery_comment',
+        pendingPayload: { deliveryId },
+      });
+      return reply(senderId, `Напишите комментарий или отправьте фото по доставке ${delivery.id}.`, {
+        attachments: deliveryStatusKeyboard(delivery),
+        mechanicStage: 'delivery_status',
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('delivery:status:')) {
+      const [, , deliveryId, nextStatus] = normalized.split(':');
+      const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
+      const actorName = authUser?.userName || 'Перевозчик';
+      const result = updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName, String(phone), authUser);
+      if (!result || result.unavailable) {
+        return reply(senderId, 'Эта доставка вам недоступна или уже закрыта.', {
           attachments: carrierKeyboard(),
           mechanicStage: 'delivery_status',
           phone,
@@ -3048,16 +3243,6 @@ function createBotHandlers(deps) {
     if (lower.startsWith('/start')) {
       console.log('[TRACE] /start matched, parts=%d', parts.length);
       if (activeBotUser && parts.length < 3) {
-        if (!preferCarrierAutoLogin && activeBotUser.userRole === 'Перевозчик') {
-          updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
-          return replyWithUi(
-            `👋 Основной бот «Скайтех» работает для сотрудников.\n\n${getLoginPromptText()}`,
-            {
-              attachments: loginPromptKeyboard(),
-              brandImage: true,
-            },
-          );
-        }
         resetBotFlow(phone);
         return replyWithUi(
           getMainMenuText(activeBotUser),
@@ -3072,7 +3257,7 @@ function createBotHandlers(deps) {
       if (preferCarrierAutoLogin && parts.length < 3) {
         resetBotFlow(phone);
         return replyWithUi(formatUnlinkedCarrierMessage(), {
-          attachments: carrierKeyboard(),
+          attachments: sharedBotEntryKeyboard(),
           mechanicStage: 'delivery_main',
         });
       }
@@ -3124,7 +3309,7 @@ function createBotHandlers(deps) {
         if (!authUser) {
           if (preferCarrierAutoLogin) {
             return reply(senderId, formatUnlinkedCarrierMessage(), {
-              attachments: carrierKeyboard(),
+              attachments: sharedBotEntryKeyboard(),
               mechanicStage: 'delivery_main',
               phone,
               callbackContext,
@@ -3196,7 +3381,7 @@ function createBotHandlers(deps) {
       }
       if (preferCarrierAutoLogin) {
         return reply(senderId, formatUnlinkedCarrierMessage(), {
-          attachments: carrierKeyboard(),
+          attachments: sharedBotEntryKeyboard(),
           mechanicStage: 'delivery_main',
           phone,
           callbackContext,
@@ -3247,6 +3432,31 @@ function createBotHandlers(deps) {
 
     if (!trimmed.startsWith('/')) {
       const currentTicket = getCurrentRepair(phone);
+      if (session.pendingAction === 'carrier_delivery_comment' && isCarrier) {
+        const deliveryId = session.pendingPayload?.deliveryId || '';
+        const result = addCarrierDeliveryCommentFromBot(deliveryId, trimmed, {
+          ...messageMeta,
+          text: trimmed,
+        }, String(phone), authUser);
+        if (result.unavailable) {
+          resetBotFlow(phone);
+          return replyWithUi('Эта доставка вам недоступна или уже закрыта.', {
+            attachments: carrierKeyboard(),
+            mechanicStage: 'delivery_status',
+          });
+        }
+        if (result.empty) {
+          return replyWithUi('Напишите комментарий или отправьте фото одним сообщением.', {
+            attachments: carrierKeyboard(),
+            mechanicStage: 'delivery_status',
+          });
+        }
+        resetBotFlow(phone);
+        return replyWithUi(`Комментарий сохранён.\n\n${formatDeliveryStatusMessage(result.delivery)}`, {
+          attachments: deliveryStatusKeyboard(result.delivery),
+          mechanicStage: 'delivery_status',
+        });
+      }
       if (session.pendingAction === 'equipment_search' && canCreateServiceRequest) {
         return handleEquipmentSearchRequest(senderId, phone, trimmed, uiContext);
       }
@@ -3547,6 +3757,14 @@ function createBotHandlers(deps) {
           replaceMessage: Boolean(uiContext.callbackContext),
         });
       }
+    }
+
+    if (isCarrier && !isDeliveriesCommand(commandText, commandCompact) && commandText !== 'меню' && commandText !== 'помощь' && commandCompact !== 'help') {
+      resetBotFlow(phone);
+      return replyWithUi(getMainMenuText(authUser), {
+        attachments: carrierKeyboard(),
+        ...mainMenuImageOptions(userRole),
+      });
     }
 
     if (lower === '/аренды' || lower === '/rentals' || lower === '/мои' || lower === 'аренды') {

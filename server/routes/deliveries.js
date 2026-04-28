@@ -1,4 +1,9 @@
 const express = require('express');
+const {
+  formatCarrierDeliveryMessage,
+  isCarrierBotUser,
+  resolveDeliveryCarrierId,
+} = require('../lib/carrier-delivery-dto');
 
 function registerDeliveryRoutes(router, deps) {
   const {
@@ -9,6 +14,7 @@ function registerDeliveryRoutes(router, deps) {
     requireWrite,
     sendMessage,
     getBotUsers,
+    saveBotUsers,
     nowIso,
     generateId,
     idPrefixes,
@@ -32,10 +38,14 @@ function registerDeliveryRoutes(router, deps) {
   function normalizeCarrierRecord(record = {}) {
     return {
       id: String(record.id || ''),
+      key: String(record.key || record.id || ''),
       name: String(record.name || '').trim(),
+      company: record.company ? String(record.company).trim() : undefined,
+      inn: record.inn ? String(record.inn).trim() : undefined,
       phone: record.phone ? String(record.phone).trim() : undefined,
       notes: record.notes ? String(record.notes).trim() : undefined,
       status: record.status === 'inactive' ? 'inactive' : 'active',
+      systemUserId: record.systemUserId ? String(record.systemUserId).trim() : null,
       maxCarrierKey: record.maxCarrierKey ? String(record.maxCarrierKey) : null,
     };
   }
@@ -95,7 +105,8 @@ function registerDeliveryRoutes(router, deps) {
       client: String(body.client || '').trim(),
       clientId: body.clientId ? String(body.clientId) : (existing?.clientId || null),
       manager: String(body.manager || existing?.manager || author).trim(),
-      carrierKey: body.carrierKey ? String(body.carrierKey) : (existing?.carrierKey || null),
+      carrierId: body.carrierId ? String(body.carrierId) : (body.carrierKey ? String(body.carrierKey) : (existing?.carrierId || null)),
+      carrierKey: body.carrierKey ? String(body.carrierKey) : (body.carrierId ? String(body.carrierId) : (existing?.carrierKey || null)),
       carrierName: body.carrierName ? String(body.carrierName) : (existing?.carrierName || null),
       carrierPhone: body.carrierPhone ? String(body.carrierPhone) : (existing?.carrierPhone || null),
       carrierChatId: body.carrierChatId ?? existing?.carrierChatId ?? null,
@@ -144,6 +155,7 @@ function registerDeliveryRoutes(router, deps) {
       'comment',
       'client',
       'clientId',
+      'carrierId',
       'carrierKey',
       'ganttRentalId',
       'classicRentalId',
@@ -180,16 +192,22 @@ function registerDeliveryRoutes(router, deps) {
     if (status === 'completed' || status === 'cancelled') return null;
     if (status === 'accepted') {
       return keyboard([
-        [button('Выехал', `delivery:status:${deliveryId}:in_transit`)],
+        [button('В пути', `delivery:status:${deliveryId}:in_transit`)],
+        [button('Проблема/отмена', `delivery:status:${deliveryId}:cancelled`)],
+        [button('Комментарий/фото', `delivery:comment:${deliveryId}`)],
       ]);
     }
     if (status === 'in_transit') {
       return keyboard([
-        [button('Доставлено', `delivery:status:${deliveryId}:completed`)],
+        [button('Выполнено', `delivery:status:${deliveryId}:completed`)],
+        [button('Проблема/отмена', `delivery:status:${deliveryId}:cancelled`)],
+        [button('Комментарий/фото', `delivery:comment:${deliveryId}`)],
       ]);
     }
     return keyboard([
-      [button('Принял', `delivery:status:${deliveryId}:accepted`)],
+      [button('Принять доставку', `delivery:status:${deliveryId}:accepted`)],
+      [button('Проблема/отмена', `delivery:status:${deliveryId}:cancelled`)],
+      [button('Комментарий/фото', `delivery:comment:${deliveryId}`)],
     ]);
   }
 
@@ -302,6 +320,12 @@ function registerDeliveryRoutes(router, deps) {
   function listCarrierDirectory() {
     const rawConnections = listRawCarrierConnections();
     const rawByKey = new Map(rawConnections.map((item) => [item.key, item]));
+    const users = readData('users') || [];
+    const carrierUsersById = new Map(
+      users
+        .filter((user) => user?.role === 'Перевозчик')
+        .map((user) => [String(user.id), user]),
+    );
     const directory = (readData('delivery_carriers') || []).map(normalizeCarrierRecord);
 
     if (directory.length === 0) {
@@ -332,9 +356,12 @@ function registerDeliveryRoutes(router, deps) {
           phone: item.phone || linked?.phone,
           notes: item.notes,
           status: item.status,
+          systemUserId: item.systemUserId || null,
+          systemUserName: carrierUsersById.get(String(item.systemUserId || ''))?.name || null,
+          systemUserEmail: carrierUsersById.get(String(item.systemUserId || ''))?.email || null,
           maxCarrierKey: item.maxCarrierKey || null,
           maxUserName: linked?.name || null,
-          email: linked?.email || undefined,
+          email: linked?.email || carrierUsersById.get(String(item.systemUserId || ''))?.email || undefined,
           role: linked?.role || undefined,
           maxConnected: Boolean(linked),
           chatId: linked?.chatId ?? null,
@@ -357,14 +384,15 @@ function registerDeliveryRoutes(router, deps) {
   }
 
   async function trySendToCarrier(delivery) {
-    if (!delivery.carrierKey) {
+    const selectedCarrierId = resolveDeliveryCarrierId(delivery);
+    if (!selectedCarrierId) {
       return {
         ...delivery,
         botSendError: 'Перевозчик не выбран',
       };
     }
 
-    const carrier = resolveCarrierSelection(delivery.carrierKey);
+    const carrier = resolveCarrierSelection(selectedCarrierId);
     if (!carrier) {
       return {
         ...delivery,
@@ -387,20 +415,45 @@ function registerDeliveryRoutes(router, deps) {
         botSendError: 'Перевозчик не подключён к боту MAX',
       };
     }
+    const hasCarrierRole = String(botUser.role || '').trim().toLowerCase() === 'carrier' ||
+      botUser.userRole === 'Перевозчик' ||
+      botUser.botMode === 'delivery';
+    if (!hasCarrierRole) {
+      return {
+        ...delivery,
+        botSendError: 'Пользователь MAX не привязан к роли перевозчика',
+      };
+    }
+    const carrierBotUser = {
+      ...botUser,
+      userRole: botUser.userRole || 'Перевозчик',
+      role: 'carrier',
+      botMode: 'delivery',
+      isActive: botUser.isActive !== false,
+      carrierId: botUser.carrierId || carrier.id,
+    };
+    if (!isCarrierBotUser(carrierBotUser)) {
+      return {
+        ...delivery,
+        botSendError: 'Пользователь MAX не привязан к роли перевозчика',
+      };
+    }
+    if (typeof saveBotUsers === 'function' && JSON.stringify(botUser) !== JSON.stringify(carrierBotUser)) {
+      saveBotUsers({
+        ...botUsers,
+        [carrier.maxCarrierKey]: carrierBotUser,
+      });
+    }
 
-    const target = botUser.replyTarget || { user_id: Number(carrier.maxCarrierKey) };
+    const target = carrierBotUser.replyTarget || { user_id: Number(carrier.maxCarrierKey) };
+    const equipment = delivery.equipmentId
+      ? (readData('equipment') || []).find(item => item.id === delivery.equipmentId)
+      : null;
     const text = [
-      delivery.type === 'shipping' ? '🚚 Новая заявка на отгрузку' : '📥 Новая заявка на приёмку',
-      `Дата перевозки: ${delivery.transportDate}`,
-      `Статус: ${delivery.status === 'accepted' ? 'Принята' : delivery.status === 'in_transit' ? 'Выехал' : delivery.status === 'completed' ? 'Выполнена' : 'Отправлена'}`,
-      delivery.neededBy ? `Когда нужно: ${delivery.neededBy}` : null,
-      `Маршрут: ${delivery.origin} → ${delivery.destination}`,
-      `Что перевозим: ${delivery.cargo}`,
-      `Клиент: ${delivery.client}`,
-      `Контакт: ${delivery.contactName} · ${delivery.contactPhone}`,
-      delivery.cost > 0 ? `Стоимость: ${delivery.cost.toLocaleString('ru-RU')} ₽` : null,
-      delivery.comment ? `Комментарий: ${delivery.comment}` : null,
-    ].filter(Boolean).join('\n');
+      delivery.type === 'shipping' ? 'Новая заявка на отгрузку' : 'Новая заявка на приёмку',
+      '',
+      formatCarrierDeliveryMessage({ ...delivery, carrierId: carrier.id }, { equipment }),
+    ].join('\n');
 
     try {
       const response = await sendMessage(target, text, {
@@ -412,6 +465,8 @@ function registerDeliveryRoutes(router, deps) {
       }
       return {
         ...delivery,
+        carrierId: carrier.id,
+        carrierKey: carrier.key || carrier.id,
         status: delivery.status === 'new' ? 'sent' : delivery.status,
         botSentAt: nowIso(),
         botSendError: null,
@@ -465,10 +520,12 @@ function registerDeliveryRoutes(router, deps) {
     try {
       const author = req.user.userName;
       let delivery = normalizeDeliveryPayload(sanitizeDeliveryBody(req.body, null, req), null, author);
-      const carrier = resolveCarrierSelection(delivery.carrierKey);
+      const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {
           ...delivery,
+          carrierId: carrier.id,
+          carrierKey: carrier.key || carrier.id,
           carrierName: carrier.name,
           carrierPhone: carrier.phone,
           carrierChatId: carrier.chatId ?? null,
@@ -477,6 +534,8 @@ function registerDeliveryRoutes(router, deps) {
       } else {
         delivery = {
           ...delivery,
+          carrierId: null,
+          carrierKey: null,
           carrierName: null,
           carrierPhone: null,
           carrierChatId: null,
@@ -519,10 +578,12 @@ function registerDeliveryRoutes(router, deps) {
       const author = req.user.userName;
       const safeBody = sanitizeDeliveryBody(req.body, current, req);
       let delivery = normalizeDeliveryPayload({ ...current, ...safeBody }, current, author);
-      const carrier = resolveCarrierSelection(delivery.carrierKey);
+      const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {
           ...delivery,
+          carrierId: carrier.id,
+          carrierKey: carrier.key || carrier.id,
           carrierName: carrier.name,
           carrierPhone: carrier.phone,
           carrierChatId: carrier.chatId ?? null,
@@ -531,6 +592,8 @@ function registerDeliveryRoutes(router, deps) {
       } else {
         delivery = {
           ...delivery,
+          carrierId: null,
+          carrierKey: null,
           carrierName: null,
           carrierPhone: null,
           carrierChatId: null,

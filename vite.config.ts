@@ -24,6 +24,10 @@ const commitHash = process.env.VITE_GIT_COMMIT_SHA ||
   process.env.GITHUB_SHA ||
   readGitCommit()
 const buildTime = process.env.VITE_BUILD_TIME || process.env.BUILD_TIME || new Date().toISOString()
+const buildId = process.env.VITE_APP_BUILD_ID || `${commitHash || 'dev'}-${buildTime}`
+
+process.env.VITE_BUILD_TIME = buildTime
+process.env.VITE_APP_BUILD_ID = buildId
 
 export default defineConfig({
   base: '/rental-management/',

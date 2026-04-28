@@ -17,19 +17,18 @@
         (function() {
           var CACHE_KEY = '__app_cache_v';
           // Метка версии, вшитая в HTML при деплое (меняется при каждом build)
-          var BUILD_TS  = '20260417_201500';
+          var BUILD_TS  = '%VITE_APP_BUILD_ID%';
           var stored    = sessionStorage.getItem(CACHE_KEY);
           if (stored !== BUILD_TS) {
             // Первый запуск в этой сессии или новый деплой → принудительно
             // перезагружаем страницу с cache-bust параметром
             sessionStorage.setItem(CACHE_KEY, BUILD_TS);
-            var sep = window.location.href.indexOf('?') === -1 ? '?' : '&';
             // reload(true) игнорируется в современных браузерах,
             // поэтому меняем URL чтобы обойти дисковый кеш
-            if (window.location.href.indexOf('_cb=') === -1) {
-              window.location.replace(
-                window.location.href + sep + '_cb=' + BUILD_TS
-              );
+            var url = new URL(window.location.href);
+            if (url.searchParams.get('_cb') !== BUILD_TS) {
+              url.searchParams.set('_cb', BUILD_TS);
+              window.location.replace(url.toString());
             }
           }
         })();

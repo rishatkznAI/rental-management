@@ -30,6 +30,7 @@ function registerCrudRoutes(deps) {
     applyServiceTicketCreationEffects,
     accessControl,
     auditLog,
+    normalizeRecordClientLink,
   } = deps;
 
   const router = express.Router();
@@ -67,6 +68,24 @@ function registerCrudRoutes(deps) {
     const currentGanttRentals = readData('gantt_rentals') || [];
     const nextGanttRentals = syncGanttRentalPaymentStatuses(currentGanttRentals, payments);
     writeData('gantt_rentals', nextGanttRentals);
+  }
+
+  function relatedRentalsById() {
+    const map = new Map();
+    [...(readData('rentals') || []), ...(readData('gantt_rentals') || [])].forEach(item => {
+      if (item?.id) map.set(String(item.id), item);
+    });
+    return map;
+  }
+
+  function withClientLink(collection, item) {
+    if (typeof normalizeRecordClientLink !== 'function') return item;
+    if (!['payments', 'documents', 'crm_deals'].includes(collection)) return item;
+    return normalizeRecordClientLink(item, readData('clients') || [], {
+      context: `${collection}:${item?.id || item?.rentalId || item?.number || 'new'}`,
+      relatedRentalsById: relatedRentalsById(),
+      logger: console,
+    });
   }
 
   function hasReadAccess(req, collection) {
@@ -150,6 +169,7 @@ function registerCrudRoutes(deps) {
       entityId: entity?.id || '',
       rentalId: rentalId || '',
       client: rental?.client || entity?.client || '',
+      clientId: rental?.clientId || entity?.clientId || '',
       equipment: Array.isArray(rental?.equipment) ? rental.equipment : [],
       initiatorId: req.user?.userId || '',
       initiatorName: req.user?.userName || 'Система',
@@ -381,7 +401,7 @@ function registerCrudRoutes(deps) {
         }
 
         const data = readData(collection) || [];
-        let newItem = { ...input, id: input.id || generateId(prefix) };
+        let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
         if (collection === 'users') {
           newItem = normalizeUserPasswordForWrite(newItem);
         }
@@ -518,7 +538,7 @@ function registerCrudRoutes(deps) {
             updatedAt: nowIso(),
           });
         } else {
-          let nextItem = { ...data[idx], ...safePatch, id: data[idx].id };
+          let nextItem = withClientLink(collection, { ...data[idx], ...safePatch, id: data[idx].id });
           if (collection === 'users') {
             if (
               safePatch.password ||
@@ -736,14 +756,15 @@ function registerCrudRoutes(deps) {
         return res.json({ ok: true, count: merged.length });
       }
 
-      writeData(collection, list);
+      const normalizedList = list.map(item => withClientLink(collection, item));
+      writeData(collection, normalizedList);
       auditLog?.(req, {
         action: `${collection}.bulk_replace`,
         entityType: collection,
         after: { count: list.length },
       });
       if (collection === 'payments') {
-        syncPaymentStatusesAfterPaymentWrite(list);
+        syncPaymentStatusesAfterPaymentWrite(normalizedList);
       }
       return res.json({ ok: true, count: list.length });
     });

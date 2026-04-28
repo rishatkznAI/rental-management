@@ -40,34 +40,47 @@ function getUpdateType(update) {
 function extractUpdateMessage(update) {
   return update?.message ||
     update?.message_created?.message ||
+    update?.message_created ||
     update?.messageCreated?.message ||
+    update?.messageCreated ||
     update?.payload?.message ||
     null;
 }
 
 function extractUpdateSender(update, message, callback = null) {
   return message?.sender ||
+    message?.user ||
+    (message?.user_id || message?.userId ? { user_id: message.user_id || message.userId, name: message?.user_name || message?.userName } : null) ||
     callback?.sender ||
     callback?.user ||
+    (callback?.user_id || callback?.userId ? { user_id: callback.user_id || callback.userId, name: callback?.user_name || callback?.userName } : null) ||
     update?.sender ||
     update?.user ||
+    (update?.user_id || update?.userId ? { user_id: update.user_id || update.userId, name: update?.user_name || update?.userName } : null) ||
     {};
 }
 
 function extractCallbackSender(update, callback = {}) {
   return callback?.user ||
     callback?.sender ||
+    (callback?.user_id || callback?.userId ? { user_id: callback.user_id || callback.userId, name: callback?.user_name || callback?.userName } : null) ||
     update?.user ||
     update?.sender ||
+    (update?.user_id || update?.userId ? { user_id: update.user_id || update.userId, name: update?.user_name || update?.userName } : null) ||
     callback?.message?.sender ||
+    callback?.message?.user ||
     update?.message?.sender ||
+    update?.message?.user ||
     {};
 }
 
 function extractUpdateRecipient(update, message, callback = null) {
   return message?.recipient ||
+    (message?.chat_id || message?.chatId ? { chat_id: message.chat_id || message.chatId } : null) ||
     callback?.recipient ||
+    (callback?.chat_id || callback?.chatId ? { chat_id: callback.chat_id || callback.chatId } : null) ||
     update?.recipient ||
+    (update?.chat_id || update?.chatId ? { chat_id: update.chat_id || update.chatId } : null) ||
     {};
 }
 
@@ -101,7 +114,9 @@ function extractUpdateText(update, message) {
   const body = message?.body;
   if (typeof body === 'string') return body;
   return body?.text ||
+    body?.value ||
     message?.text ||
+    message?.body?.message ||
     update?.text ||
     update?.payload?.text ||
     '';
@@ -196,19 +211,28 @@ function checkWebhookRateLimit(req) {
 
 function verifyWebhookRequest(req, webhookSecret = '') {
   const secret = String(webhookSecret || '').trim();
-  const secretRequired = Boolean(secret) || process.env.NODE_ENV === 'production';
+  const secretRequired = Boolean(secret);
   if (!secretRequired) return { ok: true };
-  if (!secret) {
-    return { ok: false, status: 503, error: 'Webhook secret is not configured' };
-  }
 
   const candidates = [
     req.params?.webhookSecret,
     req.headers?.['x-max-webhook-secret'],
     req.headers?.['x-webhook-secret'],
+    req.headers?.['x-max-bot-secret'],
+    req.headers?.['x-bot-webhook-secret'],
+    req.headers?.['x-webhook-token'],
   ];
   const ok = candidates.some(value => value && timingSafeEqualString(value, secret));
   return ok ? { ok: true } : { ok: false, status: 401, error: 'Unauthorized webhook' };
+}
+
+function getDiagnosticUserId(update) {
+  const callback = update?.callback || update?.message_callback || update?.messageCallback || {};
+  const message = extractUpdateMessage(update) || callback?.message || {};
+  const sender = getUpdateType(update) === 'message_callback'
+    ? extractCallbackSender(update, callback)
+    : extractUpdateSender(update, message, callback);
+  return sender?.user_id || sender?.userId || update?.user_id || update?.userId || 'unknown';
 }
 
 function toFiniteNumber(value) {
@@ -582,9 +606,13 @@ function createBotUpdateProcessor(deps) {
 
   return async function processBotUpdate(update) {
     const updateType = getUpdateType(update);
+    logger.log(`[BOT] ${normalizedWebhookPath} event type=${updateType || 'unknown'} user=${getDiagnosticUserId(update)}`);
 
     if (updateType === 'bot_started') {
-      const user = update.user || update.sender || {};
+      const user = update.user || update.sender || {
+        user_id: update.user_id || update.userId,
+        chat_id: update.chat_id || update.chatId,
+      };
       if (!user?.user_id) return;
       const startReplyTarget = {
         chat_id: update.chat_id || update.chatId || update.recipient?.chat_id || user.chat_id,
@@ -612,7 +640,7 @@ function createBotUpdateProcessor(deps) {
         null;
       const replyTarget = {
         chat_id: recipient.chat_id || recipient.chatId || update.chat_id || update.chatId,
-        user_id: sender.user_id || sender.userId || update.user_id || update.userId,
+        user_id: sender.user_id || sender.userId || callback.user_id || callback.userId || update.user_id || update.userId,
         prefer_user_id: true,
       };
       const phone = String(replyTarget.user_id || '');
@@ -633,7 +661,7 @@ function createBotUpdateProcessor(deps) {
 
     const msg = extractUpdateMessage(update);
     const sender = extractUpdateSender(update, msg);
-    const userId = sender?.user_id || sender?.userId || update?.user_id || update?.userId;
+    const userId = sender?.user_id || sender?.userId || msg?.user_id || msg?.userId || update?.user_id || update?.userId;
     if (!userId) {
       logger.log(`[BOT] ${normalizedWebhookPath} message без user_id keys=${Object.keys(update || {}).join(',')}`);
       return;
@@ -674,13 +702,14 @@ function registerBotRoutes(app, deps) {
       return res.status(429).json({ ok: false, error: 'Too many webhook requests' });
     }
 
+    const updateType = getUpdateType(Array.isArray(req.body?.updates) ? req.body.updates[0] : req.body);
+    logger.log(`[BOT] ${normalizedWebhookPath} webhook received ip=${getRequestIp(req)} type=${updateType || 'unknown'}`);
+
     const verification = verifyWebhookRequest(req, webhookSecret);
     if (!verification.ok) {
       logger.warn(`[BOT] ${normalizedWebhookPath} rejected webhook: ${verification.error}`);
       return res.status(verification.status || 401).json({ ok: false, error: verification.error });
     }
-
-    res.sendStatus(200);
 
     try {
       const updates = Array.isArray(req.body?.updates) ? req.body.updates : [req.body];
@@ -698,9 +727,11 @@ function registerBotRoutes(app, deps) {
           logger.warn(`[BOT] ${normalizedWebhookPath} Медленная обработка ${update.update_type || 'unknown'}: ${elapsedMs}ms`);
         }
       }
+      return res.sendStatus(200);
     } catch (err) {
       logger.error(`[BOT] ${normalizedWebhookPath} Ошибка обработки webhook:`, err?.message || String(err));
       logger.error(`[BOT] ${normalizedWebhookPath} Stack:`, err?.stack || 'no stack');
+      return res.status(500).json({ ok: false, error: 'Webhook processing failed' });
     }
   }
 

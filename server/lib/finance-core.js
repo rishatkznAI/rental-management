@@ -1,3 +1,8 @@
+const {
+  getStableClientId,
+  normalizeText,
+} = require('./client-links');
+
 function toNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
@@ -20,6 +25,24 @@ function getRentalDebtOverdueDays(row, today = new Date().toISOString().slice(0,
   return Math.max(0, Math.floor((new Date(today).getTime() - new Date(dueDate).getTime()) / 86400000));
 }
 
+function getClientName(record) {
+  return String(record?.client || record?.clientName || record?.company || record?.customerName || '').trim();
+}
+
+function buildClientsById(clients) {
+  return new Map(
+    (clients || [])
+      .filter(client => client?.id)
+      .map(client => [String(client.id), client]),
+  );
+}
+
+function getReceivableKey(row) {
+  const clientId = getStableClientId(row);
+  if (clientId) return `id:${clientId}`;
+  return `unlinked:${normalizeText(row?.client) || row?.rentalId || 'unknown'}`;
+}
+
 function buildRentalDebtRows(rentals, payments) {
   const byRentalId = new Map();
   (payments || []).forEach(payment => {
@@ -36,7 +59,8 @@ function buildRentalDebtRows(rentals, payments) {
       const outstanding = Math.max(0, amount - paidAmount);
       return {
         rentalId: rental.id,
-        client: rental.client || '',
+        clientId: getStableClientId(rental) || '',
+        client: getClientName(rental),
         equipmentId: rental.equipmentId || '',
         equipmentInv: rental.equipmentInv || '',
         manager: rental.manager || '',
@@ -55,18 +79,23 @@ function buildRentalDebtRows(rentals, payments) {
 }
 
 function buildClientReceivables(clients, rentalDebtRows, today = new Date().toISOString().slice(0, 10)) {
-  const clientsByName = new Map((clients || []).map(client => [client.company, client]));
+  const clientsById = buildClientsById(clients);
   const map = new Map();
 
   (rentalDebtRows || []).forEach(row => {
-    const existing = map.get(row.client) || {
-      clientId: clientsByName.get(row.client)?.id,
-      client: row.client,
-      creditLimit: toNumber(clientsByName.get(row.client)?.creditLimit),
+    const rowClientId = getStableClientId(row);
+    const client = rowClientId ? clientsById.get(rowClientId) : null;
+    const key = getReceivableKey(row);
+    const displayName = client?.company || row.client || 'Клиент не привязан';
+    const existing = map.get(key) || {
+      clientId: client?.id || rowClientId || undefined,
+      client: displayName,
+      creditLimit: toNumber(client?.creditLimit),
       currentDebt: 0,
       unpaidRentals: 0,
       overdueRentals: 0,
       exceededLimit: false,
+      dataIssue: rowClientId ? undefined : 'missing_client_id',
     };
     existing.currentDebt += row.outstanding;
     existing.unpaidRentals += 1;
@@ -74,7 +103,7 @@ function buildClientReceivables(clients, rentalDebtRows, today = new Date().toIS
       existing.overdueRentals += 1;
     }
     existing.exceededLimit = existing.creditLimit > 0 && existing.currentDebt > existing.creditLimit;
-    map.set(row.client, existing);
+    map.set(key, existing);
   });
 
   return Array.from(map.values()).sort((a, b) => b.currentDebt - a.currentDebt || a.client.localeCompare(b.client, 'ru'));
@@ -83,15 +112,15 @@ function buildClientReceivables(clients, rentalDebtRows, today = new Date().toIS
 function buildClientFinancialSnapshots(clients, rentals, payments, today = new Date().toISOString().slice(0, 10)) {
   const debtRows = buildRentalDebtRows(rentals, payments);
   const receivables = buildClientReceivables(clients, debtRows, today);
-  const receivableMap = new Map(receivables.map(item => [item.client, item]));
+  const receivableMap = new Map(receivables.filter(item => item.clientId).map(item => [String(item.clientId), item]));
 
   return (clients || [])
     .map(client => {
-      const clientRentals = (rentals || []).filter(item => item.client === client.company);
+      const clientRentals = (rentals || []).filter(item => getStableClientId(item) === String(client.id));
       const latestRental = clientRentals
         .slice()
         .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
-      const receivable = receivableMap.get(client.company);
+      const receivable = receivableMap.get(String(client.id));
       return {
         clientId: client.id,
         client: client.company,
@@ -129,7 +158,7 @@ function buildManagerReceivables(rentalDebtRows, today = new Date().toISOString(
       item.overdueRentals += 1;
       item.overdueDebt += row.outstanding;
     }
-    item.clients.add(row.client);
+    item.clients.add(getStableClientId(row) || row.client || 'Клиент не привязан');
     item.clientsCount = item.clients.size;
     map.set(key, item);
   });

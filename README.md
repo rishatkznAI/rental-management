@@ -8,6 +8,7 @@ Frontend on React/Vite and backend on Node/Express for an equipment rental manag
 - `src/` — frontend application
 - `server/` — backend API for auth, CRUD, and Railway deployment
 - `docs/processes-and-interface.md` — business process and interface map in Russian
+- `docs/gprs-gateway.md` — local GSM/GPRS gateway test steps
 
 ## Local development
 

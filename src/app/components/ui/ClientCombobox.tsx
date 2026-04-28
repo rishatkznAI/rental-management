@@ -27,6 +27,8 @@ export interface ClientComboboxProps {
   clients: Client[];
   value: string;
   onChange: (value: string) => void;
+  valueId?: string;
+  onClientSelect?: (client: Client | null) => void;
   placeholder?: string;
   className?: string;
   initialLimit?: number;
@@ -36,6 +38,8 @@ export function ClientCombobox({
   clients,
   value,
   onChange,
+  valueId,
+  onClientSelect,
   placeholder = 'Введите название, ИНН, контакт или телефон…',
   className,
   initialLimit = 10,
@@ -49,8 +53,8 @@ export function ClientCombobox({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const selectedClient = useMemo(
-    () => clients.find(client => client.company === value) ?? null,
-    [clients, value],
+    () => clients.find(client => client.id === valueId) ?? clients.find(client => client.company === value) ?? null,
+    [clients, value, valueId],
   );
 
   const filteredClients = useMemo(() => {
@@ -60,14 +64,16 @@ export function ClientCombobox({
 
   const handleSelect = useCallback((client: Client) => {
     onChange(client.company);
+    onClientSelect?.(client);
     setOpen(false);
     setQuery('');
     setHighlighted(-1);
-  }, [onChange]);
+  }, [onChange, onClientSelect]);
 
   const handleClear = (event: React.MouseEvent) => {
     event.stopPropagation();
     onChange('');
+    onClientSelect?.(null);
     setQuery('');
     setHighlighted(-1);
   };
@@ -160,7 +166,7 @@ export function ClientCombobox({
           </span>
         )}
 
-        {value ? (
+        {value || valueId ? (
           <button
             type="button"
             onMouseDown={handleClear}
@@ -187,7 +193,7 @@ export function ClientCombobox({
             <ul>
               {filteredClients.map((clientItem, index) => {
                 const isHighlighted = highlighted === index;
-                const isSelected = clientItem.company === value;
+                const isSelected = valueId ? clientItem.id === valueId : clientItem.company === value;
                 return (
                   <li
                     key={clientItem.id}

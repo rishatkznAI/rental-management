@@ -11,6 +11,7 @@ export type RepairEventType = 'repair' | 'maintenance' | 'diagnostics' | 'breakd
 export type RepairSource = 'manual' | 'bot';
 export type ShippingEventType = 'shipping' | 'receiving';
 export type EquipmentGsmSignalState = 'online' | 'location_only' | 'offline';
+export type EquipmentGsmStatus = 'online' | 'offline' | 'unknown';
 export type EquipmentGsmPointSource = 'gps' | 'parsed' | 'directory' | 'approximate';
 export type EquipmentOperationPhotoCategory =
   | 'front'
@@ -98,7 +99,17 @@ export interface Equipment {
   returnDate?: string;
   photo?: string;
   gsmTrackerId?: string;
-  gsmImei?: string;
+  gsmImei?: string | null;
+  gsmDeviceId?: string | null;
+  gsmProtocol?: string | null;
+  gsmSimNumber?: string | null;
+  gsmLastSeenAt?: string | null;
+  gsmLastLat?: number | null;
+  gsmLastLng?: number | null;
+  gsmLastSpeed?: number | null;
+  gsmLastVoltage?: number | null;
+  gsmLastMotoHours?: number | null;
+  gsmStatus?: EquipmentGsmStatus;
   gsmLatitude?: number;
   gsmLongitude?: number;
   gsmAddress?: string;
@@ -113,9 +124,15 @@ export interface Equipment {
 }
 
 export type GsmPacketDirection = 'inbound' | 'outbound';
-export type GsmCommandStatus = 'queued' | 'sent' | 'failed';
+export type GsmPacketParseStatus = 'pending' | 'parsed' | 'failed';
+export type GsmCommandStatus = 'queued' | 'sent' | 'acknowledged' | 'failed';
 
 export interface GsmGatewayStatus {
+  gatewayEnabled: boolean;
+  tcpPort: number;
+  uptimeSeconds: number;
+  connectionsActive: number;
+  packetsReceivedTotal: number;
   enabled: boolean;
   host: string;
   port: number;
@@ -135,6 +152,7 @@ export interface GsmGatewayCommandStatusSummary {
   total: number;
   queued: number;
   sent: number;
+  acknowledged?: number;
   failed: number;
 }
 
@@ -190,19 +208,36 @@ export interface GsmGatewayConnection {
 
 export interface GsmGatewayPacket {
   id: string;
-  direction: GsmPacketDirection;
+  sourceIp?: string | null;
+  remotePort?: number | null;
+  receivedAt?: string;
+  rawHex?: string;
+  rawText?: string | null;
+  protocol?: string | null;
+  parseStatus?: GsmPacketParseStatus;
+  parseError?: string | null;
   deviceId?: string | null;
   trackerId?: string | null;
   imei?: string | null;
   equipmentId?: string | null;
+  deviceTime?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  speed?: number | null;
+  course?: number | null;
+  satellites?: number | null;
+  gsmSignal?: number | null;
+  voltage?: number | null;
+  motoHours?: number | null;
+  alarmType?: string | null;
+  parsed?: Record<string, unknown> | null;
+  direction: GsmPacketDirection;
   equipmentLabel?: string | null;
   connectionId?: string | null;
   remoteAddress?: string | null;
-  remotePort?: number | null;
   payload?: string | null;
   payloadHex: string;
   encoding: 'text' | 'hex';
-  protocol?: string | null;
   summary?: string | null;
   parsedPayload?: Record<string, unknown> | null;
   createdAt: string;
@@ -216,18 +251,50 @@ export interface GsmGatewayCommand {
   deviceId?: string | null;
   trackerId?: string | null;
   imei?: string | null;
-  payload: string;
+  command?: string;
+  payload: string | Record<string, unknown>;
   encoding: 'text' | 'hex';
   appendNewline: boolean;
   status: GsmCommandStatus;
   createdAt: string;
   createdBy?: string | null;
   sentAt?: string | null;
+  ackAt?: string | null;
   failedAt?: string | null;
   error?: string | null;
   connectionId?: string | null;
   remoteAddress?: string | null;
   remotePort?: number | null;
+}
+
+export interface GsmGatewayDevice {
+  id: string;
+  equipmentId: string;
+  equipmentName?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  serialNumber?: string | null;
+  inventoryNumber?: string | null;
+  imei?: string | null;
+  deviceId?: string | null;
+  simNumber?: string | null;
+  protocol?: string | null;
+  status: EquipmentGsmStatus;
+  lastSeenAt?: string | null;
+  lastLat?: number | null;
+  lastLng?: number | null;
+  lastSpeed?: number | null;
+  lastVoltage?: number | null;
+  lastMotoHours?: number | null;
+}
+
+export interface GsmGatewayRoutePoint {
+  receivedAt: string;
+  deviceTime?: string | null;
+  lat: number;
+  lng: number;
+  speed?: number | null;
+  course?: number | null;
 }
 
 export interface RepairRecord {
@@ -268,6 +335,7 @@ export type RentalStatus = 'new' | 'confirmed' | 'delivery' | 'active' | 'return
 
 export interface Rental {
   id: string;
+  clientId?: string;
   client: string;
   contact: string;
   startDate: string;
@@ -301,6 +369,7 @@ export interface RentalChangeRequest {
   entityId?: string;
   rentalId: string;
   linkedGanttRentalId?: string;
+  clientId?: string;
   client: string;
   equipment: string[];
   initiatorId: string;
@@ -603,6 +672,7 @@ export interface Document {
   type: DocumentType;
   contractKind?: DocumentContractKind;
   number: string;
+  clientId?: string;
   client: string;
   date: string;
   amount?: number;
@@ -639,6 +709,7 @@ export interface Payment {
   id: string;
   invoiceNumber: string;
   rentalId?: string;       // link to GanttRental id
+  clientId?: string;
   client: string;
   amount: number;          // total amount due
   paidAmount?: number;     // amount actually paid (for partial)

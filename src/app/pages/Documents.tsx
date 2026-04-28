@@ -53,6 +53,7 @@ import type {
 type DocumentsView = 'general' | 'mechanics';
 
 type ContractFormState = {
+  clientId: string;
   client: string;
   signatoryName: string;
   signatoryBasis: string;
@@ -257,6 +258,7 @@ export default function Documents() {
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [createContractKind, setCreateContractKind] = React.useState<DocumentContractKind>('rental');
   const [contractForm, setContractForm] = React.useState<ContractFormState>({
+    clientId: '',
     client: '',
     signatoryName: '',
     signatoryBasis: '',
@@ -364,6 +366,7 @@ export default function Documents() {
   function openContractCreate(kind: DocumentContractKind) {
     setCreateContractKind(kind);
     setContractForm({
+      clientId: '',
       client: '',
       signatoryName: '',
       signatoryBasis: '',
@@ -374,7 +377,7 @@ export default function Documents() {
   }
 
   async function handleCreateContract() {
-    if (!contractForm.client.trim()) {
+    if (!contractForm.clientId || !contractForm.client.trim()) {
       toast.error('Выберите клиента.');
       return;
     }
@@ -395,6 +398,7 @@ export default function Documents() {
       type: 'contract',
       contractKind: createContractKind,
       number: generatedContractNumber,
+      clientId: contractForm.clientId,
       client: contractForm.client.trim(),
       date: contractForm.date,
       status: 'draft',
@@ -708,7 +712,13 @@ export default function Documents() {
                   <ClientCombobox
                     clients={clients as Client[]}
                     value={contractForm.client}
+                    valueId={contractForm.clientId}
                     onChange={(value) => setContractForm(current => ({ ...current, client: value }))}
+                    onClientSelect={(client) => setContractForm(current => ({
+                      ...current,
+                      clientId: client?.id ?? '',
+                      client: client?.company ?? '',
+                    }))}
                     placeholder="Выберите клиента из базы"
                   />
                 </div>

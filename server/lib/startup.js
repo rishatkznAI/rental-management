@@ -123,6 +123,7 @@ async function startServer({ app, port, deps, logger = console }) {
     ensureLegacyDefaultUsers,
     migrateReferenceCollections,
     migrateLegacyRepairFacts,
+    normalizeClientLinks,
     applyAdminResetFromEnv,
     registerWebhook,
     startWebhookWatchdog,
@@ -139,6 +140,13 @@ async function startServer({ app, port, deps, logger = console }) {
     ensureLegacyDefaultUsers();
     migrateReferenceCollections();
     migrateLegacyRepairFacts();
+    if (typeof normalizeClientLinks === 'function') {
+      normalizeClientLinks({
+        readData: deps.readData,
+        writeData: deps.writeData,
+        logger,
+      });
+    }
     seedServiceWorks({
       readData: deps.readData,
       writeData: deps.writeData,

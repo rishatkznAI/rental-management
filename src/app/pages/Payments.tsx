@@ -39,6 +39,7 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
   const [clientError, setClientError] = useState('');
   const [form, setForm] = useState({
     rentalId: '',
+    clientId: '',
     client: '',
     amount: '',
     paidAmount: '',
@@ -54,7 +55,10 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
       // auto-fill client from rental
       if (k === 'rentalId') {
         const r = rentals.find(r => r.id === v);
-        if (r) next.client = r.client;
+        if (r) {
+          next.clientId = r.clientId || '';
+          next.client = r.client;
+        }
       }
       return next;
     });
@@ -65,15 +69,15 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
 
   // Compute current client debt (excluding payments being created right now)
   const clientDebt = useMemo(() => {
-    if (!form.client) return null;
+    if (!form.clientId) return null;
     const debtRows = buildRentalDebtRows(rentals, allPayments);
     const receivables = buildClientReceivables(clients, debtRows);
-    return receivables.find(r => r.client === form.client) ?? null;
-  }, [form.client, rentals, allPayments, clients]);
+    return receivables.find(r => r.clientId === form.clientId) ?? null;
+  }, [form.clientId, rentals, allPayments, clients]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.client.trim()) {
+    if (!form.clientId || !form.client.trim()) {
       setClientError('Выберите клиента из базы');
       return;
     }
@@ -83,6 +87,7 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
       id: genId(),
       invoiceNumber: genInvoice(existing),
       rentalId: form.rentalId || undefined,
+      clientId: form.clientId,
       client: form.client,
       amount: amt,
       paidAmount: paid,
@@ -132,7 +137,16 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
             <ClientCombobox
               clients={clients}
               value={form.client}
+              valueId={form.clientId}
               onChange={value => set('client', value)}
+              onClientSelect={(client) => {
+                setForm(current => ({
+                  ...current,
+                  clientId: client?.id ?? '',
+                  client: client?.company ?? '',
+                }));
+                setClientError('');
+              }}
               placeholder="Выберите клиента из базы"
             />
             {clientError && (

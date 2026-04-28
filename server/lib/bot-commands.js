@@ -104,6 +104,26 @@ function createBotHandlers(deps) {
       });
   }
 
+  function botTargetSummary(target) {
+    if (target && typeof target === 'object') {
+      return `user=${target.user_id || target.userId || 'unknown'} chat=${target.chat_id || target.chatId || 'none'}`;
+    }
+    return `user=${target || 'unknown'}`;
+  }
+
+  function logBotSendResult(target, payload, context = '') {
+    const suffix = context ? ` ${context}` : '';
+    if (!payload) {
+      console.warn(`[BOT] send message failed${suffix}: empty MAX response target=${botTargetSummary(target)}`);
+      return;
+    }
+    if (payload.error || payload.code || payload.message === 'error') {
+      console.warn(`[BOT] send message failed${suffix}: ${JSON.stringify(payload).slice(0, 500)} target=${botTargetSummary(target)}`);
+      return;
+    }
+    console.log(`[BOT] message sent${suffix}: target=${botTargetSummary(target)} message=${extractMessageId(payload) || 'unknown'}`);
+  }
+
   function deleteBotMessageLater(messageId, replacementMessageId = null) {
     if (!messageId || messageId === replacementMessageId) return;
     runBotSideEffect(() => deleteMessage(messageId), `Не удалось удалить сообщение ${messageId}`);
@@ -156,10 +176,12 @@ function createBotHandlers(deps) {
       const imagePayload = separateStageAttachment
         ? await sendMessage(target, '', { attachments: [separateStageAttachment] })
         : null;
+      if (separateStageAttachment) logBotSendResult(target, imagePayload, 'stage');
       const replacementImageMessageId = await rememberBotImageMessage(phone, imagePayload);
       const payload = await sendMessage(target, text, {
         ...(hasMessageAttachments ? { attachments: messageAttachments } : {}),
       });
+      logBotSendResult(target, payload, 'reply');
       const replacementMessageId = await rememberBotMessage(phone, payload);
       deleteBotMessageLater(previousImageMessageId, replacementImageMessageId);
       deleteBotMessageLater(previousMessageId, replacementMessageId);
@@ -182,10 +204,12 @@ function createBotHandlers(deps) {
     const imagePayload = separateStageAttachment
       ? await sendMessage(target, '', { attachments: [separateStageAttachment] })
       : null;
+    if (separateStageAttachment) logBotSendResult(target, imagePayload, 'stage');
     const replacementImageMessageId = await rememberBotImageMessage(phone, imagePayload);
     const payload = await sendMessage(target, text, {
       ...(hasMessageAttachments ? { attachments: messageAttachments } : {}),
     });
+    logBotSendResult(target, payload, 'reply');
     const replacementMessageId = await rememberBotMessage(phone, payload);
 
     if (cleanupPrevious && phone) {
@@ -1837,6 +1861,11 @@ function createBotHandlers(deps) {
 
     const currentBotUser = getAuthorizedUser(String(phone));
     const currentBotMode = getUserBotMode(currentBotUser);
+    console.log('[BOT] callback resolved user=%s role=%s mode=%s action=%s',
+      currentBotUser?.userId || 'none',
+      currentBotUser?.userRole || 'none',
+      currentBotMode || 'none',
+      normalized || 'empty');
     if (!preferCarrierAutoLogin && currentBotMode === 'delivery' && isStaffBotCallback(normalized)) {
       return reply(senderId, getStaffModeRequiredText(), {
         attachments: switchToStaffKeyboard(),
@@ -3133,6 +3162,13 @@ function createBotHandlers(deps) {
       });
     }
 
+    console.log('[BOT] command resolved user=%s role=%s mode=%s scenario=%s command=%s',
+      authUser.userId || 'none',
+      authUser.userRole || 'none',
+      getUserBotMode(authUser) || 'none',
+      session.pendingAction || 'none',
+      traceCommand);
+
     const botUsers = getBotUsers();
     botUsers[String(phone)] = {
       ...authUser,
@@ -3866,7 +3902,10 @@ function createBotHandlers(deps) {
       });
     }
 
-    return sendMessage(senderId, '❓ Неизвестная команда. Напишите /помощь для списка команд.');
+    return replyWithUi('❓ Команда не распознана. Открыл главное меню, можно выбрать действие кнопкой или написать /помощь.', {
+      attachments: defaultKeyboardForRole(userRole),
+      ...mainMenuImageOptions(userRole),
+    });
   }
 
   return {

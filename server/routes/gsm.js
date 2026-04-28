@@ -21,6 +21,55 @@ function registerGsmRoutes(router, deps) {
     return res.status(403).json({ ok: false, error: 'GSM доступ запрещён' });
   }
 
+  function packetFilters(req) {
+    return {
+      limit: Number(req.query.limit) || 50,
+      offset: Number(req.query.offset) || 0,
+      equipmentId: String(req.query.equipmentId || '').trim(),
+      imei: String(req.query.imei || '').trim(),
+      deviceId: String(req.query.deviceId || '').trim(),
+      parseStatus: String(req.query.parseStatus || '').trim(),
+      from: String(req.query.from || '').trim(),
+      to: String(req.query.to || '').trim(),
+    };
+  }
+
+  router.get('/gsm/status', requireAuth, requireGsmView, (_req, res) => {
+    res.json(gprsGateway.getStatus());
+  });
+
+  router.get('/gsm/packets', requireAuth, requireGsmView, (req, res) => {
+    res.json(gprsGateway.listPackets(packetFilters(req)));
+  });
+
+  router.get('/gsm/devices', requireAuth, requireGsmView, (_req, res) => {
+    res.json(gprsGateway.listDevices());
+  });
+
+  router.get('/gsm/route', requireAuth, requireGsmView, (req, res) => {
+    res.json(gprsGateway.listRoute({
+      equipmentId: String(req.query.equipmentId || '').trim(),
+      from: String(req.query.from || '').trim(),
+      to: String(req.query.to || '').trim(),
+    }));
+  });
+
+  router.post('/gsm/commands', requireAuth, requireWrite('gsm_commands'), (req, res) => {
+    try {
+      const command = gprsGateway.createCommand({
+        equipmentId: String(req.body?.equipmentId || '').trim(),
+        command: String(req.body?.command || '').trim(),
+        payload: req.body?.payload && typeof req.body.payload === 'object' && !Array.isArray(req.body.payload)
+          ? req.body.payload
+          : {},
+        createdBy: req.user?.userName || 'Оператор',
+      });
+      res.status(202).json(command);
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
   router.get('/gsm/gateway/status', requireAuth, requireGsmView, (_req, res) => {
     res.json(gprsGateway.getStatus());
   });
@@ -30,11 +79,7 @@ function registerGsmRoutes(router, deps) {
   });
 
   router.get('/gsm/gateway/packets', requireAuth, requireGsmView, (req, res) => {
-    res.json(gprsGateway.listPackets({
-      equipmentId: String(req.query.equipmentId || '').trim(),
-      deviceId: String(req.query.deviceId || '').trim(),
-      limit: Number(req.query.limit) || 50,
-    }));
+    res.json(gprsGateway.listPackets(packetFilters(req)));
   });
 
   router.get('/gsm/gateway/commands', requireAuth, requireGsmView, (req, res) => {

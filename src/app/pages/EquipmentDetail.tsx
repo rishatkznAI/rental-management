@@ -1641,6 +1641,51 @@ export default function EquipmentDetail() {
               </div>
             )}
 
+            <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/8 p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-cyan-300">GSM</p>
+                  <p className="text-xs text-muted-foreground">Привязка трекера и последняя телеметрия</p>
+                </div>
+                <Badge
+                  variant={
+                    equipment.gsmStatus === 'online' || equipment.gsmSignalStatus === 'online'
+                      ? 'success'
+                      : equipment.gsmStatus === 'offline' || equipment.gsmSignalStatus === 'offline'
+                      ? 'warning'
+                      : 'default'
+                  }
+                >
+                  {equipment.gsmStatus === 'online' || equipment.gsmSignalStatus === 'online'
+                    ? 'Онлайн'
+                    : equipment.gsmStatus === 'offline' || equipment.gsmSignalStatus === 'offline'
+                    ? 'Офлайн'
+                    : 'Неизвестно'}
+                </Badge>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
+                <InfoField label="GSM IMEI" value={equipment.gsmImei || '—'} mono />
+                <InfoField label="Device ID" value={equipment.gsmDeviceId || equipment.gsmTrackerId || '—'} mono />
+                <InfoField label="SIM-карта" value={equipment.gsmSimNumber || '—'} />
+                <InfoField label="Протокол" value={equipment.gsmProtocol || '—'} />
+                <InfoField
+                  label="Последняя связь"
+                  value={equipment.gsmLastSeenAt || equipment.gsmLastSignalAt ? formatDateTime(equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '') : '—'}
+                />
+                <InfoField
+                  label="Координаты"
+                  value={
+                    typeof (equipment.gsmLastLat ?? equipment.gsmLatitude) === 'number'
+                    && typeof (equipment.gsmLastLng ?? equipment.gsmLongitude) === 'number'
+                      ? `${(equipment.gsmLastLat ?? equipment.gsmLatitude)!.toFixed(5)}, ${(equipment.gsmLastLng ?? equipment.gsmLongitude)!.toFixed(5)}`
+                      : '—'
+                  }
+                />
+                <InfoField label="Напряжение" value={typeof (equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage) === 'number' ? `${(equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage)!.toFixed(1)} В` : '—'} />
+                <InfoField label="Моточасы" value={typeof (equipment.gsmLastMotoHours ?? equipment.gsmHourmeter) === 'number' ? `${(equipment.gsmLastMotoHours ?? equipment.gsmHourmeter)!.toLocaleString('ru-RU')} м/ч` : '—'} />
+              </div>
+            </div>
+
             {equipment.isForSale && (
               <div className="mt-4 rounded-xl border border-orange-500/20 bg-orange-500/8 p-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
@@ -3008,9 +3053,17 @@ export default function EquipmentDetail() {
         equipment={equipment}
         onOpenChange={setShowEditModal}
         onSave={(updated) => {
+          const normalizedUpdated = {
+            ...updated,
+            gsmImei: updated.gsmImei || null,
+            gsmDeviceId: updated.gsmDeviceId || null,
+            gsmProtocol: updated.gsmProtocol || null,
+            gsmSimNumber: updated.gsmSimNumber || null,
+            gsmStatus: updated.gsmStatus || 'unknown',
+          };
           const historyEntries = buildFieldDiffHistory(
             equipment,
-            updated,
+            normalizedUpdated,
             {
               inventoryNumber: 'инвентарный номер',
               serialNumber: 'серийный номер',
@@ -3041,13 +3094,17 @@ export default function EquipmentDetail() {
               nextMaintenance: 'следующее ТО',
               maintenanceCHTO: 'дата ЧТО',
               maintenancePTO: 'дата ПТО',
+              gsmImei: 'GSM IMEI',
+              gsmDeviceId: 'Device ID',
+              gsmProtocol: 'GSM протокол',
+              gsmSimNumber: 'SIM-карта',
               notes: 'примечание',
             },
             user?.name || 'Система',
             'Обновлена карточка техники',
           );
-          const withHistory = appendAuditHistory(updated, ...historyEntries);
-          const list = allEquipment.map(e => e.id === updated.id ? withHistory : e);
+          const withHistory = appendAuditHistory(normalizedUpdated, ...historyEntries);
+          const list = allEquipment.map(e => e.id === normalizedUpdated.id ? withHistory : e);
           void persistEquipment(list);
           setShowEditModal(false);
         }}
@@ -3542,6 +3599,42 @@ function EditEquipmentModal({
                     value={form.location}
                     onChange={setStr('location')}
                     placeholder="Например: Казань, склад 1"
+                  />
+                </FormField>
+              </FormSection>
+
+              <div className="border-t border-gray-100 dark:border-gray-800" />
+
+              <FormSection title="GSM / GPRS" icon={<Bot className="h-3.5 w-3.5" />}>
+                <FormField label="GSM IMEI" hint="IMEI используется для автоматической привязки входящих пакетов">
+                  <FieldInput
+                    value={form.gsmImei || ''}
+                    onChange={setStr('gsmImei')}
+                    placeholder="866123456789012"
+                  />
+                </FormField>
+
+                <FormField label="Device ID" hint="Внутренний идентификатор трекера, если протокол передаёт не IMEI">
+                  <FieldInput
+                    value={form.gsmDeviceId || ''}
+                    onChange={setStr('gsmDeviceId')}
+                    placeholder="TRACKER-001"
+                  />
+                </FormField>
+
+                <FormField label="SIM-карта" hint="Номер SIM для обслуживания и диагностики связи">
+                  <FieldInput
+                    value={form.gsmSimNumber || ''}
+                    onChange={setStr('gsmSimNumber')}
+                    placeholder="+7 999 000-00-00"
+                  />
+                </FormField>
+
+                <FormField label="Протокол" hint="Можно заполнить позже после определения модели трекера">
+                  <FieldInput
+                    value={form.gsmProtocol || ''}
+                    onChange={setStr('gsmProtocol')}
+                    placeholder="GT06 / Teltonika / Wialon IPS"
                   />
                 </FormField>
               </FormSection>

@@ -54,6 +54,18 @@ test('classifyRentalFieldChange sends shortening to approval', () => {
   assert.equal(result.type, 'Сокращение аренды');
 });
 
+test('classifyRentalFieldChange sends active rental clientId changes to approval', () => {
+  const result = classifyRentalFieldChange({
+    previousRental: { ...rental, clientId: 'C-1' },
+    field: 'clientId',
+    newValue: 'C-2',
+    today: '2026-04-12',
+  });
+
+  assert.equal(result.mode, 'approval');
+  assert.equal(result.type, 'Изменение клиента в активной аренде');
+});
+
 test('splitRentalPatch separates immediate comments from protected price change', () => {
   const result = splitRentalPatch({
     previousRental: rental,

@@ -366,6 +366,7 @@ interface NewRentalModalProps {
   managers?: SystemUser[];
   onClose: () => void;
   onConfirm: (data: {
+    clientId: string;
     client: string;
     equipmentId: string;
     equipmentInv: string;
@@ -390,6 +391,7 @@ export function NewRentalModal({
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
   const [client,       setClient]       = useState('');
+  const [clientId,     setClientId]     = useState('');
   const [equipmentId,  setEquipmentId]  = useState('');
   const [startDate,    setStartDate]    = useState(today);
   const [endDate,      setEndDate]      = useState(nextWeek);
@@ -400,6 +402,8 @@ export function NewRentalModal({
   React.useEffect(() => {
     if (!open) return;
     setDailyRate('');
+    setClient('');
+    setClientId('');
     if (!preselectedEquipmentId) setEquipmentId('');
   }, [open, preselectedEquipmentId]);
 
@@ -452,8 +456,12 @@ export function NewRentalModal({
     [allClients, existingRentals, paymentsData],
   );
   const selectedClientFinancial = useMemo(
-    () => clientFinancials.find(item => item.client === client),
-    [clientFinancials, client],
+    () => clientFinancials.find(item => item.clientId === clientId),
+    [clientFinancials, clientId],
+  );
+  const selectedClient = useMemo(
+    () => allClients.find(item => item.id === clientId) ?? null,
+    [allClients, clientId],
   );
   const uniqueInventoryNumbers = useMemo(() => {
     const counts = new Map<string, number>();
@@ -573,13 +581,18 @@ export function NewRentalModal({
               <ClientCombobox
                 clients={allClients}
                 value={client}
+                valueId={clientId}
                 onChange={setClient}
+                onClientSelect={(selected) => {
+                  setClientId(selected?.id ?? '');
+                  setClient(selected?.company ?? '');
+                }}
                 placeholder="Введите клиента и выберите из базы…"
               />
             )}
           </div>
 
-          {client && selectedClientFinancial && (
+          {clientId && selectedClientFinancial && (
             <div className={`rounded-lg border px-3 py-3 text-sm ${
               selectedClientFinancial.exceededLimit
                 ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
@@ -721,9 +734,10 @@ export function NewRentalModal({
           <div className="flex gap-3 pt-2">
             <Button
               onClick={() => {
-                if (!selectedEquipment) return;
+                if (!selectedEquipment || !selectedClient) return;
                 onConfirm({
-                  client,
+                  clientId: selectedClient.id,
+                  client: selectedClient.company,
                   equipmentId: selectedEquipment.id,
                   equipmentInv: selectedEquipment.inventoryNumber,
                   startDate,
@@ -733,7 +747,7 @@ export function NewRentalModal({
                 });
                 onClose();
               }}
-              disabled={!client || !selectedEquipment || !startDate || !endDate}
+              disabled={!selectedClient || !selectedEquipment || !startDate || !endDate}
             >
               Создать аренду
             </Button>

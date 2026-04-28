@@ -166,7 +166,11 @@ export function buildAppNotifications({
     .filter(item => item.status === 'created')
     .forEach(item => {
       const clientDebtRows = rentalDebtRows.filter(
-        row => row.client === item.client && row.rentalId !== item.id && row.outstanding > 0,
+        row => (
+          row.clientId
+            ? row.clientId === item.clientId
+            : !item.clientId && row.client === item.client
+        ) && row.rentalId !== item.id && row.outstanding > 0,
       );
       if (!clientDebtRows.length) return;
 

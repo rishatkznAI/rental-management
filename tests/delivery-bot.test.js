@@ -18,6 +18,7 @@ const { createMaxApiClient } = require('../server/lib/max-api.js');
 const {
   createBotUpdateProcessor,
   disconnectBotConnection,
+  registerBotRoutes,
   updateBotConnectionRole,
 } = require('../server/routes/bot.js');
 
@@ -101,6 +102,52 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
   });
 
   return { state, messages, handlers };
+}
+
+function createMockResponse() {
+  return {
+    statusCode: 200,
+    body: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.body = payload;
+      return this;
+    },
+    sendStatus(code) {
+      this.statusCode = code;
+      this.body = code;
+      return this;
+    },
+  };
+}
+
+async function postBotWebhook(handlers, body, options = {}) {
+  const routes = {};
+  registerBotRoutes({
+    post(pathName, handler) {
+      routes[pathName] = handler;
+    },
+  }, {
+    handleCommand: handlers.handleCommand,
+    handleBotStarted: handlers.handleBotStarted,
+    handleCallback: handlers.handleCallback,
+    webhookPath: options.webhookPath || '/bot/webhook',
+    webhookSecret: options.webhookSecret || '',
+    logger: options.logger || { log: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  const response = createMockResponse();
+  await routes[options.webhookPath || '/bot/webhook']({
+    headers: options.headers || {},
+    params: options.params || {},
+    body,
+    ip: '127.0.0.1',
+    socket: { remoteAddress: '127.0.0.1' },
+  }, response);
+  return response;
 }
 
 test('regular bot_started keeps an existing non-carrier role menu', async () => {
@@ -221,6 +268,73 @@ test('unknown command reports an error before authorization', async () => {
 
   assert.equal(state.bot_sessions['100']?.pendingAction, undefined);
   assert.match(messages.at(-1).text, /Неизвестная команда/);
+});
+
+test('MAX webhook POST with /start sends a login response even without secret in production', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users = {};
+
+  try {
+    const response = await postBotWebhook(handlers, {
+      update_type: 'message_created',
+      message: {
+        body: { text: '/start' },
+        sender: { user_id: 200 },
+        recipient: { chat_id: 555 },
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(messages.length, 1);
+    assert.match(messages[0].text, /Напишите логин|email/i);
+    assert.equal(state.bot_sessions['200'].pendingAction, 'login_email');
+  } finally {
+    if (previousNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+  }
+});
+
+test('MAX webhook unknown command responds with main menu for authorized user', async () => {
+  const { messages, handlers } = createMemoryBot(false);
+
+  const response = await postBotWebhook(handlers, {
+    update_type: 'message_created',
+    message: {
+      body: { text: '/командакоторойнет' },
+      sender: { user_id: 100 },
+      recipient: { chat_id: 555 },
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.match(messages.at(-1).text, /Команда не распознана|Неизвестная команда/);
+  assert.ok(messages.at(-1).options.attachments);
+});
+
+test('MAX webhook callback action is routed without crashing', async () => {
+  const { messages, handlers } = createMemoryBot(false);
+
+  const response = await postBotWebhook(handlers, {
+    update_type: 'message_callback',
+    callback: {
+      callback_id: 'cb-1',
+      payload: 'menu:main',
+      user_id: 100,
+      message: {
+        message_id: 'msg-1',
+        recipient: { chat_id: 555 },
+      },
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(messages.length > 0);
+  assert.match(messages.at(-1).text, /Менеджер по аренде|Главное меню/);
 });
 
 test('MAX update processor accepts camelCase message updates', async () => {

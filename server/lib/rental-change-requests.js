@@ -7,6 +7,7 @@ const RENTAL_CHANGE_REQUEST_STATUS = {
 };
 
 const RENTAL_CHANGE_FIELD_LABELS = {
+  clientId: 'Клиент',
   client: 'Клиент',
   contact: 'Контактное лицо',
   manager: 'Менеджер',
@@ -185,7 +186,7 @@ function classifyRentalFieldChange({ previousRental, field, newValue, payments =
     return { mode: 'immediate', type: 'Изменение статуса', reason: 'Статус аренды применяется сразу.' };
   }
 
-  if (field === 'client' && previousRental?.status === 'active') {
+  if ((field === 'client' || field === 'clientId') && previousRental?.status === 'active') {
     return { mode: 'approval', type: 'Изменение клиента в активной аренде', reason: 'Клиент в активной аренде меняется только через согласование.' };
   }
 
@@ -281,6 +282,7 @@ function buildRentalChangeRequest({
     entityType: 'rental',
     rentalId: rental.id,
     linkedGanttRentalId: linkedGanttRentalId || '',
+    clientId: rental.clientId || '',
     client: rental.client,
     equipment: Array.isArray(rental.equipment) ? rental.equipment : [],
     initiatorId: initiator?.userId || '',
@@ -336,6 +338,7 @@ function rentalStatusToGanttStatus(status) {
 
 function applyRentalFieldToGantt(ganttRental, field, value) {
   if (!ganttRental) return ganttRental;
+  if (field === 'clientId') return { ...ganttRental, clientId: value };
   if (field === 'client') {
     return { ...ganttRental, client: value, clientShort: String(value || '').substring(0, 20) };
   }

@@ -1,12 +1,16 @@
 const crypto = require('crypto');
 const net = require('net');
+const { bufferToReadableText, parsePacket: fallbackParsePacket } = require('./gsm/parsers');
 
-const GPRS_PORT = Number(process.env.GPRS_PORT || 5055);
-const GPRS_HOST = process.env.GPRS_HOST || '0.0.0.0';
+const DEFAULT_GPRS_PORT = Number(process.env.GPRS_PORT || 5023);
+const DEFAULT_GPRS_HOST = process.env.GPRS_HOST || '0.0.0.0';
+const DEFAULT_MAX_PACKET_BYTES = Number(process.env.GPRS_MAX_PACKET_BYTES || 16 * 1024);
+const DEFAULT_MAX_PACKETS_PER_MINUTE = Number(process.env.GPRS_MAX_PACKETS_PER_MINUTE || 120);
+const DEFAULT_CONNECTION_TIMEOUT_MS = Number(process.env.GPRS_CONNECTION_TIMEOUT_MS || 120_000);
 const MAX_PACKET_LOG = 1500;
 const MAX_COMMAND_LOG = 600;
 const MAX_HISTORY_POINTS = 240;
-const TRACKER_SESSION_TTL_MS = 1000 * 60 * 15;
+const ONLINE_WINDOW_MS = 15 * 60 * 1000;
 
 function nowIso() {
   return new Date().toISOString();
@@ -16,146 +20,136 @@ function generateId(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
 }
 
-function sanitizePrintableText(value) {
-  if (!value) return '';
-  const normalized = value
-    .replace(/\r/g, '')
-    .replace(/\0/g, '')
-    .replace(/[^\x09\x0A\x20-\x7E\u0400-\u04FF]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return normalized.slice(0, 1200);
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
-function parseNumber(value) {
+function toText(value) {
+  return String(value || '').trim();
+}
+
+function toNumberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
-  const numeric = Number(String(value).replace(',', '.'));
+  const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function parseBoolean(value) {
-  if (typeof value === 'boolean') return value;
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return null;
-  if (['1', 'true', 'on', 'yes', 'y', 'acc', 'ignition_on'].includes(normalized)) return true;
-  if (['0', 'false', 'off', 'no', 'n', 'ignition_off'].includes(normalized)) return false;
-  return null;
+function isFiniteNumber(value) {
+  return Number.isFinite(Number(value));
 }
 
-function normalizeIsoTimestamp(value) {
-  if (!value) return nowIso();
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return nowIso();
-  return date.toISOString();
+function normalizeRemoteAddress(value) {
+  return String(value || '').replace(/^::ffff:/, '') || null;
 }
 
-function safeJsonParse(text) {
-  if (!text || !(text.startsWith('{') || text.startsWith('['))) return null;
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function safeKeyValueParse(text) {
-  if (!text || !/[=:]/.test(text)) return null;
-  const entries = {};
-  const parts = text.split(/[;,&\n]+/g).map(item => item.trim()).filter(Boolean);
-  let matched = 0;
-  for (const part of parts) {
-    const separatorIndex = part.includes('=') ? part.indexOf('=') : part.indexOf(':');
-    if (separatorIndex <= 0) continue;
-    const key = part.slice(0, separatorIndex).trim();
-    const value = part.slice(separatorIndex + 1).trim();
-    if (!key) continue;
-    entries[key] = value;
-    matched += 1;
-  }
-  return matched > 0 ? entries : null;
-}
-
-function extractIdentity(text, payload) {
-  const candidates = [
-    payload?.deviceId,
-    payload?.trackerId,
-    payload?.tracker,
-    payload?.imei,
-    payload?.IMEI,
-    payload?.id,
-  ].map(value => String(value || '').trim()).filter(Boolean);
-
-  const imeiMatch = text.match(/(?:imei|IMEI)\s*[:=]\s*(\d{10,20})/);
-  if (imeiMatch?.[1]) candidates.unshift(imeiMatch[1]);
-
-  const gt06Match = text.match(/^##,imei:(\d{10,20}),/i);
-  if (gt06Match?.[1]) candidates.unshift(gt06Match[1]);
-
-  const plainDigits = text.match(/^\d{14,20}$/);
-  if (plainDigits?.[0]) candidates.unshift(plainDigits[0]);
-
-  const imei = candidates.find(value => /^\d{10,20}$/.test(value)) || '';
-  const trackerId = candidates.find(value => value !== imei) || '';
-  const deviceId = trackerId || imei || '';
+function normalizeParseResult(result = {}) {
+  const status = ['pending', 'parsed', 'failed'].includes(result.parseStatus)
+    ? result.parseStatus
+    : 'pending';
 
   return {
-    deviceId: deviceId || null,
-    trackerId: trackerId || null,
-    imei: imei || null,
+    protocol: result.protocol || null,
+    parseStatus: status,
+    parseError: result.parseError || null,
+    deviceId: toText(result.deviceId) || null,
+    imei: toText(result.imei) || null,
+    deviceTime: result.deviceTime || null,
+    lat: toNumberOrNull(result.lat),
+    lng: toNumberOrNull(result.lng),
+    speed: toNumberOrNull(result.speed),
+    course: toNumberOrNull(result.course),
+    satellites: toNumberOrNull(result.satellites),
+    gsmSignal: toNumberOrNull(result.gsmSignal),
+    voltage: toNumberOrNull(result.voltage),
+    motoHours: toNumberOrNull(result.motoHours),
+    alarmType: toText(result.alarmType) || null,
+    parsed: result.parsed && typeof result.parsed === 'object' ? result.parsed : null,
+    ack: Buffer.isBuffer(result.ack) ? result.ack : null,
   };
 }
 
-function normalizePayload(buffer) {
-  const rawHex = buffer.toString('hex').toUpperCase();
-  const utf8Text = sanitizePrintableText(buffer.toString('utf8'));
-  const payload = safeJsonParse(utf8Text) || safeKeyValueParse(utf8Text) || null;
-  const identity = extractIdentity(utf8Text, payload);
-  const lat = parseNumber(payload?.lat ?? payload?.latitude);
-  const lng = parseNumber(payload?.lng ?? payload?.lon ?? payload?.longitude);
-  const speedKph = parseNumber(payload?.speed ?? payload?.speedKph ?? payload?.spd);
-  const batteryVoltage = parseNumber(payload?.battery ?? payload?.batteryVoltage ?? payload?.voltage ?? payload?.vbat);
-  const hourmeter = parseNumber(payload?.hourmeter ?? payload?.hours ?? payload?.engineHours ?? payload?.motoHours);
-  const ignitionOn = parseBoolean(payload?.ignition ?? payload?.ignitionOn ?? payload?.acc ?? payload?.engine);
-  const address = String(payload?.address || payload?.location || '').trim() || null;
-  const trackerTimestamp = normalizeIsoTimestamp(payload?.timestamp ?? payload?.time ?? payload?.datetime ?? payload?.at);
-
-  const protocol = payload
-    ? (String(payload.protocol || payload.type || '').trim() || 'generic-text')
-    : (utf8Text ? 'raw-text' : 'binary');
-
-  const summaryParts = [];
-  if (identity.deviceId) summaryParts.push(`Устройство ${identity.deviceId}`);
-  if (Number.isFinite(lat) && Number.isFinite(lng)) summaryParts.push(`Координаты ${lat?.toFixed(5)}, ${lng?.toFixed(5)}`);
-  if (speedKph !== null) summaryParts.push(`Скорость ${speedKph} км/ч`);
-  if (ignitionOn !== null) summaryParts.push(`Зажигание ${ignitionOn ? 'вкл' : 'выкл'}`);
-
-  return {
-    rawHex,
-    rawText: utf8Text,
-    protocol,
-    deviceId: identity.deviceId,
-    trackerId: identity.trackerId,
-    imei: identity.imei,
-    lat,
-    lng,
-    speedKph,
-    batteryVoltage,
-    hourmeter,
-    ignitionOn,
-    address,
-    trackerTimestamp,
-    payload,
-    summary: summaryParts.join(' · ') || 'Сырой пакет принят',
-  };
+function commandStatusSummary(commands) {
+  return commands.reduce((summary, command) => {
+    const status = command.status || 'queued';
+    summary.total += 1;
+    summary[status] = (summary[status] || 0) + 1;
+    return summary;
+  }, { total: 0, queued: 0, sent: 0, acknowledged: 0, failed: 0 });
 }
 
-function createGprsGateway({ readData, writeData, logger = console }) {
+function getPacketTime(packet) {
+  return packet?.receivedAt || packet?.createdAt || null;
+}
+
+function isPacketRecent(packet, sinceMs) {
+  const time = Date.parse(getPacketTime(packet) || '');
+  return Number.isFinite(time) && time >= sinceMs;
+}
+
+function protocolBreakdown(packets) {
+  const map = new Map();
+  for (const packet of packets) {
+    const protocol = toText(packet.protocol) || 'raw';
+    const current = map.get(protocol) || { protocol, count: 0, lastPacketAt: null };
+    current.count += 1;
+    const packetAt = getPacketTime(packet);
+    if (!current.lastPacketAt || Date.parse(packetAt || '') > Date.parse(current.lastPacketAt || '')) {
+      current.lastPacketAt = packetAt;
+    }
+    map.set(protocol, current);
+  }
+  return [...map.values()]
+    .sort((left, right) => right.count - left.count || String(right.lastPacketAt || '').localeCompare(String(left.lastPacketAt || '')))
+    .slice(0, 8);
+}
+
+function equipmentLabel(equipment) {
+  if (!equipment) return null;
+  return [
+    equipment.manufacturer,
+    equipment.model,
+    equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
+  ].filter(Boolean).join(' · ') || equipment.id || null;
+}
+
+function compactHex(value, maxChars = 600) {
+  const text = String(value || '');
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+function getPacketSummary(packet) {
+  const parts = [];
+  if (packet.imei || packet.deviceId) parts.push(`Устройство ${packet.imei || packet.deviceId}`);
+  if (isFiniteNumber(packet.lat) && isFiniteNumber(packet.lng)) {
+    parts.push(`Координаты ${Number(packet.lat).toFixed(5)}, ${Number(packet.lng).toFixed(5)}`);
+  }
+  if (isFiniteNumber(packet.speed)) parts.push(`Скорость ${Number(packet.speed)} км/ч`);
+  if (packet.parseStatus === 'failed') parts.push('Ошибка разбора');
+  return parts.join(' · ') || 'Сырой пакет принят';
+}
+
+function createGprsGateway({
+  readData,
+  writeData,
+  logger = console,
+  host = DEFAULT_GPRS_HOST,
+  port = DEFAULT_GPRS_PORT,
+  parsePacket = fallbackParsePacket,
+  maxPacketBytes = DEFAULT_MAX_PACKET_BYTES,
+  maxPacketsPerMinute = DEFAULT_MAX_PACKETS_PER_MINUTE,
+  connectionTimeoutMs = DEFAULT_CONNECTION_TIMEOUT_MS,
+} = {}) {
+  if (typeof readData !== 'function' || typeof writeData !== 'function') {
+    throw new Error('GPRS gateway requires readData and writeData functions');
+  }
+
   const connections = new Map();
   const deviceToConnectionId = new Map();
   let tcpServer = null;
+  let cleanupTimer = null;
   let gatewayStartedAt = null;
   let startError = '';
+  let packetsReceivedTotal = 0;
 
   function ensureStorage() {
     if (!Array.isArray(readData('gsm_packets'))) writeData('gsm_packets', []);
@@ -163,34 +157,24 @@ function createGprsGateway({ readData, writeData, logger = console }) {
   }
 
   function trimCollection(name, maxItems) {
-    const list = readData(name) || [];
-    if (!Array.isArray(list) || list.length <= maxItems) return list;
+    const list = asArray(readData(name));
+    if (list.length <= maxItems) return list;
     const nextList = list.slice(0, maxItems);
     writeData(name, nextList);
     return nextList;
   }
 
-  function resolveEquipmentByIdentity(identity) {
-    const equipment = readData('equipment') || [];
-    return equipment.find((item) => {
-      const trackerId = String(item.gsmTrackerId || '').trim();
-      const imei = String(item.gsmImei || '').trim();
-      return Boolean(
-        (identity.deviceId && trackerId && trackerId === identity.deviceId)
-        || (identity.trackerId && trackerId && trackerId === identity.trackerId)
-        || (identity.imei && imei && imei === identity.imei),
-      );
-    }) || null;
-  }
-
   function persistPacket(packet) {
-    const list = readData('gsm_packets') || [];
+    ensureStorage();
+    const list = asArray(readData('gsm_packets'));
     list.unshift(packet);
     writeData('gsm_packets', list.slice(0, MAX_PACKET_LOG));
+    if (packet.direction === 'inbound') packetsReceivedTotal += 1;
   }
 
   function persistCommand(command) {
-    const list = readData('gsm_commands') || [];
+    ensureStorage();
+    const list = asArray(readData('gsm_commands'));
     const index = list.findIndex(item => item.id === command.id);
     if (index >= 0) {
       list[index] = command;
@@ -200,306 +184,236 @@ function createGprsGateway({ readData, writeData, logger = console }) {
     writeData('gsm_commands', list.slice(0, MAX_COMMAND_LOG));
   }
 
-  function appendTelemetryToEquipment(equipmentId, payload, identity) {
+  function resolveEquipmentByIdentity(identity = {}) {
+    const imei = toText(identity.imei);
+    const deviceId = toText(identity.deviceId);
+    if (!imei && !deviceId) return null;
+
+    return asArray(readData('equipment')).find((item) => {
+      const itemImei = toText(item.gsmImei);
+      const itemDeviceId = toText(item.gsmDeviceId);
+      const legacyTrackerId = toText(item.gsmTrackerId);
+      return Boolean(
+        (imei && itemImei && imei === itemImei)
+        || (deviceId && itemDeviceId && deviceId === itemDeviceId)
+        || (deviceId && legacyTrackerId && deviceId === legacyTrackerId),
+      );
+    }) || null;
+  }
+
+  function updateEquipmentFromPacket(equipmentId, parsed, receivedAt) {
     if (!equipmentId) return;
-    const equipmentList = readData('equipment') || [];
+    const equipmentList = asArray(readData('equipment'));
     const index = equipmentList.findIndex(item => item.id === equipmentId);
     if (index === -1) return;
 
     const current = equipmentList[index];
-    const next = { ...current };
-    const pointTimestamp = payload.trackerTimestamp || nowIso();
-    let changed = false;
+    const next = {
+      ...current,
+      gsmLastSeenAt: receivedAt,
+      gsmLastSignalAt: receivedAt,
+      gsmStatus: 'online',
+      gsmSignalStatus: 'online',
+    };
 
-    if (identity.trackerId && String(next.gsmTrackerId || '').trim() !== identity.trackerId) {
-      next.gsmTrackerId = identity.trackerId;
-      changed = true;
-    }
-    if (identity.imei && String(next.gsmImei || '').trim() !== identity.imei) {
-      next.gsmImei = identity.imei;
-      changed = true;
-    }
+    if (parsed.imei && !toText(next.gsmImei)) next.gsmImei = parsed.imei;
+    if (parsed.deviceId && !toText(next.gsmDeviceId)) next.gsmDeviceId = parsed.deviceId;
+    if (parsed.protocol) next.gsmProtocol = parsed.protocol;
 
-    next.gsmLastSignalAt = pointTimestamp;
-    next.gsmSignalStatus = 'online';
-    changed = true;
-
-    if (Number.isFinite(payload.lat) && Number.isFinite(payload.lng)) {
-      next.gsmLatitude = payload.lat;
-      next.gsmLongitude = payload.lng;
-      changed = true;
+    if (isFiniteNumber(parsed.lat) && isFiniteNumber(parsed.lng)) {
+      next.gsmLastLat = Number(parsed.lat);
+      next.gsmLastLng = Number(parsed.lng);
+      next.gsmLatitude = Number(parsed.lat);
+      next.gsmLongitude = Number(parsed.lng);
     }
-    if (payload.address) {
-      next.gsmAddress = payload.address;
-      changed = true;
+    if (isFiniteNumber(parsed.speed)) {
+      next.gsmLastSpeed = Number(parsed.speed);
+      next.gsmSpeedKph = Number(parsed.speed);
     }
-    if (payload.speedKph !== null) {
-      next.gsmSpeedKph = payload.speedKph;
-      changed = true;
+    if (isFiniteNumber(parsed.voltage)) {
+      next.gsmLastVoltage = Number(parsed.voltage);
+      next.gsmBatteryVoltage = Number(parsed.voltage);
     }
-    if (payload.batteryVoltage !== null) {
-      next.gsmBatteryVoltage = payload.batteryVoltage;
-      changed = true;
-    }
-    if (payload.hourmeter !== null) {
-      next.gsmHourmeter = payload.hourmeter;
-      changed = true;
-    }
-    if (payload.ignitionOn !== null) {
-      next.gsmIgnitionOn = payload.ignitionOn;
-      changed = true;
+    if (isFiniteNumber(parsed.motoHours)) {
+      next.gsmLastMotoHours = Number(parsed.motoHours);
+      next.gsmHourmeter = Number(parsed.motoHours);
     }
 
-    if (Number.isFinite(payload.lat) && Number.isFinite(payload.lng)) {
-      const history = Array.isArray(current.gsmMovementHistory) ? current.gsmMovementHistory.slice(0) : [];
-      const dedupeKey = `${payload.lat.toFixed(5)}:${payload.lng.toFixed(5)}:${pointTimestamp.slice(0, 16)}`;
+    if (isFiniteNumber(parsed.lat) && isFiniteNumber(parsed.lng)) {
+      const history = asArray(current.gsmMovementHistory).slice();
+      const at = parsed.deviceTime || receivedAt;
+      const dedupeKey = `${Number(parsed.lat).toFixed(5)}:${Number(parsed.lng).toFixed(5)}:${at.slice(0, 16)}`;
       const exists = history.some((item) => {
         if (!item) return false;
-        const lat = Number(item.lat);
-        const lng = Number(item.lng);
-        return Number.isFinite(lat) && Number.isFinite(lng)
-          && `${lat.toFixed(5)}:${lng.toFixed(5)}:${String(item.at || '').slice(0, 16)}` === dedupeKey;
+        return `${Number(item.lat).toFixed(5)}:${Number(item.lng).toFixed(5)}:${String(item.at || '').slice(0, 16)}` === dedupeKey;
       });
-
       if (!exists) {
         history.push({
-          at: pointTimestamp,
-          lat: payload.lat,
-          lng: payload.lng,
+          at,
+          lat: Number(parsed.lat),
+          lng: Number(parsed.lng),
           source: 'gps',
-          address: payload.address || next.gsmAddress || next.location || 'GPRS точка',
-          speedKph: payload.speedKph ?? undefined,
+          address: next.gsmAddress || next.location || 'GPRS точка',
+          speedKph: isFiniteNumber(parsed.speed) ? Number(parsed.speed) : undefined,
         });
       }
-
       next.gsmMovementHistory = history
-        .sort((left, right) => new Date(left.at).getTime() - new Date(right.at).getTime())
+        .sort((left, right) => Date.parse(left.at || '') - Date.parse(right.at || ''))
         .slice(-MAX_HISTORY_POINTS);
-      changed = true;
     }
 
-    if (!changed) return;
     equipmentList[index] = next;
     writeData('equipment', equipmentList);
   }
 
-  function normalizeRemoteAddress(value) {
-    return String(value || '').replace(/^::ffff:/, '');
+  function bindConnection(connection, parsed, equipment) {
+    if (!connection) return;
+    connection.deviceId = parsed.deviceId || connection.deviceId || null;
+    connection.imei = parsed.imei || connection.imei || null;
+    if (equipment) {
+      connection.equipmentId = equipment.id;
+      connection.equipmentLabel = equipmentLabel(equipment);
+    }
+
+    const deviceKey = parsed.deviceId || parsed.imei;
+    if (deviceKey) deviceToConnectionId.set(deviceKey, connection.id);
   }
 
-  function getConnectionSummary(connection) {
+  function buildPacket({ connection, buffer, parsed, receivedAt, equipment, parseError = null, tooLarge = false }) {
+    const sourceIp = connection?.sourceIp || connection?.remoteAddress || null;
+    const rawHex = tooLarge
+      ? buffer.subarray(0, Math.max(0, maxPacketBytes)).toString('hex').toUpperCase()
+      : buffer.toString('hex').toUpperCase();
+    const rawText = tooLarge ? null : bufferToReadableText(buffer);
+    const equipmentId = equipment?.id || connection?.equipmentId || null;
+    const packet = {
+      id: generateId('GPKT'),
+      sourceIp,
+      remotePort: connection?.remotePort || null,
+      receivedAt,
+      rawHex,
+      rawText,
+      protocol: parsed.protocol || null,
+      parseStatus: parseError ? 'failed' : parsed.parseStatus,
+      parseError,
+      deviceId: parsed.deviceId || null,
+      imei: parsed.imei || null,
+      equipmentId,
+      deviceTime: parsed.deviceTime || null,
+      lat: parsed.lat,
+      lng: parsed.lng,
+      speed: parsed.speed,
+      course: parsed.course,
+      satellites: parsed.satellites,
+      gsmSignal: parsed.gsmSignal,
+      voltage: parsed.voltage,
+      motoHours: parsed.motoHours,
+      alarmType: parsed.alarmType,
+      parsed: parsed.parsed,
+    };
+
     return {
-      id: connection.id,
-      deviceId: connection.deviceId || null,
-      trackerId: connection.trackerId || null,
-      imei: connection.imei || null,
-      equipmentId: connection.equipmentId || null,
-      equipmentLabel: connection.equipmentLabel || null,
-      remoteAddress: connection.remoteAddress,
-      remotePort: connection.remotePort,
-      connectedAt: connection.connectedAt,
-      lastSeenAt: connection.lastSeenAt,
-      packetsReceived: connection.packetsReceived,
-      bytesReceived: connection.bytesReceived,
-      isOnline: !connection.closedAt,
+      ...packet,
+      direction: 'inbound',
+      trackerId: packet.deviceId,
+      equipmentLabel: equipmentLabel(equipment) || connection?.equipmentLabel || null,
+      connectionId: connection?.id || null,
+      remoteAddress: sourceIp,
+      payload: rawText,
+      payloadHex: rawHex,
+      encoding: rawText ? 'text' : 'hex',
+      summary: getPacketSummary(packet),
+      parsedPayload: packet.parsed,
+      createdAt: receivedAt,
+      createdBy: 'Трекер',
     };
   }
 
-  function identityValues(item = {}) {
-    return [item.deviceId, item.trackerId, item.imei]
-      .map(value => String(value || '').trim())
-      .filter(Boolean);
-  }
+  function processRawPacket(buffer, context = {}) {
+    ensureStorage();
+    const sourceIp = normalizeRemoteAddress(context.sourceIp || context.remoteAddress || context.connection?.sourceIp || context.connection?.remoteAddress);
+    const connection = context.connection || {
+      id: context.connectionId || null,
+      sourceIp,
+      remoteAddress: sourceIp,
+      remotePort: context.remotePort || null,
+      equipmentId: null,
+      equipmentLabel: null,
+    };
+    const receivedAt = nowIso();
 
-  function matchesGatewayFilter(item, equipmentId = '', deviceId = '') {
-    if (equipmentId && item.equipmentId !== equipmentId) return false;
-    if (deviceId && !identityValues(item).includes(deviceId)) return false;
-    return true;
-  }
-
-  function isPacketRecent(packet, sinceMs) {
-    return new Date(packet?.createdAt || 0).getTime() >= sinceMs;
-  }
-
-  function countCommandsByStatus(commands) {
-    return commands.reduce((summary, command) => {
-      const status = command.status || 'queued';
-      summary.total += 1;
-      summary[status] = (summary[status] || 0) + 1;
-      return summary;
-    }, { total: 0, queued: 0, sent: 0, failed: 0 });
-  }
-
-  function protocolBreakdown(packets) {
-    const map = new Map();
-    for (const packet of packets) {
-      const protocol = String(packet.protocol || 'raw').trim() || 'raw';
-      const current = map.get(protocol) || { protocol, count: 0, lastPacketAt: null };
-      current.count += 1;
-      if (!current.lastPacketAt || new Date(packet.createdAt).getTime() > new Date(current.lastPacketAt).getTime()) {
-        current.lastPacketAt = packet.createdAt || null;
-      }
-      map.set(protocol, current);
+    if (connection) {
+      connection.lastSeenAt = receivedAt;
+      connection.packetsReceived = (connection.packetsReceived || 0) + 1;
+      connection.bytesReceived = (connection.bytesReceived || 0) + buffer.byteLength;
     }
-    return [...map.values()]
-      .sort((left, right) => right.count - left.count || String(right.lastPacketAt || '').localeCompare(String(left.lastPacketAt || '')))
-      .slice(0, 8);
+
+    let parsed;
+    let parseError = null;
+    let tooLarge = false;
+
+    if (!Buffer.isBuffer(buffer)) {
+      buffer = Buffer.from(buffer || '');
+    }
+
+    if (buffer.byteLength > maxPacketBytes) {
+      tooLarge = true;
+      parseError = `packet_too_large: ${buffer.byteLength} bytes > ${maxPacketBytes}`;
+      parsed = normalizeParseResult({
+        parseStatus: 'failed',
+        parseError,
+        parsed: { byteLength: buffer.byteLength, maxPacketBytes, truncated: true },
+      });
+    } else if (context.forceError) {
+      parseError = String(context.forceError);
+      parsed = normalizeParseResult({
+        parseStatus: 'failed',
+        parseError,
+        parsed: { byteLength: buffer.byteLength },
+      });
+    } else {
+      try {
+        parsed = normalizeParseResult(parsePacket(buffer, {
+          sourceIp,
+          remotePort: connection.remotePort || null,
+          receivedAt,
+        }));
+        parseError = parsed.parseError;
+      } catch (error) {
+        parseError = error instanceof Error ? error.message : 'Parser failed';
+        parsed = normalizeParseResult({ parseStatus: 'failed', parseError });
+      }
+    }
+
+    const equipment = resolveEquipmentByIdentity(parsed);
+    bindConnection(connection, parsed, equipment);
+    updateEquipmentFromPacket(equipment?.id || null, parsed, receivedAt);
+
+    const packet = buildPacket({ connection, buffer, parsed, receivedAt, equipment, parseError, tooLarge });
+    persistPacket(packet);
+
+    if (parsed.ack && connection?.socket && !connection.socket.destroyed) {
+      connection.socket.write(parsed.ack, (error) => {
+        if (error) logger.warn('[GPRS] ACK write error:', error.message);
+      });
+    }
+
+    return packet;
   }
 
-  function findConnectionByIdentity(identity) {
-    const deviceKey = identity.deviceId || identity.trackerId || identity.imei;
+  function findConnectionByIdentity(identity = {}) {
+    const deviceKey = toText(identity.deviceId) || toText(identity.imei);
     if (!deviceKey) return null;
     const connectionId = deviceToConnectionId.get(deviceKey);
-    if (!connectionId) return null;
-    return connections.get(connectionId) || null;
-  }
-
-  function encodeCommandPayload(payload, encoding, appendNewline) {
-    if (encoding === 'hex') {
-      const normalized = String(payload || '').replace(/\s+/g, '');
-      if (!normalized || normalized.length % 2 !== 0 || /[^0-9a-f]/i.test(normalized)) {
-        throw new Error('HEX-пакет должен содержать чётное количество шестнадцатеричных символов');
-      }
-      return Buffer.from(normalized, 'hex');
-    }
-
-    const suffix = appendNewline ? '\r\n' : '';
-    return Buffer.from(`${String(payload || '')}${suffix}`, 'utf8');
-  }
-
-  function writeCommandToSocket(command, connection) {
-    const bytes = encodeCommandPayload(command.payload, command.encoding, command.appendNewline);
-
-    return new Promise((resolve, reject) => {
-      connection.socket.write(bytes, (error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        const sentAt = nowIso();
-        const updatedCommand = {
-          ...command,
-          status: 'sent',
-          sentAt,
-          connectionId: connection.id,
-          deviceId: connection.deviceId || command.deviceId || null,
-          equipmentId: connection.equipmentId || command.equipmentId || null,
-          remoteAddress: connection.remoteAddress,
-          remotePort: connection.remotePort,
-        };
-        persistCommand(updatedCommand);
-        persistPacket({
-          id: generateId('GPKT'),
-          direction: 'outbound',
-          deviceId: updatedCommand.deviceId,
-          trackerId: connection.trackerId || null,
-          imei: connection.imei || null,
-          equipmentId: updatedCommand.equipmentId,
-          equipmentLabel: connection.equipmentLabel || null,
-          connectionId: connection.id,
-          remoteAddress: connection.remoteAddress,
-          remotePort: connection.remotePort,
-          payload: command.payload,
-          payloadHex: bytes.toString('hex').toUpperCase(),
-          encoding: command.encoding,
-          protocol: 'outbound-command',
-          summary: `Команда отправлена ${updatedCommand.deviceId || 'на устройство'}`,
-          createdAt: sentAt,
-          createdBy: command.createdBy || 'Система',
-        });
-        resolve(updatedCommand);
-      });
-    });
-  }
-
-  async function flushQueuedCommands(identity) {
-    const deviceKey = identity.deviceId || identity.trackerId || identity.imei;
-    if (!deviceKey) return;
-
-    const list = readData('gsm_commands') || [];
-    const queued = list.filter(item =>
-      item.status === 'queued'
-      && [item.deviceId, item.trackerId, item.imei].filter(Boolean).includes(deviceKey),
-    );
-
-    if (queued.length === 0) return;
-
-    const connection = findConnectionByIdentity(identity);
-    if (!connection) return;
-
-    for (const command of queued) {
-      try {
-        await writeCommandToSocket(command, connection);
-      } catch (error) {
-        persistCommand({
-          ...command,
-          status: 'failed',
-          error: error.message,
-          failedAt: nowIso(),
-        });
-      }
-    }
-  }
-
-  function bindConnectionToIdentity(connection, payloadIdentity) {
-    const deviceKey = payloadIdentity.deviceId || payloadIdentity.trackerId || payloadIdentity.imei;
-    if (!deviceKey) return;
-
-    connection.deviceId = payloadIdentity.deviceId || connection.deviceId || null;
-    connection.trackerId = payloadIdentity.trackerId || connection.trackerId || null;
-    connection.imei = payloadIdentity.imei || connection.imei || null;
-
-    const equipment = resolveEquipmentByIdentity(payloadIdentity);
-    if (equipment) {
-      connection.equipmentId = equipment.id;
-      connection.equipmentLabel = [
-        equipment.manufacturer,
-        equipment.model,
-        equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
-      ].filter(Boolean).join(' · ');
-    }
-
-    deviceToConnectionId.set(deviceKey, connection.id);
-    void flushQueuedCommands(payloadIdentity);
-  }
-
-  function handleIncomingPacket(connection, buffer) {
-    const parsed = normalizePayload(buffer);
-    connection.lastSeenAt = parsed.trackerTimestamp || nowIso();
-    connection.packetsReceived += 1;
-    connection.bytesReceived += buffer.byteLength;
-
-    bindConnectionToIdentity(connection, parsed);
-    appendTelemetryToEquipment(connection.equipmentId, parsed, parsed);
-
-    persistPacket({
-      id: generateId('GPKT'),
-      direction: 'inbound',
-      deviceId: connection.deviceId || parsed.deviceId,
-      trackerId: connection.trackerId || parsed.trackerId,
-      imei: connection.imei || parsed.imei,
-      equipmentId: connection.equipmentId || null,
-      equipmentLabel: connection.equipmentLabel || null,
-      connectionId: connection.id,
-      remoteAddress: connection.remoteAddress,
-      remotePort: connection.remotePort,
-      payload: parsed.rawText || null,
-      payloadHex: parsed.rawHex,
-      encoding: parsed.rawText ? 'text' : 'hex',
-      protocol: parsed.protocol,
-      summary: parsed.summary,
-      parsedPayload: parsed.payload,
-      createdAt: connection.lastSeenAt,
-      createdBy: 'Трекер',
-    });
+    return connectionId ? connections.get(connectionId) || null : null;
   }
 
   function cleanupStaleConnections() {
     const now = Date.now();
     for (const connection of connections.values()) {
       if (connection.closedAt) continue;
-      if (now - new Date(connection.lastSeenAt || connection.connectedAt).getTime() <= TRACKER_SESSION_TTL_MS) continue;
+      const lastSeenAt = Date.parse(connection.lastSeenAt || connection.connectedAt || '');
+      if (Number.isFinite(lastSeenAt) && now - lastSeenAt <= ONLINE_WINDOW_MS) continue;
       try {
         connection.socket.destroy();
       } catch {
@@ -513,30 +427,65 @@ function createGprsGateway({ readData, writeData, logger = console }) {
     if (tcpServer) return tcpServer;
 
     tcpServer = net.createServer((socket) => {
+      const sourceIp = normalizeRemoteAddress(socket.remoteAddress);
       const connection = {
         id: generateId('GCONN'),
         socket,
-        deviceId: null,
-        trackerId: null,
-        imei: null,
-        equipmentId: null,
-        equipmentLabel: null,
-        remoteAddress: normalizeRemoteAddress(socket.remoteAddress),
+        sourceIp,
+        remoteAddress: sourceIp,
         remotePort: socket.remotePort || null,
         connectedAt: nowIso(),
+        disconnectedAt: null,
+        closedAt: null,
         lastSeenAt: nowIso(),
         packetsReceived: 0,
         bytesReceived: 0,
-        closedAt: null,
+        windowStartedAt: Date.now(),
+        packetsInWindow: 0,
+        bytesInWindow: 0,
+        deviceId: null,
+        imei: null,
+        equipmentId: null,
+        equipmentLabel: null,
       };
 
       connections.set(connection.id, connection);
+      logger.log('[GPRS] Device connected', {
+        sourceIp: connection.sourceIp,
+        remotePort: connection.remotePort,
+        connectedAt: connection.connectedAt,
+      });
+
+      socket.setTimeout(connectionTimeoutMs, () => {
+        logger.warn('[GPRS] Connection timeout', { sourceIp: connection.sourceIp, remotePort: connection.remotePort });
+        socket.destroy();
+      });
 
       socket.on('data', (buffer) => {
+        const now = Date.now();
+        if (now - connection.windowStartedAt >= 60_000) {
+          connection.windowStartedAt = now;
+          connection.packetsInWindow = 0;
+          connection.bytesInWindow = 0;
+        }
+        connection.packetsInWindow += 1;
+        connection.bytesInWindow += buffer.byteLength;
+
+        if (connection.packetsInWindow > maxPacketsPerMinute) {
+          processRawPacket(buffer, { connection, forceError: 'rate_limit_exceeded' });
+          socket.destroy();
+          return;
+        }
+
         try {
-          handleIncomingPacket(connection, buffer);
+          processRawPacket(buffer, { connection });
         } catch (error) {
           logger.error('[GPRS] Incoming packet error:', error.message);
+          try {
+            processRawPacket(buffer, { connection, forceError: error.message });
+          } catch {
+            // The gateway must never crash the backend because of a tracker packet.
+          }
         }
       });
 
@@ -546,11 +495,15 @@ function createGprsGateway({ readData, writeData, logger = console }) {
 
       socket.on('close', () => {
         connection.closedAt = nowIso();
+        connection.disconnectedAt = connection.closedAt;
+        logger.log('[GPRS] Device disconnected', {
+          sourceIp: connection.sourceIp,
+          remotePort: connection.remotePort,
+          disconnectedAt: connection.disconnectedAt,
+        });
         connections.delete(connection.id);
         for (const [deviceKey, connectionId] of deviceToConnectionId.entries()) {
-          if (connectionId === connection.id) {
-            deviceToConnectionId.delete(deviceKey);
-          }
+          if (connectionId === connection.id) deviceToConnectionId.delete(deviceKey);
         }
       });
     });
@@ -560,87 +513,217 @@ function createGprsGateway({ readData, writeData, logger = console }) {
       logger.error('[GPRS] Gateway server error:', error.message);
     });
 
-    tcpServer.listen(GPRS_PORT, GPRS_HOST, () => {
+    tcpServer.listen(port, host, () => {
       gatewayStartedAt = nowIso();
       startError = '';
-      logger.log(`[GPRS] Gateway listening on ${GPRS_HOST}:${GPRS_PORT}`);
+      const address = tcpServer.address();
+      const listenPort = typeof address === 'object' && address ? address.port : port;
+      logger.log(`[GPRS] Gateway listening on ${host}:${listenPort}`);
     });
 
-    setInterval(cleanupStaleConnections, 60_000).unref();
-
+    cleanupTimer = setInterval(cleanupStaleConnections, 60_000);
+    cleanupTimer.unref?.();
     return tcpServer;
+  }
+
+  function stop() {
+    if (cleanupTimer) {
+      clearInterval(cleanupTimer);
+      cleanupTimer = null;
+    }
+    for (const connection of connections.values()) {
+      try {
+        connection.socket.destroy();
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+    connections.clear();
+    deviceToConnectionId.clear();
+    if (!tcpServer) return Promise.resolve();
+    const server = tcpServer;
+    tcpServer = null;
+    return new Promise((resolve) => {
+      server.close(() => resolve());
+    });
+  }
+
+  function currentTcpPort() {
+    const address = tcpServer?.address?.();
+    if (typeof address === 'object' && address?.port) return address.port;
+    return Number(port) || DEFAULT_GPRS_PORT;
   }
 
   function getStatus() {
     ensureStorage();
-    trimCollection('gsm_packets', MAX_PACKET_LOG);
-    trimCollection('gsm_commands', MAX_COMMAND_LOG);
-
-    const packets = readData('gsm_packets') || [];
-    const commands = readData('gsm_commands') || [];
+    const packets = trimCollection('gsm_packets', MAX_PACKET_LOG);
+    const commands = trimCollection('gsm_commands', MAX_COMMAND_LOG);
     const onlineConnections = [...connections.values()].filter(item => !item.closedAt);
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayStartMs = todayStart.getTime();
+    const lastPacketAt = packets[0] ? getPacketTime(packets[0]) : null;
+    const uptimeSeconds = gatewayStartedAt
+      ? Math.max(0, Math.floor((Date.now() - Date.parse(gatewayStartedAt)) / 1000))
+      : 0;
 
     return {
-      enabled: true,
-      host: GPRS_HOST,
-      port: GPRS_PORT,
+      gatewayEnabled: !startError,
+      tcpPort: currentTcpPort(),
+      uptimeSeconds,
+      connectionsActive: onlineConnections.length,
+      packetsReceivedTotal: Math.max(packetsReceivedTotal, packets.filter(item => item.direction !== 'outbound').length),
+      lastPacketAt,
+      enabled: !startError,
+      host,
+      port: currentTcpPort(),
       startedAt: gatewayStartedAt,
       startError,
       onlineConnections: onlineConnections.length,
-      onlineDevices: new Set(onlineConnections.map(item => item.deviceId || item.imei || item.trackerId).filter(Boolean)).size,
+      onlineDevices: new Set(onlineConnections.map(item => item.deviceId || item.imei).filter(Boolean)).size,
       packetsStored: packets.length,
-      packetsToday: packets.filter(item => new Date(item.createdAt).getTime() >= todayStartMs).length,
+      packetsToday: packets.filter(item => {
+        const time = Date.parse(getPacketTime(item) || '');
+        return Number.isFinite(time) && time >= todayStartMs;
+      }).length,
       queuedCommands: commands.filter(item => item.status === 'queued').length,
-      sentToday: commands.filter(item => item.sentAt && new Date(item.sentAt).getTime() >= todayStartMs).length,
+      sentToday: commands.filter(item => item.sentAt && Date.parse(item.sentAt) >= todayStartMs).length,
       failedCommands: commands.filter(item => item.status === 'failed').length,
-      lastPacketAt: packets[0]?.createdAt || null,
     };
   }
 
   function listConnections() {
     return [...connections.values()]
-      .map(getConnectionSummary)
-      .sort((left, right) => new Date(right.lastSeenAt).getTime() - new Date(left.lastSeenAt).getTime());
+      .map(connection => ({
+        id: connection.id,
+        deviceId: connection.deviceId || null,
+        trackerId: connection.deviceId || null,
+        imei: connection.imei || null,
+        equipmentId: connection.equipmentId || null,
+        equipmentLabel: connection.equipmentLabel || null,
+        sourceIp: connection.sourceIp,
+        remoteAddress: connection.remoteAddress,
+        remotePort: connection.remotePort,
+        connectedAt: connection.connectedAt,
+        disconnectedAt: connection.disconnectedAt,
+        lastSeenAt: connection.lastSeenAt,
+        packetsReceived: connection.packetsReceived,
+        bytesReceived: connection.bytesReceived,
+        isOnline: !connection.closedAt,
+      }))
+      .sort((left, right) => Date.parse(right.lastSeenAt || '') - Date.parse(left.lastSeenAt || ''));
   }
 
-  function listPackets({ limit = 50, equipmentId = '', deviceId = '' } = {}) {
-    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 300);
-    return (readData('gsm_packets') || [])
-      .filter(item => matchesGatewayFilter(item, equipmentId, deviceId))
-      .slice(0, safeLimit);
+  function matchesPacketFilters(packet, filters = {}) {
+    if (filters.equipmentId && packet.equipmentId !== filters.equipmentId) return false;
+    if (filters.imei && packet.imei !== filters.imei) return false;
+    if (filters.deviceId && ![packet.deviceId, packet.trackerId, packet.imei].filter(Boolean).includes(filters.deviceId)) return false;
+    if (filters.parseStatus && packet.parseStatus !== filters.parseStatus) return false;
+    const time = Date.parse(getPacketTime(packet) || '');
+    if (filters.from && Number.isFinite(time) && time < Date.parse(filters.from)) return false;
+    if (filters.to && Number.isFinite(time) && time > Date.parse(filters.to)) return false;
+    return true;
+  }
+
+  function listPackets(filters = {}) {
+    ensureStorage();
+    const safeLimit = Math.min(Math.max(Number(filters.limit) || 50, 1), 500);
+    const safeOffset = Math.max(Number(filters.offset) || 0, 0);
+    return asArray(readData('gsm_packets'))
+      .filter(item => matchesPacketFilters(item, {
+        equipmentId: toText(filters.equipmentId),
+        imei: toText(filters.imei),
+        deviceId: toText(filters.deviceId),
+        parseStatus: toText(filters.parseStatus),
+        from: toText(filters.from),
+        to: toText(filters.to),
+      }))
+      .sort((left, right) => Date.parse(getPacketTime(right) || '') - Date.parse(getPacketTime(left) || ''))
+      .slice(safeOffset, safeOffset + safeLimit);
   }
 
   function listCommands({ limit = 50, equipmentId = '', deviceId = '' } = {}) {
-    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 300);
-    return (readData('gsm_commands') || [])
-      .filter(item => matchesGatewayFilter(item, equipmentId, deviceId))
+    ensureStorage();
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 500);
+    return asArray(readData('gsm_commands'))
+      .filter((item) => {
+        if (equipmentId && item.equipmentId !== equipmentId) return false;
+        if (deviceId && ![item.deviceId, item.imei].filter(Boolean).includes(deviceId)) return false;
+        return true;
+      })
+      .sort((left, right) => Date.parse(right.createdAt || '') - Date.parse(left.createdAt || ''))
       .slice(0, safeLimit);
+  }
+
+  function deriveEquipmentGsmStatus(equipment) {
+    const explicit = equipment.gsmStatus;
+    if (explicit === 'online' || explicit === 'offline' || explicit === 'unknown') return explicit;
+    const lastSeenAt = equipment.gsmLastSeenAt || equipment.gsmLastSignalAt;
+    if (!lastSeenAt) return 'unknown';
+    return Date.now() - Date.parse(lastSeenAt) <= ONLINE_WINDOW_MS ? 'online' : 'offline';
+  }
+
+  function listDevices() {
+    const onlineEquipmentIds = new Set([...connections.values()].map(item => item.equipmentId).filter(Boolean));
+    return asArray(readData('equipment'))
+      .filter(item => toText(item.gsmImei) || toText(item.gsmDeviceId) || toText(item.gsmTrackerId))
+      .map(item => {
+        const status = onlineEquipmentIds.has(item.id) ? 'online' : deriveEquipmentGsmStatus(item);
+        return {
+          equipmentId: item.id,
+          id: item.id,
+          equipmentName: equipmentLabel(item),
+          manufacturer: item.manufacturer || null,
+          model: item.model || null,
+          serialNumber: item.serialNumber || null,
+          inventoryNumber: item.inventoryNumber || null,
+          imei: item.gsmImei || null,
+          deviceId: item.gsmDeviceId || item.gsmTrackerId || null,
+          simNumber: item.gsmSimNumber || null,
+          protocol: item.gsmProtocol || null,
+          status,
+          lastSeenAt: item.gsmLastSeenAt || item.gsmLastSignalAt || null,
+          lastLat: toNumberOrNull(item.gsmLastLat ?? item.gsmLatitude),
+          lastLng: toNumberOrNull(item.gsmLastLng ?? item.gsmLongitude),
+          lastSpeed: toNumberOrNull(item.gsmLastSpeed ?? item.gsmSpeedKph),
+          lastVoltage: toNumberOrNull(item.gsmLastVoltage ?? item.gsmBatteryVoltage),
+          lastMotoHours: toNumberOrNull(item.gsmLastMotoHours ?? item.gsmHourmeter),
+        };
+      })
+      .sort((left, right) => String(right.lastSeenAt || '').localeCompare(String(left.lastSeenAt || '')));
+  }
+
+  function listRoute({ equipmentId = '', from = '', to = '' } = {}) {
+    const id = toText(equipmentId);
+    if (!id) return [];
+    return listPackets({ equipmentId: id, from, to, limit: 500 })
+      .filter(packet => isFiniteNumber(packet.lat) && isFiniteNumber(packet.lng))
+      .map(packet => ({
+        receivedAt: packet.receivedAt || packet.createdAt,
+        deviceTime: packet.deviceTime || null,
+        lat: Number(packet.lat),
+        lng: Number(packet.lng),
+        speed: toNumberOrNull(packet.speed),
+        course: toNumberOrNull(packet.course),
+      }))
+      .sort((left, right) => Date.parse(left.receivedAt || '') - Date.parse(right.receivedAt || ''));
   }
 
   function getAnalytics({ equipmentId = '', deviceId = '' } = {}) {
     ensureStorage();
-    trimCollection('gsm_packets', MAX_PACKET_LOG);
-    trimCollection('gsm_commands', MAX_COMMAND_LOG);
-
-    const packets = readData('gsm_packets') || [];
-    const commands = readData('gsm_commands') || [];
-    const equipment = readData('equipment') || [];
-    const onlineConnections = [...connections.values()].filter(item => !item.closedAt);
+    const packets = trimCollection('gsm_packets', MAX_PACKET_LOG);
+    const commands = trimCollection('gsm_commands', MAX_COMMAND_LOG);
+    const equipment = asArray(readData('equipment'));
     const since24hMs = Date.now() - 24 * 60 * 60 * 1000;
-    const configuredEquipment = equipment.filter(item =>
-      String(item.gsmTrackerId || '').trim() || String(item.gsmImei || '').trim(),
-    );
-    const onlineEquipmentIds = new Set(onlineConnections.map(item => item.equipmentId).filter(Boolean));
+    const configuredEquipment = equipment.filter(item => toText(item.gsmImei) || toText(item.gsmDeviceId) || toText(item.gsmTrackerId));
+    const onlineEquipmentIds = new Set([...connections.values()].map(item => item.equipmentId).filter(Boolean));
     const recentPackets = packets.filter(packet => isPacketRecent(packet, since24hMs));
-    const filteredPackets = packets.filter(item => matchesGatewayFilter(item, equipmentId, deviceId));
-    const filteredCommands = commands.filter(item => matchesGatewayFilter(item, equipmentId, deviceId));
+    const filteredPackets = listPackets({ equipmentId, deviceId, limit: 500 });
+    const filteredCommands = listCommands({ equipmentId, deviceId, limit: 500 });
     const selectedRecentPackets = filteredPackets.filter(packet => isPacketRecent(packet, since24hMs));
     const staleTrackers = configuredEquipment.filter((item) => {
-      const signalAt = item.gsmLastSignalAt ? new Date(item.gsmLastSignalAt).getTime() : 0;
-      return !signalAt || signalAt < since24hMs;
+      const signalAt = Date.parse(item.gsmLastSeenAt || item.gsmLastSignalAt || '');
+      return !Number.isFinite(signalAt) || signalAt < since24hMs;
     });
     const lastPacket = filteredPackets[0] || null;
     const lastCommand = filteredCommands[0] || null;
@@ -648,98 +731,95 @@ function createGprsGateway({ readData, writeData, logger = console }) {
     return {
       trackedEquipment: equipment.length,
       configuredTrackers: configuredEquipment.length,
-      onlineTrackedEquipment: configuredEquipment.filter(item => onlineEquipmentIds.has(item.id)).length,
+      onlineTrackedEquipment: configuredEquipment.filter(item => onlineEquipmentIds.has(item.id) || deriveEquipmentGsmStatus(item) === 'online').length,
       staleTrackers: staleTrackers.length,
-      unknownPackets24h: recentPackets.filter(packet => packet.direction === 'inbound' && !packet.equipmentId).length,
+      unknownPackets24h: recentPackets.filter(packet => packet.direction !== 'outbound' && !packet.equipmentId).length,
       packets24h: recentPackets.length,
-      inbound24h: recentPackets.filter(packet => packet.direction === 'inbound').length,
+      inbound24h: recentPackets.filter(packet => packet.direction !== 'outbound').length,
       outbound24h: recentPackets.filter(packet => packet.direction === 'outbound').length,
-      commandStatus: countCommandsByStatus(commands),
+      commandStatus: commandStatusSummary(commands),
       protocols: protocolBreakdown(recentPackets),
       selected: {
         equipmentId: equipmentId || null,
         deviceId: deviceId || null,
         packets24h: selectedRecentPackets.length,
-        inbound24h: selectedRecentPackets.filter(packet => packet.direction === 'inbound').length,
+        inbound24h: selectedRecentPackets.filter(packet => packet.direction !== 'outbound').length,
         outbound24h: selectedRecentPackets.filter(packet => packet.direction === 'outbound').length,
-        lastPacketAt: lastPacket?.createdAt || null,
+        lastPacketAt: lastPacket ? getPacketTime(lastPacket) : null,
         lastProtocol: lastPacket?.protocol || null,
         lastSummary: lastPacket?.summary || null,
-        commandStatus: countCommandsByStatus(filteredCommands),
+        commandStatus: commandStatusSummary(filteredCommands),
         lastCommandAt: lastCommand?.createdAt || null,
         lastCommandStatus: lastCommand?.status || null,
       },
     };
   }
 
-  async function sendCommand({ equipmentId = '', deviceId = '', payload = '', encoding = 'text', appendNewline = true, createdBy = 'Оператор' }) {
-    const equipment = equipmentId
-      ? (readData('equipment') || []).find(item => item.id === equipmentId) || null
-      : null;
+  function createCommand({ equipmentId = '', command = '', payload = {}, createdBy = 'Оператор' } = {}) {
+    ensureStorage();
+    const safeEquipmentId = toText(equipmentId);
+    const safeCommand = toText(command);
+    if (!safeEquipmentId) throw new Error('Укажите технику для команды');
+    if (!safeCommand) throw new Error('Команда не заполнена');
+    const equipment = asArray(readData('equipment')).find(item => item.id === safeEquipmentId) || null;
+    if (!equipment) throw new Error('Техника не найдена');
 
-    const resolvedIdentity = {
-      deviceId: String(deviceId || equipment?.gsmTrackerId || '').trim() || null,
-      trackerId: String(equipment?.gsmTrackerId || '').trim() || null,
-      imei: String(equipment?.gsmImei || '').trim() || null,
-    };
-
-    if (!payload || !String(payload).trim()) {
-      throw new Error('Пакет команды не заполнен');
-    }
-
-    if (!resolvedIdentity.deviceId && !resolvedIdentity.imei) {
-      throw new Error('Не удалось определить устройство: укажите deviceId или привяжите трекер в карточке техники');
-    }
-
-    const command = {
+    const item = {
       id: generateId('GCMD'),
-      equipmentId: equipment?.id || equipmentId || null,
-      equipmentLabel: equipment
-        ? [equipment.manufacturer, equipment.model, equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : ''].filter(Boolean).join(' · ')
-        : null,
-      deviceId: resolvedIdentity.deviceId,
-      trackerId: resolvedIdentity.trackerId,
-      imei: resolvedIdentity.imei,
-      payload: String(payload).trim(),
-      encoding: encoding === 'hex' ? 'hex' : 'text',
-      appendNewline: Boolean(appendNewline),
+      equipmentId: safeEquipmentId,
+      equipmentLabel: equipmentLabel(equipment),
+      imei: equipment.gsmImei || null,
+      deviceId: equipment.gsmDeviceId || equipment.gsmTrackerId || null,
+      command: safeCommand,
+      payload: payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {},
       status: 'queued',
       createdAt: nowIso(),
-      createdBy,
       sentAt: null,
-      failedAt: null,
+      ackAt: null,
       error: null,
+      createdBy,
+      encoding: 'text',
+      appendNewline: false,
       connectionId: null,
       remoteAddress: null,
       remotePort: null,
     };
+    persistCommand(item);
+    return item;
+  }
 
-    persistCommand(command);
+  async function sendCommand({ equipmentId = '', deviceId = '', payload = '', encoding = 'text', appendNewline = true, createdBy = 'Оператор' }) {
+    const command = createCommand({
+      equipmentId,
+      command: String(payload || '').trim(),
+      payload: {
+        raw: String(payload || '').trim(),
+        deviceId: toText(deviceId) || undefined,
+        encoding: encoding === 'hex' ? 'hex' : 'text',
+        appendNewline: Boolean(appendNewline),
+      },
+      createdBy,
+    });
 
-    const activeConnection = findConnectionByIdentity(resolvedIdentity);
-    if (!activeConnection) return command;
+    const connection = findConnectionByIdentity({ deviceId: command.deviceId || deviceId, imei: command.imei });
+    if (!connection || !connection.socket || connection.socket.destroyed) return command;
 
-    try {
-      return await writeCommandToSocket(command, activeConnection);
-    } catch (error) {
-      const failed = {
-        ...command,
-        status: 'failed',
-        failedAt: nowIso(),
-        error: error.message,
-      };
-      persistCommand(failed);
-      return failed;
-    }
+    // First stage keeps commands queued by default; concrete protocol senders can opt in later.
+    return command;
   }
 
   return {
     start,
+    stop,
     getStatus,
     listConnections,
     listPackets,
     listCommands,
+    listDevices,
+    listRoute,
     getAnalytics,
+    processRawPacket,
+    createCommand,
     sendCommand,
   };
 }

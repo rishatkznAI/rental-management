@@ -49,6 +49,7 @@ const statusLabels: Record<RentalStatus, string> = {
 };
 
 type RentalFormState = {
+  clientId: string;
   client: string;
   contact: string;
   manager: string;
@@ -73,6 +74,7 @@ type RentalSaveResponse = Rental & {
 };
 
 function buildInitialFormState(rental: {
+  clientId?: string;
   client: string;
   contact: string;
   manager: string;
@@ -87,6 +89,7 @@ function buildInitialFormState(rental: {
   comments?: string;
 }): RentalFormState {
   return {
+    clientId: rental.clientId || '',
     client: rental.client,
     contact: rental.contact,
     manager: rental.manager,
@@ -213,7 +216,8 @@ export default function RentalDetail() {
     });
   }, [inventoryCounts, resolvedRentalEquipment]);
 
-  const selectedClient = clients.find(c => c.company === ((isEditing ? formState?.client : rental?.client) || ''));
+  const selectedClient = clients.find(c => c.id === ((isEditing ? formState?.clientId : rental?.clientId) || ''))
+    ?? clients.find(c => c.company === ((isEditing ? formState?.client : rental?.client) || ''));
   const relatedDocs = documents.filter(d => d.rental === rental?.id);
   const pendingChangeRequests = changeRequests.filter(request => request.rentalId === rental?.id && request.status === 'pending');
   const relatedInvoices = relatedDocs.filter(doc => doc.type === 'invoice');
@@ -238,7 +242,10 @@ export default function RentalDetail() {
   const linkedGanttCandidates = useMemo(() => {
     return ganttRentals.filter(entry => {
       if (!rental) return false;
-      if (entry.client !== rental.client) return false;
+      const sameClient = entry.clientId && rental.clientId
+        ? entry.clientId === rental.clientId
+        : entry.client === rental.client;
+      if (!sameClient) return false;
       if (entry.startDate !== rental.startDate || entry.endDate !== rental.plannedReturnDate) return false;
       return safelyMatchesResolvedEquipment(entry);
     });
@@ -405,6 +412,10 @@ export default function RentalDetail() {
       setSaveError('Укажите клиента.');
       return;
     }
+    if (!formState.clientId) {
+      setSaveError('Выберите клиента из базы.');
+      return;
+    }
     if (!formState.startDate || !formState.plannedReturnDate) {
       setSaveError('Укажите дату начала и окончания аренды.');
       return;
@@ -431,6 +442,7 @@ export default function RentalDetail() {
     setSaveInfo('');
     try {
       const savedRental = await rentalsService.update(rental.id, {
+        clientId: formState.clientId,
         client: formState.client.trim(),
         contact: formState.contact.trim(),
         startDate: formState.startDate,
@@ -534,6 +546,7 @@ export default function RentalDetail() {
       await documentsService.create({
         type: documentForm.type,
         number: documentForm.number.trim(),
+        clientId: rental.clientId,
         client: rental.client,
         date: documentForm.date,
         amount,
@@ -575,6 +588,7 @@ export default function RentalDetail() {
       const created = await paymentsService.create({
         invoiceNumber: paymentForm.invoiceNumber.trim(),
         rentalId: rental.id,
+        clientId: rental.clientId,
         client: rental.client,
         amount,
         paidAmount: nextStatus === 'paid' || nextStatus === 'partial' ? paidAmount : undefined,
@@ -768,13 +782,20 @@ export default function RentalDetail() {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Компания</p>
                   {isEditing ? (
-                    <Select value={formState.client} onValueChange={(value) => updateField('client', value)}>
+                    <Select
+                      value={formState.clientId}
+                      onValueChange={(value) => {
+                        const nextClient = clients.find(clientItem => clientItem.id === value);
+                        updateField('clientId', value);
+                        updateField('client', nextClient?.company ?? '');
+                      }}
+                    >
                       <SelectTrigger className="mt-1">
                         <SelectValue placeholder="Выберите клиента" />
                       </SelectTrigger>
                       <SelectContent>
                         {clients.map(clientItem => (
-                          <SelectItem key={clientItem.id} value={clientItem.company}>{clientItem.company}</SelectItem>
+                          <SelectItem key={clientItem.id} value={clientItem.id}>{clientItem.company}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

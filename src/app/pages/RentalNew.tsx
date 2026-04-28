@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -31,6 +31,7 @@ import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
 
 export default function RentalNew() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { can } = usePermissions();
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -66,6 +67,7 @@ export default function RentalNew() {
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
   const [client, setClient] = useState('');
+  const [clientId, setClientId] = useState('');
   const [equipmentId, setEquipmentId] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(nextWeek);
@@ -91,24 +93,41 @@ export default function RentalNew() {
   }, [startDate, endDate, allEq, ganttRents, uniqueInventoryNumbers]);
 
   const selectedEquipment = allEq.find(e => e.id === equipmentId);
-  const selectedClient = clients.find(item => item.company === client);
+  useEffect(() => {
+    if (clients.length === 0 || clientId) return;
+    const requestedClientId = searchParams.get('clientId');
+    const requestedClientName = searchParams.get('client');
+    const selected = requestedClientId
+      ? clients.find(item => item.id === requestedClientId)
+      : requestedClientName
+        ? clients.find(item => item.company === requestedClientName)
+        : null;
+    if (selected) {
+      setClientId(selected.id);
+      setClient(selected.company);
+    }
+  }, [clientId, clients, searchParams]);
+
+  const selectedClient = clients.find(item => item.id === clientId) ?? clients.find(item => item.company === client);
+  const selectedClientName = selectedClient?.company ?? client;
   const rentalDebtRows = useMemo(() => buildRentalDebtRows(ganttRents, payments), [ganttRents, payments]);
   const receivables = useMemo(() => buildClientReceivables(clients, rentalDebtRows), [clients, rentalDebtRows]);
-  const selectedClientReceivable = receivables.find(item => item.client === client);
+  const selectedClientReceivable = receivables.find(item => item.clientId === selectedClient?.id);
   const conflictWarn = equipmentId
     ? busyEq.some(e => e.id === equipmentId)
     : false;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!client || !selectedEquipment) return;
+    if (!selectedClient || !selectedEquipment) return;
     const todayStr = new Date().toISOString().split('T')[0];
     const initialStatus: GanttRentalData['status'] = startDate <= todayStr ? 'active' : 'created';
 
     // Gantt entry
     await rentalsService.createGanttEntry({
-      client,
-      clientShort: client.substring(0, 20),
+      clientId: selectedClient.id,
+      client: selectedClient.company,
+      clientShort: selectedClient.company.substring(0, 20),
       equipmentId: selectedEquipment.id,
       equipmentInv: selectedEquipment.inventoryNumber,
       startDate,
@@ -122,7 +141,7 @@ export default function RentalNew() {
       comments: [
         buildRentalCreationHistory(
           {
-            client,
+            client: selectedClient.company,
             startDate,
             endDate,
             status: initialStatus,
@@ -137,7 +156,8 @@ export default function RentalNew() {
 
     // Classic rental
     await rentalsService.create({
-      client,
+      client: selectedClient.company,
+      clientId: selectedClient.id,
       contact: '',
       startDate,
       plannedReturnDate: endDate,
@@ -158,14 +178,14 @@ export default function RentalNew() {
         {
           ...selectedEquipment,
           status: eqStatus,
-          currentClient: initialStatus === 'active' ? client : selectedEquipment.currentClient,
+          currentClient: initialStatus === 'active' ? selectedClientName : selectedEquipment.currentClient,
           returnDate: initialStatus === 'active' ? endDate : selectedEquipment.returnDate,
         },
         createAuditEntry(
           user?.name || 'Система',
           initialStatus === 'active'
-            ? `Создана аренда и техника выдана клиенту ${client}`
-            : `Создана бронь под клиента ${client}`,
+            ? `Создана аренда и техника выдана клиенту ${selectedClientName}`
+            : `Создана бронь под клиента ${selectedClientName}`,
         ),
       );
       const { id: _equipmentId, ...equipmentUpdateData } = equipmentWithHistory;
@@ -208,13 +228,20 @@ export default function RentalNew() {
                   Клиентов нет — добавьте в разделе «Клиенты»
                 </p>
               ) : (
-                <Select value={client} onValueChange={setClient}>
+                <Select
+                  value={clientId}
+                  onValueChange={(value) => {
+                    const selected = clients.find(item => item.id === value);
+                    setClientId(value);
+                    setClient(selected?.company ?? '');
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Выберите клиента" />
                   </SelectTrigger>
                   <SelectContent>
                     {clients.map(c => (
-                      <SelectItem key={c.id} value={c.company}>{c.company}</SelectItem>
+                      <SelectItem key={c.id} value={c.id}>{c.company}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

@@ -20,6 +20,7 @@ function registerRentalRoutes(deps) {
     mergeRentalHistory,
     normalizeGanttRentalList,
     normalizeGanttRentalStatus,
+    normalizeRecordClientLink,
     generateId,
     idPrefixes,
     accessControl,
@@ -61,6 +62,14 @@ function registerRentalRoutes(deps) {
   function registerRentalCollection(collection) {
     const prefix = idPrefixes[collection] || collection;
     const requestPrefix = idPrefixes.rental_change_requests || 'RCR';
+
+    function withClientLink(item, context) {
+      if (typeof normalizeRecordClientLink !== 'function') return item;
+      return normalizeRecordClientLink(item, readData('clients') || [], {
+        context: context || `${collection}:${item?.id || 'new'}`,
+        logger: console,
+      });
+    }
 
     function buildLinkedGanttRentalUpdate(linkedGanttRentalId, previousRental, nextRental, author) {
       if (!linkedGanttRentalId) return null;
@@ -117,7 +126,7 @@ function registerRentalRoutes(deps) {
       }
 
       let nextPatch = { ...patch };
-      let nextItem = { ...previousRental, ...nextPatch, id: previousRental.id };
+      let nextItem = withClientLink({ ...previousRental, ...nextPatch, id: previousRental.id }, `${collection}:approval:${previousRental.id}`);
       let validation = validateRentalPayload(collection, nextItem, data, readData('equipment') || [], previousRental.id);
       if (validation.ok) {
         validation = validateLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, author);
@@ -133,7 +142,7 @@ function registerRentalRoutes(deps) {
           reason: validation.error || 'Продление конфликтует с будущей арендой и требует решения администратора.',
         });
         delete nextPatch.plannedReturnDate;
-        nextItem = { ...previousRental, ...nextPatch, id: previousRental.id };
+        nextItem = withClientLink({ ...previousRental, ...nextPatch, id: previousRental.id }, `${collection}:approval:${previousRental.id}`);
         if (Object.keys(nextPatch).length > 0) {
           validation = validateRentalPayload(collection, nextItem, data, readData('equipment') || [], previousRental.id);
           if (validation.ok) {
@@ -176,7 +185,7 @@ function registerRentalRoutes(deps) {
         return res.status(validation.status).json({ ok: false, error: validation.error });
       }
 
-      let newItem = { ...req.body, id: req.body.id || generateId(prefix) };
+      let newItem = withClientLink({ ...req.body, id: req.body.id || generateId(prefix) }, `${collection}:create`);
       if (collection === 'gantt_rentals') {
         newItem = normalizeGanttRentalStatus(newItem);
         newItem = mergeRentalHistory(null, newItem, req.user.userName);
@@ -273,7 +282,7 @@ function registerRentalRoutes(deps) {
         });
       }
 
-      let nextItem = { ...data[idx], ...patch, id: data[idx].id };
+      let nextItem = withClientLink({ ...data[idx], ...patch, id: data[idx].id }, `${collection}:update:${data[idx].id}`);
       if (collection === 'gantt_rentals') {
         nextItem = normalizeGanttRentalStatus(nextItem);
       }
@@ -352,9 +361,10 @@ function registerRentalRoutes(deps) {
         }
       }
 
+      const linkedList = list.map(item => withClientLink(item, `${collection}:bulk:${item?.id || 'new'}`));
       const nextList = collection === 'gantt_rentals'
-        ? normalizeGanttRentalList(list)
-        : list;
+        ? normalizeGanttRentalList(linkedList)
+        : linkedList;
 
       writeData(collection, nextList);
       auditLog?.(req, {

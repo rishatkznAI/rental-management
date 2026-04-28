@@ -3,6 +3,7 @@ import type { Client, Payment } from '../types';
 
 export interface RentalDebtRow {
   rentalId: string;
+  clientId?: string;
   client: string;
   equipmentInv: string;
   manager: string;
@@ -24,6 +25,7 @@ export interface ClientReceivableRow {
   unpaidRentals: number;
   overdueRentals: number;
   exceededLimit: boolean;
+  dataIssue?: 'missing_client_id';
 }
 
 export interface ClientFinancialSnapshot extends ClientReceivableRow {
@@ -52,6 +54,27 @@ function getEffectivePaidAmount(payment: Payment): number {
   if (typeof payment.paidAmount === 'number') return payment.paidAmount;
   if (payment.status === 'paid') return payment.amount;
   return 0;
+}
+
+function normalizeText(value: unknown): string {
+  return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function stableClientId(record: unknown): string {
+  if (!record || typeof record !== 'object') return '';
+  const item = record as { clientId?: unknown; customerId?: unknown; client_id?: unknown };
+  return String(item.clientId || item.customerId || item.client_id || '').trim();
+}
+
+function getClientName(record: unknown): string {
+  if (!record || typeof record !== 'object') return '';
+  const item = record as { client?: unknown; clientName?: unknown; company?: unknown; customerName?: unknown };
+  return String(item.client || item.clientName || item.company || item.customerName || '').trim();
+}
+
+function receivableKey(row: RentalDebtRow): string {
+  const clientId = stableClientId(row);
+  return clientId ? `id:${clientId}` : `unlinked:${normalizeText(row.client) || row.rentalId || 'unknown'}`;
 }
 
 function getOverdueDate(row: Pick<RentalDebtRow, 'expectedPaymentDate' | 'endDate'>): string {
@@ -89,7 +112,8 @@ export function buildRentalDebtRows(
       const outstanding = Math.max(0, (rental.amount || 0) - paidAmount);
       return {
         rentalId: rental.id,
-        client: rental.client,
+        clientId: stableClientId(rental) || undefined,
+        client: getClientName(rental),
         equipmentInv: rental.equipmentInv,
         manager: rental.manager,
         startDate: rental.startDate,
@@ -116,19 +140,23 @@ export function buildClientReceivables(
   clients: Client[],
   rentalDebtRows: RentalDebtRow[],
 ): ClientReceivableRow[] {
-  const clientsByName = new Map(clients.map(client => [client.company, client] as const));
+  const clientsById = new Map(clients.map(client => [client.id, client] as const));
   const map = new Map<string, ClientReceivableRow>();
   const today = new Date().toISOString().slice(0, 10);
 
   rentalDebtRows.forEach(row => {
-    const existing = map.get(row.client) ?? {
-      clientId: clientsByName.get(row.client)?.id,
-      client: row.client,
-      creditLimit: clientsByName.get(row.client)?.creditLimit ?? 0,
+    const rowClientId = stableClientId(row);
+    const client = rowClientId ? clientsById.get(rowClientId) : undefined;
+    const key = receivableKey(row);
+    const existing = map.get(key) ?? {
+      clientId: client?.id ?? (rowClientId || undefined),
+      client: client?.company ?? (row.client || 'Клиент не привязан'),
+      creditLimit: client?.creditLimit ?? 0,
       currentDebt: 0,
       unpaidRentals: 0,
       overdueRentals: 0,
       exceededLimit: false,
+      dataIssue: rowClientId ? undefined : 'missing_client_id',
     };
     existing.currentDebt += row.outstanding;
     existing.unpaidRentals += 1;
@@ -136,7 +164,7 @@ export function buildClientReceivables(
       existing.overdueRentals += 1;
     }
     existing.exceededLimit = existing.creditLimit > 0 && existing.currentDebt > existing.creditLimit;
-    map.set(row.client, existing);
+    map.set(key, existing);
   });
 
   return Array.from(map.values()).sort((a, b) => b.currentDebt - a.currentDebt);
@@ -149,15 +177,15 @@ export function buildClientFinancialSnapshots(
 ): ClientFinancialSnapshot[] {
   const debtRows = buildRentalDebtRows(rentals, payments);
   const receivables = buildClientReceivables(clients, debtRows);
-  const receivableMap = new Map(receivables.map(item => [item.client, item] as const));
+  const receivableMap = new Map(receivables.filter(item => item.clientId).map(item => [String(item.clientId), item] as const));
 
   return clients
     .map(client => {
-      const clientRentals = rentals.filter(item => item.client === client.company);
+      const clientRentals = rentals.filter(item => stableClientId(item) === client.id);
       const latestRental = clientRentals
         .slice()
         .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
-      const receivable = receivableMap.get(client.company);
+      const receivable = receivableMap.get(client.id);
       return {
         clientId: client.id,
         client: client.company,
@@ -198,7 +226,7 @@ export function buildManagerReceivables(
       item.overdueRentals += 1;
       item.overdueDebt += row.outstanding;
     }
-    item.clients.add(row.client);
+    item.clients.add(stableClientId(row) || row.client || 'Клиент не привязан');
     item.clientsCount = item.clients.size;
     map.set(key, item);
   });
@@ -242,9 +270,9 @@ export function mergeClientsWithFinancials(
   payments: Payment[],
 ): Client[] {
   const snapshots = buildClientFinancialSnapshots(clients, rentals, payments);
-  const byClient = new Map(snapshots.map(item => [item.client, item] as const));
+  const byClient = new Map(snapshots.map(item => [item.clientId, item] as const));
   return clients.map(client => {
-    const financial = byClient.get(client.company);
+    const financial = byClient.get(client.id);
     if (!financial) return client;
     return {
       ...client,

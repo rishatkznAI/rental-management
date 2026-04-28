@@ -129,11 +129,15 @@ export default function ClientDetail() {
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
   const clientNameKey = normalizeClientName(client?.company);
-  const clientRentals = ganttRentals.filter(r => clientNameKey && normalizeClientName(r.client) === clientNameKey);
+  const clientRentals = ganttRentals.filter(r =>
+    client && (r.clientId === client.id || (!r.clientId && clientNameKey && normalizeClientName(r.client) === clientNameKey)),
+  );
   const activeRentals = clientRentals.filter(r => r.status === 'active' || r.status === 'created');
 
   const { data: allDocs = [] } = useDocumentsList();
-  const clientDocs = allDocs.filter(d => client && d.client === client.company);
+  const clientDocs = allDocs.filter(d =>
+    client && (d.clientId === client.id || (!d.clientId && d.client === client.company)),
+  );
 
   const clientFinancial = React.useMemo(() => {
     if (!client) return null;
@@ -290,7 +294,7 @@ export default function ClientDetail() {
                   Редактировать
                 </Button>
               )}
-              <Link to={`/rentals/new?client=${encodeURIComponent(client.company)}`}>
+              <Link to={`/rentals/new?clientId=${encodeURIComponent(client.id)}`}>
                 <Button>
                   <Plus className="h-4 w-4" />
                   Новая аренда

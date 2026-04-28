@@ -113,6 +113,9 @@ function createMaxApiClient({
       if (elapsedMs > slowRequestMs) {
         logger.warn(`[MAX API] Медленный запрос ${method} ${endpoint}: ${elapsedMs}ms`);
       }
+      if (res && typeof res.status === 'number' && res.status >= 400) {
+        logger.error(`[MAX API] HTTP ${res.status} ${method} ${endpoint}:`, JSON.stringify(json).slice(0, 800));
+      }
       if (json.error) {
         logger.error(`[MAX API] Ошибка ответа (${endpoint}):`, JSON.stringify(json));
       }

@@ -193,7 +193,7 @@ export default function Dashboard() {
   );
   const computedClients = useMemo(
     () => clients.map(client => {
-      const financial = clientFinancials.find(item => item.client === client.company);
+      const financial = clientFinancials.find(item => item.clientId === client.id);
       return financial
         ? { ...client, debt: financial.currentDebt, totalRentals: financial.totalRentals, lastRentalDate: financial.lastRentalDate }
         : client;
@@ -1006,7 +1006,7 @@ export default function Dashboard() {
   // 7. Клиенты со статусом blocked + активными арендами
   const blockedClientsWithRentals = computedClients.filter(c => c.status === 'blocked');
   blockedClientsWithRentals.forEach(c => {
-    const hasActive = activeRentalsList.some(r => r.client === c.company);
+    const hasActive = activeRentalsList.some(r => r.clientId === c.id || (!r.clientId && r.client === c.company));
     if (hasActive) {
       alertItems.push({
         id: `blocked-client-${c.id}`,
@@ -2591,6 +2591,7 @@ export default function Dashboard() {
 
           const newRental: GanttRentalData = {
             id: `GR-${Date.now()}`,
+            clientId: formData.clientId,
             client: formData.client || '',
             clientShort: (formData.client || '').substring(0, 20),
             equipmentId: formData.equipmentId || '',

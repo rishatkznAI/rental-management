@@ -188,6 +188,10 @@ export default function EquipmentNew() {
     location: '',
     status: 'available',
     plannedMonthlyRevenue: '',
+    gsmImei: '',
+    gsmDeviceId: '',
+    gsmProtocol: '',
+    gsmSimNumber: '',
     notes: '',
   });
 
@@ -241,6 +245,17 @@ export default function EquipmentNew() {
       nextMaintenance:       new Date().toISOString().split('T')[0],
       maintenanceCHTO:       form.maintenanceCHTO || undefined,
       maintenancePTO:        form.maintenancePTO || undefined,
+      gsmImei:               form.gsmImei.trim() || null,
+      gsmDeviceId:           form.gsmDeviceId.trim() || null,
+      gsmProtocol:           form.gsmProtocol.trim() || null,
+      gsmSimNumber:          form.gsmSimNumber.trim() || null,
+      gsmLastSeenAt:         null,
+      gsmLastLat:            null,
+      gsmLastLng:            null,
+      gsmLastSpeed:          null,
+      gsmLastVoltage:        null,
+      gsmLastMotoHours:      null,
+      gsmStatus:             'unknown',
       notes:                 form.notes || undefined,
       history: [
         createAuditEntry(
@@ -695,6 +710,48 @@ export default function EquipmentNew() {
             </CardContent>
           </Card>
         )}
+
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Bot className="h-4 w-4 text-gray-400" />
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                GSM / GPRS
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input
+                label="GSM IMEI"
+                placeholder="866123456789012"
+                value={form.gsmImei}
+                onChange={e => update('gsmImei', e.target.value)}
+              />
+              <Input
+                label="Device ID"
+                placeholder="TRACKER-001"
+                value={form.gsmDeviceId}
+                onChange={e => update('gsmDeviceId', e.target.value)}
+              />
+              <Input
+                label="SIM-карта"
+                placeholder="+7 999 000-00-00"
+                value={form.gsmSimNumber}
+                onChange={e => update('gsmSimNumber', e.target.value)}
+              />
+              <Input
+                label="Протокол"
+                placeholder="GT06 / Teltonika / Wialon IPS"
+                value={form.gsmProtocol}
+                onChange={e => update('gsmProtocol', e.target.value)}
+              />
+            </div>
+            <FieldHint>
+              На первом этапе шлюз принимает сырые пакеты. IMEI или Device ID нужны для автоматической привязки пакета к этой технике.
+            </FieldHint>
+          </CardContent>
+        </Card>
 
         {/* ─── 5 · История обслуживания и примечания ─── */}
         <Card>

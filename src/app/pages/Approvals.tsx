@@ -17,6 +17,7 @@ import {
   useRejectRentalChangeRequest,
   useRentalChangeRequestsList,
 } from '../hooks/useRentalChangeRequests';
+import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, formatDateTime } from '../lib/utils';
 import type { RentalChangeRequest, RentalChangeRequestStatus } from '../types';
 
@@ -51,23 +52,40 @@ function financialImpact(request: RentalChangeRequest) {
 }
 
 export default function Approvals() {
+  const { user } = useAuth();
   const { data: requests = [], isLoading, error } = useRentalChangeRequestsList();
   const approveMutation = useApproveRentalChangeRequest();
   const rejectMutation = useRejectRentalChangeRequest();
   const [rejecting, setRejecting] = React.useState<RentalChangeRequest | null>(null);
   const [rejectReason, setRejectReason] = React.useState('');
+  const [actionError, setActionError] = React.useState('');
 
   const pending = requests.filter(item => item.status === 'pending');
   const processed = requests
     .filter(item => item.status !== 'pending')
     .sort((a, b) => String(b.decidedAt || b.createdAt).localeCompare(String(a.decidedAt || a.createdAt)));
   const ordered = [...pending, ...processed];
+  const isAdmin = user?.role === 'Администратор';
 
   const handleReject = async () => {
     if (!rejecting) return;
-    await rejectMutation.mutateAsync({ id: rejecting.id, reason: rejectReason });
-    setRejecting(null);
-    setRejectReason('');
+    setActionError('');
+    try {
+      await rejectMutation.mutateAsync({ id: rejecting.id, reason: rejectReason });
+      setRejecting(null);
+      setRejectReason('');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Не удалось отклонить заявку.');
+    }
+  };
+
+  const handleApprove = async (request: RentalChangeRequest) => {
+    setActionError('');
+    try {
+      await approveMutation.mutateAsync({ id: request.id });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Не удалось согласовать заявку.');
+    }
   };
 
   return (
@@ -88,6 +106,12 @@ export default function Approvals() {
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
           {error instanceof Error ? error.message : 'Не удалось загрузить заявки.'}
+        </div>
+      )}
+
+      {actionError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+          {actionError}
         </div>
       )}
 
@@ -120,11 +144,11 @@ export default function Approvals() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {statusBadge(request.status)}
-                    {request.status === 'pending' && (
+                    {request.status === 'pending' && isAdmin && (
                       <>
                         <Button
                           size="sm"
-                          onClick={() => approveMutation.mutate({ id: request.id })}
+                          onClick={() => void handleApprove(request)}
                           disabled={approveMutation.isPending || rejectMutation.isPending}
                         >
                           <Check className="h-4 w-4" />
@@ -143,6 +167,9 @@ export default function Approvals() {
                           Отклонить
                         </Button>
                       </>
+                    )}
+                    {request.status === 'pending' && !isAdmin && (
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Ожидает администратора</span>
                     )}
                   </div>
                 </div>

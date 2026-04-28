@@ -55,7 +55,9 @@ import type {
   GsmGatewayAnalytics,
   GsmGatewayCommand,
   GsmGatewayConnection,
+  GsmGatewayDevice,
   GsmGatewayPacket,
+  GsmGatewayRoutePoint,
   GsmGatewayStatus,
   ShippingPhoto,
 } from '../types';
@@ -69,15 +71,20 @@ declare global {
 
 type SignalFilter = 'all' | EquipmentGsmSignalState;
 type StatusFilter = 'all' | EquipmentStatus;
-type GsmTab = 'live' | 'history' | 'gateway';
+type GsmTab = 'overview' | 'devices' | 'packets' | 'route' | 'live' | 'history' | 'gateway';
 type RoutePeriod = 'day' | 'week';
 type GsmCommandEncoding = 'text' | 'hex';
 
 const DEFAULT_CENTER: [number, number] = [55.796127, 49.106414];
 const DEFAULT_GATEWAY_STATUS: GsmGatewayStatus = {
+  gatewayEnabled: true,
+  tcpPort: 5023,
+  uptimeSeconds: 0,
+  connectionsActive: 0,
+  packetsReceivedTotal: 0,
   enabled: true,
   host: '0.0.0.0',
-  port: 5055,
+  port: 5023,
   startedAt: null,
   startError: '',
   onlineConnections: 0,
@@ -103,6 +110,7 @@ const DEFAULT_GATEWAY_ANALYTICS: GsmGatewayAnalytics = {
     total: 0,
     queued: 0,
     sent: 0,
+    acknowledged: 0,
     failed: 0,
   },
   protocols: [],
@@ -119,6 +127,7 @@ const DEFAULT_GATEWAY_ANALYTICS: GsmGatewayAnalytics = {
       total: 0,
       queued: 0,
       sent: 0,
+      acknowledged: 0,
       failed: 0,
     },
     lastCommandAt: null,
@@ -217,15 +226,53 @@ function formatPercent(value: number, total: number) {
 
 function formatCommandStatus(value?: GsmGatewayAnalytics['selected']['lastCommandStatus']) {
   if (value === 'sent') return 'Отправлено';
+  if (value === 'acknowledged') return 'Подтверждено';
   if (value === 'failed') return 'Ошибка';
   if (value === 'queued') return 'В очереди';
   return 'Нет команд';
 }
 
 function compactPayloadText(packet: GsmGatewayPacket | GsmGatewayCommand) {
-  const text = String(packet.payload || '').trim();
+  const raw = typeof packet.payload === 'object' && packet.payload !== null
+    ? JSON.stringify(packet.payload)
+    : String(packet.payload || '');
+  const text = raw.trim();
   if (!text) return 'HEX пакет';
   return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+}
+
+function packetReceivedAt(packet: GsmGatewayPacket) {
+  return packet.receivedAt || packet.createdAt;
+}
+
+function packetRawHex(packet: GsmGatewayPacket) {
+  return packet.rawHex || packet.payloadHex || '';
+}
+
+function packetRawText(packet: GsmGatewayPacket) {
+  return packet.rawText ?? packet.payload ?? null;
+}
+
+function packetSourceIp(packet: GsmGatewayPacket) {
+  return packet.sourceIp || packet.remoteAddress || '—';
+}
+
+function formatCoordinates(lat?: number | null, lng?: number | null) {
+  if (typeof lat !== 'number' || typeof lng !== 'number') return '—';
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+}
+
+function formatGsmStatus(status?: string | null) {
+  if (status === 'online') return 'Онлайн';
+  if (status === 'offline') return 'Офлайн';
+  return 'Неизвестно';
+}
+
+function getParseStatusBadge(status?: string | null): 'success' | 'warning' | 'danger' | 'default' {
+  if (status === 'parsed') return 'success';
+  if (status === 'failed') return 'danger';
+  if (status === 'pending') return 'warning';
+  return 'default';
 }
 
 function buildEquipmentLabel(snapshot: GsmEquipmentSnapshot) {
@@ -486,11 +533,15 @@ export default function Gsm() {
     staleTime: 1000 * 60,
   });
 
-  const [tab, setTab] = React.useState<GsmTab>('live');
+  const [tab, setTab] = React.useState<GsmTab>('overview');
   const [search, setSearch] = React.useState('');
   const [signalFilter, setSignalFilter] = React.useState<SignalFilter>('all');
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [selectedPacket, setSelectedPacket] = React.useState<GsmGatewayPacket | null>(null);
+  const [routeEquipmentId, setRouteEquipmentId] = React.useState('');
+  const [routeFrom, setRouteFrom] = React.useState('');
+  const [routeTo, setRouteTo] = React.useState('');
   const [routePeriod, setRoutePeriod] = React.useState<RoutePeriod>('day');
   const [commandPayload, setCommandPayload] = React.useState('');
   const [commandEncoding, setCommandEncoding] = React.useState<GsmCommandEncoding>('text');
@@ -509,6 +560,27 @@ export default function Gsm() {
     queryFn: () => gsmGatewayService.getConnections().catch(() => []),
     refetchInterval: 5_000,
     staleTime: 3_000,
+  });
+  const { data: gsmDevices = [] } = useQuery<GsmGatewayDevice[]>({
+    queryKey: ['gsmGateway', 'devices'],
+    queryFn: () => gsmGatewayService.getDevices().catch(() => []),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
+  const { data: recentGatewayPackets = [] } = useQuery<GsmGatewayPacket[]>({
+    queryKey: ['gsmGateway', 'packets', 'recent'],
+    queryFn: () => gsmGatewayService.getPackets({ limit: 100 }).catch(() => []),
+    refetchInterval: 5_000,
+    staleTime: 3_000,
+  });
+  const { data: apiRoutePoints = [] } = useQuery<GsmGatewayRoutePoint[]>({
+    queryKey: ['gsmGateway', 'route', routeEquipmentId || 'none', routeFrom || 'from-empty', routeTo || 'to-empty'],
+    queryFn: () => routeEquipmentId
+      ? gsmGatewayService.getRoute({ equipmentId: routeEquipmentId, from: routeFrom || undefined, to: routeTo || undefined }).catch(() => [])
+      : Promise.resolve([]),
+    enabled: Boolean(routeEquipmentId),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
   });
 
   const snapshots = React.useMemo(
@@ -557,6 +629,11 @@ export default function Gsm() {
       setSelectedId(filteredSnapshots[0].equipment.id);
     }
   }, [filteredSnapshots, selectedId]);
+
+  React.useEffect(() => {
+    if (routeEquipmentId || gsmDevices.length === 0) return;
+    setRouteEquipmentId(gsmDevices[0].equipmentId);
+  }, [gsmDevices, routeEquipmentId]);
 
   const selectedSnapshot = React.useMemo(
     () => filteredSnapshots.find(item => item.equipment.id === selectedId) || filteredSnapshots[0] || null,
@@ -815,6 +892,18 @@ export default function Gsm() {
 
         <Tabs value={tab} onValueChange={(value) => setTab(value as GsmTab)} className="space-y-4">
           <TabsList className="h-auto rounded-2xl border border-white/10 bg-slate-950/70 p-1">
+            <TabsTrigger value="overview" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+              Обзор
+            </TabsTrigger>
+            <TabsTrigger value="devices" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+              Устройства
+            </TabsTrigger>
+            <TabsTrigger value="packets" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+              Последние пакеты
+            </TabsTrigger>
+            <TabsTrigger value="route" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+              Маршрут
+            </TabsTrigger>
             <TabsTrigger value="live" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
               Карта и геозоны
             </TabsTrigger>
@@ -825,6 +914,370 @@ export default function Gsm() {
               GPRS канал
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="overview">
+            <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardContent className="p-5">
+                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-cyan-300">
+                      <Server className="h-5 w-5" />
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">GPRS-шлюз</div>
+                    <div className="mt-2 text-2xl font-black text-white">
+                      {gatewayStatus.gatewayEnabled ? 'Активен' : 'Ошибка'}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-400">TCP :{gatewayStatus.tcpPort}</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardContent className="p-5">
+                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-emerald-300">
+                      <Cable className="h-5 w-5" />
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Подключения</div>
+                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.connectionsActive}</div>
+                    <div className="mt-1 text-sm text-slate-400">активных сейчас</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardContent className="p-5">
+                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-cyan-300">
+                      <ArrowDownToLine className="h-5 w-5" />
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Пакетов всего</div>
+                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.packetsReceivedTotal}</div>
+                    <div className="mt-1 text-sm text-slate-400">в журнале {gatewayStatus.packetsStored}</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardContent className="p-5">
+                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-amber-300">
+                      <Clock3 className="h-5 w-5" />
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последний пакет</div>
+                    <div className="mt-2 text-sm font-semibold text-white">{formatDateTime(gatewayStatus.lastPacketAt)}</div>
+                    <div className="mt-1 text-sm text-slate-400">uptime {gatewayStatus.uptimeSeconds} c</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardContent className="p-5">
+                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-lime-300">
+                      <Cpu className="h-5 w-5" />
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Устройства</div>
+                    <div className="mt-2 text-2xl font-black text-white">
+                      {gsmDevices.filter(item => item.status === 'online').length}/{gsmDevices.length}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-400">онлайн / всего</div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {gatewayStatus.startError && (
+                <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
+                  {gatewayStatus.startError}
+                </div>
+              )}
+
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardHeader>
+                    <CardTitle className="text-xl font-bold text-white">Последние входящие пакеты</CardTitle>
+                    <CardDescription className="text-slate-400">
+                      Сырые пакеты сохраняются до добавления конкретных парсеров протоколов.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {recentGatewayPackets.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                        Пакетов пока нет.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[780px] text-left text-sm">
+                          <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                            <tr>
+                              <th className="px-3 py-2">Время</th>
+                              <th className="px-3 py-2">IP</th>
+                              <th className="px-3 py-2">IMEI / ID</th>
+                              <th className="px-3 py-2">Статус</th>
+                              <th className="px-3 py-2">Координаты</th>
+                              <th className="px-3 py-2"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {recentGatewayPackets.slice(0, 8).map(packet => (
+                              <tr key={packet.id} className="border-t border-white/10">
+                                <td className="px-3 py-2 text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
+                                <td className="px-3 py-2 text-slate-300">{packetSourceIp(packet)}</td>
+                                <td className="px-3 py-2 text-slate-300">{packet.imei || packet.deviceId || '—'}</td>
+                                <td className="px-3 py-2">
+                                  <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
+                                </td>
+                                <td className="px-3 py-2 text-slate-300">{formatCoordinates(packet.lat, packet.lng)}</td>
+                                <td className="px-3 py-2 text-right">
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setSelectedPacket(packet)}
+                                    className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                                  >
+                                    Открыть
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-white/10 bg-slate-950/70 text-white">
+                  <CardHeader>
+                    <CardTitle className="text-xl font-bold text-white">Состояние парка</CardTitle>
+                    <CardDescription className="text-slate-400">
+                      Учитываются единицы техники с IMEI или Device ID.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {(['online', 'offline', 'unknown'] as const).map(status => (
+                      <div key={status} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                        <span className="text-sm text-slate-300">{formatGsmStatus(status)}</span>
+                        <Badge variant={status === 'online' ? 'success' : status === 'offline' ? 'warning' : 'default'}>
+                          {gsmDevices.filter(item => item.status === status).length}
+                        </Badge>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="devices">
+            <Card className="border-white/10 bg-slate-950/70 text-white">
+              <CardHeader>
+                <CardTitle className="text-xl font-bold text-white">GSM-устройства техники</CardTitle>
+                <CardDescription className="text-slate-400">
+                  Привязка выполняется по IMEI или Device ID из карточки техники.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {gsmDevices.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                    Пока нет техники с заполненным GSM IMEI или Device ID.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[1180px] text-left text-sm">
+                      <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">Техника</th>
+                          <th className="px-3 py-2">Модель</th>
+                          <th className="px-3 py-2">Серийный номер</th>
+                          <th className="px-3 py-2">IMEI</th>
+                          <th className="px-3 py-2">SIM</th>
+                          <th className="px-3 py-2">Протокол</th>
+                          <th className="px-3 py-2">Статус</th>
+                          <th className="px-3 py-2">Последняя связь</th>
+                          <th className="px-3 py-2">Координаты</th>
+                          <th className="px-3 py-2">Скорость</th>
+                          <th className="px-3 py-2">Напряжение</th>
+                          <th className="px-3 py-2">Моточасы</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gsmDevices.map(device => (
+                          <tr key={device.equipmentId} className="border-t border-white/10 align-top">
+                            <td className="px-3 py-2">
+                              <Link to={`/equipment/${device.equipmentId}`} className="font-medium text-cyan-300 hover:text-cyan-200">
+                                {device.inventoryNumber || device.equipmentName || device.equipmentId}
+                              </Link>
+                            </td>
+                            <td className="px-3 py-2 text-slate-300">{[device.manufacturer, device.model].filter(Boolean).join(' ') || '—'}</td>
+                            <td className="px-3 py-2 font-mono text-xs text-slate-300">{device.serialNumber || '—'}</td>
+                            <td className="px-3 py-2 font-mono text-xs text-slate-300">{device.imei || '—'}</td>
+                            <td className="px-3 py-2 text-slate-300">{device.simNumber || '—'}</td>
+                            <td className="px-3 py-2 text-slate-300">{device.protocol || '—'}</td>
+                            <td className="px-3 py-2">
+                              <Badge variant={device.status === 'online' ? 'success' : device.status === 'offline' ? 'warning' : 'default'}>
+                                {formatGsmStatus(device.status)}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-2 text-slate-300">{formatDateTime(device.lastSeenAt)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatCoordinates(device.lastLat, device.lastLng)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatSpeed(device.lastSpeed ?? null)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatVoltage(device.lastVoltage ?? null)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatEngineHours(device.lastMotoHours ?? null)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="packets">
+            <Card className="border-white/10 bg-slate-950/70 text-white">
+              <CardHeader>
+                <CardTitle className="text-xl font-bold text-white">Последние пакеты GSM/GPRS</CardTitle>
+                <CardDescription className="text-slate-400">
+                  Компактный журнал rawHex/rawText и результата безопасного fallback-парсинга.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {recentGatewayPackets.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                    Журнал пакетов пуст.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[1220px] text-left text-sm">
+                      <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">Время получения</th>
+                          <th className="px-3 py-2">IP</th>
+                          <th className="px-3 py-2">IMEI / deviceId</th>
+                          <th className="px-3 py-2">Техника</th>
+                          <th className="px-3 py-2">Парсинг</th>
+                          <th className="px-3 py-2">Координаты</th>
+                          <th className="px-3 py-2">rawHex</th>
+                          <th className="px-3 py-2">rawText</th>
+                          <th className="px-3 py-2">parseError</th>
+                          <th className="px-3 py-2"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recentGatewayPackets.map(packet => {
+                          const device = packet.equipmentId ? gsmDevices.find(item => item.equipmentId === packet.equipmentId) : null;
+                          return (
+                            <tr key={packet.id} className="border-t border-white/10 align-top">
+                              <td className="px-3 py-2 text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
+                              <td className="px-3 py-2 text-slate-300">{packetSourceIp(packet)}</td>
+                              <td className="px-3 py-2 font-mono text-xs text-slate-300">{packet.imei || packet.deviceId || '—'}</td>
+                              <td className="px-3 py-2 text-slate-300">{device?.equipmentName || packet.equipmentLabel || packet.equipmentId || '—'}</td>
+                              <td className="px-3 py-2">
+                                <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
+                              </td>
+                              <td className="px-3 py-2 text-slate-300">{formatCoordinates(packet.lat, packet.lng)}</td>
+                              <td className="max-w-[220px] px-3 py-2 font-mono text-xs text-cyan-200">
+                                <span className="block truncate">{packetRawHex(packet)}</span>
+                              </td>
+                              <td className="max-w-[220px] px-3 py-2 text-slate-300">
+                                <span className="block truncate">{packetRawText(packet) || '—'}</span>
+                              </td>
+                              <td className="max-w-[220px] px-3 py-2 text-rose-300">
+                                <span className="block truncate">{packet.parseError || '—'}</span>
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => setSelectedPacket(packet)}
+                                  className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                                >
+                                  Детали
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="route">
+            <div className="space-y-6">
+              <Card className="border-white/10 bg-slate-950/70 text-white">
+                <CardHeader>
+                  <CardTitle className="text-xl font-bold text-white">Маршрут по GSM-пакетам</CardTitle>
+                  <CardDescription className="text-slate-400">
+                    На первом этапе выводится таблица точек; карту можно подключить отдельной задачей.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_180px]">
+                    <select
+                      value={routeEquipmentId}
+                      onChange={event => setRouteEquipmentId(event.target.value)}
+                      className="h-11 rounded-2xl border border-white/10 bg-slate-950/80 px-3 text-sm text-white"
+                    >
+                      <option value="">Выберите технику</option>
+                      {gsmDevices.map(device => (
+                        <option key={device.equipmentId} value={device.equipmentId}>
+                          {device.inventoryNumber || device.equipmentName || device.equipmentId}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      type="date"
+                      value={routeFrom}
+                      onChange={event => setRouteFrom(event.target.value)}
+                      className="h-11 rounded-2xl border-white/10 bg-white/5 text-white"
+                    />
+                    <Input
+                      type="date"
+                      value={routeTo}
+                      onChange={event => setRouteTo(event.target.value)}
+                      className="h-11 rounded-2xl border-white/10 bg-white/5 text-white"
+                    />
+                  </div>
+
+                  <div className="min-h-[220px] rounded-3xl border border-dashed border-white/10 bg-white/5 p-6">
+                    <div className="flex h-full min-h-[170px] items-center justify-center text-center text-sm text-slate-400">
+                      Карта маршрута появится после выбора картографической библиотеки. Сейчас источник маршрута — сохранённые точки из `gsm_packets`.
+                    </div>
+                  </div>
+
+                  {apiRoutePoints.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                      Для выбранного периода точек нет.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[760px] text-left text-sm">
+                        <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                          <tr>
+                            <th className="px-3 py-2">Получено</th>
+                            <th className="px-3 py-2">Время устройства</th>
+                            <th className="px-3 py-2">Координаты</th>
+                            <th className="px-3 py-2">Скорость</th>
+                            <th className="px-3 py-2">Курс</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {apiRoutePoints.map((point, index) => (
+                            <tr key={`${point.receivedAt}:${index}`} className="border-t border-white/10">
+                              <td className="px-3 py-2 text-slate-300">{formatDateTime(point.receivedAt)}</td>
+                              <td className="px-3 py-2 text-slate-300">{formatDateTime(point.deviceTime)}</td>
+                              <td className="px-3 py-2 text-slate-300">{formatCoordinates(point.lat, point.lng)}</td>
+                              <td className="px-3 py-2 text-slate-300">{formatSpeed(point.speed ?? null)}</td>
+                              <td className="px-3 py-2 text-slate-300">{point.course ?? '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
 
           <TabsContent value="live">
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_380px]">
@@ -1710,12 +2163,14 @@ export default function Gsm() {
                                 variant={
                                   command.status === 'sent'
                                     ? 'success'
+                                    : command.status === 'acknowledged'
+                                      ? 'success'
                                     : command.status === 'failed'
                                       ? 'danger'
                                       : 'warning'
                                 }
                               >
-                                {command.status === 'sent' ? 'Отправлено' : command.status === 'failed' ? 'Ошибка' : 'В очереди'}
+                                {command.status === 'sent' ? 'Отправлено' : command.status === 'acknowledged' ? 'Подтверждено' : command.status === 'failed' ? 'Ошибка' : 'В очереди'}
                               </Badge>
                             </div>
 
@@ -1739,6 +2194,73 @@ export default function Gsm() {
           </TabsContent>
         </Tabs>
 
+        {selectedPacket && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/50">
+            <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 text-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">GSM packet</div>
+                  <h2 className="mt-1 text-xl font-bold">Детали пакета</h2>
+                  <p className="mt-1 text-sm text-slate-400">{formatDateTime(packetReceivedAt(selectedPacket))}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setSelectedPacket(null)}
+                  className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                >
+                  Закрыть
+                </Button>
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">IP</div>
+                  <div className="mt-1 text-sm text-white">{packetSourceIp(selectedPacket)}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Порт</div>
+                  <div className="mt-1 text-sm text-white">{selectedPacket.remotePort || '—'}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">IMEI / Device ID</div>
+                  <div className="mt-1 text-sm text-white">{selectedPacket.imei || selectedPacket.deviceId || '—'}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Статус парсинга</div>
+                  <div className="mt-1">
+                    <Badge variant={getParseStatusBadge(selectedPacket.parseStatus)}>{selectedPacket.parseStatus || 'pending'}</Badge>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">rawHex</div>
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 p-3 font-mono text-xs text-cyan-200">
+                    {packetRawHex(selectedPacket) || '—'}
+                  </pre>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">rawText</div>
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 p-3 text-sm text-slate-200">
+                    {packetRawText(selectedPacket) || '—'}
+                  </pre>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">parsed</div>
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 p-3 font-mono text-xs text-lime-200">
+                    {JSON.stringify(selectedPacket.parsed || selectedPacket.parsedPayload || null, null, 2)}
+                  </pre>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">parseError</div>
+                  <div className="text-sm text-rose-300">{selectedPacket.parseError || '—'}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -60,6 +60,10 @@ const {
   buildFinanceReport,
 } = require('./lib/finance-core');
 const {
+  normalizeClientLinks,
+  normalizeRecordClientLink,
+} = require('./lib/client-links');
+const {
   mergeEntityHistory,
   mergeRentalHistory,
 } = require('./lib/audit-history');
@@ -262,6 +266,28 @@ const MAX_POLL_INITIAL_REPLAY_MS = Math.max(0, Number(process.env.MAX_POLL_INITI
 const MAX_POLL_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.MAX_POLL_REQUEST_TIMEOUT_MS || 8000));
 const SHOULD_REGISTER_MAX_WEBHOOKS = Boolean(WEBHOOK_URL) &&
   MAX_BOT_TRANSPORT !== 'polling';
+
+function logMaxBotRuntimeConfig() {
+  console.log('[BOT] MAX config:', JSON.stringify({
+    botTokenConfigured: Boolean(MAIN_BOT_TOKEN),
+    webhookUrlConfigured: Boolean(WEBHOOK_URL),
+    webhookSecretConfigured: Boolean(MAX_WEBHOOK_SECRET),
+    transport: MAX_BOT_TRANSPORT,
+    webhookPath: MAIN_BOT_WEBHOOK_PATH,
+    sharedToken: managerAndDeliveryShareToken,
+  }));
+  if (!MAIN_BOT_TOKEN) {
+    console.error('[BOT] Критично: BOT_TOKEN не задан, отправка сообщений MAX работать не будет.');
+  }
+  if (MAX_BOT_TRANSPORT === 'webhook' && !WEBHOOK_URL) {
+    console.warn('[BOT] WEBHOOK_URL не задан при webhook-транспорте; регистрация webhook будет пропущена.');
+  }
+  if (!MAX_WEBHOOK_SECRET) {
+    console.warn('[BOT] MAX_WEBHOOK_SECRET не задан. Webhook будет принят без secret, чтобы бот не молчал, но для production рекомендуется включить secret.');
+  }
+}
+
+logMaxBotRuntimeConfig();
 
 function readData(name) {
   return getData(name);
@@ -841,6 +867,7 @@ apiRouter.use(registerRentalRoutes({
   idPrefixes: ID_PREFIXES,
   accessControl,
   auditLog,
+  normalizeRecordClientLink,
 }));
 
 apiRouter.use(registerRentalChangeRequestRoutes({
@@ -932,6 +959,7 @@ apiRouter.use(registerCrudRoutes({
   applyServiceTicketCreationEffects,
   accessControl,
   auditLog,
+  normalizeRecordClientLink,
 }));
 
 function requireNonEmptyString(value, fieldName) {
@@ -2224,6 +2252,7 @@ startServer({
     botToken: BOT_TOKEN,
     readData,
     writeData,
+    normalizeClientLinks,
     normalizeServiceWorkRecord,
     normalizeSparePartRecord,
     seedsDir: path.join(__dirname, 'seeds'),

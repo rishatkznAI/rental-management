@@ -89,6 +89,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     clients:          VIEW,
     documents:        VIEW_CREATE,
     payments:         ['view', 'create', 'edit'],
+    approvals:        VIEW,
     profile_settings: ['view', 'edit'],
   },
   'Офис-менеджер': {
@@ -106,6 +107,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     clients:          ALL,
     documents:        ALL,
     payments:         ALL,
+    approvals:        VIEW,
     profile_settings: ['view', 'edit'],
   },
   'Менеджер по продажам': {

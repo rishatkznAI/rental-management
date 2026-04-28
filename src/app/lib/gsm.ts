@@ -220,6 +220,7 @@ function getLatestMovementDate(equipment: Equipment, shippingPhotos: ShippingPho
   const history = asArray<Equipment['history'][number]>(equipment.history);
   const movementHistory = asArray<EquipmentGsmPositionPoint>(equipment.gsmMovementHistory);
   const dates = [
+    equipment.gsmLastSeenAt,
     equipment.gsmLastSignalAt,
     ...shippingPhotos.map(item => item.date),
     ...history.map(item => item?.date),
@@ -234,13 +235,15 @@ function getLatestMovementDate(equipment: Equipment, shippingPhotos: ShippingPho
 }
 
 function hasRealTracker(equipment: Equipment) {
-  const gpsLat = toNumber(equipment.gsmLatitude);
-  const gpsLng = toNumber(equipment.gsmLongitude);
+  const gpsLat = toNumber(equipment.gsmLastLat) ?? toNumber(equipment.gsmLatitude);
+  const gpsLng = toNumber(equipment.gsmLastLng) ?? toNumber(equipment.gsmLongitude);
   const movementHistory = asArray<EquipmentGsmPositionPoint>(equipment.gsmMovementHistory);
 
   return Boolean(
     String(equipment.gsmTrackerId || '').trim()
     || String(equipment.gsmImei || '').trim()
+    || String(equipment.gsmDeviceId || '').trim()
+    || equipment.gsmLastSeenAt
     || equipment.gsmLastSignalAt
     || (equipment.gsmSignalStatus && equipment.gsmSignalStatus !== 'location_only')
     || isValidCoordinatePair(gpsLat, gpsLng)
@@ -252,9 +255,11 @@ function hasRealTracker(equipment: Equipment) {
 }
 
 export function deriveSignalState(equipment: Equipment, lastSeenAt: string | null): EquipmentGsmSignalState {
+  if (equipment.gsmStatus === 'online') return 'online';
+  if (equipment.gsmStatus === 'offline') return 'offline';
   if (equipment.gsmSignalStatus && GSM_SIGNAL_STATES.has(equipment.gsmSignalStatus)) return equipment.gsmSignalStatus;
-  if (equipment.gsmLastSignalAt) {
-    const ageHours = Math.max(0, (Date.now() - new Date(equipment.gsmLastSignalAt).getTime()) / 36e5);
+  if (equipment.gsmLastSeenAt || equipment.gsmLastSignalAt) {
+    const ageHours = Math.max(0, (Date.now() - new Date(equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '').getTime()) / 36e5);
     return ageHours <= 24 ? 'online' : 'offline';
   }
   return lastSeenAt ? 'location_only' : 'offline';
@@ -266,7 +271,7 @@ function getTelemetrySummary(equipment: Equipment): GsmTelemetrySummary {
     .reverse()
     .find(entry => typeof entry.speedKph === 'number');
 
-  const speedKph = toNumber(equipment.gsmSpeedKph) ?? movementSpeed?.speedKph ?? null;
+  const speedKph = toNumber(equipment.gsmLastSpeed) ?? toNumber(equipment.gsmSpeedKph) ?? movementSpeed?.speedKph ?? null;
   const ignitionOn = typeof equipment.gsmIgnitionOn === 'boolean'
     ? equipment.gsmIgnitionOn
     : speedKph !== null
@@ -274,9 +279,9 @@ function getTelemetrySummary(equipment: Equipment): GsmTelemetrySummary {
       : null;
 
   return {
-    engineHours: toNumber(equipment.gsmHourmeter) ?? toNumber(equipment.hours),
+    engineHours: toNumber(equipment.gsmLastMotoHours) ?? toNumber(equipment.gsmHourmeter) ?? toNumber(equipment.hours),
     ignitionOn,
-    batteryVoltage: toNumber(equipment.gsmBatteryVoltage),
+    batteryVoltage: toNumber(equipment.gsmLastVoltage) ?? toNumber(equipment.gsmBatteryVoltage),
     speedKph,
   };
 }
@@ -360,8 +365,8 @@ function buildWarehouseZone(equipment: Equipment) {
 }
 
 function resolveEquipmentPoint(equipment: Equipment, binding: GsmRentalBinding | null): GsmResolvedPoint | undefined {
-  const gpsLat = toNumber(equipment.gsmLatitude);
-  const gpsLng = toNumber(equipment.gsmLongitude);
+  const gpsLat = toNumber(equipment.gsmLastLat) ?? toNumber(equipment.gsmLatitude);
+  const gpsLng = toNumber(equipment.gsmLastLng) ?? toNumber(equipment.gsmLongitude);
   if (gpsLat !== null && gpsLng !== null) {
     return {
       lat: gpsLat,
@@ -512,7 +517,7 @@ export function buildMovementEntries(
     historyEntries.push({
       id: `${equipment.id}:current-location`,
       equipmentId: equipment.id,
-      occurredAt: equipment.gsmLastSignalAt || new Date().toISOString(),
+      occurredAt: equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || new Date().toISOString(),
       kind: 'movement',
       title: 'Текущая известная локация',
       description: equipment.currentClient

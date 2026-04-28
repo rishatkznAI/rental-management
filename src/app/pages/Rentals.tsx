@@ -26,7 +26,7 @@ import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, type Syst
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
-import type { Equipment, EquipmentType, EquipmentStatus, Payment, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
+import type { Equipment, EquipmentType, EquipmentStatus, Payment, Rental, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
@@ -71,6 +71,15 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
 };
 
 const LEFT_PANEL_WIDTH = 236;
+
+function matchesClassicRentalForGantt(ganttRental: GanttRentalData, rental: Rental): boolean {
+  const sameClient = ganttRental.clientId && rental.clientId
+    ? ganttRental.clientId === rental.clientId
+    : ganttRental.client === rental.client;
+  if (!sameClient) return false;
+  if (rental.startDate !== ganttRental.startDate || rental.plannedReturnDate !== ganttRental.endDate) return false;
+  return Array.isArray(rental.equipment) && rental.equipment.includes(ganttRental.equipmentInv);
+}
 
 const TYPE_LABELS: Record<string, string> = {
   scissor: 'Ножничный',
@@ -335,11 +344,12 @@ export default function Rentals() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const historyAuthor = user?.name || 'Система';
+  const isAdminRole = user?.role === 'Администратор';
   const canEditRentals = can('edit', 'rentals');
   const canDeleteRentals = can('delete', 'rentals');
   const canCreatePayments = can('create', 'payments');
-  const canEditRentalDates = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
-  const canRestoreRentals = user?.role === 'Администратор';
+  const canEditRentalDates = isAdminRole || user?.role === 'Офис-менеджер';
+  const canRestoreRentals = isAdminRole;
   const today = useMemo(() => startOfDay(new Date()), []);
   const todayStr = format(today, 'yyyy-MM-dd');
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>([]);
@@ -507,6 +517,52 @@ export default function Rentals() {
       await queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
     } catch {
       showToast('Не удалось сохранить платежи', 'error');
+    }
+  }, [queryClient, showToast]);
+
+  const requestClassicRentalChange = useCallback(async (
+    ganttRental: GanttRentalData,
+    patch: Partial<Rental>,
+    reason: string,
+  ): Promise<boolean> => {
+    try {
+      const classicRentals = await rentalsService.getAll();
+      const linkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(ganttRental, item));
+      if (linkedRentals.length !== 1) {
+        showToast(
+          linkedRentals.length === 0
+            ? 'Не найдена карточка аренды для согласования'
+            : 'Найдено несколько похожих карточек аренды, откройте карточку аренды',
+          'error',
+        );
+        return false;
+      }
+
+      const saved = await rentalsService.update(linkedRentals[0].id, {
+        ...patch,
+        __linkedGanttRentalId: ganttRental.id,
+        __changeReason: reason,
+      } as Partial<Rental> & Record<string, unknown>);
+      const summary = (saved as Rental & {
+        changeRequestSummary?: { pendingCount?: number; appliedFields?: string[] };
+      }).changeRequestSummary;
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail(linkedRentals[0].id) }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
+      ]);
+
+      if (summary?.pendingCount) {
+        showToast(`Изменение отправлено на согласование: ${summary.pendingCount}`);
+      } else {
+        showToast('Изменение аренды применено');
+      }
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Не удалось отправить изменение на согласование', 'error');
+      return false;
     }
   }, [queryClient, showToast]);
 
@@ -1133,6 +1189,7 @@ export default function Rentals() {
       id: `PAY-${Date.now()}`,
       invoiceNumber: `INV-${rental.id}`,
       rentalId,
+      clientId: rental.clientId,
       client: rental.client,
       amount: rental.amount,
       paidAmount: amount,
@@ -1172,8 +1229,16 @@ export default function Rentals() {
   }, [canCreatePayments, ganttRentals, historyAuthor, payments, selectedRental]);
 
   // Extend rental: update endDate, update equipment returnDate
-  const handleExtend = useCallback((rental: GanttRentalData, newEndDate: string) => {
+  const handleExtend = useCallback(async (rental: GanttRentalData, newEndDate: string) => {
     if (!canEditRentals || !canEditRentalDates) return;
+    if (!isAdminRole) {
+      await requestClassicRentalChange(
+        rental,
+        { plannedReturnDate: newEndDate },
+        `Изменение даты возврата из планировщика: ${rental.endDate} → ${newEndDate}`,
+      );
+      return;
+    }
     const previousDays = getRentalDays(rental.startDate, rental.endDate);
     const nextDays = getRentalDays(rental.startDate, newEndDate);
     const inferredDailyRate = previousDays > 0 ? (rental.amount || 0) / previousDays : 0;
@@ -1228,7 +1293,19 @@ export default function Rentals() {
     if (selectedRental?.id === rental.id) {
       setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
     }
-  }, [appendEquipmentHistoryEntry, canEditRentals, canEditRentalDates, ganttRentals, equipmentList, historyAuthor, matchesEquipmentRow, payments, selectedRental]);
+  }, [
+    appendEquipmentHistoryEntry,
+    canEditRentals,
+    canEditRentalDates,
+    ganttRentals,
+    equipmentList,
+    historyAuthor,
+    isAdminRole,
+    matchesEquipmentRow,
+    payments,
+    requestClassicRentalChange,
+    selectedRental,
+  ]);
 
   // Update UPD signed status + optional date
   const handleUpdChange = useCallback((rental: GanttRentalData, updSigned: boolean, updDate?: string) => {
@@ -1256,15 +1333,38 @@ export default function Rentals() {
     }
   }, [canEditRentals, ganttRentals, historyAuthor, selectedRental]);
 
-  const handleUpdateRental = useCallback((rental: GanttRentalData, data: Partial<GanttRentalData>) => {
+  const handleUpdateRental = useCallback(async (rental: GanttRentalData, data: Partial<GanttRentalData>) => {
     if (!canEditRentals) return;
+    const nextData = { ...data };
     if (!canEditRentalDates) {
-      delete data.startDate;
-      delete data.endDate;
+      delete nextData.startDate;
+      delete nextData.endDate;
+    }
+
+    if (!isAdminRole) {
+      const patch: Partial<Rental> = {};
+      if (nextData.clientId !== undefined && nextData.clientId !== rental.clientId) patch.clientId = nextData.clientId;
+      if (nextData.client !== undefined && nextData.client !== rental.client) patch.client = nextData.client;
+      if (nextData.startDate !== undefined && nextData.startDate !== rental.startDate) patch.startDate = nextData.startDate;
+      if (nextData.endDate !== undefined && nextData.endDate !== rental.endDate) patch.plannedReturnDate = nextData.endDate;
+      if (nextData.manager !== undefined && nextData.manager !== rental.manager) patch.manager = nextData.manager;
+      if (nextData.amount !== undefined && nextData.amount !== rental.amount) patch.price = Number(nextData.amount) || 0;
+
+      if (Object.keys(patch).length === 0) {
+        showToast('Нет изменений для согласования', 'error');
+        return;
+      }
+
+      await requestClassicRentalChange(
+        rental,
+        patch,
+        `Изменение аренды из планировщика ${rental.id}`,
+      );
+      return;
     }
 
     const previousEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
-    const nextRental = { ...rental, ...data };
+    const nextRental = { ...rental, ...nextData };
     const historyEntries = buildRentalUpdateHistory(rental, nextRental, historyAuthor);
     const updatedRentals = ganttRentals.map(item =>
       item.id === rental.id ? appendRentalHistory(nextRental, ...historyEntries) : item
@@ -1319,7 +1419,22 @@ export default function Rentals() {
     if (selectedRental?.id === rental.id) {
       setSelectedRental(nextRental);
     }
-  }, [appendEquipmentHistoryEntry, canEditRentals, canEditRentalDates, equipmentList, ganttRentals, historyAuthor, matchesEquipmentRow, persistEquipment, persistGanttRentals, selectedRental, serviceTickets]);
+  }, [
+    appendEquipmentHistoryEntry,
+    canEditRentals,
+    canEditRentalDates,
+    equipmentList,
+    ganttRentals,
+    historyAuthor,
+    isAdminRole,
+    matchesEquipmentRow,
+    persistEquipment,
+    persistGanttRentals,
+    requestClassicRentalChange,
+    selectedRental,
+    serviceTickets,
+    showToast,
+  ]);
 
   const handleRestoreRental = useCallback((rental: GanttRentalData) => {
     if (!canRestoreRentals) return;
@@ -2319,6 +2434,7 @@ export default function Rentals() {
           managers={managersList}
           canEditRentals={canEditRentals}
           canEditRentalDates={canEditRentalDates}
+          dateConflictsRequireApproval={!isAdminRole}
           canReassignManager={user?.role === 'Администратор'}
           canRestoreRentals={canRestoreRentals}
           canDeleteRentals={canDeleteRentals}
@@ -2412,7 +2528,7 @@ export default function Rentals() {
 
                 const classicRentals = await rentalsService.getAll();
                 const linkedClassicRentals = classicRentals.filter(item =>
-                  item.client === rental.client
+                  (item.clientId && rental.clientId ? item.clientId === rental.clientId : item.client === rental.client)
                   && item.startDate === rental.startDate
                   && item.plannedReturnDate === rental.endDate
                   && item.equipment.includes(rental.equipmentInv),
@@ -2623,6 +2739,7 @@ export default function Rentals() {
             (data.startDate || '') <= todayStr ? 'active' : 'created';
 
           const newRental: Omit<GanttRentalData, 'id'> = {
+            clientId: data.clientId,
             client: data.client || '',
             clientShort: (data.client || '').substring(0, 20),
             equipmentId: data.equipmentId,
@@ -2653,6 +2770,7 @@ export default function Rentals() {
 
             // Сохраняем и "классическую" аренду, чтобы она была видна в связанных разделах и карточках.
             await rentalsService.create({
+              clientId: data.clientId,
               client: data.client || '',
               contact: '',
               startDate: data.startDate || '',

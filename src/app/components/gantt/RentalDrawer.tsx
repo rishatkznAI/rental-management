@@ -25,6 +25,7 @@ interface RentalDrawerProps {
   managers?: SystemUser[];
   canEditRentals: boolean;
   canEditRentalDates: boolean;
+  dateConflictsRequireApproval?: boolean;
   canReassignManager: boolean;
   canRestoreRentals: boolean;
   canDeleteRentals: boolean;
@@ -75,12 +76,13 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
 export function RentalDrawer({
   rental, equipment, allRentals, payments,
   clients = [], clientReceivables = [], managers = [],
-  canEditRentals, canEditRentalDates, canReassignManager, canRestoreRentals, canDeleteRentals, canCreatePayments,
+  canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
   onRestore, onUpdate, onAddComment, onAddPayment, onExtend, onEarlyReturn, onUpdChange, onUpdateMaintenanceFilters,
 }: RentalDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [editClientId, setEditClientId] = useState('');
   const [editClient, setEditClient] = useState('');
   const [editManager, setEditManager] = useState('');
   const [editStartDate, setEditStartDate] = useState('');
@@ -125,6 +127,7 @@ export function RentalDrawer({
   useEffect(() => {
     if (!rental) return;
     setShowEdit(false);
+    setEditClientId(rental.clientId || '');
     setEditClient(rental.client);
     setEditManager(rental.manager);
     setEditStartDate(rental.startDate);
@@ -160,8 +163,10 @@ export function RentalDrawer({
   const overdueDays = isReturnOverdue
     ? Math.max(1, Math.ceil((new Date(todayKey).getTime() - new Date(rental.endDate).getTime()) / 86400000))
     : 0;
-  const clientProfile = clients.find(item => item.company === rental.client);
-  const clientDebt = clientReceivables.find(item => item.client === rental.client);
+  const clientProfile = clients.find(item => item.id === rental.clientId)
+    ?? clients.find(item => !rental.clientId && item.company === rental.client);
+  const clientDebt = clientReceivables.find(item => item.clientId === rental.clientId)
+    ?? clientReceivables.find(item => !rental.clientId && item.client === rental.client);
 
   // Handle add payment submit
   const handlePaySubmit = () => {
@@ -202,7 +207,7 @@ export function RentalDrawer({
       allRentals,
       rental.id,
     );
-    if (conflict) {
+    if (conflict && !dateConflictsRequireApproval) {
       setExtendError(`Конфликт: техника занята до ${formatDate(conflict.endDate)} (${conflict.client})`);
       return;
     }
@@ -234,8 +239,8 @@ export function RentalDrawer({
 
   const handleEditSave = () => {
     if (!canEditRentals) return;
-    if (!editClient.trim()) {
-      setEditError('Укажите клиента');
+    if (!editClientId || !editClient.trim()) {
+      setEditError('Выберите клиента из базы');
       return;
     }
     if (!editStartDate || !editEndDate) {
@@ -258,13 +263,14 @@ export function RentalDrawer({
       allRentals,
       rental.id,
     );
-    if (conflict) {
+    if (conflict && !dateConflictsRequireApproval) {
       setEditError(`Конфликт: техника занята ${formatDate(conflict.startDate)} — ${formatDate(conflict.endDate)} (${conflict.client})`);
       return;
     }
 
     setEditError('');
     onUpdate(rental, {
+      clientId: editClientId,
       client: editClient.trim(),
       clientShort: editClient.trim().substring(0, 20),
       manager: editManager.trim(),
@@ -403,12 +409,20 @@ export function RentalDrawer({
                   <div className="grid grid-cols-2 gap-2">
                     <div className="col-span-2">
                       <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Клиент *</label>
-                      <input
-                        type="text"
-                        value={editClient}
-                        onChange={e => setEditClient(e.target.value)}
+                      <select
+                        value={editClientId}
+                        onChange={e => {
+                          const selected = clients.find(item => item.id === e.target.value);
+                          setEditClientId(e.target.value);
+                          setEditClient(selected?.company ?? '');
+                        }}
                         className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                      />
+                      >
+                        <option value="">Выберите клиента</option>
+                        {clients.map(clientItem => (
+                          <option key={clientItem.id} value={clientItem.id}>{clientItem.company}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Менеджер</label>

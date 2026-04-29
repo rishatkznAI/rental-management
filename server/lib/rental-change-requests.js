@@ -120,6 +120,25 @@ function normalizedText(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizedClientKey(value) {
+  const words = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .match(/[a-zа-я0-9]+/g) || [];
+  const legalForms = new Set(['ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'llc', 'ooo']);
+  return words.filter(word => !legalForms.has(word)).join('');
+}
+
+function clientNamesCompatible(left, right) {
+  const leftKey = normalizedClientKey(left);
+  const rightKey = normalizedClientKey(right);
+  if (!leftKey || !rightKey) return false;
+  if (leftKey === rightKey) return true;
+  const minLength = Math.min(leftKey.length, rightKey.length);
+  return minLength >= 8 && (leftKey.includes(rightKey) || rightKey.includes(leftKey));
+}
+
 function setHasIntersection(left, right) {
   for (const value of left || []) {
     if (right?.has(value)) return true;
@@ -232,6 +251,10 @@ function mergeGanttRentalContext(primary, fallback) {
     startDate: primary.startDate || fallback.startDate,
     endDate: primary.endDate || fallback.endDate,
     plannedReturnDate: primary.plannedReturnDate || fallback.plannedReturnDate,
+    previousStartDate: primary.previousStartDate || fallback.previousStartDate,
+    previousEndDate: primary.previousEndDate || fallback.previousEndDate,
+    oldStartDate: primary.oldStartDate || fallback.oldStartDate,
+    oldEndDate: primary.oldEndDate || fallback.oldEndDate,
   };
 }
 
@@ -349,7 +372,7 @@ function ganttMatchesClassicRental(ganttRental, rental, options = {}) {
   const rentalClientId = normalizeRentalIdentifier(rental.clientId);
   const sameClient = ganttClientId && rentalClientId
     ? ganttClientId === rentalClientId
-    : normalizedText(ganttRental.client) === normalizedText(rental.client);
+    : clientNamesCompatible(ganttRental.client, rental.client);
 
   const classicRange = rentalDateRange(rental, 'classic');
   const ganttRange = rentalDateRange(ganttRental, 'gantt');
@@ -375,7 +398,7 @@ function ganttMatchesClassicRentalByClientEquipment(ganttRental, rental, options
   const rentalClientId = normalizeRentalIdentifier(rental.clientId);
   const sameClient = ganttClientId && rentalClientId
     ? ganttClientId === rentalClientId
-    : normalizedText(ganttRental.client) === normalizedText(rental.client);
+    : clientNamesCompatible(ganttRental.client, rental.client);
   if (!sameClient) return false;
 
   return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
@@ -389,6 +412,36 @@ function isOpenClassicRental(rental) {
 function ganttMatchesOpenClassicRentalByEquipment(ganttRental, rental, options = {}) {
   if (!isOpenClassicRental(rental)) return false;
   return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
+}
+
+function dateRangeVariantsForGantt(ganttRental) {
+  return [
+    rentalDateRange(ganttRental, 'gantt'),
+    {
+      startDate: String(ganttRental?.previousStartDate || ganttRental?.oldStartDate || ''),
+      endDate: String(ganttRental?.previousEndDate || ganttRental?.oldEndDate || ''),
+    },
+  ].filter(range => range.startDate || range.endDate);
+}
+
+function dateRangesCompatibleWithRental(ganttRental, rental) {
+  const classicRange = rentalDateRange(rental, 'classic');
+  return dateRangeVariantsForGantt(ganttRental).some(range => {
+    const sameDates = classicRange.startDate === range.startDate && classicRange.endDate === range.endDate;
+    return sameDates || dateRangesOverlap(classicRange.startDate, classicRange.endDate, range.startDate, range.endDate);
+  });
+}
+
+function ganttMatchesOpenClassicRentalByClient(ganttRental, rental, options = {}) {
+  if (!isOpenClassicRental(rental)) return false;
+  const ganttClientId = normalizeRentalIdentifier(ganttRental?.clientId);
+  const rentalClientId = normalizeRentalIdentifier(rental?.clientId);
+  const sameClient = ganttClientId && rentalClientId
+    ? ganttClientId === rentalClientId
+    : clientNamesCompatible(ganttRental?.client, rental?.client);
+  if (!sameClient) return false;
+  if (options.requireDateMatch && !dateRangesCompatibleWithRental(ganttRental, rental)) return false;
+  return true;
 }
 
 function uniqueRentalMatches(matches) {
@@ -636,6 +689,60 @@ function resolveRentalForChangeRequest({
       },
     );
   }
+  const openClientDateSnapshotMatches = snapshotMatchesRequestedId
+    ? uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
+      (rentals || [])
+        .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
+        .filter(({ rental }) => ganttMatchesOpenClassicRentalByClient(ganttRental, rental, { requireDateMatch: true })),
+    ))
+    : [];
+  if (openClientDateSnapshotMatches.length === 1) {
+    return buildRentalResolutionSuccess(
+      openClientDateSnapshotMatches[0],
+      requestedRentalId || requestedGanttId || openClientDateSnapshotMatches[0].linkedGanttRental?.id,
+      openClientDateSnapshotMatches[0].linkedGanttRental,
+    );
+  }
+  if (openClientDateSnapshotMatches.length > 1) {
+    return buildRentalResolutionFailure(
+      409,
+      `Найдено несколько незакрытых карточек аренды по клиенту и датам для id "${requestedRentalId || requestedGanttId}". Откройте карточку аренды вручную.`,
+      [...searchedIds, ...linkedIds],
+      {
+        ...diagnosticsBase,
+        linkedIds,
+        fallbackCandidateCount: openClientDateSnapshotMatches.length,
+        fallbackCandidateIds: compactResolutionIds(openClientDateSnapshotMatches, match => match.rental?.id),
+      },
+    );
+  }
+  const openClientSnapshotMatches = snapshotMatchesRequestedId
+    ? uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
+      (rentals || [])
+        .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
+        .filter(({ rental }) => ganttMatchesOpenClassicRentalByClient(ganttRental, rental, { requireDateMatch: false })),
+    ))
+    : [];
+  if (openClientSnapshotMatches.length === 1) {
+    return buildRentalResolutionSuccess(
+      openClientSnapshotMatches[0],
+      requestedRentalId || requestedGanttId || openClientSnapshotMatches[0].linkedGanttRental?.id,
+      openClientSnapshotMatches[0].linkedGanttRental,
+    );
+  }
+  if (openClientSnapshotMatches.length > 1) {
+    return buildRentalResolutionFailure(
+      409,
+      `Найдено несколько незакрытых карточек аренды по клиенту для id "${requestedRentalId || requestedGanttId}". Откройте карточку аренды вручную.`,
+      [...searchedIds, ...linkedIds],
+      {
+        ...diagnosticsBase,
+        linkedIds,
+        fallbackCandidateCount: openClientSnapshotMatches.length,
+        fallbackCandidateIds: compactResolutionIds(openClientSnapshotMatches, match => match.rental?.id),
+      },
+    );
+  }
   if (linkedIds.length > 0) {
     return buildRentalResolutionFailure(
       404,
@@ -876,7 +983,9 @@ function analyzeGanttRentalLinks({ rentals = [], ganttRentals = [], equipment = 
         .filter(({ rental }) =>
           ganttMatchesClassicRental(ganttRental, rental, { equipmentList: equipment }) ||
           ganttMatchesClassicRentalByClientEquipment(ganttRental, rental, { equipmentList: equipment }) ||
-          ganttMatchesOpenClassicRentalByEquipment(ganttRental, rental, { equipmentList: equipment }),
+          ganttMatchesOpenClassicRentalByEquipment(ganttRental, rental, { equipmentList: equipment }) ||
+          ganttMatchesOpenClassicRentalByClient(ganttRental, rental, { requireDateMatch: true }) ||
+          ganttMatchesOpenClassicRentalByClient(ganttRental, rental, { requireDateMatch: false }),
         ),
     ));
 

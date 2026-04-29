@@ -433,6 +433,40 @@ test('resolveRentalForChangeRequest merges request snapshot into existing broken
   assert.equal(result.linkedGanttRentalId, 'GR-1776254974522');
 });
 
+test('resolveRentalForChangeRequest falls back to unique open client rental with previous dates', () => {
+  const result = resolveRentalForChangeRequest({
+    rentalId: 'GR-1776254974522',
+    linkedGanttRentalId: 'GR-1776254974522',
+    fallbackGanttRental: {
+      id: 'GR-1776254974522',
+      client: 'Стройтрест Алабуга',
+      startDate: '2026-04-07',
+      endDate: '2026-04-09',
+      previousStartDate: '2026-04-10',
+      previousEndDate: '2026-04-20',
+    },
+    rentals: [{
+      id: 'R-032',
+      client: 'ООО Стройтрест-Алабуга',
+      startDate: '2026-04-10',
+      plannedReturnDate: '2026-04-20',
+      equipment: ['03291436'],
+      status: 'active',
+    }],
+    ganttRentals: [{
+      id: 'GR-1776254974522',
+      client: 'Стройтрест Алабуга',
+      startDate: '2026-04-07',
+      endDate: '2026-04-09',
+      equipmentInv: '',
+    }],
+    equipment: [],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rentalId, 'R-032');
+});
+
 test('resolveRentalForChangeRequest returns 409 for ambiguous fallback matches', () => {
   const result = resolveRentalForChangeRequest({
     rentalId: 'GR-ambiguous',
@@ -1114,6 +1148,52 @@ test('PATCH /api/rentals/:id merges snapshot with existing broken GR record', as
     assert.equal(update.body.id, 'R-032');
     assert.equal(state.rental_change_requests.length, 2);
     assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-1776254974522');
+    assert.equal(state.rentals.find(item => item.id === 'R-032').startDate, '2026-04-10');
+  });
+});
+
+test('PATCH /api/rentals/:id resolves broken GR by client and old dates when equipment is missing', async () => {
+  const { app, state } = createApprovalApp();
+  const currentRental = state.rentals.find(item => item.id === 'R-032');
+  currentRental.client = 'ООО Стройтрест-Алабуга';
+  currentRental.startDate = '2026-04-10';
+  currentRental.plannedReturnDate = '2026-04-20';
+  state.gantt_rentals.push({
+    id: 'GR-1776254974522',
+    client: 'Стройтрест Алабуга',
+    startDate: '2026-04-07',
+    endDate: '2026-04-09',
+    equipmentInv: '',
+    status: 'active',
+    comments: [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1776254974522', 'manager-token', {
+      startDate: '2026-04-07',
+      plannedReturnDate: '2026-04-09',
+      ganttRentalId: 'GR-1776254974522',
+      __ganttSnapshot: {
+        id: 'GR-1776254974522',
+        client: 'Стройтрест Алабуга',
+        startDate: '2026-04-07',
+        endDate: '2026-04-09',
+        equipmentInv: '',
+      },
+      entityType: 'rental',
+      actionType: 'gantt_rental_update',
+      oldValues: { startDate: '2026-04-10', plannedReturnDate: '2026-04-20' },
+      newValues: { startDate: '2026-04-07', plannedReturnDate: '2026-04-09' },
+      changes: [
+        { field: 'startDate', oldValue: '2026-04-10', newValue: '2026-04-07' },
+        { field: 'plannedReturnDate', oldValue: '2026-04-20', newValue: '2026-04-09' },
+      ],
+      __changeReason: 'Перенос аренды 03291436 на 07.04',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.id, 'R-032');
+    assert.equal(state.rental_change_requests.length, 2);
     assert.equal(state.rentals.find(item => item.id === 'R-032').startDate, '2026-04-10');
   });
 });

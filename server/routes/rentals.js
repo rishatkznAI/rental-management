@@ -285,10 +285,20 @@ function registerRentalRoutes(deps) {
         const linkedGanttRentalId = rawMeta.linkedGanttRentalId ||
           rawMeta.ganttRentalId ||
           (String(req.params.id || '').startsWith('GR-') ? req.params.id : '');
+        const fallbackGanttRental = rawMeta.ganttSnapshot
+          ? {
+              ...rawMeta.ganttSnapshot,
+              previousStartDate: rawMeta.oldValues?.startDate || rawMeta.ganttSnapshot.previousStartDate,
+              previousEndDate:
+                rawMeta.oldValues?.plannedReturnDate ||
+                rawMeta.oldValues?.endDate ||
+                rawMeta.ganttSnapshot.previousEndDate,
+            }
+          : rawMeta.ganttSnapshot;
         const resolution = resolveRentalForChangeRequest({
           rentalId: rawMeta.rentalId || rawMeta.sourceRentalId || req.params.id,
           linkedGanttRentalId,
-          fallbackGanttRental: rawMeta.ganttSnapshot,
+          fallbackGanttRental,
           rentals: data,
           ganttRentals: readData('gantt_rentals') || [],
           equipment: readData('equipment') || [],

@@ -104,6 +104,8 @@ test('warranty mechanic can view fleet and rentals and work with service and war
   const access = createAccess(state);
   const warrantyMechanic = { userId: 'U-warranty', userName: 'Гарантийный механик', userRole: 'Механик по гарантии' };
   const warrantyMechanicAlias = { userId: 'U-warranty-alias', userName: 'Гарантийный механик Alias', userRole: 'warranty_mechanic' };
+  const warrantyMechanicCamel = { userId: 'U-warranty-camel', userName: 'Гарантийный механик Camel', userRole: 'mechanicWarranty' };
+  const warrantyMechanicLowercase = { userId: 'U-warranty-lower', userName: 'Гарантийный механик Lower', userRole: 'механик по гарантии' };
 
   assert.deepEqual(access.filterCollectionByScope('service', state.service, warrantyMechanic).map(item => item.id), ['S-1', 'S-2']);
   assert.deepEqual(access.filterCollectionByScope('warranty_claims', state.warranty_claims, warrantyMechanic).map(item => item.id), ['WC-1', 'WC-2']);
@@ -112,6 +114,10 @@ test('warranty mechanic can view fleet and rentals and work with service and war
   assert.deepEqual(access.filterCollectionByScope('gantt_rentals', state.gantt_rentals, warrantyMechanic).map(item => item.id), ['GR-1']);
   assert.deepEqual(access.filterCollectionByScope('service', state.service, warrantyMechanicAlias).map(item => item.id), ['S-1', 'S-2']);
   assert.deepEqual(access.filterCollectionByScope('equipment', state.equipment, warrantyMechanicAlias).map(item => item.id), ['EQ-1']);
+  assert.deepEqual(access.filterCollectionByScope('service', state.service, warrantyMechanicCamel).map(item => item.id), ['S-1', 'S-2']);
+  assert.deepEqual(access.filterCollectionByScope('equipment', state.equipment, warrantyMechanicCamel).map(item => item.id), ['EQ-1']);
+  assert.deepEqual(access.filterCollectionByScope('service', state.service, warrantyMechanicLowercase).map(item => item.id), ['S-1', 'S-2']);
+  assert.deepEqual(access.filterCollectionByScope('equipment', state.equipment, warrantyMechanicLowercase).map(item => item.id), ['EQ-1']);
   assert.equal(access.canMutateEntity('service', state.service[1], warrantyMechanic), true);
   assert.equal(access.canMutateEntity('warranty_claims', state.warranty_claims[1], warrantyMechanic), true);
   assert.doesNotThrow(() => access.assertCanCreateCollection('warranty_claims', warrantyMechanic, { serviceTicketId: 'S-2' }));

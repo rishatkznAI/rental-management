@@ -14,7 +14,9 @@ import { getServicePriorityBadge, getServiceStatusBadge } from '../components/ui
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { WarrantyClaimsTab } from '../components/service/WarrantyClaimsTab';
+import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
+import { isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
 import type { ServiceTicket } from '../types';
@@ -147,6 +149,7 @@ function ServiceMetricCard({
 }
 
 export default function Service() {
+  const { user } = useAuth();
   const { can } = usePermissions();
   const { data: ticketList = [] } = useServiceTicketsList();
   const canManageWarrantyClaims = can('edit', 'service');
@@ -261,6 +264,35 @@ export default function Service() {
     statusFilter,
     ticketList,
     todayIso,
+    workflowFilter,
+  ]);
+
+  React.useEffect(() => {
+    if (!import.meta.env.DEV || !isWarrantyMechanicRole(user?.role)) return;
+    console.debug('[warranty-mechanic/service]', {
+      rawRole: user?.rawRole ?? user?.role,
+      normalizedRole: normalizeUserRole(user?.role),
+      beforeFilters: ticketList.length,
+      activeTickets: activeTickets.length,
+      afterFilters: filteredTickets.length,
+      filters: { search, priorityFilter, statusFilter, scenarioFilter, mechanicFilter, workflowFilter, preset, datePreset, dateFrom, dateTo },
+      unassigned: ticketList.filter(ticket => !ticket.assignedMechanicId && !ticket.assignedTo).length,
+    });
+  }, [
+    activeTickets.length,
+    dateFrom,
+    datePreset,
+    dateTo,
+    filteredTickets.length,
+    mechanicFilter,
+    preset,
+    priorityFilter,
+    scenarioFilter,
+    search,
+    statusFilter,
+    ticketList,
+    user?.rawRole,
+    user?.role,
     workflowFilter,
   ]);
 

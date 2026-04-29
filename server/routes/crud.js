@@ -1,5 +1,6 @@
 const express = require('express');
 const { syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
+const { normalizeRole } = require('../lib/role-groups');
 const {
   RENTAL_CHANGE_REQUEST_STATUS,
   buildRequestDecisionNotificationStatus,
@@ -123,6 +124,8 @@ function registerCrudRoutes(deps) {
       next.botOnly = true;
       next.allowFrontendLogin = false;
       next.frontendAccess = false;
+    } else if (next.role) {
+      next.role = normalizeRole(next.role);
     }
     return next;
   }

@@ -508,7 +508,9 @@ function requireAuth(req, res, next) {
   req.user = {
     ...session,
     userName: currentUser.name,
-    userRole: currentUser.role,
+    userRole: normalizeRole(currentUser.role),
+    rawRole: currentUser.role,
+    normalizedRole: normalizeRole(currentUser.role),
     email: currentUser.email,
     profilePhoto: currentUser.profilePhoto || null,
     ownerId: currentUser.ownerId || null,

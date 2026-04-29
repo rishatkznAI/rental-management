@@ -5,6 +5,8 @@ export interface AuthUser {
   id: string;
   name: string;
   role: string;
+  rawRole?: string;
+  normalizedRole?: string;
   email: string;
   profilePhoto?: string;
   ownerId?: string;
@@ -36,12 +38,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   const refreshUser = useCallback(async () => {
-    const result = await api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>('/api/auth/me');
+    const result = await api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; rawRole?: string; normalizedRole?: string; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>('/api/auth/me');
     const session = result.user;
     const user: AuthUser = {
       id: session.userId,
       name: session.userName,
       role: session.userRole,
+      rawRole: session.rawRole,
+      normalizedRole: session.normalizedRole,
       email: session.email,
       profilePhoto: session.profilePhoto,
       ownerId: session.ownerId,
@@ -90,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshUser, state.isAuthenticated]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>(
+    const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; rawRole?: string; normalizedRole?: string; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>(
       '/api/auth/login',
       { email, password }
     );
@@ -101,6 +105,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       id:    result.user.id,
       name:  result.user.name,
       role:  result.user.role,
+      rawRole: result.user.rawRole,
+      normalizedRole: result.user.normalizedRole,
       email: result.user.email,
       profilePhoto: result.user.profilePhoto,
       ownerId: result.user.ownerId,

@@ -4,7 +4,9 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { MoreVertical, Plus, Search } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
+import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
+import { isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData } from '../hooks/useRentals';
 import {
@@ -201,6 +203,7 @@ function EmptyState() {
 }
 
 export default function Equipment() {
+  const { user } = useAuth();
   const { can } = usePermissions();
   const { data: equipmentList = [] } = useEquipmentList();
   const { data: ganttRentals = [] } = useGanttData();
@@ -272,6 +275,40 @@ export default function Equipment() {
     search,
     statusFilter,
     typeFilter,
+  ]);
+
+  React.useEffect(() => {
+    if (!import.meta.env.DEV || !isWarrantyMechanicRole(user?.role)) return;
+    const byTab = {
+      active: enrichedEquipmentList.filter((item) => matchesTabType(item, 'active')).length,
+      sale: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sale')).length,
+      sold: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sold')).length,
+      service: enrichedEquipmentList.filter((item) => matchesTabType(item, 'service')).length,
+      all: enrichedEquipmentList.length,
+    };
+    console.debug('[warranty-mechanic/equipment]', {
+      rawRole: user?.rawRole ?? user?.role,
+      normalizedRole: normalizeUserRole(user?.role),
+      beforeFilters: enrichedEquipmentList.length,
+      afterFilters: filteredEquipment.length,
+      activeTab,
+      byTab,
+      filters: { search, categoryFilter, fleetFilter, statusFilter, typeFilter, ownerFilter, driveFilter, locationFilter },
+    });
+  }, [
+    activeTab,
+    categoryFilter,
+    driveFilter,
+    enrichedEquipmentList,
+    filteredEquipment.length,
+    fleetFilter,
+    locationFilter,
+    ownerFilter,
+    search,
+    statusFilter,
+    typeFilter,
+    user?.rawRole,
+    user?.role,
   ]);
 
   const tabCounts = React.useMemo(() => ({

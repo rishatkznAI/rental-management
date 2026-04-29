@@ -1,3 +1,5 @@
+const { normalizeRole } = require('../lib/role-groups');
+
 function registerAuthRoutes(app, deps) {
   const {
     readData,
@@ -61,10 +63,14 @@ function registerAuthRoutes(app, deps) {
   }
 
   function buildSessionUser(user) {
+    const rawRole = user.role;
+    const normalizedRole = normalizeRole(rawRole);
     return {
       userId: user.id,
       userName: user.name,
-      userRole: user.role,
+      userRole: normalizedRole,
+      rawRole,
+      normalizedRole,
       email: user.email,
       profilePhoto: user.profilePhoto || undefined,
       ownerId: user.ownerId || undefined,
@@ -142,7 +148,9 @@ function registerAuthRoutes(app, deps) {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          role: normalizeRole(user.role),
+          rawRole: user.role,
+          normalizedRole: normalizeRole(user.role),
           profilePhoto: user.profilePhoto || undefined,
           ownerId: user.ownerId || undefined,
           ownerName: user.ownerName || undefined,

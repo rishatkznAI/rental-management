@@ -7,13 +7,14 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { normalizeRole } = require('../server/lib/role-groups.js');
 const { registerAuthRoutes } = require('../server/routes/auth.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
 const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { registerBotRoutes } = require('../server/routes/bot.js');
 
 const WARRANTY_MECHANIC_ROLE = 'Механик по гарантии';
-const WARRANTY_MECHANIC_ROLE_ALIASES = ['warranty_mechanic', 'mechanic_warranty'];
+const WARRANTY_MECHANIC_ROLE_ALIASES = ['warranty_mechanic', 'mechanic_warranty', 'warrantyMechanic', 'mechanicWarranty', 'warranty-mechanic', 'mechanic-warranty', 'механик по гарантии'];
 const WARRANTY_MECHANIC_ROLES = [WARRANTY_MECHANIC_ROLE, ...WARRANTY_MECHANIC_ROLE_ALIASES];
 const MECHANIC_ROLES = ['Механик', 'Младший стационарный механик', 'Выездной механик', 'Старший стационарный механик'];
 
@@ -58,6 +59,7 @@ function createState() {
       { id: 'U-mechanic', name: 'Петров', email: 'mechanic@example.test', role: 'Механик', status: 'Активен', password: 'mechanic', tokenVersion: 0 },
       { id: 'U-warranty', name: 'Гарантия', email: 'warranty@example.test', role: WARRANTY_MECHANIC_ROLE, status: 'Активен', password: 'warranty', tokenVersion: 0 },
       { id: 'U-warranty-alias', name: 'Гарантия Alias', email: 'warranty-alias@example.test', role: 'mechanic_warranty', status: 'Активен', password: 'warranty', tokenVersion: 0 },
+      { id: 'U-warranty-camel', name: 'Гарантия Camel', email: 'warranty-camel@example.test', role: 'mechanicWarranty', status: 'Активен', password: 'warranty', tokenVersion: 0 },
       { id: 'U-investor', name: 'Инвестор', email: 'investor@example.test', role: 'Инвестор', status: 'Активен', password: 'investor', tokenVersion: 0, ownerId: 'OW-1' },
     ],
     rentals: [
@@ -100,6 +102,7 @@ function createSecurityApp(state = createState()) {
     ['mechanic-token', { userId: 'U-mechanic', tokenVersion: 0, passwordChangedAt: null }],
     ['warranty-token', { userId: 'U-warranty', tokenVersion: 0, passwordChangedAt: null }],
     ['warranty-alias-token', { userId: 'U-warranty-alias', tokenVersion: 0, passwordChangedAt: null }],
+    ['warranty-camel-token', { userId: 'U-warranty-camel', tokenVersion: 0, passwordChangedAt: null }],
     ['investor-token', { userId: 'U-investor', tokenVersion: 0, passwordChangedAt: null }],
   ]);
   const readData = name => state[name] || [];
@@ -132,14 +135,14 @@ function createSecurityApp(state = createState()) {
   function requireRead(collection) {
     return (req, res, next) => {
       const allowed = READ_PERMISSIONS[collection] || ['Администратор'];
-      return allowed.includes(req.user?.userRole) ? next() : res.status(403).json({ ok: false, error: 'Forbidden' });
+      return allowed.includes(normalizeRole(req.user?.userRole)) ? next() : res.status(403).json({ ok: false, error: 'Forbidden' });
     };
   }
 
   function requireWrite(collection) {
     return (req, res, next) => {
       const allowed = WRITE_PERMISSIONS[collection] || ['Администратор'];
-      return allowed.includes(req.user?.userRole) ? next() : res.status(403).json({ ok: false, error: 'Forbidden' });
+      return allowed.includes(normalizeRole(req.user?.userRole)) ? next() : res.status(403).json({ ok: false, error: 'Forbidden' });
     };
   }
 
@@ -376,6 +379,25 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-other', 'warranty-alias-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/service/S-other', 'warranty-alias-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/warranty_claims/WC-1', 'warranty-alias-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-other', 'warranty-camel-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/service/S-other', 'warranty-camel-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/warranty_claims/WC-1', 'warranty-camel-token')).status, 200);
+    const authMe = await request(baseUrl, 'GET', '/api/auth/me', 'warranty-camel-token');
+    assert.equal(authMe.status, 200);
+    assert.equal(authMe.body.user.rawRole, 'mechanicWarranty');
+    assert.equal(authMe.body.user.normalizedRole, WARRANTY_MECHANIC_ROLE);
+    assert.equal(authMe.body.user.userRole, WARRANTY_MECHANIC_ROLE);
+    const equipmentList = await request(baseUrl, 'GET', '/api/equipment', 'warranty-camel-token');
+    assert.equal(equipmentList.status, 200);
+    assert.equal(equipmentList.body.length, 2);
+    assertNoCommercialFields(equipmentList.body);
+    const serviceList = await request(baseUrl, 'GET', '/api/service', 'warranty-camel-token');
+    assert.equal(serviceList.status, 200);
+    assert.equal(serviceList.body.length, 2);
+    assertNoCommercialFields(serviceList.body);
+    const warrantyClaimList = await request(baseUrl, 'GET', '/api/warranty_claims', 'warranty-camel-token');
+    assert.equal(warrantyClaimList.status, 200);
+    assert.equal(warrantyClaimList.body.length, 1);
     assert.equal((await request(baseUrl, 'GET', '/api/payments/P-1', 'warranty-token')).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/app_settings/AS-1', 'warranty-token')).status, 403);
     for (const path of [

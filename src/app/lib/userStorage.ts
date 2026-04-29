@@ -25,8 +25,13 @@ export type UserRole =
   | 'Менеджер по аренде'
   | 'Менеджер по продажам'
   | 'Механик по гарантии'
+  | 'механик по гарантии'
   | 'warranty_mechanic'
   | 'mechanic_warranty'
+  | 'warrantyMechanic'
+  | 'mechanicWarranty'
+  | 'warranty-mechanic'
+  | 'mechanic-warranty'
   | 'Механик'
   | 'Младший стационарный механик'
   | 'Выездной механик'
@@ -65,8 +70,13 @@ export const MECHANIC_ROLES: UserRole[] = [
 
 export const WARRANTY_MECHANIC_ROLE: UserRole = 'Механик по гарантии';
 export const WARRANTY_MECHANIC_ROLE_ALIASES: UserRole[] = [
+  'механик по гарантии',
   'warranty_mechanic',
   'mechanic_warranty',
+  'warrantyMechanic',
+  'mechanicWarranty',
+  'warranty-mechanic',
+  'mechanic-warranty',
 ];
 
 export const ROLES: UserRole[] = [
@@ -107,15 +117,27 @@ export function filterRentalManagerUsers<T extends UserWithManagerRole>(users: T
 }
 
 export function isMechanicRole(role: UserRole | string | null | undefined): boolean {
-  return MECHANIC_ROLES.some(item => item === role);
+  return MECHANIC_ROLES.some(item => item === normalizeUserRole(role));
 }
 
 export function isWarrantyMechanicRole(role: UserRole | string | null | undefined): boolean {
-  return role === WARRANTY_MECHANIC_ROLE || WARRANTY_MECHANIC_ROLE_ALIASES.some(item => item === role);
+  const key = normalizeRoleKey(role);
+  return key === normalizeRoleKey(WARRANTY_MECHANIC_ROLE)
+    || WARRANTY_MECHANIC_ROLE_ALIASES.some(item => normalizeRoleKey(item) === key);
 }
 
 export function normalizeUserRole(role: UserRole | string | null | undefined): string {
-  return isWarrantyMechanicRole(role) ? WARRANTY_MECHANIC_ROLE : String(role || '');
+  const value = String(role || '').trim();
+  return isWarrantyMechanicRole(value) ? WARRANTY_MECHANIC_ROLE : value;
+}
+
+function normalizeRoleKey(role: UserRole | string | null | undefined): string {
+  return String(role || '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[\s_-]+/g, '_');
 }
 
 export function isInvestorUser(user: UserWithInvestorRole | null | undefined): boolean {

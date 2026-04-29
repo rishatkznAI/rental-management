@@ -32,5 +32,9 @@ test('frontend normalizes warranty mechanic role aliases', () => {
   assert.match(userStorageSource, /WARRANTY_MECHANIC_ROLE_ALIASES/);
   assert.match(userStorageSource, /'warranty_mechanic'/);
   assert.match(userStorageSource, /'mechanic_warranty'/);
+  assert.match(userStorageSource, /'warrantyMechanic'/);
+  assert.match(userStorageSource, /'mechanicWarranty'/);
+  assert.match(userStorageSource, /'механик по гарантии'/);
+  assert.match(userStorageSource, /normalizeRoleKey/);
   assert.match(permissionsSource, /normalizeUserRole\(user\?\.role\)/);
 });

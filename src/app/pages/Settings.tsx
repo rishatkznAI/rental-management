@@ -39,6 +39,7 @@ import {
   ROLES, USERS_STORAGE_KEY,
   isMechanicRole,
   isWarrantyMechanicRole,
+  normalizeUserRole,
 } from '../lib/userStorage';
 import { usersService } from '../services/users.service';
 import { ownersService } from '../services/owners.service';
@@ -303,15 +304,16 @@ export default function Settings() {
     if (editingId) {
       // При редактировании: пустой пароль = не меняем; непустой сервер сохранит как scrypt-хеш.
       const nextPassword = form.password ? form.password : undefined;
+      const normalizedRole = normalizeUserRole(form.role) as UserRole;
       await setUsers(prev => prev.map(u => {
         if (u.id !== editingId) return u;
         return {
           ...u,
           name: form.name,
           email: form.email,
-          role: form.role,
+          role: normalizedRole,
           status: form.status,
-          ...(form.role === 'Перевозчик'
+          ...(normalizedRole === 'Перевозчик'
             ? { botOnly: true, allowFrontendLogin: false, frontendAccess: false }
             : {}),
           ...ownerPayload,
@@ -320,14 +322,15 @@ export default function Settings() {
       }));
     } else {
       if (!form.password.trim()) { setFormError('Задайте пароль для нового пользователя'); return; }
+      const normalizedRole = normalizeUserRole(form.role) as UserRole;
       const newUser: SystemUser = {
         id: Date.now().toString(),
         name: form.name,
         email: form.email,
-        role: form.role,
+        role: normalizedRole,
         status: form.status,
         password: form.password,
-        ...(form.role === 'Перевозчик'
+        ...(normalizedRole === 'Перевозчик'
           ? { botOnly: true, allowFrontendLogin: false, frontendAccess: false }
           : {}),
         ...ownerPayload,

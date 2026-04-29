@@ -18,9 +18,10 @@ import {
   useRejectRentalChangeRequest,
   useRentalChangeRequestsList,
 } from '../hooks/useRentalChangeRequests';
+import { useEquipmentList } from '../hooks/useEquipment';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, formatDateTime } from '../lib/utils';
-import type { RentalChangeRequest, RentalChangeRequestStatus } from '../types';
+import type { Equipment, RentalChangeRequest, RentalChangeRequestStatus } from '../types';
 
 const statusLabels: Record<RentalChangeRequestStatus, string> = {
   pending: 'На согласовании',
@@ -52,6 +53,53 @@ function financialImpact(request: RentalChangeRequest) {
   return `${amount > 0 ? '+' : ''}${formatCurrency(amount)}`;
 }
 
+function normalizeEquipmentRef(value: unknown) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => String(item || '').trim()).filter(Boolean);
+}
+
+function equipmentMatchesRef(equipment: Equipment, ref: string) {
+  const normalized = normalizeEquipmentRef(ref);
+  if (!normalized) return false;
+  return [
+    equipment.id,
+    equipment.inventoryNumber,
+    equipment.serialNumber,
+  ].some(value => normalizeEquipmentRef(value) === normalized);
+}
+
+function buildEquipmentTitle(equipment: Equipment, fallbackRef = '') {
+  const title = [
+    equipment.manufacturer,
+    equipment.model,
+  ].filter(Boolean).join(' ').trim() || fallbackRef || equipment.id;
+  const meta = [
+    equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
+    equipment.serialNumber ? `SN ${equipment.serialNumber}` : '',
+  ].filter(Boolean).join(' · ');
+  return meta ? `${title} · ${meta}` : title;
+}
+
+function resolveEquipmentDisplayItems(request: RentalChangeRequest, equipmentList: Equipment[]) {
+  const refs = [
+    ...(Array.isArray(request.equipment) ? request.equipment : []),
+    ...asStringList(request.oldValues?.equipment),
+    ...asStringList(request.newValues?.equipment),
+  ].map(item => String(item || '').trim()).filter(Boolean);
+  const uniqueRefs = [...new Set(refs)];
+
+  if (uniqueRefs.length === 0) return ['—'];
+
+  return uniqueRefs.map((ref) => {
+    const matched = equipmentList.find(item => equipmentMatchesRef(item, ref));
+    return matched ? buildEquipmentTitle(matched, ref) : ref;
+  });
+}
+
 function DetailField({
   label,
   children,
@@ -72,6 +120,7 @@ function DetailField({
 export default function Approvals() {
   const { user } = useAuth();
   const { data: requests = [], isLoading, error } = useRentalChangeRequestsList();
+  const { data: equipmentList = [] } = useEquipmentList();
   const approveMutation = useApproveRentalChangeRequest();
   const rejectMutation = useRejectRentalChangeRequest();
   const [selected, setSelected] = React.useState<RentalChangeRequest | null>(null);
@@ -86,6 +135,25 @@ export default function Approvals() {
   const ordered = [...pending, ...processed];
   const userRole = String(user?.role || '').trim();
   const isAdmin = userRole === 'Администратор';
+  const equipmentDisplayByRequestId = React.useMemo(() => (
+    new Map(requests.map(request => [
+      request.id,
+      resolveEquipmentDisplayItems(request, equipmentList),
+    ]))
+  ), [equipmentList, requests]);
+
+  const renderEquipmentList = (request: RentalChangeRequest) => {
+    const items = equipmentDisplayByRequestId.get(request.id) || ['—'];
+    return (
+      <div className="space-y-1">
+        {items.map((item, index) => (
+          <p key={`${request.id}:equipment:${index}`} className="font-medium text-gray-900 dark:text-white">
+            {item}
+          </p>
+        ))}
+      </div>
+    );
+  };
 
   const handleReject = async () => {
     if (!rejecting) return;
@@ -222,7 +290,7 @@ export default function Approvals() {
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 dark:text-gray-400">Техника</p>
-                    <p className="font-medium text-gray-900 dark:text-white">{request.equipment?.join(', ') || '—'}</p>
+                    {renderEquipmentList(request)}
                   </div>
                 </div>
 
@@ -316,7 +384,7 @@ export default function Approvals() {
                   ) : '—'}
                 </DetailField>
                 <DetailField label="Клиент">{selected.client || '—'}</DetailField>
-                <DetailField label="Техника">{selected.equipment?.join(', ') || '—'}</DetailField>
+                <DetailField label="Техника">{renderEquipmentList(selected)}</DetailField>
               </div>
 
               <div className="grid gap-3 md:grid-cols-3">

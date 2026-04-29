@@ -86,7 +86,7 @@ test('mechanic sees and mutates only assigned service tickets', () => {
   assert.equal(access.canMutateEntity('service', state.service[1], mechanic), false);
 });
 
-test('warranty mechanic can work with service and warranty claims without extra operational access', () => {
+test('warranty mechanic can view fleet and rentals and work with service and warranty claims', () => {
   const state = {
     service: [
       { id: 'S-1', assignedMechanicId: 'M-1', assignedMechanicName: 'Петров' },
@@ -97,6 +97,7 @@ test('warranty mechanic can work with service and warranty claims without extra 
       { id: 'WC-2', serviceTicketId: 'S-2', status: 'sent_to_factory' },
     ],
     equipment: [{ id: 'EQ-1', inventoryNumber: '100' }],
+    gantt_rentals: [{ id: 'GR-1', rentalId: 'R-1', equipmentId: 'EQ-1', manager: 'Руслан' }],
     service_vehicles: [{ id: 'SV-1', plateNumber: 'A001AA' }],
     rentals: [{ id: 'R-1', manager: 'Руслан' }],
   };
@@ -106,10 +107,11 @@ test('warranty mechanic can work with service and warranty claims without extra 
   assert.deepEqual(access.filterCollectionByScope('service', state.service, warrantyMechanic).map(item => item.id), ['S-1', 'S-2']);
   assert.deepEqual(access.filterCollectionByScope('warranty_claims', state.warranty_claims, warrantyMechanic).map(item => item.id), ['WC-1', 'WC-2']);
   assert.deepEqual(access.filterCollectionByScope('equipment', state.equipment, warrantyMechanic).map(item => item.id), ['EQ-1']);
+  assert.deepEqual(access.filterCollectionByScope('rentals', state.rentals, warrantyMechanic).map(item => item.id), ['R-1']);
+  assert.deepEqual(access.filterCollectionByScope('gantt_rentals', state.gantt_rentals, warrantyMechanic).map(item => item.id), ['GR-1']);
   assert.equal(access.canMutateEntity('service', state.service[1], warrantyMechanic), true);
   assert.equal(access.canMutateEntity('warranty_claims', state.warranty_claims[1], warrantyMechanic), true);
   assert.doesNotThrow(() => access.assertCanCreateCollection('warranty_claims', warrantyMechanic, { serviceTicketId: 'S-2' }));
-  assert.deepEqual(access.filterCollectionByScope('rentals', state.rentals, warrantyMechanic), []);
   assert.deepEqual(access.filterCollectionByScope('service_vehicles', state.service_vehicles, warrantyMechanic), []);
 });
 

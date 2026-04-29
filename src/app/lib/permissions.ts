@@ -127,6 +127,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   'Механик по гарантии': {
     equipment:        VIEW,
     sales:            VIEW,
+    rentals:          VIEW,
     service:          VIEW_CREATE_EDIT,
   },
   ...Object.fromEntries(

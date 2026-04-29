@@ -4,14 +4,28 @@ import { Link } from 'react-router-dom';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
+import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from '../ui/sheet';
+import { Textarea } from '../ui/textarea';
+import { useAuth } from '../../contexts/AuthContext';
+import { useEquipmentList } from '../../hooks/useEquipment';
+import {
+  useApproveRentalChangeRequest,
+  useRejectRentalChangeRequest,
+} from '../../hooks/useRentalChangeRequests';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
-import type { RentalChangeRequest, RentalChangeRequestStatus } from '../../types';
+import type { Equipment, RentalChangeRequest, RentalChangeRequestStatus } from '../../types';
 
 const statusLabels: Record<RentalChangeRequestStatus, string> = {
   pending: 'На согласовании',
@@ -47,6 +61,53 @@ function financialImpact(request: RentalChangeRequest) {
   const amount = request.financialImpact?.amount ?? 0;
   if (amount === 0) return request.financialImpact?.description || 'Без прямого изменения суммы';
   return `${amount > 0 ? '+' : ''}${formatCurrency(amount)}`;
+}
+
+function normalizeEquipmentRef(value: unknown) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => String(item || '').trim()).filter(Boolean);
+}
+
+function equipmentMatchesRef(equipment: Equipment, ref: string) {
+  const normalized = normalizeEquipmentRef(ref);
+  if (!normalized) return false;
+  return [
+    equipment.id,
+    equipment.inventoryNumber,
+    equipment.serialNumber,
+  ].some(value => normalizeEquipmentRef(value) === normalized);
+}
+
+function buildEquipmentTitle(equipment: Equipment, fallbackRef = '') {
+  const title = [
+    equipment.manufacturer,
+    equipment.model,
+  ].filter(Boolean).join(' ').trim() || fallbackRef || equipment.id;
+  const meta = [
+    equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
+    equipment.serialNumber ? `SN ${equipment.serialNumber}` : '',
+  ].filter(Boolean).join(' · ');
+  return meta ? `${title} · ${meta}` : title;
+}
+
+function resolveEquipmentDisplayItems(request: RentalChangeRequest, equipmentList: Equipment[]) {
+  const refs = [
+    ...(Array.isArray(request.equipment) ? request.equipment : []),
+    ...asStringList(request.oldValues?.equipment),
+    ...asStringList(request.newValues?.equipment),
+  ].map(item => String(item || '').trim()).filter(Boolean);
+  const uniqueRefs = [...new Set(refs)];
+
+  if (uniqueRefs.length === 0) return ['—'];
+
+  return uniqueRefs.map((ref) => {
+    const matched = equipmentList.find(item => equipmentMatchesRef(item, ref));
+    return matched ? buildEquipmentTitle(matched, ref) : ref;
+  });
 }
 
 function getRequestDecisionText(request: RentalChangeRequest): string {
@@ -92,9 +153,63 @@ export function RentalApprovalHistorySheet({
   isLoading = false,
   error,
 }: RentalApprovalHistorySheetProps) {
+  const { user } = useAuth();
+  const { data: equipmentList = [] } = useEquipmentList();
+  const approveMutation = useApproveRentalChangeRequest();
+  const rejectMutation = useRejectRentalChangeRequest();
+  const [rejecting, setRejecting] = React.useState<RentalChangeRequest | null>(null);
+  const [rejectReason, setRejectReason] = React.useState('');
+  const [actionError, setActionError] = React.useState<string | null>(null);
   const pendingCount = requests.filter(item => item.status === 'pending').length;
   const approvedCount = requests.filter(item => item.status === 'approved').length;
   const rejectedCount = requests.filter(item => item.status === 'rejected').length;
+  const isAdmin = String(user?.role || '').trim() === 'Администратор';
+  const equipmentDisplayByRequestId = React.useMemo(() => (
+    new Map(requests.map(request => [
+      request.id,
+      resolveEquipmentDisplayItems(request, equipmentList),
+    ]))
+  ), [equipmentList, requests]);
+
+  const renderEquipmentList = (request: RentalChangeRequest) => {
+    const items = equipmentDisplayByRequestId.get(request.id) || ['—'];
+    return (
+      <div className="space-y-1">
+        {items.map((item, index) => (
+          <p key={`${request.id}:equipment:${index}`} className="font-medium text-gray-900 dark:text-white">
+            {item}
+          </p>
+        ))}
+      </div>
+    );
+  };
+
+  const handleApprove = async (request: RentalChangeRequest) => {
+    setActionError(null);
+    try {
+      await approveMutation.mutateAsync({ id: request.id });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Не удалось согласовать заявку.');
+    }
+  };
+
+  const startReject = (request: RentalChangeRequest) => {
+    setActionError(null);
+    setRejecting(request);
+    setRejectReason('');
+  };
+
+  const handleReject = async () => {
+    if (!rejecting) return;
+    setActionError(null);
+    try {
+      await rejectMutation.mutateAsync({ id: rejecting.id, reason: rejectReason });
+      setRejecting(null);
+      setRejectReason('');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Не удалось отклонить заявку.');
+    }
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -135,6 +250,12 @@ export function RentalApprovalHistorySheet({
             </div>
           )}
 
+          {actionError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+              {actionError}
+            </div>
+          )}
+
           {isLoading ? (
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400">
               Загружаем историю согласований...
@@ -161,11 +282,34 @@ export function RentalApprovalHistorySheet({
                         {formatDateTime(request.createdAt)} · {request.initiatorName || 'Система'} · {request.initiatorRole || 'роль не указана'}
                       </p>
                     </div>
-                    <Button size="sm" variant="secondary" asChild>
-                      <Link to={`/rentals/${request.rentalId}`}>
-                        Открыть аренду
-                      </Link>
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="secondary" asChild>
+                        <Link to={`/rentals/${request.rentalId}`}>
+                          Открыть аренду
+                        </Link>
+                      </Button>
+                      {request.status === 'pending' && isAdmin && (
+                        <>
+                          <Button
+                            size="sm"
+                            onClick={() => void handleApprove(request)}
+                            disabled={approveMutation.isPending || rejectMutation.isPending}
+                          >
+                            <Check className="h-4 w-4" />
+                            Согласовать
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => startReject(request)}
+                            disabled={approveMutation.isPending || rejectMutation.isPending}
+                          >
+                            <X className="h-4 w-4" />
+                            Отклонить
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -179,7 +323,7 @@ export function RentalApprovalHistorySheet({
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 dark:text-gray-400">Техника</p>
-                      <p className="font-medium text-gray-900 dark:text-white">{request.equipment?.join(', ') || '—'}</p>
+                      {renderEquipmentList(request)}
                     </div>
                   </div>
 
@@ -223,6 +367,34 @@ export function RentalApprovalHistorySheet({
           )}
         </div>
       </SheetContent>
+
+      <Dialog open={!!rejecting} onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          setRejecting(null);
+          setRejectReason('');
+        }
+      }}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Причина отклонения</DialogTitle>
+          </DialogHeader>
+          <Textarea
+            value={rejectReason}
+            onChange={(event) => setRejectReason(event.target.value)}
+            className="min-h-28"
+            placeholder="Укажите, почему изменение нельзя применить"
+          />
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setRejecting(null)}>Отмена</Button>
+            <Button
+              onClick={() => void handleReject()}
+              disabled={!rejectReason.trim() || rejectMutation.isPending}
+            >
+              {rejectMutation.isPending ? 'Отклонение...' : 'Отклонить заявку'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   );
 }

@@ -415,7 +415,7 @@ function rentalMatchesEquipment(rental, equipment) {
 
 function getScopedEquipment(user, readData) {
   const equipment = readData('equipment') || [];
-  if (isAdmin(user) || isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isMechanic(user)) {
+  if (isAdmin(user) || isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isMechanic(user) || isWarrantyMechanic(user)) {
     return equipment;
   }
   if (isInvestor(user)) {
@@ -435,7 +435,7 @@ function getScopedRentals(user, readData) {
     ...(readData('rentals') || []),
     ...(readData('gantt_rentals') || []),
   ];
-  if (isAdmin(user) || isOfficeManager(user)) return rentals;
+  if (isAdmin(user) || isOfficeManager(user) || isWarrantyMechanic(user)) return rentals;
   if (isRentalManager(user) || isSalesManager(user)) {
     return rentals.filter(item => matchesUserManager(item, user));
   }
@@ -525,6 +525,7 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'rentals':
     case 'gantt_rentals':
       if (isOfficeManager(user)) return true;
+      if (isWarrantyMechanic(user)) return true;
       if (isRentalManager(user) || isSalesManager(user)) return matchesUserManager(entity, user);
       if (isInvestor(user)) return isInvestorRental(entity, user, readData);
       return false;

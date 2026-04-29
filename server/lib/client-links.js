@@ -22,6 +22,24 @@ function getClientDisplayName(client) {
   return firstNonEmpty(client?.company, client?.name, client?.clientName);
 }
 
+function addClientHistoryNames(byName, client) {
+  const history = Array.isArray(client?.history) ? client.history : [];
+  history.forEach(entry => {
+    const text = String(entry?.text || '');
+    const createdMatch = text.match(/Клиент создан:\s*([^;]+)/iu);
+    if (createdMatch) addLookupValue(byName, createdMatch[1], client);
+
+    const companyChangePattern = /компания:\s*([^;→]+?)\s*→\s*([^;]+)/giu;
+    let match;
+    while ((match = companyChangePattern.exec(text)) !== null) {
+      // IMPORTANT: legacy JSON can have only the old client name. Client rename history is
+      // a guarded recovery source for backfilling clientId without using the current name as FK.
+      addLookupValue(byName, match[1], client);
+      addLookupValue(byName, match[2], client);
+    }
+  });
+}
+
 function addLookupValue(map, key, client) {
   const normalized = normalizeText(key);
   if (!normalized) return;
@@ -49,6 +67,7 @@ function buildClientLookup(clients) {
     addLookupValue(byName, getClientDisplayName(client), client);
     addLookupValue(byName, client.shortName, client);
     addLookupValue(byName, client.clientName, client);
+    addClientHistoryNames(byName, client);
     addInnLookupValue(byInn, client.inn, client);
   });
 

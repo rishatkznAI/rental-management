@@ -32,6 +32,7 @@ function registerCrudRoutes(deps) {
     accessControl,
     auditLog,
     normalizeRecordClientLink,
+    normalizeClientLinks,
   } = deps;
 
   const router = express.Router();
@@ -91,6 +92,15 @@ function registerCrudRoutes(deps) {
     });
   }
 
+  function normalizeStoredClientLinksAfterClientWrite() {
+    if (typeof normalizeClientLinks !== 'function') return;
+    normalizeClientLinks({
+      readData,
+      writeData,
+      logger: console,
+    });
+  }
+
   function hasReadAccess(req, collection) {
     if (collection === 'users') return true;
     if (typeof requireRead !== 'function') {
@@ -120,8 +130,7 @@ function registerCrudRoutes(deps) {
     } else if (next.password && !String(next.password).startsWith('h1:') && !String(next.password).startsWith('h2:scrypt:')) {
       next.password = hashPassword(String(next.password));
     }
-    const role = String(next.role || '').trim().toLowerCase();
-    if (role === 'перевозчик' || role === 'carrier') {
+    if (normalizeRole(next.role) === 'Перевозчик') {
       // IMPORTANT: carrier accounts are MAX-only by default. Do not grant frontend access
       // unless a separate backend-reviewed business rule explicitly allows it.
       next.role = 'Перевозчик';
@@ -444,6 +453,9 @@ function registerCrudRoutes(deps) {
         }
         data.push(newItem);
         writeData(collection, data);
+        if (collection === 'clients') {
+          normalizeStoredClientLinksAfterClientWrite();
+        }
         if (isCriticalAuditCollection(collection)) {
           auditLog?.(req, {
             action: `${collection}.create`,
@@ -583,6 +595,9 @@ function registerCrudRoutes(deps) {
               : nextItem);
         }
         writeData(collection, data);
+        if (collection === 'clients') {
+          normalizeStoredClientLinksAfterClientWrite();
+        }
         if (isCriticalAuditCollection(collection)) {
           auditLog?.(req, {
             action: `${collection}.update`,
@@ -778,6 +793,9 @@ function registerCrudRoutes(deps) {
 
       const normalizedList = list.map(item => withClientLink(collection, item));
       writeData(collection, normalizedList);
+      if (collection === 'clients') {
+        normalizeStoredClientLinksAfterClientWrite();
+      }
       auditLog?.(req, {
         action: `${collection}.bulk_replace`,
         entityType: collection,

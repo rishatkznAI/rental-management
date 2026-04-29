@@ -81,8 +81,7 @@ function registerAuthRoutes(app, deps) {
   }
 
   function isBotOnlyCarrierAccount(user) {
-    const role = String(user?.role || '').trim().toLowerCase();
-    const isCarrierRole = role === 'перевозчик' || role === 'carrier';
+    const isCarrierRole = normalizeRole(user?.role) === 'Перевозчик';
     if (!isCarrierRole) return false;
     // IMPORTANT: carrier users are expected to work through MAX only. Frontend login would
     // expose broader screens than the carrier delivery DTO allows.

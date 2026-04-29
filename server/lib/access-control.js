@@ -339,7 +339,7 @@ function isCarrier(user) {
 }
 
 function isMechanic(user) {
-  return MECHANIC_ROLES.includes(user?.userRole || user?.role);
+  return MECHANIC_ROLES.includes(normalizeRole(user?.userRole || user?.role));
 }
 
 function isWarrantyMechanic(user) {

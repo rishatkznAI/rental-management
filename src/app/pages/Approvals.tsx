@@ -1,12 +1,13 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Check, Clock, FileText, X } from 'lucide-react';
+import { Check, Clock, Eye, FileText, X } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -51,11 +52,29 @@ function financialImpact(request: RentalChangeRequest) {
   return `${amount > 0 ? '+' : ''}${formatCurrency(amount)}`;
 }
 
+function DetailField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+      <div className="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white">
+        {children || '—'}
+      </div>
+    </div>
+  );
+}
+
 export default function Approvals() {
   const { user } = useAuth();
   const { data: requests = [], isLoading, error } = useRentalChangeRequestsList();
   const approveMutation = useApproveRentalChangeRequest();
   const rejectMutation = useRejectRentalChangeRequest();
+  const [selected, setSelected] = React.useState<RentalChangeRequest | null>(null);
   const [rejecting, setRejecting] = React.useState<RentalChangeRequest | null>(null);
   const [rejectReason, setRejectReason] = React.useState('');
   const [actionError, setActionError] = React.useState('');
@@ -65,7 +84,8 @@ export default function Approvals() {
     .filter(item => item.status !== 'pending')
     .sort((a, b) => String(b.decidedAt || b.createdAt).localeCompare(String(a.decidedAt || a.createdAt)));
   const ordered = [...pending, ...processed];
-  const isAdmin = user?.role === 'Администратор';
+  const userRole = String(user?.role || '').trim();
+  const isAdmin = userRole === 'Администратор';
 
   const handleReject = async () => {
     if (!rejecting) return;
@@ -83,9 +103,18 @@ export default function Approvals() {
     setActionError('');
     try {
       await approveMutation.mutateAsync({ id: request.id });
+      if (selected?.id === request.id) {
+        setSelected(null);
+      }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Не удалось согласовать заявку.');
     }
+  };
+
+  const startReject = (request: RentalChangeRequest) => {
+    setRejecting(request);
+    setRejectReason('');
+    setSelected(null);
   };
 
   return (
@@ -144,6 +173,14 @@ export default function Approvals() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {statusBadge(request.status)}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setSelected(request)}
+                    >
+                      <Eye className="h-4 w-4" />
+                      Открыть
+                    </Button>
                     {request.status === 'pending' && isAdmin && (
                       <>
                         <Button
@@ -157,10 +194,7 @@ export default function Approvals() {
                         <Button
                           size="sm"
                           variant="secondary"
-                          onClick={() => {
-                            setRejecting(request);
-                            setRejectReason('');
-                          }}
+                          onClick={() => startReject(request)}
                           disabled={approveMutation.isPending || rejectMutation.isPending}
                         >
                           <X className="h-4 w-4" />
@@ -247,6 +281,121 @@ export default function Approvals() {
           ))}
         </div>
       )}
+
+      <Dialog open={!!selected} onOpenChange={(open) => {
+        if (!open) setSelected(null);
+      }}>
+        {selected && (
+          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[760px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                {selected.status === 'pending' ? <Clock className="h-5 w-5 text-amber-500" /> : <FileText className="h-5 w-5 text-[--color-primary]" />}
+                {selected.type}
+              </DialogTitle>
+              <DialogDescription>
+                {formatDateTime(selected.createdAt)} · {selected.initiatorName} · {selected.initiatorRole || 'роль не указана'}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center gap-2">
+                {statusBadge(selected.status)}
+                {selected.status === 'pending' && !isAdmin && (
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    Согласовать или отклонить может только администратор. Текущая роль: {userRole || 'не определена'}.
+                  </span>
+                )}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <DetailField label="Аренда">
+                  {selected.rentalId ? (
+                    <Link to={`/rentals/${selected.rentalId}`} className="text-[--color-primary] hover:underline">
+                      {selected.rentalId}
+                    </Link>
+                  ) : '—'}
+                </DetailField>
+                <DetailField label="Клиент">{selected.client || '—'}</DetailField>
+                <DetailField label="Техника">{selected.equipment?.join(', ') || '—'}</DetailField>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <DetailField label="Поле">{selected.fieldLabel || selected.field}</DetailField>
+                <DetailField label="Старое значение">{displayValue(selected.oldValue)}</DetailField>
+                <DetailField label="Новое значение">{displayValue(selected.newValue)}</DetailField>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <DetailField label="Причина изменения">{selected.reason || '—'}</DetailField>
+                <DetailField label="Комментарий">{selected.comment || '—'}</DetailField>
+                <DetailField label="Финансовое влияние">{financialImpact(selected)}</DetailField>
+              </div>
+
+              {selected.changes && selected.changes.length > 1 && (
+                <div>
+                  <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Все изменения</p>
+                  <div className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-800">
+                    {selected.changes.map((change, index) => (
+                      <div
+                        key={`${change.field}-${index}`}
+                        className="grid gap-2 border-b border-gray-200 p-3 text-sm last:border-b-0 dark:border-gray-800 md:grid-cols-3"
+                      >
+                        <span className="font-medium text-gray-900 dark:text-white">{change.field}</span>
+                        <span className="break-words text-gray-600 dark:text-gray-300">{displayValue(change.oldValue)}</span>
+                        <span className="break-words text-gray-900 dark:text-white">{displayValue(change.newValue)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selected.attachments && selected.attachments.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Вложения</p>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {selected.attachments.map((attachment, index) => (
+                      <Badge key={`${attachment}-${index}`} variant="default">{attachment}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selected.status !== 'pending' && (
+                <div className="rounded-lg bg-gray-50 p-3 text-sm dark:bg-gray-900/40">
+                  <p className="text-gray-700 dark:text-gray-300">
+                    {selected.status === 'approved'
+                      ? `Согласовал: ${selected.decidedByName || '—'}${selected.appliedAt ? ` · применено ${formatDateTime(selected.appliedAt)}` : ''}`
+                      : `Отклонил: ${selected.decidedByName || '—'} · причина: ${selected.rejectionReason || '—'}`}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setSelected(null)}>Закрыть</Button>
+              {selected.status === 'pending' && isAdmin && (
+                <>
+                  <Button
+                    variant="destructive"
+                    onClick={() => startReject(selected)}
+                    disabled={approveMutation.isPending || rejectMutation.isPending}
+                  >
+                    <X className="h-4 w-4" />
+                    Отклонить
+                  </Button>
+                  <Button
+                    onClick={() => void handleApprove(selected)}
+                    disabled={approveMutation.isPending || rejectMutation.isPending}
+                  >
+                    <Check className="h-4 w-4" />
+                    {approveMutation.isPending ? 'Согласование...' : 'Согласовать'}
+                  </Button>
+                </>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
 
       <Dialog open={!!rejecting} onOpenChange={(open) => {
         if (!open) {

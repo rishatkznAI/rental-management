@@ -91,6 +91,17 @@ function normalizeMatchRef(value: unknown): string {
 type EquipmentAliasRecord = Partial<GanttRentalData> & Partial<Rental> & {
   inventoryNumber?: string;
   serialNumber?: string;
+  inv?: string;
+  equipmentName?: string;
+  equipmentLabel?: string;
+  equipmentRef?: string;
+  equipmentTitle?: string;
+  title?: string;
+  name?: string;
+  label?: string;
+  entity?: string;
+  unit?: string;
+  equipmentIds?: unknown[];
 };
 
 function equipmentAliasSet(record: EquipmentAliasRecord, equipmentList: Equipment[]): Set<string> {
@@ -105,12 +116,32 @@ function equipmentAliasSet(record: EquipmentAliasRecord, equipmentList: Equipmen
     add(equipment.inventoryNumber);
     add(equipment.serialNumber);
   };
+  const addReference = (value: unknown) => {
+    const normalized = normalizeMatchRef(value);
+    if (!normalized) return;
+    add(normalized);
+    const tokens = normalized.match(/[A-Za-zА-Яа-яЁё0-9]+/g) || [];
+    tokens.filter(token => token.length >= 3).forEach(add);
+  };
 
-  add(record.equipmentId);
-  add(record.equipmentInv);
-  add(record.inventoryNumber);
-  add(record.serialNumber);
-  if (Array.isArray(record.equipment)) record.equipment.forEach(add);
+  [
+    record.equipmentId,
+    record.equipmentInv,
+    record.inventoryNumber,
+    record.inv,
+    record.serialNumber,
+    record.equipmentName,
+    record.equipmentLabel,
+    record.equipmentRef,
+    record.equipmentTitle,
+    record.title,
+    record.name,
+    record.label,
+    record.entity,
+    record.unit,
+  ].forEach(addReference);
+  if (Array.isArray(record.equipment)) record.equipment.forEach(addReference);
+  if (Array.isArray(record.equipmentIds)) record.equipmentIds.forEach(addReference);
 
   const directRefs = [...aliases];
   const inventoryCounts = equipmentList.reduce((acc, equipment) => {

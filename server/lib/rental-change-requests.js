@@ -116,15 +116,6 @@ function rentalLinkIdsFromGantt(ganttRental) {
   ]);
 }
 
-function rentalEquipmentRefs(rental) {
-  return uniqueIdentifiers([
-    rental?.equipmentId,
-    rental?.equipmentInv,
-    rental?.inventoryNumber,
-    ...(Array.isArray(rental?.equipment) ? rental.equipment : []),
-  ]);
-}
-
 function normalizedText(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -178,6 +169,38 @@ function addEquipmentAliases(target, equipment) {
   if (serial) target.serialNumbers.add(serial);
 }
 
+function equipmentReferenceValues(record) {
+  return [
+    record?.equipmentId,
+    record?.equipmentInv,
+    record?.inventoryNumber,
+    record?.inv,
+    record?.serialNumber,
+    record?.equipmentName,
+    record?.equipmentLabel,
+    record?.equipmentRef,
+    record?.equipmentTitle,
+    record?.title,
+    record?.name,
+    record?.label,
+    record?.entity,
+    record?.unit,
+    ...(Array.isArray(record?.equipment) ? record.equipment : []),
+    ...(Array.isArray(record?.equipmentIds) ? record.equipmentIds : []),
+  ];
+}
+
+function equipmentReferenceTokens(value) {
+  const normalized = normalizeRentalIdentifier(value);
+  if (!normalized) return [];
+  const tokens = new Set([normalized]);
+  const parts = normalized.match(/[A-Za-zА-Яа-яЁё0-9]+/g) || [];
+  for (const part of parts) {
+    if (part.length >= 3) tokens.add(part);
+  }
+  return [...tokens];
+}
+
 function buildEquipmentAliases(record, equipmentList = []) {
   const indexes = equipmentIndexes(equipmentList);
   const aliases = {
@@ -196,12 +219,7 @@ function buildEquipmentAliases(record, equipmentList = []) {
   if (explicitInventory) aliases.inventoryNumbers.add(explicitInventory);
   if (explicitSerial) aliases.serialNumbers.add(explicitSerial);
 
-  const refs = uniqueIdentifiers([
-    explicitEquipmentId,
-    explicitInventory,
-    explicitSerial,
-    ...(Array.isArray(record?.equipment) ? record.equipment : []),
-  ]);
+  const refs = uniqueIdentifiers(equipmentReferenceValues(record).flatMap(equipmentReferenceTokens));
 
   for (const ref of refs) {
     aliases.raw.add(ref);
@@ -686,6 +704,9 @@ function compactGanttRentalDiagnostic(ganttRental, extra = {}) {
     clientId: normalizeRentalIdentifier(ganttRental?.clientId),
     equipmentId: normalizeRentalIdentifier(ganttRental?.equipmentId),
     equipmentInv: normalizeRentalIdentifier(ganttRental?.equipmentInv),
+    equipmentName: normalizeRentalIdentifier(ganttRental?.equipmentName),
+    equipmentLabel: normalizeRentalIdentifier(ganttRental?.equipmentLabel),
+    equipmentRef: normalizeRentalIdentifier(ganttRental?.equipmentRef),
     startDate: ganttRental?.startDate || '',
     endDate: ganttRental?.endDate || ganttRental?.plannedReturnDate || '',
     ...extra,
@@ -700,6 +721,9 @@ function compactRentalDiagnostic(rental, extra = {}) {
     equipment: Array.isArray(rental?.equipment) ? rental.equipment : [],
     equipmentId: normalizeRentalIdentifier(rental?.equipmentId),
     equipmentInv: normalizeRentalIdentifier(rental?.equipmentInv),
+    equipmentName: normalizeRentalIdentifier(rental?.equipmentName),
+    equipmentLabel: normalizeRentalIdentifier(rental?.equipmentLabel),
+    equipmentRef: normalizeRentalIdentifier(rental?.equipmentRef),
     inventoryNumber: normalizeRentalIdentifier(rental?.inventoryNumber),
     startDate: rental?.startDate || '',
     plannedReturnDate: rental?.plannedReturnDate || '',
@@ -800,7 +824,11 @@ function analyzeGanttRentalLinks({ rentals = [], ganttRentals = [], equipment = 
     const fallbackCandidates = uniqueRentalMatches(exactGanttRecords.flatMap(ganttRental =>
       (rentals || [])
         .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
-        .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental, { equipmentList: equipment })),
+        .filter(({ rental }) =>
+          ganttMatchesClassicRental(ganttRental, rental, { equipmentList: equipment }) ||
+          ganttMatchesClassicRentalByClientEquipment(ganttRental, rental, { equipmentList: equipment }) ||
+          ganttMatchesOpenClassicRentalByEquipment(ganttRental, rental, { equipmentList: equipment }),
+        ),
     ));
 
     result.target.linkedIds = targetLinkedIds;

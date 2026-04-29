@@ -16,6 +16,20 @@ const MECHANIC_ROLES = [
   'Старший стационарный механик',
 ];
 
+const ROLE_ALIASES = new Map([
+  ['admin', 'Администратор'],
+  ['administrator', 'Администратор'],
+  ['office_manager', 'Офис-менеджер'],
+  ['office', 'Офис-менеджер'],
+  ['rental_manager', 'Менеджер по аренде'],
+  ['rent_manager', 'Менеджер по аренде'],
+  ['sales_manager', 'Менеджер по продажам'],
+  ['mechanic', 'Механик'],
+  ['carrier', 'Перевозчик'],
+  ['delivery_carrier', 'Перевозчик'],
+  ['investor', 'Инвестор'],
+]);
+
 function isMechanicRole(role) {
   return MECHANIC_ROLES.includes(normalizeRole(role));
 }
@@ -27,6 +41,8 @@ function isWarrantyMechanicRole(role) {
 
 function normalizeRole(role) {
   const value = String(role || '').trim();
+  const alias = ROLE_ALIASES.get(normalizeRoleKey(value));
+  if (alias) return alias;
   return isWarrantyMechanicRoleValue(value) ? WARRANTY_MECHANIC_ROLE : value;
 }
 
@@ -52,4 +68,5 @@ module.exports = {
   isMechanicRole,
   isWarrantyMechanicRole,
   normalizeRole,
+  normalizeRoleKey,
 };

@@ -496,8 +496,7 @@ function requireAuth(req, res, next) {
     destroySession(token);
     return res.status(401).json({ ok: false, error: 'Session expired or invalid' });
   }
-  const currentRole = String(currentUser.role || '').trim().toLowerCase();
-  const isBotOnlyCarrier = (currentRole === 'перевозчик' || currentRole === 'carrier') &&
+  const isBotOnlyCarrier = normalizeRole(currentUser.role) === 'Перевозчик' &&
     currentUser.botOnly !== false &&
     currentUser.allowFrontendLogin !== true &&
     currentUser.frontendAccess !== true;
@@ -638,22 +637,78 @@ function sampleServiceForDiagnostics(items) {
   }));
 }
 
+function sampleGenericForDiagnostics(items) {
+  return items.slice(0, 3).map(item => {
+    if (!item || typeof item !== 'object') return item;
+    const safe = {};
+    for (const key of [
+      'id',
+      'name',
+      'company',
+      'client',
+      'clientId',
+      'rentalId',
+      'equipmentId',
+      'manager',
+      'managerId',
+      'status',
+      'role',
+      'userRole',
+      'carrierId',
+      'carrierKey',
+      'type',
+      'number',
+      'date',
+      'createdAt',
+      'updatedAt',
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(item, key)) safe[key] = item[key];
+    }
+    return safe;
+  });
+}
+
 function collectionDiagnostics(collection, user) {
   const raw = readData(collection) || [];
-  const scoped = accessControl.filterCollectionByScope(collection, raw, user);
-  const sanitized = accessControl.sanitizeCollectionForRead(collection, scoped, user);
-  return { raw, scoped, sanitized };
+  const canRead = roleAccessSummary(user?.userRole || user?.role || '').readableCollections.includes(collection);
+  const scoped = canRead ? accessControl.filterCollectionByScope(collection, raw, user) : [];
+  const sanitized = canRead ? accessControl.sanitizeCollectionForRead(collection, scoped, user) : [];
+  return { raw, scoped, sanitized, canRead };
+}
+
+function endpointDiagnostics(path, collection, user, sampleFn = sampleGenericForDiagnostics, frontend = null) {
+  const data = collectionDiagnostics(collection, user);
+  return {
+    status: data.canRead ? 200 : 403,
+    rawCount: Array.isArray(data.raw) ? data.raw.length : 0,
+    scopedCount: data.scoped.length,
+    sanitizedCount: data.sanitized.length,
+    frontendCount: typeof frontend === 'function' ? frontend(data.sanitized) : data.sanitized.length,
+    inaccessibleReason: data.canRead ? null : `Role ${user?.userRole || user?.role || 'unknown'} cannot read ${collection}`,
+    samples: sampleFn(data.sanitized),
+  };
 }
 
 function buildAccessDiagnostics(req) {
   const rawRole = req.user?.rawRole || req.user?.userRole || '';
   const normalizedRole = normalizeRole(rawRole);
-  const equipment = collectionDiagnostics('equipment', req.user);
-  const service = collectionDiagnostics('service', req.user);
-  const warrantyClaims = collectionDiagnostics('warranty_claims', req.user);
   const access = roleAccessSummary(normalizedRole);
-  const sanitizedEquipment = equipment.sanitized.map(normalizeEquipmentForDiagnostics);
-  const sanitizedService = service.sanitized;
+  const equipmentEndpoint = endpointDiagnostics(
+    '/api/equipment',
+    'equipment',
+    req.user,
+    items => sampleEquipmentForDiagnostics(items.map(normalizeEquipmentForDiagnostics)),
+    items => items.map(normalizeEquipmentForDiagnostics).length,
+  );
+  const serviceEndpoint = endpointDiagnostics(
+    '/api/service',
+    'service',
+    req.user,
+    sampleServiceForDiagnostics,
+    items => items.filter(serviceTicketIsActiveForDiagnostics).length,
+  );
+  const sanitizedEquipment = collectionDiagnostics('equipment', req.user).sanitized.map(normalizeEquipmentForDiagnostics);
+  const sanitizedService = collectionDiagnostics('service', req.user).sanitized;
 
   return {
     ok: true,
@@ -663,6 +718,8 @@ function buildAccessDiagnostics(req) {
       rawRole,
       userRole: req.user?.userRole || '',
       normalizedRole,
+      isActive: true,
+      isBotOnlyCarrier: false,
     },
     backend: {
       health: buildInfoForDiagnostics(),
@@ -670,10 +727,7 @@ function buildAccessDiagnostics(req) {
     },
     endpoints: {
       '/api/equipment': {
-        status: canReadCollection(req, 'equipment') ? 200 : 403,
-        rawCount: equipment.raw.length,
-        scopedCount: equipment.scoped.length,
-        sanitizedCount: equipment.sanitized.length,
+        ...equipmentEndpoint,
         frontendTabCounts: {
           active: sanitizedEquipment.filter(item => equipmentMatchesDiagnosticTab(item, 'active')).length,
           sale: sanitizedEquipment.filter(item => equipmentMatchesDiagnosticTab(item, 'sale')).length,
@@ -681,26 +735,22 @@ function buildAccessDiagnostics(req) {
           service: sanitizedEquipment.filter(item => equipmentMatchesDiagnosticTab(item, 'service')).length,
           all: sanitizedEquipment.length,
         },
-        samples: sampleEquipmentForDiagnostics(sanitizedEquipment),
       },
       '/api/service': {
-        status: canReadCollection(req, 'service') ? 200 : 403,
-        rawCount: service.raw.length,
-        scopedCount: service.scoped.length,
-        sanitizedCount: service.sanitized.length,
+        ...serviceEndpoint,
         frontendCounts: {
           active: sanitizedService.filter(serviceTicketIsActiveForDiagnostics).length,
           closed: sanitizedService.filter(item => !serviceTicketIsActiveForDiagnostics(item)).length,
           unassigned: sanitizedService.filter(item => !item.assignedMechanicId && !item.assignedTo).length,
         },
-        samples: sampleServiceForDiagnostics(sanitizedService),
       },
-      '/api/warranty_claims': {
-        status: canReadCollection(req, 'warranty_claims') ? 200 : 403,
-        rawCount: warrantyClaims.raw.length,
-        scopedCount: warrantyClaims.scoped.length,
-        sanitizedCount: warrantyClaims.sanitized.length,
-      },
+      '/api/rentals': endpointDiagnostics('/api/rentals', 'rentals', req.user),
+      '/api/gantt_rentals': endpointDiagnostics('/api/gantt_rentals', 'gantt_rentals', req.user),
+      '/api/clients': endpointDiagnostics('/api/clients', 'clients', req.user),
+      '/api/deliveries': endpointDiagnostics('/api/deliveries', 'deliveries', req.user),
+      '/api/payments': endpointDiagnostics('/api/payments', 'payments', req.user),
+      '/api/documents': endpointDiagnostics('/api/documents', 'documents', req.user),
+      '/api/warranty_claims': endpointDiagnostics('/api/warranty_claims', 'warranty_claims', req.user),
     },
     recommendation: 'Проверьте этот ответ под тем же пользователем в Network. Если scopedCount > 0, но UI пустой, проблема во frontend-фильтрах/состоянии. Если scopedCount = 0 или status = 403, проблема в роли/access-control/backend deploy.',
   };
@@ -1143,6 +1193,7 @@ apiRouter.use(registerCrudRoutes({
   accessControl,
   auditLog,
   normalizeRecordClientLink,
+  normalizeClientLinks,
 }));
 
 function requireNonEmptyString(value, fieldName) {

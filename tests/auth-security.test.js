@@ -89,6 +89,30 @@ test('frontend login is unavailable for bot-only carrier accounts', async () => 
   assert.deepEqual(res.payload, { ok: false, error: 'Неверный email или пароль' });
 });
 
+test('frontend login is unavailable for bot-only carrier alias accounts', async () => {
+  process.env.LOGIN_FAILURE_DELAY_MS = '0';
+  const state = {
+    users: [{
+      id: 'carrier-1',
+      name: 'Быстрая доставка',
+      email: 'carrier@example.test',
+      role: 'delivery carrier',
+      status: 'Активен',
+      password: 'right',
+      botOnly: true,
+      carrierId: 'carrier-1',
+    }],
+  };
+  const routes = createAuthRoutes(state);
+  const login = routes['POST /api/auth/login'][0];
+  const res = createMockResponse();
+
+  await login({ body: { email: 'carrier@example.test', password: 'right' }, headers: {}, ip: '127.0.0.1' }, res);
+
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.payload, { ok: false, error: 'Неверный email или пароль' });
+});
+
 test('password change increments tokenVersion and revokes existing sessions', () => {
   const revokedIds = [];
   const state = {

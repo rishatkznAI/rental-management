@@ -95,6 +95,20 @@ export const RENTAL_MANAGER_ROLES: UserRole[] = [
   'Офис-менеджер',
 ];
 
+const ROLE_ALIASES = new Map<string, string>([
+  ['admin', 'Администратор'],
+  ['administrator', 'Администратор'],
+  ['office_manager', 'Офис-менеджер'],
+  ['office', 'Офис-менеджер'],
+  ['rental_manager', 'Менеджер по аренде'],
+  ['rent_manager', 'Менеджер по аренде'],
+  ['sales_manager', 'Менеджер по продажам'],
+  ['mechanic', 'Механик'],
+  ['carrier', 'Перевозчик'],
+  ['delivery_carrier', 'Перевозчик'],
+  ['investor', 'Инвестор'],
+]);
+
 type UserWithManagerRole = {
   role?: UserRole | string;
   status?: UserStatus | string;
@@ -128,6 +142,8 @@ export function isWarrantyMechanicRole(role: UserRole | string | null | undefine
 
 export function normalizeUserRole(role: UserRole | string | null | undefined): string {
   const value = String(role || '').trim();
+  const alias = ROLE_ALIASES.get(normalizeRoleKey(value));
+  if (alias) return alias;
   return isWarrantyMechanicRole(value) ? WARRANTY_MECHANIC_ROLE : value;
 }
 

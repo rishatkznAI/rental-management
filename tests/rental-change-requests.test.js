@@ -261,6 +261,36 @@ test('resolveRentalForChangeRequest recovers stale GR when client snapshot diffe
   assert.equal(result.rentalId, 'R-032');
 });
 
+test('resolveRentalForChangeRequest recovers moved start date when client snapshot differs and period overlaps', () => {
+  const result = resolveRentalForChangeRequest({
+    rentalId: 'GR-1776254974522',
+    linkedGanttRentalId: 'GR-1776254974522',
+    fallbackGanttRental: {
+      id: 'GR-1776254974522',
+      client: 'Стройтрест Алабуга',
+      startDate: '2026-04-07',
+      endDate: '2026-04-20',
+      equipmentInv: '03291436',
+    },
+    rentals: [{
+      id: 'R-032',
+      client: 'ООО Стройтрест-Алабуга',
+      startDate: '2026-04-10',
+      plannedReturnDate: '2026-04-20',
+      equipment: ['03291436'],
+    }],
+    ganttRentals: [],
+    equipment: [{
+      id: 'EQ-032',
+      inventoryNumber: '03291436',
+      serialNumber: 'SN-032',
+    }],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rentalId, 'R-032');
+});
+
 test('resolveRentalForChangeRequest returns 409 for ambiguous fallback matches', () => {
   const result = resolveRentalForChangeRequest({
     rentalId: 'GR-ambiguous',
@@ -737,6 +767,40 @@ test('PATCH /api/rentals/:id resolves real stale GR for equipment 03291436 throu
     assert.equal(state.rental_change_requests[0].sourceRentalId, 'GR-1776254974522');
     assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-1776254974522');
     assert.equal(state.rentals.find(item => item.id === 'R-032').price, 90000);
+  });
+});
+
+test('PATCH /api/rentals/:id creates approval when moving stale 03291436 rental start to 07.04', async () => {
+  const { app, state } = createApprovalApp();
+  state.rentals.find(item => item.id === 'R-032').client = 'ООО Стройтрест-Алабуга';
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1776254974522', 'manager-token', {
+      startDate: '2026-04-07',
+      ganttRentalId: 'GR-1776254974522',
+      __ganttSnapshot: {
+        id: 'GR-1776254974522',
+        client: 'Стройтрест Алабуга',
+        startDate: '2026-04-07',
+        endDate: '2026-04-20',
+        equipmentId: 'EQ-032',
+        equipmentInv: '03291436',
+      },
+      entityType: 'rental',
+      actionType: 'gantt_rental_update',
+      oldValues: { startDate: '2026-04-10' },
+      newValues: { startDate: '2026-04-07' },
+      changes: [{ field: 'startDate', oldValue: '2026-04-10', newValue: '2026-04-07' }],
+      __changeReason: 'Перенос начала аренды 03291436 на 07.04',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.id, 'R-032');
+    assert.equal(state.rental_change_requests.length, 1);
+    assert.equal(state.rental_change_requests[0].rentalId, 'R-032');
+    assert.equal(state.rental_change_requests[0].field, 'startDate');
+    assert.equal(state.rental_change_requests[0].newValue, '2026-04-07');
+    assert.equal(state.rentals.find(item => item.id === 'R-032').startDate, '2026-04-10');
   });
 });
 

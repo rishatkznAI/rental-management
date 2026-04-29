@@ -162,7 +162,7 @@ function matchesClassicRentalForGanttByShape(ganttRental: GanttRentalData, renta
   const linkedRentalId = getGanttRentalSourceId(ganttRental);
   if (linkedRentalId) return String(rental.id) === linkedRentalId;
   const rentalEndDate = rental.plannedReturnDate || (rental as Rental & { endDate?: string }).endDate || '';
-  if (rental.startDate !== ganttRental.startDate || rentalEndDate !== ganttRental.endDate) return false;
+  if (!dateRangesOverlap(rental.startDate, rentalEndDate, ganttRental.startDate, ganttRental.endDate)) return false;
   return hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
 }
 

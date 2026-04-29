@@ -297,7 +297,6 @@ function ganttMatchesClassicRental(ganttRental, rental, options = {}) {
   );
   if (!compatibleDates) return false;
   if (!sameClient && !options.allowClientMismatch) return false;
-  if (!sameClient && !sameDates) return false;
 
   return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
 }

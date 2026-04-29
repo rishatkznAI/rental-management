@@ -46,7 +46,7 @@ function registerServiceRoutes(router, deps) {
       .map(normalizeServiceWorkRecord)
       .filter(item => item.isActive)
       .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ru'));
-    res.json(list);
+    res.json(accessControl.sanitizeCollectionForRead('service_works', list, req.user));
   });
 
   router.post('/service_works/:id/deactivate', requireAuth, requireWrite('service_works'), (req, res) => {
@@ -71,7 +71,7 @@ function registerServiceRoutes(router, deps) {
       .map(normalizeSparePartRecord)
       .filter(item => item.isActive)
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-    res.json(list);
+    res.json(accessControl.sanitizeCollectionForRead('spare_parts', list, req.user));
   });
 
   router.post('/spare_parts/:id/deactivate', requireAuth, requireWrite('spare_parts'), (req, res) => {
@@ -118,9 +118,9 @@ function registerServiceRoutes(router, deps) {
       if (rows.length === 0 && sanitized.some(item => item.repairId === repairId)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
-      return res.json(rows);
+      return res.json(accessControl.sanitizeCollectionForRead('repair_work_items', rows, req.user));
     }
-    res.json(scoped);
+    res.json(accessControl.sanitizeCollectionForRead('repair_work_items', scoped, req.user));
   });
 
   router.post('/repair_work_items', requireAuth, requireWrite('repair_work_items'), (req, res) => {
@@ -165,7 +165,7 @@ function registerServiceRoutes(router, deps) {
         entityId: item.id,
         after: item,
       });
-      res.status(201).json(item);
+      res.status(201).json(accessControl.sanitizeEntityForRead('repair_work_items', item, req.user));
     } catch (error) {
       res.status(400).json({ ok: false, error: error.message });
     }
@@ -219,9 +219,9 @@ function registerServiceRoutes(router, deps) {
       if (rows.length === 0 && sanitized.some(item => item.repairId === repairId)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
-      return res.json(rows);
+      return res.json(accessControl.sanitizeCollectionForRead('repair_part_items', rows, req.user));
     }
-    res.json(scoped);
+    res.json(accessControl.sanitizeCollectionForRead('repair_part_items', scoped, req.user));
   });
 
   router.post('/repair_part_items', requireAuth, requireWrite('repair_part_items'), (req, res) => {
@@ -271,7 +271,7 @@ function registerServiceRoutes(router, deps) {
         entityId: item.id,
         after: item,
       });
-      res.status(201).json(item);
+      res.status(201).json(accessControl.sanitizeEntityForRead('repair_part_items', item, req.user));
     } catch (error) {
       res.status(400).json({ ok: false, error: error.message });
     }

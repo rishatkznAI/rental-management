@@ -25,6 +25,8 @@ export type UserRole =
   | 'Менеджер по аренде'
   | 'Менеджер по продажам'
   | 'Механик по гарантии'
+  | 'warranty_mechanic'
+  | 'mechanic_warranty'
   | 'Механик'
   | 'Младший стационарный механик'
   | 'Выездной механик'
@@ -61,12 +63,18 @@ export const MECHANIC_ROLES: UserRole[] = [
   'Старший стационарный механик',
 ];
 
+export const WARRANTY_MECHANIC_ROLE: UserRole = 'Механик по гарантии';
+export const WARRANTY_MECHANIC_ROLE_ALIASES: UserRole[] = [
+  'warranty_mechanic',
+  'mechanic_warranty',
+];
+
 export const ROLES: UserRole[] = [
   'Администратор',
   'Инвестор',
   'Менеджер по аренде',
   'Менеджер по продажам',
-  'Механик по гарантии',
+  WARRANTY_MECHANIC_ROLE,
   ...MECHANIC_ROLES,
   'Офис-менеджер',
   'Перевозчик',
@@ -100,6 +108,14 @@ export function filterRentalManagerUsers<T extends UserWithManagerRole>(users: T
 
 export function isMechanicRole(role: UserRole | string | null | undefined): boolean {
   return MECHANIC_ROLES.some(item => item === role);
+}
+
+export function isWarrantyMechanicRole(role: UserRole | string | null | undefined): boolean {
+  return role === WARRANTY_MECHANIC_ROLE || WARRANTY_MECHANIC_ROLE_ALIASES.some(item => item === role);
+}
+
+export function normalizeUserRole(role: UserRole | string | null | undefined): string {
+  return isWarrantyMechanicRole(role) ? WARRANTY_MECHANIC_ROLE : String(role || '');
 }
 
 export function isInvestorUser(user: UserWithInvestorRole | null | undefined): boolean {

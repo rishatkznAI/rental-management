@@ -1,4 +1,9 @@
-const { MECHANIC_ROLES, WARRANTY_MECHANIC_ROLE } = require('./role-groups');
+const {
+  MECHANIC_ROLES,
+  WARRANTY_MECHANIC_ROLE,
+  isWarrantyMechanicRole,
+  normalizeRole,
+} = require('./role-groups');
 
 const ROLES = {
   ADMIN: 'Администратор',
@@ -237,6 +242,34 @@ const RENTAL_MANAGER_APPROVAL_FIELDS = new Set([
   'approvedBy',
 ]);
 
+const WARRANTY_MECHANIC_REDACTED_FIELDS = new Set([
+  'amount',
+  'commercialTerms',
+  'cost',
+  'debt',
+  'defaultPrice',
+  'documents',
+  'financialImpact',
+  'invoiceNumber',
+  'margin',
+  'paidAmount',
+  'paymentStatus',
+  'plannedMonthlyRevenue',
+  'price',
+  'priceSnapshot',
+  'profit',
+  'rate',
+  'ratePerHour',
+  'ratePerHourSnapshot',
+  'revenue',
+  'salePrice',
+  'salePrice1',
+  'salePrice2',
+  'salePrice3',
+  'subleasePrice',
+  'totalAmount',
+]);
+
 function normalizeText(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -259,11 +292,11 @@ function compact(values) {
 }
 
 function roleIs(user, role) {
-  return user?.userRole === role || user?.role === role;
+  return normalizeRole(user?.userRole) === role || normalizeRole(user?.role) === role;
 }
 
 function currentRole(user) {
-  return user?.userRole || user?.role || '';
+  return normalizeRole(user?.userRole || user?.role || '');
 }
 
 function isKnownRole(user) {
@@ -310,7 +343,7 @@ function isMechanic(user) {
 }
 
 function isWarrantyMechanic(user) {
-  return roleIs(user, ROLES.WARRANTY_MECHANIC);
+  return isWarrantyMechanicRole(user?.userRole || user?.role);
 }
 
 function userName(user) {
@@ -674,6 +707,39 @@ function filterCollectionByScope(collection, list, user, readData) {
   return data.filter(item => canAccessEntity(collection, item, user, readData));
 }
 
+function redactCommercialFields(value) {
+  if (Array.isArray(value)) return value.map(redactCommercialFields);
+  if (!value || typeof value !== 'object') return value;
+  return Object.entries(value).reduce((acc, [key, entryValue]) => {
+    if (WARRANTY_MECHANIC_REDACTED_FIELDS.has(key)) return acc;
+    acc[key] = redactCommercialFields(entryValue);
+    return acc;
+  }, {});
+}
+
+function sanitizeEntityForRead(collection, entity, user) {
+  if (!entity) return entity;
+  if (!isWarrantyMechanic(user)) return entity;
+  if (![
+    'equipment',
+    'gantt_rentals',
+    'rentals',
+    'repair_part_items',
+    'repair_work_items',
+    'service',
+    'service_works',
+    'spare_parts',
+    'warranty_claims',
+  ].includes(collection)) {
+    return entity;
+  }
+  return redactCommercialFields(entity);
+}
+
+function sanitizeCollectionForRead(collection, list, user) {
+  return (Array.isArray(list) ? list : []).map(item => sanitizeEntityForRead(collection, item, user));
+}
+
 function isSystemField(field) {
   return SYSTEM_FIELD_PATTERN.test(field) || MASS_ASSIGNMENT_BLOCKED_FIELDS.has(field);
 }
@@ -836,6 +902,8 @@ function createAccessControl({ readData }) {
     matchesScopedRental: (entity, user) => matchesScopedRental(entity, user, readData),
     matchesUserManager,
     sanitizeCreateInput,
+    sanitizeCollectionForRead,
+    sanitizeEntityForRead,
     sanitizeUpdateInput,
     splitForbiddenRentalManagerPatch,
   };

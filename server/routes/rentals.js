@@ -359,7 +359,11 @@ function registerRentalRoutes(deps) {
 
     router.get(`/${collection}`, requireAuth, requireRead(collection), (req, res) => {
       const data = readData(collection) || [];
-      return res.json(accessControl.filterCollectionByScope(collection, data, req.user));
+      return res.json(accessControl.sanitizeCollectionForRead(
+        collection,
+        accessControl.filterCollectionByScope(collection, data, req.user),
+        req.user,
+      ));
     });
 
     router.get(`/${collection}/:id`, requireAuth, requireRead(collection), (req, res) => {
@@ -369,7 +373,7 @@ function registerRentalRoutes(deps) {
       if (!accessControl.canAccessEntity(collection, item, req.user)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
-      return res.json(item);
+      return res.json(accessControl.sanitizeEntityForRead(collection, item, req.user));
     });
 
     router.post(`/${collection}`, requireAuth, (req, res) => {

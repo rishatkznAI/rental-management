@@ -13,18 +13,24 @@ const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { registerBotRoutes } = require('../server/routes/bot.js');
 
 const WARRANTY_MECHANIC_ROLE = 'Механик по гарантии';
+const WARRANTY_MECHANIC_ROLE_ALIASES = ['warranty_mechanic', 'mechanic_warranty'];
+const WARRANTY_MECHANIC_ROLES = [WARRANTY_MECHANIC_ROLE, ...WARRANTY_MECHANIC_ROLE_ALIASES];
 const MECHANIC_ROLES = ['Механик', 'Младший стационарный механик', 'Выездной механик', 'Старший стационарный механик'];
 
 const READ_PERMISSIONS = {
   app_settings: ['Администратор'],
   clients: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   documents: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
-  equipment: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
-  rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', WARRANTY_MECHANIC_ROLE],
-  gantt_rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', WARRANTY_MECHANIC_ROLE],
+  equipment: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
+  gantt_rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   payments: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
-  repair_work_items: ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
-  service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  repair_work_items: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  repair_part_items: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  service_works: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  spare_parts: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  warranty_claims: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   users: ['Администратор'],
 };
 
@@ -34,8 +40,12 @@ const WRITE_PERMISSIONS = {
   documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   equipment: ['Администратор', 'Офис-менеджер'],
   payments: ['Администратор', 'Офис-менеджер'],
-  repair_work_items: ['Администратор', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
-  service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  repair_work_items: ['Администратор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  repair_part_items: ['Администратор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  service_works: ['Администратор'],
+  spare_parts: ['Администратор'],
+  warranty_claims: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   users: ['Администратор'],
 };
 
@@ -47,26 +57,31 @@ function createState() {
       { id: 'U-office', name: 'Офис', email: 'office@example.test', role: 'Офис-менеджер', status: 'Активен', password: 'office', tokenVersion: 0 },
       { id: 'U-mechanic', name: 'Петров', email: 'mechanic@example.test', role: 'Механик', status: 'Активен', password: 'mechanic', tokenVersion: 0 },
       { id: 'U-warranty', name: 'Гарантия', email: 'warranty@example.test', role: WARRANTY_MECHANIC_ROLE, status: 'Активен', password: 'warranty', tokenVersion: 0 },
+      { id: 'U-warranty-alias', name: 'Гарантия Alias', email: 'warranty-alias@example.test', role: 'mechanic_warranty', status: 'Активен', password: 'warranty', tokenVersion: 0 },
       { id: 'U-investor', name: 'Инвестор', email: 'investor@example.test', role: 'Инвестор', status: 'Активен', password: 'investor', tokenVersion: 0, ownerId: 'OW-1' },
     ],
     rentals: [
-      { id: 'R-own', manager: 'Руслан', managerId: 'U-manager', client: 'ООО Свой', equipmentId: 'EQ-own' },
-      { id: 'R-other', manager: 'Анна', managerId: 'U-other', client: 'ООО Чужой', equipmentId: 'EQ-other' },
+      { id: 'R-own', manager: 'Руслан', managerId: 'U-manager', client: 'ООО Свой', equipmentId: 'EQ-own', price: 100000, discount: 5000, rate: '5000/день', documents: ['D-1'] },
+      { id: 'R-other', manager: 'Анна', managerId: 'U-other', client: 'ООО Чужой', equipmentId: 'EQ-other', price: 120000, discount: 0, rate: '6000/день', documents: ['D-2'] },
     ],
     gantt_rentals: [
-      { id: 'GR-own', manager: 'Руслан', managerId: 'U-manager', client: 'ООО Свой', equipmentId: 'EQ-own' },
-      { id: 'GR-other', manager: 'Анна', managerId: 'U-other', client: 'ООО Чужой', equipmentId: 'EQ-other' },
+      { id: 'GR-own', manager: 'Руслан', managerId: 'U-manager', client: 'ООО Свой', equipmentId: 'EQ-own', amount: 100000, paymentStatus: 'unpaid', debt: 100000, documents: ['D-1'] },
+      { id: 'GR-other', manager: 'Анна', managerId: 'U-other', client: 'ООО Чужой', equipmentId: 'EQ-other', amount: 120000, paymentStatus: 'partial', debt: 60000, documents: ['D-2'] },
     ],
     equipment: [
-      { id: 'EQ-own', inventoryNumber: '100', ownerId: 'OW-1', notes: 'own' },
-      { id: 'EQ-other', inventoryNumber: '200', ownerId: 'OW-2', notes: 'other' },
+      { id: 'EQ-own', inventoryNumber: '100', ownerId: 'OW-1', notes: 'own', salePrice1: 1000000, salePrice2: 1100000, salePrice3: 1200000, subleasePrice: 10000, plannedMonthlyRevenue: 300000 },
+      { id: 'EQ-other', inventoryNumber: '200', ownerId: 'OW-2', notes: 'other', salePrice1: 2000000, salePrice2: 2100000, salePrice3: 2200000, subleasePrice: 20000, plannedMonthlyRevenue: 400000 },
     ],
     mechanics: [{ id: 'M-1', name: 'Петров', userId: 'U-mechanic' }],
     service: [
       { id: 'S-own', assignedMechanicId: 'M-1', assignedMechanicName: 'Петров', status: 'new' },
-      { id: 'S-other', assignedMechanicId: 'M-2', assignedMechanicName: 'Другой', status: 'new' },
+      { id: 'S-other', assignedMechanicId: 'M-2', assignedMechanicName: 'Другой', status: 'new', resultData: { partsUsed: [{ name: 'Фильтр', qty: 1, cost: 5000 }] }, amount: 9000 },
     ],
-    repair_work_items: [],
+    service_works: [{ id: 'SW-1', name: 'Диагностика', normHours: 1, ratePerHour: 2500, isActive: true }],
+    spare_parts: [{ id: 'SP-1', name: 'Фильтр', unit: 'шт', defaultPrice: 5000, isActive: true }],
+    warranty_claims: [{ id: 'WC-1', serviceTicketId: 'S-other', status: 'draft' }],
+    repair_work_items: [{ id: 'RW-1', repairId: 'S-other', workId: 'SW-1', quantity: 1, ratePerHourSnapshot: 2500, normHoursSnapshot: 1 }],
+    repair_part_items: [{ id: 'RP-1', repairId: 'S-other', partId: 'SP-1', quantity: 1, priceSnapshot: 5000 }],
     payments: [{ id: 'P-1', rentalId: 'R-own', amount: 1000, status: 'new' }],
     clients: [],
     documents: [],
@@ -84,6 +99,7 @@ function createSecurityApp(state = createState()) {
     ['office-token', { userId: 'U-office', tokenVersion: 0, passwordChangedAt: null }],
     ['mechanic-token', { userId: 'U-mechanic', tokenVersion: 0, passwordChangedAt: null }],
     ['warranty-token', { userId: 'U-warranty', tokenVersion: 0, passwordChangedAt: null }],
+    ['warranty-alias-token', { userId: 'U-warranty-alias', tokenVersion: 0, passwordChangedAt: null }],
     ['investor-token', { userId: 'U-investor', tokenVersion: 0, passwordChangedAt: null }],
   ]);
   const readData = name => state[name] || [];
@@ -170,8 +186,34 @@ function createSecurityApp(state = createState()) {
     auditLog: (_req, entry) => auditEntries.push(entry),
   }));
   apiRouter.use(registerCrudRoutes({
-    collections: ['equipment', 'service', 'app_settings', 'payments', 'users', 'repair_work_items', 'clients', 'documents', 'unknown_collection'],
-    idPrefixes: { equipment: 'EQ', service: 'S', payments: 'P', users: 'U', repair_work_items: 'RW', clients: 'C', documents: 'D' },
+    collections: [
+      'equipment',
+      'service',
+      'warranty_claims',
+      'app_settings',
+      'payments',
+      'users',
+      'repair_work_items',
+      'repair_part_items',
+      'service_works',
+      'spare_parts',
+      'clients',
+      'documents',
+      'unknown_collection',
+    ],
+    idPrefixes: {
+      equipment: 'EQ',
+      service: 'S',
+      warranty_claims: 'WC',
+      payments: 'P',
+      users: 'U',
+      repair_work_items: 'RW',
+      repair_part_items: 'RP',
+      service_works: 'SW',
+      spare_parts: 'SP',
+      clients: 'C',
+      documents: 'D',
+    },
     readData,
     writeData,
     deleteSessionsForUserIds: ids => ids.length,
@@ -245,6 +287,49 @@ async function request(baseUrl, method, path, token, body, headers = {}) {
   };
 }
 
+function assertNoCommercialFields(value) {
+  const forbidden = new Set([
+    'amount',
+    'commercialTerms',
+    'cost',
+    'debt',
+    'defaultPrice',
+    'documents',
+    'financialImpact',
+    'invoiceNumber',
+    'margin',
+    'paidAmount',
+    'paymentStatus',
+    'plannedMonthlyRevenue',
+    'price',
+    'priceSnapshot',
+    'profit',
+    'rate',
+    'ratePerHour',
+    'ratePerHourSnapshot',
+    'revenue',
+    'salePrice1',
+    'salePrice2',
+    'salePrice3',
+    'subleasePrice',
+    'totalAmount',
+  ]);
+
+  function walk(node, path = '$') {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      node.forEach((item, index) => walk(item, `${path}[${index}]`));
+      return;
+    }
+    for (const [key, child] of Object.entries(node)) {
+      assert.equal(forbidden.has(key), false, `forbidden commercial field ${path}.${key}`);
+      walk(child, `${path}.${key}`);
+    }
+  }
+
+  walk(value);
+}
+
 test('generic CRUD refuses to register without access-control', () => {
   assert.throws(() => registerCrudRoutes({
     collections: [],
@@ -278,11 +363,35 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal((await request(baseUrl, 'POST', '/api/repair_work_items', 'mechanic-token', { repairId: 'S-other', workId: 'W-1', quantity: 1 })).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-other', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/service/S-other', 'warranty-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/warranty_claims/WC-1', 'warranty-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/service_works/SW-1', 'warranty-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/spare_parts/SP-1', 'warranty-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/repair_work_items/RW-1', 'warranty-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/repair_part_items/RP-1', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-other', 'warranty-token', { status: 'in_progress', assignedMechanicId: 'M-1' })).status, 200);
     assert.equal(state.service.find(item => item.id === 'S-other').assignedMechanicId, 'M-2');
     assert.equal((await request(baseUrl, 'GET', '/api/rentals/R-own', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/gantt_rentals/GR-other', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'warranty-token', { comments: 'bypass' })).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-other', 'warranty-alias-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/service/S-other', 'warranty-alias-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/warranty_claims/WC-1', 'warranty-alias-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/payments/P-1', 'warranty-token')).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/app_settings/AS-1', 'warranty-token')).status, 403);
+    for (const path of [
+      '/api/equipment/EQ-other',
+      '/api/service/S-other',
+      '/api/rentals/R-own',
+      '/api/gantt_rentals/GR-other',
+      '/api/service_works/SW-1',
+      '/api/spare_parts/SP-1',
+      '/api/repair_work_items/RW-1',
+      '/api/repair_part_items/RP-1',
+    ]) {
+      const response = await request(baseUrl, 'GET', path, 'warranty-token');
+      assert.equal(response.status, 200, path);
+      assertNoCommercialFields(response.body);
+    }
     assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-other', 'investor-token')).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/gantt_rentals/GR-other', 'investor-token')).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/app_settings', 'manager-token')).status, 403);

@@ -12,7 +12,7 @@
 
 import { useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { MECHANIC_ROLES } from './userStorage';
+import { MECHANIC_ROLES, WARRANTY_MECHANIC_ROLE, normalizeUserRole } from './userStorage';
 
 // ── Типы ─────────────────────────────────────────────────────────────────────
 
@@ -124,7 +124,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     payments:         VIEW,
     profile_settings: ['view', 'edit'],
   },
-  'Механик по гарантии': {
+  [WARRANTY_MECHANIC_ROLE]: {
     equipment:        VIEW,
     sales:            VIEW,
     rentals:          VIEW,
@@ -209,7 +209,7 @@ const SECTION_PATHS: Array<[Section, string]> = [
 
 export function usePermissions() {
   const { user } = useAuth();
-  const role = user?.role ?? '';
+  const role = normalizeUserRole(user?.role);
   const perms: RolePermissions = useMemo(() => PERMISSIONS[role] ?? {}, [role]);
 
   /** Проверяет, разрешено ли конкретное действие в разделе */

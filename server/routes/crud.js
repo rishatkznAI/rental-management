@@ -330,7 +330,11 @@ function registerCrudRoutes(deps) {
       if (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req)) {
         return res.json(data.filter(item => item.userId === req.user.userId));
       }
-      data = accessControl.filterCollectionByScope(collection, data, req.user);
+      data = accessControl.sanitizeCollectionForRead(
+        collection,
+        accessControl.filterCollectionByScope(collection, data, req.user),
+        req.user,
+      );
       return res.json(data);
     });
 
@@ -365,7 +369,7 @@ function registerCrudRoutes(deps) {
       if (!accessControl.canAccessEntity(collection, item, req.user)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
-      return res.json(item);
+      return res.json(accessControl.sanitizeEntityForRead(collection, item, req.user));
     });
 
     router.post(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {

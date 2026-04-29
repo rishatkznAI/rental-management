@@ -170,6 +170,15 @@ function createSecurityApp(state = createState()) {
       return count;
     },
     auditLog: (_req, entry) => auditEntries.push(entry),
+    getRoleAccessSummary: role => ({
+      normalizedRole: normalizeRole(role),
+      readableCollections: Object.entries(READ_PERMISSIONS)
+        .filter(([, roles]) => roles.includes(normalizeRole(role)))
+        .map(([collection]) => collection),
+      writableCollections: Object.entries(WRITE_PERMISSIONS)
+        .filter(([, roles]) => roles.includes(normalizeRole(role)))
+        .map(([collection]) => collection),
+    }),
     nowIso: () => '2026-04-28T12:00:00.000Z',
   });
 
@@ -387,6 +396,10 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal(authMe.body.user.rawRole, 'mechanicWarranty');
     assert.equal(authMe.body.user.normalizedRole, WARRANTY_MECHANIC_ROLE);
     assert.equal(authMe.body.user.userRole, WARRANTY_MECHANIC_ROLE);
+    assert.ok(authMe.body.user.permissions.readableCollections.includes('equipment'));
+    assert.ok(authMe.body.user.permissions.readableCollections.includes('service'));
+    assert.ok(authMe.body.user.permissions.readableCollections.includes('warranty_claims'));
+    assert.equal(authMe.body.user.permissions.readableCollections.includes('payments'), false);
     const equipmentList = await request(baseUrl, 'GET', '/api/equipment', 'warranty-camel-token');
     assert.equal(equipmentList.status, 200);
     assert.equal(equipmentList.body.length, 2);

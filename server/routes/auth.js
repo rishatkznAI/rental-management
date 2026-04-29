@@ -12,6 +12,7 @@ function registerAuthRoutes(app, deps) {
     destroySession,
     deleteSessionsForUserIds,
     auditLog,
+    getRoleAccessSummary,
     nowIso = () => new Date().toISOString(),
   } = deps;
 
@@ -71,6 +72,7 @@ function registerAuthRoutes(app, deps) {
       userRole: normalizedRole,
       rawRole,
       normalizedRole,
+      permissions: typeof getRoleAccessSummary === 'function' ? getRoleAccessSummary(normalizedRole) : undefined,
       email: user.email,
       profilePhoto: user.profilePhoto || undefined,
       ownerId: user.ownerId || undefined,
@@ -151,6 +153,7 @@ function registerAuthRoutes(app, deps) {
           role: normalizeRole(user.role),
           rawRole: user.role,
           normalizedRole: normalizeRole(user.role),
+          permissions: typeof getRoleAccessSummary === 'function' ? getRoleAccessSummary(user.role) : undefined,
           profilePhoto: user.profilePhoto || undefined,
           ownerId: user.ownerId || undefined,
           ownerName: user.ownerName || undefined,

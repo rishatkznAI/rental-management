@@ -90,6 +90,48 @@ function getTicketSearchText(ticket: ServiceTicket) {
   ].filter(Boolean).join(' '));
 }
 
+function shouldLogWarrantyDebug() {
+  return import.meta.env.DEV || window.localStorage.getItem('warrantyDebug') === '1';
+}
+
+function serviceFilterReasons(
+  ticket: ServiceTicket,
+  filters: {
+    search: string;
+    priorityFilter: string;
+    statusFilter: string;
+    scenarioFilter: string;
+    mechanicFilter: string;
+    workflowFilter: ServiceWorkflowFilter;
+    preset: 'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'maintenance';
+    effectiveDateFrom: string;
+    effectiveDateTo: string;
+  },
+) {
+  const reasons: string[] = [];
+  const query = normalizeSearch(filters.search);
+  const ticketPriority = normalizeServicePriority(ticket.priority);
+  const ticketStatus = normalizeServiceStatus(ticket.status);
+  const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || '';
+  const createdDate = typeof ticket.createdAt === 'string' ? ticket.createdAt.slice(0, 10) : '';
+  if (query && !getTicketSearchText(ticket).includes(query)) reasons.push('search');
+  if (filters.priorityFilter !== 'all' && ticketPriority !== filters.priorityFilter) reasons.push('priority');
+  if (filters.statusFilter !== 'all' && ticketStatus !== filters.statusFilter) reasons.push('status');
+  if (filters.scenarioFilter !== 'all' && inferServiceKind(ticket) !== filters.scenarioFilter) reasons.push('scenario');
+  if (filters.mechanicFilter !== 'all' && assignedMechanic !== filters.mechanicFilter) reasons.push('mechanic');
+  if (filters.workflowFilter !== 'all' && getTicketWorkflowKind(ticket) !== filters.workflowFilter) reasons.push('workflow');
+  if (filters.effectiveDateFrom && (!createdDate || createdDate < filters.effectiveDateFrom)) reasons.push('dateFrom');
+  if (filters.effectiveDateTo && (!createdDate || createdDate > filters.effectiveDateTo)) reasons.push('dateTo');
+  const matchesPreset =
+    filters.preset === 'all'
+    || (filters.preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
+    || (filters.preset === 'urgent' && ['high', 'critical'].includes(ticketPriority))
+    || (filters.preset === 'waiting_parts' && ticketStatus === 'waiting_parts')
+    || (filters.preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
+  if (!matchesPreset) reasons.push(`preset:${filters.preset}`);
+  return reasons;
+}
+
 function getTicketWorkflowKind(ticket: ServiceTicket): ServiceWorkflowKind {
   const kind = inferServiceKind(ticket);
   if (kind !== 'repair') return 'maintenance';
@@ -268,7 +310,22 @@ export default function Service() {
   ]);
 
   React.useEffect(() => {
-    if (!import.meta.env.DEV || !isWarrantyMechanicRole(user?.role)) return;
+    if (!shouldLogWarrantyDebug() || !isWarrantyMechanicRole(user?.role)) return;
+    const effectiveDateFrom = dateFrom || (
+      datePreset === 'today'
+        ? todayIso
+        : datePreset === 'last7'
+          ? last7StartIso
+          : datePreset === 'month'
+            ? monthStartIso
+            : ''
+    );
+    const effectiveDateTo = dateTo || (datePreset === 'all' ? '' : todayIso);
+    const filters = { search, priorityFilter, statusFilter, scenarioFilter, mechanicFilter, workflowFilter, preset, effectiveDateFrom, effectiveDateTo };
+    const excluded = ticketList
+      .map(ticket => ({ id: ticket.id, equipmentId: ticket.equipmentId, reasons: serviceFilterReasons(ticket, filters) }))
+      .filter(item => item.reasons.length > 0)
+      .slice(0, 5);
     console.debug('[warranty-mechanic/service]', {
       rawRole: user?.rawRole ?? user?.role,
       normalizedRole: normalizeUserRole(user?.role),
@@ -277,6 +334,7 @@ export default function Service() {
       afterFilters: filteredTickets.length,
       filters: { search, priorityFilter, statusFilter, scenarioFilter, mechanicFilter, workflowFilter, preset, datePreset, dateFrom, dateTo },
       unassigned: ticketList.filter(ticket => !ticket.assignedMechanicId && !ticket.assignedTo).length,
+      excluded,
     });
   }, [
     activeTickets.length,
@@ -284,13 +342,16 @@ export default function Service() {
     datePreset,
     dateTo,
     filteredTickets.length,
+    last7StartIso,
     mechanicFilter,
+    monthStartIso,
     preset,
     priorityFilter,
     scenarioFilter,
     search,
     statusFilter,
     ticketList,
+    todayIso,
     user?.rawRole,
     user?.role,
     workflowFilter,

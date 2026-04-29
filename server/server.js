@@ -546,6 +546,19 @@ function canReadCollection(req, collection) {
   return allowed.includes(normalizeRole(req.user?.userRole));
 }
 
+function roleAccessSummary(role) {
+  const normalizedRole = normalizeRole(role);
+  const readableCollections = Object.entries(READ_PERMISSIONS)
+    .filter(([, roles]) => roles.includes(normalizedRole))
+    .map(([collection]) => collection)
+    .sort();
+  const writableCollections = Object.entries(WRITE_PERMISSIONS)
+    .filter(([, roles]) => roles.includes(normalizedRole))
+    .map(([collection]) => collection)
+    .sort();
+  return { normalizedRole, readableCollections, writableCollections };
+}
+
 function requireRead(collection) {
   return (req, res, next) => {
     if (!canReadCollection(req, collection)) {
@@ -557,6 +570,144 @@ function requireRead(collection) {
 
 function requirePermission(collection, action = 'read') {
   return action === 'write' ? requireWrite(collection) : requireRead(collection);
+}
+
+function normalizeEquipmentForDiagnostics(equipment = {}) {
+  return {
+    ...equipment,
+    category: equipment.category ?? 'own',
+    activeInFleet: equipment.activeInFleet ?? true,
+    isForSale: equipment.isForSale ?? false,
+    salePdiStatus: equipment.salePdiStatus ?? 'not_started',
+  };
+}
+
+function equipmentMatchesDiagnosticTab(equipment, tab) {
+  const item = normalizeEquipmentForDiagnostics(equipment);
+  if (tab === 'active') return item.activeInFleet && (item.category === 'own' || item.category === 'partner');
+  if (tab === 'sale') return item.isForSale && item.category !== 'sold';
+  if (tab === 'sold') return item.category === 'sold';
+  if (tab === 'service') return item.category === 'client' || (!item.activeInFleet && item.category !== 'sold');
+  return true;
+}
+
+function serviceTicketIsActiveForDiagnostics(ticket = {}) {
+  return String(ticket.status || 'new').trim() !== 'closed';
+}
+
+function sampleEquipmentForDiagnostics(items) {
+  return items.slice(0, 5).map(item => ({
+    id: item.id,
+    model: item.model,
+    manufacturer: item.manufacturer,
+    serialNumber: item.serialNumber,
+    inventoryNumber: item.inventoryNumber,
+    status: item.status,
+    category: item.category,
+    activeInFleet: item.activeInFleet,
+    isForSale: item.isForSale,
+    saleStatus: item.saleStatus,
+    salePdiStatus: item.salePdiStatus,
+    owner: item.owner,
+    ownerId: item.ownerId,
+    location: item.location,
+    archived: item.archived,
+    deleted: item.deleted,
+  }));
+}
+
+function sampleServiceForDiagnostics(items) {
+  return items.slice(0, 5).map(item => ({
+    id: item.id,
+    equipmentId: item.equipmentId,
+    equipment: item.equipment,
+    inventoryNumber: item.inventoryNumber,
+    serialNumber: item.serialNumber,
+    status: item.status,
+    type: item.type,
+    serviceKind: item.serviceKind,
+    scenario: item.scenario,
+    assignedMechanicId: item.assignedMechanicId,
+    mechanicId: item.mechanicId,
+    responsibleId: item.responsibleId,
+    assignedTo: item.assignedTo,
+    warrantyClaimId: item.warrantyClaimId,
+    clientId: item.clientId,
+    archived: item.archived,
+    deleted: item.deleted,
+  }));
+}
+
+function collectionDiagnostics(collection, user) {
+  const raw = readData(collection) || [];
+  const scoped = accessControl.filterCollectionByScope(collection, raw, user);
+  const sanitized = accessControl.sanitizeCollectionForRead(collection, scoped, user);
+  return { raw, scoped, sanitized };
+}
+
+function buildAccessDiagnostics(req) {
+  const rawRole = req.user?.rawRole || req.user?.userRole || '';
+  const normalizedRole = normalizeRole(rawRole);
+  const equipment = collectionDiagnostics('equipment', req.user);
+  const service = collectionDiagnostics('service', req.user);
+  const warrantyClaims = collectionDiagnostics('warranty_claims', req.user);
+  const access = roleAccessSummary(normalizedRole);
+  const sanitizedEquipment = equipment.sanitized.map(normalizeEquipmentForDiagnostics);
+  const sanitizedService = service.sanitized;
+
+  return {
+    ok: true,
+    user: {
+      id: req.user?.userId || '',
+      email: req.user?.email || '',
+      rawRole,
+      userRole: req.user?.userRole || '',
+      normalizedRole,
+    },
+    backend: {
+      health: buildInfoForDiagnostics(),
+      access,
+    },
+    endpoints: {
+      '/api/equipment': {
+        status: canReadCollection(req, 'equipment') ? 200 : 403,
+        rawCount: equipment.raw.length,
+        scopedCount: equipment.scoped.length,
+        sanitizedCount: equipment.sanitized.length,
+        frontendTabCounts: {
+          active: sanitizedEquipment.filter(item => equipmentMatchesDiagnosticTab(item, 'active')).length,
+          sale: sanitizedEquipment.filter(item => equipmentMatchesDiagnosticTab(item, 'sale')).length,
+          sold: sanitizedEquipment.filter(item => equipmentMatchesDiagnosticTab(item, 'sold')).length,
+          service: sanitizedEquipment.filter(item => equipmentMatchesDiagnosticTab(item, 'service')).length,
+          all: sanitizedEquipment.length,
+        },
+        samples: sampleEquipmentForDiagnostics(sanitizedEquipment),
+      },
+      '/api/service': {
+        status: canReadCollection(req, 'service') ? 200 : 403,
+        rawCount: service.raw.length,
+        scopedCount: service.scoped.length,
+        sanitizedCount: service.sanitized.length,
+        frontendCounts: {
+          active: sanitizedService.filter(serviceTicketIsActiveForDiagnostics).length,
+          closed: sanitizedService.filter(item => !serviceTicketIsActiveForDiagnostics(item)).length,
+          unassigned: sanitizedService.filter(item => !item.assignedMechanicId && !item.assignedTo).length,
+        },
+        samples: sampleServiceForDiagnostics(sanitizedService),
+      },
+      '/api/warranty_claims': {
+        status: canReadCollection(req, 'warranty_claims') ? 200 : 403,
+        rawCount: warrantyClaims.raw.length,
+        scopedCount: warrantyClaims.scoped.length,
+        sanitizedCount: warrantyClaims.sanitized.length,
+      },
+    },
+    recommendation: 'Проверьте этот ответ под тем же пользователем в Network. Если scopedCount > 0, но UI пустой, проблема во frontend-фильтрах/состоянии. Если scopedCount = 0 или status = 403, проблема в роли/access-control/backend deploy.',
+  };
+}
+
+function buildInfoForDiagnostics() {
+  return typeof getBuildInfo === 'function' ? getBuildInfo() : null;
 }
 
 function requireAdmin(req, res, next) {
@@ -875,7 +1026,12 @@ registerAuthRoutes(app, {
   destroySession,
   deleteSessionsForUserIds,
   auditLog,
+  getRoleAccessSummary: roleAccessSummary,
   nowIso,
+});
+
+apiRouter.get('/access-diagnostics', requireAuth, (req, res) => {
+  return res.json(buildAccessDiagnostics(req));
 });
 
 apiRouter.use(registerRentalRoutes({

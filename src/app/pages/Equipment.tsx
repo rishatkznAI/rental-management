@@ -137,6 +137,45 @@ function matchesTabType(equipment: EquipmentEntity, activeTab: EquipmentTab) {
   return true;
 }
 
+function shouldLogWarrantyDebug() {
+  return import.meta.env.DEV || window.localStorage.getItem('warrantyDebug') === '1';
+}
+
+function equipmentFilterReasons(
+  equipment: EquipmentEntity,
+  filters: {
+    activeTab: EquipmentTab;
+    search: string;
+    statusFilter: string;
+    typeFilter: string;
+    driveFilter: string;
+    categoryFilter: string;
+    fleetFilter: string;
+    ownerFilter: string;
+    locationFilter: string;
+  },
+) {
+  const query = filters.search.toLowerCase().trim();
+  const reasons: string[] = [];
+  const matchesSearch = query === ''
+    || equipment.inventoryNumber.toLowerCase().includes(query)
+    || equipment.model.toLowerCase().includes(query)
+    || equipment.manufacturer.toLowerCase().includes(query)
+    || equipment.serialNumber.toLowerCase().includes(query)
+    || equipment.currentClient?.toLowerCase().includes(query)
+    || equipment.location?.toLowerCase().includes(query);
+  if (!matchesSearch) reasons.push('search');
+  if (filters.statusFilter !== 'all' && equipment.status !== filters.statusFilter) reasons.push('status');
+  if (filters.typeFilter !== 'all' && equipment.type !== filters.typeFilter) reasons.push('type');
+  if (filters.driveFilter !== 'all' && equipment.drive !== filters.driveFilter) reasons.push('drive');
+  if (filters.categoryFilter !== 'all' && equipment.category !== filters.categoryFilter) reasons.push('category');
+  if (filters.fleetFilter !== 'all' && String(equipment.activeInFleet) !== filters.fleetFilter) reasons.push('activeInFleet');
+  if (filters.ownerFilter !== 'all' && equipment.owner !== filters.ownerFilter) reasons.push('owner');
+  if (filters.locationFilter !== 'all' && equipment.location !== filters.locationFilter) reasons.push('location');
+  if (!matchesTabType(equipment, filters.activeTab)) reasons.push(`tab:${filters.activeTab}`);
+  return reasons;
+}
+
 function EquipmentMobileCard({
   equipment,
   isSaleTab,
@@ -278,7 +317,7 @@ export default function Equipment() {
   ]);
 
   React.useEffect(() => {
-    if (!import.meta.env.DEV || !isWarrantyMechanicRole(user?.role)) return;
+    if (!shouldLogWarrantyDebug() || !isWarrantyMechanicRole(user?.role)) return;
     const byTab = {
       active: enrichedEquipmentList.filter((item) => matchesTabType(item, 'active')).length,
       sale: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sale')).length,
@@ -286,6 +325,11 @@ export default function Equipment() {
       service: enrichedEquipmentList.filter((item) => matchesTabType(item, 'service')).length,
       all: enrichedEquipmentList.length,
     };
+    const filters = { activeTab, search, categoryFilter, fleetFilter, statusFilter, typeFilter, ownerFilter, driveFilter, locationFilter };
+    const excluded = enrichedEquipmentList
+      .map(item => ({ id: item.id, inventoryNumber: item.inventoryNumber, reasons: equipmentFilterReasons(item, filters) }))
+      .filter(item => item.reasons.length > 0)
+      .slice(0, 5);
     console.debug('[warranty-mechanic/equipment]', {
       rawRole: user?.rawRole ?? user?.role,
       normalizedRole: normalizeUserRole(user?.role),
@@ -293,7 +337,8 @@ export default function Equipment() {
       afterFilters: filteredEquipment.length,
       activeTab,
       byTab,
-      filters: { search, categoryFilter, fleetFilter, statusFilter, typeFilter, ownerFilter, driveFilter, locationFilter },
+      filters,
+      excluded,
     });
   }, [
     activeTab,

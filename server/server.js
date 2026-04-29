@@ -79,7 +79,7 @@ const { getBuildInfo } = require('./lib/build-info');
 const { createGprsGateway } = require('./lib/gprs-gateway');
 const { createMaxApiClient } = require('./lib/max-api');
 const { createServiceCore } = require('./lib/service-core');
-const { MECHANIC_ROLES } = require('./lib/role-groups');
+const { MECHANIC_ROLES, WARRANTY_MECHANIC_ROLE } = require('./lib/role-groups');
 const { startServer } = require('./lib/startup');
 const { registerAuthRoutes } = require('./routes/auth');
 const {
@@ -396,8 +396,8 @@ const WRITE_PERMISSIONS = {
   rental_change_requests: ['Администратор'],
   deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   delivery_carriers: ['Администратор'],
-  service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
-  warranty_claims: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  warranty_claims: ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
   clients:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   knowledge_base_modules: ['Администратор', 'Офис-менеджер'],
   knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
@@ -416,8 +416,8 @@ const WRITE_PERMISSIONS = {
   spare_parts:    ['Администратор'],
   service_route_norms: ['Администратор'],
   service_field_trips: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
-  repair_work_items: ['Администратор', ...MECHANIC_ROLES],
-  repair_part_items: ['Администратор', ...MECHANIC_ROLES],
+  repair_work_items: ['Администратор', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  repair_part_items: ['Администратор', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
   service_work_catalog: ['Администратор'],
   spare_parts_catalog: ['Администратор'],
   planner_items:  ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
@@ -426,14 +426,14 @@ const WRITE_PERMISSIONS = {
 };
 
 const READ_PERMISSIONS = {
-  equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...MECHANIC_ROLES],
+  equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор'],
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   delivery_carriers: ['Администратор'],
-  service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
-  warranty_claims: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  warranty_claims: ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
   clients:        ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   knowledge_base_modules: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
   knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
@@ -448,13 +448,13 @@ const READ_PERMISSIONS = {
   users:          ['Администратор'],
   shipping_photos:['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   owners:         ['Администратор', 'Инвестор'],
-  mechanics:      ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
-  service_works:  ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
-  spare_parts:    ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
-  service_route_norms: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  mechanics:      ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  service_works:  ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  spare_parts:    ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  service_route_norms: ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
   service_field_trips: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
-  repair_work_items: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
-  repair_part_items: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  repair_work_items: ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  repair_part_items: ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
   service_work_catalog: ['Администратор'],
   spare_parts_catalog: ['Администратор'],
   planner_items:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],

@@ -86,6 +86,33 @@ test('mechanic sees and mutates only assigned service tickets', () => {
   assert.equal(access.canMutateEntity('service', state.service[1], mechanic), false);
 });
 
+test('warranty mechanic can work with service and warranty claims without extra operational access', () => {
+  const state = {
+    service: [
+      { id: 'S-1', assignedMechanicId: 'M-1', assignedMechanicName: 'Петров' },
+      { id: 'S-2', assignedMechanicId: 'M-2', assignedMechanicName: 'Другой' },
+    ],
+    warranty_claims: [
+      { id: 'WC-1', serviceTicketId: 'S-1', status: 'draft' },
+      { id: 'WC-2', serviceTicketId: 'S-2', status: 'sent_to_factory' },
+    ],
+    equipment: [{ id: 'EQ-1', inventoryNumber: '100' }],
+    service_vehicles: [{ id: 'SV-1', plateNumber: 'A001AA' }],
+    rentals: [{ id: 'R-1', manager: 'Руслан' }],
+  };
+  const access = createAccess(state);
+  const warrantyMechanic = { userId: 'U-warranty', userName: 'Гарантийный механик', userRole: 'Механик по гарантии' };
+
+  assert.deepEqual(access.filterCollectionByScope('service', state.service, warrantyMechanic).map(item => item.id), ['S-1', 'S-2']);
+  assert.deepEqual(access.filterCollectionByScope('warranty_claims', state.warranty_claims, warrantyMechanic).map(item => item.id), ['WC-1', 'WC-2']);
+  assert.deepEqual(access.filterCollectionByScope('equipment', state.equipment, warrantyMechanic).map(item => item.id), ['EQ-1']);
+  assert.equal(access.canMutateEntity('service', state.service[1], warrantyMechanic), true);
+  assert.equal(access.canMutateEntity('warranty_claims', state.warranty_claims[1], warrantyMechanic), true);
+  assert.doesNotThrow(() => access.assertCanCreateCollection('warranty_claims', warrantyMechanic, { serviceTicketId: 'S-2' }));
+  assert.deepEqual(access.filterCollectionByScope('rentals', state.rentals, warrantyMechanic), []);
+  assert.deepEqual(access.filterCollectionByScope('service_vehicles', state.service_vehicles, warrantyMechanic), []);
+});
+
 test('carrier delivery scope is tied to carrierId', () => {
   const access = createAccess({});
   const carrier = { userId: 'carrier-1', userName: 'Быстрая доставка', userRole: 'Перевозчик', carrierId: 'carrier-1', phone: '100' };

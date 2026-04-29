@@ -1,4 +1,4 @@
-const { MECHANIC_ROLES } = require('./role-groups');
+const { MECHANIC_ROLES, WARRANTY_MECHANIC_ROLE } = require('./role-groups');
 
 const ROLES = {
   ADMIN: 'Администратор',
@@ -7,6 +7,7 @@ const ROLES = {
   SALES_MANAGER: 'Менеджер по продажам',
   INVESTOR: 'Инвестор',
   CARRIER: 'Перевозчик',
+  WARRANTY_MECHANIC: WARRANTY_MECHANIC_ROLE,
 };
 
 const SYSTEM_FIELD_PATTERN = /^(?:__|_)/;
@@ -308,6 +309,10 @@ function isMechanic(user) {
   return MECHANIC_ROLES.includes(user?.userRole || user?.role);
 }
 
+function isWarrantyMechanic(user) {
+  return roleIs(user, ROLES.WARRANTY_MECHANIC);
+}
+
 function userName(user) {
   return user?.userName || user?.name || '';
 }
@@ -525,7 +530,7 @@ function canAccessEntity(collection, entity, user, readData) {
       return false;
     case 'equipment':
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user);
-      if (isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isMechanic(user)) return true;
+      if (isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isMechanic(user) || isWarrantyMechanic(user)) return true;
       return false;
     case 'owners':
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user) || getOwnerKeys(user).some(key => sameText(key, entity.id) || sameText(key, entity.name));
@@ -543,10 +548,12 @@ function canAccessEntity(collection, entity, user, readData) {
       return false;
     case 'service':
       if (isOfficeManager(user) || isRentalManager(user)) return true;
+      if (isWarrantyMechanic(user)) return true;
       if (isMechanic(user)) return isAssignedMechanic(entity, user, readData);
       return false;
     case 'warranty_claims':
       if (isOfficeManager(user)) return true;
+      if (isWarrantyMechanic(user)) return true;
       if (isMechanic(user)) return isMechanicLinkedEntity(entity, user, readData);
       return false;
     case 'repair_work_items':
@@ -588,6 +595,7 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isMechanic(user)) return isMechanicLinkedEntity(entity, user, readData);
       return false;
     case 'mechanics':
+      if (isWarrantyMechanic(user)) return true;
       if (isOfficeManager(user)) return true;
       if (isMechanic(user)) {
         const mechanicIds = getMechanicIdsForUser(user, readData);
@@ -599,7 +607,7 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'service_works':
     case 'spare_parts':
     case 'service_route_norms':
-      return isOfficeManager(user) || isMechanic(user);
+      return isOfficeManager(user) || isMechanic(user) || isWarrantyMechanic(user);
     case 'service_work_catalog':
     case 'spare_parts_catalog':
     case 'company_expenses':
@@ -642,6 +650,7 @@ function canMutateEntity(collection, entity, user, readData) {
   if (collection === 'service') {
     if (isOfficeManager(user)) return true;
     if (isRentalManager(user)) return false;
+    if (isWarrantyMechanic(user)) return canAccessEntity(collection, entity, user, readData);
     if (isMechanic(user)) return canAccessEntity(collection, entity, user, readData);
     return false;
   }

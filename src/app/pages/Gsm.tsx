@@ -16,6 +16,7 @@ import {
   Map as MapIcon,
   MapPinned,
   Navigation,
+  Plus,
   Route,
   Search,
   SendHorizontal,
@@ -32,6 +33,7 @@ import { Textarea } from '../components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge, getEquipmentStatusBadge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { cn } from '../lib/utils';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useClientsList } from '../hooks/useClients';
@@ -50,6 +52,7 @@ import {
   type GsmZone,
 } from '../lib/gsm';
 import type {
+  Equipment,
   EquipmentGsmSignalState,
   EquipmentStatus,
   GsmGatewayAnalytics,
@@ -74,6 +77,21 @@ type StatusFilter = 'all' | EquipmentStatus;
 type GsmTab = 'overview' | 'devices' | 'packets' | 'route' | 'live' | 'history' | 'gateway';
 type RoutePeriod = 'day' | 'week';
 type GsmCommandEncoding = 'text' | 'hex';
+type GsmBindingForm = {
+  equipmentId: string;
+  gsmImei: string;
+  gsmDeviceId: string;
+  gsmSimNumber: string;
+  gsmProtocol: string;
+};
+
+const EMPTY_GSM_BINDING_FORM: GsmBindingForm = {
+  equipmentId: '',
+  gsmImei: '',
+  gsmDeviceId: '',
+  gsmSimNumber: '',
+  gsmProtocol: '',
+};
 
 const DEFAULT_CENTER: [number, number] = [55.796127, 49.106414];
 const DEFAULT_GATEWAY_STATUS: GsmGatewayStatus = {
@@ -288,6 +306,26 @@ function buildEquipmentLabel(snapshot: GsmEquipmentSnapshot) {
     snapshot.equipment.model,
     snapshot.equipment.inventoryNumber ? `INV ${snapshot.equipment.inventoryNumber}` : '',
   ].filter(Boolean).join(' · ');
+}
+
+function buildEquipmentOptionLabel(equipment: Equipment) {
+  const title = [
+    equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
+    equipment.manufacturer,
+    equipment.model,
+  ].filter(Boolean).join(' · ') || equipment.id;
+  return equipment.serialNumber ? `${title} · SN ${equipment.serialNumber}` : title;
+}
+
+function makeGsmBindingForm(equipment?: Equipment | null): GsmBindingForm {
+  if (!equipment) return EMPTY_GSM_BINDING_FORM;
+  return {
+    equipmentId: equipment.id,
+    gsmImei: String(equipment.gsmImei || '').trim(),
+    gsmDeviceId: String(equipment.gsmDeviceId || equipment.gsmTrackerId || '').trim(),
+    gsmSimNumber: String(equipment.gsmSimNumber || '').trim(),
+    gsmProtocol: String(equipment.gsmProtocol || '').trim(),
+  };
 }
 
 function buildMapLink(point?: GsmResolvedPoint) {
@@ -554,7 +592,10 @@ export default function Gsm() {
   const [commandEncoding, setCommandEncoding] = React.useState<GsmCommandEncoding>('text');
   const [appendNewline, setAppendNewline] = React.useState(true);
   const [commandDeviceId, setCommandDeviceId] = React.useState('');
+  const [gsmBindingOpen, setGsmBindingOpen] = React.useState(false);
+  const [gsmBindingForm, setGsmBindingForm] = React.useState<GsmBindingForm>(EMPTY_GSM_BINDING_FORM);
   const canSendGprsCommands = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
+  const canBindGsmEquipment = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
 
   const { data: gatewayStatus = DEFAULT_GATEWAY_STATUS } = useQuery({
     queryKey: ['gsmGateway', 'status'],
@@ -604,6 +645,16 @@ export default function Gsm() {
     [clients, equipment, ganttRentals, rentals, shippingPhotos],
   );
 
+  const equipmentOptions = React.useMemo(
+    () => [...equipment].sort((left, right) => (
+      buildEquipmentOptionLabel(left).localeCompare(buildEquipmentOptionLabel(right), 'ru', {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    )),
+    [equipment],
+  );
+
   const filteredSnapshots = React.useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
@@ -647,7 +698,12 @@ export default function Gsm() {
     [filteredSnapshots, selectedId],
   );
   const selectedTrackerId = React.useMemo(
-    () => String(selectedSnapshot?.equipment.gsmTrackerId || selectedSnapshot?.equipment.gsmImei || '').trim(),
+    () => String(
+      selectedSnapshot?.equipment.gsmDeviceId
+      || selectedSnapshot?.equipment.gsmImei
+      || selectedSnapshot?.equipment.gsmTrackerId
+      || '',
+    ).trim(),
     [selectedSnapshot],
   );
 
@@ -769,6 +825,58 @@ export default function Gsm() {
       toast.error(error.message || 'Не удалось отправить пакет в GPRS канал');
     },
   });
+
+  const bindGsmDeviceMutation = useMutation({
+    mutationFn: (form: GsmBindingForm) => {
+      const equipmentId = form.equipmentId.trim();
+      const gsmImei = form.gsmImei.trim();
+      const gsmDeviceId = form.gsmDeviceId.trim();
+      const gsmSimNumber = form.gsmSimNumber.trim();
+      const gsmProtocol = form.gsmProtocol.trim();
+
+      if (!equipmentId) {
+        throw new Error('Выберите технику для привязки GSM-устройства.');
+      }
+      if (!gsmImei && !gsmDeviceId) {
+        throw new Error('Укажите GSM IMEI или Device ID трекера.');
+      }
+
+      return equipmentService.update(equipmentId, {
+        gsmImei: gsmImei || null,
+        gsmDeviceId: gsmDeviceId || null,
+        gsmSimNumber: gsmSimNumber || null,
+        gsmProtocol: gsmProtocol || null,
+      });
+    },
+    onSuccess: (updated) => {
+      toast.success('GSM-устройство привязано к технике');
+      setGsmBindingOpen(false);
+      setSelectedId(updated.id);
+      setRouteEquipmentId(current => current || updated.id);
+      queryClient.invalidateQueries({ queryKey: ['equipment'] });
+      queryClient.invalidateQueries({ queryKey: ['gsmGateway'] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Не удалось привязать GSM-устройство');
+    },
+  });
+
+  const openGsmBinding = React.useCallback((equipmentId?: string) => {
+    const selectedEquipment = equipment.find(item => item.id === equipmentId)
+      || equipment.find(item => !String(item.gsmImei || '').trim() && !String(item.gsmDeviceId || item.gsmTrackerId || '').trim())
+      || equipment[0]
+      || null;
+    setGsmBindingForm(makeGsmBindingForm(selectedEquipment));
+    setGsmBindingOpen(true);
+  }, [equipment]);
+
+  const handleGsmBindingEquipmentChange = React.useCallback((equipmentId: string) => {
+    setGsmBindingForm(makeGsmBindingForm(equipment.find(item => item.id === equipmentId) || null));
+  }, [equipment]);
+
+  const updateGsmBindingForm = React.useCallback((field: keyof GsmBindingForm, value: string) => {
+    setGsmBindingForm(current => ({ ...current, [field]: value }));
+  }, []);
 
   const handleSendGprsCommand = React.useCallback(() => {
     if (!canSendGprsCommands) return;
@@ -1071,20 +1179,42 @@ export default function Gsm() {
 
           <TabsContent value="devices">
             <Card className="border-white/10 bg-slate-950/70 text-white">
-              <CardHeader>
-                <CardTitle className="text-xl font-bold text-white">GSM-устройства техники</CardTitle>
-                <CardDescription className="text-slate-400">
-                  Привязка выполняется по IMEI или Device ID из карточки техники.
-                </CardDescription>
+              <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="text-xl font-bold text-white">GSM-устройства техники</CardTitle>
+                  <CardDescription className="text-slate-400">
+                    Привязка выполняется по IMEI или Device ID. Добавить трекер можно прямо здесь.
+                  </CardDescription>
+                </div>
+                {canBindGsmEquipment ? (
+                  <Button
+                    type="button"
+                    onClick={() => openGsmBinding()}
+                    className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Привязать технику
+                  </Button>
+                ) : null}
               </CardHeader>
               <CardContent>
                 {gsmDevices.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
-                    Пока нет техники с заполненным GSM IMEI или Device ID.
+                    <div>Пока нет техники с заполненным GSM IMEI или Device ID.</div>
+                    {canBindGsmEquipment ? (
+                      <Button
+                        type="button"
+                        onClick={() => openGsmBinding()}
+                        className="mt-4 rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Привязать первое устройство
+                      </Button>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1180px] text-left text-sm">
+                    <table className="w-full min-w-[1280px] text-left text-sm">
                       <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
                         <tr>
                           <th className="px-3 py-2">Техника</th>
@@ -1099,6 +1229,7 @@ export default function Gsm() {
                           <th className="px-3 py-2">Скорость</th>
                           <th className="px-3 py-2">Напряжение</th>
                           <th className="px-3 py-2">Моточасы</th>
+                          {canBindGsmEquipment ? <th className="px-3 py-2">Действия</th> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -1124,6 +1255,19 @@ export default function Gsm() {
                             <td className="px-3 py-2 text-slate-300">{formatSpeed(device.lastSpeed ?? null)}</td>
                             <td className="px-3 py-2 text-slate-300">{formatVoltage(device.lastVoltage ?? null)}</td>
                             <td className="px-3 py-2 text-slate-300">{formatEngineHours(device.lastMotoHours ?? null)}</td>
+                            {canBindGsmEquipment ? (
+                              <td className="px-3 py-2">
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => openGsmBinding(device.equipmentId)}
+                                  className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                                >
+                                  Изменить
+                                </Button>
+                              </td>
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
@@ -2200,6 +2344,104 @@ export default function Gsm() {
             </div>
           </TabsContent>
         </Tabs>
+
+        <Sheet open={gsmBindingOpen} onOpenChange={setGsmBindingOpen}>
+          <SheetContent side="right" className="w-full overflow-y-auto border-white/10 bg-slate-950 text-white sm:max-w-xl">
+            <SheetHeader className="border-b border-white/10 px-6 py-5 pr-12">
+              <SheetTitle className="flex items-center gap-2 text-xl text-white">
+                <Cable className="h-5 w-5 text-cyan-300" />
+                Привязать GSM-устройство
+              </SheetTitle>
+              <SheetDescription className="text-slate-400">
+                Выберите технику и заполните IMEI или Device ID трекера. После сохранения техника появится в списке GSM-устройств.
+              </SheetDescription>
+            </SheetHeader>
+
+            <div className="space-y-5 px-6 py-5">
+              <label className="block space-y-2">
+                <span className="text-sm font-medium text-slate-200">Техника</span>
+                <select
+                  value={gsmBindingForm.equipmentId}
+                  onChange={event => handleGsmBindingEquipmentChange(event.target.value)}
+                  className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-3 text-sm text-white outline-none focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/20"
+                >
+                  <option value="">Выберите технику</option>
+                  {equipmentOptions.map(item => (
+                    <option key={item.id} value={item.id}>
+                      {buildEquipmentOptionLabel(item)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-slate-200">GSM IMEI</span>
+                  <Input
+                    value={gsmBindingForm.gsmImei}
+                    onChange={event => updateGsmBindingForm('gsmImei', event.target.value)}
+                    placeholder="866123456789012"
+                    className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                  />
+                </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-slate-200">Device ID</span>
+                  <Input
+                    value={gsmBindingForm.gsmDeviceId}
+                    onChange={event => updateGsmBindingForm('gsmDeviceId', event.target.value)}
+                    placeholder="TRACKER-001"
+                    className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                  />
+                </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-slate-200">SIM-карта</span>
+                  <Input
+                    value={gsmBindingForm.gsmSimNumber}
+                    onChange={event => updateGsmBindingForm('gsmSimNumber', event.target.value)}
+                    placeholder="+7 999 000-00-00"
+                    className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                  />
+                </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-slate-200">Протокол</span>
+                  <Input
+                    value={gsmBindingForm.gsmProtocol}
+                    onChange={event => updateGsmBindingForm('gsmProtocol', event.target.value)}
+                    placeholder="GT06 / Teltonika / Wialon IPS"
+                    className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                  />
+                </label>
+              </div>
+
+              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4 text-sm leading-6 text-cyan-50">
+                Для автоматической привязки входящих пакетов достаточно, чтобы IMEI или Device ID в карточке техники совпадал с тем,
+                что передаёт трекер в GPRS-пакете.
+              </div>
+            </div>
+
+            <SheetFooter className="border-t border-white/10 px-6 py-4 sm:flex-row sm:items-center sm:justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setGsmBindingOpen(false)}
+                className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+              >
+                Отмена
+              </Button>
+              <Button
+                type="button"
+                onClick={() => bindGsmDeviceMutation.mutate(gsmBindingForm)}
+                disabled={bindGsmDeviceMutation.isPending}
+                className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+              >
+                {bindGsmDeviceMutation.isPending ? 'Сохраняем...' : 'Сохранить привязку'}
+              </Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
 
         {selectedPacket && (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/50">

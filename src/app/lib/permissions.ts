@@ -7,6 +7,7 @@
  *                      разделов, создание сервисных заявок; без Отчётов и Настроек
  *  Офис-менеджер   — полный операционный доступ + свой дашборд (без Отчётов и Настроек)
  *  Механик          — только Техника (просмотр) + Сервис (полный CRUD)
+ *  Механик по гарантии — Сервис/Рекламации + просмотр Техники и Продаж
  */
 
 import { useCallback, useMemo } from 'react';
@@ -46,6 +47,7 @@ type RolePermissions = Partial<Record<Section, Action[]>>;
 const ALL: Action[] = ['view', 'create', 'edit', 'delete'];
 const VIEW: Action[] = ['view'];
 const VIEW_CREATE: Action[] = ['view', 'create'];
+const VIEW_CREATE_EDIT: Action[] = ['view', 'create', 'edit'];
 
 const PERMISSIONS: Record<string, RolePermissions> = {
   'Администратор': {
@@ -121,6 +123,11 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     documents:        VIEW,
     payments:         VIEW,
     profile_settings: ['view', 'edit'],
+  },
+  'Механик по гарантии': {
+    equipment:        VIEW,
+    sales:            VIEW,
+    service:          VIEW_CREATE_EDIT,
   },
   ...Object.fromEntries(
     MECHANIC_ROLES.map(role => [role, {

@@ -12,16 +12,17 @@ const { registerCrudRoutes } = require('../server/routes/crud.js');
 const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { registerBotRoutes } = require('../server/routes/bot.js');
 
+const WARRANTY_MECHANIC_ROLE = 'Механик по гарантии';
 const MECHANIC_ROLES = ['Механик', 'Младший стационарный механик', 'Выездной механик', 'Старший стационарный механик'];
 
 const READ_PERMISSIONS = {
   app_settings: ['Администратор'],
   clients: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   documents: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
-  equipment: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...MECHANIC_ROLES],
+  equipment: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
   payments: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
-  repair_work_items: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
-  service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
+  repair_work_items: ['Администратор', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
   users: ['Администратор'],
 };
 
@@ -31,8 +32,8 @@ const WRITE_PERMISSIONS = {
   documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   equipment: ['Администратор', 'Офис-менеджер'],
   payments: ['Администратор', 'Офис-менеджер'],
-  repair_work_items: ['Администратор', ...MECHANIC_ROLES],
-  service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
+  repair_work_items: ['Администратор', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
+  service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', WARRANTY_MECHANIC_ROLE, ...MECHANIC_ROLES],
   users: ['Администратор'],
 };
 
@@ -43,6 +44,7 @@ function createState() {
       { id: 'U-manager', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Активен', password: 'old-password', tokenVersion: 0 },
       { id: 'U-office', name: 'Офис', email: 'office@example.test', role: 'Офис-менеджер', status: 'Активен', password: 'office', tokenVersion: 0 },
       { id: 'U-mechanic', name: 'Петров', email: 'mechanic@example.test', role: 'Механик', status: 'Активен', password: 'mechanic', tokenVersion: 0 },
+      { id: 'U-warranty', name: 'Гарантия', email: 'warranty@example.test', role: WARRANTY_MECHANIC_ROLE, status: 'Активен', password: 'warranty', tokenVersion: 0 },
       { id: 'U-investor', name: 'Инвестор', email: 'investor@example.test', role: 'Инвестор', status: 'Активен', password: 'investor', tokenVersion: 0, ownerId: 'OW-1' },
     ],
     rentals: [
@@ -79,6 +81,7 @@ function createSecurityApp(state = createState()) {
     ['manager-token', { userId: 'U-manager', tokenVersion: 0, passwordChangedAt: null }],
     ['office-token', { userId: 'U-office', tokenVersion: 0, passwordChangedAt: null }],
     ['mechanic-token', { userId: 'U-mechanic', tokenVersion: 0, passwordChangedAt: null }],
+    ['warranty-token', { userId: 'U-warranty', tokenVersion: 0, passwordChangedAt: null }],
     ['investor-token', { userId: 'U-investor', tokenVersion: 0, passwordChangedAt: null }],
   ]);
   const readData = name => state[name] || [];
@@ -271,6 +274,11 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal(state.service.find(item => item.id === 'S-own').assignedMechanicId, 'M-1');
     assert.equal(state.service.find(item => item.id === 'S-own').assignedUserId, undefined);
     assert.equal((await request(baseUrl, 'POST', '/api/repair_work_items', 'mechanic-token', { repairId: 'S-other', workId: 'W-1', quantity: 1 })).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-other', 'warranty-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/service/S-other', 'warranty-token')).status, 200);
+    assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-other', 'warranty-token', { status: 'in_progress', assignedMechanicId: 'M-1' })).status, 200);
+    assert.equal(state.service.find(item => item.id === 'S-other').assignedMechanicId, 'M-2');
+    assert.equal((await request(baseUrl, 'GET', '/api/rentals/R-own', 'warranty-token')).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-other', 'investor-token')).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/gantt_rentals/GR-other', 'investor-token')).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/app_settings', 'manager-token')).status, 403);

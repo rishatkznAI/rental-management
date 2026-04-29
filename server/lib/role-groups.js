@@ -1,3 +1,5 @@
+const WARRANTY_MECHANIC_ROLE = 'Механик по гарантии';
+
 const MECHANIC_ROLES = [
   'Механик',
   'Младший стационарный механик',
@@ -11,5 +13,6 @@ function isMechanicRole(role) {
 
 module.exports = {
   MECHANIC_ROLES,
+  WARRANTY_MECHANIC_ROLE,
   isMechanicRole,
 };

@@ -118,6 +118,7 @@ type BadgeVariant = 'danger' | 'warning' | 'info' | 'success' | 'secondary';
 function roleBadgeVariant(role: UserRole): BadgeVariant {
   if (role === 'Администратор') return 'danger';
   if (role === 'Менеджер по продажам') return 'success';
+  if (role === 'Механик по гарантии') return 'warning';
   if (isMechanicRole(role)) return 'warning';
   if (role === 'Перевозчик') return 'secondary';
   return 'info';

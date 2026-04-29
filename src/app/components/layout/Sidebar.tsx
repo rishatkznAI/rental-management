@@ -26,7 +26,6 @@ import {
   Shield,
   UserCog,
   WalletCards,
-  ClipboardCheck,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -66,7 +65,6 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Документы',    href: '/documents', icon: FileCheck,       section: 'documents'  },
   { name: 'Платежи',      href: '/payments',  icon: CreditCard,      section: 'payments'   },
   { name: 'Финансы',      href: '/finance',   icon: WalletCards,     section: 'finance'    },
-  { name: 'Согласования', href: '/approvals', icon: ClipboardCheck,  section: 'approvals'  },
   { name: 'Бот',          href: '/bots',      icon: Bot,             section: 'bots'       },
   { name: 'Отчёты',       href: '/reports',   icon: BarChart3,       section: 'reports'    },
   { name: 'Личные настройки', href: '/settings', icon: UserCog,      section: 'profile_settings' },

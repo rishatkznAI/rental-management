@@ -214,6 +214,26 @@ function matchesOpenClassicRentalForGanttByEquipment(ganttRental: GanttRentalDat
   return hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
 }
 
+function mergeGanttRentalContext(primary: GanttRentalData, fallback: GanttRentalData): GanttRentalData {
+  return {
+    ...fallback,
+    ...primary,
+    clientId: primary.clientId || fallback.clientId,
+    client: primary.client || fallback.client,
+    clientShort: primary.clientShort || fallback.clientShort,
+    equipmentId: primary.equipmentId || fallback.equipmentId,
+    equipmentInv: primary.equipmentInv || fallback.equipmentInv,
+  };
+}
+
+function withEquipmentRowContext(rental: GanttRentalData, equipment: Equipment): GanttRentalData {
+  return {
+    ...rental,
+    equipmentId: rental.equipmentId || equipment.id,
+    equipmentInv: rental.equipmentInv || equipment.inventoryNumber,
+  };
+}
+
 function dateRangesOverlap(startA: string, endA: string, startB: string, endB: string): boolean {
   if (!startA || !endA || !startB || !endB) return false;
   return startA <= endB && startB <= endA;
@@ -706,15 +726,18 @@ export default function Rentals() {
         rentalsService.getAll(),
         rentalsService.getGanttData().catch(() => [] as GanttRentalData[]),
       ]);
-      const currentGanttRental =
-        freshGanttRentals.find(item => item.id === ganttRental.id) ||
-        freshGanttRentals.find(item =>
+      const exactFreshGanttRental = freshGanttRentals.find(item => item.id === ganttRental.id);
+      const shapeFreshGanttRental = freshGanttRentals.find(item =>
           item.equipmentInv === ganttRental.equipmentInv &&
           item.startDate === ganttRental.startDate &&
           item.endDate === ganttRental.endDate &&
           (item.clientId && ganttRental.clientId ? item.clientId === ganttRental.clientId : item.client === ganttRental.client)
-        ) ||
-        ganttRental;
+        );
+      const currentGanttRental = exactFreshGanttRental
+        ? mergeGanttRentalContext(exactFreshGanttRental, ganttRental)
+        : shapeFreshGanttRental
+          ? mergeGanttRentalContext(shapeFreshGanttRental, ganttRental)
+          : ganttRental;
       const strictLinkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(currentGanttRental, item, equipmentList));
       const shapeLinkedRentals = strictLinkedRentals.length > 0
         ? strictLinkedRentals
@@ -2467,7 +2490,7 @@ export default function Rentals() {
 
                 <div className="mt-3 flex flex-wrap gap-2">
                   {primaryRental && (
-                    <Button size="sm" variant="secondary" onClick={() => setSelectedRental(primaryRental)}>
+                    <Button size="sm" variant="secondary" onClick={() => setSelectedRental(withEquipmentRowContext(primaryRental, equipment))}>
                       Открыть аренду
                     </Button>
                   )}
@@ -2478,7 +2501,7 @@ export default function Rentals() {
                     </Button>
                   )}
                   {primaryRental?.status === 'active' && (
-                    <Button size="sm" variant="secondary" onClick={() => handleOpenReturn(primaryRental)}>
+                    <Button size="sm" variant="secondary" onClick={() => handleOpenReturn(withEquipmentRowContext(primaryRental, equipment))}>
                       <RotateCcw className="h-3.5 w-3.5" />
                       Возврат
                     </Button>
@@ -2651,7 +2674,7 @@ export default function Rentals() {
                     days={days}
                     today={today}
                     paymentFractions={rentalPaidFractions}
-                    onBarClick={setSelectedRental}
+                    onBarClick={(rental) => setSelectedRental(withEquipmentRowContext(rental, eq))}
                     onNewRental={() => handleOpenNewRental(eq.id)}
                     onReturn={(rental) => handleOpenReturn(rental)}
                     onDowntime={() => handleOpenDowntime(eq.inventoryNumber)}
@@ -3338,7 +3361,7 @@ function EquipmentRow({
           {activeRental && (
             <button
               onClick={() => {
-                if (activeRental) onReturn(activeRental);
+                if (activeRental) onReturn(withEquipmentRowContext(activeRental, equipment));
               }}
               className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/30 dark:hover:text-green-400"
               title="Оформить возврат по строке"

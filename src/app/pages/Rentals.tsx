@@ -1437,6 +1437,7 @@ export default function Rentals() {
           rental,
           equipment,
           equipmentLabel: getEquipmentMovementLabel(equipment),
+          serialNumber: event.serialNumber || equipment?.serialNumber || '',
           clientLabel: rental?.client || equipment?.currentClient || 'Без клиента',
           typeLabel: event.type === 'shipping' ? 'Отгрузка' : 'Приёмка',
           typeBadgeClassName: event.type === 'shipping'
@@ -3283,6 +3284,9 @@ export default function Rentals() {
                           >
                             {entry.equipmentLabel}
                           </Link>
+                          <div className="text-sm text-gray-600 dark:text-gray-300">
+                            Серийный номер: <span className="font-medium text-gray-900 dark:text-white">{entry.serialNumber || 'не указан'}</span>
+                          </div>
                           <div className="text-sm text-gray-600 dark:text-gray-300">
                             Клиент: <span className="font-medium text-gray-900 dark:text-white">{entry.clientLabel}</span>
                           </div>

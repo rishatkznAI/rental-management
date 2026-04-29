@@ -315,6 +315,7 @@ export interface RepairRecord {
 export interface ShippingPhoto {
   id: string;
   equipmentId: string;
+  serialNumber?: string;
   date: string;
   type: ShippingEventType;
   uploadedBy: string;

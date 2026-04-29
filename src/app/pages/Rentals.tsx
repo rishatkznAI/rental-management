@@ -176,6 +176,13 @@ function matchesClassicRentalForGanttByClientEquipment(ganttRental: GanttRentalD
   return sameClient && hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
 }
 
+function matchesOpenClassicRentalForGanttByEquipment(ganttRental: GanttRentalData, rental: Rental, equipmentList: Equipment[] = []): boolean {
+  const linkedRentalId = getGanttRentalSourceId(ganttRental);
+  if (linkedRentalId) return String(rental.id) === linkedRentalId;
+  if (['closed', 'returned', 'completed', 'cancelled', 'canceled'].includes(String(rental.status || '')) || rental.actualReturnDate) return false;
+  return hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
+}
+
 function dateRangesOverlap(startA: string, endA: string, startB: string, endB: string): boolean {
   if (!startA || !endA || !startB || !endB) return false;
   return startA <= endB && startB <= endA;
@@ -684,17 +691,20 @@ export default function Rentals() {
       const linkedRentals = shapeLinkedRentals.length > 0
         ? shapeLinkedRentals
         : classicRentals.filter(item => matchesClassicRentalForGanttByClientEquipment(currentGanttRental, item, equipmentList));
+      const finalLinkedRentals = linkedRentals.length > 0
+        ? linkedRentals
+        : classicRentals.filter(item => matchesOpenClassicRentalForGanttByEquipment(currentGanttRental, item, equipmentList));
       const sourceRentalId = getGanttRentalSourceId(currentGanttRental);
-      if (!sourceRentalId && linkedRentals.length > 1) {
+      if (!sourceRentalId && finalLinkedRentals.length > 1) {
         showToast(
           'Найдено несколько похожих карточек аренды, откройте карточку аренды',
           'error',
         );
         return false;
       }
-      const resolvedRentalId = sourceRentalId || linkedRentals[0]?.id || '';
+      const resolvedRentalId = sourceRentalId || finalLinkedRentals[0]?.id || '';
       const targetRentalId = resolvedRentalId || currentGanttRental.id;
-      const previousRental = linkedRentals.find(item => item.id === resolvedRentalId) || linkedRentals[0] || null;
+      const previousRental = finalLinkedRentals.find(item => item.id === resolvedRentalId) || finalLinkedRentals[0] || null;
       const oldValues = Object.fromEntries(Object.keys(patch).map(field => {
         if (previousRental && field in previousRental) return [field, previousRental[field as keyof Rental]];
         if (field === 'plannedReturnDate') return [field, currentGanttRental.endDate];

@@ -314,6 +314,16 @@ function ganttMatchesClassicRentalByClientEquipment(ganttRental, rental, options
   return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
 }
 
+function isOpenClassicRental(rental) {
+  const status = normalizedText(rental?.status);
+  return !['closed', 'returned', 'completed', 'cancelled', 'canceled'].includes(status) && !rental?.actualReturnDate;
+}
+
+function ganttMatchesOpenClassicRentalByEquipment(ganttRental, rental, options = {}) {
+  if (!isOpenClassicRental(rental)) return false;
+  return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
+}
+
 function uniqueRentalMatches(matches) {
   const byId = new Map();
   for (const match of matches || []) {
@@ -529,6 +539,33 @@ function resolveRentalForChangeRequest({
         linkedIds,
         fallbackCandidateCount: looseSnapshotMatches.length,
         fallbackCandidateIds: compactResolutionIds(looseSnapshotMatches, match => match.rental?.id),
+      },
+    );
+  }
+  const openEquipmentSnapshotMatches = snapshotMatchesRequestedId
+    ? uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
+      (rentals || [])
+        .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
+        .filter(({ rental }) => ganttMatchesOpenClassicRentalByEquipment(ganttRental, rental, { equipmentList: equipment })),
+    ))
+    : [];
+  if (openEquipmentSnapshotMatches.length === 1) {
+    return buildRentalResolutionSuccess(
+      openEquipmentSnapshotMatches[0],
+      requestedRentalId || requestedGanttId || openEquipmentSnapshotMatches[0].linkedGanttRental?.id,
+      openEquipmentSnapshotMatches[0].linkedGanttRental,
+    );
+  }
+  if (openEquipmentSnapshotMatches.length > 1) {
+    return buildRentalResolutionFailure(
+      409,
+      `Найдено несколько незакрытых карточек аренды по технике для id "${requestedRentalId || requestedGanttId}". Откройте карточку аренды вручную.`,
+      [...searchedIds, ...linkedIds],
+      {
+        ...diagnosticsBase,
+        linkedIds,
+        fallbackCandidateCount: openEquipmentSnapshotMatches.length,
+        fallbackCandidateIds: compactResolutionIds(openEquipmentSnapshotMatches, match => match.rental?.id),
       },
     );
   }

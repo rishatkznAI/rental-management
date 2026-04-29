@@ -445,6 +445,8 @@ function registerDeliveryRoutes(router, deps) {
     const previousCarrierId = resolveDeliveryCarrierId(previous);
     const nextCarrierId = resolveDeliveryCarrierId(next);
     if (!nextCarrierId) return false;
+    // IMPORTANT: completed/cancelled deliveries are terminal. Do not re-send them as
+    // active tasks to the carrier bot after edits.
     if (next.status === 'completed' || next.status === 'cancelled') return false;
 
     const carrierChanged = previousCarrierId !== nextCarrierId;

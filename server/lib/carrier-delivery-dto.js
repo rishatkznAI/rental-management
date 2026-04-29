@@ -118,6 +118,8 @@ function driverCommentForCarrier(delivery) {
 
 function toCarrierDeliveryDto(delivery, options = {}) {
   const equipment = options.equipment || null;
+  // IMPORTANT: this DTO is intentionally operational. Do not add client finances,
+  // client documents, rental ids, or clientId to data sent to carrier users.
   return {
     number: delivery?.number || delivery?.deliveryNumber || delivery?.id || '',
     type: delivery?.type === 'receiving' ? 'receiving' : 'shipping',
@@ -162,6 +164,8 @@ function formatCarrierDeliveryList(deliveries, options = {}) {
   }
 
   const getEquipment = typeof options.getEquipment === 'function' ? options.getEquipment : () => null;
+  // IMPORTANT: callers must pass only active, carrier-scoped deliveries. Completed and
+  // cancelled deliveries are terminal and should not be shown as active carrier tasks.
   const lines = list.slice(0, 10).map((delivery, index) => {
     const dto = toCarrierDeliveryDto(delivery, { equipment: getEquipment(delivery) });
     return [

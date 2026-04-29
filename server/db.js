@@ -9,6 +9,8 @@ const DB_PATH = process.env.DB_PATH
 const DATA_DIR = path.dirname(DB_PATH);
 
 const JSON_COLLECTIONS = [
+  // IMPORTANT: app_data records are schemaless JSON and older rows may not have newly
+  // introduced fields. Keep readers/writers backward compatible.
   'equipment',
   'rentals',
   'gantt_rentals',

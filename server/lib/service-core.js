@@ -160,6 +160,8 @@ function createServiceCore(deps) {
       rental.status !== 'closed'
     );
 
+    // IMPORTANT: equipment status is derived from the service/rental state. Closing one
+    // ticket must not mark equipment available while another open ticket or rental blocks it.
     const nextEquipment = equipmentList.map(item => {
       const matches =
         (ticket.equipmentId && item.id === ticket.equipmentId) ||

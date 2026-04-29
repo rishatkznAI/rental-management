@@ -50,6 +50,8 @@ function getReceivableKey(row) {
 function buildRentalDebtRows(rentals, payments) {
   const byRentalId = new Map();
   (payments || []).forEach(payment => {
+    // IMPORTANT: payment impact is joined through rentalId. Client names are editable labels
+    // and must not become financial foreign keys for debt calculations.
     if (!payment?.rentalId) return;
     if (!byRentalId.has(payment.rentalId)) byRentalId.set(payment.rentalId, []);
     byRentalId.get(payment.rentalId).push(payment);
@@ -87,6 +89,8 @@ function buildClientReceivables(clients, rentalDebtRows, today = new Date().toIS
   const map = new Map();
 
   (rentalDebtRows || []).forEach(row => {
+    // IMPORTANT: receivables are grouped by stable clientId when present. The display
+    // name may change without losing debt, payment, document, or rental history.
     const rowClientId = getStableClientId(row);
     const client = rowClientId ? clientsById.get(rowClientId) : null;
     const key = getReceivableKey(row);

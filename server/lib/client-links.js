@@ -121,6 +121,8 @@ function normalizeRecordClientLink(record, clients, {
     return record.clientId === stableId ? record : { ...record, clientId: stableId };
   }
 
+  // IMPORTANT: rentalId is the safest recovery path for payments/documents. Name and INN
+  // matching below is only a guarded legacy backfill path for old JSON without clientId.
   const relatedRentalId = firstNonEmpty(record.rentalId, record.rental);
   const relatedRental = relatedRentalId && relatedRentalsById?.get(relatedRentalId);
   const relatedClientId = getStableClientId(relatedRental);

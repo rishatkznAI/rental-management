@@ -332,6 +332,8 @@ function updateBotConnectionRole(botUsers = {}, botSessions = {}, phone = '', us
 
   nextUsers[phoneKey] = nextUser;
 
+  // IMPORTANT: role changes reset the bot scenario. Otherwise a user could continue
+  // an old pending flow after receiving a different set of permissions.
   return {
     ok: true,
     botUsers: nextUsers,

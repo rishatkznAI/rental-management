@@ -22,6 +22,8 @@ function registerFinanceRoutes(router, deps) {
     const clients = readData('clients') || [];
     const rentals = readData('gantt_rentals') || [];
     const payments = readData('payments') || [];
+    // IMPORTANT: finance reports must use backend-scoped collections. Frontend visibility
+    // controls are not a data protection boundary.
     return {
       clients: accessControl.filterCollectionByScope('clients', clients, user),
       rentals: accessControl.filterCollectionByScope('gantt_rentals', rentals, user),

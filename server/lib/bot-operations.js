@@ -709,6 +709,8 @@ function createBotOperations(deps) {
       (r.status === 'active' || r.status === 'created')
     ) || null;
 
+    // IMPORTANT: MAX shipping/receiving is a state-changing business flow. Keep equipment,
+    // rental status, photos, and post-return service inspection in sync in this operation.
     const flattenedPhotos = Object.values(operation.photos || {}).flat();
     const eventType = operation.type === 'receiving' ? 'receiving' : 'shipping';
     const comment = operation.type === 'receiving'
@@ -829,6 +831,8 @@ function createBotOperations(deps) {
       (r.status === 'active' || r.status === 'created')
     ) || null;
 
+    // IMPORTANT: legacy photo commands still update rental/equipment state. Keep this
+    // path consistent with the full operation-session flow above.
     const newEvent = {
       id: generateId(idPrefixes.shipping_photos),
       equipmentId: equipment.id,

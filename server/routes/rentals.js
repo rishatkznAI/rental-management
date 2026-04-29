@@ -67,6 +67,8 @@ function registerRentalRoutes(deps) {
 
     function withClientLink(item, context) {
       if (typeof normalizeRecordClientLink !== 'function') return item;
+      // IMPORTANT: rentals carry clientId as the durable link. The client name is editable
+      // display text and must not be the source of debt/payment/document relationships.
       return normalizeRecordClientLink(item, readData('clients') || [], {
         context: context || `${collection}:${item?.id || 'new'}`,
         logger: console,

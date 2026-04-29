@@ -84,6 +84,8 @@ function registerAuthRoutes(app, deps) {
     const role = String(user?.role || '').trim().toLowerCase();
     const isCarrierRole = role === 'перевозчик' || role === 'carrier';
     if (!isCarrierRole) return false;
+    // IMPORTANT: carrier users are expected to work through MAX only. Frontend login would
+    // expose broader screens than the carrier delivery DTO allows.
     return user.botOnly !== false && user.allowFrontendLogin !== true && user.frontendAccess !== true;
   }
 

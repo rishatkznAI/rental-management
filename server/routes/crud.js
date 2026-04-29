@@ -82,6 +82,8 @@ function registerCrudRoutes(deps) {
   function withClientLink(collection, item) {
     if (typeof normalizeRecordClientLink !== 'function') return item;
     if (!['payments', 'documents', 'crm_deals'].includes(collection)) return item;
+    // IMPORTANT: payments/documents must keep stable clientId links. Client name fields
+    // are display labels and can change after the financial/document history is created.
     return normalizeRecordClientLink(item, readData('clients') || [], {
       context: `${collection}:${item?.id || item?.rentalId || item?.number || 'new'}`,
       relatedRentalsById: relatedRentalsById(),
@@ -120,6 +122,8 @@ function registerCrudRoutes(deps) {
     }
     const role = String(next.role || '').trim().toLowerCase();
     if (role === 'перевозчик' || role === 'carrier') {
+      // IMPORTANT: carrier accounts are MAX-only by default. Do not grant frontend access
+      // unless a separate backend-reviewed business rule explicitly allows it.
       next.role = 'Перевозчик';
       next.botOnly = true;
       next.allowFrontendLogin = false;
@@ -173,6 +177,8 @@ function registerCrudRoutes(deps) {
     const rentals = readData('rentals') || [];
     const rental = rentals.find(item => item.id === rentalId);
     const requests = readData('rental_change_requests') || [];
+    // IMPORTANT: approval records preserve clientId/rentalId so payment and document
+    // corrections stay attached even if the displayed client name changes later.
     const request = {
       id: generateId(idPrefixes.rental_change_requests || 'RCR'),
       entityType,

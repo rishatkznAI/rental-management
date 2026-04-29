@@ -527,6 +527,8 @@ function matchesScopedRental(entity, user, readData) {
   const ids = entityRentalIds(entity);
   if (ids.length > 0 && ids.some(id => scopedIds.some(scopedId => sameId(id, scopedId)))) return true;
 
+  // IMPORTANT: ID links above are authoritative. Client-name fallback exists only for
+  // legacy unlinked records and must not be reused for finance or durable relationships.
   const clientKeys = compact([entity?.clientId, entity?.client, entity?.company]);
   if (clientKeys.length === 0) return false;
   return scopedRentals.some(rental => {
@@ -543,6 +545,8 @@ function isCarrierDelivery(delivery, user) {
     delivery?.carrierId,
     delivery?.carrierKey,
   ]);
+  // IMPORTANT: carriers are scoped by carrierId/carrierKey, not MAX user ids or phone
+  // numbers. That keeps each carrier limited to its assigned deliveries.
   return carrierKeys.some(left => deliveryCarrierKeys.some(right => sameText(left, right)));
 }
 

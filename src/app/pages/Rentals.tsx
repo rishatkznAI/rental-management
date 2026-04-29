@@ -1937,12 +1937,12 @@ export default function Rentals() {
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/80 px-2.5 py-1 text-muted-foreground">
+              <div className="flex max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto whitespace-nowrap text-xs">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary/80 px-2 py-0.5 text-muted-foreground">
                   <span className="font-semibold text-foreground">{shownEquipment}</span>
                   ед. техники
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary/80 px-2.5 py-1 text-muted-foreground">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary/80 px-2 py-0.5 text-muted-foreground">
                   <span className="font-semibold text-foreground">{shownRentals}</span>
                   аренд
                 </span>
@@ -1950,7 +1950,7 @@ export default function Rentals() {
                   type="button"
                   onClick={() => toggleRentalPreset('unpaid')}
                   className={cn(
-                    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 transition-colors',
+                    'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 transition-colors',
                     rentalPreset === 'unpaid'
                       ? 'border-blue-400/40 bg-blue-500/20 text-blue-200'
                       : 'border-blue-500/15 bg-blue-500/10 text-blue-300 hover:border-blue-400/30 hover:bg-blue-500/15',
@@ -1964,7 +1964,7 @@ export default function Rentals() {
                   type="button"
                   onClick={() => toggleRentalPreset('overdue')}
                   className={cn(
-                    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 transition-colors',
+                    'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 transition-colors',
                     rentalPreset === 'overdue'
                       ? 'border-red-400/40 bg-red-500/20 text-red-200'
                       : 'border-red-500/15 bg-red-500/10 text-red-300 hover:border-red-400/30 hover:bg-red-500/15',

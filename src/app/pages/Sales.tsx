@@ -30,9 +30,17 @@ function getSaleReadinessBadge(status: EquipmentSalePdiStatus = 'not_started') {
   );
 }
 
+function apiErrorMessage(error: unknown, fallback: string) {
+  if (!error) return fallback;
+  const status = typeof error === 'object' && error && 'status' in error ? `HTTP ${(error as { status?: number }).status}` : '';
+  const message = error instanceof Error ? error.message : fallback;
+  return [status, message].filter(Boolean).join(': ');
+}
+
 export default function Sales() {
   const { can } = usePermissions();
-  const { data: rawEquipment = [] } = useEquipmentList();
+  const equipmentQuery = useEquipmentList();
+  const rawEquipment = equipmentQuery.data ?? [];
   const [search, setSearch] = React.useState('');
   const [pdiFilter, setPdiFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
@@ -99,6 +107,18 @@ export default function Sales() {
           </Link>
         )}
       </div>
+
+      {equipmentQuery.error && (
+        <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-100">
+          <div className="font-semibold">Не удалось загрузить технику для продаж</div>
+          <div className="mt-1 text-red-700/80 dark:text-red-100/80">
+            {apiErrorMessage(equipmentQuery.error, 'Проверьте доступ к GET /api/equipment.')}
+          </div>
+          <div className="mt-2 text-red-700/80 dark:text-red-100/80">
+            Для роли механика по гарантии дополнительно проверьте `GET /api/access-diagnostics`.
+          </div>
+        </section>
+      )}
 
       <div className="grid gap-3 md:grid-cols-3">
         <Card>

@@ -241,11 +241,20 @@ function EmptyState() {
   );
 }
 
+function apiErrorMessage(error: unknown, fallback: string) {
+  if (!error) return fallback;
+  const status = typeof error === 'object' && error && 'status' in error ? `HTTP ${(error as { status?: number }).status}` : '';
+  const message = error instanceof Error ? error.message : fallback;
+  return [status, message].filter(Boolean).join(': ');
+}
+
 export default function Equipment() {
   const { user } = useAuth();
   const { can } = usePermissions();
-  const { data: equipmentList = [] } = useEquipmentList();
-  const { data: ganttRentals = [] } = useGanttData();
+  const equipmentQuery = useEquipmentList();
+  const ganttQuery = useGanttData();
+  const equipmentList = equipmentQuery.data ?? [];
+  const ganttRentals = ganttQuery.data ?? [];
   const equipmentTypeCatalog = useEquipmentTypeCatalog();
   const [search, setSearch] = React.useState('');
   const [activeTab, setActiveTab] = React.useState<EquipmentTab>('active');
@@ -447,6 +456,20 @@ export default function Equipment() {
           </div>
         </div>
       </section>
+
+      {(equipmentQuery.error || ganttQuery.error) && (
+        <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+          <div className="font-semibold">Не удалось загрузить данные техники</div>
+          <div className="mt-1 text-red-100/80">
+            {apiErrorMessage(equipmentQuery.error || ganttQuery.error, 'Проверьте доступ к /api/equipment и /api/gantt_rentals.')}
+          </div>
+          {isWarrantyMechanicRole(user?.role) && (
+            <div className="mt-2 text-red-100/80">
+              Для диагностики под этим пользователем откройте в Network `GET /api/access-diagnostics`.
+            </div>
+          )}
+        </section>
+      )}
 
       <FilterDialog
         open={showFilters}

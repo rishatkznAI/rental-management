@@ -5,6 +5,9 @@ import { readFileSync } from 'node:fs';
 const permissionsSource = readFileSync(new URL('../src/app/lib/permissions.ts', import.meta.url), 'utf8');
 const userStorageSource = readFileSync(new URL('../src/app/lib/userStorage.ts', import.meta.url), 'utf8');
 const sidebarSource = readFileSync(new URL('../src/app/components/layout/Sidebar.tsx', import.meta.url), 'utf8');
+const equipmentPageSource = readFileSync(new URL('../src/app/pages/Equipment.tsx', import.meta.url), 'utf8');
+const servicePageSource = readFileSync(new URL('../src/app/pages/Service.tsx', import.meta.url), 'utf8');
+const salesPageSource = readFileSync(new URL('../src/app/pages/Sales.tsx', import.meta.url), 'utf8');
 
 function warrantyPermissionBlock() {
   const match = permissionsSource.match(/\[WARRANTY_MECHANIC_ROLE\]:\s*\{(?<body>[\s\S]*?)\n\s*\},/);
@@ -37,4 +40,20 @@ test('frontend normalizes warranty mechanic role aliases', () => {
   assert.match(userStorageSource, /'механик по гарантии'/);
   assert.match(userStorageSource, /normalizeRoleKey/);
   assert.match(permissionsSource, /normalizeUserRole\(user\?\.role\)/);
+});
+
+test('frontend does not mask equipment and service API failures as empty warranty data', () => {
+  assert.match(equipmentPageSource, /const equipmentQuery = useEquipmentList\(\)/);
+  assert.match(equipmentPageSource, /equipmentQuery\.data \?\? \[\]/);
+  assert.match(equipmentPageSource, /GET \/api\/access-diagnostics/);
+  assert.match(equipmentPageSource, /\/api\/equipment/);
+
+  assert.match(servicePageSource, /const ticketsQuery = useServiceTicketsList\(\)/);
+  assert.match(servicePageSource, /ticketsQuery\.data \?\? \[\]/);
+  assert.match(servicePageSource, /GET \/api\/service/);
+  assert.match(servicePageSource, /GET \/api\/access-diagnostics/);
+
+  assert.match(salesPageSource, /const equipmentQuery = useEquipmentList\(\)/);
+  assert.match(salesPageSource, /equipmentQuery\.data \?\? \[\]/);
+  assert.match(salesPageSource, /GET \/api\/equipment/);
 });

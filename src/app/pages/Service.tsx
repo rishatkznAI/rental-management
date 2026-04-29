@@ -94,6 +94,13 @@ function shouldLogWarrantyDebug() {
   return import.meta.env.DEV || window.localStorage.getItem('warrantyDebug') === '1';
 }
 
+function apiErrorMessage(error: unknown, fallback: string) {
+  if (!error) return fallback;
+  const status = typeof error === 'object' && error && 'status' in error ? `HTTP ${(error as { status?: number }).status}` : '';
+  const message = error instanceof Error ? error.message : fallback;
+  return [status, message].filter(Boolean).join(': ');
+}
+
 function serviceFilterReasons(
   ticket: ServiceTicket,
   filters: {
@@ -193,7 +200,8 @@ function ServiceMetricCard({
 export default function Service() {
   const { user } = useAuth();
   const { can } = usePermissions();
-  const { data: ticketList = [] } = useServiceTicketsList();
+  const ticketsQuery = useServiceTicketsList();
+  const ticketList = ticketsQuery.data ?? [];
   const canManageWarrantyClaims = can('edit', 'service');
   const [search, setSearch] = React.useState('');
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
@@ -421,6 +429,20 @@ export default function Service() {
           </Link>
         )}
       </div>
+
+      {ticketsQuery.error && (
+        <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-100">
+          <div className="font-semibold">Не удалось загрузить сервисные заявки</div>
+          <div className="mt-1 text-red-700/80 dark:text-red-100/80">
+            {apiErrorMessage(ticketsQuery.error, 'Проверьте доступ к GET /api/service.')}
+          </div>
+          {isWarrantyMechanicRole(user?.role) && (
+            <div className="mt-2 text-red-700/80 dark:text-red-100/80">
+              Для диагностики под этим пользователем откройте в Network `GET /api/access-diagnostics`.
+            </div>
+          )}
+        </section>
+      )}
 
       <FilterDialog
         open={showFilters}

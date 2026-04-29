@@ -291,7 +291,17 @@ function rentalApprovalErrorMessage(error: unknown): string {
   const candidates = typeof details?.fallbackCandidateCount === 'number'
     ? `кандидатов=${details.fallbackCandidateCount}`
     : '';
-  const suffix = [reason, hasSnapshot, candidates].filter(Boolean).join(' · ');
+  const snapshotClient = typeof details?.snapshotClient === 'string' && details.snapshotClient
+    ? `клиент=${details.snapshotClient}`
+    : '';
+  const oldStartDate = typeof details?.oldStartDate === 'string' ? details.oldStartDate : '';
+  const oldEndDate = typeof details?.oldEndDate === 'string' ? details.oldEndDate : '';
+  const newStartDate = typeof details?.newStartDate === 'string' ? details.newStartDate : '';
+  const newEndDate = typeof details?.newEndDate === 'string' ? details.newEndDate : '';
+  const dates = oldStartDate || oldEndDate || newStartDate || newEndDate
+    ? `даты=${oldStartDate || '?'}-${oldEndDate || '?'}→${newStartDate || '?'}-${newEndDate || '?'}`
+    : '';
+  const suffix = [reason, hasSnapshot, candidates, snapshotClient, dates].filter(Boolean).join(' · ');
   return suffix ? `${error.message}. ${suffix}` : error.message;
 }
 

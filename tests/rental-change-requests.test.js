@@ -1198,6 +1198,60 @@ test('PATCH /api/rentals/:id resolves broken GR by client and old dates when equ
   });
 });
 
+test('PATCH /api/rentals/:id restores orphan gantt rental before creating approval', async () => {
+  const { app, state } = createApprovalApp();
+  state.rentals = state.rentals.filter(item => item.id !== 'R-032');
+  state.gantt_rentals.push({
+    id: 'GR-1776254974522',
+    client: 'Стройтрест Алабуга',
+    startDate: '2026-04-10',
+    endDate: '2026-04-20',
+    equipmentId: 'EQ-032',
+    equipmentInv: '03291436',
+    manager: 'Руслан',
+    managerId: 'U-manager',
+    status: 'active',
+    amount: 90000,
+    comments: [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1776254974522', 'manager-token', {
+      startDate: '2026-04-07',
+      plannedReturnDate: '2026-04-09',
+      ganttRentalId: 'GR-1776254974522',
+      __ganttSnapshot: {
+        id: 'GR-1776254974522',
+        client: 'Стройтрест Алабуга',
+        startDate: '2026-04-10',
+        endDate: '2026-04-20',
+        equipmentInv: '03291436',
+      },
+      entityType: 'rental',
+      actionType: 'gantt_rental_update',
+      oldValues: { startDate: '2026-04-10', plannedReturnDate: '2026-04-20' },
+      newValues: { startDate: '2026-04-07', plannedReturnDate: '2026-04-09' },
+      changes: [
+        { field: 'startDate', oldValue: '2026-04-10', newValue: '2026-04-07' },
+        { field: 'plannedReturnDate', oldValue: '2026-04-20', newValue: '2026-04-09' },
+      ],
+      __changeReason: 'Перенос аренды 03291436 на 07.04',
+    });
+
+    assert.equal(update.status, 200);
+    assert.match(update.body.id, /^R-/);
+    assert.notEqual(update.body.id, 'GR-1776254974522');
+    const restoredRental = state.rentals.find(item => item.id === update.body.id);
+    assert.equal(restoredRental.client, 'Стройтрест Алабуга');
+    assert.equal(restoredRental.startDate, '2026-04-10');
+    assert.equal(restoredRental.plannedReturnDate, '2026-04-20');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1776254974522').rentalId, update.body.id);
+    assert.equal(state.rental_change_requests.length, 2);
+    assert.equal(state.rental_change_requests[0].rentalId, update.body.id);
+    assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-1776254974522');
+  });
+});
+
 test('rentals PATCH returns clear 400 and 404 for bad approval ids', async () => {
   const { app } = createApprovalApp();
 

@@ -105,6 +105,125 @@ function registerRentalRoutes(deps) {
       writeData('gantt_rentals', ganttRentals);
     }
 
+    function mergeGanttRentalForRepair(primary, fallback) {
+      if (!fallback) return primary;
+      if (!primary) return fallback;
+      return {
+        ...fallback,
+        ...primary,
+        clientId: primary.clientId || fallback.clientId,
+        client: primary.client || fallback.client,
+        clientShort: primary.clientShort || fallback.clientShort,
+        equipmentId: primary.equipmentId || fallback.equipmentId,
+        equipmentInv: primary.equipmentInv || fallback.equipmentInv || fallback.inventoryNumber,
+        startDate: primary.startDate || fallback.startDate,
+        endDate: primary.endDate || primary.plannedReturnDate || fallback.endDate || fallback.plannedReturnDate,
+        manager: primary.manager || fallback.manager,
+        managerId: primary.managerId || fallback.managerId,
+        amount: primary.amount ?? fallback.amount,
+      };
+    }
+
+    function generateUniqueRentalId(existingRentals) {
+      const existingIds = new Set((existingRentals || []).map(item => String(item?.id || '')));
+      let id = generateId(prefix);
+      for (let attempt = 0; attempt < 5 && existingIds.has(id); attempt += 1) {
+        id = generateId(prefix);
+      }
+      return id;
+    }
+
+    function buildClassicRentalFromGantt(ganttRental, rawMeta, author, existingRentals) {
+      const equipmentList = readData('equipment') || [];
+      const equipmentById = equipmentList.find(item => item.id === ganttRental.equipmentId);
+      const equipmentInv = ganttRental.equipmentInv || ganttRental.inventoryNumber || equipmentById?.inventoryNumber || '';
+      const oldValues = rawMeta.oldValues || {};
+      const restored = withClientLink({
+        id: generateUniqueRentalId(existingRentals),
+        clientId: ganttRental.clientId || oldValues.clientId || '',
+        client: ganttRental.client || oldValues.client || '',
+        contact: ganttRental.contact || '',
+        startDate: oldValues.startDate || ganttRental.startDate || '',
+        plannedReturnDate: oldValues.plannedReturnDate || oldValues.endDate || ganttRental.endDate || ganttRental.plannedReturnDate || '',
+        equipmentId: ganttRental.equipmentId || '',
+        equipmentInv,
+        equipment: equipmentInv ? [equipmentInv] : (ganttRental.equipmentId ? [ganttRental.equipmentId] : []),
+        rate: ganttRental.rate || '',
+        price: Number(ganttRental.amount ?? ganttRental.price) || 0,
+        discount: Number(ganttRental.discount) || 0,
+        deliveryAddress: ganttRental.deliveryAddress || '',
+        deliveryTime: ganttRental.deliveryTime || '',
+        manager: ganttRental.manager || '',
+        managerId: ganttRental.managerId || '',
+        status: ganttRental.status === 'closed' || ganttRental.status === 'returned' ? ganttRental.status : 'active',
+        expectedPaymentDate: ganttRental.expectedPaymentDate || '',
+        paymentStatus: ganttRental.paymentStatus || '',
+        documents: Array.isArray(ganttRental.documents) ? ganttRental.documents : [],
+        comments: '',
+        history: [{
+          date: new Date().toISOString(),
+          text: `Карточка аренды восстановлена из записи планировщика ${ganttRental.id}`,
+          author: author || 'Система',
+          type: 'system',
+        }],
+      }, `rentals:repair-from-gantt:${ganttRental.id}`);
+      return restored;
+    }
+
+    function restoreOrphanGanttRentalIfSafe(req, data, rawMeta, fallbackGanttRental, resolution) {
+      if (collection !== 'rentals') return null;
+      if (resolution?.status !== 404) return null;
+      const requestedIds = [
+        req.params.id,
+        rawMeta.linkedGanttRentalId,
+        rawMeta.ganttRentalId,
+        fallbackGanttRental?.id,
+      ].map(value => String(value || '').trim()).filter(Boolean);
+      if (!requestedIds.some(value => /^GR-/i.test(value))) return null;
+
+      const ganttRentals = readData('gantt_rentals') || [];
+      const ganttIdx = ganttRentals.findIndex(item => requestedIds.some(id => String(item?.id || '') === id));
+      if (ganttIdx === -1) return null;
+      const exactGanttRental = ganttRentals[ganttIdx];
+      if (exactGanttRental.rentalId || exactGanttRental.sourceRentalId || exactGanttRental.originalRentalId) return null;
+
+      try {
+        accessControl.assertCanUpdateEntity('gantt_rentals', exactGanttRental, req.user);
+      } catch {
+        return null;
+      }
+
+      const repairSource = mergeGanttRentalForRepair(exactGanttRental, fallbackGanttRental);
+      const restoredRental = buildClassicRentalFromGantt(repairSource, rawMeta, req.user?.userName, data);
+      const validation = validateRentalPayload('rentals', restoredRental, data, readData('equipment') || [], '', { skipConflictCheck: false });
+      if (!validation.ok) {
+        console.warn('[rental-approval] orphan gantt repair skipped', JSON.stringify({
+          ganttRentalId: exactGanttRental.id,
+          status: validation.status,
+          error: validation.error,
+        }));
+        return null;
+      }
+
+      data.push(restoredRental);
+      writeData('rentals', data);
+      const repairedGanttRental = {
+        ...exactGanttRental,
+        rentalId: restoredRental.id,
+        sourceRentalId: restoredRental.id,
+        originalRentalId: exactGanttRental.originalRentalId || restoredRental.id,
+      };
+      ganttRentals[ganttIdx] = repairedGanttRental;
+      writeData('gantt_rentals', ganttRentals);
+      auditLog?.(req, {
+        action: 'rentals.repair_from_gantt',
+        entityType: 'rentals',
+        entityId: restoredRental.id,
+        after: { rentalId: restoredRental.id, ganttRentalId: repairedGanttRental.id },
+      });
+      return { restoredRental, ganttRentals };
+    }
+
     function logRentalResolutionFailure(req, resolution, rawMeta) {
       if (resolution.status !== 404 && resolution.status !== 409) return;
       const details = resolution.details || {};
@@ -312,15 +431,36 @@ function registerRentalRoutes(deps) {
                 rawMeta.ganttSnapshot.previousEndDate,
             }
           : rawMeta.ganttSnapshot;
-        const resolution = resolveRentalForChangeRequest({
+        let ganttRentalsForResolution = readData('gantt_rentals') || [];
+        let resolution = resolveRentalForChangeRequest({
           rentalId: safeRentalId || safeSourceRentalId || req.params.id,
           linkedGanttRentalId,
           fallbackGanttRental,
           rentals: data,
-          ganttRentals: readData('gantt_rentals') || [],
+          ganttRentals: ganttRentalsForResolution,
           equipment: readData('equipment') || [],
           context: `${req.method} ${req.originalUrl || req.url}`,
         });
+        if (!resolution.ok) {
+          const repaired = restoreOrphanGanttRentalIfSafe(req, data, rawMeta, fallbackGanttRental, resolution);
+          if (repaired) {
+            ganttRentalsForResolution = repaired.ganttRentals;
+            resolution = resolveRentalForChangeRequest({
+              rentalId: repaired.restoredRental.id,
+              linkedGanttRentalId,
+              fallbackGanttRental: {
+                ...fallbackGanttRental,
+                rentalId: repaired.restoredRental.id,
+                sourceRentalId: repaired.restoredRental.id,
+                originalRentalId: repaired.restoredRental.id,
+              },
+              rentals: data,
+              ganttRentals: ganttRentalsForResolution,
+              equipment: readData('equipment') || [],
+              context: `${req.method} ${req.originalUrl || req.url}`,
+            });
+          }
+        }
         if (!resolution.ok) {
           const debug = buildRentalResolutionDebug(req, resolution, rawMeta);
           logRentalResolutionFailure(req, resolution, rawMeta);

@@ -201,6 +201,55 @@ function equipmentReferenceTokens(value) {
   return [...tokens];
 }
 
+function mergeGanttRentalContext(primary, fallback) {
+  if (!primary) return fallback || null;
+  if (!fallback) return primary;
+  return {
+    ...fallback,
+    ...primary,
+    rentalId: primary.rentalId || fallback.rentalId,
+    sourceRentalId: primary.sourceRentalId || fallback.sourceRentalId,
+    originalRentalId: primary.originalRentalId || fallback.originalRentalId,
+    classicRentalId: primary.classicRentalId || fallback.classicRentalId,
+    entityId: primary.entityId || fallback.entityId,
+    approvalEntityId: primary.approvalEntityId || fallback.approvalEntityId,
+    clientId: primary.clientId || fallback.clientId,
+    client: primary.client || fallback.client,
+    clientShort: primary.clientShort || fallback.clientShort,
+    equipmentId: primary.equipmentId || fallback.equipmentId,
+    equipmentInv: primary.equipmentInv || fallback.equipmentInv,
+    inventoryNumber: primary.inventoryNumber || fallback.inventoryNumber,
+    serialNumber: primary.serialNumber || fallback.serialNumber,
+    equipmentName: primary.equipmentName || fallback.equipmentName,
+    equipmentLabel: primary.equipmentLabel || fallback.equipmentLabel,
+    equipmentRef: primary.equipmentRef || fallback.equipmentRef,
+    equipmentTitle: primary.equipmentTitle || fallback.equipmentTitle,
+    title: primary.title || fallback.title,
+    name: primary.name || fallback.name,
+    label: primary.label || fallback.label,
+    entity: primary.entity || fallback.entity,
+    unit: primary.unit || fallback.unit,
+    startDate: primary.startDate || fallback.startDate,
+    endDate: primary.endDate || fallback.endDate,
+    plannedReturnDate: primary.plannedReturnDate || fallback.plannedReturnDate,
+  };
+}
+
+function mergeGanttRentalsWithSnapshot(ganttRentals = [], snapshotGanttRental = null) {
+  if (!snapshotGanttRental) return ganttRentals || [];
+  const snapshotId = normalizeRentalIdentifier(snapshotGanttRental.id);
+  let merged = false;
+  const mergedList = (ganttRentals || []).map((ganttRental) => {
+    if (snapshotId && sameRentalIdentifier(ganttRental?.id, snapshotId)) {
+      merged = true;
+      return mergeGanttRentalContext(snapshotGanttRental, ganttRental);
+    }
+    return ganttRental;
+  });
+  if (!merged) mergedList.push(snapshotGanttRental);
+  return mergedList;
+}
+
 function buildEquipmentAliases(record, equipmentList = []) {
   const indexes = equipmentIndexes(equipmentList);
   const aliases = {
@@ -417,7 +466,7 @@ function resolveRentalForChangeRequest({
     sameRentalIdentifier(snapshotGanttRental.id, requestedRentalId)
   );
   const resolverGanttRentals = snapshotMatchesRequestedId
-    ? [...(ganttRentals || []), snapshotGanttRental]
+    ? mergeGanttRentalsWithSnapshot(ganttRentals, snapshotGanttRental)
     : (ganttRentals || []);
   const directGanttMatches = resolverGanttRentals
     .filter(ganttRental =>

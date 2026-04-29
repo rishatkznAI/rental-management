@@ -29,11 +29,15 @@ export function clearToken(): void {
   localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  details?: unknown;
+  body?: unknown;
+  constructor(message: string, status: number, details?: unknown, body?: unknown) {
     super(message);
     this.status = status;
+    this.details = details;
+    this.body = body;
     this.name = 'ApiError';
   }
 }
@@ -68,13 +72,17 @@ async function request<T>(
 
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
+    let details: unknown;
+    let body: unknown;
     try {
       const json = await res.json();
+      body = json;
       message = json.error || message;
+      details = json.details;
     } catch {
       // ignore parse error
     }
-    throw new ApiError(message, res.status);
+    throw new ApiError(message, res.status, details, body);
   }
 
   // 204 No Content or empty body

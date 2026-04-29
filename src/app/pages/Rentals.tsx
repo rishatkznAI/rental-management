@@ -34,6 +34,7 @@ import { paymentsService } from '../services/payments.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
 import { clientsService } from '../services/clients.service';
 import { usersService } from '../services/users.service';
+import { ApiError } from '../lib/api';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
@@ -166,9 +167,37 @@ function matchesClassicRentalForGanttByShape(ganttRental: GanttRentalData, renta
   return hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
 }
 
+function matchesClassicRentalForGanttByClientEquipment(ganttRental: GanttRentalData, rental: Rental, equipmentList: Equipment[] = []): boolean {
+  const linkedRentalId = getGanttRentalSourceId(ganttRental);
+  if (linkedRentalId) return String(rental.id) === linkedRentalId;
+  const sameClient = ganttRental.clientId && rental.clientId
+    ? ganttRental.clientId === rental.clientId
+    : ganttRental.client === rental.client;
+  return sameClient && hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
+}
+
 function dateRangesOverlap(startA: string, endA: string, startB: string, endB: string): boolean {
   if (!startA || !endA || !startB || !endB) return false;
   return startA <= endB && startB <= endA;
+}
+
+function rentalApprovalErrorMessage(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return error instanceof Error ? error.message : 'Не удалось отправить изменение на согласование';
+  }
+
+  const details = error.details && typeof error.details === 'object'
+    ? error.details as Record<string, unknown>
+    : null;
+  const reason = typeof details?.possibleReason === 'string' ? details.possibleReason : '';
+  const hasSnapshot = details && Object.prototype.hasOwnProperty.call(details, 'hasGanttSnapshot')
+    ? `snapshot=${details.hasGanttSnapshot ? 'yes' : 'no'}`
+    : '';
+  const candidates = typeof details?.fallbackCandidateCount === 'number'
+    ? `кандидатов=${details.fallbackCandidateCount}`
+    : '';
+  const suffix = [reason, hasSnapshot, candidates].filter(Boolean).join(' · ');
+  return suffix ? `${error.message}. ${suffix}` : error.message;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -649,9 +678,12 @@ export default function Rentals() {
         ) ||
         ganttRental;
       const strictLinkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(currentGanttRental, item, equipmentList));
-      const linkedRentals = strictLinkedRentals.length > 0
+      const shapeLinkedRentals = strictLinkedRentals.length > 0
         ? strictLinkedRentals
         : classicRentals.filter(item => matchesClassicRentalForGanttByShape(currentGanttRental, item, equipmentList));
+      const linkedRentals = shapeLinkedRentals.length > 0
+        ? shapeLinkedRentals
+        : classicRentals.filter(item => matchesClassicRentalForGanttByClientEquipment(currentGanttRental, item, equipmentList));
       const sourceRentalId = getGanttRentalSourceId(currentGanttRental);
       if (!sourceRentalId && linkedRentals.length > 1) {
         showToast(
@@ -713,7 +745,7 @@ export default function Rentals() {
       }
       return true;
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Не удалось отправить изменение на согласование', 'error');
+      showToast(rentalApprovalErrorMessage(error), 'error');
       return false;
     }
   }, [equipmentList, queryClient, showToast]);

@@ -301,6 +301,19 @@ function ganttMatchesClassicRental(ganttRental, rental, options = {}) {
   return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
 }
 
+function ganttMatchesClassicRentalByClientEquipment(ganttRental, rental, options = {}) {
+  if (!ganttRental || !rental) return false;
+
+  const ganttClientId = normalizeRentalIdentifier(ganttRental.clientId);
+  const rentalClientId = normalizeRentalIdentifier(rental.clientId);
+  const sameClient = ganttClientId && rentalClientId
+    ? ganttClientId === rentalClientId
+    : normalizedText(ganttRental.client) === normalizedText(rental.client);
+  if (!sameClient) return false;
+
+  return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
+}
+
 function uniqueRentalMatches(matches) {
   const byId = new Map();
   for (const match of matches || []) {
@@ -489,6 +502,33 @@ function resolveRentalForChangeRequest({
         linkedIds,
         fallbackCandidateCount: shapeMatches.length,
         fallbackCandidateIds: compactResolutionIds(shapeMatches, match => match.rental?.id),
+      },
+    );
+  }
+  const looseSnapshotMatches = snapshotMatchesRequestedId
+    ? uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
+      (rentals || [])
+        .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
+        .filter(({ rental }) => ganttMatchesClassicRentalByClientEquipment(ganttRental, rental, { equipmentList: equipment })),
+    ))
+    : [];
+  if (looseSnapshotMatches.length === 1) {
+    return buildRentalResolutionSuccess(
+      looseSnapshotMatches[0],
+      requestedRentalId || requestedGanttId || looseSnapshotMatches[0].linkedGanttRental?.id,
+      looseSnapshotMatches[0].linkedGanttRental,
+    );
+  }
+  if (looseSnapshotMatches.length > 1) {
+    return buildRentalResolutionFailure(
+      409,
+      `Найдено несколько карточек аренды по клиенту и технике для id "${requestedRentalId || requestedGanttId}". Откройте карточку аренды вручную.`,
+      [...searchedIds, ...linkedIds],
+      {
+        ...diagnosticsBase,
+        linkedIds,
+        fallbackCandidateCount: looseSnapshotMatches.length,
+        fallbackCandidateIds: compactResolutionIds(looseSnapshotMatches, match => match.rental?.id),
       },
     );
   }

@@ -134,6 +134,7 @@ function registerRentalRoutes(deps) {
       const receivedId = String(req.params.id || '');
       const receivedRentalId = String(rawMeta.rentalId || rawMeta.sourceRentalId || '');
       const receivedGanttRentalId = String(rawMeta.linkedGanttRentalId || rawMeta.ganttRentalId || '');
+      const snapshot = rawMeta.ganttSnapshot && typeof rawMeta.ganttSnapshot === 'object' ? rawMeta.ganttSnapshot : null;
       const frontendAction = String(rawMeta.actionType || rawMeta.entityType || '').trim();
       const idLooksLikeGantt = /^GR-/i.test(receivedId);
       let possibleReason = 'Аренда не найдена по переданным идентификаторам.';
@@ -163,6 +164,16 @@ function registerRentalRoutes(deps) {
         receivedSourceRentalId: String(rawMeta.sourceRentalId || ''),
         receivedGanttSnapshotId: String(rawMeta.ganttSnapshot?.id || ''),
         hasGanttSnapshot: Boolean(rawMeta.ganttSnapshot),
+        snapshotClient: String(snapshot?.client || snapshot?.clientName || ''),
+        snapshotClientId: String(snapshot?.clientId || ''),
+        snapshotEquipmentId: String(snapshot?.equipmentId || ''),
+        snapshotEquipmentInv: String(snapshot?.equipmentInv || snapshot?.inventoryNumber || ''),
+        snapshotStartDate: String(snapshot?.startDate || ''),
+        snapshotEndDate: String(snapshot?.endDate || snapshot?.plannedReturnDate || ''),
+        oldStartDate: String(rawMeta.oldValues?.startDate || ''),
+        oldEndDate: String(rawMeta.oldValues?.plannedReturnDate || rawMeta.oldValues?.endDate || ''),
+        newStartDate: String(rawMeta.newValues?.startDate || req.body?.startDate || ''),
+        newEndDate: String(rawMeta.newValues?.plannedReturnDate || rawMeta.newValues?.endDate || req.body?.plannedReturnDate || req.body?.endDate || ''),
         searchedCollections: details.searchedCollections || [],
         possibleReason,
         frontendAction,
@@ -282,12 +293,18 @@ function registerRentalRoutes(deps) {
       const data = readData(collection) || [];
       let idx = data.findIndex(entry => String(entry.id) === String(req.params.id));
       if (collection === 'rentals') {
+        const rawRentalId = String(rawMeta.rentalId || '').trim();
+        const rawSourceRentalId = String(rawMeta.sourceRentalId || '').trim();
+        const safeRentalId = /^GR-/i.test(rawRentalId) ? '' : rawRentalId;
+        const safeSourceRentalId = /^GR-/i.test(rawSourceRentalId) ? '' : rawSourceRentalId;
         const linkedGanttRentalId = rawMeta.linkedGanttRentalId ||
           rawMeta.ganttRentalId ||
           (String(req.params.id || '').startsWith('GR-') ? req.params.id : '');
         const fallbackGanttRental = rawMeta.ganttSnapshot
           ? {
               ...rawMeta.ganttSnapshot,
+              client: rawMeta.ganttSnapshot.client || rawMeta.oldValues?.client,
+              clientId: rawMeta.ganttSnapshot.clientId || rawMeta.oldValues?.clientId,
               previousStartDate: rawMeta.oldValues?.startDate || rawMeta.ganttSnapshot.previousStartDate,
               previousEndDate:
                 rawMeta.oldValues?.plannedReturnDate ||
@@ -296,7 +313,7 @@ function registerRentalRoutes(deps) {
             }
           : rawMeta.ganttSnapshot;
         const resolution = resolveRentalForChangeRequest({
-          rentalId: rawMeta.rentalId || rawMeta.sourceRentalId || req.params.id,
+          rentalId: safeRentalId || safeSourceRentalId || req.params.id,
           linkedGanttRentalId,
           fallbackGanttRental,
           rentals: data,
@@ -319,7 +336,7 @@ function registerRentalRoutes(deps) {
         idx = resolution.rentalIndex;
         meta = {
           ...rawMeta,
-          sourceRentalId: rawMeta.sourceRentalId || resolution.sourceRentalId || '',
+          sourceRentalId: safeSourceRentalId || resolution.sourceRentalId || '',
           linkedGanttRentalId: rawMeta.linkedGanttRentalId || rawMeta.ganttRentalId || resolution.linkedGanttRentalId || '',
         };
       }

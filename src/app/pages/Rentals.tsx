@@ -88,6 +88,25 @@ function normalizeMatchRef(value: unknown): string {
   return String(value ?? '').trim();
 }
 
+function normalizedClientKey(value: unknown): string {
+  const words = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .match(/[a-zа-я0-9]+/g) || [];
+  const legalForms = new Set(['ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'llc', 'ooo']);
+  return words.filter(word => !legalForms.has(word)).join('');
+}
+
+function clientNamesCompatible(left: unknown, right: unknown): boolean {
+  const leftKey = normalizedClientKey(left);
+  const rightKey = normalizedClientKey(right);
+  if (!leftKey || !rightKey) return false;
+  if (leftKey === rightKey) return true;
+  const minLength = Math.min(leftKey.length, rightKey.length);
+  return minLength >= 8 && (leftKey.includes(rightKey) || rightKey.includes(leftKey));
+}
+
 type EquipmentAliasRecord = Partial<GanttRentalData> & Partial<Rental> & {
   inventoryNumber?: string;
   serialNumber?: string;
@@ -181,7 +200,7 @@ function matchesClassicRentalForGantt(ganttRental: GanttRentalData, rental: Rent
 
   const sameClient = ganttRental.clientId && rental.clientId
     ? ganttRental.clientId === rental.clientId
-    : ganttRental.client === rental.client;
+    : clientNamesCompatible(ganttRental.client, rental.client);
   const rentalEndDate = rental.plannedReturnDate || (rental as Rental & { endDate?: string }).endDate || '';
   const exactDates = rental.startDate === ganttRental.startDate && rentalEndDate === ganttRental.endDate;
   const overlappingDates = dateRangesOverlap(rental.startDate, rentalEndDate, ganttRental.startDate, ganttRental.endDate);
@@ -203,7 +222,7 @@ function matchesClassicRentalForGanttByClientEquipment(ganttRental: GanttRentalD
   if (linkedRentalId) return String(rental.id) === linkedRentalId;
   const sameClient = ganttRental.clientId && rental.clientId
     ? ganttRental.clientId === rental.clientId
-    : ganttRental.client === rental.client;
+    : clientNamesCompatible(ganttRental.client, rental.client);
   return sameClient && hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
 }
 
@@ -212,6 +231,24 @@ function matchesOpenClassicRentalForGanttByEquipment(ganttRental: GanttRentalDat
   if (linkedRentalId) return String(rental.id) === linkedRentalId;
   if (['closed', 'returned', 'completed', 'cancelled', 'canceled'].includes(String(rental.status || '')) || rental.actualReturnDate) return false;
   return hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
+}
+
+function rentalEndDate(rental: Rental): string {
+  return rental.plannedReturnDate || (rental as Rental & { endDate?: string }).endDate || '';
+}
+
+function matchesOpenClassicRentalForGanttByClient(ganttRental: GanttRentalData, rental: Rental, requireDateMatch = false): boolean {
+  const linkedRentalId = getGanttRentalSourceId(ganttRental);
+  if (linkedRentalId) return String(rental.id) === linkedRentalId;
+  if (['closed', 'returned', 'completed', 'cancelled', 'canceled'].includes(String(rental.status || '')) || rental.actualReturnDate) return false;
+  const sameClient = ganttRental.clientId && rental.clientId
+    ? ganttRental.clientId === rental.clientId
+    : clientNamesCompatible(ganttRental.client, rental.client);
+  if (!sameClient) return false;
+  if (!requireDateMatch) return true;
+  const endDate = rentalEndDate(rental);
+  return (rental.startDate === ganttRental.startDate && endDate === ganttRental.endDate) ||
+    dateRangesOverlap(rental.startDate, endDate, ganttRental.startDate, ganttRental.endDate);
 }
 
 function mergeGanttRentalContext(primary: GanttRentalData, fallback: GanttRentalData): GanttRentalData {
@@ -748,17 +785,23 @@ export default function Rentals() {
       const finalLinkedRentals = linkedRentals.length > 0
         ? linkedRentals
         : classicRentals.filter(item => matchesOpenClassicRentalForGanttByEquipment(currentGanttRental, item, equipmentList));
+      const clientDateLinkedRentals = finalLinkedRentals.length > 0
+        ? finalLinkedRentals
+        : classicRentals.filter(item => matchesOpenClassicRentalForGanttByClient(currentGanttRental, item, true));
+      const clientLinkedRentals = clientDateLinkedRentals.length > 0
+        ? clientDateLinkedRentals
+        : classicRentals.filter(item => matchesOpenClassicRentalForGanttByClient(currentGanttRental, item, false));
       const sourceRentalId = getGanttRentalSourceId(currentGanttRental);
-      if (!sourceRentalId && finalLinkedRentals.length > 1) {
+      if (!sourceRentalId && clientLinkedRentals.length > 1) {
         showToast(
           'Найдено несколько похожих карточек аренды, откройте карточку аренды',
           'error',
         );
         return false;
       }
-      const resolvedRentalId = sourceRentalId || finalLinkedRentals[0]?.id || '';
+      const resolvedRentalId = sourceRentalId || clientLinkedRentals[0]?.id || '';
       const targetRentalId = resolvedRentalId || currentGanttRental.id;
-      const previousRental = finalLinkedRentals.find(item => item.id === resolvedRentalId) || finalLinkedRentals[0] || null;
+      const previousRental = clientLinkedRentals.find(item => item.id === resolvedRentalId) || clientLinkedRentals[0] || null;
       const oldValues = Object.fromEntries(Object.keys(patch).map(field => {
         if (previousRental && field in previousRental) return [field, previousRental[field as keyof Rental]];
         if (field === 'plannedReturnDate') return [field, currentGanttRental.endDate];
@@ -787,7 +830,7 @@ export default function Rentals() {
         __rentalId: resolvedRentalId,
         __linkedGanttRentalId: currentGanttRental.id,
         __ganttRentalId: currentGanttRental.id,
-        __sourceRentalId: currentGanttRental.id,
+        __sourceRentalId: resolvedRentalId,
         __ganttSnapshot: currentGanttRental,
         __changeReason: reason,
       } as Partial<Rental> & Record<string, unknown>);

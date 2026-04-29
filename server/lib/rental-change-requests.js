@@ -743,6 +743,13 @@ function resolveRentalForChangeRequest({
       },
     );
   }
+  const allFallbackMatches = uniqueRentalMatches([
+    ...shapeMatches,
+    ...looseSnapshotMatches,
+    ...openEquipmentSnapshotMatches,
+    ...openClientDateSnapshotMatches,
+    ...openClientSnapshotMatches,
+  ]);
   if (linkedIds.length > 0) {
     return buildRentalResolutionFailure(
       404,
@@ -751,8 +758,8 @@ function resolveRentalForChangeRequest({
       {
         ...diagnosticsBase,
         linkedIds,
-        fallbackCandidateCount: shapeMatches.length,
-        fallbackCandidateIds: compactResolutionIds(shapeMatches, match => match.rental?.id),
+        fallbackCandidateCount: allFallbackMatches.length,
+        fallbackCandidateIds: compactResolutionIds(allFallbackMatches, match => match.rental?.id),
       },
     );
   }
@@ -764,8 +771,8 @@ function resolveRentalForChangeRequest({
     {
       ...diagnosticsBase,
       linkedIds,
-      fallbackCandidateCount: shapeMatches.length,
-      fallbackCandidateIds: compactResolutionIds(shapeMatches, match => match.rental?.id),
+      fallbackCandidateCount: allFallbackMatches.length,
+      fallbackCandidateIds: compactResolutionIds(allFallbackMatches, match => match.rental?.id),
     },
   );
 }

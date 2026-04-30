@@ -1067,6 +1067,10 @@ export interface Delivery {
   createdAt: string;
   updatedAt: string;
   createdBy: string;
+  createdByUserId?: string | null;
+  createdByName?: string | null;
+  createdByPhone?: string | null;
+  createdByEmail?: string | null;
 }
 
 export interface DeliveryCarrier {

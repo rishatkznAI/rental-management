@@ -9,7 +9,10 @@ const require = createRequire(import.meta.url);
 const { createBotHandlers } = require('../server/lib/bot-commands.js');
 const { createBotNotificationService } = require('../server/lib/bot-notifications.js');
 const { createAccessControl } = require('../server/lib/access-control.js');
-const { toCarrierDeliveryDto } = require('../server/lib/carrier-delivery-dto.js');
+const {
+  formatCarrierDeliveryMessage,
+  toCarrierDeliveryDto,
+} = require('../server/lib/carrier-delivery-dto.js');
 const {
   BOT_STAGE_IMAGE_VERSION,
   MANAGER_STAGE_IMAGES,
@@ -1423,6 +1426,10 @@ test('carrier sees only assigned deliveries without client or financial fields',
       clientId: 'C-secret',
       rentalId: 'R-secret',
       ganttRentalId: 'GR-secret',
+      documents: ['DOC-secret'],
+      rentalCost: 444444,
+      rentalAmount: 333333,
+      internalFinance: { margin: 123 },
       cost: 987654321,
       amount: 7654321,
       debt: 1234567,
@@ -1457,7 +1464,7 @@ test('carrier sees only assigned deliveries without client or financial fields',
   assert.match(text, /Mantall XE120W/);
   assert.doesNotMatch(text, /JLG 1930ES/);
   assert.doesNotMatch(text, /Секретный клиент|Чужой клиент|C-secret|R-secret|GR-secret/);
-  assert.doesNotMatch(text, /987654321|7654321|1234567|555555/);
+  assert.doesNotMatch(text, /DOC-secret|987654321|7654321|1234567|555555|444444|333333/);
   assert.match(text, /Комментарий менеджера: Передать комплект закрывающих документов\./);
 
   const dto = toCarrierDeliveryDto(state.deliveries[0]);
@@ -1470,6 +1477,106 @@ test('carrier sees only assigned deliveries without client or financial fields',
   assert.equal('amount' in dto, false);
   assert.equal('debt' in dto, false);
   assert.equal('margin' in dto, false);
+  assert.equal('documents' in dto, false);
+  assert.equal('rentalCost' in dto, false);
+  assert.equal('internalFinance' in dto, false);
+});
+
+test('carrier delivery message prefers responsible manager contact', () => {
+  const text = formatCarrierDeliveryMessage({
+    id: 'DL-contact',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Объект',
+    cargo: 'Mantall XE120W',
+    contactName: 'Иван',
+    contactPhone: '+7 900 000-00-00',
+    responsibleManager: 'Анна Логист',
+    responsibleManagerPhone: '+7 900 111-22-33',
+    responsibleManagerEmail: 'anna@example.test',
+    createdByName: 'Руслан Создатель',
+    createdByPhone: '+7 900 999-99-99',
+    createdByEmail: 'creator@example.test',
+  });
+
+  assert.match(text, /👤 Контакт по заявке:\nИмя: Анна Логист\nТелефон: \+7 900 111-22-33\nEmail: anna@example\.test/);
+  assert.doesNotMatch(text, /Руслан Создатель|creator@example\.test/);
+});
+
+test('carrier delivery message falls back to creator contact', () => {
+  const text = formatCarrierDeliveryMessage({
+    id: 'DL-contact',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Объект',
+    cargo: 'Mantall XE120W',
+    contactName: 'Иван',
+    contactPhone: '+7 900 000-00-00',
+    createdByName: 'Руслан Создатель',
+    createdByPhone: '+7 900 999-99-99',
+    createdByEmail: 'creator@example.test',
+  });
+
+  assert.match(text, /👤 Контакт по заявке:\nИмя: Руслан Создатель\nТелефон: \+7 900 999-99-99\nEmail: creator@example\.test/);
+});
+
+test('carrier delivery contact uses email when phone is missing', () => {
+  const dto = toCarrierDeliveryDto({
+    id: 'DL-contact',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Объект',
+    cargo: 'Mantall XE120W',
+    contactName: 'Иван',
+    contactPhone: '+7 900 000-00-00',
+    manager: 'Руслан Создатель',
+    createdByName: 'Руслан Создатель',
+    createdByEmail: 'creator@example.test',
+  });
+
+  assert.deepEqual(dto.requestContact, {
+    name: 'Руслан Создатель',
+    phone: '',
+    email: 'creator@example.test',
+  });
+  assert.match(formatCarrierDeliveryMessage({
+    id: 'DL-contact',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Объект',
+    cargo: 'Mantall XE120W',
+    contactName: 'Иван',
+    contactPhone: '+7 900 000-00-00',
+    manager: 'Руслан Создатель',
+    createdByName: 'Руслан Создатель',
+    createdByEmail: 'creator@example.test',
+  }), /Имя: Руслан Создатель\nEmail: creator@example\.test/);
+});
+
+test('carrier delivery contact with name only does not crash', () => {
+  const text = formatCarrierDeliveryMessage({
+    id: 'DL-contact',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Объект',
+    cargo: 'Mantall XE120W',
+    contactName: 'Иван',
+    contactPhone: '+7 900 000-00-00',
+    createdByName: 'Руслан Создатель',
+  });
+
+  assert.match(text, /👤 Контакт по заявке:\nИмя: Руслан Создатель/);
+  assert.doesNotMatch(text, /Телефон:|Email:/);
 });
 
 test('carrier status callback checks role, carrierId and writes bot activity audit', async () => {

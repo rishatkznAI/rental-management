@@ -495,6 +495,10 @@ function createBotHandlers(deps) {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       createdBy: authUser.userName,
+      createdByUserId: authUser.userId || null,
+      createdByName: authUser.userName || 'Система',
+      createdByPhone: authUser.phone || null,
+      createdByEmail: authUser.email || null,
     };
     deliveries.push(delivery);
     writeData('deliveries', deliveries);

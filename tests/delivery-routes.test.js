@@ -45,7 +45,14 @@ function makeDelivery(overrides = {}) {
 
 function createDeliveryApp(deliveryOverrides = {}) {
   const state = {
-    users: [{ id: 'U-admin', name: 'Администратор', role: 'Администратор', status: 'Активен' }],
+    users: [{
+      id: 'U-admin',
+      name: 'Администратор',
+      role: 'Администратор',
+      status: 'Активен',
+      phone: '+7 900 123-45-67',
+      email: 'admin@example.test',
+    }],
     deliveries: [makeDelivery(deliveryOverrides)],
     delivery_carriers: [{
       id: 'carrier-1',
@@ -86,6 +93,7 @@ function createDeliveryApp(deliveryOverrides = {}) {
       userId: 'U-admin',
       userName: 'Администратор',
       userRole: 'Администратор',
+      email: 'admin@example.test',
     };
     return next();
   }
@@ -164,6 +172,37 @@ test('updating a delivery with a carrier sends the previously unsent request to 
     assert.match(messages[0].text, /^Появилась новая заявка на отгрузку/);
     assert.match(messages[0].text, /Комментарий менеджера: Забрать у охраны пропуск и комплект документов\./);
     assert.equal(state.deliveries[0].botSendError, null);
+  });
+});
+
+test('creating a delivery stores creator contact fields and sends them to carrier', async () => {
+  const { app, state, messages } = createDeliveryApp();
+  state.deliveries = [];
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      transportDate: '2026-04-29',
+      neededBy: '2026-04-29',
+      origin: 'Новая база',
+      destination: 'Аксубаево',
+      cargo: 'LGMG AS1413 L13000065',
+      contactName: 'Олег',
+      contactPhone: '+7 927 407-07-23',
+      client: 'ИНЖИНИРИНГ',
+      manager: 'Администратор',
+      carrierKey: 'carrier-1',
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.createdBy, 'Администратор');
+    assert.equal(response.body.createdByUserId, 'U-admin');
+    assert.equal(response.body.createdByName, 'Администратор');
+    assert.equal(response.body.createdByPhone, '+7 900 123-45-67');
+    assert.equal(response.body.createdByEmail, 'admin@example.test');
+    assert.equal(state.deliveries[0].createdByUserId, 'U-admin');
+    assert.equal(messages.length, 1);
+    assert.match(messages[0].text, /👤 Контакт по заявке:\nИмя: Администратор\nТелефон: \+7 900 123-45-67\nEmail: admin@example\.test/);
   });
 });
 

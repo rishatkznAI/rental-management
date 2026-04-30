@@ -116,10 +116,84 @@ function driverCommentForCarrier(delivery) {
   ].map(stripInternalCommentLines)).join('\n');
 }
 
+function firstText(values) {
+  return values
+    .map(value => String(value || '').trim())
+    .find(Boolean) || '';
+}
+
+function sameText(left, right) {
+  return String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
+}
+
+function managerContactForCarrier(delivery) {
+  const responsible = delivery?.responsibleManager;
+  const responsibleName = typeof responsible === 'object' && responsible !== null
+    ? firstText([responsible.name, responsible.fullName, responsible.userName])
+    : String(responsible || '').trim();
+  const responsiblePhone = typeof responsible === 'object' && responsible !== null
+    ? firstText([responsible.phone, responsible.mobile, responsible.phoneNumber])
+    : '';
+  const responsibleEmail = typeof responsible === 'object' && responsible !== null
+    ? firstText([responsible.email])
+    : '';
+
+  const name = firstText([
+    responsibleName,
+    delivery?.responsibleManagerName,
+    delivery?.managerName,
+    delivery?.manager,
+  ]);
+
+  if (!name) return null;
+
+  const managerMatchesCreator = sameText(name, delivery?.createdByName) || sameText(name, delivery?.createdBy);
+  return {
+    name,
+    phone: firstText([
+      responsiblePhone,
+      delivery?.responsibleManagerPhone,
+      delivery?.managerPhone,
+      managerMatchesCreator ? delivery?.createdByPhone : '',
+    ]),
+    email: firstText([
+      responsibleEmail,
+      delivery?.responsibleManagerEmail,
+      delivery?.managerEmail,
+      managerMatchesCreator ? delivery?.createdByEmail : '',
+    ]),
+  };
+}
+
+function creatorContactForCarrier(delivery) {
+  const name = firstText([delivery?.createdByName, delivery?.createdBy]);
+  if (!name) return null;
+  return {
+    name,
+    phone: firstText([delivery?.createdByPhone]),
+    email: firstText([delivery?.createdByEmail]),
+  };
+}
+
+function requestContactForCarrier(delivery) {
+  return managerContactForCarrier(delivery) || creatorContactForCarrier(delivery) || null;
+}
+
+function formatRequestContactBlock(contact) {
+  if (!contact?.name) return null;
+  return [
+    '👤 Контакт по заявке:',
+    `Имя: ${contact.name}`,
+    contact.phone ? `Телефон: ${contact.phone}` : null,
+    contact.email ? `Email: ${contact.email}` : null,
+  ].filter(Boolean).join('\n');
+}
+
 function toCarrierDeliveryDto(delivery, options = {}) {
   const equipment = options.equipment || null;
   // IMPORTANT: this DTO is intentionally operational. Do not add client finances,
   // client documents, rental ids, or clientId to data sent to carrier users.
+  const requestContact = requestContactForCarrier(delivery);
   return {
     number: delivery?.number || delivery?.deliveryNumber || delivery?.id || '',
     type: delivery?.type === 'receiving' ? 'receiving' : 'shipping',
@@ -131,6 +205,13 @@ function toCarrierDeliveryDto(delivery, options = {}) {
     destination: delivery?.destination || '',
     contactName: delivery?.contactName || '',
     contactPhone: delivery?.contactPhone || '',
+    requestContact: requestContact
+      ? {
+          name: requestContact.name,
+          phone: requestContact.phone || '',
+          email: requestContact.email || '',
+        }
+      : null,
     driverComment: driverCommentForCarrier(delivery),
     status: delivery?.status || 'new',
     statusLabel: DELIVERY_STATUS_LABELS[delivery?.status] || delivery?.status || 'Новая',
@@ -149,6 +230,7 @@ function formatCarrierDeliveryMessage(delivery, options = {}) {
     `Откуда: ${dto.origin || 'не указано'}`,
     `Куда: ${dto.destination || 'не указано'}`,
     `Контакт: ${[dto.contactName, dto.contactPhone].filter(Boolean).join(' · ') || 'не указан'}`,
+    formatRequestContactBlock(dto.requestContact),
     dto.driverComment ? `Комментарий менеджера: ${dto.driverComment}` : null,
   ].filter(Boolean).join('\n');
 }
@@ -174,6 +256,7 @@ function formatCarrierDeliveryList(deliveries, options = {}) {
       `   Техника: ${dto.equipment}`,
       `   ${dto.origin || 'не указано'} -> ${dto.destination || 'не указано'}`,
       `   Контакт: ${[dto.contactName, dto.contactPhone].filter(Boolean).join(' · ') || 'не указан'}`,
+      formatRequestContactBlock(dto.requestContact)?.split('\n').map(line => `   ${line}`).join('\n'),
       dto.driverComment ? `   Комментарий менеджера: ${dto.driverComment}` : null,
       `   Статус: ${dto.statusLabel}`,
     ].filter(Boolean).join('\n');

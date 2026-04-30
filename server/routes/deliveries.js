@@ -73,7 +73,20 @@ function registerDeliveryRoutes(router, deps) {
     return existing ? `${existing}\n${line}` : line;
   }
 
-  function normalizeDeliveryPayload(body, existing = null, author = 'Система') {
+  function buildDeliveryCreator(req) {
+    const users = readData('users') || [];
+    const userId = String(req.user?.userId || '').trim();
+    const user = users.find(item => String(item.id || '') === userId) || null;
+    const name = String(req.user?.userName || user?.name || 'Система').trim();
+    return {
+      id: userId || null,
+      name,
+      phone: String(user?.phone || req.user?.phone || '').trim() || null,
+      email: String(req.user?.email || user?.email || '').trim() || null,
+    };
+  }
+
+  function normalizeDeliveryPayload(body, existing = null, author = 'Система', creator = null) {
     const type = body.type === 'receiving' ? 'receiving' : 'shipping';
     const status = ['new', 'sent', 'accepted', 'in_transit', 'completed', 'cancelled'].includes(body.status)
       ? body.status
@@ -90,6 +103,9 @@ function registerDeliveryRoutes(router, deps) {
     ensureNonEmpty(body.client, 'Клиент');
     ensureNonEmpty(body.manager || existing?.manager || author, 'Ответственный менеджер');
 
+    const existingCreatorName = String(existing?.createdByName || existing?.createdBy || '').trim().toLowerCase();
+    const currentCreatorName = String(creator?.name || '').trim().toLowerCase();
+    const canUseCurrentCreatorContact = !existing || (existingCreatorName && existingCreatorName === currentCreatorName);
     const next = {
       id: existing?.id || body.id || generateId(idPrefixes.deliveries),
       type,
@@ -127,6 +143,10 @@ function registerDeliveryRoutes(router, deps) {
       createdAt: existing?.createdAt || nowIso(),
       updatedAt: nowIso(),
       createdBy: existing?.createdBy || author,
+      createdByUserId: existing?.createdByUserId || (canUseCurrentCreatorContact ? creator?.id : null) || null,
+      createdByName: existing?.createdByName || existing?.createdBy || creator?.name || author,
+      createdByPhone: existing?.createdByPhone || (canUseCurrentCreatorContact ? creator?.phone : null) || null,
+      createdByEmail: existing?.createdByEmail || (canUseCurrentCreatorContact ? creator?.email : null) || null,
     };
 
     if (next.status === 'completed' && !next.completedAt) {
@@ -614,7 +634,7 @@ function registerDeliveryRoutes(router, deps) {
   router.post('/deliveries', requireAuth, requireWrite('deliveries'), async (req, res) => {
     try {
       const author = req.user.userName;
-      let delivery = normalizeDeliveryPayload(sanitizeDeliveryBody(req.body, null, req), null, author);
+      let delivery = normalizeDeliveryPayload(sanitizeDeliveryBody(req.body, null, req), null, author, buildDeliveryCreator(req));
       const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {
@@ -675,7 +695,7 @@ function registerDeliveryRoutes(router, deps) {
       }
       const author = req.user.userName;
       const safeBody = sanitizeDeliveryBody(req.body, current, req);
-      let delivery = normalizeDeliveryPayload({ ...current, ...safeBody }, current, author);
+      let delivery = normalizeDeliveryPayload({ ...current, ...safeBody }, current, author, buildDeliveryCreator(req));
       const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {

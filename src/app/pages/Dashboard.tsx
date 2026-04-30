@@ -58,6 +58,12 @@ import type {
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
+import {
+  buildActiveRentalFleetLookup,
+  calculateCurrentFleetUtilization,
+  getRentalEquipmentKey,
+  isActiveRentalFleetEquipment,
+} from '../lib/fleetUtilization';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -104,16 +110,6 @@ type RoleFocusCard = {
   icon: React.ElementType;
 };
 
-function getKnownRentalEquipmentKey(
-  rental: Pick<GanttRentalData, 'equipmentId' | 'equipmentInv'>,
-  equipmentById: Map<string, Equipment>,
-  uniqueEquipmentByInventory: Map<string, Equipment>,
-) {
-  if (rental.equipmentId && equipmentById.has(rental.equipmentId)) return rental.equipmentId;
-  if (!rental.equipmentInv) return '';
-  return uniqueEquipmentByInventory.get(rental.equipmentInv)?.id || '';
-}
-
 // ─── main component ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -155,6 +151,10 @@ export default function Dashboard() {
     });
     return uniqueMap;
   }, [equipmentList]);
+  const activeRentalFleetLookup = useMemo(
+    () => buildActiveRentalFleetLookup(equipmentList),
+    [equipmentList],
+  );
 
   const [selectedKPI, setSelectedKPI] = useState<
     | 'utilization'
@@ -235,33 +235,35 @@ export default function Dashboard() {
   const rentedEquipmentKeys = useMemo(() => {
     const keys = new Set<string>();
     activeRentalsList.forEach(rental => {
-      const key = getKnownRentalEquipmentKey(rental, equipmentById, uniqueEquipmentByInventory);
+      const key = getRentalEquipmentKey(rental, activeRentalFleetLookup);
       if (key) keys.add(key);
     });
     return keys;
-  }, [activeRentalsList, equipmentById, uniqueEquipmentByInventory]);
+  }, [activeRentalFleetLookup, activeRentalsList]);
   const reservedEquipmentKeys = useMemo(() => {
     const keys = new Set<string>();
     reservedRentalsList.forEach(rental => {
-      const key = getKnownRentalEquipmentKey(rental, equipmentById, uniqueEquipmentByInventory);
+      const key = getRentalEquipmentKey(rental, activeRentalFleetLookup);
       if (key && !rentedEquipmentKeys.has(key)) keys.add(key);
     });
     return keys;
-  }, [equipmentById, rentedEquipmentKeys, reservedRentalsList, uniqueEquipmentByInventory]);
+  }, [activeRentalFleetLookup, rentedEquipmentKeys, reservedRentalsList]);
 
   // Utilization
   const totalEquipment = equipment.length;
-  const activeEquipment = equipment.filter(e => e.status !== 'inactive').length;
-  const rentedEquipment = rentedEquipmentKeys.size;
+  const fleetUtilization = useMemo(
+    () => calculateCurrentFleetUtilization(equipmentList, activeRentalsList),
+    [activeRentalsList, equipmentList],
+  );
+  const activeEquipment = fleetUtilization.activeEquipment;
+  const rentedEquipment = fleetUtilization.rentedEquipment;
   const availableEquipment = equipmentList.filter(e =>
-    e.status !== 'inactive'
+    isActiveRentalFleetEquipment(e)
     && e.status !== 'in_service'
     && !rentedEquipmentKeys.has(e.id)
     && !reservedEquipmentKeys.has(e.id),
   ).length;
-  const utilization = totalEquipment === 0
-    ? 0
-    : Math.round(safeDiv(rentedEquipment, activeEquipment > 0 ? activeEquipment : totalEquipment) * 100);
+  const utilization = fleetUtilization.utilization;
 
   const overdueRentalsList = viewPlannerRentals.filter(r =>
     isOpenRentalStatus(r.status) && isOverdue(r.endDate)
@@ -1625,17 +1627,17 @@ export default function Dashboard() {
                 <TrendingUp className="h-3.5 w-3.5 text-gray-400" />
               </CardDescription>
               <CardTitle className={`text-3xl font-bold ${
-                totalEquipment === 0 ? 'text-gray-400' :
+                activeEquipment === 0 ? 'text-gray-400' :
                 utilization >= UTILIZATION_TARGET ? 'text-green-600 dark:text-green-400' :
                 utilization >= UTILIZATION_TARGET - 15 ? 'text-amber-600 dark:text-amber-400' :
                 'text-orange-600 dark:text-orange-400'
               }`}>
-                {totalEquipment === 0 ? '—' : `${utilization}%`}
+                {activeEquipment === 0 ? '—' : `${utilization}%`}
               </CardTitle>
             </CardHeader>
             <CardContent className={dashboardCardContentClass}>
-              {totalEquipment === 0 ? (
-                <p className="text-sm text-gray-400">Техника не добавлена</p>
+              {activeEquipment === 0 ? (
+                <p className="text-sm text-gray-400">Активный арендный парк не сформирован</p>
               ) : (
                 <>
                   <p className="text-sm text-gray-500 dark:text-gray-400">{rentedEquipment} из {activeEquipment} ед. в работе</p>

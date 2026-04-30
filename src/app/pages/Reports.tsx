@@ -19,6 +19,10 @@ import {
   getRentalDebtOverdueDays,
 } from '../lib/finance';
 import { getServiceScenarioLabel } from '../lib/serviceScenarios';
+import {
+  calculateCurrentFleetUtilization,
+  calculateMonthlyFleetUtilization,
+} from '../lib/fleetUtilization';
 import type { Equipment, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
@@ -58,12 +62,6 @@ function lastNMonths(n: number) {
     result.push({ year: d.getFullYear(), month: d.getMonth(), label: MONTH_LABELS[d.getMonth()] });
   }
   return result;
-}
-
-function daysOverlap(start: string, end: string, mStart: Date, mEnd: Date): number {
-  const s = Math.max(new Date(start).getTime(), mStart.getTime());
-  const e = Math.min(new Date(end).getTime(), mEnd.getTime());
-  return e >= s ? Math.ceil((e - s) / 86400000) + 1 : 0;
 }
 
 // ─── data types ─────────────────────────────────────────────────────────────
@@ -1196,14 +1194,18 @@ export default function Reports() {
 
   // ─── KPI ──────────────────────────────────────────────────────────────────
   const totalEquipment = equipment.length;
-  const activeEquipment = equipment.filter(e => e.status !== 'inactive').length;
-  const rentedEquipment = equipment.filter(e => e.status === 'rented').length;
+  const fleetUtilization = useMemo(
+    () => calculateCurrentFleetUtilization(equipment, ganttRentals),
+    [equipment, ganttRentals],
+  );
+  const activeEquipment = fleetUtilization.activeEquipment;
+  const rentedEquipment = fleetUtilization.rentedEquipment;
   const activeRentals = ganttRentals.filter(r => r.status === 'active').length;
   const openTickets = tickets.filter(t => t.status !== 'closed').length;
   const inProgressTickets = tickets.filter(t => t.status === 'in_progress').length;
   const utilization = activeEquipment === 0
     ? null
-    : Math.round((rentedEquipment / activeEquipment) * 100);
+    : fleetUtilization.utilization;
 
   // ─── Utilization by month (last 6 months) ────────────────────────────────
   const utilizationData = useMemo(() => {
@@ -1211,16 +1213,10 @@ export default function Reports() {
     return months.map(({ year, month, label }) => {
       const mStart = new Date(year, month, 1);
       const mEnd = new Date(year, month + 1, 0);
-      const daysInMonth = mEnd.getDate();
-      if (totalEquipment === 0) return { month: label, utilization: 0 };
-      const totalPossible = totalEquipment * daysInMonth;
-      const rentedDays = ganttRentals
-        .filter(r => r.status === 'active' || r.status === 'returned' || r.status === 'closed')
-        .reduce((sum, r) => sum + daysOverlap(r.startDate, r.endDate, mStart, mEnd), 0);
-      const pct = totalPossible === 0 ? 0 : Math.min(100, Math.round((rentedDays / totalPossible) * 100));
-      return { month: label, utilization: pct };
+      const monthUtilization = calculateMonthlyFleetUtilization(equipment, ganttRentals, mStart, mEnd);
+      return { month: label, utilization: monthUtilization.utilization };
     });
-  }, [ganttRentals, totalEquipment]);
+  }, [equipment, ganttRentals]);
 
   const hasUtilizationData = utilizationData.some(d => d.utilization > 0);
 

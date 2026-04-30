@@ -1,4 +1,4 @@
-const { isMechanicRole } = require('./role-groups');
+const { isMechanicRole, normalizeRole } = require('./role-groups');
 
 function createBotUi() {
   function button(text, payload) {
@@ -46,11 +46,30 @@ function createBotUi() {
     ]);
   }
 
+  function adminKeyboard() {
+    return keyboard([
+      [button('Мои заявки', 'menu:myrepairs'), button('Новая заявка', 'menu:new_ticket')],
+      [button('Операции', 'menu:operations'), button('Действия по заявке', 'menu:repair_actions')],
+      [button('🔔 Уведомления', 'menu:notifications'), button('Найти технику', 'menu:find_equipment')],
+      [button('Отчёт за день', 'menu:day_report'), button('Помощь', 'menu:help')],
+    ]);
+  }
+
   function rentalManagerKeyboard() {
     return keyboard([
       [button('Мои аренды', 'menu:rentals'), button('Свободная техника', 'menu:equipment')],
       [button('Моя сводка', 'menu:manager_summary'), button('Новая доставка', 'menu:new_delivery')],
-      [button('Новая сервисная', 'menu:new_ticket'), button('Помощь', 'menu:help')],
+      [button('🔔 Уведомления', 'menu:notifications'), button('Новая сервисная', 'menu:new_ticket')],
+      [button('Помощь', 'menu:help')],
+    ]);
+  }
+
+  function notificationsKeyboard() {
+    return keyboard([
+      [button('Возвраты сегодня', 'notifications:returns_today'), button('Возвраты завтра', 'notifications:returns_tomorrow')],
+      [button('Просроченные возвраты', 'notifications:returns_overdue')],
+      [button('Отгрузки сегодня', 'notifications:dispatches_today'), button('Активные отгрузки', 'notifications:dispatches_active')],
+      [button('Главное меню', 'menu:main')],
     ]);
   }
 
@@ -234,13 +253,17 @@ function createBotUi() {
   }
 
   function defaultKeyboardForRole(role) {
-    if (isMechanicRole(role) || role === 'Администратор') {
+    const normalizedRole = normalizeRole(role);
+    if (normalizedRole === 'Администратор') {
+      return adminKeyboard();
+    }
+    if (isMechanicRole(normalizedRole)) {
       return mechanicKeyboard();
     }
-    if (role === 'Менеджер по аренде') {
+    if (normalizedRole === 'Менеджер по аренде') {
       return rentalManagerKeyboard();
     }
-    if (role === 'Перевозчик') {
+    if (normalizedRole === 'Перевозчик') {
       return carrierKeyboard();
     }
     return keyboard([
@@ -256,8 +279,10 @@ function createBotUi() {
     chunkButtons,
     authKeyboard,
     mechanicKeyboard,
+    adminKeyboard,
     rentalManagerKeyboard,
     carrierKeyboard,
+    notificationsKeyboard,
     currentRepairKeyboard,
     operationsKeyboard,
     repairActionsKeyboard,

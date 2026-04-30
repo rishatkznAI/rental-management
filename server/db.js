@@ -46,6 +46,7 @@ const JSON_COLLECTIONS = [
   'bot_users',
   'bot_sessions',
   'bot_activity',
+  'bot_notifications',
   'audit_log',
   'snapshot',
 ];

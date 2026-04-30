@@ -1,4 +1,4 @@
-const { isMechanicRole } = require('./role-groups');
+const { isMechanicRole, normalizeRole } = require('./role-groups');
 
 function createBotFormatters(deps) {
   const {
@@ -492,7 +492,8 @@ function createBotFormatters(deps) {
   }
 
   function formatRentals(rentals, managerName, role) {
-    const filtered = role === 'Менеджер по аренде'
+    const normalizedRole = normalizeRole(role);
+    const filtered = normalizedRole === 'Менеджер по аренде'
       ? rentals.filter(r => r.manager === managerName && (r.status === 'active' || r.status === 'created'))
       : rentals.filter(r => r.status === 'active' || r.status === 'created');
 
@@ -503,7 +504,7 @@ function createBotFormatters(deps) {
       return `• ${rental.equipmentInv} → ${rental.client} ${end}`.trim();
     });
 
-    const header = role === 'Менеджер по аренде'
+    const header = normalizedRole === 'Менеджер по аренде'
       ? `📋 Ваши активные аренды (${filtered.length}):`
       : `📋 Все активные аренды (${filtered.length}):`;
 
@@ -639,9 +640,10 @@ function createBotFormatters(deps) {
   }
 
   function getHelpText(role) {
-    const isMechanic = isMechanicRole(role) || role === 'Администратор';
-    const isRentalManager = role === 'Менеджер по аренде';
-    const isCarrier = role === 'Перевозчик';
+    const normalizedRole = normalizeRole(role);
+    const isMechanic = isMechanicRole(normalizedRole) || normalizedRole === 'Администратор';
+    const isRentalManager = normalizedRole === 'Менеджер по аренде';
+    const isCarrier = normalizedRole === 'Перевозчик';
     const mechanicLines = [
       '/моизаявки — мои сервисные заявки',
       '/новаязаявка — создать новую заявку',
@@ -693,32 +695,33 @@ function createBotFormatters(deps) {
   }
 
   function getMainMenuText(authUser) {
-    if (isMechanicRole(authUser.userRole) || authUser.userRole === 'Администратор') {
+    const normalizedRole = normalizeRole(authUser.userRole);
+    if (isMechanicRole(normalizedRole) || normalizedRole === 'Администратор') {
       return [
-        `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
+        `✅ Вы вошли как ${normalizedRole} (${authUser.userName})`,
         '',
         'Выберите действие кнопками ниже.',
       ].join('\n');
     }
 
-    if (authUser.userRole === 'Менеджер по аренде') {
+    if (normalizedRole === 'Менеджер по аренде') {
       return [
-        `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
+        `✅ Вы вошли как ${normalizedRole} (${authUser.userName})`,
         '',
         'Доступны аренды, свободная техника, утренняя сводка и быстрые заявки в доставку и сервис.',
       ].join('\n');
     }
 
-    if (authUser.userRole === 'Перевозчик') {
+    if (normalizedRole === 'Перевозчик') {
       return [
-        `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
+        `✅ Вы вошли как ${normalizedRole} (${authUser.userName})`,
         '',
         'Здесь вы видите свои доставки и можете менять их статусы: Принять доставку, В пути, Выполнено.',
       ].join('\n');
     }
 
     return [
-      `✅ Вы вошли как ${authUser.userRole} (${authUser.userName})`,
+      `✅ Вы вошли как ${normalizedRole || authUser.userRole} (${authUser.userName})`,
       '',
       'Доступны быстрые команды по аренде, технике и сервису.',
     ].join('\n');

@@ -18,7 +18,7 @@ const {
   operationStageImageKey,
   stageImageAttachment,
 } = require('./bot-stage-images');
-const { isMechanicRole } = require('./role-groups');
+const { isMechanicRole, normalizeRole } = require('./role-groups');
 
 function createBotHandlers(deps) {
   const {
@@ -48,6 +48,7 @@ function createBotHandlers(deps) {
     preferCarrierAutoLogin = false,
     accessControl = null,
     auditLog = null,
+    notificationService = null,
   } = deps;
   const requiredAccessMethods = ['canAccessEntity', 'isCarrierDelivery'];
   const missingAccessMethods = !accessControl
@@ -65,6 +66,7 @@ function createBotHandlers(deps) {
     mechanicKeyboard,
     rentalManagerKeyboard,
     carrierKeyboard,
+    notificationsKeyboard,
     currentRepairKeyboard,
     operationsKeyboard,
     repairActionsKeyboard,
@@ -239,7 +241,8 @@ function createBotHandlers(deps) {
   }
 
   function isMechanicMenuRole(role) {
-    return isMechanicRole(role) || role === 'Администратор';
+    const normalizedRole = normalizeRole(role);
+    return isMechanicRole(normalizedRole) || normalizedRole === 'Администратор';
   }
 
   function mechanicMainStageForRole(role) {
@@ -247,7 +250,7 @@ function createBotHandlers(deps) {
   }
 
   function isRentalManagerRole(role) {
-    return role === 'Менеджер по аренде';
+    return normalizeRole(role) === 'Менеджер по аренде';
   }
 
   function managerStageOptions(role, stageKey) {
@@ -265,9 +268,10 @@ function createBotHandlers(deps) {
   }
 
   function mainMenuImageOptions(role) {
+    const normalizedRole = normalizeRole(role);
     const mechanicStage = mechanicMainStageForRole(role);
-    if (role === 'Перевозчик') return { mechanicStage: 'delivery_main' };
-    if (isRentalManagerRole(role)) return { mechanicStage: 'manager_main' };
+    if (normalizedRole === 'Перевозчик') return { mechanicStage: 'delivery_main' };
+    if (isRentalManagerRole(normalizedRole)) return { mechanicStage: 'manager_main' };
     return mechanicStage ? { mechanicStage } : { brandImage: true };
   }
 
@@ -278,6 +282,18 @@ function createBotHandlers(deps) {
 
   function managerSummaryKeyboard() {
     return rentalManagerKeyboard();
+  }
+
+  function canUseNotificationMenu(role) {
+    const normalizedRole = normalizeRole(role);
+    return normalizedRole === 'Администратор' || normalizedRole === 'Менеджер по аренде';
+  }
+
+  function buildNotificationMenuText(authUser, section = 'summary') {
+    if (!notificationService || typeof notificationService.buildMenuText !== 'function') {
+      return '🔔 Уведомления временно недоступны.';
+    }
+    return notificationService.buildMenuText(authUser, section);
   }
 
   function getServiceRouteNorms() {
@@ -694,7 +710,7 @@ function createBotHandlers(deps) {
       pendingPayload: null,
     });
     const existingUser = getAuthorizedUserForCurrentBot(phone, senderId);
-    if (existingUser?.userRole === 'Перевозчик') {
+    if (normalizeRole(existingUser?.userRole) === 'Перевозчик') {
       return reply(
         senderId,
         getMainMenuText(existingUser),
@@ -884,7 +900,7 @@ function createBotHandlers(deps) {
     botUsers[phone] = {
       userId: found.id,
       userName: found.name,
-      userRole: found.role,
+      userRole: normalizeRole(found.role),
       botMode: 'staff',
       email: found.email,
       replyTarget: normalizeReplyTarget(replyTarget, phone),
@@ -925,14 +941,14 @@ function createBotHandlers(deps) {
 
   function getUserBotMode(user) {
     if (!user) return null;
-    if (user.botMode === 'delivery' || user.userRole === 'Перевозчик') return 'delivery';
+    if (user.botMode === 'delivery' || normalizeRole(user.userRole) === 'Перевозчик') return 'delivery';
     return 'staff';
   }
 
   function getAuthorizedUserForCurrentBot(phone, replyTarget = null) {
     if (!preferCarrierAutoLogin) return getAuthorizedUser(phone);
     const carrierUser = authorizeCarrier(String(phone), replyTarget);
-    return carrierUser?.userRole === 'Перевозчик' ? carrierUser : null;
+    return normalizeRole(carrierUser?.userRole) === 'Перевозчик' ? carrierUser : null;
   }
 
   function canBotUserAccessServiceTicket(ticket, authUser) {
@@ -1118,6 +1134,7 @@ function createBotHandlers(deps) {
       'приёмка',
       'моя сводка',
       'новая доставка',
+      'уведомления',
       'выезд',
       'черновик',
       'итог',
@@ -1142,6 +1159,7 @@ function createBotHandlers(deps) {
       '/техпоиск',
       '/моясводка',
       '/новаядоставка',
+      '/уведомления',
       '/мойдень',
       '/отчётзадень',
       '/отчетзадень',
@@ -1160,6 +1178,7 @@ function createBotHandlers(deps) {
     }
     return payload.startsWith('ticket:') ||
       payload.startsWith('deliverycreate:') ||
+      payload.startsWith('notifications:') ||
       payload.startsWith('equipmentcat:') ||
       payload.startsWith('operation:') ||
       payload.startsWith('reason:') ||
@@ -2210,6 +2229,9 @@ function createBotHandlers(deps) {
         });
       }
       const delivery = createDeliveryFromBot(authUser, draft);
+      if (notificationService?.notifyDeliveryCreated) {
+        await notificationService.notifyDeliveryCreated(delivery);
+      }
       resetBotFlow(phone);
       return reply(senderId, withBotMenu([
         `✅ Доставка создана: ${delivery.id}`,
@@ -2501,6 +2523,12 @@ function createBotHandlers(deps) {
 
       const result = completeBotEquipmentOperation(operation, authUser);
       const completedEquipment = (readData('equipment') || []).find(item => item.id === operation.equipmentId);
+      if (operation.type === 'shipping' && result.activeRental && notificationService?.notifyEquipmentRented) {
+        await notificationService.notifyEquipmentRented(result.activeRental, completedEquipment);
+      }
+      if (operation.type === 'receiving' && result.activeRental && notificationService?.notifyRentalReturned) {
+        await notificationService.notifyRentalReturned(result.activeRental);
+      }
       resetBotFlow(phone);
 
       if (operation.type === 'receiving') {
@@ -2672,9 +2700,30 @@ function createBotHandlers(deps) {
       });
     }
 
+    if (normalized.startsWith('notifications:')) {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser || !canUseNotificationMenu(authUser.userRole)) {
+        return reply(senderId, '🔒 Раздел уведомлений доступен менеджеру по аренде и администратору.', {
+          attachments: defaultKeyboardForRole(authUser?.userRole || ''),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const section = normalized.slice('notifications:'.length);
+      return reply(senderId, buildNotificationMenuText(authUser, section), {
+        attachments: notificationsKeyboard(),
+        ...managerStageOptions(authUser.userRole, 'manager_summary'),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
     const map = {
       'menu:help': '/помощь',
       'menu:main': '/меню',
+      'menu:notifications': '/уведомления',
       'menu:deliveries': '/доставки',
       'menu:rentals': '/аренды',
       'menu:equipment': '/техника',
@@ -2733,6 +2782,7 @@ function createBotHandlers(deps) {
       const [, , deliveryId, nextStatus] = normalized.split(':');
       const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
       const actorName = authUser?.userName || 'Перевозчик';
+      const previousDelivery = (readData('deliveries') || []).find(item => item.id === deliveryId) || null;
       const result = updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName, String(phone), authUser);
       if (!result || result.unavailable) {
         return reply(senderId, 'Эта доставка вам недоступна или уже закрыта.', {
@@ -2752,6 +2802,9 @@ function createBotHandlers(deps) {
           replaceMessage: true,
           notification: 'Статус нельзя изменить этим шагом',
         });
+      }
+      if (result.changed && notificationService?.notifyDeliveryStatusChanged) {
+        await notificationService.notifyDeliveryStatusChanged(previousDelivery, result.delivery);
       }
       return reply(senderId, formatDeliveryStatusMessage(result.delivery), {
         attachments: deliveryStatusKeyboard(result.delivery),
@@ -3440,7 +3493,8 @@ function createBotHandlers(deps) {
     };
     saveBotUsers(botUsers);
 
-    const { userName, userRole } = authUser;
+    const { userName } = authUser;
+    const userRole = normalizeRole(authUser.userRole);
     const activeBotMode = getUserBotMode(authUser);
     if (!preferCarrierAutoLogin && activeBotMode === 'delivery' && isStaffCommand(lower, commandText, commandCompact)) {
       return replyWithUi(getStaffModeRequiredText(), {
@@ -3663,6 +3717,9 @@ function createBotHandlers(deps) {
           comment: trimmed,
         };
         const delivery = createDeliveryFromBot(authUser, draft);
+        if (notificationService?.notifyDeliveryCreated) {
+          await notificationService.notifyDeliveryCreated(delivery);
+        }
         resetBotFlow(phone);
         return reply(senderId, withBotMenu([
           `✅ Доставка создана: ${delivery.id}`,
@@ -3834,6 +3891,13 @@ function createBotHandlers(deps) {
       return replyWithUi(getMainMenuText(authUser), {
         attachments: defaultKeyboardForRole(userRole),
         ...mainMenuImageOptions(userRole),
+      });
+    }
+
+    if ((lower === '/уведомления' || commandText === 'уведомления') && canUseNotificationMenu(userRole)) {
+      return replyWithUi(buildNotificationMenuText(authUser, 'summary'), {
+        attachments: notificationsKeyboard(),
+        ...managerStageOptions(userRole, 'manager_summary'),
       });
     }
 

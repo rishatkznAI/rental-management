@@ -20,6 +20,7 @@ function registerDeliveryRoutes(router, deps) {
     idPrefixes,
     accessControl,
     auditLog,
+    botNotifications = null,
   } = deps;
   const requiredAccessMethods = ['filterCollectionByScope', 'canAccessEntity', 'assertCanUpdateEntity', 'assertCanDeleteEntity'];
   const missingAccessMethods = !accessControl
@@ -220,6 +221,15 @@ function registerDeliveryRoutes(router, deps) {
       return response.message || 'MAX вернул ошибку';
     }
     return null;
+  }
+
+  async function emitDeliveryNotification(label, task) {
+    if (typeof task !== 'function') return;
+    try {
+      await task();
+    } catch (error) {
+      console.error(`[BOT] ${label}:`, error?.message || error);
+    }
   }
 
   function syncLinkedRentals(delivery, author) {
@@ -640,6 +650,9 @@ function registerDeliveryRoutes(router, deps) {
         entityId: delivery.id,
         after: delivery,
       });
+      await emitDeliveryNotification('Не удалось отправить уведомление о создании отгрузки', () =>
+        botNotifications?.notifyDeliveryCreated?.(delivery),
+      );
       return res.status(201).json(delivery);
     } catch (error) {
       return res.status(400).json({ ok: false, error: error.message });
@@ -712,6 +725,9 @@ function registerDeliveryRoutes(router, deps) {
         before: current,
         after: delivery,
       });
+      await emitDeliveryNotification('Не удалось отправить уведомление о статусе отгрузки', () =>
+        botNotifications?.notifyDeliveryStatusChanged?.(current, delivery),
+      );
       return res.json(delivery);
     } catch (error) {
       return res.status(400).json({ ok: false, error: error.message });

@@ -210,13 +210,14 @@ async function startServer({ app, port, deps, logger = console }) {
     if (typeof startGprsGateway === 'function') {
       startGprsGateway();
     }
-    setInterval(() => {
+    const crmCleanupTimer = setInterval(() => {
       cleanupArchivedCrm({
         readData: deps.readData,
         writeData: deps.writeData,
         logger,
       });
     }, 60 * 60 * 1000);
+    crmCleanupTimer.unref?.();
 
     logger.log('');
     logger.log('╔══════════════════════════════════════════════════════╗');

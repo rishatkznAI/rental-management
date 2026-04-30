@@ -75,6 +75,11 @@ const {
 const { createAccessControl } = require('./lib/access-control');
 const { createAuditLogger } = require('./lib/security-audit');
 const { createBotHandlers } = require('./lib/bot-commands');
+const {
+  createBotNotificationService,
+  isBotNotificationSchedulerEnabled,
+  startBotNotificationScheduler,
+} = require('./lib/bot-notifications');
 const { getBuildInfo } = require('./lib/build-info');
 const { createGprsGateway } = require('./lib/gprs-gateway');
 const { createMaxApiClient } = require('./lib/max-api');
@@ -343,6 +348,16 @@ const {
   logger: console,
 });
 
+const botNotifications = createBotNotificationService({
+  readData,
+  writeData,
+  sendMessage,
+  generateId,
+  nowIso,
+  accessControl,
+  logger: console,
+});
+
 const managerSendMessage = sendMessage;
 const managerDeleteMessage = deleteMessage;
 const managerAnswerCallback = answerCallback;
@@ -388,9 +403,10 @@ function destroySession(token) {
 }
 
 // Чистим протухшие сессии каждый час
-setInterval(() => {
+const sessionCleanupTimer = setInterval(() => {
   cleanupExpiredSessions();
 }, 3600_000);
+sessionCleanupTimer.unref?.();
 
 // ── RBAC ──────────────────────────────────────────────────────────────────────
 
@@ -1092,6 +1108,10 @@ apiRouter.get('/access-diagnostics', requireAuth, (req, res) => {
   return res.json(buildAccessDiagnostics(req));
 });
 
+apiRouter.get('/bot/notification-diagnostics', requireAuth, requireAdmin, (req, res) => {
+  return res.json(botNotifications.getDiagnostics());
+});
+
 apiRouter.use(registerRentalRoutes({
   readData,
   writeData,
@@ -1106,6 +1126,7 @@ apiRouter.use(registerRentalRoutes({
   accessControl,
   auditLog,
   normalizeRecordClientLink,
+  botNotifications,
 }));
 
 apiRouter.use(registerRentalChangeRequestRoutes({
@@ -1153,6 +1174,7 @@ registerDeliveryRoutes(apiRouter, {
   auditLog,
   analyzeGanttRentalLinks,
   backfillGanttRentalLinks,
+  botNotifications,
 });
 
 const serviceCore = createServiceCore({
@@ -1275,6 +1297,7 @@ const {
   serviceStatusLabel,
   accessControl,
   auditLog,
+  notificationService: botNotifications,
 });
 
 const managerBotHandlers = createBotHandlers({
@@ -1303,6 +1326,7 @@ const managerBotHandlers = createBotHandlers({
   serviceStatusLabel,
   accessControl,
   auditLog,
+  notificationService: botNotifications,
 });
 
 const deliveryBotHandlers = createBotHandlers({
@@ -1332,6 +1356,7 @@ const deliveryBotHandlers = createBotHandlers({
   preferCarrierAutoLogin: true,
   accessControl,
   auditLog,
+  notificationService: botNotifications,
 });
 
 function getMoscowDateParts(date = new Date()) {
@@ -1388,11 +1413,26 @@ async function sendRentalManagerMorningDigests() {
   }
 }
 
-setInterval(() => {
-  sendRentalManagerMorningDigests().catch(error => {
-    console.error('[BOT] Ошибка утренней рассылки менеджерам по аренде', error?.message || error);
-  });
-}, 10 * 60_000);
+if (isBotNotificationSchedulerEnabled(process.env)) {
+  const managerDigestTimer = setInterval(() => {
+    sendRentalManagerMorningDigests().catch(error => {
+      console.error('[BOT] Ошибка утренней рассылки менеджерам по аренде', error?.message || error);
+    });
+  }, 10 * 60_000);
+  managerDigestTimer.unref?.();
+}
+
+async function runBotNotificationSchedulerTick(reason = 'interval') {
+  const result = await botNotifications.runScheduledNotifications();
+  if (result?.events) {
+    console.log(`[BOT] notification scheduler ${reason}: events=${result.events}`);
+  }
+}
+
+startBotNotificationScheduler({
+  runTick: runBotNotificationSchedulerTick,
+  logger: console,
+});
 
 const BOT_ACTIVITY_LIMIT = 2000;
 
@@ -1715,7 +1755,9 @@ function startMaxBotPolling() {
   }
   console.log(`[BOT] /bot/polling включён: interval=${MAX_POLL_INTERVAL_MS}ms`);
   pollMaxBotUpdatesOnce();
-  return setInterval(pollMaxBotUpdatesOnce, MAX_POLL_INTERVAL_MS);
+  const timer = setInterval(pollMaxBotUpdatesOnce, MAX_POLL_INTERVAL_MS);
+  timer.unref?.();
+  return timer;
 }
 
 // ── Планировщик подготовки техники к аренде ──────────────────────────────────

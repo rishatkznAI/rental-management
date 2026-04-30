@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createBotHandlers } = require('../server/lib/bot-commands.js');
+const { createBotNotificationService } = require('../server/lib/bot-notifications.js');
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { toCarrierDeliveryDto } = require('../server/lib/carrier-delivery-dto.js');
 const {
@@ -55,9 +56,25 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     repair_part_items: [],
     equipment_operation_sessions: [],
     bot_activity: [],
+    bot_notifications: [],
   };
   const messages = [];
   const readData = (name) => state[name] ?? [];
+  const accessControl = createAccessControl({ readData });
+  const notificationService = createBotNotificationService({
+    readData,
+    writeData: (name, value) => {
+      state[name] = value;
+    },
+    sendMessage: async (target, text, options = {}) => {
+      messages.push({ target, text, options, notification: true });
+      return { message: { message_id: `msg-${messages.length}` } };
+    },
+    generateId: (prefix) => `${prefix}-1`,
+    nowIso: () => '2026-04-24T08:00:00.000Z',
+    accessControl,
+    logger: { error: () => {}, warn: () => {}, log: () => {} },
+  });
   const handlers = createBotHandlers({
     readData,
     writeData: (name, value) => {
@@ -100,7 +117,8 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     getOpenTicketByEquipment: () => null,
     serviceStatusLabel: (status) => status,
     preferCarrierAutoLogin,
-    accessControl: createAccessControl({ readData }),
+    accessControl,
+    notificationService,
   });
 
   return { state, messages, handlers };
@@ -641,6 +659,75 @@ test('manager free equipment command shows category buttons', async () => {
   assert.equal(menu.payload.buttons[0][0].text, 'Ножничный · 2');
   assert.equal(menu.payload.buttons[0][0].payload, 'equipmentcat:0:0');
   assert.match(messages[0].options.attachments[0].payload.file, /manager-stages\/equipment-optimistic\.jpg$/);
+});
+
+test('manager notification menu shows only own return events', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.rentals = [
+    {
+      id: 'R-own',
+      client: 'ООО Свой клиент',
+      equipmentInv: '026',
+      plannedReturnDate: '2026-04-24',
+      manager: 'Руслан',
+      status: 'active',
+    },
+    {
+      id: 'R-other',
+      client: 'ООО Чужой клиент',
+      equipmentInv: '099',
+      plannedReturnDate: '2026-04-24',
+      manager: 'Другой менеджер',
+      status: 'active',
+    },
+  ];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/уведомления');
+
+  assert.match(messages.at(-1).text, /Возвраты сегодня: 1/);
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'notifications:returns_today');
+
+  assert.match(messages.at(-1).text, /ООО Свой клиент/);
+  assert.doesNotMatch(messages.at(-1).text, /ООО Чужой клиент/);
+});
+
+test('admin notification menu shows all return events', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'U-admin',
+    userName: 'Админ',
+    userRole: 'Администратор',
+    email: 'admin@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.rentals = [
+    {
+      id: 'R-one',
+      client: 'ООО Первый клиент',
+      equipmentInv: '026',
+      plannedReturnDate: '2026-04-24',
+      manager: 'Руслан',
+      status: 'active',
+    },
+    {
+      id: 'R-two',
+      client: 'ООО Второй клиент',
+      equipmentInv: '099',
+      plannedReturnDate: '2026-04-24',
+      manager: 'Другой менеджер',
+      status: 'active',
+    },
+  ];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/уведомления');
+
+  assert.match(messages.at(-1).text, /Возвраты сегодня: 2/);
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'notifications:returns_today');
+
+  assert.match(messages.at(-1).text, /ООО Первый клиент/);
+  assert.match(messages.at(-1).text, /ООО Второй клиент/);
 });
 
 test('manager free equipment category opens paged equipment list', async () => {

@@ -27,6 +27,7 @@ function registerRentalRoutes(deps) {
     idPrefixes,
     accessControl,
     auditLog,
+    botNotifications = null,
   } = deps;
 
   const router = express.Router();
@@ -133,6 +134,15 @@ function registerRentalRoutes(deps) {
         id = generateId(prefix);
       }
       return id;
+    }
+
+    async function emitRentalNotification(previousRental, nextRental) {
+      if (!botNotifications?.notifyRentalChanged || !previousRental || !nextRental) return;
+      try {
+        await botNotifications.notifyRentalChanged(previousRental, nextRental);
+      } catch (error) {
+        console.error('[BOT] Не удалось отправить уведомление по аренде:', error?.message || error);
+      }
     }
 
     function buildClassicRentalFromGantt(ganttRental, rawMeta, author, existingRentals) {
@@ -407,7 +417,7 @@ function registerRentalRoutes(deps) {
       return res.status(201).json(newItem);
     });
 
-    router.patch(`/${collection}/:id`, requireAuth, (req, res) => {
+    router.patch(`/${collection}/:id`, requireAuth, async (req, res) => {
       const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
       if (forbiddenReason) {
         return res.status(403).json({ ok: false, error: forbiddenReason });
@@ -541,6 +551,7 @@ function registerRentalRoutes(deps) {
             after: nextItem,
           });
           syncLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, req.user.userName);
+          await emitRentalNotification(previousRental, nextItem);
         } else if (createdRequests.length > 0) {
           data[idx] = appendRentalHistory(previousRental, pendingHistoryEntries);
           writeData(collection, data);
@@ -599,6 +610,7 @@ function registerRentalRoutes(deps) {
       if (collection === 'rentals') {
         syncLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, req.user.userName);
       }
+      await emitRentalNotification(previousRental, nextItem);
       return res.json(data[idx]);
     });
 

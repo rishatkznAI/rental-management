@@ -10,6 +10,9 @@ const { normalizeRole } = require('../server/lib/role-groups.js');
 
 test('normalizeRole maps production role aliases to canonical Russian roles', () => {
   assert.equal(normalizeRole('admin'), 'Администратор');
+  assert.equal(normalizeRole('administrator'), 'Администратор');
+  assert.equal(normalizeRole('администратор'), 'Администратор');
+  assert.equal(normalizeRole('менеджер по аренде'), 'Менеджер по аренде');
   assert.equal(normalizeRole('office manager'), 'Офис-менеджер');
   assert.equal(normalizeRole('rental_manager'), 'Менеджер по аренде');
   assert.equal(normalizeRole('sales manager'), 'Менеджер по продажам');

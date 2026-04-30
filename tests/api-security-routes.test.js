@@ -54,9 +54,13 @@ function createState() {
   return {
     users: [
       { id: 'U-admin', name: 'Админ', email: 'admin@example.test', role: 'Администратор', status: 'Активен', password: 'admin', tokenVersion: 0 },
+      { id: 'U-admin-alias', name: 'Админ Alias', email: 'admin-alias@example.test', role: 'administrator', status: 'Активен', password: 'admin', tokenVersion: 0 },
       { id: 'U-manager', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Активен', password: 'old-password', tokenVersion: 0 },
+      { id: 'U-manager-alias', name: 'Руслан Alias', email: 'manager-alias@example.test', role: 'rental_manager', status: 'Активен', password: 'manager', tokenVersion: 0 },
       { id: 'U-office', name: 'Офис', email: 'office@example.test', role: 'Офис-менеджер', status: 'Активен', password: 'office', tokenVersion: 0 },
+      { id: 'U-office-alias', name: 'Офис Alias', email: 'office-alias@example.test', role: 'office_manager', status: 'Активен', password: 'office', tokenVersion: 0 },
       { id: 'U-mechanic', name: 'Петров', email: 'mechanic@example.test', role: 'Механик', status: 'Активен', password: 'mechanic', tokenVersion: 0 },
+      { id: 'U-mechanic-alias', name: 'Петров Alias', email: 'mechanic-alias@example.test', role: 'mechanic', status: 'Активен', password: 'mechanic', tokenVersion: 0 },
       { id: 'U-warranty', name: 'Гарантия', email: 'warranty@example.test', role: WARRANTY_MECHANIC_ROLE, status: 'Активен', password: 'warranty', tokenVersion: 0 },
       { id: 'U-warranty-alias', name: 'Гарантия Alias', email: 'warranty-alias@example.test', role: 'mechanic_warranty', status: 'Активен', password: 'warranty', tokenVersion: 0 },
       { id: 'U-warranty-camel', name: 'Гарантия Camel', email: 'warranty-camel@example.test', role: 'mechanicWarranty', status: 'Активен', password: 'warranty', tokenVersion: 0 },
@@ -97,9 +101,13 @@ function createSecurityApp(state = createState()) {
   app.use(express.json());
   const sessions = new Map([
     ['admin-token', { userId: 'U-admin', tokenVersion: 0, passwordChangedAt: null }],
+    ['admin-alias-token', { userId: 'U-admin-alias', tokenVersion: 0, passwordChangedAt: null }],
     ['manager-token', { userId: 'U-manager', tokenVersion: 0, passwordChangedAt: null }],
+    ['manager-alias-token', { userId: 'U-manager-alias', tokenVersion: 0, passwordChangedAt: null }],
     ['office-token', { userId: 'U-office', tokenVersion: 0, passwordChangedAt: null }],
+    ['office-alias-token', { userId: 'U-office-alias', tokenVersion: 0, passwordChangedAt: null }],
     ['mechanic-token', { userId: 'U-mechanic', tokenVersion: 0, passwordChangedAt: null }],
+    ['mechanic-alias-token', { userId: 'U-mechanic-alias', tokenVersion: 0, passwordChangedAt: null }],
     ['warranty-token', { userId: 'U-warranty', tokenVersion: 0, passwordChangedAt: null }],
     ['warranty-alias-token', { userId: 'U-warranty-alias', tokenVersion: 0, passwordChangedAt: null }],
     ['warranty-camel-token', { userId: 'U-warranty-camel', tokenVersion: 0, passwordChangedAt: null }],
@@ -352,6 +360,33 @@ test('generic CRUD refuses to register without access-control', () => {
     requireRead: () => (_req, _res, next) => next(),
     requireWrite: () => (_req, _res, next) => next(),
   }), /requires access-control/);
+});
+
+test('/api/service returns 200 for service roles and 403 for forbidden roles', async () => {
+  const { app } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    for (const token of [
+      'admin-token',
+      'admin-alias-token',
+      'office-token',
+      'office-alias-token',
+      'manager-token',
+      'manager-alias-token',
+      'mechanic-token',
+      'mechanic-alias-token',
+      'warranty-token',
+      'warranty-alias-token',
+      'warranty-camel-token',
+    ]) {
+      const response = await request(baseUrl, 'GET', '/api/service', token);
+      assert.equal(response.status, 200, token);
+      assert.equal(Array.isArray(response.body), true, token);
+    }
+
+    assert.equal((await request(baseUrl, 'GET', '/api/service', 'investor-token')).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/service', null)).status, 401);
+  });
 });
 
 test('real Express API routes deny direct object-level bypasses', async () => {

@@ -472,6 +472,9 @@ export interface RepairWorkItem {
   createdAt: string;
   createdByUserId?: string;
   createdByUserName?: string;
+  meterHours?: number;
+  equipmentId?: string;
+  equipmentSnapshot?: string;
 }
 
 export interface RepairPartItem {
@@ -511,6 +514,11 @@ export interface ServiceWorkPerformed {
   totalNormHours: number;
   ratePerHour: number;
   totalCost: number;
+  meterHours?: number;
+  equipmentId?: string;
+  equipmentSnapshot?: string;
+  createdAt?: string;
+  createdByUserName?: string;
 }
 
 export interface ServiceRepairResult {

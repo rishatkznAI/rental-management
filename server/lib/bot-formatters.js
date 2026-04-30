@@ -93,6 +93,13 @@ function createBotFormatters(deps) {
     return `${match[3]}.${match[2]}.${match[1]}`;
   }
 
+  function formatWorkItemMeterHours(item) {
+    const value = Number(item?.meterHours);
+    return Number.isFinite(value)
+      ? `${value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} м/ч`
+      : 'моточасы не указаны';
+  }
+
   function formatEquipmentForBot(item) {
     const typeLabel =
       item.type === 'scissor' ? 'ножничный'
@@ -218,7 +225,12 @@ function createBotFormatters(deps) {
     const repairPhotos = normalizeRepairPhotos(ticket);
     const closeChecklist = buildRepairCloseChecklistStatus(ticket);
     const worksText = workItems.length
-      ? workItems.map((item, index) => `${index + 1}. ${item.nameSnapshot} × ${item.quantity}`).join('\n')
+      ? workItems.map((item, index) => {
+        const author = item.createdByUserName ? ` · ${item.createdByUserName}` : '';
+        const createdAt = item.createdAt ? ` · ${formatBotDate(item.createdAt)}` : '';
+        const equipment = item.equipmentSnapshot ? ` · ${item.equipmentSnapshot}` : '';
+        return `${index + 1}. ${item.nameSnapshot} × ${item.quantity} · ${formatWorkItemMeterHours(item)}${author}${createdAt}${equipment}`;
+      }).join('\n')
       : 'нет';
     const partsText = partItems.length
       ? partItems.map((item, index) => `${index + 1}. ${item.nameSnapshot} × ${item.quantity} (${Number(item.priceSnapshot || 0).toLocaleString('ru-RU')} ₽)`).join('\n')

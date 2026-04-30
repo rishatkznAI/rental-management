@@ -130,6 +130,11 @@ function workItemsToResult(items: RepairWorkItem[]): ServiceWorkPerformed[] {
       totalNormHours,
       ratePerHour,
       totalCost: Number((totalNormHours * ratePerHour).toFixed(2)),
+      meterHours: Number.isFinite(Number(item.meterHours)) ? Number(item.meterHours) : undefined,
+      equipmentId: item.equipmentId,
+      equipmentSnapshot: item.equipmentSnapshot,
+      createdAt: item.createdAt,
+      createdByUserName: item.createdByUserName,
     };
   });
 }
@@ -163,6 +168,11 @@ function normalizeWorkPerformed(work: Partial<ServiceWorkPerformed> | undefined)
     totalNormHours: Number.isFinite(work?.totalNormHours) ? Number(work!.totalNormHours) : 0,
     ratePerHour: Number.isFinite(work?.ratePerHour) ? Number(work!.ratePerHour) : 0,
     totalCost: Number.isFinite(work?.totalCost) ? Number(work!.totalCost) : 0,
+    meterHours: Number.isFinite(Number(work?.meterHours)) ? Number(work!.meterHours) : undefined,
+    equipmentId: work?.equipmentId,
+    equipmentSnapshot: work?.equipmentSnapshot,
+    createdAt: work?.createdAt,
+    createdByUserName: work?.createdByUserName,
   };
 }
 
@@ -1130,6 +1140,12 @@ export default function ServiceDetail() {
                                       · {work.totalCost.toLocaleString('ru-RU')} ₽
                                     </span>
                                   )}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  Моточасы: {typeof work.meterHours === 'number' ? work.meterHours.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) : 'моточасы не указаны'}
+                                  {work.createdByUserName ? ` · ${work.createdByUserName}` : ''}
+                                  {work.createdAt ? ` · ${formatServiceDate(work.createdAt)}` : ''}
+                                  {work.equipmentSnapshot ? ` · ${work.equipmentSnapshot}` : ''}
                                 </p>
                               </div>
                               {canEditTicketFields && item && (

@@ -166,6 +166,43 @@ function setupMechanicRepairWithParts(parts = []) {
   return { state, messages, handlers };
 }
 
+function setupMechanicRepairWithWorks(works = [], equipmentOverrides = {}) {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.equipment = [{
+    id: 'EQ-1',
+    inventoryNumber: '083',
+    serialNumber: 'SN-083',
+    manufacturer: 'Mantall',
+    model: 'HZ160JRT',
+    type: 'scissor',
+    status: 'service',
+    hours: 500,
+    history: [],
+    ...equipmentOverrides,
+  }];
+  state.service = [{
+    id: 'S-1',
+    status: 'in_progress',
+    equipmentId: 'EQ-1',
+    equipment: 'Mantall HZ160JRT (INV: 083)',
+    inventoryNumber: '083',
+    serialNumber: 'SN-083',
+    reason: 'Полная диагностика',
+    assignedMechanicName: 'Дмитрий',
+    workLog: [],
+  }];
+  state.bot_sessions['100'] = { activeRepairId: 'S-1' };
+  state.service_works = works;
+  return { state, messages, handlers };
+}
+
 function makePart(index, overrides = {}) {
   return {
     id: `P-${index}`,
@@ -176,6 +213,18 @@ function makePart(index, overrides = {}) {
     manufacturer: 'Skytech',
     defaultPrice: 1000 + index,
     unit: 'шт',
+    isActive: true,
+    ...overrides,
+  };
+}
+
+function makeWork(index, overrides = {}) {
+  return {
+    id: `W-${index}`,
+    name: `Работа ${String(index).padStart(2, '0')}`,
+    category: 'Диагностика',
+    normHours: 1,
+    ratePerHour: 2500,
     isActive: true,
     ...overrides,
   };
@@ -960,6 +1009,116 @@ test('mechanic new ticket search opens equipment action menu before repair reaso
   const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
   const buttonTexts = menu.payload.buttons.flat().map((item) => item.text);
   assert.deepEqual(buttonTexts.slice(1, 5), ['Ремонт', 'ТО', 'ЧТО', 'ПТО']);
+});
+
+test('mechanic work add asks for meter hours before saving', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithWorks([
+    makeWork(1, { name: 'Диагностика гидравлики' }),
+  ]);
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'work:choose:W-1', { callbackId: 'cb-1' });
+
+  assert.equal(state.bot_sessions['100'].pendingAction, 'work_hours');
+  assert.equal(state.repair_work_items.length, 0);
+  assert.match(messages.at(-1).text, /Укажите текущие моточасы техники/);
+});
+
+test('mechanic work add rejects empty, text and negative meter hours without saving', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithWorks([
+    makeWork(1, { name: 'Диагностика гидравлики' }),
+  ]);
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'work:choose:W-1', { callbackId: 'cb-1' });
+  await handlers.handleCommand({ user_id: 100 }, '100', '');
+  assert.equal(state.repair_work_items.length, 0);
+  assert.match(messages.at(-1).text, /Моточасы нужно указать числом/);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', 'примерно 500');
+  assert.equal(state.repair_work_items.length, 0);
+  assert.match(messages.at(-1).text, /Моточасы нужно указать числом/);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '-1');
+  assert.equal(state.repair_work_items.length, 0);
+  assert.match(messages.at(-1).text, /Моточасы нужно указать числом/);
+});
+
+test('mechanic work add rejects meter hours below equipment card value', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithWorks([
+    makeWork(1, { name: 'Диагностика гидравлики' }),
+  ], { hours: 500 });
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'work:choose:W-1', { callbackId: 'cb-1' });
+  await handlers.handleCommand({ user_id: 100 }, '100', '499.5');
+
+  assert.equal(state.repair_work_items.length, 0);
+  assert.equal(state.equipment[0].hours, 500);
+  assert.match(messages.at(-1).text, /Указанные моточасы меньше текущих/);
+});
+
+test('mechanic work add saves meter hours, service history, equipment hours and bot activity', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithWorks([
+    makeWork(1, { name: 'Диагностика гидравлики', normHours: 1.5 }),
+  ], { hours: 500 });
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'work:choose:W-1', { callbackId: 'cb-1' });
+  await handlers.handleCommand({ user_id: 100 }, '100', '1250.5');
+
+  assert.equal(state.repair_work_items.length, 1);
+  assert.equal(state.repair_work_items[0].meterHours, 1250.5);
+  assert.equal(state.repair_work_items[0].equipmentId, 'EQ-1');
+  assert.equal(state.equipment[0].hours, 1250.5);
+  assert.match(state.service[0].workLog.at(-1).text, /Моточасы: 1 250,5|Моточасы: 1 250,5|Моточасы: 1250,5/);
+  assert.equal(state.bot_activity.at(-1).action, 'service.work_item.create');
+  assert.equal(state.bot_activity.at(-1).meterHours, 1250.5);
+  assert.match(messages.at(-1).text, /Работа сохранена\. Моточасы: 1 250,5\.|Работа сохранена\. Моточасы: 1 250,5\.|Работа сохранена\. Моточасы: 1250,5\./);
+});
+
+test('mechanic work add keeps equipment hours when entered value equals current', async () => {
+  const { state, handlers } = setupMechanicRepairWithWorks([
+    makeWork(1, { name: 'Диагностика гидравлики' }),
+  ], { hours: 500, history: [] });
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'work:choose:W-1', { callbackId: 'cb-1' });
+  await handlers.handleCommand({ user_id: 100 }, '100', '500');
+
+  assert.equal(state.repair_work_items[0].meterHours, 500);
+  assert.equal(state.equipment[0].hours, 500);
+  assert.equal(state.equipment[0].history.length, 0);
+});
+
+test('mechanic work add does not overwrite a newer equipment hours value', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithWorks([
+    makeWork(1, { name: 'Диагностика гидравлики' }),
+  ], { hours: 500, history: [] });
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'work:choose:W-1', { callbackId: 'cb-1' });
+  state.equipment[0].hours = 900;
+  await handlers.handleCommand({ user_id: 100 }, '100', '800');
+
+  assert.equal(state.repair_work_items.length, 0);
+  assert.equal(state.equipment[0].hours, 900);
+  assert.equal(state.equipment[0].history.length, 0);
+  assert.match(messages.at(-1).text, /Указанные моточасы меньше текущих/);
+});
+
+test('mechanic current repair draft displays legacy work without meter hours', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithWorks([
+    makeWork(1, { name: 'Диагностика гидравлики' }),
+  ]);
+  state.repair_work_items = [{
+    id: 'RWI-old',
+    repairId: 'S-1',
+    workId: 'W-1',
+    quantity: 1,
+    normHoursSnapshot: 1,
+    nameSnapshot: 'Старая работа',
+    createdAt: '2026-04-20T08:00:00.000Z',
+  }];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/черновик');
+
+  assert.match(messages.at(-1).text, /Старая работа/);
+  assert.match(messages.at(-1).text, /моточасы не указаны/);
 });
 
 test('mechanic parts menu shows first page from spare_parts and pagination', async () => {

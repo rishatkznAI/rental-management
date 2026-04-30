@@ -246,6 +246,7 @@ function pendingActionLabel(action) {
     ticket_reason: 'Причина заявки',
     work_search: 'Поиск работ',
     work_pick: 'Добавление работы',
+    work_hours: 'Моточасы работы',
     part_search: 'Поиск запчастей',
     part_pick: 'Добавление запчасти',
     summary: 'Итог ремонта',

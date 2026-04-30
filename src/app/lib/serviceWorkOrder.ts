@@ -34,6 +34,11 @@ function workItemsToRows(items: RepairWorkItem[]): ServiceWorkPerformed[] {
       totalNormHours,
       ratePerHour,
       totalCost: Number((totalNormHours * ratePerHour).toFixed(2)),
+      meterHours: Number.isFinite(Number(item.meterHours)) ? Number(item.meterHours) : undefined,
+      equipmentId: item.equipmentId,
+      equipmentSnapshot: item.equipmentSnapshot,
+      createdAt: item.createdAt,
+      createdByUserName: item.createdByUserName,
     };
   });
 }

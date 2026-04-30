@@ -577,6 +577,30 @@ function createBotHandlers(deps) {
     return entry;
   }
 
+  function appendServiceBotActivity({ phone = '', authUser = null, repairId = '', equipmentId = '', workItemId = '', action = '', meterHours = null }) {
+    const timestamp = nowIso();
+    const activity = readData('bot_activity') || [];
+    const entry = {
+      id: generateId('botact'),
+      botId: 'max',
+      phone: String(phone || '') || null,
+      maxUserId: getCarrierMaxUserId(phone, authUser),
+      userId: authUser?.userId || null,
+      userName: authUser?.userName || null,
+      userRole: authUser?.userRole || null,
+      repairId: repairId || null,
+      equipmentId: equipmentId || null,
+      workItemId: workItemId || null,
+      eventType: 'message',
+      action,
+      meterHours,
+      timestamp,
+      createdAt: timestamp,
+    };
+    writeData('bot_activity', [...activity, entry].slice(-1000));
+    return entry;
+  }
+
   function updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName, phone = '', authUser = null) {
     const deliveries = readData('deliveries') || [];
     const index = deliveries.findIndex(item => item.id === deliveryId);
@@ -1737,6 +1761,123 @@ function createBotHandlers(deps) {
     );
   }
 
+  function parseMeterHoursInput(value) {
+    const raw = String(value || '').trim().replace(',', '.');
+    if (!raw || !/^\d+(?:\.\d+)?$/.test(raw)) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+
+  function formatMeterHours(value) {
+    return Number(value).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+  }
+
+  function findEquipmentForServiceTicket(ticket) {
+    const equipmentList = readData('equipment') || [];
+    if (ticket?.equipmentId) {
+      const byId = equipmentList.find(item => item.id === ticket.equipmentId);
+      if (byId) return byId;
+    }
+    if (ticket?.inventoryNumber) {
+      const byInventory = equipmentList.find(item => String(item.inventoryNumber || '') === String(ticket.inventoryNumber));
+      if (byInventory) return byInventory;
+    }
+    if (ticket?.serialNumber) {
+      const bySerial = equipmentList.find(item => String(item.serialNumber || '') === String(ticket.serialNumber));
+      if (bySerial) return bySerial;
+    }
+    return null;
+  }
+
+  async function promptWorkMeterHours(senderId, phone, ticket, work, quantity, uiContext = {}) {
+    updateBotSession(phone, {
+      activeRepairId: ticket.id,
+      pendingAction: 'work_hours',
+      pendingPayload: {
+        selectedWorkId: work.id,
+        quantity,
+      },
+    });
+    return reply(senderId, 'Укажите текущие моточасы техники.', {
+      attachments: currentRepairKeyboard(ticket.id),
+      mechanicStage: 'work',
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
+    });
+  }
+
+  async function handleWorkMeterHoursRequest(senderId, phone, authUser, ticket, inputText, uiContext = {}) {
+    const session = getBotSession(phone);
+    const workId = session.pendingPayload?.selectedWorkId;
+    const quantity = Number(session.pendingPayload?.quantity || 1);
+    const work = (readData('service_works') || []).find(item => item.id === workId && item.isActive !== false);
+    if (!work || !Number.isFinite(quantity) || quantity <= 0) {
+      resetBotFlow(phone);
+      return reply(senderId, '❌ Работа больше недоступна. Выполните поиск работ заново.', {
+        attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'work',
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      });
+    }
+
+    const meterHours = parseMeterHoursInput(inputText);
+    if (meterHours === null) {
+      return reply(senderId, 'Моточасы нужно указать числом, например: 1250 или 1250.5.', {
+        attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'work',
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      });
+    }
+
+    const equipment = findEquipmentForServiceTicket(ticket);
+    const currentHours = Number(equipment?.hours);
+    if (Number.isFinite(currentHours) && currentHours >= 0 && meterHours < currentHours) {
+      return reply(senderId, 'Указанные моточасы меньше текущих в карточке техники. Проверьте значение и введите снова.', {
+        attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'work',
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      });
+    }
+
+    const workItem = addRepairWorkItemFromCatalog(ticket, work, quantity, authUser, { meterHours, equipment });
+    const updated = appendServiceLog(
+      ticket,
+      `Добавлена работа через MAX: ${work.name}. Моточасы: ${formatMeterHours(meterHours)}${ticket.equipment ? `. Техника: ${ticket.equipment}` : ''}`,
+      authUser.userName,
+      'repair_result',
+    );
+    saveServiceTicket(updated);
+    appendServiceBotActivity({
+      phone,
+      authUser,
+      repairId: ticket.id,
+      equipmentId: equipment?.id || ticket.equipmentId || '',
+      workItemId: workItem.id,
+      action: 'service.work_item.create',
+      meterHours,
+    });
+    resetBotFlow(phone);
+    return reply(senderId, withBotMenu(`Работа сохранена. Моточасы: ${formatMeterHours(meterHours)}.`, ['ещё работы', 'запчасти', 'черновик', 'готово']), {
+      attachments: currentRepairKeyboard(ticket.id),
+      mechanicStage: 'work',
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+      cleanupPrevious: !uiContext.callbackContext,
+    });
+  }
+
   async function handleAddWorkRequest(senderId, phone, authUser, ticket, selectionText, uiContext = {}) {
     const [firstRaw, secondRaw] = selectionText.trim().split(/\s+/);
     const session = getBotSession(phone);
@@ -1774,18 +1915,7 @@ function createBotHandlers(deps) {
     if (!work) {
       return reply(senderId, '❌ Работа больше недоступна в справочнике. Выполните поиск заново.');
     }
-    addRepairWorkItemFromCatalog(ticket, work, quantity, authUser);
-    const updated = appendServiceLog(ticket, `Добавлена работа через MAX: ${work.name}`, authUser.userName, 'repair_result');
-    saveServiceTicket(updated);
-    resetBotFlow(phone);
-    return reply(senderId, withBotMenu(`✅ Добавлена работа: ${work.name}`, ['ещё работы', 'запчасти', 'черновик', 'готово']), {
-      attachments: currentRepairKeyboard(ticket.id),
-      mechanicStage: 'work',
-      phone,
-      callbackContext: uiContext.callbackContext,
-      replaceMessage: Boolean(uiContext.callbackContext),
-      cleanupPrevious: !uiContext.callbackContext,
-    });
+    return promptWorkMeterHours(senderId, phone, ticket, work, quantity, uiContext);
   }
 
   async function handlePartSearchRequest(senderId, phone, ticket, query, uiContext = {}) {
@@ -3742,6 +3872,10 @@ function createBotHandlers(deps) {
       if (session.pendingAction === 'work_pick') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
         return handleAddWorkRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
+      }
+      if (session.pendingAction === 'work_hours') {
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        return handleWorkMeterHoursRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'part_search') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');

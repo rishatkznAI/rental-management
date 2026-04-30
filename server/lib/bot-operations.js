@@ -904,7 +904,10 @@ function createBotOperations(deps) {
     };
   }
 
-  function addRepairWorkItemFromCatalog(ticket, work, quantity, authUser = null) {
+  function addRepairWorkItemFromCatalog(ticket, work, quantity, authUser = null, options = {}) {
+    const meterHours = Number(options.meterHours);
+    const hasMeterHours = Number.isFinite(meterHours) && meterHours >= 0;
+    const equipment = options.equipment || null;
     const items = readData('repair_work_items') || [];
     const nextItem = {
       id: generateId(idPrefixes.repair_work_items),
@@ -917,9 +920,33 @@ function createBotOperations(deps) {
       createdAt: nowIso(),
       createdByUserId: authUser?.userId,
       createdByUserName: authUser?.userName,
+      ...(hasMeterHours ? { meterHours } : {}),
+      ...(equipment?.id || ticket.equipmentId ? { equipmentId: equipment?.id || ticket.equipmentId } : {}),
+      ...(ticket.equipment ? { equipmentSnapshot: ticket.equipment } : {}),
     };
     items.push(nextItem);
     writeData('repair_work_items', items);
+
+    if (hasMeterHours && equipment?.id) {
+      const equipmentList = readData('equipment') || [];
+      const latestEquipment = equipmentList.find(item => item.id === equipment.id) || equipment;
+      const currentHours = Number(latestEquipment.hours);
+      if (!Number.isFinite(currentHours) || meterHours > currentHours) {
+        writeData('equipment', equipmentList.map(item => {
+          if (item.id !== equipment.id) return item;
+          return appendEquipmentHistoryEntry({
+            ...item,
+            hours: Math.max(Number.isFinite(currentHours) ? currentHours : 0, meterHours),
+          }, {
+            date: nowIso(),
+            author: authUser?.userName || 'MAX',
+            type: 'system',
+            text: `Моточасы обновлены через MAX при добавлении работы ${work.name}: ${meterHours}`,
+          });
+        }));
+      }
+    }
+
     return nextItem;
   }
 

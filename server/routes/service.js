@@ -41,6 +41,33 @@ function registerServiceRoutes(router, deps) {
     return 'repair';
   };
 
+  function safeNonNegativeNumber(value, fallback = 0) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
+  }
+
+  function safePositiveNumber(value, fallback = 1) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+  }
+
+  function parseRequiredPositiveNumber(value, fieldLabel) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      throw new Error(`${fieldLabel} должно быть числом больше 0`);
+    }
+    return numeric;
+  }
+
+  function parseOptionalNonNegativeNumber(value, fieldLabel, fallback) {
+    if (value === undefined || value === null || value === '') return fallback;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      throw new Error(`${fieldLabel} должно быть числом не меньше 0`);
+    }
+    return numeric;
+  }
+
   router.get('/service_works/active', requireAuth, requireRead('service'), (req, res) => {
     const list = (readData('service_works') || [])
       .map(normalizeServiceWorkRecord)
@@ -98,18 +125,18 @@ function registerServiceRoutes(router, deps) {
     const catalogById = new Map(catalog.map(item => [item.id, item]));
     const sanitized = list.map(item => {
       const ref = catalogById.get(item.workId);
-      const normHours = Number.isNaN(item.normHoursSnapshot) || item.normHoursSnapshot == null
-        ? (ref ? Math.max(0, Number(ref.normHours) || 0) : 0)
-        : Number(item.normHoursSnapshot);
-      const ratePerHour = Number.isNaN(item.ratePerHourSnapshot) || item.ratePerHourSnapshot == null
-        ? (ref ? Math.max(0, Number(ref.ratePerHour) || 0) : 0)
-        : Number(item.ratePerHourSnapshot);
+      const normHours = item.normHoursSnapshot == null
+        ? safeNonNegativeNumber(ref?.normHours, 0)
+        : safeNonNegativeNumber(item.normHoursSnapshot, 0);
+      const ratePerHour = item.ratePerHourSnapshot == null
+        ? safeNonNegativeNumber(ref?.ratePerHour, 0)
+        : safeNonNegativeNumber(item.ratePerHourSnapshot, 0);
       return {
         ...item,
         normHoursSnapshot: normHours,
         ratePerHourSnapshot: ratePerHour,
         nameSnapshot: item.nameSnapshot || ref?.name || 'Работа',
-        quantity: Number.isNaN(item.quantity) || item.quantity == null ? 1 : Number(item.quantity),
+        quantity: safePositiveNumber(item.quantity, 1),
       };
     });
     const scoped = accessControl.filterCollectionByScope('repair_work_items', sanitized, req.user);
@@ -126,12 +153,9 @@ function registerServiceRoutes(router, deps) {
   router.post('/repair_work_items', requireAuth, requireWrite('repair_work_items'), (req, res) => {
     try {
       const { repairId, workId } = req.body || {};
-      const quantity = Number(req.body?.quantity);
       requireNonEmptyString(repairId, 'Заявка');
       requireNonEmptyString(workId, 'Работа');
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new Error('Количество работы должно быть больше 0');
-      }
+      const quantity = parseRequiredPositiveNumber(req.body?.quantity, 'Количество работы');
       const ticket = findServiceTicketOr404(repairId, res);
       if (!ticket) return;
       try {
@@ -151,8 +175,8 @@ function registerServiceRoutes(router, deps) {
         repairId,
         workId,
         quantity,
-        normHoursSnapshot: Math.max(0, Number(work.normHours) || 0),
-        ratePerHourSnapshot: Math.max(0, Number(work.ratePerHour) || 0),
+        normHoursSnapshot: safeNonNegativeNumber(work.normHours, 0),
+        ratePerHourSnapshot: safeNonNegativeNumber(work.ratePerHour, 0),
         nameSnapshot: String(work.name || '').trim(),
         categorySnapshot: work.category ? String(work.category).trim() : undefined,
         createdAt: nowIso(),
@@ -206,10 +230,10 @@ function registerServiceRoutes(router, deps) {
       return {
         ...item,
         nameSnapshot: item.nameSnapshot || ref?.name || 'Запчасть',
-        priceSnapshot: Number.isNaN(item.priceSnapshot) || item.priceSnapshot == null
-          ? (ref ? Math.max(0, Number(ref.defaultPrice) || 0) : 0)
-          : Number(item.priceSnapshot),
-        quantity: Number.isNaN(item.quantity) || item.quantity == null ? 1 : Number(item.quantity),
+        priceSnapshot: item.priceSnapshot == null
+          ? safeNonNegativeNumber(ref?.defaultPrice, 0)
+          : safeNonNegativeNumber(item.priceSnapshot, 0),
+        quantity: safePositiveNumber(item.quantity, 1),
         unitSnapshot: item.unitSnapshot || ref?.unit || 'шт',
       };
     });
@@ -227,13 +251,9 @@ function registerServiceRoutes(router, deps) {
   router.post('/repair_part_items', requireAuth, requireWrite('repair_part_items'), (req, res) => {
     try {
       const { repairId, partId } = req.body || {};
-      const quantity = Number(req.body?.quantity);
-      const priceSnapshot = Number(req.body?.priceSnapshot);
       requireNonEmptyString(repairId, 'Заявка');
       requireNonEmptyString(partId, 'Запчасть');
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new Error('Количество запчастей должно быть больше 0');
-      }
+      const quantity = parseRequiredPositiveNumber(req.body?.quantity, 'Количество запчастей');
       const ticket = findServiceTicketOr404(repairId, res);
       if (!ticket) return;
       try {
@@ -247,9 +267,11 @@ function registerServiceRoutes(router, deps) {
         return res.status(404).json({ ok: false, error: 'Запчасть из справочника не найдена или отключена' });
       }
 
-      const safePrice = Number.isFinite(priceSnapshot)
-        ? Math.max(0, priceSnapshot)
-        : Math.max(0, Number(part.defaultPrice) || 0);
+      const safePrice = parseOptionalNonNegativeNumber(
+        req.body?.priceSnapshot,
+        'Цена запчасти',
+        safeNonNegativeNumber(part.defaultPrice, 0),
+      );
 
       const list = readData('repair_part_items') || [];
       const item = {
@@ -332,7 +354,7 @@ function registerServiceRoutes(router, deps) {
     for (const [repairId, repairParts] of partsByRepair.entries()) {
       repairCostById.set(
         repairId,
-        repairParts.reduce((sum, part) => sum + (Number(part.priceSnapshot) || 0) * (Number(part.quantity) || 0), 0),
+        repairParts.reduce((sum, part) => sum + safeNonNegativeNumber(part.priceSnapshot, 0) * safePositiveNumber(part.quantity, 0), 0),
       );
       partNamesByRepair.set(repairId, Array.from(new Set(repairParts.map(part => part.nameSnapshot).filter(Boolean))));
     }
@@ -340,7 +362,7 @@ function registerServiceRoutes(router, deps) {
     for (const item of workItems) {
       repairNormHoursById.set(
         item.repairId,
-        (repairNormHoursById.get(item.repairId) || 0) + (Number(item.quantity) || 0) * (Number(item.normHoursSnapshot) || 0),
+        (repairNormHoursById.get(item.repairId) || 0) + safePositiveNumber(item.quantity, 0) * safeNonNegativeNumber(item.normHoursSnapshot, 0),
       );
     }
 
@@ -387,9 +409,9 @@ function registerServiceRoutes(router, deps) {
         createdAt: item.createdAt || ticket?.createdAt || '',
         workName: item.nameSnapshot,
         workCategory: item.categorySnapshot || '',
-        quantity: Number(item.quantity) || 0,
-        normHours: Number(item.normHoursSnapshot) || 0,
-        totalNormHours: (Number(item.quantity) || 0) * (Number(item.normHoursSnapshot) || 0),
+        quantity: safePositiveNumber(item.quantity, 0),
+        normHours: safeNonNegativeNumber(item.normHoursSnapshot, 0),
+        totalNormHours: safePositiveNumber(item.quantity, 0) * safeNonNegativeNumber(item.normHoursSnapshot, 0),
       }));
     });
 
@@ -423,8 +445,8 @@ function registerServiceRoutes(router, deps) {
           routeFrom,
           routeTo,
           routeLabel: [routeFrom, routeTo].filter(Boolean).join(' → '),
-          distanceKm: Number(item.distanceKm) || 0,
-          closedNormHours: Number(item.closedNormHours) || 0,
+          distanceKm: safeNonNegativeNumber(item.distanceKm, 0),
+          closedNormHours: safeNonNegativeNumber(item.closedNormHours, 0),
           serviceVehicleId: item.serviceVehicleId || null,
         };
       });

@@ -554,6 +554,92 @@ test('payments API accepts explicit zero paidAmount', async () => {
   });
 });
 
+test('service work catalog rejects non-numeric normHours', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service_works', 'admin-token', {
+      name: 'Диагностика',
+      normHours: 'abc',
+    });
+
+    assert.equal(response.status, 400);
+  });
+});
+
+test('service work catalog rejects negative normHours', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service_works', 'admin-token', {
+      name: 'Диагностика',
+      normHours: -1,
+    });
+
+    assert.equal(response.status, 400);
+  });
+});
+
+test('service work catalog rejects non-numeric ratePerHour', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service_works', 'admin-token', {
+      name: 'Диагностика',
+      ratePerHour: 'abc',
+    });
+
+    assert.equal(response.status, 400);
+  });
+});
+
+test('service work catalog rejects negative ratePerHour', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service_works', 'admin-token', {
+      name: 'Диагностика',
+      ratePerHour: -1,
+    });
+
+    assert.equal(response.status, 400);
+  });
+});
+
+test('spare part catalog rejects non-numeric defaultPrice', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/spare_parts', 'admin-token', {
+      name: 'Фильтр',
+      unit: 'шт',
+      defaultPrice: 'abc',
+    });
+
+    assert.equal(response.status, 400);
+  });
+});
+
+test('spare part catalog rejects negative defaultPrice', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/spare_parts', 'admin-token', {
+      name: 'Фильтр',
+      unit: 'шт',
+      defaultPrice: -1,
+    });
+
+    assert.equal(response.status, 400);
+  });
+});
+
+test('spare part catalog accepts omitted defaultPrice', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/spare_parts', 'admin-token', {
+      name: 'Фильтр',
+      unit: 'шт',
+    });
+
+    assert.equal(response.status, 201);
+  });
+});
+
 test('MAX webhook accepts header secret and rejects missing, wrong, or query secrets', async () => {
   const { app, auditEntries } = createSecurityApp();
 

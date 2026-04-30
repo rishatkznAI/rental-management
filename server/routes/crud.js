@@ -251,6 +251,28 @@ function registerCrudRoutes(deps) {
     if (hasPaidAmount) parsePaymentMoney(record?.paidAmount, 'Оплачено');
   }
 
+  function parseOptionalServiceNumber(record, field, fieldLabel, { required = false } = {}) {
+    if (!record || !Object.prototype.hasOwnProperty.call(record, field)) {
+      if (required) throw new Error(`${fieldLabel} должно быть числом не меньше 0`);
+      return;
+    }
+    const value = record[field];
+    if (value === undefined || value === null || value === '') return;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      throw new Error(`${fieldLabel} должно быть числом не меньше 0`);
+    }
+  }
+
+  function validateServiceWorkCatalogRecord(record) {
+    parseOptionalServiceNumber(record, 'normHours', 'Нормо-часы');
+    parseOptionalServiceNumber(record, 'ratePerHour', 'Стоимость нормо-часа');
+  }
+
+  function validateSparePartCatalogRecord(record) {
+    parseOptionalServiceNumber(record, 'defaultPrice', 'Базовая цена');
+  }
+
   function isPaymentStatusOnlyPatch(previousPayment, patch) {
     const changedFields = Object.keys(patch || {}).filter(field => {
       if (field === 'id') return false;
@@ -447,10 +469,12 @@ function registerCrudRoutes(deps) {
 
         if (collection === 'service_works') {
           requireNonEmptyString(input?.name, 'Название работы');
+          validateServiceWorkCatalogRecord(input);
         }
         if (collection === 'spare_parts') {
           requireNonEmptyString(input?.name, 'Название запчасти');
           requireNonEmptyString(input?.unit, 'Единица измерения');
+          validateSparePartCatalogRecord(input);
         }
         if (collection === 'payments') {
           validatePaymentRecord(input);
@@ -582,6 +606,7 @@ function registerCrudRoutes(deps) {
 
         if (collection === 'service_works') {
           requireNonEmptyString(safePatch?.name ?? data[idx].name, 'Название работы');
+          validateServiceWorkCatalogRecord(safePatch);
           data[idx] = normalizeServiceWorkRecord({
             ...data[idx],
             ...safePatch,
@@ -592,6 +617,7 @@ function registerCrudRoutes(deps) {
         } else if (collection === 'spare_parts') {
           requireNonEmptyString(safePatch?.name ?? data[idx].name, 'Название запчасти');
           requireNonEmptyString(safePatch?.unit ?? data[idx].unit, 'Единица измерения');
+          validateSparePartCatalogRecord(safePatch);
           data[idx] = normalizeSparePartRecord({
             ...data[idx],
             ...safePatch,
@@ -780,8 +806,18 @@ function registerCrudRoutes(deps) {
           }
         }
       }
-      if (collection === 'payments') {
-        for (const item of list) validatePaymentRecord(item);
+      try {
+        if (collection === 'payments') {
+          for (const item of list) validatePaymentRecord(item);
+        }
+        if (collection === 'service_works') {
+          for (const item of list) validateServiceWorkCatalogRecord(item);
+        }
+        if (collection === 'spare_parts') {
+          for (const item of list) validateSparePartCatalogRecord(item);
+        }
+      } catch (error) {
+        return res.status(400).json({ ok: false, error: error.message });
       }
 
       if (collection === 'service_works') {

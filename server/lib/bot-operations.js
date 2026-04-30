@@ -175,6 +175,22 @@ function createBotOperations(deps) {
     return Math.round((safeDistance / safeSpeed) * 10) / 10;
   }
 
+  function requirePositiveNumber(value, fieldLabel) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      throw new Error(`${fieldLabel} должно быть числом больше 0`);
+    }
+    return numeric;
+  }
+
+  function requireNonNegativeNumber(value, fieldLabel) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      throw new Error(`${fieldLabel} должно быть числом не меньше 0`);
+    }
+    return numeric;
+  }
+
   function readServiceFieldTrips() {
     return readData('service_field_trips') || [];
   }
@@ -905,6 +921,9 @@ function createBotOperations(deps) {
   }
 
   function addRepairWorkItemFromCatalog(ticket, work, quantity, authUser = null, options = {}) {
+    const safeQuantity = requirePositiveNumber(quantity, 'Количество работы');
+    const normHoursSnapshot = requireNonNegativeNumber(work?.normHours ?? 0, 'Нормо-часы работы');
+    const ratePerHourSnapshot = requireNonNegativeNumber(work?.ratePerHour ?? 0, 'Стоимость нормо-часа');
     const meterHours = Number(options.meterHours);
     const hasMeterHours = Number.isFinite(meterHours) && meterHours >= 0;
     const equipment = options.equipment || null;
@@ -913,8 +932,9 @@ function createBotOperations(deps) {
       id: generateId(idPrefixes.repair_work_items),
       repairId: ticket.id,
       workId: work.id,
-      quantity,
-      normHoursSnapshot: Math.max(0, Number(work.normHours) || 0),
+      quantity: safeQuantity,
+      normHoursSnapshot,
+      ratePerHourSnapshot,
       nameSnapshot: work.name,
       categorySnapshot: work.category,
       createdAt: nowIso(),
@@ -951,13 +971,15 @@ function createBotOperations(deps) {
   }
 
   function addRepairPartItemFromCatalog(ticket, part, quantity, priceSnapshot, authUser = null) {
+    const safeQuantity = requirePositiveNumber(quantity, 'Количество запчастей');
+    const safePrice = requireNonNegativeNumber(priceSnapshot, 'Цена запчасти');
     const items = readData('repair_part_items') || [];
     const nextItem = {
       id: generateId(idPrefixes.repair_part_items),
       repairId: ticket.id,
       partId: part.id,
-      quantity,
-      priceSnapshot,
+      quantity: safeQuantity,
+      priceSnapshot: safePrice,
       nameSnapshot: part.name,
       articleSnapshot: part.article || part.sku,
       unitSnapshot: part.unit || 'шт',

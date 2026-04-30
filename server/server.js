@@ -852,6 +852,11 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function safeNonNegativeNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
+}
+
 function normalizeServiceWorkRecord(record) {
   const timestamp = nowIso();
   return {
@@ -859,8 +864,8 @@ function normalizeServiceWorkRecord(record) {
     name: String(record.name || '').trim(),
     category: record.category ? String(record.category).trim() : undefined,
     description: record.description ? String(record.description).trim() : undefined,
-    normHours: Math.max(0, Number(record.normHours) || 0),
-    ratePerHour: Math.max(0, Number(record.ratePerHour) || 0),
+    normHours: safeNonNegativeNumber(record.normHours, 0),
+    ratePerHour: safeNonNegativeNumber(record.ratePerHour, 0),
     isActive: record.isActive !== false,
     sortOrder: Number.isFinite(Number(record.sortOrder)) ? Number(record.sortOrder) : 0,
     createdAt: record.createdAt || timestamp,
@@ -877,7 +882,7 @@ function normalizeSparePartRecord(record) {
     article: article ? String(article).trim() : undefined,
     sku: article ? String(article).trim() : undefined,
     unit: String(record.unit || 'шт').trim() || 'шт',
-    defaultPrice: Math.max(0, Number(record.defaultPrice) || 0),
+    defaultPrice: safeNonNegativeNumber(record.defaultPrice, 0),
     category: record.category ? String(record.category).trim() : undefined,
     manufacturer: record.manufacturer ? String(record.manufacturer).trim() : undefined,
     isActive: record.isActive !== false,

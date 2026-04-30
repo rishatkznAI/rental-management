@@ -4010,9 +4010,9 @@ function createBotHandlers(deps) {
       }
       if (session.pendingAction === 'field_trip_manual_distance') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
-        const distanceKm = Math.max(0, Number(String(trimmed).replace(',', '.')) || 0);
-        if (!distanceKm) {
-          return reply(senderId, '❌ Напишите расстояние числом в километрах. Например: 200', {
+        const distanceKm = Number(String(trimmed).replace(',', '.'));
+        if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
+          return reply(senderId, '❌ Напишите положительное число километров. Например: 200', {
             attachments: keyboard([[button('Назад', 'menu:field_trip'), button('Главное меню', 'menu:main')]]),
             mechanicStage: 'field_trip',
             phone,

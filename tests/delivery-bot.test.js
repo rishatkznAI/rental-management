@@ -207,6 +207,19 @@ function setupMechanicRepairWithWorks(works = [], equipmentOverrides = {}) {
   return { state, messages, handlers };
 }
 
+function setupManualFieldTripDistance() {
+  const { state, messages, handlers } = setupMechanicRepairWithWorks([]);
+  state.bot_sessions['100'] = {
+    activeRepairId: 'S-1',
+    pendingAction: 'field_trip_manual_distance',
+    pendingPayload: {
+      serviceTicketId: 'S-1',
+      fieldTripDraft: { routeFrom: 'Казань', routeTo: 'Алабуга' },
+    },
+  };
+  return { state, messages, handlers };
+}
+
 function makePart(index, overrides = {}) {
   return {
     id: `P-${index}`,
@@ -1104,6 +1117,53 @@ test('mechanic work add does not overwrite a newer equipment hours value', async
   assert.equal(state.equipment[0].hours, 900);
   assert.equal(state.equipment[0].history.length, 0);
   assert.match(messages.at(-1).text, /Указанные моточасы меньше текущих/);
+});
+
+test('MAX manual field trip rejects Infinity distance', async () => {
+  const { state, messages, handlers } = setupManualFieldTripDistance();
+
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Infinity');
+
+  assert.equal(state.service_field_trips.length, 0);
+  assert.match(messages.at(-1).text, /положительное число километров/);
+});
+
+test('MAX manual field trip rejects non-numeric distance', async () => {
+  const { state, messages, handlers } = setupManualFieldTripDistance();
+
+  await handlers.handleCommand({ user_id: 100 }, '100', 'примерно 200');
+
+  assert.equal(state.service_field_trips.length, 0);
+  assert.match(messages.at(-1).text, /положительное число километров/);
+});
+
+test('MAX manual field trip rejects zero distance', async () => {
+  const { state, messages, handlers } = setupManualFieldTripDistance();
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '0');
+
+  assert.equal(state.service_field_trips.length, 0);
+  assert.match(messages.at(-1).text, /положительное число километров/);
+});
+
+test('MAX manual field trip rejects negative distance', async () => {
+  const { state, messages, handlers } = setupManualFieldTripDistance();
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '-10');
+
+  assert.equal(state.service_field_trips.length, 0);
+  assert.match(messages.at(-1).text, /положительное число километров/);
+});
+
+test('MAX manual field trip accepts valid positive distance', async () => {
+  const { state, messages, handlers } = setupManualFieldTripDistance();
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '200');
+
+  assert.equal(state.service_field_trips.length, 1);
+  assert.equal(state.service_field_trips[0].distanceKm, 200);
+  assert.equal(state.service_field_trips[0].closedNormHours, 2.9);
+  assert.match(messages.at(-1).text, /Казань/);
 });
 
 test('mechanic current repair draft displays legacy work without meter hours', async () => {

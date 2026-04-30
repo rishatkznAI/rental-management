@@ -101,6 +101,7 @@ const { registerRentalChangeRequestRoutes } = require('./routes/rental-change-re
 const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
 const { registerSystemRoutes } = require('./routes/system');
+const { normalizeServiceTicketList } = require('./lib/service-dto');
 const {
   DB_PATH,
   cloneCollectionIfMissing,
@@ -670,8 +671,9 @@ function sampleGenericForDiagnostics(items) {
 
 function collectionDiagnostics(collection, user) {
   const raw = readData(collection) || [];
+  const readableRaw = collection === 'service' ? normalizeServiceTicketList(raw) : raw;
   const canRead = roleAccessSummary(user?.userRole || user?.role || '').readableCollections.includes(collection);
-  const scoped = canRead ? accessControl.filterCollectionByScope(collection, raw, user) : [];
+  const scoped = canRead ? accessControl.filterCollectionByScope(collection, readableRaw, user) : [];
   const sanitized = canRead ? accessControl.sanitizeCollectionForRead(collection, scoped, user) : [];
   return { raw, scoped, sanitized, canRead };
 }
@@ -680,6 +682,7 @@ function endpointDiagnostics(path, collection, user, sampleFn = sampleGenericFor
   const data = collectionDiagnostics(collection, user);
   return {
     status: data.canRead ? 200 : 403,
+    statusCode: data.canRead ? 200 : 403,
     rawCount: Array.isArray(data.raw) ? data.raw.length : 0,
     scopedCount: data.scoped.length,
     sanitizedCount: data.sanitized.length,
@@ -738,6 +741,11 @@ function buildAccessDiagnostics(req) {
       },
       '/api/service': {
         ...serviceEndpoint,
+        role: req.user?.userRole || '',
+        rawRole,
+        normalizedRole,
+        readableCollections: access.readableCollections,
+        safeSamples: serviceEndpoint.samples,
         frontendCounts: {
           active: sanitizedService.filter(serviceTicketIsActiveForDiagnostics).length,
           closed: sanitizedService.filter(item => !serviceTicketIsActiveForDiagnostics(item)).length,

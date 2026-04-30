@@ -237,40 +237,79 @@ function formatCarrierDeliveryMessage(delivery, options = {}) {
   ].filter(Boolean).join('\n');
 }
 
+function parseDeliveryDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function addDays(dateKey, days) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function formatDateLabel(dateKey, todayKey) {
+  if (!dateKey) return 'Без даты';
+  if (dateKey === todayKey) return 'Сегодня';
+  if (dateKey === addDays(todayKey, 1)) return 'Завтра';
+  const match = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : dateKey;
+}
+
+function deliveryTimeText(dto) {
+  return dto.pickupTime || dto.neededBy || '';
+}
+
+function formatCarrierDeliveryListItem(delivery, index, options = {}) {
+  const getEquipment = typeof options.getEquipment === 'function' ? options.getEquipment : () => null;
+  const dto = toCarrierDeliveryDto(delivery, { equipment: getEquipment(delivery) });
+  const time = deliveryTimeText(dto);
+  return [
+    `${index}.`,
+    time ? `${time} ·` : '',
+    `${dto.operationType} ·`,
+    `${dto.equipment} ·`,
+    `${dto.origin || 'не указано'} → ${dto.destination || 'не указано'} ·`,
+    dto.statusLabel,
+  ].filter(Boolean).join(' ');
+}
+
 function formatCarrierDeliveryList(deliveries, options = {}) {
   const list = Array.isArray(deliveries) ? deliveries : [];
   if (!list.length) {
-    return [
-      'У вас пока нет активных доставок.',
-      '',
-      'Как только офис назначит новую доставку, здесь появятся заявки и статусы.',
-    ].join('\n');
+    return 'Активных доставок нет.';
   }
 
   const getEquipment = typeof options.getEquipment === 'function' ? options.getEquipment : () => null;
-  // IMPORTANT: callers must pass only active, carrier-scoped deliveries. Completed and
-  // cancelled deliveries are terminal and should not be shown as active carrier tasks.
-  const lines = list.slice(0, 10).map((delivery, index) => {
-    const dto = toCarrierDeliveryDto(delivery, { equipment: getEquipment(delivery) });
-    return [
-      `${index + 1}. ${dto.operationType} · ${dto.number}`,
-      `   Дата: ${dto.transportDate || 'не указана'}${dto.neededBy ? ` · дедлайн: ${dto.neededBy}` : ''}`,
-      `   Время забора: ${dto.pickupTime || 'не указано'}`,
-      `   Техника: ${dto.equipment}`,
-      `   ${dto.origin || 'не указано'} -> ${dto.destination || 'не указано'}`,
-      `   Контакт: ${[dto.contactName, dto.contactPhone].filter(Boolean).join(' · ') || 'не указан'}`,
-      formatRequestContactBlock(dto.requestContact)?.split('\n').map(line => `   ${line}`).join('\n'),
-      dto.driverComment ? `   Комментарий менеджера: ${dto.driverComment}` : null,
-      `   Статус: ${dto.statusLabel}`,
-    ].filter(Boolean).join('\n');
+  const pageSize = Math.max(1, Number(options.pageSize) || 10);
+  const total = list.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(Math.max(Number(options.page) || 0, 0), totalPages - 1);
+  const start = page * pageSize;
+  const pageItems = list.slice(start, start + pageSize);
+  const todayKey = parseDeliveryDate(options.currentDate || new Date().toISOString()) || new Date().toISOString().slice(0, 10);
+  const lines = [`🚚 Мои активные доставки: ${total}`];
+  if (total > pageSize) {
+    lines.push(`Показаны ${start + 1}-${start + pageItems.length} из ${total}`);
+  }
+  lines.push('');
+
+  let currentGroup = null;
+  pageItems.forEach((delivery, pageIndex) => {
+    const dateKey = parseDeliveryDate(delivery?.transportDate);
+    const group = formatDateLabel(dateKey, todayKey);
+    if (group !== currentGroup) {
+      if (currentGroup) lines.push('');
+      lines.push(group);
+      currentGroup = group;
+    }
+    lines.push(formatCarrierDeliveryListItem(delivery, start + pageIndex + 1, { getEquipment }));
   });
 
-  return [
-    `Мои доставки (${list.length})`,
-    '',
-    ...lines,
-    list.length > 10 ? `... и ещё ${list.length - 10}` : '',
-  ].filter(Boolean).join('\n');
+  return lines.filter(line => line !== null && line !== undefined).join('\n');
 }
 
 module.exports = {

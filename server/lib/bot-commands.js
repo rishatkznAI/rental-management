@@ -57,6 +57,7 @@ function createBotHandlers(deps) {
   if (missingAccessMethods.length > 0) {
     throw new Error(`Bot handlers require access-control methods: ${missingAccessMethods.join(', ')}`);
   }
+  const CARRIER_DELIVERY_PAGE_SIZE = 10;
   const {
     button,
     keyboard,
@@ -516,7 +517,7 @@ function createBotHandlers(deps) {
   function deliveryStatusKeyboard(delivery) {
     if (!delivery || delivery.status === 'completed' || delivery.status === 'cancelled') {
       return keyboard([
-        [button('Мои доставки', 'menu:deliveries')],
+        [button('⬅️ К списку доставок', 'menu:deliveries')],
         [button('Главное меню', 'menu:main')],
       ]);
     }
@@ -525,7 +526,7 @@ function createBotHandlers(deps) {
         [button('В пути', `delivery:status:${delivery.id}:in_transit`)],
         [button('Проблема/отмена', `delivery:status:${delivery.id}:cancelled`)],
         [button('Комментарий/фото', `delivery:comment:${delivery.id}`)],
-        [button('Мои доставки', 'menu:deliveries'), button('Главное меню', 'menu:main')],
+        [button('⬅️ К списку', 'menu:deliveries')],
       ]);
     }
     if (delivery.status === 'in_transit') {
@@ -533,15 +534,23 @@ function createBotHandlers(deps) {
         [button('Выполнено', `delivery:status:${delivery.id}:completed`)],
         [button('Проблема/отмена', `delivery:status:${delivery.id}:cancelled`)],
         [button('Комментарий/фото', `delivery:comment:${delivery.id}`)],
-        [button('Мои доставки', 'menu:deliveries'), button('Главное меню', 'menu:main')],
+        [button('⬅️ К списку', 'menu:deliveries')],
       ]);
     }
     return keyboard([
       [button('Принять доставку', `delivery:status:${delivery.id}:accepted`)],
       [button('Проблема/отмена', `delivery:status:${delivery.id}:cancelled`)],
       [button('Комментарий/фото', `delivery:comment:${delivery.id}`)],
-      [button('Мои доставки', 'menu:deliveries'), button('Главное меню', 'menu:main')],
+      [button('⬅️ К списку', 'menu:deliveries')],
     ]);
+  }
+
+  function carrierDeliveryBackKeyboard() {
+    return keyboard([[button('⬅️ К списку доставок', 'menu:deliveries')]]);
+  }
+
+  function unavailableCarrierDeliveryKeyboard() {
+    return keyboard([[button('🚚 Мои доставки', 'menu:deliveries')]]);
   }
 
   function formatDeliveryStatusMessage(delivery) {
@@ -997,6 +1006,8 @@ function createBotHandlers(deps) {
       payload === 'menu:help' ||
       payload === 'auth:start' ||
       payload === 'menu:cancel_login' ||
+      payload.startsWith('delivery:list:') ||
+      payload.startsWith('delivery:open:') ||
       payload.startsWith('delivery:comment:') ||
       payload.startsWith('delivery:status:');
   }
@@ -1042,15 +1053,55 @@ function createBotHandlers(deps) {
 
     return (readData('deliveries') || [])
       .filter(item => isVisibleCarrierDelivery(item) && resolveDeliveryCarrierId(item) === carrierId)
-      .sort((left, right) => new Date(right.transportDate || 0).getTime() - new Date(left.transportDate || 0).getTime());
+      .sort(compareCarrierDeliveries);
   }
 
-  function formatCarrierDeliveries(deliveries) {
+  function deliverySortTimestamp(delivery) {
+    const date = String(delivery?.transportDate || '').trim();
+    if (!date) return Number.POSITIVE_INFINITY;
+    const time = String(delivery?.pickupTime || '').trim();
+    const iso = time ? `${date}T${time}:00` : `${date}T23:59:59`;
+    const value = new Date(iso).getTime();
+    return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+  }
+
+  function compareCarrierDeliveries(left, right) {
+    const leftTime = deliverySortTimestamp(left);
+    const rightTime = deliverySortTimestamp(right);
+    if (leftTime !== rightTime) return leftTime - rightTime;
+    return String(left?.id || '').localeCompare(String(right?.id || ''), 'ru', { numeric: true });
+  }
+
+  function formatCarrierDeliveries(deliveries, page = 0) {
     return formatCarrierDeliveryList(deliveries, {
       getEquipment: delivery => delivery?.equipmentId
         ? (readData('equipment') || []).find(item => item.id === delivery.equipmentId)
         : null,
+      page,
+      pageSize: CARRIER_DELIVERY_PAGE_SIZE,
+      currentDate: nowIso(),
     });
+  }
+
+  function carrierDeliveryListKeyboard(deliveries, page = 0) {
+    const total = Array.isArray(deliveries) ? deliveries.length : 0;
+    if (!total) return carrierKeyboard();
+    const totalPages = Math.max(1, Math.ceil(total / CARRIER_DELIVERY_PAGE_SIZE));
+    const safePage = Math.min(Math.max(Number(page) || 0, 0), totalPages - 1);
+    const start = safePage * CARRIER_DELIVERY_PAGE_SIZE;
+    const pageItems = deliveries.slice(start, start + CARRIER_DELIVERY_PAGE_SIZE);
+    const numberButtons = pageItems.map((delivery, index) =>
+      button(String(start + index + 1), `delivery:open:${delivery.id}`),
+    );
+    const rows = chunkButtons(numberButtons, 5);
+    rows.push([button('🔄 Обновить', `delivery:list:${safePage}`)]);
+    if (totalPages > 1) {
+      rows.push([
+        ...(safePage > 0 ? [button('⬅️ Назад', `delivery:list:${safePage - 1}`)] : []),
+        ...(safePage < totalPages - 1 ? [button('➡️ Далее', `delivery:list:${safePage + 1}`)] : []),
+      ]);
+    }
+    return keyboard(rows);
   }
 
   function formatUnlinkedCarrierMessage() {
@@ -1220,6 +1271,8 @@ function createBotHandlers(deps) {
 
   function isDeliveryModeCallback(payload) {
     return payload === 'menu:deliveries' ||
+      payload.startsWith('delivery:list:') ||
+      payload.startsWith('delivery:open:') ||
       payload.startsWith('delivery:comment:') ||
       payload.startsWith('delivery:status:');
   }
@@ -2886,13 +2939,48 @@ function createBotHandlers(deps) {
       return handleCommand(senderId, phone, `/ремонт ${ticketId}`, {}, { callbackContext, replaceMessage: true });
     }
 
+    if (normalized.startsWith('delivery:list:')) {
+      const page = Number(normalized.slice('delivery:list:'.length)) || 0;
+      const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
+      const deliveries = getCarrierDeliveries(phone, authUser);
+      return reply(senderId, formatCarrierDeliveries(deliveries, page), {
+        attachments: carrierDeliveryListKeyboard(deliveries, page),
+        mechanicStage: 'delivery_list',
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized.startsWith('delivery:open:')) {
+      const deliveryId = normalized.slice('delivery:open:'.length);
+      const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
+      const delivery = (readData('deliveries') || []).find(item => item.id === deliveryId) || null;
+      if (!isCarrierBotUser(authUser) || !delivery || !canCarrierAccessDelivery(delivery, authUser) || isClosedDelivery(delivery)) {
+        return reply(senderId, 'Эта доставка вам недоступна или уже закрыта.', {
+          attachments: unavailableCarrierDeliveryKeyboard(),
+          mechanicStage: 'delivery_status',
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      return reply(senderId, formatDeliveryStatusMessage(delivery), {
+        attachments: deliveryStatusKeyboard(delivery),
+        mechanicStage: 'delivery_status',
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
     if (normalized.startsWith('delivery:comment:')) {
       const deliveryId = normalized.slice('delivery:comment:'.length);
       const authUser = getAuthorizedUserForCurrentBot(String(phone), senderId);
       const delivery = (readData('deliveries') || []).find(item => item.id === deliveryId) || null;
       if (!isCarrierBotUser(authUser) || !delivery || !canCarrierAccessDelivery(delivery, authUser) || isClosedDelivery(delivery)) {
         return reply(senderId, 'Эта доставка вам недоступна или уже закрыта.', {
-          attachments: carrierKeyboard(),
+          attachments: unavailableCarrierDeliveryKeyboard(),
           mechanicStage: 'delivery_status',
           phone,
           callbackContext,
@@ -2920,7 +3008,7 @@ function createBotHandlers(deps) {
       const result = updateDeliveryStatusFromBot(deliveryId, nextStatus, actorName, String(phone), authUser);
       if (!result || result.unavailable) {
         return reply(senderId, 'Эта доставка вам недоступна или уже закрыта.', {
-          attachments: carrierKeyboard(),
+          attachments: unavailableCarrierDeliveryKeyboard(),
           mechanicStage: 'delivery_status',
           phone,
           callbackContext,
@@ -2928,20 +3016,19 @@ function createBotHandlers(deps) {
         });
       }
       if (result.invalid) {
-        return reply(senderId, formatDeliveryStatusMessage(result.delivery), {
-          attachments: deliveryStatusKeyboard(result.delivery),
+        return reply(senderId, 'Эта доставка вам недоступна или уже закрыта.', {
+          attachments: unavailableCarrierDeliveryKeyboard(),
           mechanicStage: 'delivery_status',
           phone,
           callbackContext,
           replaceMessage: true,
-          notification: 'Статус нельзя изменить этим шагом',
         });
       }
       if (result.changed && notificationService?.notifyDeliveryStatusChanged) {
         await notificationService.notifyDeliveryStatusChanged(previousDelivery, result.delivery);
       }
-      return reply(senderId, formatDeliveryStatusMessage(result.delivery), {
-        attachments: deliveryStatusKeyboard(result.delivery),
+      return reply(senderId, `✅ Статус обновлён: ${deliveryStatusLabel(result.delivery.status)}`, {
+        attachments: carrierDeliveryBackKeyboard(),
         mechanicStage: 'delivery_status',
         phone,
         callbackContext,
@@ -4041,9 +4128,8 @@ function createBotHandlers(deps) {
 
     if (isDeliveriesCommand(commandText, commandCompact) && isCarrier) {
       const deliveries = getCarrierDeliveries(phone, authUser);
-      const activeDelivery = deliveries.find(item => item.status !== 'completed' && item.status !== 'cancelled') || deliveries[0] || null;
       return replyWithUi(formatCarrierDeliveries(deliveries), {
-        attachments: activeDelivery ? deliveryStatusKeyboard(activeDelivery) : carrierKeyboard(),
+        attachments: carrierDeliveryListKeyboard(deliveries),
         mechanicStage: 'delivery_list',
       });
     }

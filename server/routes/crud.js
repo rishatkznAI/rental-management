@@ -1,6 +1,7 @@
 const express = require('express');
 const { syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
 const { normalizeRole } = require('../lib/role-groups');
+const { normalizeServiceTicketList, normalizeServiceTicketRecord } = require('../lib/service-dto');
 const {
   RENTAL_CHANGE_REQUEST_STATUS,
   buildRequestDecisionNotificationStatus,
@@ -339,6 +340,9 @@ function registerCrudRoutes(deps) {
           data = data.filter(item => item.isActive);
         }
       }
+      if (collection === 'service') {
+        data = normalizeServiceTicketList(data);
+      }
       if (collection === 'users') {
         if (canReadFullUsers(req)) {
           return res.json(data.map(sanitizeUser));
@@ -375,6 +379,7 @@ function registerCrudRoutes(deps) {
       if (!item) return res.status(404).json({ ok: false, error: 'Not found' });
       if (collection === 'service_works') item = normalizeServiceWorkRecord(item);
       if (collection === 'spare_parts') item = normalizeSparePartRecord(item);
+      if (collection === 'service') item = normalizeServiceTicketRecord(item);
       if (collection === 'users') {
         if (canReadFullUsers(req) || item.id === req.user.userId) {
           return res.json(sanitizeUser(item));

@@ -104,3 +104,30 @@ test('auth login 401 follows unauthorized flow without entering the app', async 
   await expect(page).toHaveURL(/#\/login$/);
   await expect(page.getByText('Неверный email или пароль')).toBeVisible();
 });
+
+test('service tab renders legacy incomplete tickets without crashing', async ({ page }) => {
+  await page.route('**/api/service', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([
+      null,
+      {
+        id: 'S-legacy',
+        equipmentInv: 'INV-legacy',
+        status: null,
+        priority: null,
+        reason: null,
+        description: null,
+        createdAt: 'not-a-date',
+      },
+    ]),
+  }));
+
+  await loginAsAdmin(page);
+  await page.locator('aside').getByRole('button', { name: /^Сервис/ }).click();
+
+  await expectStillAuthenticatedOnService(page);
+  await expect(page.getByText('S-legacy')).toBeVisible();
+  await expect(page.getByText('INV: INV-legacy').first()).toBeVisible();
+  await expect(page.getByText('Без причины')).toBeVisible();
+});

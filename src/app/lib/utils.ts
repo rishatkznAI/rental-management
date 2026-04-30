@@ -14,21 +14,25 @@ export function formatCurrency(amount: number): string {
 }
 
 export function formatDate(date: string): string {
+  const parsed = new Date(date);
+  if (!date || Number.isNaN(parsed.getTime())) return '—';
   return new Intl.DateTimeFormat('ru-RU', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
-  }).format(new Date(date));
+  }).format(parsed);
 }
 
 export function formatDateTime(date: string): string {
+  const parsed = new Date(date);
+  if (!date || Number.isNaN(parsed.getTime())) return '—';
   return new Intl.DateTimeFormat('ru-RU', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(date));
+  }).format(parsed);
 }
 
 export function getDaysUntil(date: string): number {

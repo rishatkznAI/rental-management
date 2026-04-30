@@ -876,7 +876,8 @@ export default function Dashboard() {
   const serviceInDaysRows = openServiceTickets
     .map(ticket => {
       const createdAt = new Date(ticket.createdAt);
-      const daysInService = Math.max(1, Math.ceil((today.getTime() - createdAt.getTime()) / 86400000));
+      const createdAtTime = Number.isNaN(createdAt.getTime()) ? today.getTime() : createdAt.getTime();
+      const daysInService = Math.max(1, Math.ceil((today.getTime() - createdAtTime) / 86400000));
       const linkedEquipment =
         (ticket.equipmentId && equipmentById.get(ticket.equipmentId)) ||
         (ticket.inventoryNumber && uniqueEquipmentByInventory.get(ticket.inventoryNumber)) ||

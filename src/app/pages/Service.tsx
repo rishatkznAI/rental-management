@@ -90,10 +90,6 @@ function getTicketSearchText(ticket: ServiceTicket) {
   ].filter(Boolean).join(' '));
 }
 
-function shouldLogWarrantyDebug() {
-  return import.meta.env.DEV || window.localStorage.getItem('warrantyDebug') === '1';
-}
-
 function apiErrorMessage(error: unknown, fallback: string) {
   if (!error) return fallback;
   const status = typeof error === 'object' && error && 'status' in error ? `HTTP ${(error as { status?: number }).status}` : '';
@@ -318,54 +314,6 @@ export default function Service() {
   ]);
 
   React.useEffect(() => {
-    if (!shouldLogWarrantyDebug() || !isWarrantyMechanicRole(user?.role)) return;
-    const effectiveDateFrom = dateFrom || (
-      datePreset === 'today'
-        ? todayIso
-        : datePreset === 'last7'
-          ? last7StartIso
-          : datePreset === 'month'
-            ? monthStartIso
-            : ''
-    );
-    const effectiveDateTo = dateTo || (datePreset === 'all' ? '' : todayIso);
-    const filters = { search, priorityFilter, statusFilter, scenarioFilter, mechanicFilter, workflowFilter, preset, effectiveDateFrom, effectiveDateTo };
-    const excluded = ticketList
-      .map(ticket => ({ id: ticket.id, equipmentId: ticket.equipmentId, reasons: serviceFilterReasons(ticket, filters) }))
-      .filter(item => item.reasons.length > 0)
-      .slice(0, 5);
-    console.debug('[warranty-mechanic/service]', {
-      rawRole: user?.rawRole ?? user?.role,
-      normalizedRole: normalizeUserRole(user?.role),
-      beforeFilters: ticketList.length,
-      activeTickets: activeTickets.length,
-      afterFilters: filteredTickets.length,
-      filters: { search, priorityFilter, statusFilter, scenarioFilter, mechanicFilter, workflowFilter, preset, datePreset, dateFrom, dateTo },
-      unassigned: ticketList.filter(ticket => !ticket.assignedMechanicId && !ticket.assignedTo).length,
-      excluded,
-    });
-  }, [
-    activeTickets.length,
-    dateFrom,
-    datePreset,
-    dateTo,
-    filteredTickets.length,
-    last7StartIso,
-    mechanicFilter,
-    monthStartIso,
-    preset,
-    priorityFilter,
-    scenarioFilter,
-    search,
-    statusFilter,
-    ticketList,
-    todayIso,
-    user?.rawRole,
-    user?.role,
-    workflowFilter,
-  ]);
-
-  React.useEffect(() => {
     setVisibleCount(RESULT_BATCH_SIZE);
   }, [search, priorityFilter, statusFilter, scenarioFilter, mechanicFilter, workflowFilter, preset, datePreset, dateFrom, dateTo]);
 
@@ -432,7 +380,7 @@ export default function Service() {
 
       {ticketsQuery.error && (
         <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-100">
-          <div className="font-semibold">Не удалось загрузить сервисные заявки</div>
+          <div className="font-semibold">Не удалось загрузить сервисные заявки. Попробуйте обновить страницу или обратитесь к администратору.</div>
           <div className="mt-1 text-red-700/80 dark:text-red-100/80">
             {apiErrorMessage(ticketsQuery.error, 'Проверьте доступ к GET /api/service.')}
           </div>

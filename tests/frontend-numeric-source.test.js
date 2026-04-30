@@ -20,3 +20,14 @@ test('CRM form validates budget and probability instead of silently clamping', (
   assert.doesNotMatch(source, /Math\.max\(0, Number\(form\.budget\) \|\| 0\)/);
   assert.doesNotMatch(source, /Math\.min\(100, Math\.max\(0, Number\(form\.probability\) \|\| 0\)\)/);
 });
+
+test('Documents page guards legacy optional fields before filtering and rendering', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf-8');
+
+  assert.match(source, /Array\.isArray\(documentList\) \? documentList : \[\]/);
+  assert.match(source, /searchText\(doc\.number\)/);
+  assert.match(source, /searchText\(doc\.client\)/);
+  assert.match(source, /getSafeDocumentStatus\(doc\.status\)/);
+  assert.doesNotMatch(source, /doc\.number\.toLowerCase\(\)/);
+  assert.doesNotMatch(source, /doc\.client\.toLowerCase\(\)/);
+});

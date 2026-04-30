@@ -408,6 +408,21 @@ test('/api/service returns 200 for service roles and 403 for forbidden roles', a
   });
 });
 
+test('/api/documents remains readable for roles with Documents section access', async () => {
+  const { app } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    for (const token of ['admin-token', 'office-token', 'manager-token', 'sales-token']) {
+      const response = await request(baseUrl, 'GET', '/api/documents', token);
+      assert.equal(response.status, 200, token);
+      assert.equal(Array.isArray(response.body), true, token);
+    }
+
+    assert.equal((await request(baseUrl, 'GET', '/api/documents', 'mechanic-token')).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/documents', null)).status, 401);
+  });
+});
+
 test('real Express API routes deny direct object-level bypasses', async () => {
   const { app, state } = createSecurityApp();
 

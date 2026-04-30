@@ -45,12 +45,16 @@ import type {
   Client,
   Document as Doc,
   DocumentContractKind,
+  DocumentStatus,
   DocumentType,
   Mechanic,
   MechanicDocument,
 } from '../types';
 
 type DocumentsView = 'general' | 'mechanics';
+
+const VALID_DOCUMENT_TYPES = new Set<DocumentType>(['contract', 'act', 'invoice', 'work_order']);
+const VALID_DOCUMENT_STATUSES = new Set<DocumentStatus>(['draft', 'signed', 'sent']);
 
 type ContractFormState = {
   clientId: string;
@@ -106,14 +110,28 @@ function getContractKindLabel(kind?: DocumentContractKind) {
   return 'Договор аренды';
 }
 
-function getDocumentTypeLabel(doc: Doc): string {
+function displayText(value: unknown, fallback = '—') {
+  const text = String(value ?? '').trim();
+  return text || fallback;
+}
+
+function searchText(value: unknown) {
+  return String(value ?? '').toLowerCase();
+}
+
+export function getDocumentTypeLabel(doc: Partial<Doc> | null | undefined): string {
   const labels: Record<DocumentType, string> = {
-    contract: getContractKindLabel(doc.contractKind),
+    contract: getContractKindLabel(doc?.contractKind),
     act: 'Акт',
     invoice: 'Счёт',
     work_order: 'Заказ-наряд',
   };
-  return labels[doc.type];
+  const type = doc?.type;
+  return VALID_DOCUMENT_TYPES.has(type as DocumentType) ? labels[type as DocumentType] : 'Документ';
+}
+
+export function getSafeDocumentStatus(status: unknown): DocumentStatus {
+  return VALID_DOCUMENT_STATUSES.has(status as DocumentStatus) ? status as DocumentStatus : 'draft';
 }
 
 function nextContractNumber(documents: Doc[], kind: DocumentContractKind, date: string) {
@@ -269,25 +287,27 @@ export default function Documents() {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const signedScanInputRef = React.useRef<HTMLInputElement | null>(null);
   const [signedScanTargetDoc, setSignedScanTargetDoc] = React.useState<Doc | null>(null);
+  const documents = Array.isArray(documentList) ? documentList : [];
+  const mechanicList = Array.isArray(mechanics) ? mechanics : [];
 
   React.useEffect(() => {
-    setMechanicDocuments(mechanicDocsData);
+    setMechanicDocuments(Array.isArray(mechanicDocsData) ? mechanicDocsData : []);
   }, [mechanicDocsData]);
 
   React.useEffect(() => {
-    if (!selectedMechanicId && mechanics.length > 0) {
-      setSelectedMechanicId(mechanics[0].id);
+    if (!selectedMechanicId && mechanicList.length > 0) {
+      setSelectedMechanicId(mechanicList[0].id);
     }
-  }, [mechanics, selectedMechanicId]);
+  }, [mechanicList, selectedMechanicId]);
 
-  const filteredDocuments = documentList.filter(doc => {
+  const filteredDocuments = documents.filter(doc => {
     const q = search.trim().toLowerCase();
     const matchesSearch = q === ''
-      || doc.number.toLowerCase().includes(q)
-      || doc.client.toLowerCase().includes(q)
+      || searchText(doc.number).includes(q)
+      || searchText(doc.client).includes(q)
       || getDocumentTypeLabel(doc).toLowerCase().includes(q)
-      || String(doc.signatoryName || '').toLowerCase().includes(q)
-      || String(doc.signatoryBasis || '').toLowerCase().includes(q);
+      || searchText(doc.signatoryName).includes(q)
+      || searchText(doc.signatoryBasis).includes(q);
 
     const matchesType = typeFilter === 'all' || doc.type === typeFilter;
     const matchesStatus = statusFilter === 'all' || doc.status === statusFilter;
@@ -302,7 +322,7 @@ export default function Documents() {
   ].filter(Boolean).length;
 
   const filteredMechanics = React.useMemo(() => (
-    mechanics
+    mechanicList
       .filter(item => item.status === 'active')
       .filter(item => {
         const query = mechanicSearch.trim().toLowerCase();
@@ -310,10 +330,10 @@ export default function Documents() {
         return item.name.toLowerCase().includes(query) || (item.phone || '').toLowerCase().includes(query);
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
-  ), [mechanicSearch, mechanics]);
+  ), [mechanicSearch, mechanicList]);
 
   const selectedMechanic = filteredMechanics.find(item => item.id === selectedMechanicId)
-    || mechanics.find(item => item.id === selectedMechanicId)
+    || mechanicList.find(item => item.id === selectedMechanicId)
     || null;
 
   const selectedMechanicDocuments = React.useMemo(
@@ -324,8 +344,8 @@ export default function Documents() {
   );
 
   const generatedContractNumber = React.useMemo(
-    () => nextContractNumber(documentList, createContractKind, contractForm.date),
-    [createContractKind, contractForm.date, documentList],
+    () => nextContractNumber(documents, createContractKind, contractForm.date),
+    [createContractKind, contractForm.date, documents],
   );
 
   const persistMechanicDocuments = React.useCallback(async (next: MechanicDocument[]) => {
@@ -433,11 +453,11 @@ export default function Documents() {
 
   function downloadDocument(doc: Doc) {
     if (doc.contentHtml) {
-      downloadPrintableHtml(doc.contentHtml, `${doc.number}.html`);
+      downloadPrintableHtml(doc.contentHtml, `${displayText(doc.number, 'document')}.html`);
       return;
     }
     if (doc.signedScanDataUrl) {
-      downloadDataUrl(doc.signedScanDataUrl, doc.signedScanFileName || `${doc.number}`);
+      downloadDataUrl(doc.signedScanDataUrl, doc.signedScanFileName || displayText(doc.number, 'document'));
     }
   }
 
@@ -592,8 +612,8 @@ export default function Documents() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredDocuments.map((doc) => (
-                  <TableRow key={doc.id}>
+                {filteredDocuments.map((doc, index) => (
+                  <TableRow key={doc.id || doc.number || index}>
                     <TableCell>
                       <div>
                         <p className="text-sm font-medium">{getDocumentTypeLabel(doc)}</p>
@@ -606,14 +626,14 @@ export default function Documents() {
                     </TableCell>
                     <TableCell>
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{doc.number}</p>
+                        <p className="font-medium text-gray-900 dark:text-white">{displayText(doc.number)}</p>
                         {doc.signedScanFileName ? (
                           <p className="text-xs text-green-600 dark:text-green-400">Скан загружен</p>
                         ) : null}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <p className="text-sm">{doc.client}</p>
+                      <p className="text-sm">{displayText(doc.client)}</p>
                     </TableCell>
                     <TableCell>
                       <div>
@@ -625,13 +645,13 @@ export default function Documents() {
                     </TableCell>
                     <TableCell>
                       <div>
-                        <p className="text-sm">{formatDate(doc.date)}</p>
+                        <p className="text-sm">{formatDate(String(doc.date || ''))}</p>
                         {doc.signedAt ? (
                           <p className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.signedAt)}</p>
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell>{getDocumentStatusBadge(doc.status)}</TableCell>
+                    <TableCell>{getDocumentStatusBadge(getSafeDocumentStatus(doc.status))}</TableCell>
                     <TableCell>
                       <div className="flex gap-2">
                         <button
@@ -685,7 +705,7 @@ export default function Documents() {
 
           {filteredDocuments.length > 0 && (
             <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-              <p>Показано {filteredDocuments.length} из {documentList.length} документов</p>
+              <p>Показано {filteredDocuments.length} из {documents.length} документов</p>
             </div>
           )}
 

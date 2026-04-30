@@ -26,6 +26,7 @@ const READ_PERMISSIONS = {
   rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   gantt_rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   payments: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  crm_deals: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   repair_work_items: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   repair_part_items: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
@@ -41,6 +42,7 @@ const WRITE_PERMISSIONS = {
   documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   equipment: ['Администратор', 'Офис-менеджер'],
   payments: ['Администратор', 'Офис-менеджер'],
+  crm_deals: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   repair_work_items: ['Администратор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   repair_part_items: ['Администратор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
@@ -57,6 +59,7 @@ function createState() {
       { id: 'U-admin-alias', name: 'Админ Alias', email: 'admin-alias@example.test', role: 'administrator', status: 'Активен', password: 'admin', tokenVersion: 0 },
       { id: 'U-manager', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Активен', password: 'old-password', tokenVersion: 0 },
       { id: 'U-manager-alias', name: 'Руслан Alias', email: 'manager-alias@example.test', role: 'rental_manager', status: 'Активен', password: 'manager', tokenVersion: 0 },
+      { id: 'U-sales', name: 'Светлана', email: 'sales@example.test', role: 'Менеджер по продажам', status: 'Активен', password: 'sales', tokenVersion: 0 },
       { id: 'U-office', name: 'Офис', email: 'office@example.test', role: 'Офис-менеджер', status: 'Активен', password: 'office', tokenVersion: 0 },
       { id: 'U-office-alias', name: 'Офис Alias', email: 'office-alias@example.test', role: 'office_manager', status: 'Активен', password: 'office', tokenVersion: 0 },
       { id: 'U-mechanic', name: 'Петров', email: 'mechanic@example.test', role: 'Механик', status: 'Активен', password: 'mechanic', tokenVersion: 0 },
@@ -89,6 +92,19 @@ function createState() {
     repair_work_items: [{ id: 'RW-1', repairId: 'S-other', workId: 'SW-1', quantity: 1, ratePerHourSnapshot: 2500, normHoursSnapshot: 1 }],
     repair_part_items: [{ id: 'RP-1', repairId: 'S-other', partId: 'SP-1', quantity: 1, priceSnapshot: 5000 }],
     payments: [{ id: 'P-1', rentalId: 'R-own', amount: 1000, status: 'new' }],
+    crm_deals: [{
+      id: 'CRM-own',
+      title: 'Продажа подъёмника',
+      pipeline: 'sales',
+      stage: 'lead',
+      status: 'open',
+      priority: 'medium',
+      company: 'ООО Свой',
+      manager: 'Светлана',
+      managerId: 'U-sales',
+      budget: 100000,
+      probability: 25,
+    }],
     clients: [],
     documents: [],
     app_settings: [{ id: 'AS-1', key: 'secret', value: { enabled: true } }],
@@ -104,6 +120,7 @@ function createSecurityApp(state = createState()) {
     ['admin-alias-token', { userId: 'U-admin-alias', tokenVersion: 0, passwordChangedAt: null }],
     ['manager-token', { userId: 'U-manager', tokenVersion: 0, passwordChangedAt: null }],
     ['manager-alias-token', { userId: 'U-manager-alias', tokenVersion: 0, passwordChangedAt: null }],
+    ['sales-token', { userId: 'U-sales', tokenVersion: 0, passwordChangedAt: null }],
     ['office-token', { userId: 'U-office', tokenVersion: 0, passwordChangedAt: null }],
     ['office-alias-token', { userId: 'U-office-alias', tokenVersion: 0, passwordChangedAt: null }],
     ['mechanic-token', { userId: 'U-mechanic', tokenVersion: 0, passwordChangedAt: null }],
@@ -219,6 +236,7 @@ function createSecurityApp(state = createState()) {
       'spare_parts',
       'clients',
       'documents',
+      'crm_deals',
       'unknown_collection',
     ],
     idPrefixes: {
@@ -233,6 +251,7 @@ function createSecurityApp(state = createState()) {
       spare_parts: 'SP',
       clients: 'C',
       documents: 'D',
+      crm_deals: 'CRM',
     },
     readData,
     writeData,
@@ -551,6 +570,150 @@ test('payments API accepts explicit zero paidAmount', async () => {
     assert.equal(response.status, 201);
     assert.equal(response.body.paidAmount, 0);
     assert.equal(state.payments.at(-1).paidAmount, 0);
+  });
+});
+
+test('CRM rejects negative budget', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/crm_deals', 'admin-token', {
+      title: 'Сделка',
+      company: 'ООО Клиент',
+      budget: -1,
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Сумма сделки/);
+  });
+});
+
+test('CRM rejects non-numeric budget', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/crm_deals', 'admin-token', {
+      title: 'Сделка',
+      company: 'ООО Клиент',
+      budget: 'abc',
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Сумма сделки/);
+  });
+});
+
+test('CRM rejects Infinity budget', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/crm_deals', 'admin-token', {
+      title: 'Сделка',
+      company: 'ООО Клиент',
+      budget: 'Infinity',
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Сумма сделки/);
+  });
+});
+
+test('CRM rejects probability below zero', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/crm_deals', 'admin-token', {
+      title: 'Сделка',
+      company: 'ООО Клиент',
+      probability: -1,
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Вероятность/);
+  });
+});
+
+test('CRM rejects probability above one hundred', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/crm_deals', 'admin-token', {
+      title: 'Сделка',
+      company: 'ООО Клиент',
+      probability: 101,
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Вероятность/);
+  });
+});
+
+test('sales manager can persist CRM budget and probability', async () => {
+  const { app, state } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/crm_deals', 'sales-token', {
+      title: 'Новая продажа',
+      pipeline: 'sales',
+      stage: 'lead',
+      status: 'open',
+      priority: 'high',
+      company: 'ООО Новый клиент',
+      budget: 250000,
+      probability: 40,
+      responsibleUserId: 'U-sales',
+      responsibleUserName: 'Светлана',
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.budget, 250000);
+    assert.equal(response.body.probability, 40);
+    const saved = state.crm_deals.find(item => item.id === response.body.id);
+    assert.equal(saved.budget, 250000);
+    assert.equal(saved.probability, 40);
+    assert.equal(saved.managerId, 'U-sales');
+  });
+});
+
+test('non-admin CRM update does not silently drop allowed fields', async () => {
+  const { app, state } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'PATCH', '/api/crm_deals/CRM-own', 'sales-token', {
+      pipeline: 'sales',
+      status: 'open',
+      priority: 'high',
+      company: 'ООО Обновленный',
+      budget: 300000,
+      probability: 65,
+      responsibleUserId: 'U-sales',
+      responsibleUserName: 'Светлана',
+    });
+
+    assert.equal(response.status, 200);
+    const saved = state.crm_deals.find(item => item.id === 'CRM-own');
+    assert.equal(saved.pipeline, 'sales');
+    assert.equal(saved.status, 'open');
+    assert.equal(saved.priority, 'high');
+    assert.equal(saved.company, 'ООО Обновленный');
+    assert.equal(saved.budget, 300000);
+    assert.equal(saved.probability, 65);
+    assert.equal(saved.responsibleUserId, 'U-sales');
+    assert.equal(saved.responsibleUserName, 'Светлана');
+  });
+});
+
+test('non-admin CRM mass-assignment still strips forbidden fields', async () => {
+  const { app, state } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'PATCH', '/api/crm_deals/CRM-own', 'sales-token', {
+      budget: 350000,
+      role: 'Администратор',
+      isAdmin: true,
+      amount: 999999,
+      managerId: 'U-other',
+    });
+
+    assert.equal(response.status, 200);
+    const saved = state.crm_deals.find(item => item.id === 'CRM-own');
+    assert.equal(saved.budget, 350000);
+    assert.equal(saved.role, undefined);
+    assert.equal(saved.isAdmin, undefined);
+    assert.equal(saved.amount, undefined);
+    assert.equal(saved.managerId, 'U-sales');
   });
 });
 

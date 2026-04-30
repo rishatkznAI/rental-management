@@ -165,6 +165,20 @@ function formatDateTime(value?: string | null) {
   }
 }
 
+function parseBudgetInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const numeric = Number(trimmed);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+}
+
+function parseProbabilityInput(value: string): number | undefined | null {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const numeric = Number(trimmed);
+  return Number.isFinite(numeric) && numeric >= 0 && numeric <= 100 ? numeric : null;
+}
+
 function getAllowedPipelines(role?: string): CrmPipelineType[] {
   if (role === 'Менеджер по аренде') return ['rental'];
   if (role === 'Менеджер по продажам') return ['sales'];
@@ -389,8 +403,16 @@ export default function CRM() {
     }
 
     const selectedManager = managers.find((item) => item.id === form.responsibleUserId);
-    const budget = form.budget.trim() ? Math.max(0, Number(form.budget) || 0) : 0;
-    const probability = form.probability.trim() ? Math.min(100, Math.max(0, Number(form.probability) || 0)) : undefined;
+    const budget = parseBudgetInput(form.budget);
+    if (budget === null) {
+      setFormError('Сумма сделки должна быть числом не меньше 0.');
+      return;
+    }
+    const probability = parseProbabilityInput(form.probability);
+    if (probability === null) {
+      setFormError('Вероятность должна быть числом от 0 до 100.');
+      return;
+    }
     const status = stageToStatus(form.stage);
 
     if (editingDeal) {

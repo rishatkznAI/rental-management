@@ -273,6 +273,24 @@ function registerCrudRoutes(deps) {
     parseOptionalServiceNumber(record, 'defaultPrice', 'Базовая цена');
   }
 
+  function parseOptionalCrmNumber(record, field, fieldLabel, { min = 0, max = Infinity } = {}) {
+    if (!record || !Object.prototype.hasOwnProperty.call(record, field)) return;
+    const value = record[field];
+    if (value === undefined || value === null || value === '') return;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < min || numeric > max) {
+      const rangeLabel = Number.isFinite(max)
+        ? `от ${min} до ${max}`
+        : `не меньше ${min}`;
+      throw new Error(`${fieldLabel} должно быть числом ${rangeLabel}`);
+    }
+  }
+
+  function validateCrmDealRecord(record) {
+    parseOptionalCrmNumber(record, 'budget', 'Сумма сделки');
+    parseOptionalCrmNumber(record, 'probability', 'Вероятность', { min: 0, max: 100 });
+  }
+
   function isPaymentStatusOnlyPatch(previousPayment, patch) {
     const changedFields = Object.keys(patch || {}).filter(field => {
       if (field === 'id') return false;
@@ -479,6 +497,9 @@ function registerCrudRoutes(deps) {
         if (collection === 'payments') {
           validatePaymentRecord(input);
         }
+        if (collection === 'crm_deals') {
+          validateCrmDealRecord(input);
+        }
 
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
@@ -591,6 +612,9 @@ function registerCrudRoutes(deps) {
         const previousItem = { ...data[idx] };
         if (collection === 'payments') {
           validatePaymentRecord({ ...data[idx], ...safePatch });
+        }
+        if (collection === 'crm_deals') {
+          validateCrmDealRecord(safePatch);
         }
         if (collection === 'rentals' || collection === 'gantt_rentals') {
           const validation = validateRentalPayload(
@@ -815,6 +839,9 @@ function registerCrudRoutes(deps) {
         }
         if (collection === 'spare_parts') {
           for (const item of list) validateSparePartCatalogRecord(item);
+        }
+        if (collection === 'crm_deals') {
+          for (const item of list) validateCrmDealRecord(item);
         }
       } catch (error) {
         return res.status(400).json({ ok: false, error: error.message });

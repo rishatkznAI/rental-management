@@ -15,6 +15,7 @@ function makeDelivery(overrides = {}) {
     type: 'shipping',
     status: 'new',
     transportDate: '2026-04-28',
+    pickupTime: null,
     neededBy: '2026-04-28',
     origin: 'Новая база',
     destination: 'Аксубаево',
@@ -183,6 +184,7 @@ test('creating a delivery stores creator contact fields and sends them to carrie
     const response = await request(baseUrl, 'POST', '/api/deliveries', {
       type: 'shipping',
       transportDate: '2026-04-29',
+      pickupTime: '09:30',
       neededBy: '2026-04-29',
       origin: 'Новая база',
       destination: 'Аксубаево',
@@ -195,14 +197,35 @@ test('creating a delivery stores creator contact fields and sends them to carrie
     });
 
     assert.equal(response.status, 201);
+    assert.equal(response.body.pickupTime, '09:30');
     assert.equal(response.body.createdBy, 'Администратор');
     assert.equal(response.body.createdByUserId, 'U-admin');
     assert.equal(response.body.createdByName, 'Администратор');
     assert.equal(response.body.createdByPhone, '+7 900 123-45-67');
     assert.equal(response.body.createdByEmail, 'admin@example.test');
     assert.equal(state.deliveries[0].createdByUserId, 'U-admin');
+    assert.equal(state.deliveries[0].pickupTime, '09:30');
     assert.equal(messages.length, 1);
+    assert.match(messages[0].text, /Время забора: 09:30/);
     assert.match(messages[0].text, /👤 Контакт по заявке:\nИмя: Администратор\nТелефон: \+7 900 123-45-67\nEmail: admin@example\.test/);
+  });
+});
+
+test('delivery API reads and updates pickupTime', async () => {
+  const { app, state } = createDeliveryApp({ pickupTime: undefined });
+
+  await withServer(app, async (baseUrl) => {
+    const before = await request(baseUrl, 'GET', '/api/deliveries/DL-1');
+    assert.equal(before.status, 200);
+    assert.equal(before.body.pickupTime, undefined);
+
+    const response = await request(baseUrl, 'PATCH', '/api/deliveries/DL-1', {
+      pickupTime: '14:45',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.pickupTime, '14:45');
+    assert.equal(state.deliveries[0].pickupTime, '14:45');
   });
 });
 

@@ -10,6 +10,7 @@ const { createBotHandlers } = require('../server/lib/bot-commands.js');
 const { createBotNotificationService } = require('../server/lib/bot-notifications.js');
 const { createAccessControl } = require('../server/lib/access-control.js');
 const {
+  formatCarrierDeliveryList,
   formatCarrierDeliveryMessage,
   toCarrierDeliveryDto,
 } = require('../server/lib/carrier-delivery-dto.js');
@@ -1417,6 +1418,7 @@ test('carrier sees only assigned deliveries without client or financial fields',
       type: 'shipping',
       status: 'sent',
       transportDate: '2026-04-25',
+      pickupTime: '09:30',
       neededBy: '2026-04-26',
       origin: 'Склад',
       destination: 'Точка монтажа',
@@ -1461,6 +1463,7 @@ test('carrier sees only assigned deliveries without client or financial fields',
 
   const text = messages.at(-1).text;
   assert.match(text, /Мои доставки \(1\)/);
+  assert.match(text, /Время забора: 09:30/);
   assert.match(text, /Mantall XE120W/);
   assert.doesNotMatch(text, /JLG 1930ES/);
   assert.doesNotMatch(text, /Секретный клиент|Чужой клиент|C-secret|R-secret|GR-secret/);
@@ -1468,6 +1471,7 @@ test('carrier sees only assigned deliveries without client or financial fields',
   assert.match(text, /Комментарий менеджера: Передать комплект закрывающих документов\./);
 
   const dto = toCarrierDeliveryDto(state.deliveries[0]);
+  assert.equal(dto.pickupTime, '09:30');
   assert.equal(dto.driverComment, 'Передать комплект закрывающих документов.');
   assert.equal('client' in dto, false);
   assert.equal('clientName' in dto, false);
@@ -1480,6 +1484,23 @@ test('carrier sees only assigned deliveries without client or financial fields',
   assert.equal('documents' in dto, false);
   assert.equal('rentalCost' in dto, false);
   assert.equal('internalFinance' in dto, false);
+});
+
+test('carrier delivery formatters show pickupTime fallback for legacy deliveries', () => {
+  const delivery = {
+    id: 'DL-legacy',
+    type: 'shipping',
+    status: 'sent',
+    transportDate: '2026-04-25',
+    origin: 'Склад',
+    destination: 'Объект',
+    cargo: 'Mantall XE120W',
+    contactName: 'Иван',
+    contactPhone: '+7 900 000-00-00',
+  };
+
+  assert.match(formatCarrierDeliveryMessage(delivery), /Время забора: не указано/);
+  assert.match(formatCarrierDeliveryList([delivery]), /Время забора: не указано/);
 });
 
 test('carrier delivery message prefers responsible manager contact', () => {
@@ -1597,6 +1618,7 @@ test('carrier status callback checks role, carrierId and writes bot activity aud
     type: 'shipping',
     status: 'sent',
     transportDate: '2026-04-25',
+    pickupTime: '10:15',
     origin: 'Склад',
     destination: 'Точка',
     cargo: 'Mantall XE120W',
@@ -1611,6 +1633,7 @@ test('carrier status callback checks role, carrierId and writes bot activity aud
   await handlers.handleCallback({ user_id: 100 }, '100', 'delivery:status:DL-1:accepted');
 
   assert.equal(state.deliveries[0].status, 'accepted');
+  assert.match(messages.at(-1).text, /Время забора: 10:15/);
   assert.doesNotMatch(messages.at(-1).text, /ООО Клиент|C-1/);
   const audit = state.bot_activity.find(item => item.action === 'carrier.delivery_status');
   assert.ok(audit);

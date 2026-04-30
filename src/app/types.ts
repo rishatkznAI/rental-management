@@ -1035,6 +1035,7 @@ export interface Delivery {
   type: DeliveryType;
   status: DeliveryStatus;
   transportDate: string;
+  pickupTime?: string | null;
   neededBy?: string | null;
   origin: string;
   destination: string;

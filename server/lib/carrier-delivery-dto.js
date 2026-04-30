@@ -199,6 +199,7 @@ function toCarrierDeliveryDto(delivery, options = {}) {
     type: delivery?.type === 'receiving' ? 'receiving' : 'shipping',
     operationType: deliveryTypeLabel(delivery?.type),
     transportDate: delivery?.transportDate || '',
+    pickupTime: delivery?.pickupTime || null,
     neededBy: delivery?.neededBy || null,
     equipment: formatEquipmentForCarrier(delivery, equipment),
     origin: delivery?.origin || '',
@@ -225,6 +226,7 @@ function formatCarrierDeliveryMessage(delivery, options = {}) {
     `Доставка: ${dto.number}`,
     `Статус: ${dto.statusLabel}`,
     `Дата: ${dto.transportDate || 'не указана'}`,
+    `Время забора: ${dto.pickupTime || 'не указано'}`,
     dto.neededBy ? `Дедлайн: ${dto.neededBy}` : null,
     `Техника: ${dto.equipment}`,
     `Откуда: ${dto.origin || 'не указано'}`,
@@ -253,6 +255,7 @@ function formatCarrierDeliveryList(deliveries, options = {}) {
     return [
       `${index + 1}. ${dto.operationType} · ${dto.number}`,
       `   Дата: ${dto.transportDate || 'не указана'}${dto.neededBy ? ` · дедлайн: ${dto.neededBy}` : ''}`,
+      `   Время забора: ${dto.pickupTime || 'не указано'}`,
       `   Техника: ${dto.equipment}`,
       `   ${dto.origin || 'не указано'} -> ${dto.destination || 'не указано'}`,
       `   Контакт: ${[dto.contactName, dto.contactPhone].filter(Boolean).join(' · ') || 'не указан'}`,

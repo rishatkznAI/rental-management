@@ -36,6 +36,20 @@ function registerDeliveryRoutes(router, deps) {
     }
   }
 
+  function normalizePickupTime(value, existing = null) {
+    if (value === undefined) return existing?.pickupTime || null;
+    const time = String(value || '').trim();
+    if (!time) return null;
+    if (!/^\d{2}:\d{2}$/.test(time)) {
+      throw new Error('Поле «Время забора техники» должно быть в формате HH:mm');
+    }
+    const [hours, minutes] = time.split(':').map(Number);
+    if (hours > 23 || minutes > 59) {
+      throw new Error('Поле «Время забора техники» должно быть в формате HH:mm');
+    }
+    return time;
+  }
+
   function normalizeCarrierRecord(record = {}) {
     return {
       id: String(record.id || ''),
@@ -111,6 +125,7 @@ function registerDeliveryRoutes(router, deps) {
       type,
       status,
       transportDate,
+      pickupTime: normalizePickupTime(body.pickupTime, existing),
       neededBy,
       origin: String(body.origin || '').trim(),
       destination: String(body.destination || '').trim(),
@@ -167,6 +182,7 @@ function registerDeliveryRoutes(router, deps) {
     const allowed = new Set([
       'type',
       'transportDate',
+      'pickupTime',
       'neededBy',
       'origin',
       'destination',

@@ -70,6 +70,7 @@ const TYPE_CLASSES: Record<DeliveryType, string> = {
 type DeliveryFormState = {
   type: DeliveryType;
   transportDate: string;
+  pickupTime: string;
   neededBy: string;
   origin: string;
   destination: string;
@@ -118,6 +119,7 @@ function makeEmptyForm(managerName = ''): DeliveryFormState {
   return {
     type: 'shipping',
     transportDate: today,
+    pickupTime: '',
     neededBy: today,
     origin: '',
     destination: '',
@@ -156,6 +158,7 @@ function buildFormFromDelivery(delivery: Delivery): DeliveryFormState {
   return {
     type: delivery.type,
     transportDate: delivery.transportDate || todayIso(),
+    pickupTime: delivery.pickupTime || '',
     neededBy: delivery.neededBy || delivery.transportDate || todayIso(),
     origin: delivery.origin || '',
     destination: delivery.destination || '',
@@ -308,6 +311,16 @@ function DeliveryDialog({
           <div>
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Дата перевозки</label>
             <Input type="date" value={form.transportDate} onChange={(e) => setForm((prev) => ({ ...prev, transportDate: e.target.value }))} />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Время забора техники</label>
+            <Input
+              type="time"
+              placeholder="Например, 09:30"
+              value={form.pickupTime}
+              onChange={(e) => setForm((prev) => ({ ...prev, pickupTime: e.target.value }))}
+            />
           </div>
 
           <div>
@@ -562,6 +575,7 @@ export default function Deliveries() {
         type: form.type,
         status: form.status,
         transportDate: form.transportDate,
+        pickupTime: form.pickupTime || null,
         neededBy: form.neededBy,
         origin: form.origin,
         destination: form.destination,
@@ -776,6 +790,9 @@ export default function Deliveries() {
                     </td>
                     <td className="py-3 pr-4">
                       <div className="font-medium text-gray-900 dark:text-white">{formatDate(delivery.transportDate)}</div>
+                      <div className="mt-1 inline-flex w-fit rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                        Время забора: {delivery.pickupTime || 'не указано'}
+                      </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
                         Нужно к {formatDate(delivery.neededBy || delivery.transportDate)}
                       </div>

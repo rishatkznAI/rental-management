@@ -14,6 +14,7 @@ export const AUTH_TOKEN_KEY = 'app_auth_token';
 
 export const API_BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 let authToken: string | null = null;
+let unauthorizedSessionCheck: Promise<boolean> | null = null;
 
 export function getToken(): string | null {
   return authToken;
@@ -42,6 +43,65 @@ export class ApiError extends Error {
   }
 }
 
+export function shouldClearTokenForUnauthorized(path: string): boolean {
+  const normalizedPath = path.split('?')[0];
+  return normalizedPath.startsWith('/api/auth/');
+}
+
+async function parseErrorResponse(res: Response) {
+  let message = `HTTP ${res.status}`;
+  let details: unknown;
+  let body: unknown;
+  try {
+    const json = await res.json();
+    body = json;
+    message = json.error || message;
+    details = json.details;
+  } catch {
+    // ignore parse error
+  }
+  return { message, details, body };
+}
+
+function dispatchUnauthorized(): void {
+  clearToken();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+  }
+}
+
+async function checkSessionAfterDataUnauthorized(): Promise<boolean> {
+  if (!unauthorizedSessionCheck) {
+    unauthorizedSessionCheck = (async () => {
+      const token = getToken();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        });
+        if (res.status === 401) {
+          dispatchUnauthorized();
+          return false;
+        }
+        return true;
+      } catch {
+        return true;
+      } finally {
+        unauthorizedSessionCheck = null;
+      }
+    })();
+  }
+  return unauthorizedSessionCheck;
+}
+
 async function request<T>(
   method: string,
   path: string,
@@ -63,25 +123,17 @@ async function request<T>(
   });
 
   if (res.status === 401) {
-    // Session expired / invalid — clear token and notify AuthContext via event
-    // so the UI redirects to login even if this request wasn't the bootstrap check.
-    clearToken();
-    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
-    throw new ApiError('Unauthorized', 401);
+    const { message, details, body } = await parseErrorResponse(res);
+    if (shouldClearTokenForUnauthorized(path)) {
+      dispatchUnauthorized();
+    } else {
+      await checkSessionAfterDataUnauthorized();
+    }
+    throw new ApiError(message, 401, details, body);
   }
 
   if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    let details: unknown;
-    let body: unknown;
-    try {
-      const json = await res.json();
-      body = json;
-      message = json.error || message;
-      details = json.details;
-    } catch {
-      // ignore parse error
-    }
+    const { message, details, body } = await parseErrorResponse(res);
     throw new ApiError(message, res.status, details, body);
   }
 

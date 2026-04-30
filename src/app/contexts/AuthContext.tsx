@@ -63,8 +63,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState({ user: null, isAuthenticated: false, isLoading: false });
   }, [refreshUser]);
 
-  // Слушаем событие из api.ts: любой запрос получил 401 в рантайме (не только bootstrap).
-  // Это обеспечивает немедленный редирект на /login при истечении сессии в любом месте.
+  // Слушаем событие из api.ts: auth endpoint или silent session check подтвердил,
+  // что сессия истекла. Ошибки обычных разделов остаются локальными.
   useEffect(() => {
     function handleUnauthorized() {
       setState({ user: null, isAuthenticated: false, isLoading: false });

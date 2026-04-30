@@ -7,6 +7,7 @@ const userStorageSource = readFileSync(new URL('../src/app/lib/userStorage.ts', 
 const sidebarSource = readFileSync(new URL('../src/app/components/layout/Sidebar.tsx', import.meta.url), 'utf8');
 const equipmentPageSource = readFileSync(new URL('../src/app/pages/Equipment.tsx', import.meta.url), 'utf8');
 const servicePageSource = readFileSync(new URL('../src/app/pages/Service.tsx', import.meta.url), 'utf8');
+const apiSource = readFileSync(new URL('../src/app/lib/api.ts', import.meta.url), 'utf8');
 const salesPageSource = readFileSync(new URL('../src/app/pages/Sales.tsx', import.meta.url), 'utf8');
 
 function warrantyPermissionBlock() {
@@ -56,4 +57,15 @@ test('frontend does not mask equipment and service API failures as empty warrant
   assert.match(salesPageSource, /const equipmentQuery = useEquipmentList\(\)/);
   assert.match(salesPageSource, /equipmentQuery\.data \?\? \[\]/);
   assert.match(salesPageSource, /GET \/api\/equipment/);
+});
+
+test('frontend verifies session before clearing auth after data endpoint 401', () => {
+  assert.match(apiSource, /function shouldClearTokenForUnauthorized\(path: string\)/);
+  assert.match(apiSource, /normalizedPath\.startsWith\('\/api\/auth\/'\)/);
+  assert.match(apiSource, /let unauthorizedSessionCheck: Promise<boolean> \| null = null/);
+  assert.match(apiSource, /async function checkSessionAfterDataUnauthorized\(\): Promise<boolean>/);
+  assert.match(apiSource, /fetch\(`\$\{API_BASE_URL\}\/api\/auth\/me`/);
+  assert.match(apiSource, /if \(res\.status === 401\) \{[\s\S]*dispatchUnauthorized\(\);[\s\S]*return false;/);
+  assert.match(apiSource, /if \(shouldClearTokenForUnauthorized\(path\)\) \{[\s\S]*dispatchUnauthorized\(\);[\s\S]*\} else \{[\s\S]*await checkSessionAfterDataUnauthorized\(\);/);
+  assert.match(apiSource, /unauthorizedSessionCheck = null/);
 });

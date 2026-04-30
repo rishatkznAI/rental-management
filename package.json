@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "build": "node scripts/vite-build.mjs",
     "dev": "CSS_TRANSFORMER_WASM=1 NAPI_RS_FORCE_WASI=1 vite",

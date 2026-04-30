@@ -1,0 +1,3 @@
+# Node LTS is pinned because better-sqlite3 native prebuilds can lag behind newest Node releases.
+[variables]
+NIXPACKS_NODE_VERSION = "20"

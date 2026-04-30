@@ -282,7 +282,11 @@ function registerSystemRoutes(app, deps) {
       return res.status(404).json({ ok: false, error: 'Bot test endpoint disabled' });
     }
 
-    const chatId = Number(req.query.chatId) || 134374193;
+    const rawChatId = req.query.chatId ?? process.env.BOT_TEST_CHAT_ID;
+    const chatId = Number(rawChatId);
+    if (!Number.isFinite(chatId)) {
+      return res.status(400).json({ ok: false, error: 'chatId is required for bot test endpoint' });
+    }
     const text = req.query.text || 'Тест бота';
     try {
       const result = await sendMessage({ chat_id: chatId }, text);

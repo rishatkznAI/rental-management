@@ -1,14 +1,20 @@
 function getEffectivePaidAmount(payment) {
   if (!payment) return 0;
-  if (typeof payment.paidAmount === 'number') return payment.paidAmount;
-  if (payment.status === 'paid') return Number(payment.amount) || 0;
+  if (typeof payment.paidAmount === 'number') {
+    return Number.isFinite(payment.paidAmount) && payment.paidAmount > 0 ? payment.paidAmount : 0;
+  }
+  if (payment.status === 'paid') {
+    const amount = Number(payment.amount);
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  }
   return 0;
 }
 
 function deriveRentalPaymentStatus(rental, payments) {
   if (!rental) return 'unpaid';
 
-  const totalAmount = Number(rental.amount) || 0;
+  const amount = Number(rental.amount);
+  const totalAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
   const totalPaid = (payments || [])
     .filter(payment => payment?.rentalId === rental.id)
     .reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);

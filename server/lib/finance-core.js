@@ -9,8 +9,8 @@ function toNumber(value) {
 }
 
 function getEffectivePaidAmount(payment) {
-  if (typeof payment?.paidAmount === 'number') return payment.paidAmount;
-  if (payment?.status === 'paid') return toNumber(payment.amount);
+  if (typeof payment?.paidAmount === 'number') return Math.max(0, payment.paidAmount);
+  if (payment?.status === 'paid') return Math.max(0, toNumber(payment.amount));
   return 0;
 }
 

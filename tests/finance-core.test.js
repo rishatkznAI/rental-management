@@ -41,6 +41,30 @@ test('buildRentalDebtRows calculates outstanding from related payments', () => {
   assert.equal(rows[0].outstanding, 60000);
 });
 
+test('buildRentalDebtRows keeps overpayment from creating negative debt', () => {
+  const rows = buildRentalDebtRows(
+    [
+      {
+        id: 'gr-overpaid',
+        clientId: 'c-1',
+        client: 'ЭМ-СТРОЙ',
+        equipmentInv: '083',
+        manager: 'Руслан',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        amount: 100000,
+        paymentStatus: 'paid',
+        status: 'closed',
+      },
+    ],
+    [
+      { id: 'p-overpaid', rentalId: 'gr-overpaid', amount: 100000, paidAmount: 120000, status: 'paid' },
+    ],
+  );
+
+  assert.equal(rows.length, 0);
+});
+
 test('getRentalDebtOverdueDays returns zero for fully paid rentals', () => {
   assert.equal(
     getRentalDebtOverdueDays(

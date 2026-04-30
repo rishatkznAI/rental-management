@@ -229,6 +229,73 @@ test('delivery API reads and updates pickupTime', async () => {
   });
 });
 
+test('creating a delivery rejects negative delivery cost', async () => {
+  const { app } = createDeliveryApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      transportDate: '2026-04-29',
+      origin: 'Новая база',
+      destination: 'Аксубаево',
+      cargo: 'LGMG AS1413 L13000065',
+      contactName: 'Олег',
+      contactPhone: '+7 927 407-07-23',
+      client: 'ИНЖИНИРИНГ',
+      manager: 'Администратор',
+      cost: -1,
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Стоимость доставки/);
+  });
+});
+
+test('creating a delivery rejects non-numeric delivery cost', async () => {
+  const { app } = createDeliveryApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      transportDate: '2026-04-29',
+      origin: 'Новая база',
+      destination: 'Аксубаево',
+      cargo: 'LGMG AS1413 L13000065',
+      contactName: 'Олег',
+      contactPhone: '+7 927 407-07-23',
+      client: 'ИНЖИНИРИНГ',
+      manager: 'Администратор',
+      cost: 'abc',
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Стоимость доставки/);
+  });
+});
+
+test('creating a delivery treats empty delivery cost as zero', async () => {
+  const { app, state } = createDeliveryApp();
+  state.deliveries = [];
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      transportDate: '2026-04-29',
+      origin: 'Новая база',
+      destination: 'Аксубаево',
+      cargo: 'LGMG AS1413 L13000065',
+      contactName: 'Олег',
+      contactPhone: '+7 927 407-07-23',
+      client: 'ИНЖИНИРИНГ',
+      manager: 'Администратор',
+      cost: '',
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.cost, 0);
+  });
+});
+
 test('updating manager comment on a sent delivery notifies carrier again', async () => {
   const { app, messages } = createDeliveryApp({
     status: 'sent',

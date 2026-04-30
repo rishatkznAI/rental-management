@@ -50,6 +50,16 @@ function registerDeliveryRoutes(router, deps) {
     return time;
   }
 
+  function normalizeDeliveryCost(value, existing = null) {
+    if (value === undefined) return existing?.cost ?? 0;
+    if (value === null || value === '') return 0;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      throw new Error('Поле «Стоимость доставки» должно быть числом не меньше 0');
+    }
+    return numeric;
+  }
+
   function normalizeCarrierRecord(record = {}) {
     return {
       id: String(record.id || ''),
@@ -132,7 +142,7 @@ function registerDeliveryRoutes(router, deps) {
       cargo: String(body.cargo || '').trim(),
       contactName: String(body.contactName || '').trim(),
       contactPhone: String(body.contactPhone || '').trim(),
-      cost: Math.max(0, Number(body.cost) || 0),
+      cost: normalizeDeliveryCost(body.cost, existing),
       comment: String(body.comment || '').trim(),
       client: String(body.client || '').trim(),
       clientId: body.clientId ? String(body.clientId) : (existing?.clientId || null),

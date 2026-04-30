@@ -42,6 +42,55 @@ function hasDateOverlap(startDateA, endDateA, startDateB, endDateB) {
   return startA <= endB && endA >= startB;
 }
 
+function parseOptionalNonNegativeNumber(value, fieldLabel) {
+  if (value === undefined || value === null || value === '') return { ok: true };
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: `${fieldLabel} должно быть числом не меньше 0`,
+    };
+  }
+  return { ok: true };
+}
+
+function validateRentalNumericFields(payload) {
+  const checks = [
+    ['amount', 'Сумма аренды'],
+    ['price', 'Цена аренды'],
+    ['discount', 'Скидка'],
+    ['dailyRate', 'Дневная ставка'],
+    ['monthlyRate', 'Месячная ставка'],
+  ];
+
+  for (const [field, label] of checks) {
+    const validation = parseOptionalNonNegativeNumber(payload?.[field], label);
+    if (!validation.ok) return validation;
+  }
+
+  if (payload && Object.prototype.hasOwnProperty.call(payload, 'rate')) {
+    const rate = payload.rate;
+    const normalizedRate = typeof rate === 'string' ? rate.trim().replace(/\s+/g, '') : rate;
+    const rateValue = typeof normalizedRate === 'string'
+      ? normalizedRate.match(/-?\d+(?:[.,]\d+)?/)?.[0]
+      : normalizedRate;
+    if (normalizedRate !== undefined && normalizedRate !== null && normalizedRate !== '' && rateValue === undefined) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Ставка аренды должно быть числом не меньше 0',
+      };
+    }
+    if (rateValue !== undefined && rateValue !== null && rateValue !== '') {
+      const validation = parseOptionalNonNegativeNumber(String(rateValue).replace(',', '.'), 'Ставка аренды');
+      if (!validation.ok) return validation;
+    }
+  }
+
+  return { ok: true };
+}
+
 function isBlockingRental(rental) {
   return rental?.status !== 'returned' && rental?.status !== 'closed';
 }
@@ -118,6 +167,9 @@ function validateRentalPayload(collection, payload, rentals = [], equipment = []
     };
   }
 
+  const numericValidation = validateRentalNumericFields(payload);
+  if (!numericValidation.ok) return numericValidation;
+
   const { startDate, endDate } = getRentalDateRange(collection, payload);
   if ((startDate && !endDate) || (!startDate && endDate)) {
     return { ok: false, status: 400, error: 'Для аренды нужно указать и дату начала, и дату окончания' };
@@ -141,6 +193,7 @@ module.exports = {
   canEquipmentParticipateInRentals,
   getRentalDateRange,
   hasDateOverlap,
+  validateRentalNumericFields,
   isBlockingRental,
   rentalMatchesEquipment,
   findConflictingRental,

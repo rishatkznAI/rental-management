@@ -6,7 +6,12 @@ const require = createRequire(import.meta.url);
 const {
   findConflictingRental,
   formatConflictError,
+  validateRentalPayload,
 } = require('../server/lib/rental-validation.js');
+
+const rentableEquipment = [
+  { id: 'eq-1', inventoryNumber: '083', serialNumber: 'SN-083', category: 'own', activeInFleet: true },
+];
 
 test('findConflictingRental finds overlap by exact equipmentId', () => {
   const equipment = [
@@ -86,4 +91,63 @@ test('formatConflictError returns readable period and client', () => {
   );
 
   assert.equal(message, 'Техника уже занята в период 2026-04-10 — 2026-04-20 (ЭМ-СТРОЙ)');
+});
+
+test('validateRentalPayload rejects negative rental amount', () => {
+  const validation = validateRentalPayload('gantt_rentals', {
+    equipmentId: 'eq-1',
+    startDate: '2026-04-10',
+    endDate: '2026-04-10',
+    amount: -1,
+  }, [], rentableEquipment);
+
+  assert.equal(validation.ok, false);
+  assert.equal(validation.status, 400);
+});
+
+test('validateRentalPayload rejects non-numeric rental amount', () => {
+  const validation = validateRentalPayload('gantt_rentals', {
+    equipmentId: 'eq-1',
+    startDate: '2026-04-10',
+    endDate: '2026-04-10',
+    amount: 'abc',
+  }, [], rentableEquipment);
+
+  assert.equal(validation.ok, false);
+  assert.equal(validation.status, 400);
+});
+
+test('validateRentalPayload rejects non-numeric rental rate', () => {
+  const validation = validateRentalPayload('gantt_rentals', {
+    equipmentId: 'eq-1',
+    startDate: '2026-04-10',
+    endDate: '2026-04-10',
+    rate: 'abc',
+  }, [], rentableEquipment);
+
+  assert.equal(validation.ok, false);
+  assert.equal(validation.status, 400);
+});
+
+test('validateRentalPayload accepts same-day rental period', () => {
+  const validation = validateRentalPayload('gantt_rentals', {
+    equipmentId: 'eq-1',
+    startDate: '2026-04-10',
+    endDate: '2026-04-10',
+    amount: 10000,
+  }, [], rentableEquipment);
+
+  assert.equal(validation.ok, true);
+});
+
+test('validateRentalPayload rejects endDate before startDate', () => {
+  const validation = validateRentalPayload('gantt_rentals', {
+    equipmentId: 'eq-1',
+    startDate: '2026-04-11',
+    endDate: '2026-04-10',
+    amount: 10000,
+  }, [], rentableEquipment);
+
+  assert.equal(validation.ok, false);
+  assert.equal(validation.status, 400);
 });

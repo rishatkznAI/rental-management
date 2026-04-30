@@ -74,7 +74,7 @@ function isOverdue(plannedReturnDate: string): boolean {
 }
 
 function isOpenRentalStatus(status: GanttRentalData['status']): boolean {
-  return status === 'active' || status === 'returned';
+  return status === 'active' || status === 'confirmed' || status === 'return_planned';
 }
 
 function daysAgo(n: number): Date {

@@ -30,6 +30,39 @@ test('deriveRentalPaymentStatus returns partial for partial payment', () => {
   assert.equal(status, 'partial');
 });
 
+test('deriveRentalPaymentStatus keeps zero paid amount unpaid', () => {
+  const status = deriveRentalPaymentStatus(
+    { id: 'gr-1', amount: 50000, paymentStatus: 'unpaid' },
+    [
+      { id: 'p-1', rentalId: 'gr-1', amount: 50000, paidAmount: 0, status: 'partial' },
+    ],
+  );
+
+  assert.equal(status, 'unpaid');
+});
+
+test('deriveRentalPaymentStatus ignores negative legacy paid amounts defensively', () => {
+  const status = deriveRentalPaymentStatus(
+    { id: 'gr-1', amount: 50000, paymentStatus: 'unpaid' },
+    [
+      { id: 'p-1', rentalId: 'gr-1', amount: 50000, paidAmount: -10000, status: 'partial' },
+    ],
+  );
+
+  assert.equal(status, 'unpaid');
+});
+
+test('deriveRentalPaymentStatus treats overpayment as paid', () => {
+  const status = deriveRentalPaymentStatus(
+    { id: 'gr-1', amount: 50000, paymentStatus: 'unpaid' },
+    [
+      { id: 'p-1', rentalId: 'gr-1', amount: 50000, paidAmount: 60000, status: 'paid' },
+    ],
+  );
+
+  assert.equal(status, 'paid');
+});
+
 test('syncGanttRentalPaymentStatuses updates only linked rentals', () => {
   const updated = syncGanttRentalPaymentStatuses(
     [

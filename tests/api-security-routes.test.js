@@ -487,6 +487,73 @@ test('old bearer token stops working after password change', async () => {
   });
 });
 
+test('payments API rejects negative payment amount', async () => {
+  const { app } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/payments', 'admin-token', {
+      rentalId: 'R-own',
+      client: 'ООО Свой',
+      amount: -1,
+      status: 'partial',
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Сумма платежа/);
+  });
+});
+
+test('payments API rejects negative paidAmount', async () => {
+  const { app } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/payments', 'admin-token', {
+      rentalId: 'R-own',
+      client: 'ООО Свой',
+      amount: 1000,
+      paidAmount: -1,
+      status: 'partial',
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Оплачено/);
+  });
+});
+
+test('payments API rejects non-numeric payment amount', async () => {
+  const { app } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/payments', 'admin-token', {
+      rentalId: 'R-own',
+      client: 'ООО Свой',
+      amount: 'abc',
+      status: 'partial',
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Сумма платежа/);
+  });
+});
+
+test('payments API accepts explicit zero paidAmount', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/payments', 'admin-token', {
+      rentalId: 'R-own',
+      client: 'ООО Свой',
+      amount: 1000,
+      paidAmount: 0,
+      status: 'partial',
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.paidAmount, 0);
+    assert.equal(state.payments.at(-1).paidAmount, 0);
+  });
+});
+
 test('MAX webhook accepts header secret and rejects missing, wrong, or query secrets', async () => {
   const { app, auditEntries } = createSecurityApp();
 

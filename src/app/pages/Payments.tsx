@@ -37,6 +37,7 @@ interface AddPaymentModalProps {
 
 function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayments }: AddPaymentModalProps) {
   const [clientError, setClientError] = useState('');
+  const [formError, setFormError] = useState('');
   const [form, setForm] = useState({
     rentalId: '',
     clientId: '',
@@ -65,6 +66,7 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
     if (k === 'client') {
       setClientError('');
     }
+    setFormError('');
   };
 
   // Compute current client debt (excluding payments being created right now)
@@ -81,8 +83,16 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
       setClientError('Выберите клиента из базы');
       return;
     }
-    const amt = Number(form.amount) || 0;
-    const paid = Number(form.paidAmount) || amt;
+    const amt = Number(form.amount);
+    if (!Number.isFinite(amt) || amt < 0) {
+      setFormError('Сумма к оплате должна быть числом не меньше 0');
+      return;
+    }
+    const paid = form.paidAmount === '' ? amt : Number(form.paidAmount);
+    if (!Number.isFinite(paid) || paid < 0) {
+      setFormError('Оплачено должно быть числом не меньше 0');
+      return;
+    }
     const newPayment: Payment = {
       id: genId(),
       invoiceNumber: genInvoice(existing),
@@ -110,6 +120,11 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
           </button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {formError && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300">
+              {formError}
+            </div>
+          )}
           {/* Rental link */}
           <div>
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">

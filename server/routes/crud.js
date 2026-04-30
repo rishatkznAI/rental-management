@@ -232,6 +232,25 @@ function registerCrudRoutes(deps) {
     };
   }
 
+  function parsePaymentMoney(value, fieldLabel, { required = false } = {}) {
+    if (value === undefined || value === null || value === '') {
+      if (required) throw new Error(`${fieldLabel} должен быть числом не меньше 0`);
+      return undefined;
+    }
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      throw new Error(`${fieldLabel} должен быть числом не меньше 0`);
+    }
+    return numeric;
+  }
+
+  function validatePaymentRecord(record, { partial = false } = {}) {
+    const hasAmount = record && Object.prototype.hasOwnProperty.call(record, 'amount');
+    const hasPaidAmount = record && Object.prototype.hasOwnProperty.call(record, 'paidAmount');
+    if (!partial || hasAmount) parsePaymentMoney(record?.amount, 'Сумма платежа', { required: true });
+    if (hasPaidAmount) parsePaymentMoney(record?.paidAmount, 'Оплачено');
+  }
+
   function isPaymentStatusOnlyPatch(previousPayment, patch) {
     const changedFields = Object.keys(patch || {}).filter(field => {
       if (field === 'id') return false;
@@ -433,6 +452,9 @@ function registerCrudRoutes(deps) {
           requireNonEmptyString(input?.name, 'Название запчасти');
           requireNonEmptyString(input?.unit, 'Единица измерения');
         }
+        if (collection === 'payments') {
+          validatePaymentRecord(input);
+        }
 
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
@@ -543,6 +565,9 @@ function registerCrudRoutes(deps) {
       try {
         const safePatch = accessControl.sanitizeUpdateInput(collection, req.body, req.user, data[idx]);
         const previousItem = { ...data[idx] };
+        if (collection === 'payments') {
+          validatePaymentRecord({ ...data[idx], ...safePatch });
+        }
         if (collection === 'rentals' || collection === 'gantt_rentals') {
           const validation = validateRentalPayload(
             collection,
@@ -754,6 +779,9 @@ function registerCrudRoutes(deps) {
             return res.status(validation.status).json({ ok: false, error: validation.error });
           }
         }
+      }
+      if (collection === 'payments') {
+        for (const item of list) validatePaymentRecord(item);
       }
 
       if (collection === 'service_works') {

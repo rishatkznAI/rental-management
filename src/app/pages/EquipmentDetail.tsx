@@ -34,6 +34,8 @@ import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
+import { documentsService } from '../services/documents.service';
+import { clientsService } from '../services/clients.service';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
@@ -42,6 +44,7 @@ import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
 import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
 import { getToken } from '../lib/api';
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
+import { buildEquipment360Summary } from '../lib/equipment360.js';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -605,6 +608,11 @@ export default function EquipmentDetail() {
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const canEditEquipment = can('edit', 'equipment');
+  const canViewRentals = can('view', 'rentals');
+  const canViewService = can('view', 'service');
+  const canViewDocuments = can('view', 'documents');
+  const canViewClients = can('view', 'clients');
+  const canViewFinance = can('view', 'finance');
   const canCreateService = can('create', 'service');
   const canManageAcceptance = canEditEquipment || canCreateService || isMechanicRole(user?.role);
   const { id } = useParams();
@@ -622,14 +630,27 @@ export default function EquipmentDetail() {
   const { data: ganttData = [] } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
+    enabled: canViewRentals,
   });
   const { data: serviceData = [] } = useQuery({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
+    enabled: canViewService,
   });
   const { data: paymentData = [] } = useQuery({
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
+    enabled: canViewFinance,
+  });
+  const { data: documentData = [] } = useQuery({
+    queryKey: ['documents'],
+    queryFn: documentsService.getAll,
+    enabled: canViewDocuments,
+  });
+  const { data: clientData = [] } = useQuery({
+    queryKey: ['clients'],
+    queryFn: clientsService.getAll,
+    enabled: canViewClients,
   });
   const { data: shippingPhotoData = [] } = useQuery({
     queryKey: ['shippingPhotos', id],
@@ -1318,6 +1339,16 @@ export default function EquipmentDetail() {
   const equipmentRentalIds = new Set(ganttRentals.map(r => r.id));
   const equipmentPayments = allPayments.filter(p => p.rentalId && equipmentRentalIds.has(p.rentalId));
   const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
+  const equipment360 = buildEquipment360Summary({
+    equipment,
+    rentals: canViewRentals ? allGanttRentals : [],
+    serviceTickets: canViewService ? allServiceTickets : [],
+    documents: canViewDocuments ? documentData : [],
+    payments: canViewFinance ? allPayments : [],
+    clients: canViewClients ? clientData : [],
+    inventoryIsUnique: (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1,
+    utilizationPercent: utilizationMonth,
+  });
 
   const tabTriggerClass = 'whitespace-nowrap';
 
@@ -1388,18 +1419,22 @@ export default function EquipmentDetail() {
                 Редактировать
               </Button>
             )}
-            <Link to="/rentals">
-              <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
-                <Calendar className="h-3.5 w-3.5" />
-                Аренды
-              </Button>
-            </Link>
-            <Link to="/service">
-              <Button size="sm" className="app-button-primary rounded-xl px-4">
-                <Wrench className="h-3.5 w-3.5" />
-                В сервис
-              </Button>
-            </Link>
+            {canViewRentals && (
+              <Link to="/rentals">
+                <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
+                  <Calendar className="h-3.5 w-3.5" />
+                  Аренды
+                </Button>
+              </Link>
+            )}
+            {canViewService && (
+              <Link to="/service">
+                <Button size="sm" className="app-button-primary rounded-xl px-4">
+                  <Wrench className="h-3.5 w-3.5" />
+                  В сервис
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
       </div>
@@ -1519,6 +1554,162 @@ export default function EquipmentDetail() {
         </div>
       )}
 
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle>Техника 360°</CardTitle>
+              <CardDescription>Сводка по занятости, сервису, документам и рискам без изменения данных</CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {canViewRentals && (
+                <Link to="/rentals">
+                  <Button size="sm" variant="secondary"><Calendar className="h-4 w-4" /> Аренды</Button>
+                </Link>
+              )}
+              {canViewService && (
+                <Link to="/service">
+                  <Button size="sm" variant="secondary"><Wrench className="h-4 w-4" /> Сервис</Button>
+                </Link>
+              )}
+              {canViewDocuments && (
+                <Link to="/documents">
+                  <Button size="sm" variant="secondary"><FileText className="h-4 w-4" /> Документы</Button>
+                </Link>
+              )}
+              {canViewClients && equipment360.occupancy.currentRental?.clientId && (
+                <Link to={`/clients/${equipment360.occupancy.currentRental.clientId}`}>
+                  <Button size="sm" variant="secondary"><User className="h-4 w-4" /> Клиент</Button>
+                </Link>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <CompactMetric label="Статус" value={equipment360.occupancy.label} tone={equipment360.flags.length > 0 ? 'warning' : 'default'} />
+            <CompactMetric label="Собственник" value={equipment.ownerName || ownerLabels[equipment.owner] || 'Не указан'} />
+            <CompactMetric label="Локация" value={equipment.location || 'Не указана'} />
+            <CompactMetric label="Простой" value={equipment360.downtime.label} tone={equipment360.downtime.reason === 'service' ? 'danger' : 'default'} />
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-3">
+            <div className="rounded-xl border border-border bg-card/70 p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-foreground">Текущая занятость</h3>
+                {equipment360.occupancy.overdueReturn && <Badge variant="error">Просрочен возврат</Badge>}
+              </div>
+              {equipment360.occupancy.currentRental ? (
+                <div className="space-y-2 text-sm">
+                  <p className="font-medium text-foreground">{equipment360.occupancy.currentRental.client}</p>
+                  <p className="text-muted-foreground">
+                    {formatDate(equipment360.occupancy.currentRental.startDate)} — {formatDate(equipment360.occupancy.currentRental.endDate)}
+                  </p>
+                  <p className="text-muted-foreground">Менеджер: {equipment360.occupancy.currentRental.manager}</p>
+                  {canViewRentals && (
+                    <Link to={`/rentals/${equipment360.occupancy.currentRental.id}`} className="inline-flex items-center gap-1 text-xs text-[--color-primary] hover:underline">
+                      Открыть аренду <ChevronRight className="h-3 w-3" />
+                    </Link>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">{equipment360.occupancy.label}</p>
+              )}
+              {equipment360.occupancy.nextRental && (
+                <div className="mt-3 rounded-lg border border-border bg-secondary/50 p-3 text-sm">
+                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Ближайшая будущая аренда</p>
+                  <p className="mt-1 font-medium text-foreground">{equipment360.occupancy.nextRental.client}</p>
+                  <p className="text-muted-foreground">{formatDate(equipment360.occupancy.nextRental.startDate)} — {formatDate(equipment360.occupancy.nextRental.endDate)}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-border bg-card/70 p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-foreground">Сервис и готовность</h3>
+                <Badge variant={equipment360.service.open.length > 0 ? 'warning' : 'default'}>{equipment360.service.open.length} открыто</Badge>
+              </div>
+              {canViewService ? (
+                equipment360.service.open.length > 0 ? (
+                  <div className="space-y-2">
+                    {equipment360.service.open.slice(0, 3).map(ticket => (
+                      <LinkedRow
+                        key={ticket.id}
+                        title={ticket.reason}
+                        meta={`${ticket.statusLabel} · ${ticket.mechanic}${ticket.waitingParts ? ' · ждёт запчасти' : ''}`}
+                        href={`/service/${ticket.id}`}
+                        canOpen={canViewService}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Открытых сервисных заявок нет.</p>
+                )
+              ) : (
+                <p className="text-sm text-muted-foreground">Раздел сервиса недоступен для этой роли.</p>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-border bg-card/70 p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-foreground">Красные флаги</h3>
+                <Badge variant={equipment360.flags.length > 0 ? 'error' : 'success'}>{equipment360.flags.length}</Badge>
+              </div>
+              {equipment360.flags.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {equipment360.flags.slice(0, 8).map(flag => (
+                    <Badge key={flag.id} variant={flag.severity === 'high' ? 'error' : 'warning'}>{flag.label}</Badge>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Критичных сигналов по доступным данным нет.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-3">
+            <CompactList
+              title="Арендная история"
+              emptyText={canViewRentals ? 'Аренд по технике нет.' : 'Раздел аренд недоступен для этой роли.'}
+              items={canViewRentals ? equipment360.rentals.latest.slice(0, 5).map(rental => ({
+                id: rental.id,
+                title: rental.client,
+                meta: `${formatDate(rental.startDate)} — ${formatDate(rental.endDate)} · ${rental.statusLabel} · ${rental.manager}`,
+                href: `/rentals/${rental.id}`,
+              })) : []}
+              canOpen={canViewRentals}
+            />
+            <CompactList
+              title="Документы техники"
+              emptyText={canViewDocuments ? 'Связанных документов нет.' : 'Раздел документов недоступен для этой роли.'}
+              items={canViewDocuments ? equipment360.documents.latest.slice(0, 5).map(doc => ({
+                id: doc.id,
+                title: `${doc.type} ${doc.id ? `· ${doc.id}` : ''}`,
+                meta: `${formatDate(doc.date)} · ${doc.status}`,
+                href: '/documents',
+              })) : []}
+              canOpen={canViewDocuments}
+            />
+            {canViewFinance ? (
+              <div className="rounded-xl border border-border bg-card/70 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-foreground">Финансы по технике</h3>
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                  <CompactMetric label="Выручка по арендам" value={formatCurrency(equipment360.finance.revenue)} tone="success" />
+                  <CompactMetric label="Задолженность по арендам" value={formatCurrency(equipment360.finance.outstanding)} tone={equipment360.finance.outstanding > 0 ? 'danger' : 'default'} />
+                  <CompactMetric label="Количество аренд" value={String(equipment360.finance.rentalCount)} />
+                  <CompactMetric label="Средняя длительность" value={equipment360.finance.averageDurationDays > 0 ? `${equipment360.finance.averageDurationDays} дн.` : 'Нет данных'} />
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-border bg-card/70 p-4">
+                <h3 className="mb-2 text-sm font-semibold text-foreground">Финансы по технике</h3>
+                <p className="text-sm text-muted-foreground">Финансовые показатели скрыты правами доступа.</p>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-[260px_1fr]">
         <Card>
           <CardContent className="p-0">
@@ -1613,7 +1804,7 @@ export default function EquipmentDetail() {
               {equipment.weight && <InfoField label="Масса" value={`${equipment.weight} кг`} />}
               <InfoField label="Локация" value={equipment.location || '—'} />
               <InfoField label="Владелец" value={ownerLabels[equipment.owner]} />
-              {equipment.owner === 'sublease' && equipment.subleasePrice && (
+              {canViewFinance && equipment.owner === 'sublease' && equipment.subleasePrice && (
                 <InfoField label="Стоимость субаренды" value={`${formatCurrency(equipment.subleasePrice)}/мес`} highlight="orange" />
               )}
               {!equipment.isForSale && (
@@ -1634,7 +1825,7 @@ export default function EquipmentDetail() {
                   {activeRental?.manager && (
                     <InfoField label="Менеджер" value={activeRental.manager} />
                   )}
-                  {activeRental?.amount && (
+                  {canViewFinance && activeRental?.amount && (
                     <InfoField label="Сумма аренды" value={formatCurrency(activeRental.amount)} />
                   )}
                 </div>
@@ -1703,11 +1894,15 @@ export default function EquipmentDetail() {
                     {EQUIPMENT_SALE_PDI_LABELS[equipment.salePdiStatus ?? 'not_started']}
                   </Badge>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <InfoField label="Цена 1" value={formatCurrency(equipment.salePrice1 ?? 0)} />
-                  <InfoField label="Цена 2" value={formatCurrency(equipment.salePrice2 ?? 0)} />
-                  <InfoField label="Цена 3" value={formatCurrency(equipment.salePrice3 ?? 0)} />
-                </div>
+                {canViewFinance ? (
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <InfoField label="Цена 1" value={formatCurrency(equipment.salePrice1 ?? 0)} />
+                    <InfoField label="Цена 2" value={formatCurrency(equipment.salePrice2 ?? 0)} />
+                    <InfoField label="Цена 3" value={formatCurrency(equipment.salePrice3 ?? 0)} />
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Финансовые параметры продажи скрыты правами доступа.</p>
+                )}
               </div>
             )}
 
@@ -1728,24 +1923,34 @@ export default function EquipmentDetail() {
           <TabsTrigger value="overview" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><CheckCircle className="h-3.5 w-3.5" /> Обзор</span>
           </TabsTrigger>
-          <TabsTrigger value="financial" className={tabTriggerClass}>
-            <span className="flex items-center gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Финансы</span>
-          </TabsTrigger>
-          <TabsTrigger value="rental-history" className={tabTriggerClass}>
-            <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Аренды {ganttRentals.length > 0 && <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">{ganttRentals.length}</span>}</span>
-          </TabsTrigger>
-          <TabsTrigger value="service-history" className={tabTriggerClass}>
-            <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Сервис {openServiceTickets.length > 0 && <span className="rounded-full bg-red-500/12 px-1.5 text-xs text-red-300">{openServiceTickets.length}</span>}</span>
-          </TabsTrigger>
-          <TabsTrigger value="repair-history" className={tabTriggerClass}>
-            <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Ремонты</span>
-          </TabsTrigger>
+          {canViewFinance && (
+            <TabsTrigger value="financial" className={tabTriggerClass}>
+              <span className="flex items-center gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Финансы</span>
+            </TabsTrigger>
+          )}
+          {canViewRentals && (
+            <TabsTrigger value="rental-history" className={tabTriggerClass}>
+              <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Аренды {ganttRentals.length > 0 && <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">{ganttRentals.length}</span>}</span>
+            </TabsTrigger>
+          )}
+          {canViewService && (
+            <TabsTrigger value="service-history" className={tabTriggerClass}>
+              <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Сервис {openServiceTickets.length > 0 && <span className="rounded-full bg-red-500/12 px-1.5 text-xs text-red-300">{openServiceTickets.length}</span>}</span>
+            </TabsTrigger>
+          )}
+          {canViewService && (
+            <TabsTrigger value="repair-history" className={tabTriggerClass}>
+              <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Ремонты</span>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="photos" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><Camera className="h-3.5 w-3.5" /> Фото</span>
           </TabsTrigger>
-          <TabsTrigger value="documents" className={tabTriggerClass}>
-            <span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" /> Документы</span>
-          </TabsTrigger>
+          {canViewDocuments && (
+            <TabsTrigger value="documents" className={tabTriggerClass}>
+              <span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" /> Документы</span>
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* ══ OVERVIEW TAB ══ */}
@@ -1904,36 +2109,38 @@ export default function EquipmentDetail() {
           </div>
 
           {/* Economics summary */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <DollarSign className="h-5 w-5 text-[--color-primary]" />
-                Экономика
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-                <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3">
-                  <p className="text-xs uppercase tracking-[0.14em] text-blue-200/80">Плановый доход/мес</p>
-                  <p className="mt-1 text-lg font-semibold text-blue-300">{formatCurrency(equipment.plannedMonthlyRevenue)}</p>
+          {canViewFinance && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-[--color-primary]" />
+                  Экономика
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+                  <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-blue-200/80">Плановый доход/мес</p>
+                    <p className="mt-1 text-lg font-semibold text-blue-300">{formatCurrency(equipment.plannedMonthlyRevenue)}</p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-emerald-200/80">Факт. доход · {format(today, 'MMM', { locale: ru })}</p>
+                    <p className="mt-1 text-lg font-semibold text-emerald-300">{formatCurrency(Math.round(actualMonthRevenue))}</p>
+                  </div>
+                  <div className="rounded-xl border border-orange-500/20 bg-orange-500/10 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-orange-200/80">Суммарная выручка</p>
+                    <p className="mt-1 text-lg font-semibold text-orange-300">{formatCurrency(totalRevenue)}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{ganttRentals.filter(r => r.status !== 'created').length} аренд</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-secondary/70 p-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Утилизация месяца</p>
+                    <p className="mt-1 text-lg font-semibold text-foreground">{utilizationMonth}%</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{daysRentedThisMonth} / {daysInCurrentMonth} дн.</p>
+                  </div>
                 </div>
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
-                  <p className="text-xs uppercase tracking-[0.14em] text-emerald-200/80">Факт. доход · {format(today, 'MMM', { locale: ru })}</p>
-                  <p className="mt-1 text-lg font-semibold text-emerald-300">{formatCurrency(Math.round(actualMonthRevenue))}</p>
-                </div>
-                <div className="rounded-xl border border-orange-500/20 bg-orange-500/10 p-3">
-                  <p className="text-xs uppercase tracking-[0.14em] text-orange-200/80">Суммарная выручка</p>
-                  <p className="mt-1 text-lg font-semibold text-orange-300">{formatCurrency(totalRevenue)}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{ganttRentals.filter(r => r.status !== 'created').length} аренд</p>
-                </div>
-                <div className="rounded-xl border border-border bg-secondary/70 p-3">
-                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Утилизация месяца</p>
-                  <p className="mt-1 text-lg font-semibold text-foreground">{utilizationMonth}%</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{daysRentedThisMonth} / {daysInCurrentMonth} дн.</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Notes */}
           {equipment.notes && (
@@ -1975,6 +2182,7 @@ export default function EquipmentDetail() {
         </TabsContent>
 
         {/* ══ FINANCIAL TAB ══ */}
+        {canViewFinance && (
         <TabsContent value="financial">
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
@@ -2100,8 +2308,10 @@ export default function EquipmentDetail() {
             </Card>
           </div>
         </TabsContent>
+        )}
 
         {/* ══ RENTAL HISTORY TAB ══ */}
+        {canViewRentals && (
         <TabsContent value="rental-history">
           <Card>
             <CardHeader>
@@ -2128,8 +2338,8 @@ export default function EquipmentDetail() {
                       <TableHead>Период</TableHead>
                       <TableHead>Дней</TableHead>
                       <TableHead>Менеджер</TableHead>
-                      <TableHead>Стоимость</TableHead>
-                      <TableHead>Оплата</TableHead>
+                      {canViewFinance && <TableHead>Стоимость</TableHead>}
+                      {canViewFinance && <TableHead>Оплата</TableHead>}
                       <TableHead>Статус</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2149,12 +2359,14 @@ export default function EquipmentDetail() {
                           </TableCell>
                           <TableCell>{days}</TableCell>
                           <TableCell className="text-sm">{gr.managerInitials}</TableCell>
-                          <TableCell>{formatCurrency(gr.amount)}</TableCell>
-                          <TableCell>
-                            <Badge variant={gr.paymentStatus === 'paid' ? 'success' : gr.paymentStatus === 'partial' ? 'warning' : 'error'}>
-                              {gr.paymentStatus === 'paid' ? 'Оплачено' : gr.paymentStatus === 'partial' ? `${formatCurrency(paid)}` : 'Не опл.'}
-                            </Badge>
-                          </TableCell>
+                          {canViewFinance && <TableCell>{formatCurrency(gr.amount)}</TableCell>}
+                          {canViewFinance && (
+                            <TableCell>
+                              <Badge variant={gr.paymentStatus === 'paid' ? 'success' : gr.paymentStatus === 'partial' ? 'warning' : 'error'}>
+                                {gr.paymentStatus === 'paid' ? 'Оплачено' : gr.paymentStatus === 'partial' ? `${formatCurrency(paid)}` : 'Не опл.'}
+                              </Badge>
+                            </TableCell>
+                          )}
                           <TableCell>
                             <Badge variant={
                               gr.status === 'active' ? 'info' :
@@ -2181,8 +2393,10 @@ export default function EquipmentDetail() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* ══ SERVICE HISTORY TAB ══ */}
+        {canViewService && (
         <TabsContent value="service-history">
           <Card>
             <CardHeader>
@@ -2260,8 +2474,10 @@ export default function EquipmentDetail() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* ══ REPAIR HISTORY TAB ══ */}
+        {canViewService && (
         <TabsContent value="repair-history">
           <Card>
             <CardHeader>
@@ -2294,12 +2510,13 @@ export default function EquipmentDetail() {
                             {record.totalNormHours > 0 && <span>{record.totalNormHours.toFixed(1)} н/ч</span>}
                           </div>
                         </div>
-                        {record.cost != null && record.cost > 0 && (
+                        {canViewFinance && record.cost != null && record.cost > 0 && (
                           <p className="ml-4 font-medium text-foreground">{formatCurrency(record.cost)}</p>
                         )}
                       </div>
                     </div>
                   ))}
+                  {canViewFinance && (
                   <div className="border-t border-border pt-3">
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Всего затрат на ремонты</span>
@@ -2308,6 +2525,7 @@ export default function EquipmentDetail() {
                       </span>
                     </div>
                   </div>
+                  )}
                 </div>
               ) : (
                 <EmptyState icon={<Wrench className="h-12 w-12" />} text="Записей о ремонтах нет" />
@@ -2315,6 +2533,7 @@ export default function EquipmentDetail() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* ══ PHOTOS TAB ══ */}
         <TabsContent value="photos">
@@ -2989,18 +3208,32 @@ export default function EquipmentDetail() {
         </TabsContent>
 
         {/* ══ DOCUMENTS TAB ══ */}
+        {canViewDocuments && (
         <TabsContent value="documents">
           <Card>
             <CardHeader>
               <CardTitle>Документы</CardTitle>
             </CardHeader>
             <CardContent>
-              <EmptyState icon={<FileText className="h-12 w-12" />} text="Документов нет">
-                <Button variant="secondary" size="sm" className="mt-4">Загрузить документ</Button>
-              </EmptyState>
+              {equipment360.documents.latest.length > 0 ? (
+                <div className="space-y-2">
+                  {equipment360.documents.latest.map(doc => (
+                    <LinkedRow
+                      key={doc.id || `${doc.type}-${doc.date}`}
+                      title={`${doc.type}${doc.id ? ` · ${doc.id}` : ''}`}
+                      meta={`${formatDate(doc.date)} · ${doc.status}`}
+                      href="/documents"
+                      canOpen={canViewDocuments}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState icon={<FileText className="h-12 w-12" />} text="Связанных документов нет" />
+              )}
             </CardContent>
           </Card>
         </TabsContent>
+        )}
       </Tabs>
 
       {/* ── Modals ── */}
@@ -3051,6 +3284,7 @@ export default function EquipmentDetail() {
       <EditEquipmentModal
         open={showEditModal}
         equipment={equipment}
+        canViewFinance={canViewFinance}
         onOpenChange={setShowEditModal}
         onSave={(updated) => {
           const normalizedUpdated = {
@@ -3161,6 +3395,78 @@ function EmptyState({ icon, text, children }: { icon: React.ReactNode; text: str
       <div className="mx-auto text-gray-400">{icon}</div>
       <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{text}</p>
       {children}
+    </div>
+  );
+}
+
+function CompactMetric({ label, value, tone = 'default' }: {
+  label: string;
+  value: string;
+  tone?: 'default' | 'success' | 'warning' | 'danger';
+}) {
+  const toneClass = tone === 'success'
+    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+    : tone === 'warning'
+    ? 'border-orange-500/20 bg-orange-500/10 text-orange-300'
+    : tone === 'danger'
+    ? 'border-red-500/20 bg-red-500/10 text-red-300'
+    : 'border-border bg-secondary/60 text-foreground';
+  return (
+    <div className={cn('rounded-lg border p-3', toneClass)}>
+      <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold">{value || 'Нет данных'}</p>
+    </div>
+  );
+}
+
+function LinkedRow({ title, meta, href, canOpen }: {
+  title: string;
+  meta: string;
+  href: string;
+  canOpen: boolean;
+}) {
+  const content = (
+    <>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-foreground">{title || 'Запись'}</p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{meta || 'Детали не указаны'}</p>
+      </div>
+      {canOpen && <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+    </>
+  );
+
+  if (!canOpen) {
+    return <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-2">{content}</div>;
+  }
+
+  return (
+    <Link to={href} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-2 transition hover:border-blue-400/40 hover:bg-blue-500/10">
+      {content}
+    </Link>
+  );
+}
+
+function CompactList({ title, emptyText, items, canOpen }: {
+  title: string;
+  emptyText: string;
+  items: Array<{ id: string; title: string; meta: string; href: string }>;
+  canOpen: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card/70 p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <Badge variant="default">{items.length}</Badge>
+      </div>
+      {items.length > 0 ? (
+        <div className="space-y-2">
+          {items.map(item => (
+            <LinkedRow key={item.id || `${item.title}-${item.meta}`} title={item.title} meta={item.meta} href={item.href} canOpen={canOpen} />
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">{emptyText}</p>
+      )}
     </div>
   );
 }
@@ -3320,10 +3626,11 @@ function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 function EditEquipmentModal({
-  open, equipment, onOpenChange, onSave,
+  open, equipment, canViewFinance, onOpenChange, onSave,
 }: {
   open: boolean;
   equipment: Equipment;
+  canViewFinance: boolean;
   onOpenChange: (v: boolean) => void;
   onSave: (updated: Equipment) => void;
 }) {
@@ -3576,7 +3883,7 @@ function EditEquipmentModal({
                   />
                 </FormField>
 
-                {form.owner === 'sublease' && (
+                {canViewFinance && form.owner === 'sublease' && (
                   <FormField
                     label="Стоимость субаренды"
                     unit="₽/мес"
@@ -3641,7 +3948,7 @@ function EditEquipmentModal({
 
               <div className="border-t border-gray-100 dark:border-gray-800" />
 
-              <FormSection title="Продажа" icon={<DollarSign className="h-3.5 w-3.5" />}>
+              <FormSection title="Продажа" icon={<FileText className="h-3.5 w-3.5" />}>
                 <FormField label="Техника выставлена на продажу" hint="Если включено, единица появится в разделе продаж и в sale-представлениях">
                   <FieldSelect
                     value={form.isForSale ? 'yes' : 'no'}
@@ -3667,53 +3974,62 @@ function EditEquipmentModal({
                       />
                     </FormField>
 
-                    <FormField label="Цена 1" unit="₽" hint="Основная прайс-лист цена">
-                      <FieldInput
-                        type="number"
-                        value={String(form.salePrice1 || '')}
-                        onChange={setNum('salePrice1')}
-                        placeholder="Например: 4950000"
-                      />
-                    </FormField>
+                    {canViewFinance ? (
+                      <>
+                        <FormField label="Цена 1" unit="₽" hint="Основная прайс-лист цена">
+                          <FieldInput
+                            type="number"
+                            value={String(form.salePrice1 || '')}
+                            onChange={setNum('salePrice1')}
+                            placeholder="Например: 4950000"
+                          />
+                        </FormField>
 
-                    <FormField label="Цена 2" unit="₽" hint="Цена для переговоров">
-                      <FieldInput
-                        type="number"
-                        value={String(form.salePrice2 || '')}
-                        onChange={setNum('salePrice2')}
-                        placeholder="Например: 4750000"
-                      />
-                    </FormField>
+                        <FormField label="Цена 2" unit="₽" hint="Цена для переговоров">
+                          <FieldInput
+                            type="number"
+                            value={String(form.salePrice2 || '')}
+                            onChange={setNum('salePrice2')}
+                            placeholder="Например: 4750000"
+                          />
+                        </FormField>
 
-                    <FormField label="Цена 3" unit="₽" hint="Минимально допустимая цена">
-                      <FieldInput
-                        type="number"
-                        value={String(form.salePrice3 || '')}
-                        onChange={setNum('salePrice3')}
-                        placeholder="Например: 4550000"
-                      />
-                    </FormField>
+                        <FormField label="Цена 3" unit="₽" hint="Минимально допустимая цена">
+                          <FieldInput
+                            type="number"
+                            value={String(form.salePrice3 || '')}
+                            onChange={setNum('salePrice3')}
+                            placeholder="Например: 4550000"
+                          />
+                        </FormField>
+                      </>
+                    ) : (
+                      <p className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
+                        Цены скрыты правами доступа.
+                      </p>
+                    )}
                   </>
                 )}
               </FormSection>
 
               <div className="border-t border-gray-100 dark:border-gray-800" />
 
-              {/* ── Блок 4: Экономика и обслуживание ── */}
-              <FormSection title="Экономика и обслуживание" icon={<DollarSign className="h-3.5 w-3.5" />}>
-                <FormField
-                  label="Плановый доход в месяц"
-                  unit="₽"
-                  hint="Ориентир для оценки загрузки и эффективности"
-                >
-                  <FieldInput
-                    type="number"
-                    value={String(form.plannedMonthlyRevenue)}
-                    onChange={setNum('plannedMonthlyRevenue')}
-                    placeholder="Например: 80000"
-                  />
-                </FormField>
-
+              {/* ── Блок 4: Обслуживание ── */}
+              <FormSection title="Обслуживание" icon={<Wrench className="h-3.5 w-3.5" />}>
+                {canViewFinance && (
+                  <FormField
+                    label="Плановый доход в месяц"
+                    unit="₽"
+                    hint="Ориентир для оценки загрузки и эффективности"
+                  >
+                    <FieldInput
+                      type="number"
+                      value={String(form.plannedMonthlyRevenue)}
+                      onChange={setNum('plannedMonthlyRevenue')}
+                      placeholder="Например: 80000"
+                    />
+                  </FormField>
+                )}
                 <FormField
                   label="Следующее ТО"
                   hint="Дата планового технического обслуживания"

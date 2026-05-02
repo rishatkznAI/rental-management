@@ -58,6 +58,20 @@ test.describe('production smoke', () => {
     await openSidebarSection(page, /^Панель администратора/, /Панель администратора|Администрирование/);
   });
 
+  test('admin can open equipment 360 card', async ({ page }) => {
+    const suffix = `equipment-360-${Date.now()}`;
+    const seed = await withAdminApi(async (api) => createEquipment(api, suffix));
+
+    await loginAsAdmin(page);
+    await navigateInApp(page, `/equipment/${seed.id}`);
+
+    await expect(page.getByRole('heading', { name: /Техника 360°/ })).toBeVisible();
+    await expect(page.getByText('Сводка по занятости, сервису, документам и рискам')).toBeVisible();
+    await expect(page.getByText('Текущая занятость')).toBeVisible();
+    await expect(page.getByText('Сервис и готовность')).toBeVisible();
+    await expect(page.getByText('Красные флаги')).toBeVisible();
+  });
+
   test('admin can create client, equipment, rental and service ticket', async ({ page }) => {
     const suffix = `smoke-${Date.now()}`;
     const company = `Smoke Client ${suffix}`;

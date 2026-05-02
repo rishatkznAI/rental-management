@@ -6,7 +6,7 @@ import { useDocumentsList } from '../hooks/useDocuments';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { usePaymentsList } from '../hooks/usePayments';
 import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
-import { RENTAL_KEYS, useGanttData, useRentalsList } from '../hooks/useRentals';
+import { RENTAL_KEYS, useGanttData, useRentalAuditHistory, useRentalsList } from '../hooks/useRentals';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
@@ -35,6 +35,7 @@ import { paymentsService } from '../services/payments.service';
 import { equipmentService } from '../services/equipment.service';
 import { appendRentalHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
+import { formatRentalAuditEvents } from '../lib/rentalAuditHistory.js';
 import { formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
 import type { DocumentType, Equipment, PaymentStatus, Rental, RentalStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
@@ -132,6 +133,15 @@ function documentBelongsToRental(doc: { rental?: string; rentalId?: string }, re
   return doc.rentalId === rentalId || doc.rental === rentalId;
 }
 
+function auditBadgeVariant(kind: string) {
+  if (kind === 'return') return 'success';
+  if (kind === 'delete') return 'error';
+  if (kind === 'status') return 'warning';
+  if (kind === 'extension') return 'info';
+  if (kind === 'create') return 'success';
+  return 'default';
+}
+
 export default function RentalDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -146,10 +156,12 @@ export default function RentalDetail() {
   const { data: clients = [] } = useClientsList();
   const { data: documents = [] } = useDocumentsList();
   const { data: changeRequests = [] } = useRentalChangeRequestsList();
+  const { data: auditHistory, isLoading: auditHistoryLoading, isError: auditHistoryError } = useRentalAuditHistory(id || '');
 
   const rental = rentals.find(r => r.id === id);
   const canEditRentals = can('edit', 'rentals');
   const canEditRentalDates = canEditRentals;
+  const canViewFinance = can('view', 'finance');
   const isAdmin = user?.role === 'Администратор';
   const canCreateDocuments = can('create', 'documents');
   const canCreatePayments = can('create', 'payments');
@@ -331,6 +343,10 @@ export default function RentalDetail() {
       user: rental.manager || 'Система',
     }] : []),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const rentalAuditEvents = useMemo(
+    () => formatRentalAuditEvents(auditHistory?.logs || []),
+    [auditHistory?.logs],
+  );
 
   const rentalDays = getRentalDays(rental?.startDate || '', rental?.plannedReturnDate || '');
   const editingDays = getRentalDays(formState?.startDate || '', formState?.plannedReturnDate || '');
@@ -1360,6 +1376,58 @@ export default function RentalDetail() {
                     </div>
                   ))}
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-[--color-primary]" />
+                История изменений
+              </CardTitle>
+              <CardDescription>
+                Audit log по этой аренде{!canViewFinance ? ' · финансовые изменения скрыты правами доступа' : ''}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {auditHistoryLoading ? (
+                <p className="text-sm text-gray-400 dark:text-gray-500">Загружаем историю изменений...</p>
+              ) : auditHistoryError ? (
+                <p className="text-sm text-red-600 dark:text-red-400">Не удалось загрузить историю изменений.</p>
+              ) : rentalAuditEvents.length > 0 ? (
+                <div className="space-y-3">
+                  {rentalAuditEvents.map(event => (
+                    <div key={event.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={auditBadgeVariant(event.actionKind)}>{event.actionLabel}</Badge>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">{event.entityType} · {event.entityId}</span>
+                          </div>
+                          <p className="mt-1 text-sm text-gray-900 dark:text-white">{event.description}</p>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            {formatDateTime(event.createdAt)} · {event.userName} · {event.role}
+                          </p>
+                        </div>
+                      </div>
+                      {event.changes.length > 0 && (
+                        <div className="mt-3 space-y-1.5">
+                          {event.changes.map(change => (
+                            <div key={`${event.id}-${change.field}`} className="rounded-md bg-gray-50 px-2 py-1.5 text-xs dark:bg-gray-900/50">
+                              <span className="font-medium text-gray-700 dark:text-gray-200">{change.label}: </span>
+                              <span className={change.hidden ? 'text-amber-600 dark:text-amber-400' : 'text-gray-600 dark:text-gray-300'}>
+                                {change.text}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400 dark:text-gray-500">История изменений пока пуста.</p>
               )}
             </CardContent>
           </Card>

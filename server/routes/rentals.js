@@ -12,6 +12,151 @@ const {
   syncGanttRentalFields,
 } = require('../lib/rental-change-requests');
 const { rentalMatchesEquipment } = require('../lib/rental-validation');
+const { LEGACY_AUDIT_COLLECTION, redactAuditValue } = require('../lib/security-audit');
+
+const AUDIT_COLLECTION = 'audit_logs';
+const RENTAL_AUDIT_LIMIT = 20;
+const RENTAL_AUDIT_FINANCE_FIELDS = new Set([
+  'amount',
+  'paidAmount',
+  'paymentStatus',
+  'price',
+  'discount',
+  'rate',
+  'debt',
+  'currency',
+]);
+const RENTAL_AUDIT_FIELD_LABELS = {
+  id: 'ID',
+  client: 'Клиент',
+  clientId: 'ID клиента',
+  rental: 'Аренда',
+  rentalId: 'ID аренды',
+  equipment: 'Техника',
+  equipmentId: 'ID техники',
+  equipmentInv: 'Инв. номер',
+  inventoryNumber: 'Инв. номер',
+  manager: 'Менеджер',
+  managerId: 'ID менеджера',
+  startDate: 'Дата начала',
+  endDate: 'Дата окончания',
+  plannedReturnDate: 'Плановая дата возврата',
+  actualReturnDate: 'Фактическая дата возврата',
+  returnDate: 'Дата возврата',
+  status: 'Статус',
+  paymentStatus: 'Статус оплаты',
+  amount: 'Сумма',
+  price: 'Цена',
+  discount: 'Скидка',
+  rate: 'Ставка',
+  hasDamage: 'Повреждения',
+  serviceTicketId: 'Сервисная заявка',
+  equipmentStatus: 'Статус техники',
+};
+
+function normalizeAuditText(value) {
+  return String(value ?? '').trim();
+}
+
+function auditValueMatchesId(value, ids) {
+  if (value === null || value === undefined) return false;
+  if (typeof value !== 'object') return ids.has(normalizeAuditText(value));
+  if (Array.isArray(value)) return value.some(item => auditValueMatchesId(item, ids));
+  return Object.values(value).some(item => auditValueMatchesId(item, ids));
+}
+
+function readAuditLogs(readData) {
+  const current = readData(AUDIT_COLLECTION);
+  const legacy = readData(LEGACY_AUDIT_COLLECTION);
+  return [
+    ...(Array.isArray(current) ? current : []),
+    ...(Array.isArray(legacy) ? legacy : []),
+  ];
+}
+
+function auditActionLabel(action) {
+  const value = normalizeAuditText(action);
+  if (value === 'rentals.create' || value === 'gantt_rentals.create') return 'Создание аренды';
+  if (value === 'rentals.update' || value === 'gantt_rentals.update') return 'Изменение аренды';
+  if (value === 'rentals.return') return 'Возврат аренды';
+  if (value === 'rentals.change_request') return 'Изменение на согласовании';
+  if (value === 'rentals.delete' || value === 'gantt_rentals.delete') return 'Удаление аренды';
+  if (value.endsWith('.bulk_replace')) return 'Массовое обновление';
+  return value || 'Событие';
+}
+
+function auditActionKind(action, changes = []) {
+  const value = normalizeAuditText(action);
+  const changedFields = changes.map(item => item.field);
+  if (value === 'rentals.return') return 'return';
+  if (value.endsWith('.create')) return 'create';
+  if (value.endsWith('.delete')) return 'delete';
+  if (changedFields.includes('status')) return 'status';
+  if (changedFields.includes('plannedReturnDate') || changedFields.includes('endDate')) return 'extension';
+  return 'update';
+}
+
+function canSeeRentalAuditFinance(user) {
+  return user?.userRole === 'Администратор';
+}
+
+function sanitizeRentalAuditSnapshot(value, canViewFinance) {
+  const redacted = redactAuditValue(value);
+  if (!redacted || typeof redacted !== 'object') return redacted ?? null;
+  if (Array.isArray(redacted)) return redacted.map(item => sanitizeRentalAuditSnapshot(item, canViewFinance));
+  return Object.entries(redacted).reduce((acc, [key, item]) => {
+    if (!canViewFinance && RENTAL_AUDIT_FINANCE_FIELDS.has(key)) return acc;
+    acc[key] = sanitizeRentalAuditSnapshot(item, canViewFinance);
+    return acc;
+  }, {});
+}
+
+function buildRentalAuditChanges(before, after, canViewFinance) {
+  const safeBefore = sanitizeRentalAuditSnapshot(before, canViewFinance) || {};
+  const safeAfter = sanitizeRentalAuditSnapshot(after, canViewFinance) || {};
+  const rawBefore = redactAuditValue(before) || {};
+  const rawAfter = redactAuditValue(after) || {};
+  const keys = new Set([...Object.keys(rawBefore), ...Object.keys(rawAfter)]);
+  return [...keys]
+    .filter(field => field !== 'id')
+    .filter(field => !(!canViewFinance && RENTAL_AUDIT_FINANCE_FIELDS.has(field) && JSON.stringify(rawBefore[field] ?? null) === JSON.stringify(rawAfter[field] ?? null)))
+    .filter(field => JSON.stringify(rawBefore[field] ?? null) !== JSON.stringify(rawAfter[field] ?? null))
+    .slice(0, 12)
+    .map(field => {
+      const hidden = !canViewFinance && RENTAL_AUDIT_FINANCE_FIELDS.has(field);
+      return {
+        field,
+        label: RENTAL_AUDIT_FIELD_LABELS[field] || field,
+        before: hidden ? null : (safeBefore[field] ?? null),
+        after: hidden ? null : (safeAfter[field] ?? null),
+        hidden,
+      };
+    });
+}
+
+function buildRentalAuditEntry(entry, canViewFinance) {
+  const before = sanitizeRentalAuditSnapshot(entry.before, canViewFinance);
+  const after = sanitizeRentalAuditSnapshot(entry.after, canViewFinance);
+  const metadata = sanitizeRentalAuditSnapshot(entry.metadata, canViewFinance);
+  const changes = buildRentalAuditChanges(entry.before, entry.after, canViewFinance);
+  return {
+    id: normalizeAuditText(entry.id),
+    createdAt: normalizeAuditText(entry.createdAt),
+    userId: normalizeAuditText(entry.userId),
+    userName: normalizeAuditText(entry.userName) || 'Система',
+    role: normalizeAuditText(entry.normalizedRole || entry.role || entry.rawRole) || '—',
+    action: normalizeAuditText(entry.action),
+    actionLabel: auditActionLabel(entry.action),
+    actionKind: auditActionKind(entry.action, changes),
+    entityType: normalizeAuditText(entry.entityType),
+    entityId: normalizeAuditText(entry.entityId),
+    description: normalizeAuditText(entry.description),
+    before,
+    after,
+    metadata,
+    changes,
+  };
+}
 
 function registerRentalRoutes(deps) {
   const {
@@ -492,6 +637,64 @@ function registerRentalRoutes(deps) {
       }
       return res.json(accessControl.sanitizeEntityForRead(collection, item, req.user));
     });
+
+    if (collection === 'rentals') {
+      router.get(`/${collection}/:id/audit`, requireAuth, requireRead(collection), (req, res) => {
+        const rentals = readData('rentals') || [];
+        const ganttRentals = readData('gantt_rentals') || [];
+        const routeId = normalizeAuditText(req.params.id);
+        let classicRental = rentals.find(item => normalizeAuditText(item?.id) === routeId) || null;
+        let ganttRental = ganttRentals.find(item => normalizeAuditText(item?.id) === routeId) || null;
+
+        if (!classicRental && ganttRental) {
+          const linkedClassicId = normalizeAuditText(ganttRental.rentalId || ganttRental.sourceRentalId || ganttRental.originalRentalId);
+          classicRental = linkedClassicId
+            ? rentals.find(item => normalizeAuditText(item?.id) === linkedClassicId) || null
+            : null;
+        }
+        if (!ganttRental && classicRental) {
+          ganttRental = findLinkedGanttRental(classicRental, routeId);
+        }
+        if (!classicRental && !ganttRental) {
+          return res.status(404).json({ ok: false, error: 'Аренда не найдена.' });
+        }
+
+        const targetCollection = classicRental ? 'rentals' : 'gantt_rentals';
+        const targetRental = classicRental || ganttRental;
+        if (!accessControl.canAccessEntity(targetCollection, targetRental, req.user)) {
+          return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
+
+        const ids = new Set([
+          routeId,
+          classicRental?.id,
+          ganttRental?.id,
+          ganttRental?.rentalId,
+          ganttRental?.sourceRentalId,
+          ganttRental?.originalRentalId,
+        ].map(normalizeAuditText).filter(Boolean));
+        const canViewFinance = canSeeRentalAuditFinance(req.user);
+        const logs = readAuditLogs(readData)
+          .filter(entry => ['rentals', 'gantt_rentals'].includes(normalizeAuditText(entry?.entityType)))
+          .filter(entry =>
+            ids.has(normalizeAuditText(entry?.entityId)) ||
+            auditValueMatchesId(entry?.before, ids) ||
+            auditValueMatchesId(entry?.after, ids) ||
+            auditValueMatchesId(entry?.metadata, ids)
+          )
+          .map(entry => buildRentalAuditEntry(entry, canViewFinance))
+          .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+          .slice(0, RENTAL_AUDIT_LIMIT);
+
+        return res.json({
+          ok: true,
+          rentalId: classicRental?.id || '',
+          ganttRentalId: ganttRental?.id || '',
+          canViewFinance,
+          logs,
+        });
+      });
+    }
 
     router.post(`/${collection}`, requireAuth, (req, res) => {
       const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'POST');

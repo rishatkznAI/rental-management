@@ -54,4 +54,5 @@ test('admin can open rental detail page for an existing rental', async ({ page }
   await expect(page.getByRole('heading', { name: 'Клиент' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Редактировать' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Даты аренды' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'История изменений' })).toBeVisible();
 });

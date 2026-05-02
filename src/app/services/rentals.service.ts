@@ -9,6 +9,26 @@ export const rentalsService = {
   getById: (id: string): Promise<Rental | undefined> =>
     api.get<Rental>(`/api/rentals/${id}`).catch(() => undefined),
 
+  getAuditHistory: (id: string): Promise<{
+    ok: boolean;
+    rentalId: string;
+    ganttRentalId: string;
+    canViewFinance: boolean;
+    logs: Array<{
+      id: string;
+      createdAt: string;
+      userName: string;
+      role: string;
+      action: string;
+      actionLabel: string;
+      actionKind: string;
+      entityType: string;
+      entityId: string;
+      description: string;
+      changes: Array<{ field: string; label: string; before: unknown; after: unknown; hidden?: boolean }>;
+    }>;
+  }> => api.get(`/api/rentals/${id}/audit`),
+
   getGanttData: (): Promise<GanttRentalData[]> =>
     api.get<GanttRentalData[]>('/api/gantt_rentals'),
 

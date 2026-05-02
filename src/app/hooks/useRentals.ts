@@ -5,6 +5,7 @@ import type { Rental } from '../types';
 export const RENTAL_KEYS = {
   all: ['rentals'] as const,
   detail: (id: string) => ['rentals', id] as const,
+  audit: (id: string) => ['rentals', id, 'audit'] as const,
   gantt: ['rentals', 'gantt'] as const,
 };
 
@@ -20,6 +21,14 @@ export function useRentalById(id: string) {
   return useQuery({
     queryKey: RENTAL_KEYS.detail(id),
     queryFn: () => rentalsService.getById(id),
+    enabled: !!id,
+  });
+}
+
+export function useRentalAuditHistory(id: string) {
+  return useQuery({
+    queryKey: RENTAL_KEYS.audit(id),
+    queryFn: () => rentalsService.getAuditHistory(id),
     enabled: !!id,
   });
 }

@@ -38,7 +38,7 @@ export default defineConfig({
       command: backendCommand,
       cwd: './server',
       url: 'http://127.0.0.1:3000/health',
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 120_000,
     },
   ],

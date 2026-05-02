@@ -12,6 +12,7 @@
     "postinstall": "node scripts/fix-lightningcss-wasm.mjs",
     "test": "node --test tests/*.test.js",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test e2e/smoke.spec.ts",
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {

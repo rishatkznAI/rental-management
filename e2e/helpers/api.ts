@@ -48,6 +48,28 @@ type ServiceTicketRecord = {
   status?: string;
 };
 
+type DocumentRecord = {
+  id: string;
+  type: string;
+  number: string;
+  client: string;
+  clientId?: string;
+  rentalId?: string;
+  rental?: string;
+  equipmentId?: string;
+  equipmentInv?: string;
+  status: string;
+  manager?: string;
+};
+
+type UserRecord = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+};
+
 type GanttRentalRecord = {
   id: string;
   client: string;
@@ -140,6 +162,64 @@ export async function createClient(api: APIRequestContext, suffix: string): Prom
   });
   expect(res.ok()).toBeTruthy();
   return (await res.json()) as ClientRecord;
+}
+
+export async function findClientByCompany(api: APIRequestContext, company: string): Promise<ClientRecord> {
+  const res = await api.get('/api/clients');
+  expect(res.ok()).toBeTruthy();
+  const clients = (await res.json()) as ClientRecord[];
+  const client = [...clients].reverse().find(item => item.company === company);
+  expect(client, `Expected client ${company}`).toBeTruthy();
+  return client!;
+}
+
+export async function findEquipmentBySerialNumber(api: APIRequestContext, serialNumber: string): Promise<EquipmentRecord> {
+  const res = await api.get('/api/equipment');
+  expect(res.ok()).toBeTruthy();
+  const equipment = (await res.json()) as EquipmentRecord[];
+  const item = [...equipment].reverse().find(entry => entry.serialNumber === serialNumber);
+  expect(item, `Expected equipment with serial number ${serialNumber}`).toBeTruthy();
+  return item!;
+}
+
+export async function ensureUser(
+  api: APIRequestContext,
+  user: {
+    name: string;
+    email: string;
+    role: string;
+    password?: string;
+  },
+): Promise<{ email: string; password: string }> {
+  const password = user.password ?? '1234';
+  const getRes = await api.get('/api/users');
+  expect(getRes.ok()).toBeTruthy();
+  const users = (await getRes.json()) as UserRecord[];
+  const existing = users.find(item => item.email === user.email);
+  if (existing) {
+    const patchRes = await api.patch(`/api/users/${existing.id}`, {
+      data: {
+        name: user.name,
+        role: user.role,
+        status: 'Активен',
+        password,
+      },
+    });
+    expect(patchRes.ok()).toBeTruthy();
+    return { email: user.email, password };
+  }
+
+  const createRes = await api.post('/api/users', {
+    data: {
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: 'Активен',
+      password,
+    },
+  });
+  expect(createRes.ok()).toBeTruthy();
+  return { email: user.email, password };
 }
 
 export async function ensureOfficeManager(api: APIRequestContext, suffix: string) {
@@ -257,4 +337,13 @@ export async function findServiceTicketByEquipmentId(api: APIRequestContext, equ
   expect(res.ok()).toBeTruthy();
   const tickets = (await res.json()) as ServiceTicketRecord[];
   return [...tickets].reverse().find(item => item.equipmentId === equipmentId) ?? null;
+}
+
+export async function createDocument(
+  api: APIRequestContext,
+  data: Omit<DocumentRecord, 'id'>,
+): Promise<DocumentRecord> {
+  const res = await api.post('/api/documents', { data });
+  expect(res.ok()).toBeTruthy();
+  return (await res.json()) as DocumentRecord;
 }

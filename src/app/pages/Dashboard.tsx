@@ -57,7 +57,8 @@ import type {
   ManagerBreakdownResponse,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
-import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
+import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
+import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
 import {
   buildActiveRentalFleetLookup,
   calculateCurrentFleetUtilization,
@@ -205,6 +206,20 @@ export default function Dashboard() {
     () => buildRentalDebtRows(ganttRentals, payments),
     [ganttRentals, payments],
   );
+  const clientDebtAgingRows = useMemo(
+    () => buildClientDebtAgingRows(clients, rentalDebtRows, today.toISOString().slice(0, 10)),
+    [clients, rentalDebtRows, today],
+  );
+  const canViewFinance = can('view', 'finance');
+  const canViewDocuments = can('view', 'documents');
+  const canViewService = can('view', 'service');
+  const canViewEquipment = can('view', 'equipment');
+  const canViewClients = can('view', 'clients');
+  const shouldShowAttentionSummary =
+    user?.role === 'Администратор'
+    || user?.role === 'Офис-менеджер'
+    || user?.role === 'Коммерческий директор'
+    || (canViewFinance && canViewDocuments);
   const computedClients = useMemo(
     () => clients.map(client => {
       const financial = clientFinancials.find(item => item.clientId === client.id);
@@ -226,6 +241,18 @@ export default function Dashboard() {
   const viewPlannerRentals = isManagerRole && currentUserName
     ? ganttRentals.filter(r => r.manager === currentUserName)
     : ganttRentals;
+  const attentionSummary = useMemo(
+    () => buildDashboardAttentionSummary({
+      rentalDebtRows,
+      clientDebtAgingRows,
+      rentals: viewPlannerRentals,
+      documents,
+      tickets,
+      equipment: equipmentList,
+      today: today.toISOString().slice(0, 10),
+    }),
+    [clientDebtAgingRows, documents, equipmentList, rentalDebtRows, tickets, today, viewPlannerRentals],
+  );
 
   // Dashboard operational KPIs should use planner rentals as the source of truth.
   const activeRentalsList = useMemo(
@@ -1402,6 +1429,143 @@ export default function Dashboard() {
       )}
 
       {/* Header old block removed */}
+
+      {shouldShowAttentionSummary && (
+        <section className={dashboardSectionClass}>
+          <div className={dashboardSectionHeaderClass}>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+              Управленческий контроль
+            </p>
+            <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Что требует внимания сегодня</h2>
+          </div>
+
+          <Card className={dashboardCardClass}>
+            <CardContent className="space-y-4 p-5">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className={`rounded-xl border p-4 ${attentionSummary.receivables.overdueDebt > 0 ? 'border-red-300 bg-red-50/60 dark:border-red-900/70 dark:bg-red-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">Просроченная дебиторка</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {attentionSummary.receivables.overdueClients} клиентов · {attentionSummary.receivables.overdueRentals} аренд
+                      </p>
+                    </div>
+                    <Badge variant={attentionSummary.receivables.overdueDebt > 0 ? 'destructive' : 'default'}>
+                      {attentionSummary.receivables.overdueDebt > 0 ? 'критично' : 'норма'}
+                    </Badge>
+                  </div>
+                  <p className={`mt-3 text-2xl font-bold ${attentionSummary.receivables.overdueDebt > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300'}`}>
+                    {canViewFinance ? formatCurrency(attentionSummary.receivables.overdueDebt) : 'Сумма скрыта'}
+                  </p>
+                  <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
+                    60+ дней: {attentionSummary.receivables.rentals60Plus} аренд
+                    {canViewFinance ? ` · ${formatCurrency(attentionSummary.receivables.debt60Plus)}` : ' · без суммы'}
+                  </p>
+                </div>
+
+                <div className={`rounded-xl border p-4 ${attentionSummary.returns.today > 0 ? 'border-amber-300 bg-amber-50/60 dark:border-amber-900/70 dark:bg-amber-950/20' : 'border-border bg-secondary/50'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">Возвраты сегодня и завтра</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Сегодня {attentionSummary.returns.today} · завтра {attentionSummary.returns.tomorrow}
+                      </p>
+                    </div>
+                    <Clock className="h-5 w-5 text-amber-500" />
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {attentionSummary.returns.upcoming.length === 0 ? (
+                      <p className="text-sm text-emerald-600 dark:text-emerald-300">Ближайших возвратов нет.</p>
+                    ) : attentionSummary.returns.upcoming.map(item => (
+                      <div key={`${item.id}-${item.date}`} className="rounded-lg bg-white/70 px-3 py-2 text-xs dark:bg-gray-900/60">
+                        <p className="font-medium text-gray-900 dark:text-white">{item.client}</p>
+                        <p className="text-gray-500 dark:text-gray-400">{item.equipment} · {formatDate(item.date)} · {item.manager}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className={`rounded-xl border p-4 ${attentionSummary.documents.unsigned > 0 ? 'border-amber-300 bg-amber-50/60 dark:border-amber-900/70 dark:bg-amber-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">Документы без подписи</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{attentionSummary.documents.unsigned} документов требуют контроля</p>
+                    </div>
+                    <FileText className="h-5 w-5 text-amber-500" />
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {attentionSummary.documents.items.length === 0 ? (
+                      <p className="text-sm text-emerald-600 dark:text-emerald-300">Нет неподписанных договоров и актов.</p>
+                    ) : attentionSummary.documents.items.map(item => (
+                      <div key={item.id || `${item.type}-${item.client}-${item.rental}`} className="rounded-lg bg-white/70 px-3 py-2 text-xs dark:bg-gray-900/60">
+                        <p className="font-medium text-gray-900 dark:text-white">{item.type} · {item.client}</p>
+                        <p className="text-gray-500 dark:text-gray-400">{item.rental} · {item.status} · {item.manager}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className={`rounded-xl border p-4 ${attentionSummary.service.unassigned + attentionSummary.service.waitingParts + attentionSummary.service.urgent > 0 ? 'border-orange-300 bg-orange-50/60 dark:border-orange-900/70 dark:bg-orange-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">Сервисные блокеры</p>
+                    <Wrench className="h-5 w-5 text-orange-500" />
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Без механика: <strong>{attentionSummary.service.unassigned}</strong></div>
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Ждут запчасти: <strong>{attentionSummary.service.waitingParts}</strong></div>
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Срочные: <strong>{attentionSummary.service.urgent}</strong></div>
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">В сервисе: <strong>{attentionSummary.service.equipmentInService}</strong></div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-secondary/50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">Техника простаивает</p>
+                    <Truck className="h-5 w-5 text-gray-500" />
+                  </div>
+                  <p className="mt-3 text-2xl font-bold text-gray-900 dark:text-white">{attentionSummary.idleEquipment.available}</p>
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    Свободная техника. Дней простоя нет в данных, поэтому показатель не рассчитывается.
+                  </p>
+                </div>
+
+                <div className={`rounded-xl border p-4 ${attentionSummary.highRiskClients.count > 0 ? 'border-red-300 bg-red-50/60 dark:border-red-900/70 dark:bg-red-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">Клиенты высокого риска</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        60+ дней: {attentionSummary.highRiskClients.sixtyPlus} · активная аренда с просрочкой: {attentionSummary.highRiskClients.activeWithOverdue}
+                      </p>
+                    </div>
+                    <ShieldAlert className="h-5 w-5 text-red-500" />
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {!canViewFinance ? (
+                      <p className="text-sm text-gray-600 dark:text-gray-300">Детализация долга скрыта правами доступа.</p>
+                    ) : attentionSummary.highRiskClients.top.length === 0 ? (
+                      <p className="text-sm text-emerald-600 dark:text-emerald-300">Клиентов высокого риска нет.</p>
+                    ) : attentionSummary.highRiskClients.top.map(item => (
+                      <div key={item.clientId || item.client} className="rounded-lg bg-white/70 px-3 py-2 text-xs dark:bg-gray-900/60">
+                        <p className="font-medium text-gray-900 dark:text-white">{item.client}</p>
+                        <p className="text-gray-500 dark:text-gray-400">{formatCurrency(item.debt)} · {item.maxOverdueDays} дн. · {item.manager}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+                {canViewFinance && <Button asChild variant="secondary" size="sm"><Link to="/finance">Финансы</Link></Button>}
+                {can('view', 'rentals') && <Button asChild variant="secondary" size="sm"><Link to="/rentals">Аренды</Link></Button>}
+                {canViewDocuments && <Button asChild variant="secondary" size="sm"><Link to="/documents">Документы</Link></Button>}
+                {canViewService && <Button asChild variant="secondary" size="sm"><Link to="/service">Сервис</Link></Button>}
+                {canViewEquipment && <Button asChild variant="secondary" size="sm"><Link to="/equipment">Техника</Link></Button>}
+                {canViewClients && <Button asChild variant="secondary" size="sm"><Link to="/clients">Клиенты</Link></Button>}
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      )}
 
       {isAdminRole && (
         <section className={dashboardSectionClass}>

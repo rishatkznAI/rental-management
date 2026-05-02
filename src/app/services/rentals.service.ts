@@ -2,6 +2,28 @@ import { api } from '../lib/api';
 import type { Rental } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
+export type RentalExtensionConflict = {
+  date: string;
+  startDate: string;
+  endDate: string;
+  client: string;
+  rentalId: string;
+  ganttRentalId?: string;
+  status: string;
+};
+
+export type RentalExtensionResponse = {
+  ok: boolean;
+  applied: boolean;
+  rental?: Rental;
+  ganttRental?: GanttRentalData;
+  conflict?: RentalExtensionConflict | null;
+  approval?: {
+    created: boolean;
+    requestIds: string[];
+  };
+};
+
 export const rentalsService = {
   getAll: (): Promise<Rental[]> =>
     api.get<Rental[]>('/api/rentals'),
@@ -48,6 +70,11 @@ export const rentalsService = {
     equipment?: unknown;
     serviceTicket?: unknown;
   }> => api.post(`/api/rentals/${id}/return`, data),
+
+  extend: (
+    id: string,
+    data: { newPlannedReturnDate: string; reason: string; comment?: string },
+  ): Promise<RentalExtensionResponse> => api.post(`/api/rentals/${id}/extend`, data),
 
   delete: (id: string): Promise<void> =>
     api.del(`/api/rentals/${id}`),

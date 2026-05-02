@@ -36,6 +36,13 @@ import { equipmentService } from '../services/equipment.service';
 import { appendRentalHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { formatRentalAuditEvents } from '../lib/rentalAuditHistory.js';
+import {
+  EXTENSION_REASONS,
+  buildExtensionConflictDisplay,
+  buildExtensionFormState,
+  formatExtensionDate,
+  getRentalExtensionValidation,
+} from '../lib/rentalExtension.js';
 import { formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
 import type { DocumentType, Equipment, PaymentStatus, Rental, RentalStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
@@ -175,6 +182,14 @@ export default function RentalDetail() {
   const [formState, setFormState] = useState<RentalFormState | null>(null);
   const [documentDialogOpen, setDocumentDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [extensionDialogOpen, setExtensionDialogOpen] = useState(false);
+  const [extensionForm, setExtensionForm] = useState({
+    newPlannedReturnDate: '',
+    reason: '',
+    comment: '',
+  });
+  const [extensionConflict, setExtensionConflict] = useState<ReturnType<typeof buildExtensionConflictDisplay> | null>(null);
+  const [isExtending, setIsExtending] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [isSubmittingDocument, setIsSubmittingDocument] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -204,6 +219,8 @@ export default function RentalDetail() {
     setSaveInfo('');
     setApprovalReason('');
     setApprovalComment('');
+    setExtensionForm(buildExtensionFormState(rental));
+    setExtensionConflict(null);
   }, [rental]);
 
   const inventoryCounts = useMemo(() => {
@@ -419,6 +436,38 @@ export default function RentalDetail() {
       return newStart <= entryEnd && newEnd >= entryStart;
     }) || null;
   }, [formState?.plannedReturnDate, formState?.startDate, ganttRentals, isEditing, linkedGanttRental, safelyMatchesResolvedEquipment]);
+
+  const unsignedDocs = relatedDocs.filter(doc => doc.type !== 'invoice' && doc.status !== 'signed');
+  const hasRentalEquipmentForExtension = resolvedRentalEquipment.length > 0 || (rental?.equipment || []).length > 0;
+  const extensionValidation = getRentalExtensionValidation({
+    rental,
+    form: extensionForm,
+    hasEquipment: hasRentalEquipmentForExtension,
+  });
+  const extensionPreviewConflict = useMemo(() => {
+    if (!rental || !extensionForm.newPlannedReturnDate) return null;
+    const currentEnd = new Date(`${rental.plannedReturnDate}T00:00:00`).getTime();
+    const newEnd = new Date(`${extensionForm.newPlannedReturnDate}T00:00:00`).getTime();
+    if (Number.isNaN(currentEnd) || Number.isNaN(newEnd) || newEnd <= currentEnd) return null;
+    const conflict = ganttRentals.find(entry => {
+      if (linkedGanttRental && entry.id === linkedGanttRental.id) return false;
+      if (entry.rentalId === rental.id || entry.sourceRentalId === rental.id || entry.originalRentalId === rental.id) return false;
+      if (['returned', 'closed', 'cancelled', 'canceled', 'completed'].includes(String(entry.status || '').toLowerCase())) return false;
+      if (!safelyMatchesResolvedEquipment(entry)) return false;
+      const entryStart = new Date(`${entry.startDate}T00:00:00`).getTime();
+      const entryEnd = new Date(`${entry.endDate}T00:00:00`).getTime();
+      return !Number.isNaN(entryStart) && !Number.isNaN(entryEnd) && entryStart <= newEnd && entryEnd >= currentEnd;
+    });
+    return buildExtensionConflictDisplay(conflict ? {
+      date: conflict.startDate,
+      startDate: conflict.startDate,
+      endDate: conflict.endDate,
+      client: conflict.client,
+      rentalId: conflict.rentalId || conflict.sourceRentalId || conflict.id,
+      ganttRentalId: conflict.id,
+      status: conflict.status,
+    } : null);
+  }, [extensionForm.newPlannedReturnDate, ganttRentals, linkedGanttRental, rental, safelyMatchesResolvedEquipment]);
 
   const updateField = (field: keyof RentalFormState, value: string) => {
     setFormState(prev => prev ? { ...prev, [field]: value } : prev);
@@ -665,6 +714,50 @@ export default function RentalDetail() {
     }
   };
 
+  const openExtensionDialog = () => {
+    if (!rental) return;
+    setExtensionForm(buildExtensionFormState(rental));
+    setExtensionConflict(null);
+    setSaveError('');
+    setSaveInfo('');
+    setExtensionDialogOpen(true);
+  };
+
+  const handleExtendRental = async () => {
+    if (!rental || extensionValidation) return;
+    setIsExtending(true);
+    setSaveError('');
+    setSaveInfo('');
+    setExtensionConflict(null);
+    try {
+      const result = await rentalsService.extend(rental.id, {
+        newPlannedReturnDate: extensionForm.newPlannedReturnDate,
+        reason: extensionForm.reason.trim(),
+        comment: extensionForm.comment.trim(),
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail(rental.id) }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.audit(rental.id) }),
+        queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
+      ]);
+      if (result.applied) {
+        setExtensionDialogOpen(false);
+        setSaveInfo('Аренда продлена и синхронизирована с планировщиком.');
+      } else {
+        setExtensionConflict(buildExtensionConflictDisplay(result.conflict));
+        setSaveInfo(result.approval?.created
+          ? 'Найден конфликт. Запрос на согласование создан.'
+          : 'Найден конфликт по технике.');
+      }
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Не удалось продлить аренду.');
+    } finally {
+      setIsExtending(false);
+    }
+  };
+
   const handleRestoreRental = async () => {
     if (!rental || !canRestoreThisRental || !resolvedRentalEquipment[0]) return;
     setIsRestoring(true);
@@ -759,10 +852,16 @@ export default function RentalDetail() {
               </Button>
             </>
           ) : canEditRentals ? (
-            <Button variant="secondary" onClick={() => setIsEditing(true)}>
-              <Edit className="h-4 w-4" />
-              Редактировать
-            </Button>
+            <>
+              <Button variant="secondary" onClick={openExtensionDialog}>
+                <Calendar className="h-4 w-4" />
+                Продлить аренду
+              </Button>
+              <Button variant="secondary" onClick={() => setIsEditing(true)}>
+                <Edit className="h-4 w-4" />
+                Редактировать
+              </Button>
+            </>
           ) : null}
           {canRestoreThisRental && (
             <Button variant="secondary" onClick={() => void handleRestoreRental()} disabled={isRestoring}>
@@ -1458,6 +1557,106 @@ export default function RentalDetail() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={extensionDialogOpen} onOpenChange={setExtensionDialogOpen}>
+        <DialogContent className="sm:max-w-[620px]">
+          <DialogHeader>
+            <DialogTitle>Продлить аренду</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Текущая дата окончания</p>
+                <p className="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-900 dark:border-gray-700 dark:text-white">
+                  {formatExtensionDate(rental.plannedReturnDate)}
+                </p>
+              </div>
+              <div>
+                <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Новая дата окончания</p>
+                <Input
+                  type="date"
+                  value={extensionForm.newPlannedReturnDate}
+                  onChange={(event) => {
+                    setExtensionForm(prev => ({ ...prev, newPlannedReturnDate: event.target.value }));
+                    setExtensionConflict(null);
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Причина продления</p>
+              <Select
+                value={extensionForm.reason}
+                onValueChange={(value) => setExtensionForm(prev => ({ ...prev, reason: value }))}
+              >
+                <SelectTrigger><SelectValue placeholder="Выберите причину" /></SelectTrigger>
+                <SelectContent>
+                  {EXTENSION_REASONS.map(reason => (
+                    <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Комментарий</p>
+              <Textarea
+                className="min-h-24"
+                value={extensionForm.comment}
+                onChange={(event) => setExtensionForm(prev => ({ ...prev, comment: event.target.value }))}
+                placeholder="Дополнительные детали для истории и согласования"
+              />
+            </div>
+
+            {remainingBalance > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                {canViewFinance
+                  ? `У клиента есть долг по этой аренде: ${formatCurrency(Math.max(remainingBalance, 0))}.`
+                  : 'У клиента есть финансовые ограничения, подробности скрыты правами доступа.'}
+              </div>
+            )}
+
+            {unsignedDocs.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                Есть неподписанные документы: {unsignedDocs.map(doc => doc.number || doc.id).join(', ')}.
+              </div>
+            )}
+
+            {extensionValidation ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                {extensionValidation}
+              </div>
+            ) : (extensionConflict || extensionPreviewConflict) ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                <p className="font-medium">Есть конфликт по технике</p>
+                {(() => {
+                  const conflict = extensionConflict || extensionPreviewConflict;
+                  return conflict ? (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <span>Дата: {conflict.date}</span>
+                      <span>Период: {conflict.period}</span>
+                      <span>Клиент: {conflict.client}</span>
+                      <span>Аренда: {conflict.rental}</span>
+                      <span>Статус: {conflict.status}</span>
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-medium text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300">
+                Конфликтов нет
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setExtensionDialogOpen(false)}>Отмена</Button>
+            <Button onClick={() => void handleExtendRental()} disabled={isExtending || Boolean(extensionValidation)}>
+              {isExtending ? 'Проверка...' : 'Продлить'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={documentDialogOpen} onOpenChange={setDocumentDialogOpen}>
         <DialogContent className="sm:max-w-[520px]">

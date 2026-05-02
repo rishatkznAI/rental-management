@@ -16,6 +16,7 @@ const { LEGACY_AUDIT_COLLECTION, redactAuditValue } = require('../lib/security-a
 
 const AUDIT_COLLECTION = 'audit_logs';
 const RENTAL_AUDIT_LIMIT = 20;
+const CLOSED_RENTAL_STATUSES = new Set(['closed', 'returned', 'cancelled', 'canceled', 'completed']);
 const RENTAL_AUDIT_FINANCE_FIELDS = new Set([
   'amount',
   'paidAmount',
@@ -98,6 +99,28 @@ function auditActionKind(action, changes = []) {
 
 function canSeeRentalAuditFinance(user) {
   return user?.userRole === 'Администратор';
+}
+
+function normalizeDateKey(value) {
+  return String(value || '').slice(0, 10);
+}
+
+function parseDateKey(value) {
+  const key = normalizeDateKey(value);
+  if (!key) return null;
+  const date = new Date(`${key}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function compareDateKeys(left, right) {
+  const leftDate = parseDateKey(left);
+  const rightDate = parseDateKey(right);
+  if (!leftDate || !rightDate) return null;
+  return leftDate.getTime() - rightDate.getTime();
+}
+
+function isClosedRentalStatus(status) {
+  return CLOSED_RENTAL_STATUSES.has(String(status || '').trim().toLowerCase());
 }
 
 function sanitizeRentalAuditSnapshot(value, canViewFinance) {
@@ -322,6 +345,91 @@ function registerRentalRoutes(deps) {
           return equipment ? rentalMatchesEquipment(item, equipment, equipmentList) : false;
         })
         || null;
+    }
+
+    function findClassicRentalForRoute(routeId, rentals, ganttRentals) {
+      let classicRental = rentals.find(item => String(item.id || '') === String(routeId || '')) || null;
+      let ganttRental = null;
+      if (!classicRental) {
+        ganttRental = ganttRentals.find(item => String(item.id || '') === String(routeId || '')) || null;
+        const linkedClassicId = ganttRental?.rentalId || ganttRental?.sourceRentalId || ganttRental?.originalRentalId || '';
+        classicRental = linkedClassicId
+          ? rentals.find(item => String(item.id || '') === String(linkedClassicId)) || null
+          : null;
+      }
+      if (!ganttRental && classicRental) {
+        ganttRental = findLinkedGanttRental(classicRental, routeId);
+      }
+      return { classicRental, ganttRental };
+    }
+
+    function hasRentalEquipment(rental) {
+      return Boolean(
+        rental?.equipmentId ||
+        rental?.equipmentInv ||
+        rental?.inventoryNumber ||
+        rental?.serialNumber ||
+        (Array.isArray(rental?.equipment) && rental.equipment.some(Boolean)) ||
+        (Array.isArray(rental?.equipmentIds) && rental.equipmentIds.some(Boolean))
+      );
+    }
+
+    function rentalDateRange(rental) {
+      return {
+        startDate: normalizeDateKey(rental?.startDate),
+        endDate: normalizeDateKey(rental?.endDate || rental?.plannedReturnDate),
+      };
+    }
+
+    function conflictDto(rental) {
+      const { startDate, endDate } = rentalDateRange(rental);
+      return {
+        date: startDate || endDate || '',
+        startDate,
+        endDate,
+        client: String(rental?.client || rental?.clientName || 'Без клиента'),
+        rentalId: String(rental?.rentalId || rental?.sourceRentalId || rental?.originalRentalId || rental?.id || ''),
+        ganttRentalId: String(/^GR-/i.test(String(rental?.id || '')) ? rental.id : ''),
+        status: String(rental?.status || ''),
+      };
+    }
+
+    function findExtensionConflict({ classicRental, ganttRental, newPlannedReturnDate, equipmentList, rentals, ganttRentals }) {
+      const currentEnd = normalizeDateKey(classicRental?.plannedReturnDate || ganttRental?.endDate);
+      const extensionEnd = normalizeDateKey(newPlannedReturnDate);
+      const equipment = findEquipmentForRental(classicRental || ganttRental, equipmentList);
+      if (!equipment || !currentEnd || !extensionEnd) return null;
+      const currentId = String(classicRental?.id || '');
+      const linkedGanttId = String(ganttRental?.id || '');
+      const candidates = [
+        ...(ganttRentals || []).map(item => ({ ...item, __collection: 'gantt_rentals' })),
+        ...(rentals || []).map(item => ({ ...item, __collection: 'rentals' })),
+      ];
+      return candidates.find(item => {
+        if (!item) return false;
+        if (item.__collection === 'rentals' && String(item.id || '') === currentId) return false;
+        if (item.__collection === 'gantt_rentals' && String(item.id || '') === linkedGanttId) return false;
+        if (currentId && [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => String(id || '') === currentId)) return false;
+        if (isClosedRentalStatus(item.status)) return false;
+        if (!rentalMatchesEquipment(item, equipment, equipmentList)) return false;
+        const { startDate, endDate } = rentalDateRange(item);
+        if (!startDate || !endDate) return false;
+        const startsBeforeExtensionEnds = compareDateKeys(startDate, extensionEnd);
+        const endsAfterCurrentEnd = compareDateKeys(endDate, currentEnd);
+        return startsBeforeExtensionEnds !== null &&
+          endsAfterCurrentEnd !== null &&
+          startsBeforeExtensionEnds <= 0 &&
+          endsAfterCurrentEnd >= 0;
+      }) || null;
+    }
+
+    function buildExtensionHistoryEntry(oldDate, newDate, reason, comment, author) {
+      return {
+        date: new Date().toISOString(),
+        text: `Аренда продлена: ${oldDate} → ${newDate}. Причина: ${reason}${comment ? `. Комментарий: ${comment}` : ''}`,
+        author,
+        type: 'system',
+      };
     }
 
     function isReturnedClassicRental(rental) {
@@ -923,6 +1031,180 @@ function registerRentalRoutes(deps) {
     });
 
     if (collection === 'rentals') {
+      router.post(`/${collection}/:id/extend`, requireAuth, async (req, res) => {
+        const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
+        if (forbiddenReason) {
+          return res.status(403).json({ ok: false, error: forbiddenReason });
+        }
+
+        const rentals = readData(collection) || [];
+        const ganttRentals = readData('gantt_rentals') || [];
+        const equipmentList = readData('equipment') || [];
+        const routeId = String(req.params.id || '');
+        const newPlannedReturnDate = normalizeDateKey(req.body?.newPlannedReturnDate);
+        const reason = String(req.body?.reason || '').trim();
+        const comment = String(req.body?.comment || '').trim();
+        const { classicRental, ganttRental } = findClassicRentalForRoute(routeId, rentals, ganttRentals);
+
+        if (!classicRental && !ganttRental) {
+          return res.status(404).json({ ok: false, error: 'Аренда для продления не найдена.' });
+        }
+        const rentalForAccess = classicRental || ganttRental;
+        try {
+          accessControl.assertCanUpdateEntity(classicRental ? 'rentals' : 'gantt_rentals', rentalForAccess, req.user);
+        } catch (error) {
+          return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+        }
+
+        const currentEnd = normalizeDateKey(classicRental?.plannedReturnDate || ganttRental?.endDate || ganttRental?.plannedReturnDate);
+        if (!reason) return res.status(400).json({ ok: false, error: 'Укажите причину продления.' });
+        if (!newPlannedReturnDate || !parseDateKey(newPlannedReturnDate)) {
+          return res.status(400).json({ ok: false, error: 'Укажите новую дату окончания аренды.' });
+        }
+        if (!currentEnd || !parseDateKey(currentEnd)) {
+          return res.status(400).json({ ok: false, error: 'В аренде не указана текущая дата окончания.' });
+        }
+        if (compareDateKeys(newPlannedReturnDate, currentEnd) <= 0) {
+          return res.status(400).json({ ok: false, error: 'Новая дата должна быть позже текущей даты окончания.' });
+        }
+        if (compareDateKeys(newPlannedReturnDate, new Date().toISOString().slice(0, 10)) < 0) {
+          return res.status(400).json({ ok: false, error: 'Нельзя продлить аренду в прошлую дату.' });
+        }
+        if (isClosedRentalStatus(classicRental?.status) || isClosedRentalStatus(ganttRental?.status)) {
+          return res.status(409).json({ ok: false, error: 'Нельзя продлить закрытую или отменённую аренду.' });
+        }
+        if (!hasRentalEquipment(classicRental || ganttRental)) {
+          return res.status(409).json({ ok: false, error: 'Нельзя продлить аренду без техники.' });
+        }
+
+        const conflict = findExtensionConflict({
+          classicRental,
+          ganttRental,
+          newPlannedReturnDate,
+          equipmentList,
+          rentals,
+          ganttRentals,
+        });
+        if (conflict) {
+          const createdRequests = classicRental
+            ? createApprovalRequests(classicRental, [{
+                field: 'plannedReturnDate',
+                label: getFieldLabel('plannedReturnDate'),
+                oldValue: currentEnd,
+                newValue: newPlannedReturnDate,
+                type: 'Продление аренды с конфликтом',
+                reason: `Конфликт с арендой ${conflict.id || conflict.rentalId || ''}`,
+              }], {
+                linkedGanttRentalId: ganttRental?.id || '',
+                sourceRentalId: ganttRental?.id || '',
+                reason,
+                comment,
+              }, req)
+            : [];
+          auditLog?.(req, {
+            action: 'rentals.change_request',
+            entityType: 'rentals',
+            entityId: classicRental?.id || ganttRental?.id,
+            after: { rentalId: classicRental?.id, requestIds: createdRequests.map(item => item.id) },
+            metadata: { reason, comment, conflict: conflictDto(conflict) },
+          });
+          return res.status(202).json({
+            ok: true,
+            applied: false,
+            rental: classicRental || null,
+            ganttRental: ganttRental || null,
+            conflict: conflictDto(conflict),
+            approval: {
+              created: createdRequests.length > 0,
+              requestIds: createdRequests.map(item => item.id),
+            },
+          });
+        }
+
+        const author = req.user?.userName || 'Система';
+        const classicIdx = classicRental ? rentals.findIndex(item => item.id === classicRental.id) : -1;
+        const ganttIdx = ganttRental ? ganttRentals.findIndex(item => item.id === ganttRental.id) : -1;
+        const nextClassic = classicRental
+          ? appendRentalHistory(
+              { ...classicRental, plannedReturnDate: newPlannedReturnDate },
+              [buildExtensionHistoryEntry(currentEnd, newPlannedReturnDate, reason, comment, author)],
+            )
+          : null;
+        const nextGantt = ganttRental
+          ? mergeRentalHistory(ganttRental, {
+              ...ganttRental,
+              endDate: newPlannedReturnDate,
+              plannedReturnDate: newPlannedReturnDate,
+            }, author)
+          : null;
+
+        if (nextClassic) {
+          const validation = validateRentalPayload('rentals', nextClassic, rentals, equipmentList, classicRental.id);
+          if (!validation.ok) return res.status(validation.status).json({ ok: false, error: validation.error });
+        }
+        if (nextGantt) {
+          const validation = validateRentalPayload('gantt_rentals', nextGantt, ganttRentals, equipmentList, ganttRental.id);
+          if (!validation.ok) return res.status(validation.status).json({ ok: false, error: validation.error });
+        }
+
+        if (classicIdx !== -1 && nextClassic) {
+          rentals[classicIdx] = nextClassic;
+          writeData(collection, rentals);
+        }
+        if (ganttIdx !== -1 && nextGantt) {
+          ganttRentals[ganttIdx] = nextGantt;
+          writeData('gantt_rentals', ganttRentals);
+        }
+
+        const auditMetadata = {
+          oldPlannedReturnDate: currentEnd,
+          newPlannedReturnDate,
+          reason,
+          comment,
+          rentalId: nextClassic?.id || classicRental?.id || '',
+          ganttRentalId: nextGantt?.id || ganttRental?.id || '',
+          equipmentId: nextClassic?.equipmentId || nextGantt?.equipmentId || '',
+        };
+        if (nextClassic) {
+          auditLog?.(req, {
+            action: 'rentals.extend',
+            entityType: 'rentals',
+            entityId: nextClassic.id,
+            before: { id: classicRental.id, plannedReturnDate: currentEnd, equipmentId: classicRental.equipmentId },
+            after: { id: nextClassic.id, plannedReturnDate: newPlannedReturnDate, equipmentId: nextClassic.equipmentId },
+            metadata: auditMetadata,
+          });
+          auditLog?.(req, {
+            action: 'rentals.planned_return_date_change',
+            entityType: 'rentals',
+            entityId: nextClassic.id,
+            before: { id: classicRental.id, plannedReturnDate: currentEnd },
+            after: { id: nextClassic.id, plannedReturnDate: newPlannedReturnDate },
+            metadata: auditMetadata,
+          });
+        }
+        if (nextGantt) {
+          auditLog?.(req, {
+            action: 'gantt_rentals.extend',
+            entityType: 'gantt_rentals',
+            entityId: nextGantt.id,
+            before: { id: ganttRental.id, endDate: currentEnd, plannedReturnDate: currentEnd, equipmentId: ganttRental.equipmentId },
+            after: { id: nextGantt.id, endDate: newPlannedReturnDate, plannedReturnDate: newPlannedReturnDate, equipmentId: nextGantt.equipmentId },
+            metadata: auditMetadata,
+          });
+        }
+
+        if (nextClassic) await emitRentalNotification(classicRental, nextClassic);
+        return res.json({
+          ok: true,
+          applied: true,
+          rental: nextClassic,
+          ganttRental: nextGantt,
+          conflict: null,
+          approval: { created: false, requestIds: [] },
+        });
+      });
+
       router.post(`/${collection}/:id/return`, requireAuth, async (req, res) => {
         const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
         if (forbiddenReason) {

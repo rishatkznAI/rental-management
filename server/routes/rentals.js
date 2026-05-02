@@ -11,6 +11,7 @@ const {
   stripRentalPatchMeta,
   syncGanttRentalFields,
 } = require('../lib/rental-change-requests');
+const { rentalMatchesEquipment } = require('../lib/rental-validation');
 
 function registerRentalRoutes(deps) {
   const {
@@ -143,6 +144,110 @@ function registerRentalRoutes(deps) {
       } catch (error) {
         console.error('[BOT] Не удалось отправить уведомление по аренде:', error?.message || error);
       }
+    }
+
+    function openServiceStatuses() {
+      return ['new', 'in_progress', 'waiting_parts'];
+    }
+
+    function findEquipmentForRental(rental, equipmentList) {
+      return (equipmentList || []).find(equipment => rentalMatchesEquipment(rental, equipment, equipmentList)) || null;
+    }
+
+    function findLinkedGanttRental(classicRental, routeId) {
+      const ganttRentals = readData('gantt_rentals') || [];
+      const normalizedRouteId = String(routeId || '');
+      const classicId = String(classicRental?.id || '');
+      return ganttRentals.find(item => String(item.id || '') === normalizedRouteId)
+        || ganttRentals.find(item =>
+          classicId &&
+          [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => String(id || '') === classicId)
+        )
+        || ganttRentals.find(item => {
+          if (!classicRental) return false;
+          const sameClient = item.clientId && classicRental.clientId
+            ? item.clientId === classicRental.clientId
+            : item.client === classicRental.client;
+          if (!sameClient) return false;
+          const sameDates = item.startDate === classicRental.startDate
+            && item.endDate === classicRental.plannedReturnDate;
+          if (!sameDates) return false;
+          const equipmentList = readData('equipment') || [];
+          const equipment = findEquipmentForRental(classicRental, equipmentList);
+          return equipment ? rentalMatchesEquipment(item, equipment, equipmentList) : false;
+        })
+        || null;
+    }
+
+    function isReturnedClassicRental(rental) {
+      return Boolean(rental?.actualReturnDate) || rental?.status === 'closed' || rental?.status === 'returned';
+    }
+
+    function isReturnedGanttRental(rental) {
+      return rental?.status === 'returned' || rental?.status === 'closed';
+    }
+
+    function findOpenServiceTicketForEquipment(equipment) {
+      if (!equipment) return null;
+      const equipmentList = readData('equipment') || [];
+      return (readData('service') || []).find(ticket =>
+        openServiceStatuses().includes(ticket.status) &&
+        (
+          (ticket.equipmentId && ticket.equipmentId === equipment.id) ||
+          (ticket.serialNumber && equipment.serialNumber && ticket.serialNumber === equipment.serialNumber) ||
+          (ticket.inventoryNumber && equipment.inventoryNumber && ticket.inventoryNumber === equipment.inventoryNumber)
+        )
+      ) || null;
+    }
+
+    function hasOtherBlockingRental(ganttRentals, currentGanttId, equipment) {
+      if (!equipment) return false;
+      const equipmentList = readData('equipment') || [];
+      return (ganttRentals || []).some(rental =>
+        String(rental.id || '') !== String(currentGanttId || '') &&
+        rentalMatchesEquipment(rental, equipment, equipmentList) &&
+        rental.status !== 'returned' &&
+        rental.status !== 'closed'
+      );
+    }
+
+    function buildReturnServiceTicket(rental, equipment, returnDate, damageDescription, author) {
+      const now = new Date().toISOString();
+      return {
+        id: generateId(idPrefixes.service || 'S'),
+        equipmentId: equipment.id,
+        equipment: `${equipment.manufacturer || ''} ${equipment.model || ''} (INV: ${equipment.inventoryNumber || ''})`.trim(),
+        inventoryNumber: equipment.inventoryNumber,
+        serialNumber: equipment.serialNumber,
+        equipmentType: equipment.type,
+        location: equipment.location,
+        reason: 'Приёмка с аренды',
+        description: damageDescription
+          ? `Техника возвращена с повреждениями: ${damageDescription}`
+          : 'Техника принята с аренды. Требуется осмотр и дефектовка после возврата.',
+        priority: damageDescription ? 'high' : 'medium',
+        sla: '24 ч',
+        createdBy: author,
+        createdByUserId: '',
+        createdByUserName: author,
+        reporterContact: rental?.client || author,
+        source: 'system',
+        status: 'new',
+        resultData: { summary: '', partsUsed: [], worksPerformed: [] },
+        workLog: [{
+          date: now,
+          text: `Заявка автоматически создана после возврата техники из аренды ${rental?.id || ''} (${returnDate})`,
+          author,
+          type: 'status_change',
+        }],
+        parts: [],
+        createdAt: now,
+        photos: [],
+        archived: false,
+        rentalId: rental?.id,
+        clientId: rental?.clientId,
+        client: rental?.client,
+      };
     }
 
     function buildClassicRentalFromGantt(ganttRental, rawMeta, author, existingRentals) {
@@ -613,6 +718,175 @@ function registerRentalRoutes(deps) {
       await emitRentalNotification(previousRental, nextItem);
       return res.json(data[idx]);
     });
+
+    if (collection === 'rentals') {
+      router.post(`/${collection}/:id/return`, requireAuth, async (req, res) => {
+        const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
+        if (forbiddenReason) {
+          return res.status(403).json({ ok: false, error: forbiddenReason });
+        }
+
+        const data = readData(collection) || [];
+        const equipmentList = readData('equipment') || [];
+        const ganttRentals = readData('gantt_rentals') || [];
+        const routeId = String(req.params.id || '');
+        const returnDate = String(req.body?.returnDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
+        const hasDamage = req.body?.hasDamage === true || req.body?.result === 'service';
+        const damageDescription = String(req.body?.damageDescription || '').trim();
+
+        let classicRental = data.find(item => String(item.id) === routeId) || null;
+        let ganttRental = null;
+        if (!classicRental) {
+          ganttRental = ganttRentals.find(item => String(item.id) === routeId) || null;
+          const linkedClassicId = ganttRental?.rentalId || ganttRental?.sourceRentalId || ganttRental?.originalRentalId || '';
+          classicRental = linkedClassicId
+            ? data.find(item => String(item.id) === String(linkedClassicId)) || null
+            : null;
+        }
+        if (!ganttRental) {
+          ganttRental = findLinkedGanttRental(classicRental, routeId);
+        }
+        if (!classicRental && !ganttRental) {
+          return res.status(404).json({ ok: false, error: 'Аренда для возврата не найдена.' });
+        }
+
+        const rentalForAccess = classicRental || ganttRental;
+        try {
+          accessControl.assertCanUpdateEntity(classicRental ? 'rentals' : 'gantt_rentals', rentalForAccess, req.user);
+        } catch (error) {
+          return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+        }
+
+        if (isReturnedClassicRental(classicRental) || isReturnedGanttRental(ganttRental)) {
+          return res.status(409).json({ ok: false, error: 'Возврат уже оформлен для этой аренды.' });
+        }
+
+        const equipment = findEquipmentForRental(classicRental || ganttRental, equipmentList);
+        if (!equipment) {
+          return res.status(409).json({ ok: false, error: 'Не удалось однозначно определить технику для возврата.' });
+        }
+        if (equipment.status === 'inactive') {
+          return res.status(409).json({ ok: false, error: 'Нельзя оформить возврат: техника списана или неактивна.' });
+        }
+
+        const openServiceTicket = findOpenServiceTicketForEquipment(equipment);
+        if (!hasDamage && openServiceTicket) {
+          return res.status(409).json({
+            ok: false,
+            error: `Нельзя освободить технику: есть активная сервисная заявка ${openServiceTicket.id}.`,
+          });
+        }
+        if (!hasDamage && equipment.status === 'in_service') {
+          return res.status(409).json({
+            ok: false,
+            error: 'Нельзя освободить технику: текущий статус уже «В сервисе».',
+          });
+        }
+
+        const author = req.user?.userName || 'Система';
+        const nextRentals = data.map(item => {
+          if (!classicRental || item.id !== classicRental.id) return item;
+          return appendRentalHistory(
+            {
+              ...item,
+              actualReturnDate: returnDate,
+              status: 'closed',
+            },
+            [{
+              date: new Date().toISOString(),
+              text: hasDamage
+                ? `Возврат оформлен: техника принята с повреждениями${damageDescription ? ` (${damageDescription})` : ''}`
+                : 'Возврат оформлен: аренда закрыта, техника возвращена в парк',
+              author,
+              type: 'system',
+            }],
+          );
+        });
+
+        const nextGanttRentals = ganttRentals.map(item => {
+          if (!ganttRental || item.id !== ganttRental.id) return item;
+          return mergeRentalHistory(
+            item,
+            {
+              ...item,
+              endDate: returnDate || item.endDate,
+              status: 'returned',
+            },
+            author,
+          );
+        });
+
+        const otherBlockingRental = hasOtherBlockingRental(nextGanttRentals, ganttRental?.id, equipment);
+        const nextService = readData('service') || [];
+        let createdServiceTicket = null;
+        let resultingEquipmentStatus = equipment.status;
+        if (hasDamage) {
+          resultingEquipmentStatus = 'in_service';
+          if (!openServiceTicket) {
+            createdServiceTicket = buildReturnServiceTicket(classicRental || ganttRental, equipment, returnDate, damageDescription, author);
+            nextService.push(createdServiceTicket);
+          }
+        } else if (otherBlockingRental) {
+          resultingEquipmentStatus = 'rented';
+        } else {
+          resultingEquipmentStatus = 'available';
+        }
+
+        const nextEquipment = equipmentList.map(item => {
+          if (item.id !== equipment.id) return item;
+          return {
+            ...item,
+            status: resultingEquipmentStatus,
+            currentClient: otherBlockingRental ? item.currentClient : undefined,
+            returnDate: otherBlockingRental ? item.returnDate : undefined,
+            history: [
+              ...(Array.isArray(item.history) ? item.history : []),
+              {
+                date: new Date().toISOString(),
+                text: hasDamage
+                  ? 'Возврат из аренды: техника переведена в сервис'
+                  : otherBlockingRental
+                    ? 'Возврат из аренды: техника осталась занята другой активной арендой'
+                    : 'Возврат из аренды: техника доступна',
+                author,
+                type: 'system',
+              },
+            ],
+          };
+        });
+
+        writeData(collection, nextRentals);
+        writeData('gantt_rentals', nextGanttRentals);
+        writeData('equipment', nextEquipment);
+        if (createdServiceTicket) writeData('service', nextService);
+
+        const returnedRental = classicRental
+          ? nextRentals.find(item => item.id === classicRental.id)
+          : null;
+        auditLog?.(req, {
+          action: 'rentals.return',
+          entityType: 'rentals',
+          entityId: returnedRental?.id || ganttRental?.id,
+          after: {
+            returnDate,
+            hasDamage,
+            equipmentId: equipment.id,
+            equipmentStatus: resultingEquipmentStatus,
+            serviceTicketId: createdServiceTicket?.id || openServiceTicket?.id || null,
+          },
+        });
+        if (returnedRental) await emitRentalNotification(classicRental, returnedRental);
+        return res.json({
+          ok: true,
+          rental: returnedRental,
+          ganttRental: ganttRental ? nextGanttRentals.find(item => item.id === ganttRental.id) : null,
+          equipment: nextEquipment.find(item => item.id === equipment.id),
+          serviceTicket: createdServiceTicket || openServiceTicket || null,
+          documentsPreserved: (readData('documents') || []).filter(item => item.rentalId === returnedRental?.id || item.rental === returnedRental?.id).length,
+          paymentsPreserved: (readData('payments') || []).filter(item => item.rentalId === returnedRental?.id).length,
+        });
+      });
+    }
 
     router.delete(`/${collection}/:id`, requireAuth, (req, res) => {
       const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'DELETE');

@@ -2969,109 +2969,25 @@ export default function Rentals() {
             }
             return;
           }
-          // Обновляем статус аренды на 'returned'
-          const updated = ganttRentals.map(r =>
-            r.id === ganttRentalId
-              ? appendRentalHistory(
-                  { ...r, status: 'returned' as const },
-                  createRentalHistoryEntry(
-                    historyAuthor,
-                    data.result === 'service'
-                      ? 'Техника принята с аренды и отправлена в сервис'
-                      : 'Техника принята с аренды и возвращена в парк',
-                  ),
-                )
-              : r,
-          );
-          void persistGanttRentals(updated);
-
-          // Обновляем статус техники, если нет других активных аренд
-          if (rental) {
-            const currentEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
-            const hasOtherActive = updated.some(
-              r =>
-                !!currentEquipment
-                && r.id !== ganttRentalId
-                && matchesEquipmentRow(r, currentEquipment)
-                && r.status !== 'returned'
-                && r.status !== 'closed',
-            );
-            if (!hasOtherActive) {
-              const newStatus: EquipmentStatus =
-                data.result === 'service'
-                  ? 'in_service'
-                  : (currentEquipment && hasOpenServiceTicketForEquipment(serviceTickets, currentEquipment) ? 'in_service' : 'available');
-              const newEqList = equipmentList.map(e =>
-                matchesEquipmentRow(rental, e)
-                  ? appendEquipmentHistoryEntry(
-                      { ...e, status: newStatus, currentClient: undefined, returnDate: undefined },
-                      data.result === 'service'
-                        ? 'Техника принята с аренды и передана в сервис'
-                        : 'Техника принята с аренды и возвращена в свободный парк',
-                    )
-                  : e,
-              );
-              void persistEquipment(newEqList);
-            }
-
-            if (data.result === 'service' && currentEquipment) {
-              const hasOpenTicket = serviceTickets.some(ticket => (
-                ticket.equipmentId === currentEquipment.id
-                || (
-                  ticket.inventoryNumber === currentEquipment.inventoryNumber
-                  && ticket.serialNumber === currentEquipment.serialNumber
-                )
-              ) && ticket.status !== 'closed');
-
-              if (!hasOpenTicket) {
-                const nowIso = new Date().toISOString();
-                await serviceTicketsService.create({
-                  equipmentId: currentEquipment.id,
-                  equipment: `${currentEquipment.manufacturer} ${currentEquipment.model} (INV: ${currentEquipment.inventoryNumber})`,
-                  inventoryNumber: currentEquipment.inventoryNumber,
-                  serialNumber: currentEquipment.serialNumber,
-                  equipmentType: currentEquipment.type,
-                  equipmentTypeLabel: TYPE_LABELS[currentEquipment.type] || currentEquipment.type,
-                  location: currentEquipment.location,
-                  reason: 'Приёмка с аренды',
-                  description: `Техника принята с аренды из планировщика аренды. Требуется осмотр и дефектовка после возврата.`,
-                  priority: 'medium',
-                  sla: '24 ч',
-                  assignedTo: undefined,
-                  assignedMechanicId: undefined,
-                  assignedMechanicName: undefined,
-                  createdBy: historyAuthor,
-                  createdByUserId: user?.id,
-                  createdByUserName: historyAuthor,
-                  reporterContact: rental.client || historyAuthor,
-                  source: 'system',
-                  status: 'new',
-                  result: undefined,
-                  resultData: {
-                    summary: '',
-                    partsUsed: [],
-                    worksPerformed: [],
-                  },
-                  workLog: [
-                    {
-                      date: nowIso,
-                      text: 'Заявка автоматически создана после приёмки техники с аренды',
-                      author: historyAuthor,
-                      type: 'status_change',
-                    },
-                  ],
-                  parts: [],
-                  createdAt: nowIso,
-                  photos: [],
-                  archived: false,
-                });
-                await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all });
-              }
-            }
+          try {
+            await rentalsService.returnRental(ganttRentalId, {
+              returnDate: data.returnDate,
+              result: data.result,
+              hasDamage: data.result === 'service',
+            });
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+              queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+              queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+              queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
+              queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+            ]);
+            showToast(`Возврат оформлен: ${rental.equipmentInv ?? ganttRentalId}`);
+            setShowReturnModal(false);
+            setReturnRental(null);
+          } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Не удалось оформить возврат', 'error');
           }
-          showToast(`Возврат оформлен: ${rental?.equipmentInv ?? ganttRentalId}`);
-          setShowReturnModal(false);
-          setReturnRental(null);
         }}
       />
         <DowntimeModal

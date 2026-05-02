@@ -1284,19 +1284,25 @@ test('rentals PATCH returns clear 400 and 404 for bad approval ids', async () =>
 
 test('conflict-free extension applies immediately and does not create approval', async () => {
   const { app, state } = createApprovalApp();
+  const rental = state.rentals.find(item => item.id === 'R-2');
+  const ganttRental = state.gantt_rentals.find(item => item.id === 'GR-2');
+  rental.startDate = '2026-05-23';
+  rental.plannedReturnDate = '2026-05-25';
+  ganttRental.startDate = '2026-05-23';
+  ganttRental.endDate = '2026-05-25';
 
   await withServer(app, async (baseUrl) => {
     const update = await request(baseUrl, 'PATCH', '/api/rentals/R-2', 'manager-token', {
-      plannedReturnDate: '2026-04-30',
+      plannedReturnDate: '2026-05-30',
       __linkedGanttRentalId: 'GR-2',
       __changeReason: 'Клиент продлил аренду',
     });
 
     assert.equal(update.status, 200);
-    assert.equal(update.body.plannedReturnDate, '2026-04-30');
+    assert.equal(update.body.plannedReturnDate, '2026-05-30');
     assert.equal(update.body.changeRequestSummary.pendingCount, 0);
     assert.equal(state.rental_change_requests.length, 0);
-    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').endDate, '2026-04-30');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').endDate, '2026-05-30');
   });
 });
 

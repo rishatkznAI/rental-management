@@ -18,6 +18,17 @@ export const rentalsService = {
   update: (id: string, data: Partial<Rental>): Promise<Rental> =>
     api.patch<Rental>(`/api/rentals/${id}`, data),
 
+  returnRental: (
+    id: string,
+    data: { returnDate: string; result?: string; hasDamage?: boolean; damageDescription?: string },
+  ): Promise<{
+    ok: boolean;
+    rental?: Rental;
+    ganttRental?: GanttRentalData;
+    equipment?: unknown;
+    serviceTicket?: unknown;
+  }> => api.post(`/api/rentals/${id}/return`, data),
+
   delete: (id: string): Promise<void> =>
     api.del(`/api/rentals/${id}`),
 

@@ -10,7 +10,7 @@ export const documentsService = {
 
   getByRentalId: async (rentalId: string): Promise<Document[]> => {
     const all = await api.get<Document[]>('/api/documents');
-    return all.filter(d => d.rental === rentalId);
+    return all.filter(d => d.rentalId === rentalId || d.rental === rentalId);
   },
 
   create: (data: Omit<Document, 'id'>): Promise<Document> =>

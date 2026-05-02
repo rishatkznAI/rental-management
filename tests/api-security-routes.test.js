@@ -423,6 +423,46 @@ test('/api/documents remains readable for roles with Documents section access', 
   });
 });
 
+test('/api/documents preserves stable rental, equipment and client links', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [{ id: 'C-1', company: 'ООО Свой' }];
+
+  await withServer(app, async (baseUrl) => {
+    const create = await request(baseUrl, 'POST', '/api/documents', 'admin-token', {
+      type: 'contract',
+      contractKind: 'rental',
+      number: 'DOC-LINK-1',
+      clientId: 'C-1',
+      client: 'ООО Свой',
+      rentalId: 'R-own',
+      rental: 'R-own',
+      equipmentId: 'EQ-own',
+      equipmentInv: '100',
+      equipment: '100',
+      date: '2026-05-02',
+      status: 'sent',
+      manager: 'Руслан',
+    });
+
+    assert.equal(create.status, 201);
+    assert.equal(create.body.clientId, 'C-1');
+    assert.equal(create.body.rentalId, 'R-own');
+    assert.equal(create.body.rental, 'R-own');
+    assert.equal(create.body.equipmentId, 'EQ-own');
+    assert.equal(create.body.equipmentInv, '100');
+    assert.equal(create.body.status, 'sent');
+
+    const stored = state.documents.find(item => item.id === create.body.id);
+    assert.equal(stored.clientId, 'C-1');
+    assert.equal(stored.rentalId, 'R-own');
+    assert.equal(stored.equipmentId, 'EQ-own');
+
+    const list = await request(baseUrl, 'GET', '/api/documents', 'office-token');
+    assert.equal(list.status, 200);
+    assert.equal(list.body.some(item => item.rentalId === 'R-own' && item.equipmentId === 'EQ-own'), true);
+  });
+});
+
 test('real Express API routes deny direct object-level bypasses', async () => {
   const { app, state } = createSecurityApp();
 

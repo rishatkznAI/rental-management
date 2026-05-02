@@ -26,7 +26,8 @@ test('Documents page guards legacy optional fields before filtering and renderin
 
   assert.match(source, /Array\.isArray\(documentList\) \? documentList : \[\]/);
   assert.match(source, /searchText\(doc\.number\)/);
-  assert.match(source, /searchText\(doc\.client\)/);
+  assert.match(source, /const normalizedClient = doc\.client \|\| rental\?\.client \|\| clientsById\.get\(normalizedClientId\)\?\.company \|\| ''/);
+  assert.match(source, /searchText\(normalizedClient\)/);
   assert.match(source, /getSafeDocumentStatus\(doc\.status\)/);
   assert.doesNotMatch(source, /doc\.number\.toLowerCase\(\)/);
   assert.doesNotMatch(source, /doc\.client\.toLowerCase\(\)/);

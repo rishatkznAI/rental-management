@@ -35,6 +35,8 @@ import {
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { useClientsList } from '../hooks/useClients';
 import { useCreateDocument, useDocumentsList, useUpdateDocument } from '../hooks/useDocuments';
+import { useEquipmentList } from '../hooks/useEquipment';
+import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { downloadPrintableHtml, openPrintableHtml } from '../lib/serviceWorkOrder';
 import { formatDate, formatCurrency, formatDateTime } from '../lib/utils';
 import { mechanicsService } from '../services/mechanics.service';
@@ -47,9 +49,12 @@ import type {
   DocumentContractKind,
   DocumentStatus,
   DocumentType,
+  Equipment,
   Mechanic,
   MechanicDocument,
+  Rental,
 } from '../types';
+import type { GanttRentalData } from '../mock-data';
 
 type DocumentsView = 'general' | 'mechanics';
 
@@ -59,6 +64,8 @@ const VALID_DOCUMENT_STATUSES = new Set<DocumentStatus>(['draft', 'signed', 'sen
 type ContractFormState = {
   clientId: string;
   client: string;
+  rentalId: string;
+  equipmentId: string;
   signatoryName: string;
   signatoryBasis: string;
   date: string;
@@ -132,6 +139,33 @@ export function getDocumentTypeLabel(doc: Partial<Doc> | null | undefined): stri
 
 export function getSafeDocumentStatus(status: unknown): DocumentStatus {
   return VALID_DOCUMENT_STATUSES.has(status as DocumentStatus) ? status as DocumentStatus : 'draft';
+}
+
+function getDocumentRentalId(doc: Partial<Doc> | null | undefined) {
+  return displayText(doc?.rentalId || doc?.rental, '');
+}
+
+function getDocumentEquipmentId(doc: Partial<Doc> | null | undefined) {
+  return displayText(doc?.equipmentId, '');
+}
+
+function getDocumentEquipmentInv(doc: Partial<Doc> | null | undefined) {
+  return displayText(doc?.equipmentInv || doc?.equipment, '');
+}
+
+function getRentalSourceId(entry: GanttRentalData) {
+  return entry.rentalId || entry.sourceRentalId || entry.originalRentalId || '';
+}
+
+function getRentalLabel(rental: Rental | undefined) {
+  if (!rental) return '';
+  const start = rental.startDate ? formatDate(rental.startDate) : '';
+  return [rental.id, rental.client, start].filter(Boolean).join(' · ');
+}
+
+function getEquipmentLabel(item: Equipment | undefined) {
+  if (!item) return '';
+  return [item.inventoryNumber, item.manufacturer, item.model].filter(Boolean).join(' · ');
 }
 
 function nextContractNumber(documents: Doc[], kind: DocumentContractKind, date: string) {
@@ -254,6 +288,9 @@ export default function Documents() {
   const canManageDocuments = can('create', 'documents') || can('edit', 'documents');
   const { data: documentList = [] } = useDocumentsList();
   const { data: clients = [] } = useClientsList();
+  const { data: rentals = [] } = useRentalsList();
+  const { data: ganttRentals = [] } = useGanttData();
+  const { data: equipment = [] } = useEquipmentList();
   const createDocument = useCreateDocument();
   const updateDocument = useUpdateDocument();
   const { data: mechanics = [] } = useQuery<Mechanic[]>({
@@ -266,8 +303,12 @@ export default function Documents() {
   });
 
   const [search, setSearch] = React.useState('');
+  const [unsignedOnly, setUnsignedOnly] = React.useState(false);
+  const [clientFilter, setClientFilter] = React.useState<string>('all');
+  const [rentalFilter, setRentalFilter] = React.useState<string>('all');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
+  const [managerFilter, setManagerFilter] = React.useState<string>('all');
   const [showFilters, setShowFilters] = React.useState(false);
   const [view, setView] = React.useState<DocumentsView>('general');
   const [mechanicSearch, setMechanicSearch] = React.useState('');
@@ -278,6 +319,8 @@ export default function Documents() {
   const [contractForm, setContractForm] = React.useState<ContractFormState>({
     clientId: '',
     client: '',
+    rentalId: '',
+    equipmentId: '',
     signatoryName: '',
     signatoryBasis: '',
     date: new Date().toISOString().slice(0, 10),
@@ -300,25 +343,113 @@ export default function Documents() {
     }
   }, [mechanicList, selectedMechanicId]);
 
+  const clientsById = React.useMemo(
+    () => new Map((clients as Client[]).map(client => [client.id, client])),
+    [clients],
+  );
+  const rentalsById = React.useMemo(
+    () => new Map((rentals as Rental[]).map(rental => [rental.id, rental])),
+    [rentals],
+  );
+  const ganttByRentalId = React.useMemo(() => {
+    const map = new Map<string, GanttRentalData>();
+    (ganttRentals as GanttRentalData[]).forEach(entry => {
+      const rentalId = getRentalSourceId(entry);
+      if (rentalId && !map.has(rentalId)) map.set(rentalId, entry);
+    });
+    return map;
+  }, [ganttRentals]);
+  const equipmentById = React.useMemo(
+    () => new Map((equipment as Equipment[]).map(item => [item.id, item])),
+    [equipment],
+  );
+  const equipmentByInventory = React.useMemo(
+    () => new Map((equipment as Equipment[])
+      .filter(item => item.inventoryNumber)
+      .map(item => [item.inventoryNumber, item])),
+    [equipment],
+  );
+  const relatedRentals = React.useMemo(() => {
+    if (!contractForm.clientId && !contractForm.client) return rentals as Rental[];
+    return (rentals as Rental[]).filter(rental => (
+      rental.clientId === contractForm.clientId
+      || rental.client === contractForm.client
+    ));
+  }, [contractForm.client, contractForm.clientId, rentals]);
+  const selectedRental = contractForm.rentalId ? rentalsById.get(contractForm.rentalId) : undefined;
+  const rentalEquipmentIds = React.useMemo(() => {
+    if (!selectedRental) return new Set<string>();
+    const gantt = ganttByRentalId.get(selectedRental.id);
+    return new Set([
+      ...(gantt?.equipmentId ? [gantt.equipmentId] : []),
+      ...(selectedRental.equipment || [])
+        .map(inv => equipmentByInventory.get(inv)?.id)
+        .filter(Boolean) as string[],
+    ]);
+  }, [equipmentByInventory, ganttByRentalId, selectedRental]);
+  const availableEquipment = React.useMemo(() => {
+    const list = equipment as Equipment[];
+    if (!selectedRental || rentalEquipmentIds.size === 0) return list;
+    return list.filter(item => rentalEquipmentIds.has(item.id));
+  }, [equipment, rentalEquipmentIds, selectedRental]);
+  const managerOptions = React.useMemo(() => {
+    const names = new Set<string>();
+    documents.forEach(doc => {
+      if (displayText(doc.manager, '')) names.add(displayText(doc.manager, ''));
+      const rentalId = getDocumentRentalId(doc);
+      const rental = rentalId ? rentalsById.get(rentalId) : undefined;
+      if (displayText(rental?.manager, '')) names.add(displayText(rental?.manager, ''));
+    });
+    (rentals as Rental[]).forEach(rental => {
+      if (displayText(rental.manager, '')) names.add(displayText(rental.manager, ''));
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [documents, rentals, rentalsById]);
+
   const filteredDocuments = documents.filter(doc => {
     const q = search.trim().toLowerCase();
+    const rentalId = getDocumentRentalId(doc);
+    const equipmentId = getDocumentEquipmentId(doc);
+    const equipmentInv = getDocumentEquipmentInv(doc);
+    const rental = rentalId ? rentalsById.get(rentalId) : undefined;
+    const gantt = rentalId ? ganttByRentalId.get(rentalId) : undefined;
+    const equipmentItem = equipmentId
+      ? equipmentById.get(equipmentId)
+      : (equipmentInv ? equipmentByInventory.get(equipmentInv) : undefined);
+    const normalizedClientId = doc.clientId || rental?.clientId || '';
+    const normalizedClient = doc.client || rental?.client || clientsById.get(normalizedClientId)?.company || '';
+    const normalizedManager = doc.manager || rental?.manager || gantt?.manager || '';
     const matchesSearch = q === ''
       || searchText(doc.number).includes(q)
-      || searchText(doc.client).includes(q)
+      || searchText(normalizedClient).includes(q)
+      || searchText(rentalId).includes(q)
+      || searchText(equipmentInv).includes(q)
+      || searchText(getEquipmentLabel(equipmentItem)).includes(q)
       || getDocumentTypeLabel(doc).toLowerCase().includes(q)
       || searchText(doc.signatoryName).includes(q)
       || searchText(doc.signatoryBasis).includes(q);
 
     const matchesType = typeFilter === 'all' || doc.type === typeFilter;
-    const matchesStatus = statusFilter === 'all' || doc.status === statusFilter;
+    const safeStatus = getSafeDocumentStatus(doc.status);
+    const matchesStatus = statusFilter === 'all' || safeStatus === statusFilter;
+    const matchesUnsigned = !unsignedOnly || safeStatus !== 'signed';
+    const matchesClient = clientFilter === 'all'
+      || normalizedClientId === clientFilter
+      || normalizedClient === clientsById.get(clientFilter)?.company;
+    const matchesRental = rentalFilter === 'all' || rentalId === rentalFilter;
+    const matchesManager = managerFilter === 'all' || normalizedManager === managerFilter;
 
-    return matchesSearch && matchesType && matchesStatus;
+    return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesClient && matchesRental && matchesManager;
   });
 
   const activeFilterCount = [
     search.trim() !== '',
+    unsignedOnly,
+    clientFilter !== 'all',
+    rentalFilter !== 'all',
     typeFilter !== 'all',
     statusFilter !== 'all',
+    managerFilter !== 'all',
   ].filter(Boolean).length;
 
   const filteredMechanics = React.useMemo(() => (
@@ -388,6 +519,8 @@ export default function Documents() {
     setContractForm({
       clientId: '',
       client: '',
+      rentalId: '',
+      equipmentId: '',
       signatoryName: '',
       signatoryBasis: '',
       date: new Date().toISOString().slice(0, 10),
@@ -435,6 +568,18 @@ export default function Documents() {
         comment: contractForm.comment.trim() || undefined,
       }),
     };
+    const rental = contractForm.rentalId ? rentalsById.get(contractForm.rentalId) : undefined;
+    const gantt = contractForm.rentalId ? ganttByRentalId.get(contractForm.rentalId) : undefined;
+    const equipmentItem = contractForm.equipmentId ? equipmentById.get(contractForm.equipmentId) : undefined;
+    if (contractForm.rentalId) {
+      payload.rentalId = contractForm.rentalId;
+      payload.rental = contractForm.rentalId;
+    }
+    if (contractForm.equipmentId) {
+      payload.equipmentId = contractForm.equipmentId;
+      payload.equipmentInv = equipmentItem?.inventoryNumber || gantt?.equipmentInv || rental?.equipment?.[0] || '';
+      payload.equipment = payload.equipmentInv;
+    }
 
     await createDocument.mutateAsync(payload);
     setCreateDialogOpen(false);
@@ -541,11 +686,15 @@ export default function Documents() {
             open={showFilters}
             onOpenChange={setShowFilters}
             title="Фильтры документов"
-            description="Отбери документы по поиску, типу и статусу."
+            description="Отбери документы по подписи, связям, типу, статусу и менеджеру."
             onReset={() => {
               setSearch('');
+              setUnsignedOnly(false);
+              setClientFilter('all');
+              setRentalFilter('all');
               setTypeFilter('all');
               setStatusFilter('all');
+              setManagerFilter('all');
             }}
           >
             <div className="grid gap-4 md:grid-cols-2">
@@ -559,6 +708,43 @@ export default function Documents() {
                     className="app-filter-input pl-10"
                   />
                 </div>
+              </FilterField>
+              <FilterField label="Подпись">
+                <Button
+                  type="button"
+                  variant={unsignedOnly ? 'default' : 'secondary'}
+                  onClick={() => setUnsignedOnly(value => !value)}
+                  className="w-full justify-start"
+                >
+                  <FileSignature className="h-4 w-4" />
+                  Без подписи
+                </Button>
+              </FilterField>
+              <FilterField label="Клиент">
+                <Select value={clientFilter} onValueChange={setClientFilter}>
+                  <SelectTrigger className="app-filter-input">
+                    <SelectValue placeholder="Все клиенты" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все клиенты</SelectItem>
+                    {(clients as Client[]).map(client => (
+                      <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              <FilterField label="Аренда">
+                <Select value={rentalFilter} onValueChange={setRentalFilter}>
+                  <SelectTrigger className="app-filter-input">
+                    <SelectValue placeholder="Все аренды" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все аренды</SelectItem>
+                    {(rentals as Rental[]).map(rental => (
+                      <SelectItem key={rental.id} value={rental.id}>{getRentalLabel(rental)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </FilterField>
               <FilterField label="Тип документа">
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -582,8 +768,21 @@ export default function Documents() {
                   <SelectContent>
                     <SelectItem value="all">Все статусы</SelectItem>
                     <SelectItem value="draft">Черновик</SelectItem>
-                    <SelectItem value="signed">Подписан</SelectItem>
                     <SelectItem value="sent">Отправлен</SelectItem>
+                    <SelectItem value="signed">Подписан</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              <FilterField label="Ответственный менеджер">
+                <Select value={managerFilter} onValueChange={setManagerFilter}>
+                  <SelectTrigger className="app-filter-input">
+                    <SelectValue placeholder="Все менеджеры" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все менеджеры</SelectItem>
+                    {managerOptions.map(manager => (
+                      <SelectItem key={manager} value={manager}>{manager}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </FilterField>
@@ -605,6 +804,8 @@ export default function Documents() {
                   <TableHead>Тип</TableHead>
                   <TableHead>Номер</TableHead>
                   <TableHead>Клиент</TableHead>
+                  <TableHead>Аренда</TableHead>
+                  <TableHead>Техника</TableHead>
                   <TableHead>Подписант</TableHead>
                   <TableHead>Дата</TableHead>
                   <TableHead>Статус</TableHead>
@@ -612,7 +813,18 @@ export default function Documents() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredDocuments.map((doc, index) => (
+                {filteredDocuments.map((doc, index) => {
+                  const rentalId = getDocumentRentalId(doc);
+                  const equipmentId = getDocumentEquipmentId(doc);
+                  const equipmentInv = getDocumentEquipmentInv(doc);
+                  const rental = rentalId ? rentalsById.get(rentalId) : undefined;
+                  const gantt = rentalId ? ganttByRentalId.get(rentalId) : undefined;
+                  const equipmentItem = equipmentId
+                    ? equipmentById.get(equipmentId)
+                    : (equipmentInv ? equipmentByInventory.get(equipmentInv) : undefined);
+                  const clientName = doc.client || rental?.client || clientsById.get(doc.clientId || '')?.company;
+                  const managerName = doc.manager || rental?.manager || gantt?.manager;
+                  return (
                   <TableRow key={doc.id || doc.number || index}>
                     <TableCell>
                       <div>
@@ -633,7 +845,22 @@ export default function Documents() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <p className="text-sm">{displayText(doc.client)}</p>
+                      <p className="text-sm">{displayText(clientName)}</p>
+                      {managerName ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{managerName}</p>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{displayText(rentalId)}</p>
+                      {rental?.startDate ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(rental.startDate)}</p>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{displayText(equipmentInv || equipmentItem?.inventoryNumber)}</p>
+                      {equipmentItem ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{displayText(`${equipmentItem.manufacturer || ''} ${equipmentItem.model || ''}`.trim())}</p>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <div>
@@ -686,7 +913,8 @@ export default function Documents() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
 
@@ -733,14 +961,65 @@ export default function Documents() {
                     clients={clients as Client[]}
                     value={contractForm.client}
                     valueId={contractForm.clientId}
-                    onChange={(value) => setContractForm(current => ({ ...current, client: value }))}
+                    onChange={(value) => setContractForm(current => ({
+                      ...current,
+                      client: value,
+                      rentalId: '',
+                      equipmentId: '',
+                    }))}
                     onClientSelect={(client) => setContractForm(current => ({
                       ...current,
                       clientId: client?.id ?? '',
                       client: client?.company ?? '',
+                      rentalId: '',
+                      equipmentId: '',
                     }))}
                     placeholder="Выберите клиента из базы"
                   />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">Связанная аренда</div>
+                    <Select
+                      value={contractForm.rentalId || 'none'}
+                      onValueChange={(value) => setContractForm(current => ({
+                        ...current,
+                        rentalId: value === 'none' ? '' : value,
+                        equipmentId: '',
+                      }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Без аренды" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Без аренды</SelectItem>
+                        {relatedRentals.map(rental => (
+                          <SelectItem key={rental.id} value={rental.id}>{getRentalLabel(rental)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">Связанная техника</div>
+                    <Select
+                      value={contractForm.equipmentId || 'none'}
+                      onValueChange={(value) => setContractForm(current => ({
+                        ...current,
+                        equipmentId: value === 'none' ? '' : value,
+                      }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Без техники" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Без техники</SelectItem>
+                        {availableEquipment.map(item => (
+                          <SelectItem key={item.id} value={item.id}>{getEquipmentLabel(item)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">

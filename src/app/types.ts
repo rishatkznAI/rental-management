@@ -701,7 +701,11 @@ export interface Document {
   status: DocumentStatus;
   signatoryName?: string;
   signatoryBasis?: string;
+  rentalId?: string;
   rental?: string;
+  equipmentId?: string;
+  equipmentInv?: string;
+  equipment?: string;
   serviceTicket?: string;
   manager?: string;
   contentHtml?: string;

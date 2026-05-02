@@ -127,6 +127,11 @@ function nextDocumentNumber(type: DocumentType, rentalId: string, existingCount:
   return `INV-${rentalId}-${suffix}`;
 }
 
+function documentBelongsToRental(doc: { rental?: string; rentalId?: string }, rentalId?: string) {
+  if (!rentalId) return false;
+  return doc.rentalId === rentalId || doc.rental === rentalId;
+}
+
 export default function RentalDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -227,7 +232,7 @@ export default function RentalDetail() {
 
   const selectedClient = clients.find(c => c.id === ((isEditing ? formState?.clientId : rental?.clientId) || ''))
     ?? clients.find(c => c.company === ((isEditing ? formState?.client : rental?.client) || ''));
-  const relatedDocs = documents.filter(d => d.rental === rental?.id);
+  const relatedDocs = documents.filter(d => documentBelongsToRental(d, rental?.id));
   const pendingChangeRequests = changeRequests.filter(request => request.rentalId === rental?.id && request.status === 'pending');
   const relatedInvoices = relatedDocs.filter(doc => doc.type === 'invoice');
   const relatedPayments = payments.filter(p => p.rentalId === rental?.id);
@@ -519,7 +524,7 @@ export default function RentalDetail() {
 
   useEffect(() => {
     if (!rental) return;
-    const existingCount = documents.filter(doc => doc.rental === rental.id).length;
+    const existingCount = documents.filter(doc => documentBelongsToRental(doc, rental.id)).length;
     setDocumentForm({
       type: 'invoice',
       number: nextDocumentNumber('invoice', rental.id, existingCount),
@@ -528,7 +533,7 @@ export default function RentalDetail() {
       status: 'draft',
     });
     const lastInvoiceNumber = documents
-      .filter(doc => doc.rental === rental.id && doc.type === 'invoice')
+      .filter(doc => documentBelongsToRental(doc, rental.id) && doc.type === 'invoice')
       .sort((a, b) => b.date.localeCompare(a.date))[0]?.number || `INV-${rental.id}`;
     const suggestedAmount = Math.max((rental.price || 0) - paidAmount, 0);
     setPaymentForm({
@@ -580,7 +585,11 @@ export default function RentalDetail() {
         date: documentForm.date,
         amount,
         status: documentForm.status,
+        rentalId: rental.id,
         rental: rental.id,
+        equipmentId: resolvedRentalEquipment[0]?.id,
+        equipmentInv: resolvedRentalEquipment[0]?.inventoryNumber || rental.equipment?.[0],
+        equipment: resolvedRentalEquipment[0]?.inventoryNumber || rental.equipment?.[0],
       });
       await queryClient.invalidateQueries({ queryKey: ['documents'] });
       setDocumentDialogOpen(false);

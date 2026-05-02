@@ -98,6 +98,10 @@ function formatCountLabel(value: number, one: string, few: string, many: string)
   return many;
 }
 
+function isUnsignedDocument(doc: Document) {
+  return (doc.type === 'contract' || doc.type === 'act') && doc.status !== 'signed';
+}
+
 type RoleFocusCard = {
   id: string;
   title: string;
@@ -371,8 +375,7 @@ export default function Dashboard() {
   const myUnsignedDocuments = currentUserName
     ? documents.filter(doc =>
         doc.manager === currentUserName
-        && (doc.type === 'contract' || doc.type === 'act')
-        && doc.status !== 'signed',
+        && isUnsignedDocument(doc),
       )
     : [];
   const myAssignedServiceTickets = currentUserName
@@ -388,9 +391,7 @@ export default function Dashboard() {
   const unassignedServiceTickets = openServiceTickets.filter(
     t => !t.assignedMechanicId && !t.assignedMechanicName && !t.assignedTo,
   );
-  const officeUnsignedDocuments = documents.filter(doc =>
-    (doc.type === 'contract' || doc.type === 'act') && doc.status !== 'signed',
-  );
+  const officeUnsignedDocuments = documents.filter(isUnsignedDocument);
   const officeUpcomingPayments = rentalDebtRows.filter(row => {
     if (!row.outstanding) return false;
     const compareDate = row.expectedPaymentDate || row.endDate;
@@ -429,6 +430,23 @@ export default function Dashboard() {
   );
   const overdueDebtClients = computedClients.filter(c => (c.debt ?? 0) > 0);
   const roleDashboardCards = useMemo<RoleFocusCard[]>(() => {
+    if (user?.role === 'Администратор') {
+      return [
+        {
+          id: 'admin-docs',
+          title: 'Документы без подписи',
+          value: String(officeUnsignedDocuments.length),
+          hint: officeUnsignedDocuments.length > 0
+            ? 'Есть договоры и акты, которые нужно довести до подписания'
+            : 'Все ключевые документы подписаны',
+          href: '/documents',
+          cta: 'Открыть документы',
+          tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
+          icon: ClipboardX,
+        },
+      ];
+    }
+
     if (user?.role === 'Менеджер по аренде') {
       return [
         {
@@ -612,6 +630,13 @@ export default function Dashboard() {
     user?.role,
   ]);
   const roleDashboardMeta = useMemo(() => {
+    if (user?.role === 'Администратор') {
+      return {
+        badge: 'Роль: админ',
+        title: 'Контроль операционных рисков',
+        description: 'Сверху вынесены документы, которые требуют подписи и внимания офиса.',
+      };
+    }
     if (user?.role === 'Менеджер по аренде') {
       return {
         badge: 'Роль: аренда',
@@ -1025,9 +1050,7 @@ export default function Dashboard() {
   });
 
   // 5. Неподписанные документы (договоры без статуса signed)
-  const unsignedDocs = documents.filter(d =>
-    (d.type === 'contract' || d.type === 'act') && d.status !== 'signed'
-  );
+  const unsignedDocs = documents.filter(isUnsignedDocument);
   unsignedDocs.slice(0, 5).forEach(d => {
     const typeLabel = d.type === 'contract' ? 'Договор' : d.type === 'act' ? 'УПД/Акт' : 'Документ';
     alertItems.push({

@@ -1,4 +1,5 @@
 const { isMechanicRole } = require('../lib/role-groups');
+const { redactAuditValue } = require('../lib/security-audit');
 const dns = require('dns');
 const http = require('http');
 const https = require('https');
@@ -130,6 +131,14 @@ const SYSTEM_DATA_COLLECTIONS = [
 
 const SYSTEM_DATA_COLLECTION_SET = new Set(SYSTEM_DATA_COLLECTIONS);
 const SENSITIVE_KEY_PATTERN = /(password|passhash|token|secret|apikey|api_key|authorization|cookie|session|webhook)/i;
+const DEFAULT_AUDIT_ACTIONS = [
+  'login.success',
+  'login.fail',
+  'logout',
+  'system_data.export',
+  'system_data.import',
+  'rentals.return',
+];
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -275,6 +284,50 @@ function mergeImportedUsers(incoming, existingUsers) {
     }
     return { ...user, ...preserved };
   });
+}
+
+function safeAuditLogEntry(entry) {
+  return {
+    id: entry?.id || '',
+    createdAt: entry?.createdAt || '',
+    userId: entry?.userId || null,
+    userName: entry?.userName || null,
+    role: entry?.role || entry?.normalizedRole || null,
+    rawRole: entry?.rawRole || null,
+    normalizedRole: entry?.normalizedRole || entry?.role || null,
+    action: entry?.action || '',
+    entityType: entry?.entityType || '',
+    entityId: entry?.entityId || null,
+    description: entry?.description || '',
+    before: redactAuditValue(entry?.before || null),
+    after: redactAuditValue(entry?.after || null),
+    metadata: redactAuditValue(entry?.metadata || null),
+  };
+}
+
+function readAuditLogs(readData) {
+  const current = readData('audit_logs');
+  if (Array.isArray(current) && current.length > 0) return current;
+  const legacy = readData('audit_log');
+  return Array.isArray(legacy) ? legacy : [];
+}
+
+function matchesAuditFilters(entry, query) {
+  const user = String(query.user || '').trim().toLowerCase();
+  const action = String(query.action || '').trim().toLowerCase();
+  const section = String(query.section || query.entityType || '').trim().toLowerCase();
+  const dateFrom = String(query.dateFrom || '').trim();
+  const dateTo = String(query.dateTo || '').trim();
+  const createdAt = String(entry?.createdAt || '');
+  if (user) {
+    const haystack = [entry?.userId, entry?.userName].map(value => String(value || '').toLowerCase()).join(' ');
+    if (!haystack.includes(user)) return false;
+  }
+  if (action && String(entry?.action || '').toLowerCase() !== action) return false;
+  if (section && String(entry?.entityType || '').toLowerCase() !== section) return false;
+  if (dateFrom && createdAt.slice(0, 10) < dateFrom) return false;
+  if (dateTo && createdAt.slice(0, 10) > dateTo) return false;
+  return true;
 }
 
 function registerSystemRoutes(app, deps) {
@@ -557,6 +610,25 @@ function registerSystemRoutes(app, deps) {
       },
     });
     return res.json(payload);
+  });
+
+  app.get('/api/admin/audit-logs', requireAuth, requireAdmin, (req, res) => {
+    const allLogs = readAuditLogs(readData).map(safeAuditLogEntry);
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit || 100) || 100));
+    const logs = allLogs
+      .filter(entry => matchesAuditFilters(entry, req.query))
+      .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+      .slice(0, limit);
+    const actions = Array.from(new Set([
+      ...DEFAULT_AUDIT_ACTIONS,
+      ...allLogs.map(entry => entry.action).filter(Boolean),
+    ])).sort();
+    const sections = Array.from(new Set(allLogs.map(entry => entry.entityType).filter(Boolean))).sort();
+    return res.json({
+      ok: true,
+      logs,
+      filters: { actions, sections },
+    });
   });
 
   app.post('/api/admin/system-data/import/dry-run', requireAuth, requireAdmin, (req, res) => {

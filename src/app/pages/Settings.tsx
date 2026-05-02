@@ -359,6 +359,7 @@ export default function Settings() {
             { value: 'reference',     label: 'Справочники' },
             { value: 'notifications', label: 'Уведомления' },
             { value: 'data',          label: 'Данные системы' },
+            { value: 'audit',         label: 'Журнал действий' },
             { value: 'diagnostics',   label: 'Диагностика' },
           ].map(tab => (
             <TabsTrigger
@@ -602,6 +603,10 @@ export default function Settings() {
           </div>
         </TabsContent>
 
+        <TabsContent value="audit">
+          <AuditLogSection />
+        </TabsContent>
+
         <TabsContent value="diagnostics">
           <ProductionDiagnosticsSection />
         </TabsContent>
@@ -777,6 +782,29 @@ type ClientEndpointStatus = {
   error?: string;
 };
 
+type AuditLogEntry = {
+  id: string;
+  createdAt: string;
+  userId?: string | null;
+  userName?: string | null;
+  role?: string | null;
+  action: string;
+  entityType: string;
+  entityId?: string | null;
+  description?: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+};
+
+type AuditLogResponse = {
+  ok: boolean;
+  logs: AuditLogEntry[];
+  filters: {
+    actions: string[];
+    sections: string[];
+  };
+};
+
 const DIAGNOSTIC_ENDPOINTS = [
   { name: 'equipment', path: '/api/equipment' },
   { name: 'rentals', path: '/api/rentals' },
@@ -882,6 +910,139 @@ function EndpointStatusTable({
         })}
       </TableBody>
     </Table>
+  );
+}
+
+function AuditLogSection() {
+  const [userFilter, setUserFilter] = React.useState('');
+  const [actionFilter, setActionFilter] = React.useState('all');
+  const [sectionFilter, setSectionFilter] = React.useState('all');
+  const [dateFrom, setDateFrom] = React.useState('');
+  const [dateTo, setDateTo] = React.useState('');
+
+  const query = useQuery<AuditLogResponse>({
+    queryKey: ['admin-audit-logs', userFilter, actionFilter, sectionFilter, dateFrom, dateTo],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (userFilter.trim()) params.set('user', userFilter.trim());
+      if (actionFilter !== 'all') params.set('action', actionFilter);
+      if (sectionFilter !== 'all') params.set('section', sectionFilter);
+      if (dateFrom) params.set('dateFrom', dateFrom);
+      if (dateTo) params.set('dateTo', dateTo);
+      params.set('limit', '200');
+      return api.get<AuditLogResponse>(`/api/admin/audit-logs?${params.toString()}`);
+    },
+    retry: 1,
+  });
+
+  const logs = query.data?.logs || [];
+  const actions = query.data?.filters?.actions || [];
+  const sections = query.data?.filters?.sections || [];
+  const clearFilters = () => {
+    setUserFilter('');
+    setActionFilter('all');
+    setSectionFilter('all');
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle>Журнал действий</CardTitle>
+            <CardDescription>Admin-only аудит входов, изменений данных, import/export и важных операций без паролей, токенов и secrets.</CardDescription>
+          </div>
+          <Button variant="secondary" onClick={() => query.refetch()} disabled={query.isFetching}>
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} />
+            Обновить
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-5">
+          <input
+            value={userFilter}
+            onChange={event => setUserFilter(event.target.value)}
+            placeholder="Пользователь"
+            className="h-10 rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+          />
+          <Select value={actionFilter} onValueChange={setActionFilter}>
+            <SelectTrigger><SelectValue placeholder="Действие" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все действия</SelectItem>
+              {actions.map(action => <SelectItem key={action} value={action}>{action}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={sectionFilter} onValueChange={setSectionFilter}>
+            <SelectTrigger><SelectValue placeholder="Раздел" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все разделы</SelectItem>
+              {sections.map(section => <SelectItem key={section} value={section}>{section}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={event => setDateFrom(event.target.value)}
+            className="h-10 rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+          />
+          <input
+            type="date"
+            value={dateTo}
+            onChange={event => setDateTo(event.target.value)}
+            className="h-10 rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+          />
+        </div>
+        <div className="flex justify-end">
+          <Button variant="ghost" onClick={clearFilters}>Сбросить фильтры</Button>
+        </div>
+
+        {query.isError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+            Журнал действий недоступен: {query.error instanceof Error ? query.error.message : 'неизвестная ошибка'}.
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Дата</TableHead>
+                <TableHead>Пользователь</TableHead>
+                <TableHead>Роль</TableHead>
+                <TableHead>Действие</TableHead>
+                <TableHead>Сущность</TableHead>
+                <TableHead>Описание</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {logs.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-8 text-center text-sm text-gray-500">
+                    Записей не найдено.
+                  </TableCell>
+                </TableRow>
+              ) : logs.map(entry => (
+                <TableRow key={entry.id}>
+                  <TableCell className="whitespace-nowrap text-xs">{entry.createdAt ? new Date(entry.createdAt).toLocaleString('ru-RU') : '—'}</TableCell>
+                  <TableCell>
+                    <p className="text-sm font-medium">{entry.userName || 'Система'}</p>
+                    <p className="text-xs text-gray-500">{entry.userId || '—'}</p>
+                  </TableCell>
+                  <TableCell><Badge variant="secondary">{entry.role || '—'}</Badge></TableCell>
+                  <TableCell className="font-mono text-xs">{entry.action}</TableCell>
+                  <TableCell>
+                    <p className="text-sm">{entry.entityType || '—'}</p>
+                    <p className="font-mono text-xs text-gray-500">{entry.entityId || '—'}</p>
+                  </TableCell>
+                  <TableCell className="max-w-[360px] text-sm">{entry.description || '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

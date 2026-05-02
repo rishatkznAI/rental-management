@@ -160,6 +160,70 @@ test('/api/admin/production-diagnostics is admin-only', async () => {
   });
 });
 
+test('/api/admin/audit-logs returns filtered safe entries for admins only', async () => {
+  const collections = {
+    audit_logs: [
+      {
+        id: 'AUD-1',
+        createdAt: '2026-05-02T10:00:00.000Z',
+        userId: 'U-1',
+        userName: 'Админ',
+        role: 'Администратор',
+        action: 'payments.update',
+        entityType: 'payments',
+        entityId: 'P-1',
+        description: 'Изменение платежа',
+        before: { id: 'P-1', amount: 100, password: 'hidden', internalComment: 'hidden-note', fileUrl: 'https://example.test/private.pdf' },
+        after: { id: 'P-1', amount: 200, token: 'hidden' },
+        metadata: { secret: 'hidden', reason: 'test', debugPayload: 'hidden-debug' },
+        userAgent: 'hidden-agent',
+      },
+      {
+        id: 'AUD-2',
+        createdAt: '2026-05-01T10:00:00.000Z',
+        userId: 'U-2',
+        userName: 'Менеджер',
+        role: 'Менеджер по аренде',
+        action: 'documents.create',
+        entityType: 'documents',
+        entityId: 'D-1',
+      },
+    ],
+  };
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/audit-logs?action=payments.update&section=payments&dateFrom=2026-05-02');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.logs.length, 1);
+    assert.equal(response.body.logs[0].id, 'AUD-1');
+    assert.equal(response.body.logs[0].before.amount, 100);
+    assert.equal(response.body.logs[0].before.password, undefined);
+    assert.equal(response.body.logs[0].before.internalComment, undefined);
+    assert.equal(response.body.logs[0].before.fileUrl, undefined);
+    assert.equal(response.body.logs[0].after.token, undefined);
+    assert.equal(response.body.logs[0].metadata.debugPayload, undefined);
+    assert.equal(response.body.logs[0].userAgent, undefined);
+    assert.ok(response.body.filters.actions.includes('payments.update'));
+    assert.ok(response.body.filters.sections.includes('payments'));
+    assert.doesNotMatch(JSON.stringify(response.body), /hidden|token|secret|password|private\.pdf/i);
+  });
+});
+
+test('/api/admin/audit-logs is admin-only', async () => {
+  const { app } = createSystemApp({
+    requireAdmin: (_req, res) => res.status(403).json({ ok: false, error: 'Forbidden' }),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/audit-logs');
+    assert.equal(response.status, 403);
+  });
+});
+
 test('/api/admin/system-data/export returns safe JSON without passwords or secrets', async () => {
   const collections = {
     equipment: [{ id: 'EQ-1', serialNumber: 'SN-1' }],

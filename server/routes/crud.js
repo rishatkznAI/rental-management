@@ -64,7 +64,7 @@ function registerCrudRoutes(deps) {
   }
 
   function isCriticalAuditCollection(collection) {
-    return ['payments', 'rentals', 'gantt_rentals', 'equipment', 'service', 'users', 'app_settings'].includes(collection);
+    return Boolean(collection);
   }
 
   function syncPaymentStatusesAfterPaymentWrite(payments) {

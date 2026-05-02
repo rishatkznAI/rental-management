@@ -50,6 +50,8 @@ test.describe('production smoke', () => {
     await openSidebarSection(page, /^Техника/, 'Техника');
     await openSidebarSection(page, /^Аренды/, 'Планировщик аренды');
     await openSidebarSection(page, /^Сервис/, 'Сервис');
+    await page.getByRole('tab', { name: 'Очередь сервиса' }).click();
+    await expect(page.getByText('Открытых сервисных задач нет').or(page.getByText('Критично'))).toBeVisible();
     await openSidebarSection(page, /^Доставка/, 'Доставка');
     await openSidebarSection(page, /^Документы/, 'Документы');
     await openSidebarSection(page, /^Платежи/, 'Платежи');

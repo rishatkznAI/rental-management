@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowDown, Plus, Search } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -21,6 +22,10 @@ import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
 import type { ServiceTicket } from '../types';
 import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
+import { buildServiceQueue } from '../lib/serviceQueue';
+import { equipmentService } from '../services/equipment.service';
+import { rentalsService } from '../services/rentals.service';
+import { clientsService } from '../services/clients.service';
 
 const RESULT_BATCH_SIZE = 80;
 
@@ -161,6 +166,27 @@ function getTicketInventory(ticket: ServiceTicket) {
   return match?.[1] || '—';
 }
 
+function equipmentStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    available: 'Свободна',
+    rented: 'В аренде',
+    reserved: 'Бронь',
+    in_service: 'В сервисе',
+    inactive: 'Списана',
+    unknown: 'Нет данных',
+  };
+  return labels[status] || status || 'Нет данных';
+}
+
+function serviceQueueGroupTone(group: string) {
+  if (group === 'critical') return 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-200';
+  if (group === 'high') return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200';
+  if (group === 'waiting_parts') return 'border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-200';
+  if (group === 'unassigned') return 'border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-200';
+  if (group === 'long_running') return 'border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-200';
+  return 'border-gray-200 bg-gray-50 text-gray-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-gray-300';
+}
+
 function formatTicketDate(value: ServiceTicket['createdAt']) {
   const timestamp = Date.parse(String(value || ''));
   return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : '—';
@@ -193,12 +219,240 @@ function ServiceMetricCard({
   );
 }
 
+function ServiceQueueTab({
+  queue,
+  mechanicOptions,
+  canViewFinance,
+  canViewRentals,
+  canViewEquipment,
+  canViewClients,
+}: {
+  queue: ReturnType<typeof buildServiceQueue>;
+  mechanicOptions: string[];
+  canViewFinance: boolean;
+  canViewRentals: boolean;
+  canViewEquipment: boolean;
+  canViewClients: boolean;
+}) {
+  const [search, setSearch] = React.useState('');
+  const [priorityFilter, setPriorityFilter] = React.useState('all');
+  const [statusFilter, setStatusFilter] = React.useState('all');
+  const [mechanicFilter, setMechanicFilter] = React.useState('all');
+  const [typeFilter, setTypeFilter] = React.useState('all');
+  const [flagFilter, setFlagFilter] = React.useState('all');
+
+  const equipmentTypes = React.useMemo(() => (
+    Array.from(new Set(queue.rows.map(item => item.equipmentType).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'ru'))
+  ), [queue.rows]);
+
+  const filteredRows = React.useMemo(() => {
+    const query = normalizeSearch(search);
+    return queue.rows.filter(item => {
+      const searchText = normalizeSearch([
+        item.ticketId,
+        item.equipmentTitle,
+        item.model,
+        item.serialNumber,
+        item.inventoryNumber,
+        item.reason,
+        item.description,
+        item.mechanic,
+        item.currentRental?.client,
+        item.nextRental?.client,
+      ].filter(Boolean).join(' '));
+      if (query && !searchText.includes(query)) return false;
+      if (priorityFilter !== 'all' && item.ticketPriority !== priorityFilter) return false;
+      if (statusFilter !== 'all' && item.ticketStatus !== statusFilter) return false;
+      if (mechanicFilter !== 'all' && item.mechanic !== mechanicFilter) return false;
+      if (typeFilter !== 'all' && item.equipmentType !== typeFilter) return false;
+      if (flagFilter === 'waiting_parts' && !item.waitingParts) return false;
+      if (flagFilter === 'unassigned' && !item.unassigned) return false;
+      if (flagFilter === 'old' && item.ageDays < 7) return false;
+      return true;
+    });
+  }, [flagFilter, mechanicFilter, priorityFilter, queue.rows, search, statusFilter, typeFilter]);
+
+  const groupedRows = React.useMemo(() => (
+    queue.groups
+      .map(group => ({
+        ...group,
+        items: filteredRows.filter(item => item.group === group.key),
+      }))
+      .filter(group => group.items.length > 0)
+  ), [filteredRows, queue.groups]);
+
+  const formatRisk = (amount: number) => new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    maximumFractionDigits: 0,
+  }).format(amount);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+        <ServiceMetricCard title="Открыто" value={queue.metrics.totalOpen} caption="В очереди" tone="lime" />
+        <ServiceMetricCard title="Критично" value={queue.metrics.critical} caption="Первый фокус" tone="red" />
+        <ServiceMetricCard title="Без механика" value={queue.metrics.unassigned} caption="Нужно назначить" tone="amber" />
+        <ServiceMetricCard title="Запчасти" value={queue.metrics.waitingParts} caption="Блокер ремонта" tone="neutral" />
+        <ServiceMetricCard title="В сервисе" value={queue.metrics.equipmentInService} caption="Статус техники" tone="neutral" />
+        <ServiceMetricCard title="Средний возраст" value={queue.metrics.averageAgeDays} caption="Дней" tone="neutral" />
+        <ServiceMetricCard title="7+ дней" value={queue.metrics.olderThan7Days} caption="Долго в работе" tone="amber" />
+      </div>
+
+      <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(220px,1.4fr)_repeat(5,minmax(140px,1fr))]">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Модель, SN, INV, клиент..."
+              className="pl-10"
+            />
+          </div>
+          <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+            <SelectTrigger><SelectValue placeholder="Приоритет" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все приоритеты</SelectItem>
+              <SelectItem value="critical">Критический</SelectItem>
+              <SelectItem value="high">Высокий</SelectItem>
+              <SelectItem value="medium">Средний</SelectItem>
+              <SelectItem value="low">Низкий</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger><SelectValue placeholder="Статус" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все статусы</SelectItem>
+              <SelectItem value="new">Новая</SelectItem>
+              <SelectItem value="in_progress">В работе</SelectItem>
+              <SelectItem value="waiting_parts">Ожидание запчастей</SelectItem>
+              <SelectItem value="ready">Готово</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
+            <SelectTrigger><SelectValue placeholder="Механик" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все механики</SelectItem>
+              <SelectItem value="Не назначен">Не назначен</SelectItem>
+              {mechanicOptions.map(mechanic => (
+                <SelectItem key={mechanic} value={mechanic}>{mechanic}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger><SelectValue placeholder="Тип" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все типы</SelectItem>
+              {equipmentTypes.map(type => (
+                <SelectItem key={type} value={type}>{type}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={flagFilter} onValueChange={setFlagFilter}>
+            <SelectTrigger><SelectValue placeholder="Флаги" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все флаги</SelectItem>
+              <SelectItem value="waiting_parts">Ждут запчасти</SelectItem>
+              <SelectItem value="unassigned">Без механика</SelectItem>
+              <SelectItem value="old">7+ дней</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </section>
+
+      {filteredRows.length === 0 ? (
+        <div className="rounded-lg border border-gray-200 bg-white py-14 text-center dark:border-white/10 dark:bg-white/[0.03]">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Открытых сервисных задач нет</h3>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Или текущие фильтры скрыли все позиции очереди.</p>
+        </div>
+      ) : (
+        groupedRows.map(group => (
+          <section key={group.key} className="space-y-3">
+            <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-bold ${serviceQueueGroupTone(group.key)}`}>
+              {group.label}
+              <span className="text-xs opacity-70">{group.items.length}</span>
+            </div>
+            <div className="grid gap-3">
+              {group.items.map(item => (
+                <article key={item.ticketId} className="rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 font-mono text-xs font-semibold text-gray-600 dark:bg-white/8 dark:text-gray-300">
+                          score {item.score}
+                        </span>
+                        {getServicePriorityBadge(item.ticketPriority)}
+                        {getServiceStatusBadge(item.ticketStatus)}
+                        {item.waitingParts && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">Запчасти</span>}
+                      </div>
+                      <h3 className="mt-3 truncate text-lg font-black text-gray-900 dark:text-white">{item.equipmentTitle}</h3>
+                      <p className="mt-1 truncate font-mono text-sm text-gray-500 dark:text-gray-400">
+                        INV: {item.inventoryNumber || '—'} · SN: {item.serialNumber || '—'} · {equipmentStatusLabel(item.equipmentStatus)}
+                      </p>
+                      <p className="mt-3 text-sm font-semibold text-gray-900 dark:text-white">{item.reason}</p>
+                      {item.description && <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">{item.description}</p>}
+                    </div>
+
+                    <div className="grid gap-2 text-sm text-gray-600 dark:text-gray-300 lg:min-w-[280px]">
+                      <div>Создана: <span className="font-semibold">{item.createdAt ? formatDate(item.createdAt) : '—'}</span> · {item.ageDays} дн.</div>
+                      <div>Механик: <span className="font-semibold">{item.mechanic}</span></div>
+                      {canViewRentals && item.currentRental && (
+                        <div>Аренда сейчас: <span className="font-semibold">{canViewClients ? item.currentRental.client : 'Клиент скрыт'}</span></div>
+                      )}
+                      {canViewRentals && item.nextRental && (
+                        <div>Ближайшая аренда: <span className="font-semibold">{item.nextRental.startDate ? formatDate(item.nextRental.startDate) : '—'}</span></div>
+                      )}
+                      {canViewFinance && item.revenueRisk && (
+                        <div>{item.revenueRisk.label}: <span className="font-semibold">{formatRisk(item.revenueRisk.amount)}</span></div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-3 dark:border-white/10 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex flex-wrap gap-2">
+                      {(item.scoreReasons.length ? item.scoreReasons : ['без дополнительных факторов']).map(reason => (
+                        <span key={reason} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/8 dark:text-gray-300">
+                          {reason}
+                        </span>
+                      ))}
+                      {item.redFlags.map(flag => (
+                        <span key={flag} className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-200">
+                          {flag}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Link to={`/service/${item.ticketId}`}>
+                        <Button size="sm" variant="secondary">Открыть заявку</Button>
+                      </Link>
+                      {canViewEquipment && item.equipmentId && (
+                        <Link to={`/equipment/${item.equipmentId}`}>
+                          <Button size="sm" variant="outline">Открыть технику</Button>
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ))
+      )}
+    </div>
+  );
+}
+
 export default function Service() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const ticketsQuery = useServiceTicketsList();
   const ticketList = ticketsQuery.data ?? [];
   const canManageWarrantyClaims = can('edit', 'service');
+  const canViewEquipment = can('view', 'equipment');
+  const canViewRentals = can('view', 'rentals');
+  const canViewClients = can('view', 'clients');
+  const canViewFinance = can('view', 'finance');
   const [search, setSearch] = React.useState('');
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
@@ -211,6 +465,25 @@ export default function Service() {
   const [dateTo, setDateTo] = React.useState('');
   const [showFilters, setShowFilters] = React.useState(false);
   const [visibleCount, setVisibleCount] = React.useState(RESULT_BATCH_SIZE);
+
+  const { data: equipmentList = [] } = useQuery({
+    queryKey: ['equipment', 'service-queue'],
+    queryFn: equipmentService.getAll,
+    enabled: canViewEquipment,
+    staleTime: 1000 * 60 * 2,
+  });
+  const { data: ganttRentals = [] } = useQuery({
+    queryKey: ['ganttRentals', 'service-queue'],
+    queryFn: rentalsService.getGanttData,
+    enabled: canViewRentals,
+    staleTime: 1000 * 60 * 2,
+  });
+  const { data: clients = [] } = useQuery({
+    queryKey: ['clients', 'service-queue'],
+    queryFn: clientsService.getAll,
+    enabled: canViewClients,
+    staleTime: 1000 * 60 * 2,
+  });
 
   const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
   const monthStartIso = React.useMemo(() => {
@@ -253,6 +526,14 @@ export default function Service() {
     medium: activeTickets.filter(ticket => normalizeServicePriority(ticket.priority) === 'medium').length,
     low: activeTickets.filter(ticket => normalizeServicePriority(ticket.priority) === 'low').length,
   }), [activeTickets]);
+
+  const serviceQueue = React.useMemo(() => buildServiceQueue({
+    serviceTickets: ticketList,
+    equipment: canViewEquipment ? equipmentList : [],
+    rentals: canViewRentals ? ganttRentals : [],
+    clients: canViewClients ? clients : [],
+    canViewFinance,
+  }), [canViewClients, canViewEquipment, canViewFinance, canViewRentals, clients, equipmentList, ganttRentals, ticketList]);
 
   const filteredTickets = React.useMemo(() => {
     const query = normalizeSearch(search);
@@ -530,6 +811,12 @@ export default function Service() {
           >
             Заявки
           </TabsTrigger>
+          <TabsTrigger
+            value="queue"
+            className="flex-none rounded-none border-0 border-b-4 border-transparent bg-transparent px-0 pb-4 pt-0 text-xl font-black text-gray-500 data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:data-[state=active]:bg-transparent"
+          >
+            Очередь сервиса
+          </TabsTrigger>
           {canManageWarrantyClaims && (
             <TabsTrigger
               value="warranty"
@@ -654,6 +941,17 @@ export default function Service() {
               )}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="queue" className="space-y-5">
+          <ServiceQueueTab
+            queue={serviceQueue}
+            mechanicOptions={mechanicOptions}
+            canViewFinance={canViewFinance}
+            canViewRentals={canViewRentals}
+            canViewEquipment={canViewEquipment}
+            canViewClients={canViewClients}
+          />
         </TabsContent>
 
         {canManageWarrantyClaims && (

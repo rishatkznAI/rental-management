@@ -74,6 +74,8 @@ test.describe('production smoke', () => {
     await page.getByRole('button', { name: 'Создать клиента' }).click();
     await expect(page).toHaveURL(/#\/clients\/.+/);
     await expect(page.getByRole('heading', { name: company })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Сводка по клиенту' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Риск и задолженность' })).toBeVisible();
 
     const client = await withAdminApi((api) => findClientByCompany(api, company));
     expect(client.id).toBeTruthy();

@@ -32,3 +32,12 @@ test('Documents page guards legacy optional fields before filtering and renderin
   assert.doesNotMatch(source, /doc\.number\.toLowerCase\(\)/);
   assert.doesNotMatch(source, /doc\.client\.toLowerCase\(\)/);
 });
+
+test('Client detail masks finance blocks by permissions and uses client 360 helper', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/ClientDetail.tsx'), 'utf-8');
+
+  assert.match(source, /buildClient360Summary/);
+  assert.match(source, /canViewFinance = can\('view', 'finance'\)/);
+  assert.match(source, /Финансовые данные скрыты правами доступа/);
+  assert.match(source, /canViewPayments = can\('view', 'payments'\) \|\| canViewFinance/);
+});

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
@@ -9,18 +9,20 @@ import { Select } from '../components/ui/select';
 import {
   ArrowLeft, Edit, FileText, TrendingUp, Clock, Phone, Mail,
   Building2, MapPin, User, CreditCard, CheckCircle, XCircle,
-  AlertTriangle, Download, Plus, Save, Trash2, Upload, X,
+  AlertTriangle, Download, Plus, Save, Trash2, Upload, X, Wrench,
 } from 'lucide-react';
 import { formatDate, formatDateTime, formatCurrency } from '../lib/utils';
 import { useClientById, useUpdateClient } from '../hooks/useClients';
-import { useRentalsList, useGanttData } from '../hooks/useRentals';
+import { useGanttData } from '../hooks/useRentals';
 import { usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
+import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import type { Client, ClientStatus } from '../types';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
-import { buildClientFinancialSnapshots } from '../lib/finance';
+import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
+import { buildClient360Summary } from '../lib/client360.js';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,35 @@ function debtRiskVariant(snapshot: { currentDebt: number; overdueRentals: number
   if (!snapshot || snapshot.currentDebt <= 0) return 'success';
   if (snapshot.exceededLimit || snapshot.overdueRentals > 0) return 'error';
   return 'warning';
+}
+
+function client360RiskVariant(level: string): BadgeVariant {
+  if (level === 'high') return 'error';
+  if (level === 'medium') return 'warning';
+  return 'success';
+}
+
+function paymentStatusVariant(status: string): BadgeVariant {
+  if (status === 'Оплачен') return 'success';
+  if (status === 'Частично') return 'info';
+  if (status === 'Просрочен') return 'error';
+  return 'warning';
+}
+
+function servicePriorityVariant(priority: string): BadgeVariant {
+  const value = priority.toLowerCase();
+  if (value === 'critical') return 'error';
+  if (value === 'high') return 'warning';
+  if (value === 'low') return 'default';
+  return 'info';
+}
+
+function rentalStatusLabel(status: string) {
+  return RENTAL_STATUS_LABELS[status]?.label ?? (status || 'Без статуса');
+}
+
+function rentalStatusVariant(status: string): BadgeVariant {
+  return RENTAL_STATUS_LABELS[status]?.variant ?? 'default';
 }
 
 function normalizeClientName(value?: string | null) {
@@ -138,9 +169,9 @@ export default function ClientDetail() {
   const [editData, setEditData] = useState<Partial<Client>>({});
 
   // Related data via react-query
-  const { data: allRentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
+  const { data: serviceTickets = [] } = useServiceTicketsList();
   const clientNameKey = normalizeClientName(client?.company);
   const clientRentals = ganttRentals.filter(r =>
     client && (r.clientId === client.id || (!r.clientId && clientNameKey && normalizeClientName(r.client) === clientNameKey)),
@@ -148,14 +179,29 @@ export default function ClientDetail() {
   const activeRentals = clientRentals.filter(r => r.status === 'active' || r.status === 'created');
 
   const { data: allDocs = [] } = useDocumentsList();
-  const clientDocs = allDocs.filter(d =>
-    client && (d.clientId === client.id || (!d.clientId && d.client === client.company)),
-  );
 
   const clientFinancial = React.useMemo(() => {
     if (!client) return null;
     return buildClientFinancialSnapshots([client], ganttRentals, payments)[0] ?? null;
   }, [client, ganttRentals, payments]);
+  const rentalDebtRows = useMemo(
+    () => buildRentalDebtRows(ganttRentals, payments),
+    [ganttRentals, payments],
+  );
+  const client360 = useMemo(
+    () => buildClient360Summary({
+      client,
+      rentals: ganttRentals,
+      rentalDebtRows,
+      payments,
+      documents: allDocs,
+      serviceTickets,
+      today: new Date().toISOString().slice(0, 10),
+    }),
+    [allDocs, client, ganttRentals, payments, rentalDebtRows, serviceTickets],
+  );
+  const canViewFinance = can('view', 'finance');
+  const canViewPayments = can('view', 'payments') || canViewFinance;
 
   const displayedDebt = clientFinancial?.currentDebt ?? client?.debt ?? 0;
   const displayedTotalRentals = clientFinancial?.totalRentals ?? client?.totalRentals ?? 0;
@@ -336,6 +382,118 @@ export default function ClientDetail() {
         </div>
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Building2 className="h-4 w-4" />
+            Сводка по клиенту
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Field label="Компания" value={client.company} />
+            <Field label="ИНН" value={client.inn || '—'} mono />
+            <Field label="Контактное лицо" value={client.contact || '—'} />
+            <Field label="Ответственный менеджер" value={client.manager || 'Не назначен'} />
+            <Field label="Телефон" value={client.phone || '—'} />
+            <Field label="Email" value={client.email || '—'} />
+            <Field label="Условия оплаты" value={client.paymentTerms || '—'} />
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">Риск клиента</p>
+              <Badge variant={client360RiskVariant(client360.debt.riskLevel)}>{client360.debt.riskLabel}</Badge>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
+            <Link to={`/rentals/new?clientId=${encodeURIComponent(client.id)}`}>
+              <Button size="sm">
+                <Plus className="h-4 w-4" />
+                Новая аренда
+              </Button>
+            </Link>
+            <Link to="/rentals"><Button variant="secondary" size="sm">Открыть аренды</Button></Link>
+            <Link to="/documents"><Button variant="secondary" size="sm">Открыть документы</Button></Link>
+            {canViewPayments && <Link to="/payments"><Button variant="secondary" size="sm">Открыть платежи</Button></Link>}
+            {canViewFinance && <Link to="/finance"><Button variant="secondary" size="sm">Финансы</Button></Link>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className={client360.debt.riskLevel === 'high' ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20' : undefined}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-4 w-4" />
+              Риск и задолженность
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!canViewFinance ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Финансовые данные скрыты правами доступа.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Общий долг</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(client360.debt.total)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Просроченный долг</p>
+                  <p className={`text-xl font-bold ${client360.debt.overdue > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                    {formatCurrency(client360.debt.overdue)}
+                  </p>
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2 text-xs">
+              <Badge variant={client360RiskVariant(client360.debt.riskLevel)}>{client360.debt.riskLabel} риск</Badge>
+              <Badge variant={client360.debt.hasActiveRental ? 'info' : 'default'}>
+                {client360.debt.hasActiveRental ? 'Есть активная аренда' : 'Активных аренд нет'}
+              </Badge>
+              <Badge variant={client360.debt.maxAgeDays > 60 ? 'error' : client360.debt.maxAgeDays > 0 ? 'warning' : 'success'}>
+                Возраст долга: {client360.debt.maxAgeDays} дн.
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <TrendingUp className="h-4 w-4" />
+              Аренды клиента
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-3 text-sm">
+            <div><p className="text-gray-500">Активные</p><p className="text-2xl font-bold">{client360.rentals.active.length}</p></div>
+            <div><p className="text-gray-500">Завершённые</p><p className="text-2xl font-bold">{client360.rentals.completed.length}</p></div>
+            <div><p className="text-gray-500">Просроченные возвраты</p><p className="text-2xl font-bold text-red-600">{client360.rentals.overdueReturns.length}</p></div>
+            <div>
+              <p className="text-gray-500">Ближайший возврат</p>
+              <p className="text-sm font-semibold">{client360.rentals.nextReturn ? formatDate(client360.rentals.nextReturn.date) : '—'}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-4 w-4" />
+              Красные флаги
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {client360.flags.length === 0 ? (
+              <p className="text-sm text-green-600 dark:text-green-400">Критичных флагов по клиенту нет.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {client360.flags.map(flag => (
+                  <Badge key={flag.id} variant={flag.severity === 'high' ? 'error' : 'warning'}>{flag.label}</Badge>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ── Left (2/3) ─────────────────────────────────────────────────── */}
         <div className="lg:col-span-2 space-y-6">
@@ -494,30 +652,39 @@ export default function ClientDetail() {
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <Field label="Условия оплаты" value={client.paymentTerms} />
-                  <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Кредитный лимит</p>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(client.creditLimit)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Задолженность</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(displayedDebt)}</p>
-                      <Badge variant={debtVariant(displayedDebt)}>{debtLabel(displayedDebt)}</Badge>
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                      <Badge variant={debtRiskVariant(clientFinancial)}>{debtRiskLabel(clientFinancial)}</Badge>
-                      {clientFinancial && displayedDebt > 0 && (
-                        <span>
-                          Неоплаченных: {clientFinancial.unpaidRentals}
-                          {clientFinancial.overdueRentals > 0 && ` · просроченных: ${clientFinancial.overdueRentals}`}
-                        </span>
+                  {canViewFinance ? (
+                    <>
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Кредитный лимит</p>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(client.creditLimit)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Задолженность</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(displayedDebt)}</p>
+                          <Badge variant={debtVariant(displayedDebt)}>{debtLabel(displayedDebt)}</Badge>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                          <Badge variant={debtRiskVariant(clientFinancial)}>{debtRiskLabel(clientFinancial)}</Badge>
+                          {clientFinancial && displayedDebt > 0 && (
+                            <span>
+                              Неоплаченных: {clientFinancial.unpaidRentals}
+                              {clientFinancial.overdueRentals > 0 && ` · просроченных: ${clientFinancial.overdueRentals}`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {(canEditDebt || (client.debt ?? 0) > 0) && (
+                        <div>
+                          <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Ручная дебиторка</p>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(client.debt ?? 0)}</p>
+                        </div>
                       )}
-                    </div>
-                  </div>
-                  {(canEditDebt || (client.debt ?? 0) > 0) && (
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Ручная дебиторка</p>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(client.debt ?? 0)}</p>
+                    </>
+                  ) : (
+                    <div className="col-span-2">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Финансы</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Финансовые данные скрыты правами доступа.</p>
                     </div>
                   )}
                   {client.manager && <Field label="Менеджер" value={client.manager} />}
@@ -537,39 +704,43 @@ export default function ClientDetail() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <TrendingUp className="h-4 w-4" />
-                История аренд
-                {clientRentals.length > 0 && (
+                Аренды клиента
+                {client360.rentals.latest.length > 0 && (
                   <span className="ml-auto text-xs font-normal text-gray-500">{clientRentals.length} аренд</span>
                 )}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {clientRentals.length === 0 ? (
+              {client360.rentals.latest.length === 0 ? (
                 <p className="text-sm text-gray-400 italic">Аренд не найдено</p>
               ) : (
                 <div className="space-y-3">
-                  {clientRentals.map((rental) => {
-                    const rs = RENTAL_STATUS_LABELS[rental.status] ?? { label: rental.status, variant: 'default' as BadgeVariant };
+                  {client360.rentals.latest.map((rental) => {
                     return (
                       <div
                         key={rental.id}
                         className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:border-blue-400 cursor-pointer transition-colors"
-                        onClick={() => navigate('/rentals')}
+                        onClick={() => navigate(`/rentals/${rental.id}`)}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
                               <p className="font-medium text-gray-900 dark:text-white text-sm">{rental.id}</p>
-                              <Badge variant={rs.variant}>{rs.label}</Badge>
+                              <Badge variant={rentalStatusVariant(rental.status)}>{rentalStatusLabel(rental.status)}</Badge>
                             </div>
-                            <p className="text-xs text-gray-500 truncate">{rental.equipmentInv || '—'}</p>
+                            <p className="text-xs text-gray-500 truncate">{rental.equipment || '—'}</p>
                             <p className="text-xs text-gray-400 mt-0.5">
                               {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
                             </p>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-semibold text-sm text-gray-900 dark:text-white">{formatCurrency(rental.amount || 0)}</p>
+                            <p className="font-semibold text-sm text-gray-900 dark:text-white">
+                              {canViewFinance ? formatCurrency(rental.amount || 0) : 'Сумма скрыта'}
+                            </p>
                             <p className="text-xs text-gray-500">{rental.manager || '—'}</p>
+                            <Link to={`/rentals/${rental.id}`} className="mt-1 inline-block text-xs text-[--color-primary] hover:underline" onClick={event => event.stopPropagation()}>
+                              Открыть аренду
+                            </Link>
                           </div>
                         </div>
                       </div>
@@ -586,25 +757,93 @@ export default function ClientDetail() {
               <CardTitle className="flex items-center gap-2 text-base">
                 <FileText className="h-4 w-4" />
                 Документы
-                {clientDocs.length > 0 && (
-                  <span className="ml-auto text-xs font-normal text-gray-500">{clientDocs.length}</span>
+                {client360.documents.total > 0 && (
+                  <span className="ml-auto text-xs font-normal text-gray-500">
+                    {client360.documents.total} · без подписи {client360.documents.unsigned}
+                  </span>
                 )}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {clientDocs.length === 0 ? (
+              {client360.documents.latest.length === 0 ? (
                 <p className="text-sm text-gray-400 italic">Документов не найдено</p>
               ) : (
                 <div className="space-y-2">
-                  {clientDocs.map((doc) => (
+                  {client360.documents.latest.map((doc) => (
                     <div key={doc.id} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
                       <div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">{doc.number}</p>
-                        <p className="text-xs text-gray-400">{doc.type} · {formatDate(doc.date)}</p>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{doc.type}</p>
+                        <p className="text-xs text-gray-400">{formatDate(doc.date)} · {doc.rental}</p>
+                        <Link to="/documents" className="text-xs text-[--color-primary] hover:underline">Открыть документы</Link>
                       </div>
-                      <Badge variant={doc.status === 'signed' ? 'success' : doc.status === 'sent' ? 'info' : 'default'}>
-                        {doc.status === 'signed' ? 'Подписан' : doc.status === 'sent' ? 'Отправлен' : 'Черновик'}
-                      </Badge>
+                      <Badge variant={doc.rawStatus === 'signed' ? 'success' : doc.rawStatus === 'sent' ? 'info' : 'default'}>{doc.status}</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <CreditCard className="h-4 w-4" />
+                Платежи клиента
+                {canViewPayments && client360.payments.total > 0 && (
+                  <span className="ml-auto text-xs font-normal text-gray-500">{client360.payments.total}</span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!canViewPayments ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">Платежи и суммы скрыты правами доступа.</p>
+              ) : client360.payments.latest.length === 0 ? (
+                <p className="text-sm text-gray-400 italic">Платежей не найдено</p>
+              ) : (
+                <div className="space-y-2">
+                  {client360.payments.latest.map(payment => (
+                    <div key={payment.id || payment.invoiceNumber} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{payment.invoiceNumber || payment.id}</p>
+                        <p className="text-xs text-gray-400">{formatDate(payment.date)} · {payment.rentalId}</p>
+                        <Link to="/payments" className="text-xs text-[--color-primary] hover:underline">Открыть платежи</Link>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(payment.amount)}</p>
+                        <Badge variant={paymentStatusVariant(payment.status)}>{payment.status}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Wrench className="h-4 w-4" />
+                Сервис по клиенту
+                {client360.service.total > 0 && (
+                  <span className="ml-auto text-xs font-normal text-gray-500">
+                    {client360.service.total} · открытых {client360.service.open}
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {client360.service.latest.length === 0 ? (
+                <p className="text-sm text-gray-400 italic">Надёжно связанных сервисных заявок не найдено.</p>
+              ) : (
+                <div className="space-y-2">
+                  {client360.service.latest.map(ticket => (
+                    <div key={ticket.id} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{ticket.equipment}</p>
+                        <p className="text-xs text-gray-400">{formatDate(ticket.date)} · {ticket.status}</p>
+                        <Link to={`/service/${ticket.id}`} className="text-xs text-[--color-primary] hover:underline">Открыть заявку</Link>
+                      </div>
+                      <Badge variant={servicePriorityVariant(ticket.priority)}>{ticket.priority}</Badge>
                     </div>
                   ))}
                 </div>
@@ -716,7 +955,7 @@ export default function ClientDetail() {
                 <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Активных аренд</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-white">{displayedActiveRentals}</p>
               </div>
-              {displayedDebt > 0 && (
+              {canViewFinance && displayedDebt > 0 && (
                 <>
                   <Divider />
                   <div>
@@ -779,7 +1018,7 @@ export default function ClientDetail() {
           </Card>
 
           {/* Debt alert */}
-          {displayedDebt > 50000 && (
+          {canViewFinance && displayedDebt > 50000 && (
             <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
               <CardContent className="pt-4">
                 <div className="flex items-center gap-2 mb-1">

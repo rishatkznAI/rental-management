@@ -51,9 +51,50 @@ export interface OverdueBucketRow {
   debt: number;
 }
 
+export interface ClientDebtAgingRow {
+  clientId?: string;
+  client: string;
+  manager: string;
+  ageBucket: string;
+  ageBucketLabel: string;
+  debt: number;
+  rentals: number;
+  overdueRentals: number;
+  hasActiveRental: boolean;
+  maxOverdueDays: number;
+}
+
+const IGNORED_PAYMENT_STATUSES = new Set([
+  'cancelled',
+  'canceled',
+  'void',
+  'error',
+  'failed',
+  'closed',
+  'deleted',
+  'reversed',
+]);
+
+const DEBT_AGE_BUCKETS: OverdueBucketRow[] = [
+  { key: '0_7', label: '0-7 дней', rentals: 0, debt: 0 },
+  { key: '8_14', label: '8-14 дней', rentals: 0, debt: 0 },
+  { key: '15_30', label: '15-30 дней', rentals: 0, debt: 0 },
+  { key: '31_60', label: '31-60 дней', rentals: 0, debt: 0 },
+  { key: '60_plus', label: '60+ дней', rentals: 0, debt: 0 },
+];
+
+function normalizeStatus(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function shouldCountPayment(payment: Payment): boolean {
+  return !IGNORED_PAYMENT_STATUSES.has(normalizeStatus(payment.status));
+}
+
 function getEffectivePaidAmount(payment: Payment): number {
-  if (typeof payment.paidAmount === 'number') return payment.paidAmount;
-  if (payment.status === 'paid') return payment.amount;
+  if (!shouldCountPayment(payment)) return 0;
+  if (typeof payment.paidAmount === 'number') return toMoney(payment.paidAmount);
+  if (payment.status === 'paid') return toMoney(payment.amount);
   return 0;
 }
 
@@ -102,8 +143,14 @@ export function buildRentalDebtRows(
   payments: Payment[],
 ): RentalDebtRow[] {
   const byRentalId = new Map<string, Payment[]>();
+  const seenPaymentIds = new Set<string>();
   payments.forEach(payment => {
     if (!payment.rentalId) return;
+    if (!shouldCountPayment(payment)) return;
+    if (payment.id) {
+      if (seenPaymentIds.has(payment.id)) return;
+      seenPaymentIds.add(payment.id);
+    }
     if (!byRentalId.has(payment.rentalId)) byRentalId.set(payment.rentalId, []);
     byRentalId.get(payment.rentalId)!.push(payment);
   });
@@ -140,6 +187,26 @@ export function buildRentalDebtRows(
     })
     .filter(row => row.outstanding > 0 || row.paymentStatus !== 'paid')
     .sort((a, b) => b.outstanding - a.outstanding);
+}
+
+function isActiveRentalStatus(status: unknown): boolean {
+  return ['active', 'created', 'confirmed', 'return_planned'].includes(normalizeStatus(status));
+}
+
+function getDebtAgeBucket(overdueDays: number): OverdueBucketRow {
+  if (overdueDays <= 7) return DEBT_AGE_BUCKETS[0];
+  if (overdueDays <= 14) return DEBT_AGE_BUCKETS[1];
+  if (overdueDays <= 30) return DEBT_AGE_BUCKETS[2];
+  if (overdueDays <= 60) return DEBT_AGE_BUCKETS[3];
+  return DEBT_AGE_BUCKETS[4];
+}
+
+function getDebtAgeBucketKey(overdueDays: number): string {
+  return getDebtAgeBucket(overdueDays).key;
+}
+
+function cloneDebtAgeBuckets(): OverdueBucketRow[] {
+  return DEBT_AGE_BUCKETS.map(item => ({ ...item }));
 }
 
 export function buildClientReceivables(
@@ -288,28 +355,67 @@ export function buildOverdueBuckets(
   rentalDebtRows: RentalDebtRow[],
   today = new Date().toISOString().slice(0, 10),
 ): OverdueBucketRow[] {
-  const buckets: OverdueBucketRow[] = [
-    { key: '1_7', label: '1-7 дней', rentals: 0, debt: 0 },
-    { key: '8_14', label: '8-14 дней', rentals: 0, debt: 0 },
-    { key: '15_30', label: '15-30 дней', rentals: 0, debt: 0 },
-    { key: '31_60', label: '31-60 дней', rentals: 0, debt: 0 },
-    { key: '61_plus', label: '61+ дней', rentals: 0, debt: 0 },
-  ];
+  const buckets = cloneDebtAgeBuckets();
 
   rentalDebtRows.forEach(row => {
+    if (row.outstanding <= 0) return;
     const overdueDays = getRentalDebtOverdueDays(row, today);
-    if (overdueDays <= 0) return;
-    const bucket =
-      overdueDays <= 7 ? buckets[0] :
-      overdueDays <= 14 ? buckets[1] :
-      overdueDays <= 30 ? buckets[2] :
-      overdueDays <= 60 ? buckets[3] :
-      buckets[4];
+    const bucket = buckets.find(item => item.key === getDebtAgeBucketKey(overdueDays)) ?? buckets[0];
     bucket.rentals += 1;
     bucket.debt += row.outstanding;
   });
 
   return buckets;
+}
+
+export function buildClientDebtAgingRows(
+  clients: Client[],
+  rentalDebtRows: RentalDebtRow[],
+  today = new Date().toISOString().slice(0, 10),
+): ClientDebtAgingRow[] {
+  const clientsById = new Map(clients.map(client => [client.id, client] as const));
+  const map = new Map<string, ClientDebtAgingRow>();
+
+  rentalDebtRows.forEach(row => {
+    if (row.outstanding <= 0) return;
+    const rowClientId = stableClientId(row);
+    const client = rowClientId ? clientsById.get(rowClientId) : undefined;
+    const overdueDays = getRentalDebtOverdueDays(row, today);
+    const bucket = getDebtAgeBucket(overdueDays);
+    const hasActiveRental = isActiveRentalStatus(row.rentalStatus);
+    const clientName = client?.company ?? (row.client || 'Клиент не привязан');
+    const manager = row.manager || client?.manager || 'Не назначен';
+    const key = [
+      rowClientId ? `id:${rowClientId}` : `unlinked:${normalizeText(clientName) || row.rentalId || 'unknown'}`,
+      manager,
+      bucket.key,
+      hasActiveRental ? 'active' : 'inactive',
+    ].join('|');
+    const existing = map.get(key) ?? {
+      clientId: client?.id ?? (rowClientId || undefined),
+      client: clientName,
+      manager,
+      ageBucket: bucket.key,
+      ageBucketLabel: bucket.label,
+      debt: 0,
+      rentals: 0,
+      overdueRentals: 0,
+      hasActiveRental,
+      maxOverdueDays: 0,
+    };
+    existing.debt += row.outstanding;
+    existing.rentals += 1;
+    if (overdueDays > 0) existing.overdueRentals += 1;
+    existing.maxOverdueDays = Math.max(existing.maxOverdueDays, overdueDays);
+    map.set(key, existing);
+  });
+
+  return Array.from(map.values()).sort((a, b) =>
+    b.debt - a.debt
+    || b.maxOverdueDays - a.maxOverdueDays
+    || a.client.localeCompare(b.client, 'ru')
+    || a.manager.localeCompare(b.manager, 'ru')
+  );
 }
 
 export function mergeClientsWithFinancials(

@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  AlertTriangle,
   Archive,
   CalendarDays,
   CheckCircle2,
@@ -46,7 +47,17 @@ import {
   type AdminListOption,
 } from '../lib/adminConfig';
 import { formatCurrency, formatDate } from '../lib/utils';
+import {
+  buildClientDebtAgingRows,
+  buildClientFinancialSnapshots,
+  buildManagerReceivables,
+  buildOverdueBuckets,
+  buildRentalDebtRows,
+} from '../lib/finance';
+import { clientsService } from '../services/clients.service';
 import { COMPANY_EXPENSE_KEYS, companyExpensesService } from '../services/company-expenses.service';
+import { paymentsService } from '../services/payments.service';
+import { rentalsService } from '../services/rentals.service';
 import type { CompanyExpense, CompanyExpenseFrequency, CompanyExpenseStatus } from '../types';
 
 const FREQUENCY_LABELS: Record<CompanyExpenseFrequency, string> = {
@@ -195,6 +206,21 @@ export default function Finance() {
     queryFn: companyExpensesService.getAll,
     staleTime: 1000 * 60 * 2,
   });
+  const { data: clients = [] } = useQuery({
+    queryKey: ['clients'],
+    queryFn: clientsService.getAll,
+    staleTime: 1000 * 60 * 2,
+  });
+  const { data: ganttRentals = [] } = useQuery({
+    queryKey: ['gantt_rentals'],
+    queryFn: rentalsService.getGanttData,
+    staleTime: 1000 * 60 * 2,
+  });
+  const { data: payments = [] } = useQuery({
+    queryKey: ['payments'],
+    queryFn: paymentsService.getAll,
+    staleTime: 1000 * 60 * 2,
+  });
 
   const createExpense = useMutation({
     mutationFn: (data: Omit<CompanyExpense, 'id'>) => companyExpensesService.create(data),
@@ -305,6 +331,23 @@ export default function Finance() {
   const upcomingExpenses = activeExpenses.filter(isUpcoming).sort(sortExpenses);
   const pausedCount = expenses.filter(item => item.status === 'paused').length;
   const archivedCount = expenses.filter(item => item.status === 'archived').length;
+  const rentalDebtRows = React.useMemo(() => buildRentalDebtRows(ganttRentals, payments), [ganttRentals, payments]);
+  const clientDebtRows = React.useMemo(
+    () => buildClientDebtAgingRows(clients, rentalDebtRows),
+    [clients, rentalDebtRows],
+  );
+  const clientSnapshots = React.useMemo(
+    () => buildClientFinancialSnapshots(clients, ganttRentals, payments),
+    [clients, ganttRentals, payments],
+  );
+  const managerReceivables = React.useMemo(
+    () => buildManagerReceivables(rentalDebtRows, undefined, clients),
+    [clients, rentalDebtRows],
+  );
+  const debtBuckets = React.useMemo(() => buildOverdueBuckets(rentalDebtRows), [rentalDebtRows]);
+  const totalDebt = clientSnapshots.reduce((sum, item) => sum + item.currentDebt, 0);
+  const overdueDebt = managerReceivables.reduce((sum, item) => sum + item.overdueDebt, 0);
+  const overdueClients = clientSnapshots.filter(item => item.overdueRentals > 0).length;
   const activeFilterCount = [
     search.trim() !== '',
     statusFilter !== 'current',
@@ -443,6 +486,120 @@ export default function Finance() {
             Добавить расход
           </Button>
         )}
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Дебиторка клиентов</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+                <ReceiptText className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{formatCurrency(totalDebt)}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Просроченный долг</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+                <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{formatCurrency(overdueDebt)}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Клиенты с просрочкой</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
+                <WalletCards className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{overdueClients}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Неоплаченные аренды</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+                <Archive className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+              </div>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{rentalDebtRows.length}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Дебиторка по клиентам</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {clientDebtRows.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Нет долгов по арендам.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Клиент</TableHead>
+                      <TableHead>Менеджер</TableHead>
+                      <TableHead>Возраст</TableHead>
+                      <TableHead>Активная аренда</TableHead>
+                      <TableHead className="text-right">Долг</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {clientDebtRows.slice(0, 10).map(item => (
+                      <TableRow key={`${item.clientId || item.client}-${item.manager}-${item.ageBucket}-${item.hasActiveRental}`}>
+                        <TableCell className="font-medium">{item.client}</TableCell>
+                        <TableCell>{item.manager}</TableCell>
+                        <TableCell>
+                          <Badge variant={item.overdueRentals > 0 ? 'warning' : 'default'}>{item.ageBucketLabel}</Badge>
+                        </TableCell>
+                        <TableCell>{item.hasActiveRental ? 'Да' : 'Нет'}</TableCell>
+                        <TableCell className="text-right font-semibold">{formatCurrency(item.debt)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Возраст долга</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {debtBuckets.map(item => (
+                <div key={item.key} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-900/40">
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">{item.label}</p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Аренд: {item.rentals}</p>
+                  </div>
+                  <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(item.debt)}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

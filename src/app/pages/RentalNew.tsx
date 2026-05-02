@@ -252,7 +252,7 @@ export default function RentalNew() {
             {selectedClient && (
               <div
                 className={`rounded-lg border px-3 py-3 text-sm ${
-                  (selectedClientReceivable?.exceededLimit || false)
+                  (selectedClientReceivable?.exceededLimit || false) || (selectedClientReceivable?.overdueRentals || 0) > 0
                     ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
                     : (selectedClientReceivable?.currentDebt || selectedClient.debt || 0) > 0
                       ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
@@ -262,7 +262,9 @@ export default function RentalNew() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="font-medium">
-                      {(selectedClientReceivable?.exceededLimit || false)
+                      {(selectedClientReceivable?.overdueRentals || 0) > 0
+                        ? 'Внимание: у клиента есть просроченная задолженность'
+                        : (selectedClientReceivable?.exceededLimit || false)
                         ? 'Внимание: превышен кредитный лимит клиента'
                         : (selectedClientReceivable?.currentDebt || selectedClient.debt || 0) > 0
                           ? 'У клиента есть действующая задолженность'

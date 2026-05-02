@@ -50,6 +50,18 @@ function debtLabel(debt: number) {
   return 'Высокая задолженность';
 }
 
+function debtRiskLabel(snapshot: { currentDebt: number; overdueRentals: number; exceededLimit: boolean } | null) {
+  if (!snapshot || snapshot.currentDebt <= 0) return 'Низкий риск';
+  if (snapshot.exceededLimit || snapshot.overdueRentals > 0) return 'Высокий риск';
+  return 'Средний риск';
+}
+
+function debtRiskVariant(snapshot: { currentDebt: number; overdueRentals: number; exceededLimit: boolean } | null): BadgeVariant {
+  if (!snapshot || snapshot.currentDebt <= 0) return 'success';
+  if (snapshot.exceededLimit || snapshot.overdueRentals > 0) return 'error';
+  return 'warning';
+}
+
 function normalizeClientName(value?: string | null) {
   return String(value || '').trim().toLowerCase();
 }
@@ -491,6 +503,15 @@ export default function ClientDetail() {
                     <div className="flex items-center gap-2 mt-0.5">
                       <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(displayedDebt)}</p>
                       <Badge variant={debtVariant(displayedDebt)}>{debtLabel(displayedDebt)}</Badge>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                      <Badge variant={debtRiskVariant(clientFinancial)}>{debtRiskLabel(clientFinancial)}</Badge>
+                      {clientFinancial && displayedDebt > 0 && (
+                        <span>
+                          Неоплаченных: {clientFinancial.unpaidRentals}
+                          {clientFinancial.overdueRentals > 0 && ` · просроченных: ${clientFinancial.overdueRentals}`}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {(canEditDebt || (client.debt ?? 0) > 0) && (

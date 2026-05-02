@@ -608,7 +608,7 @@ export function NewRentalModal({
 
           {clientId && selectedClientFinancial && (
             <div className={`rounded-lg border px-3 py-3 text-sm ${
-              selectedClientFinancial.exceededLimit
+              selectedClientFinancial.exceededLimit || selectedClientFinancial.overdueRentals > 0
                 ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
                 : selectedClientFinancial.currentDebt > 0
                   ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
@@ -617,7 +617,9 @@ export function NewRentalModal({
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="font-medium">
-                    {selectedClientFinancial.exceededLimit
+                    {selectedClientFinancial.overdueRentals > 0
+                      ? 'Внимание: у клиента есть просроченная задолженность'
+                      : selectedClientFinancial.exceededLimit
                       ? 'Внимание: кредитный лимит клиента превышен'
                       : selectedClientFinancial.currentDebt > 0
                         ? 'У клиента есть задолженность'

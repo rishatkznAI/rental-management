@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { formatCurrency } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
 import {
+  buildClientDebtAgingRows,
   buildClientFinancialSnapshots,
   buildManagerReceivables,
   buildOverdueBuckets,
@@ -248,6 +249,10 @@ export default function Reports() {
   const financeOverdueBuckets = useMemo(
     () => buildOverdueBuckets(financeDebtRows),
     [financeDebtRows],
+  );
+  const financeClientDebtAgingRows = useMemo(
+    () => buildClientDebtAgingRows(clients, financeDebtRows),
+    [clients, financeDebtRows],
   );
   const financeTotals = useMemo(() => ({
     debt: financeClientSnapshots.reduce((sum, item) => sum + item.currentDebt, 0),
@@ -979,16 +984,16 @@ export default function Reports() {
   }, [equipmentServiceSummary, filteredFieldTrips, filteredMechanicRows, filteredMechanicSummary]);
 
   const exportFinanceXls = useCallback(() => {
-    const clientRowsXml = financeClientSnapshots
-      .filter(item => item.currentDebt > 0)
+    const clientRowsXml = financeClientDebtAgingRows
       .map(item => `
         <Row>
           <Cell><Data ss:Type="String">${escapeXml(item.client)}</Data></Cell>
-          <Cell><Data ss:Type="Number">${escapeXml(item.currentDebt.toFixed(2))}</Data></Cell>
-          <Cell><Data ss:Type="Number">${escapeXml(item.unpaidRentals)}</Data></Cell>
+          <Cell><Data ss:Type="String">${escapeXml(item.manager)}</Data></Cell>
+          <Cell><Data ss:Type="String">${escapeXml(item.ageBucketLabel)}</Data></Cell>
+          <Cell><Data ss:Type="String">${escapeXml(item.hasActiveRental ? 'Да' : 'Нет')}</Data></Cell>
+          <Cell><Data ss:Type="Number">${escapeXml(item.debt.toFixed(2))}</Data></Cell>
+          <Cell><Data ss:Type="Number">${escapeXml(item.rentals)}</Data></Cell>
           <Cell><Data ss:Type="Number">${escapeXml(item.overdueRentals)}</Data></Cell>
-          <Cell><Data ss:Type="Number">${escapeXml(item.creditLimit.toFixed(2))}</Data></Cell>
-          <Cell><Data ss:Type="String">${escapeXml(item.exceededLimit ? 'Да' : 'Нет')}</Data></Cell>
         </Row>
       `).join('');
 
@@ -1035,11 +1040,12 @@ export default function Reports() {
           <Table>
             <Row>
               <Cell><Data ss:Type="String">Клиент</Data></Cell>
-              <Cell><Data ss:Type="String">Долг</Data></Cell>
-              <Cell><Data ss:Type="String">Неоплаченные аренды</Data></Cell>
+              <Cell><Data ss:Type="String">Менеджер</Data></Cell>
+              <Cell><Data ss:Type="String">Возраст долга</Data></Cell>
+              <Cell><Data ss:Type="String">Активная аренда</Data></Cell>
+              <Cell><Data ss:Type="String">Сумма долга</Data></Cell>
+              <Cell><Data ss:Type="String">Аренды</Data></Cell>
               <Cell><Data ss:Type="String">Просроченные аренды</Data></Cell>
-              <Cell><Data ss:Type="String">Кредитный лимит</Data></Cell>
-              <Cell><Data ss:Type="String">Превышен лимит</Data></Cell>
             </Row>
             ${clientRowsXml}
           </Table>
@@ -1060,7 +1066,7 @@ export default function Reports() {
         <Worksheet ss:Name="Просрочка">
           <Table>
             <Row>
-              <Cell><Data ss:Type="String">Период просрочки</Data></Cell>
+              <Cell><Data ss:Type="String">Возраст долга</Data></Cell>
               <Cell><Data ss:Type="String">Аренды</Data></Cell>
               <Cell><Data ss:Type="String">Сумма долга</Data></Cell>
             </Row>
@@ -1087,22 +1093,22 @@ export default function Reports() {
       </Workbook>`;
 
     downloadFile(xls, `finance-report-${new Date().toISOString().slice(0, 10)}.xls`, 'application/vnd.ms-excel');
-  }, [financeClientSnapshots, financeDebtRows, financeManagerSnapshots, financeOverdueBuckets]);
+  }, [financeClientDebtAgingRows, financeDebtRows, financeManagerSnapshots, financeOverdueBuckets]);
 
   const exportFinancePdf = useCallback(() => {
     const popup = window.open('', '_blank', 'width=1100,height=800');
     if (!popup) return;
 
-    const clientRows = financeClientSnapshots
-      .filter(item => item.currentDebt > 0)
+    const clientRows = financeClientDebtAgingRows
       .map(item => `
         <tr>
           <td>${escapeXml(item.client)}</td>
-          <td>${escapeXml(formatCurrency(item.currentDebt))}</td>
-          <td>${escapeXml(item.unpaidRentals)}</td>
+          <td>${escapeXml(item.manager)}</td>
+          <td>${escapeXml(item.ageBucketLabel)}</td>
+          <td>${escapeXml(item.hasActiveRental ? 'Да' : 'Нет')}</td>
+          <td>${escapeXml(formatCurrency(item.debt))}</td>
+          <td>${escapeXml(item.rentals)}</td>
           <td>${escapeXml(item.overdueRentals)}</td>
-          <td>${escapeXml(item.creditLimit > 0 ? formatCurrency(item.creditLimit) : '—')}</td>
-          <td>${escapeXml(item.exceededLimit ? 'Да' : 'Нет')}</td>
         </tr>
       `).join('');
 
@@ -1165,10 +1171,10 @@ export default function Reports() {
             <div class="card"><div class="card-label">Клиенты с просрочкой</div><div class="card-value">${escapeXml(financeTotals.overdueClients)}</div></div>
           </div>
           <h2>Дебиторка по клиентам</h2>
-          <table><thead><tr><th>Клиент</th><th>Долг</th><th>Неоплаченные аренды</th><th>Просроченные</th><th>Лимит</th><th>Превышен</th></tr></thead><tbody>${clientRows}</tbody></table>
+          <table><thead><tr><th>Клиент</th><th>Менеджер</th><th>Возраст</th><th>Активная аренда</th><th>Долг</th><th>Аренды</th><th>Просроченные</th></tr></thead><tbody>${clientRows}</tbody></table>
           <h2>Дебиторка по менеджерам</h2>
           <table><thead><tr><th>Менеджер</th><th>Долг</th><th>Просроченный долг</th><th>Неоплаченные аренды</th><th>Просроченные</th><th>Клиенты</th></tr></thead><tbody>${managerRows}</tbody></table>
-          <h2>Возраст просрочки</h2>
+          <h2>Возраст долга</h2>
           <table><thead><tr><th>Период</th><th>Аренды</th><th>Сумма долга</th></tr></thead><tbody>${overdueRows}</tbody></table>
           <h2>Крупнейшие долги по арендам</h2>
           <table><thead><tr><th>Клиент</th><th>Менеджер</th><th>Техника</th><th>Срок оплаты</th><th>Дней просрочки</th><th>Остаток</th></tr></thead><tbody>${detailRows}</tbody></table>
@@ -1177,7 +1183,7 @@ export default function Reports() {
       </html>
     `);
     popup.document.close();
-  }, [financeClientSnapshots, financeDebtRows, financeManagerSnapshots, financeOverdueBuckets, financeTotals]);
+  }, [financeClientDebtAgingRows, financeDebtRows, financeManagerSnapshots, financeOverdueBuckets, financeTotals]);
 
   const refresh = useCallback(() => {
     setIsRefreshing(true);
@@ -1632,18 +1638,18 @@ export default function Reports() {
             <Card>
               <CardHeader>
                 <CardTitle>Дебиторка по клиентам</CardTitle>
-                <CardDescription>Текущая задолженность и риск по лимиту</CardDescription>
+                <CardDescription>Группировка по клиенту, менеджеру, возрасту долга и активной аренде</CardDescription>
               </CardHeader>
               <CardContent>
-                {financeClientSnapshots.length === 0 ? (
+                {financeClientDebtAgingRows.length === 0 ? (
                   <EmptyChart message="Нет данных по дебиторке клиентов." />
                 ) : (
                   <div className="space-y-3">
-                    {financeClientSnapshots.filter(item => item.currentDebt > 0).slice(0, 12).map(item => (
+                    {financeClientDebtAgingRows.slice(0, 12).map(item => (
                       <div
-                        key={item.client}
+                        key={`${item.clientId || item.client}-${item.manager}-${item.ageBucket}-${item.hasActiveRental}`}
                         className={`rounded-lg border px-4 py-3 ${
-                          item.exceededLimit
+                          item.overdueRentals > 0
                             ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
                             : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
                         }`}
@@ -1652,16 +1658,16 @@ export default function Reports() {
                           <div>
                             <p className="font-medium text-gray-900 dark:text-white">{item.client}</p>
                             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                              Активных неоплаченных аренд: {item.unpaidRentals}
+                              {item.manager} · возраст: {item.ageBucketLabel} · активная аренда: {item.hasActiveRental ? 'да' : 'нет'}
                               {item.overdueRentals > 0 && ` · просроченных: ${item.overdueRentals}`}
                             </p>
                           </div>
                           <div className="text-right">
-                            <p className={`font-semibold ${item.exceededLimit ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
-                              {formatCurrency(item.currentDebt)}
+                            <p className={`font-semibold ${item.overdueRentals > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                              {formatCurrency(item.debt)}
                             </p>
                             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                              Лимит: {item.creditLimit > 0 ? formatCurrency(item.creditLimit) : 'не задан'}
+                              Аренд: {item.rentals}
                             </p>
                           </div>
                         </div>
@@ -1767,12 +1773,12 @@ export default function Reports() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Возраст просрочки</CardTitle>
-                <CardDescription>Сколько аренд и долга в каждом интервале просрочки</CardDescription>
+                <CardTitle>Возраст долга</CardTitle>
+                <CardDescription>Сколько аренд и долга в каждом интервале возраста</CardDescription>
               </CardHeader>
               <CardContent>
                 {financeOverdueBuckets.every(item => item.rentals === 0) ? (
-                  <EmptyChart message="Нет просроченных аренд по срокам оплаты." />
+                  <EmptyChart message="Нет неоплаченных аренд по срокам оплаты." />
                 ) : (
                   <div className="space-y-3">
                     {financeOverdueBuckets.map(item => (
@@ -1781,7 +1787,7 @@ export default function Reports() {
                           <div>
                             <p className="font-medium text-gray-900 dark:text-white">{item.label}</p>
                             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                              Просроченных аренд: {item.rentals}
+                              Аренд с долгом: {item.rentals}
                             </p>
                           </div>
                           <div className="text-right">

@@ -36,7 +36,7 @@ import {
 // Пользовательское хранилище вынесено в отдельный модуль
 import {
   type UserRole, type UserStatus, type SystemUser,
-  ROLES, USERS_STORAGE_KEY,
+  ROLES,
   isMechanicRole,
   isWarrantyMechanicRole,
   normalizeUserRole,
@@ -142,6 +142,7 @@ const EMPTY_FORM = {
 
 export default function Settings() {
   const { can } = usePermissions();
+  const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = React.useState('users');
   const [users, setUsersState] = React.useState<SystemUser[]>([]);
@@ -180,15 +181,6 @@ export default function Settings() {
   React.useEffect(() => {
     setSidebarGroups(normalizeSidebarGroups(sidebarGroupSetting?.value));
   }, [sidebarGroupSetting]);
-
-  // Синхронизируем с сервером
-  const setUsers = React.useCallback(async (updater: (prev: SystemUser[]) => SystemUser[]) => {
-    const next = updater(users);
-    setUsersState(next);
-    localStorage.removeItem(USERS_STORAGE_KEY);
-    await usersService.bulkReplace(next);
-    await queryClient.invalidateQueries({ queryKey: ['users'] });
-  }, [queryClient, users]);
 
   const moveSidebarSection = React.useCallback((section: (typeof DEFAULT_SIDEBAR_ORDER)[number], direction: -1 | 1) => {
     setSidebarOrder(current => {
@@ -253,6 +245,9 @@ export default function Settings() {
   const [form, setForm] = React.useState(EMPTY_FORM);
   const [showPassword, setShowPassword] = React.useState(false);
   const [formError, setFormError] = React.useState('');
+  const [userAction, setUserAction] = React.useState<{ type: 'deactivate' | 'activate' | 'delete'; user: SystemUser } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = React.useState('');
+  const [userActionError, setUserActionError] = React.useState('');
 
   const openAdd = () => {
     setEditingId(null);
@@ -278,8 +273,38 @@ export default function Settings() {
     setDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    void setUsers(prev => prev.filter(u => u.id !== id));
+  const refreshUsers = React.useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['users'] });
+  }, [queryClient]);
+
+  const openUserAction = (type: 'deactivate' | 'activate' | 'delete', user: SystemUser) => {
+    setUserAction({ type, user });
+    setDeleteConfirmation('');
+    setUserActionError('');
+  };
+
+  const closeUserAction = () => {
+    setUserAction(null);
+    setDeleteConfirmation('');
+    setUserActionError('');
+  };
+
+  const handleConfirmUserAction = async () => {
+    if (!userAction) return;
+    setUserActionError('');
+    try {
+      if (userAction.type === 'deactivate') {
+        await usersService.update(userAction.user.id, { status: 'Неактивен', confirm: true } as Partial<SystemUser> & { confirm: boolean });
+      } else if (userAction.type === 'activate') {
+        await usersService.update(userAction.user.id, { status: 'Активен' });
+      } else {
+        await usersService.delete(userAction.user.id, deleteConfirmation);
+      }
+      await refreshUsers();
+      closeUserAction();
+    } catch (error) {
+      setUserActionError(error instanceof Error ? error.message : 'Не удалось выполнить действие');
+    }
   };
 
   const handleSave = async () => {
@@ -307,21 +332,23 @@ export default function Settings() {
       // При редактировании: пустой пароль = не меняем; непустой сервер сохранит как scrypt-хеш.
       const nextPassword = form.password ? form.password : undefined;
       const normalizedRole = normalizeUserRole(form.role) as UserRole;
-      await setUsers(prev => prev.map(u => {
-        if (u.id !== editingId) return u;
-        return {
-          ...u,
-          name: form.name,
-          email: form.email,
-          role: normalizedRole,
-          status: form.status,
-          ...(normalizedRole === 'Перевозчик'
-            ? { botOnly: true, allowFrontendLogin: false, frontendAccess: false }
-            : {}),
-          ...ownerPayload,
-          ...(nextPassword ? { password: nextPassword } : {}),
-        };
-      }));
+      const previousUser = users.find(user => user.id === editingId);
+      if (previousUser?.status === 'Активен' && form.status !== 'Активен') {
+        setFormError('Для деактивации используйте действие «Деактивировать» в таблице пользователей.');
+        return;
+      }
+      await usersService.update(editingId, {
+        name: form.name,
+        email: form.email,
+        role: normalizedRole,
+        status: form.status,
+        ...(normalizedRole === 'Перевозчик'
+          ? { botOnly: true, allowFrontendLogin: false, frontendAccess: false }
+          : {}),
+        ...ownerPayload,
+        ...(nextPassword ? { password: nextPassword } : {}),
+      });
+      await refreshUsers();
     } else {
       if (!form.password.trim()) { setFormError('Задайте пароль для нового пользователя'); return; }
       const normalizedRole = normalizeUserRole(form.role) as UserRole;
@@ -337,7 +364,8 @@ export default function Settings() {
           : {}),
         ...ownerPayload,
       };
-      await setUsers(prev => [...prev, newUser]);
+      await usersService.create(newUser);
+      await refreshUsers();
     }
     setDialogOpen(false);
   };
@@ -401,7 +429,7 @@ export default function Settings() {
                       <TableHead>Роль</TableHead>
                       <TableHead>Статус</TableHead>
                       <TableHead>Собственник</TableHead>
-                      <TableHead className="w-[90px]">Действия</TableHead>
+                      <TableHead className="w-[220px]">Действия</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -421,7 +449,7 @@ export default function Settings() {
                           <p className="text-sm">{user.role === 'Инвестор' ? (user.ownerName || 'Не привязан') : '—'}</p>
                         </TableCell>
                         <TableCell>
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2">
                             <button
                               onClick={() => openEdit(user)}
                               className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -429,8 +457,25 @@ export default function Settings() {
                             >
                               <Edit className="h-4 w-4 text-gray-500" />
                             </button>
+                            {user.status === 'Активен' ? (
+                              <Button
+                                variant="secondary"
+                                className="h-8 px-2 text-xs"
+                                onClick={() => openUserAction('deactivate', user)}
+                              >
+                                Деактивировать
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="secondary"
+                                className="h-8 px-2 text-xs"
+                                onClick={() => openUserAction('activate', user)}
+                              >
+                                Активировать
+                              </Button>
+                            )}
                             <button
-                              onClick={() => handleDelete(user.id)}
+                              onClick={() => openUserAction('delete', user)}
                               className="rounded p-1 hover:bg-red-50 dark:hover:bg-red-900/20"
                               title="Удалить"
                             >
@@ -718,6 +763,84 @@ export default function Settings() {
             <Button onClick={handleSave}>
               {editingId ? 'Сохранить' : 'Добавить'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(userAction)} onOpenChange={(open) => { if (!open) closeUserAction(); }}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>
+              {userAction?.type === 'delete'
+                ? 'Удалить пользователя?'
+                : userAction?.type === 'activate'
+                  ? 'Активировать пользователя?'
+                  : 'Деактивировать пользователя?'}
+            </DialogTitle>
+          </DialogHeader>
+
+          {userAction && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm dark:border-gray-700 dark:bg-gray-900">
+                <p className="font-medium text-gray-900 dark:text-white">{userAction.user.name}</p>
+                <p className="text-gray-600 dark:text-gray-300">{userAction.user.email}</p>
+                <p className="text-gray-500 dark:text-gray-400">Роль: {userAction.user.role}</p>
+              </div>
+
+              {userAction.type === 'delete' ? (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+                    Это опасное действие. Лучше деактивировать пользователя, чтобы сохранить историю.
+                  </div>
+                  <Field label="Введите email пользователя для подтверждения">
+                    <Input
+                      value={deleteConfirmation}
+                      onChange={event => setDeleteConfirmation(event.target.value)}
+                      placeholder={userAction.user.email}
+                    />
+                  </Field>
+                </div>
+              ) : userAction.type === 'activate' ? (
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  Пользователь снова сможет входить в систему после активации.
+                </p>
+              ) : (
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  Пользователь не сможет входить в систему, но история действий сохранится.
+                </p>
+              )}
+
+              {currentUser?.id === userAction.user.id && userAction.type !== 'activate' && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                  Нельзя удалить или деактивировать самого себя.
+                </div>
+              )}
+
+              {userActionError && <p className="text-sm text-red-600">{userActionError}</p>}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="secondary" onClick={closeUserAction}>Отмена</Button>
+            {userAction?.type === 'delete' ? (
+              <Button
+                variant="destructive"
+                onClick={handleConfirmUserAction}
+                disabled={!userAction || deleteConfirmation !== userAction.user.email || currentUser?.id === userAction.user.id}
+              >
+                Удалить
+              </Button>
+            ) : userAction?.type === 'activate' ? (
+              <Button onClick={handleConfirmUserAction}>Активировать</Button>
+            ) : (
+              <Button
+                variant="destructive"
+                onClick={handleConfirmUserAction}
+                disabled={!userAction || currentUser?.id === userAction.user.id}
+              >
+                Деактивировать
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -65,6 +65,8 @@ function actionLabel(action) {
   if (value === 'system_data.export') return 'Экспорт системных данных';
   if (value === 'system_data.import') return 'Импорт системных данных';
   if (value === 'rentals.return') return 'Возврат аренды';
+  if (value === 'users.deactivate') return 'Деактивация пользователя';
+  if (value === 'users.status_change') return 'Смена статуса пользователя';
   if (value.endsWith('.create')) return 'Создание записи';
   if (value.endsWith('.update')) return 'Изменение записи';
   if (value.endsWith('.delete')) return 'Удаление записи';

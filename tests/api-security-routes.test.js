@@ -561,6 +561,106 @@ test('old bearer token stops working after password change', async () => {
   });
 });
 
+test('admin can deactivate a regular user and writes safe audit events', async () => {
+  const { app, state, auditEntries } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'PATCH', '/api/users/U-manager', 'admin-token', {
+      status: 'Неактивен',
+      confirm: true,
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(state.users.find(user => user.id === 'U-manager').status, 'Неактивен');
+    assert.ok(auditEntries.some(entry => entry.action === 'users.status_change' && entry.entityId === 'U-manager'));
+    const deactivate = auditEntries.find(entry => entry.action === 'users.deactivate' && entry.entityId === 'U-manager');
+    assert.ok(deactivate);
+    assert.equal(deactivate.before.status, 'Активен');
+    assert.equal(deactivate.after.status, 'Неактивен');
+    assert.equal(JSON.stringify(deactivate).includes('old-password'), false);
+  });
+});
+
+test('non-admin roles cannot change users', async () => {
+  const { app } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    for (const token of ['manager-token', 'office-token', 'mechanic-token']) {
+      const response = await request(baseUrl, 'PATCH', '/api/users/U-sales', token, {
+        status: 'Неактивен',
+        confirm: true,
+      });
+      assert.equal(response.status, 403, token);
+    }
+  });
+});
+
+test('cannot deactivate or delete the last active admin', async () => {
+  const state = createState();
+  state.users = state.users.filter(user => user.id !== 'U-admin-alias');
+  const { app } = createSecurityApp(state);
+
+  await withServer(app, async (baseUrl) => {
+    const deactivate = await request(baseUrl, 'PATCH', '/api/users/U-admin', 'admin-token', {
+      status: 'Неактивен',
+      confirm: true,
+    });
+    assert.equal(deactivate.status, 409);
+    assert.match(deactivate.body.error, /последнего активного администратора/);
+
+    const remove = await request(baseUrl, 'DELETE', '/api/users/U-admin', 'admin-token', {
+      emailConfirmation: 'admin@example.test',
+    });
+    assert.equal(remove.status, 409);
+    assert.match(remove.body.error, /последнего активного администратора/);
+  });
+});
+
+test('cannot deactivate or delete yourself when another admin exists', async () => {
+  const { app } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const deactivate = await request(baseUrl, 'PATCH', '/api/users/U-admin', 'admin-token', {
+      status: 'Неактивен',
+      confirm: true,
+    });
+    assert.equal(deactivate.status, 403);
+    assert.match(deactivate.body.error, /самого себя/);
+
+    const remove = await request(baseUrl, 'DELETE', '/api/users/U-admin', 'admin-token', {
+      emailConfirmation: 'admin@example.test',
+    });
+    assert.equal(remove.status, 403);
+    assert.match(remove.body.error, /самого себя/);
+  });
+});
+
+test('user delete requires exact email confirmation', async () => {
+  const { app, state, auditEntries } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const missing = await request(baseUrl, 'DELETE', '/api/users/U-sales', 'admin-token');
+    assert.equal(missing.status, 400);
+    assert.match(missing.body.error, /email пользователя/);
+
+    const wrong = await request(baseUrl, 'DELETE', '/api/users/U-sales', 'admin-token', {
+      emailConfirmation: 'wrong@example.test',
+    });
+    assert.equal(wrong.status, 400);
+    assert.match(wrong.body.error, /email пользователя/);
+
+    const ok = await request(baseUrl, 'DELETE', '/api/users/U-sales', 'admin-token', {
+      emailConfirmation: 'sales@example.test',
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(state.users.some(user => user.id === 'U-sales'), false);
+    const deleteAudit = auditEntries.find(entry => entry.action === 'users.delete' && entry.entityId === 'U-sales');
+    assert.ok(deleteAudit);
+    assert.equal(JSON.stringify(deleteAudit).includes('sales'), true);
+    assert.equal(JSON.stringify(deleteAudit).includes('password'), false);
+  });
+});
+
 test('payments API rejects negative payment amount', async () => {
   const { app } = createSecurityApp();
 

@@ -144,6 +144,94 @@ function registerCrudRoutes(deps) {
     return next;
   }
 
+  function isActiveUser(user) {
+    return user?.status === 'Активен';
+  }
+
+  function isAdminUser(user) {
+    return normalizeRole(user?.role) === 'Администратор';
+  }
+
+  function activeAdminCount(users) {
+    return (users || []).filter(user => isActiveUser(user) && isAdminUser(user)).length;
+  }
+
+  function validateUserSafetyChange(req, users, previousUser, nextUser, operation, confirmation = {}) {
+    const actorId = String(req.user?.userId || '');
+    const targetId = String(previousUser?.id || '');
+    const deletesUser = operation === 'delete';
+    const previousIsAdmin = isActiveUser(previousUser) && isAdminUser(previousUser);
+    const nextIsActiveAdmin = nextUser ? isActiveUser(nextUser) && isAdminUser(nextUser) : false;
+    const removesAdminAccess = previousIsAdmin && !nextIsActiveAdmin;
+    const deactivatesUser = isActiveUser(previousUser) && nextUser && !isActiveUser(nextUser);
+
+    if ((deletesUser || removesAdminAccess) && previousIsAdmin) {
+      const remainingActiveAdmins = activeAdminCount(users.filter(user => String(user?.id || '') !== targetId));
+      if (remainingActiveAdmins < 1) {
+        const message = deletesUser
+          ? 'Нельзя удалить последнего активного администратора'
+          : 'Нельзя деактивировать последнего активного администратора';
+        throw Object.assign(new Error(message), { status: 409 });
+      }
+    }
+
+    if (targetId && actorId && targetId === actorId && (deletesUser || deactivatesUser || removesAdminAccess)) {
+      throw Object.assign(new Error(deletesUser ? 'Нельзя удалить самого себя' : 'Нельзя деактивировать самого себя'), { status: 403 });
+    }
+
+    if (deletesUser) {
+      const expectedEmail = String(previousUser?.email || '').trim();
+      const providedEmail = String(confirmation?.emailConfirmation || confirmation?.confirmEmail || '').trim();
+      if (!expectedEmail || providedEmail !== expectedEmail) {
+        throw Object.assign(new Error('Для удаления введите email пользователя'), { status: 400 });
+      }
+    }
+
+    if (deactivatesUser && confirmation?.confirm !== true) {
+      throw Object.assign(new Error(isAdminUser(previousUser) ? 'Подтвердите деактивацию администратора' : 'Подтвердите деактивацию пользователя'), { status: 400 });
+    }
+  }
+
+  function auditUserStatusChanges(req, previousUser, nextUser) {
+    if (!previousUser || !nextUser || previousUser.status === nextUser.status) return;
+    auditLog?.(req, {
+      action: 'users.status_change',
+      entityType: 'users',
+      entityId: nextUser.id,
+      before: {
+        id: previousUser.id,
+        email: previousUser.email,
+        role: previousUser.role,
+        status: previousUser.status,
+      },
+      after: {
+        id: nextUser.id,
+        email: nextUser.email,
+        role: nextUser.role,
+        status: nextUser.status,
+      },
+    });
+    if (previousUser.status === 'Активен' && nextUser.status !== 'Активен') {
+      auditLog?.(req, {
+        action: 'users.deactivate',
+        entityType: 'users',
+        entityId: nextUser.id,
+        before: {
+          id: previousUser.id,
+          email: previousUser.email,
+          role: previousUser.role,
+          status: previousUser.status,
+        },
+        after: {
+          id: nextUser.id,
+          email: nextUser.email,
+          role: nextUser.role,
+          status: nextUser.status,
+        },
+      });
+    }
+  }
+
   function crmArchiveForbiddenReason(collection) {
     if (collection !== 'crm_deals') return null;
     const settings = readData('app_settings') || [];
@@ -627,6 +715,9 @@ function registerCrudRoutes(deps) {
             return res.status(validation.status).json({ ok: false, error: validation.error });
           }
         }
+        if (collection === 'users') {
+          validateUserSafetyChange(req, data, data[idx], { ...data[idx], ...safePatch, id: data[idx].id }, 'update', req.body);
+        }
 
         if (collection === 'service_works') {
           requireNonEmptyString(safePatch?.name ?? data[idx].name, 'Название работы');
@@ -683,9 +774,26 @@ function registerCrudRoutes(deps) {
             action: `${collection}.update`,
             entityType: collection,
             entityId: data[idx].id,
-            before: previousItem,
-            after: data[idx],
+            before: collection === 'users'
+              ? {
+                  id: previousItem.id,
+                  email: previousItem.email,
+                  role: previousItem.role,
+                  status: previousItem.status,
+                }
+              : previousItem,
+            after: collection === 'users'
+              ? {
+                  id: data[idx].id,
+                  email: data[idx].email,
+                  role: data[idx].role,
+                  status: data[idx].status,
+                }
+              : data[idx],
           });
+        }
+        if (collection === 'users') {
+          auditUserStatusChanges(req, previousItem, data[idx]);
         }
         if (collection === 'users' && previousItem) {
           invalidateAffectedUserSessions([previousItem], [data[idx]]);
@@ -698,7 +806,7 @@ function registerCrudRoutes(deps) {
         }
         return res.json(data[idx]);
       } catch (error) {
-        return res.status(400).json({ ok: false, error: error.message });
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
     });
 
@@ -763,6 +871,13 @@ function registerCrudRoutes(deps) {
         });
         return res.status(202).json({ ok: true, changeRequest: request });
       }
+      if (collection === 'users') {
+        try {
+          validateUserSafetyChange(req, data, removedItem, null, 'delete', req.body);
+        } catch (error) {
+          return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        }
+      }
       if (collection === 'service') {
         const repairId = data[idx].id;
         writeData('repair_work_items', (readData('repair_work_items') || []).filter(item => item.repairId !== repairId));
@@ -775,7 +890,14 @@ function registerCrudRoutes(deps) {
           action: `${collection}.delete`,
           entityType: collection,
           entityId: removedItem.id,
-          before: removedItem,
+          before: collection === 'users'
+            ? {
+                id: removedItem.id,
+                email: removedItem.email,
+                role: removedItem.role,
+                status: removedItem.status,
+              }
+            : removedItem,
         });
       }
       if (collection === 'users') {
@@ -877,6 +999,25 @@ function registerCrudRoutes(deps) {
           }
           return normalizeUserPasswordForWrite(item, existingById.get(item.id));
         });
+        const incomingIds = new Set(merged.map(item => String(item?.id || '')));
+        for (const existingUser of existing) {
+          if (!incomingIds.has(String(existingUser?.id || ''))) {
+            return res.status(400).json({ ok: false, error: 'Массовое удаление пользователей запрещено. Деактивируйте пользователя или используйте подтверждённое удаление.' });
+          }
+        }
+        try {
+          for (const nextUser of merged) {
+            const previousUser = existingById.get(nextUser.id);
+            if (previousUser) {
+              if (previousUser.status !== nextUser.status) {
+                return res.status(400).json({ ok: false, error: 'Массовое изменение статуса пользователей запрещено. Используйте подтверждённую деактивацию или активацию пользователя.' });
+              }
+              validateUserSafetyChange(req, existing, previousUser, nextUser, 'update', { confirm: true });
+            }
+          }
+        } catch (error) {
+          return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        }
         writeData('users', merged);
         invalidateAffectedUserSessions(existing, merged);
         auditLog?.(req, {
@@ -884,6 +1025,9 @@ function registerCrudRoutes(deps) {
           entityType: collection,
           after: { count: merged.length },
         });
+        for (const nextUser of merged) {
+          auditUserStatusChanges(req, existingById.get(nextUser.id), nextUser);
+        }
         return res.json({ ok: true, count: merged.length });
       }
 

@@ -163,6 +163,41 @@ test.describe('production smoke', () => {
     }
   });
 
+  test('admin user deletion and deactivation require confirmation', async ({ page }) => {
+    const suffix = `user-action-${Date.now()}`;
+    const email = `smoke-user-action-${suffix}@example.local`;
+    await withAdminApi((api) => ensureUser(api, {
+      name: `Smoke User Action ${suffix}`,
+      email,
+      role: 'Менеджер по аренде',
+      password: '1234',
+    }));
+
+    await loginAsAdmin(page);
+    await navigateInApp(page, '/admin');
+    await expect(page.getByRole('heading', { name: 'Панель администратора' })).toBeVisible();
+
+    const row = page.getByRole('row', { name: new RegExp(email) });
+    await expect(row).toBeVisible();
+
+    await row.locator('button[title="Удалить"]').click();
+    const deleteDialog = page.getByRole('dialog', { name: 'Удалить пользователя?' });
+    await expect(deleteDialog).toBeVisible();
+    await expect(deleteDialog.getByText('Это опасное действие. Лучше деактивировать пользователя, чтобы сохранить историю.')).toBeVisible();
+    await expect(deleteDialog.getByRole('button', { name: 'Удалить' })).toBeDisabled();
+    await deleteDialog.getByPlaceholder(email).fill('wrong@example.local');
+    await expect(deleteDialog.getByRole('button', { name: 'Удалить' })).toBeDisabled();
+    await deleteDialog.getByRole('button', { name: 'Отмена' }).click();
+
+    await row.getByRole('button', { name: 'Деактивировать' }).click();
+    const deactivateDialog = page.getByRole('dialog', { name: 'Деактивировать пользователя?' });
+    await expect(deactivateDialog).toBeVisible();
+    await expect(deactivateDialog.getByText('Пользователь не сможет входить в систему, но история действий сохранится.')).toBeVisible();
+    await deactivateDialog.getByRole('button', { name: 'Деактивировать' }).click();
+    await expect(row.getByText('Неактивен')).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Активировать' })).toBeVisible();
+  });
+
   test('admin can see linked documents in registry, rental card and dashboard', async ({ page }) => {
     const suffix = `docs-${Date.now()}`;
     const manager = `Docs Manager ${suffix}`;

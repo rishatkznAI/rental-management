@@ -14,8 +14,8 @@ export const usersService = {
   update: (id: string, data: Partial<SystemUser>): Promise<SystemUser> =>
     api.patch<SystemUser>(`/api/users/${id}`, data),
 
-  delete: (id: string): Promise<void> =>
-    api.del(`/api/users/${id}`),
+  delete: (id: string, emailConfirmation: string): Promise<void> =>
+    api.del(`/api/users/${id}`, { emailConfirmation }),
 
   bulkReplace: (list: SystemUser[]): Promise<void> =>
     api.put('/api/users', list),

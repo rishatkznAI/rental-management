@@ -99,6 +99,7 @@ const {
   shouldProcessWebhookUpdate,
 } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
+const { registerDebtCollectionPlanRoutes } = require('./routes/debt-collection-plans');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
 const { registerFinanceRoutes } = require('./routes/finance');
 const { registerGsmRoutes } = require('./routes/gsm');
@@ -430,6 +431,7 @@ const WRITE_PERMISSIONS = {
   documents:      ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   payments:       ['Администратор', 'Офис-менеджер'],
+  debt_collection_plans: ['Администратор', 'Офис-менеджер'],
   company_expenses: ['Администратор'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
@@ -467,6 +469,7 @@ const READ_PERMISSIONS = {
   documents:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   payments:       ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  debt_collection_plans: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   company_expenses: ['Администратор'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
@@ -830,6 +833,7 @@ const ID_PREFIXES = {
   documents:      'D',
   mechanic_documents: 'MD',
   payments:       'P',
+  debt_collection_plans: 'DCP',
   company_expenses: 'CE',
   crm_deals:      'CRM',
   deliveries:     'DL',
@@ -1076,6 +1080,7 @@ const COLLECTIONS = [
   'documents',
   'mechanic_documents',
   'payments',
+  'debt_collection_plans',
   'company_expenses',
   'crm_deals',
   'delivery_carriers',
@@ -1156,6 +1161,20 @@ registerFinanceRoutes(apiRouter, {
   buildOverdueBuckets,
   buildFinanceReport,
 });
+
+apiRouter.use(registerDebtCollectionPlanRoutes({
+  readData,
+  writeData,
+  requireAuth,
+  requireRead,
+  requireWrite,
+  canReadCollection,
+  accessControl,
+  auditLog,
+  generateId,
+  idPrefixes: ID_PREFIXES,
+  nowIso,
+}));
 
 registerGsmRoutes(apiRouter, {
   requireAuth,

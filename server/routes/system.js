@@ -121,6 +121,7 @@ const SYSTEM_DATA_COLLECTIONS = [
   'service',
   'documents',
   'payments',
+  'debt_collection_plans',
   'deliveries',
   'users',
   'owners',

@@ -767,6 +767,49 @@ export interface CompanyExpense {
   updatedBy?: string;
 }
 
+export type DebtCollectionPlanStatus =
+  | 'new'
+  | 'contacted'
+  | 'promised'
+  | 'partial_paid'
+  | 'disputed'
+  | 'escalation'
+  | 'legal'
+  | 'closed';
+
+export type DebtCollectionNextActionType =
+  | 'call'
+  | 'message'
+  | 'email'
+  | 'documents'
+  | 'restrict_equipment'
+  | 'claim'
+  | 'meeting'
+  | 'wait_payment'
+  | 'other';
+
+export type DebtCollectionPlanPriority = 'low' | 'medium' | 'high' | 'critical';
+
+export interface DebtCollectionPlan {
+  id: string;
+  clientId?: string;
+  clientName: string;
+  responsibleUserId?: string;
+  responsibleName?: string;
+  status: DebtCollectionPlanStatus;
+  priority: DebtCollectionPlanPriority;
+  lastContactDate?: string;
+  promisedPaymentDate?: string;
+  nextActionDate?: string;
+  nextActionType: DebtCollectionNextActionType;
+  comment?: string;
+  result?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
 export interface ManagerBreakdownPayment {
   id: string;
   invoiceNumber: string;

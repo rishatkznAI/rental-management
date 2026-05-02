@@ -40,6 +40,7 @@ test.describe('production smoke', () => {
       /^Доставка/,
       /^Документы/,
       /^Платежи/,
+      /^Финансы/,
       /^Панель администратора/,
     ]) {
       await expect(menu.getByRole('button', { name: item })).toBeVisible();
@@ -52,6 +53,8 @@ test.describe('production smoke', () => {
     await openSidebarSection(page, /^Доставка/, 'Доставка');
     await openSidebarSection(page, /^Документы/, 'Документы');
     await openSidebarSection(page, /^Платежи/, 'Платежи');
+    await openSidebarSection(page, /^Финансы/, 'Финансы');
+    await expect(page.getByRole('heading', { name: 'План взыскания дебиторки' })).toBeVisible();
     await openSidebarSection(page, /^Панель администратора/, /Панель администратора|Администрирование/);
   });
 
@@ -76,6 +79,7 @@ test.describe('production smoke', () => {
     await expect(page.getByRole('heading', { name: company })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Сводка по клиенту' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Риск и задолженность' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'План взыскания' })).toBeVisible();
 
     const client = await withAdminApi((api) => findClientByCompany(api, company));
     expect(client.id).toBeTruthy();

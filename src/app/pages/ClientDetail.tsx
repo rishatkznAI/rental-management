@@ -10,6 +10,7 @@ import {
   ArrowLeft, Edit, FileText, TrendingUp, Clock, Phone, Mail,
   Building2, MapPin, User, CreditCard, CheckCircle, XCircle,
   AlertTriangle, Download, Plus, Save, Trash2, Upload, X, Wrench,
+  ShieldAlert,
 } from 'lucide-react';
 import { formatDate, formatDateTime, formatCurrency } from '../lib/utils';
 import { useClientById, useUpdateClient } from '../hooks/useClients';
@@ -17,12 +18,19 @@ import { useGanttData } from '../hooks/useRentals';
 import { usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
+import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
 import type { Client, ClientStatus } from '../types';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
 import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import { buildClient360Summary } from '../lib/client360.js';
+import {
+  debtCollectionActionLabel,
+  debtCollectionPriorityLabel,
+  debtCollectionStatusLabel,
+  isDebtCollectionActionOverdue,
+} from '../lib/debtCollectionPlans.js';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -172,6 +180,8 @@ export default function ClientDetail() {
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
   const { data: serviceTickets = [] } = useServiceTicketsList();
+  const { data: debtPlanResponse } = useDebtCollectionPlans();
+  const debtCollectionPlans = debtPlanResponse?.plans ?? [];
   const clientNameKey = normalizeClientName(client?.company);
   const clientRentals = ganttRentals.filter(r =>
     client && (r.clientId === client.id || (!r.clientId && clientNameKey && normalizeClientName(r.client) === clientNameKey)),
@@ -202,6 +212,13 @@ export default function ClientDetail() {
   );
   const canViewFinance = can('view', 'finance');
   const canViewPayments = can('view', 'payments') || canViewFinance;
+  const clientDebtPlan = useMemo(() => {
+    if (!client) return null;
+    const byId = debtCollectionPlans.find(plan => plan.clientId && plan.clientId === client.id);
+    if (byId) return byId;
+    const company = normalizeClientName(client.company);
+    return debtCollectionPlans.find(plan => !plan.clientId && company && normalizeClientName(plan.clientName) === company) || null;
+  }, [client, debtCollectionPlans]);
 
   const displayedDebt = clientFinancial?.currentDebt ?? client?.debt ?? 0;
   const displayedTotalRentals = clientFinancial?.totalRentals ?? client?.totalRentals ?? 0;
@@ -694,6 +711,59 @@ export default function ClientDetail() {
                       <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{client.notes}</p>
                     </div>
                   )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ShieldAlert className="h-4 w-4" />
+                План взыскания
+                {clientDebtPlan && (
+                  <span className="ml-auto text-xs font-normal text-gray-500">{debtCollectionStatusLabel(clientDebtPlan.status)}</span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!clientDebtPlan ? (
+                <div className="rounded-lg border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  План взыскания по клиенту не создан.
+                  {canViewFinance && client360.debt.maxAgeDays >= 30 && (
+                    <span className="mt-1 block font-medium text-amber-700 dark:text-amber-300">
+                      Есть долг 30+ дней, план взыскания стоит создать в разделе “Финансы”.
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="Статус" value={debtCollectionStatusLabel(clientDebtPlan.status)} />
+                  <Field label="Приоритет" value={debtCollectionPriorityLabel(clientDebtPlan.priority)} />
+                  <Field label="Ответственный" value={clientDebtPlan.responsibleName || 'Не назначен'} />
+                  <Field label="Последний контакт" value={clientDebtPlan.lastContactDate ? formatDate(clientDebtPlan.lastContactDate) : 'Не указан'} />
+                  <Field label="Обещанная оплата" value={clientDebtPlan.promisedPaymentDate ? formatDate(clientDebtPlan.promisedPaymentDate) : 'Не указана'} />
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Следующее действие</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {debtCollectionActionLabel(clientDebtPlan.nextActionType)}
+                    </p>
+                    <p className={`mt-1 text-xs ${isDebtCollectionActionOverdue(clientDebtPlan) ? 'font-medium text-red-600 dark:text-red-300' : 'text-gray-500 dark:text-gray-400'}`}>
+                      {clientDebtPlan.nextActionDate ? formatDate(clientDebtPlan.nextActionDate) : 'Дата не назначена'}
+                    </p>
+                  </div>
+                  {canViewFinance ? (
+                    <Field label="Долг по клиенту" value={formatCurrency(client360.debt.total)} />
+                  ) : (
+                    <Field label="Финансы" value="Финансовые данные скрыты правами доступа." />
+                  )}
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Комментарий</p>
+                    <p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{clientDebtPlan.comment || clientDebtPlan.result || 'Комментариев нет'}</p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <Link to="/finance" className="text-sm text-[--color-primary] hover:underline">Открыть план в Финансах</Link>
+                  </div>
                 </div>
               )}
             </CardContent>

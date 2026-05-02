@@ -26,6 +26,7 @@ const JSON_COLLECTIONS = [
   'documents',
   'mechanic_documents',
   'payments',
+  'debt_collection_plans',
   'company_expenses',
   'crm_deals',
   'deliveries',

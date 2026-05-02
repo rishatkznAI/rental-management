@@ -37,6 +37,7 @@ import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useClientsList } from '../hooks/useClients';
 import { usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
+import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
 import { KPIDetailModal } from '../components/modals/KPIDetailModal';
 import { ServiceRequestModal } from '../components/modals/ServiceRequestModal';
 import { NewClientModal } from '../components/modals/NewClientModal';
@@ -59,6 +60,7 @@ import type {
 import type { GanttRentalData } from '../mock-data';
 import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
+import { buildDebtCollectionDashboardSummary } from '../lib/debtCollectionPlans.js';
 import {
   buildActiveRentalFleetLookup,
   calculateCurrentFleetUtilization,
@@ -129,6 +131,8 @@ export default function Dashboard() {
   const { data: clients = [] }    = useClientsList();
   const { data: payments = [] }   = usePaymentsList();
   const { data: documents = [] }  = useDocumentsList();
+  const { data: debtCollectionPlansResponse } = useDebtCollectionPlans();
+  const debtCollectionPlans = debtCollectionPlansResponse?.plans ?? [];
   const { data: ganttRentals = [] } = useGanttData();
   const { data: mechanicWorkload } = useQuery<MechanicsWorkloadReport>({
     queryKey: ['reports', 'mechanicsWorkload'],
@@ -252,6 +256,14 @@ export default function Dashboard() {
       today: today.toISOString().slice(0, 10),
     }),
     [clientDebtAgingRows, documents, equipmentList, rentalDebtRows, tickets, today, viewPlannerRentals],
+  );
+  const debtCollectionSummary = useMemo(
+    () => buildDebtCollectionDashboardSummary({
+      clientDebtRows: clientDebtAgingRows,
+      plans: debtCollectionPlans,
+      today: today.toISOString().slice(0, 10),
+    }),
+    [clientDebtAgingRows, debtCollectionPlans, today],
   );
 
   // Dashboard operational KPIs should use planner rentals as the source of truth.
@@ -1461,6 +1473,35 @@ export default function Dashboard() {
                     60+ дней: {attentionSummary.receivables.rentals60Plus} аренд
                     {canViewFinance ? ` · ${formatCurrency(attentionSummary.receivables.debt60Plus)}` : ' · без суммы'}
                   </p>
+                </div>
+
+                <div className={`rounded-xl border p-4 ${debtCollectionSummary.overdueActions + debtCollectionSummary.withoutPlan30Plus + debtCollectionSummary.highPriority > 0 ? 'border-red-300 bg-red-50/60 dark:border-red-900/70 dark:bg-red-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">План взыскания дебиторки</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Просрочено действий: {debtCollectionSummary.overdueActions} · обещаний сегодня: {debtCollectionSummary.promisedToday}
+                      </p>
+                    </div>
+                    <ShieldAlert className="h-5 w-5 text-red-500" />
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Без плана 30+ дн.: <strong>{debtCollectionSummary.withoutPlan30Plus}</strong></div>
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">High/Critical: <strong>{debtCollectionSummary.highPriority}</strong></div>
+                  </div>
+                  {debtCollectionSummary.rows.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {debtCollectionSummary.rows.slice(0, 3).map(row => (
+                        <div key={row.clientId || row.client} className="rounded-lg bg-white/70 px-3 py-2 text-xs dark:bg-gray-900/60">
+                          <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
+                          <p className="text-gray-500 dark:text-gray-400">
+                            {row.nextAction} · {row.nextActionDate ? formatDate(row.nextActionDate) : 'дата не назначена'}
+                            {canViewFinance ? ` · ${formatCurrency(row.debt)}` : ' · сумма скрыта'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className={`rounded-xl border p-4 ${attentionSummary.returns.today > 0 ? 'border-amber-300 bg-amber-50/60 dark:border-amber-900/70 dark:bg-amber-950/20' : 'border-border bg-secondary/50'}`}>

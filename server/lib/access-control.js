@@ -72,6 +72,7 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'delivery_carriers',
   'deliveries',
   'documents',
+  'debt_collection_plans',
   'equipment',
   'gantt_rentals',
   'gsm_commands',
@@ -117,6 +118,20 @@ const SERVICE_MECHANIC_UPDATE_FIELDS = new Set([
 const NON_ADMIN_UPDATE_FIELDS = {
   clients: new Set(['company', 'inn', 'email', 'address', 'contact', 'phone', 'paymentTerms', 'notes']),
   documents: new Set(['type', 'number', 'client', 'clientId', 'rental', 'rentalId', 'date', 'fileName', 'fileUrl', 'comment', 'attachments']),
+  debt_collection_plans: new Set([
+    'clientId',
+    'clientName',
+    'responsibleUserId',
+    'responsibleName',
+    'status',
+    'priority',
+    'lastContactDate',
+    'promisedPaymentDate',
+    'nextActionDate',
+    'nextActionType',
+    'comment',
+    'result',
+  ]),
   equipment: new Set([
     'manufacturer',
     'model',
@@ -238,6 +253,20 @@ const NON_ADMIN_CREATE_FIELDS = {
     'attachments',
   ]),
   documents: new Set(['type', 'number', 'client', 'clientId', 'rental', 'rentalId', 'date', 'fileName', 'fileUrl', 'comment', 'attachments']),
+  debt_collection_plans: new Set([
+    'clientId',
+    'clientName',
+    'responsibleUserId',
+    'responsibleName',
+    'status',
+    'priority',
+    'lastContactDate',
+    'promisedPaymentDate',
+    'nextActionDate',
+    'nextActionType',
+    'comment',
+    'result',
+  ]),
 };
 
 const RENTAL_MANAGER_APPROVAL_FIELDS = new Set([
@@ -387,6 +416,8 @@ function getEntityManagerKeys(entity) {
     entity?.managerUserId,
     entity?.manager,
     entity?.responsibleManager,
+    entity?.responsibleUserId,
+    entity?.responsibleName,
     entity?.createdBy,
     entity?.createdById,
   ]);
@@ -594,6 +625,7 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'clients':
     case 'documents':
     case 'payments':
+    case 'debt_collection_plans':
       if (isOfficeManager(user)) return true;
       if (isRentalManager(user) || isSalesManager(user)) return matchesScopedRental(entity, user, readData) || matchesUserManager(entity, user);
       return false;
@@ -693,6 +725,9 @@ function canMutateEntity(collection, entity, user, readData) {
     return false;
   }
   if (collection === 'payments') {
+    return isOfficeManager(user);
+  }
+  if (collection === 'debt_collection_plans') {
     return isOfficeManager(user);
   }
   if (collection === 'equipment') {
@@ -834,6 +869,9 @@ function assertCanCreateCollection(collection, user, input = {}, readData) {
   }
   if (collection === 'payments' && !(isAdmin(user) || isOfficeManager(user))) {
     throw forbidden('Платежи можно создавать только администратору или офис-менеджеру.');
+  }
+  if (collection === 'debt_collection_plans' && !(isAdmin(user) || isOfficeManager(user))) {
+    throw forbidden('Планы взыскания можно создавать только администратору или офис-менеджеру.');
   }
   if (collection === 'app_settings' && !isAdmin(user)) {
     throw forbidden();

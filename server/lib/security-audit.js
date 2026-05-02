@@ -23,6 +23,8 @@ const SAFE_FIELD_ALLOWLIST = new Set([
   'serialNumber',
   'manager',
   'managerId',
+  'responsibleUserId',
+  'responsibleName',
   'date',
   'returnDate',
   'startDate',
@@ -37,6 +39,12 @@ const SAFE_FIELD_ALLOWLIST = new Set([
   'paidAmount',
   'currency',
   'priority',
+  'lastContactDate',
+  'promisedPaymentDate',
+  'nextActionDate',
+  'nextActionType',
+  'comment',
+  'result',
   'source',
   'createdAt',
   'updatedAt',
@@ -70,6 +78,9 @@ function actionLabel(action) {
   if (value === 'rentals.return') return 'Возврат аренды';
   if (value === 'users.deactivate') return 'Деактивация пользователя';
   if (value === 'users.status_change') return 'Смена статуса пользователя';
+  if (value === 'debt_collection_plans.status_change') return 'Смена статуса взыскания';
+  if (value === 'debt_collection_plans.close') return 'Закрытие плана взыскания';
+  if (value === 'debt_collection_plans.comment') return 'Комментарий по взысканию';
   if (value.endsWith('.create')) return 'Создание записи';
   if (value.endsWith('.update')) return 'Изменение записи';
   if (value.endsWith('.delete')) return 'Удаление записи';

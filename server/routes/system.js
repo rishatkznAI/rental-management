@@ -113,6 +113,170 @@ function mediaProxyAgent(parsedUrl) {
   return parsedUrl.protocol === 'https:' ? mediaProxyHttpsAgent : mediaProxyHttpAgent;
 }
 
+const SYSTEM_DATA_COLLECTIONS = [
+  'equipment',
+  'rentals',
+  'clients',
+  'service',
+  'documents',
+  'payments',
+  'deliveries',
+  'users',
+  'owners',
+  'mechanics',
+  'delivery_carriers',
+  'app_settings',
+];
+
+const SYSTEM_DATA_COLLECTION_SET = new Set(SYSTEM_DATA_COLLECTIONS);
+const SENSITIVE_KEY_PATTERN = /(password|passhash|token|secret|apikey|api_key|authorization|cookie|session|webhook)/i;
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sanitizeSystemValue(value, stats) {
+  if (Array.isArray(value)) {
+    return value.map(item => sanitizeSystemValue(item, stats));
+  }
+  if (!isPlainObject(value)) return value;
+
+  return Object.entries(value).reduce((acc, [key, child]) => {
+    if (SENSITIVE_KEY_PATTERN.test(key)) {
+      stats.strippedSensitiveFields += 1;
+      return acc;
+    }
+    acc[key] = sanitizeSystemValue(child, stats);
+    return acc;
+  }, {});
+}
+
+function sanitizeSystemRecord(collection, record, stats) {
+  const sanitized = sanitizeSystemValue(record, stats);
+  if (collection === 'app_settings' && SENSITIVE_KEY_PATTERN.test(String(sanitized?.key || ''))) {
+    stats.skippedSensitiveSettings += 1;
+    return null;
+  }
+  return sanitized;
+}
+
+function normalizeSystemImportPayload(payload) {
+  if (payload?.collections && isPlainObject(payload.collections)) return payload.collections;
+  if (isPlainObject(payload)) {
+    const knownKeys = Object.keys(payload).filter(key => SYSTEM_DATA_COLLECTION_SET.has(key));
+    if (knownKeys.length > 0) {
+      return knownKeys.reduce((acc, key) => {
+        acc[key] = payload[key];
+        return acc;
+      }, {});
+    }
+  }
+  return {};
+}
+
+function buildSystemDataExport(readData) {
+  const stats = { strippedSensitiveFields: 0, skippedSensitiveSettings: 0 };
+  const collections = {};
+  for (const collection of SYSTEM_DATA_COLLECTIONS) {
+    const source = readData(collection) || [];
+    const list = Array.isArray(source) ? source : [];
+    collections[collection] = list
+      .map(item => sanitizeSystemRecord(collection, item, stats))
+      .filter(item => item !== null);
+  }
+  return {
+    ok: true,
+    format: 'rental-management-system-data',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    collections,
+    warnings: [
+      ...(stats.strippedSensitiveFields > 0 ? [`Удалено чувствительных полей: ${stats.strippedSensitiveFields}`] : []),
+      ...(stats.skippedSensitiveSettings > 0 ? [`Пропущено чувствительных app_settings: ${stats.skippedSensitiveSettings}`] : []),
+    ],
+  };
+}
+
+function analyzeSystemDataImport(payload, readData) {
+  const rawCollections = normalizeSystemImportPayload(payload);
+  const unknownCollections = Object.keys(rawCollections).filter(name => !SYSTEM_DATA_COLLECTION_SET.has(name));
+  const stats = { strippedSensitiveFields: 0, skippedSensitiveSettings: 0 };
+  const collections = {};
+  const duplicates = {};
+  const conflicts = {};
+  const invalidCollections = [];
+  const sanitizedCollections = {};
+
+  for (const collection of SYSTEM_DATA_COLLECTIONS) {
+    if (!(collection in rawCollections)) continue;
+    const rawValue = rawCollections[collection];
+    if (!Array.isArray(rawValue)) {
+      invalidCollections.push(collection);
+      continue;
+    }
+
+    const sanitized = rawValue
+      .map(item => sanitizeSystemRecord(collection, item, stats))
+      .filter(item => item !== null);
+    sanitizedCollections[collection] = sanitized;
+    collections[collection] = {
+      incoming: sanitized.length,
+      existing: Array.isArray(readData(collection)) ? (readData(collection) || []).length : 0,
+    };
+
+    const seen = new Set();
+    const duplicateIds = new Set();
+    sanitized.forEach(item => {
+      const id = String(item?.id || '').trim();
+      if (!id) return;
+      if (seen.has(id)) duplicateIds.add(id);
+      seen.add(id);
+    });
+    if (duplicateIds.size > 0) duplicates[collection] = Array.from(duplicateIds);
+
+    const existingById = new Map((readData(collection) || [])
+      .filter(item => item?.id)
+      .map(item => [String(item.id), sanitizeSystemRecord(collection, item, { strippedSensitiveFields: 0, skippedSensitiveSettings: 0 })]));
+    const conflictIds = sanitized
+      .filter(item => item?.id && existingById.has(String(item.id)))
+      .filter(item => JSON.stringify(existingById.get(String(item.id))) !== JSON.stringify(item))
+      .map(item => String(item.id));
+    if (conflictIds.length > 0) conflicts[collection] = conflictIds.slice(0, 50);
+  }
+
+  const blockingErrors = [
+    ...unknownCollections.map(name => `Неизвестная коллекция: ${name}`),
+    ...invalidCollections.map(name => `Коллекция ${name} должна быть массивом`),
+    ...Object.entries(duplicates).map(([name, ids]) => `Дубликаты id в ${name}: ${ids.join(', ')}`),
+  ];
+
+  return {
+    ok: blockingErrors.length === 0,
+    dryRun: true,
+    collections,
+    unknownCollections,
+    duplicateIds: duplicates,
+    conflicts,
+    strippedSensitiveFields: stats.strippedSensitiveFields,
+    skippedSensitiveSettings: stats.skippedSensitiveSettings,
+    errors: blockingErrors,
+    sanitizedCollections,
+  };
+}
+
+function mergeImportedUsers(incoming, existingUsers) {
+  const existingById = new Map((existingUsers || []).map(user => [String(user?.id || ''), user]));
+  return incoming.map(user => {
+    const existing = existingById.get(String(user?.id || ''));
+    if (!existing) return user;
+    const preserved = {};
+    for (const [key, value] of Object.entries(existing)) {
+      if (SENSITIVE_KEY_PATTERN.test(key)) preserved[key] = value;
+    }
+    return { ...user, ...preserved };
+  });
+}
+
 function registerSystemRoutes(app, deps) {
   const {
     readData,
@@ -380,6 +544,59 @@ function registerSystemRoutes(app, deps) {
       },
       endpoints,
     });
+  });
+
+  app.get('/api/admin/system-data/export', requireAuth, requireAdmin, (req, res) => {
+    const payload = buildSystemDataExport(readData);
+    auditLog?.(req, {
+      action: 'system_data.export',
+      entityType: 'system_data',
+      after: {
+        collections: Object.fromEntries(Object.entries(payload.collections).map(([name, list]) => [name, list.length])),
+        warnings: payload.warnings.length,
+      },
+    });
+    return res.json(payload);
+  });
+
+  app.post('/api/admin/system-data/import/dry-run', requireAuth, requireAdmin, (req, res) => {
+    const analysis = analyzeSystemDataImport(req.body, readData);
+    const { sanitizedCollections, ...publicAnalysis } = analysis;
+    return res.status(analysis.ok ? 200 : 400).json(publicAnalysis);
+  });
+
+  app.post('/api/admin/system-data/import', requireAuth, requireAdmin, (req, res) => {
+    if (req.body?.confirm !== true) {
+      return res.status(400).json({ ok: false, error: 'Import requires confirm: true after dry-run.' });
+    }
+
+    const analysis = analyzeSystemDataImport(req.body, readData);
+    if (!analysis.ok) {
+      const { sanitizedCollections, ...publicAnalysis } = analysis;
+      return res.status(400).json(publicAnalysis);
+    }
+
+    const imported = {};
+    for (const [collection, list] of Object.entries(analysis.sanitizedCollections)) {
+      const nextList = collection === 'users'
+        ? mergeImportedUsers(list, readData('users') || [])
+        : list;
+      writeData(collection, nextList);
+      imported[collection] = nextList.length;
+    }
+
+    auditLog?.(req, {
+      action: 'system_data.import',
+      entityType: 'system_data',
+      after: {
+        imported,
+        conflicts: Object.fromEntries(Object.entries(analysis.conflicts).map(([name, ids]) => [name, ids.length])),
+        strippedSensitiveFields: analysis.strippedSensitiveFields,
+      },
+    });
+
+    const { sanitizedCollections, ...publicAnalysis } = analysis;
+    return res.json({ ...publicAnalysis, ok: true, dryRun: false, imported });
   });
 
   app.get('/api/admin/rental-link-diagnostics', requireAuth, requireAdmin, (req, res) => {

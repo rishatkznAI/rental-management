@@ -596,6 +596,7 @@ export default function Settings() {
         {/* ── Данные системы ────────────────────────────────────────────────── */}
         <TabsContent value="data">
           <div className="space-y-6">
+            <SystemDataBackupSection canManageData={can('edit', 'admin_panel')} />
             <DataManagementSection canManageData={can('edit', 'admin_panel')} />
             <DataResetSection />
           </div>
@@ -1783,6 +1784,18 @@ function downloadCSV(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function downloadJSON(content: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(content, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function parseCSVRow(line: string) {
   const result: string[] = [];
   let current = '';
@@ -1904,6 +1917,19 @@ interface RentalImportPreviewRow {
   equipmentId?: string;
 }
 
+type SystemDataImportAnalysis = {
+  ok: boolean;
+  dryRun: boolean;
+  collections: Record<string, { incoming: number; existing: number }>;
+  unknownCollections: string[];
+  duplicateIds: Record<string, string[]>;
+  conflicts: Record<string, string[]>;
+  strippedSensitiveFields: number;
+  skippedSensitiveSettings: number;
+  errors: string[];
+  imported?: Record<string, number>;
+};
+
 const GANTT_STATUS_IMPORT_MAP: Record<string, GanttRentalData['status']> = {
   active: 'active',
   created: 'created',
@@ -1932,6 +1958,190 @@ const PAYMENT_STATUS_IMPORT_MAP: Record<string, GanttRentalData['paymentStatus']
   'не оплачено': 'unpaid',
   'частично': 'partial',
 };
+
+function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) {
+  const queryClient = useQueryClient();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [selectedPayload, setSelectedPayload] = React.useState<unknown | null>(null);
+  const [selectedFileName, setSelectedFileName] = React.useState('');
+  const [analysis, setAnalysis] = React.useState<SystemDataImportAnalysis | null>(null);
+  const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isExporting, setIsExporting] = React.useState(false);
+  const [isChecking, setIsChecking] = React.useState(false);
+  const [isImporting, setIsImporting] = React.useState(false);
+
+  const handleExport = React.useCallback(async () => {
+    setMessage(null);
+    setIsExporting(true);
+    try {
+      const payload = await api.get<unknown>('/api/admin/system-data/export');
+      downloadJSON(payload, `system-data-${new Date().toISOString().slice(0, 10)}.json`);
+      setMessage({ type: 'success', text: 'JSON-экспорт системных данных подготовлен.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось выгрузить системные данные.' });
+    } finally {
+      setIsExporting(false);
+    }
+  }, []);
+
+  const handleFileSelected = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    setMessage(null);
+    setAnalysis(null);
+    setSelectedPayload(null);
+    setSelectedFileName('');
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as unknown;
+      setSelectedPayload(parsed);
+      setSelectedFileName(file.name);
+      setIsChecking(true);
+      const result = await api.post<SystemDataImportAnalysis>('/api/admin/system-data/import/dry-run', parsed);
+      setAnalysis(result);
+      setMessage({ type: 'success', text: 'Dry-run проверка пройдена. Проверьте конфликты перед импортом.' });
+    } catch (error) {
+      const body = (error as { body?: unknown })?.body as SystemDataImportAnalysis | undefined;
+      if (body?.collections) {
+        setAnalysis(body);
+      }
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось проверить JSON-файл.' });
+    } finally {
+      setIsChecking(false);
+    }
+  }, []);
+
+  const handleImport = React.useCallback(async () => {
+    if (!selectedPayload || !analysis?.ok) return;
+    setMessage(null);
+    setIsImporting(true);
+    try {
+      const result = await api.post<SystemDataImportAnalysis>('/api/admin/system-data/import', {
+        ...(selectedPayload && typeof selectedPayload === 'object' ? selectedPayload as Record<string, unknown> : { collections: {} }),
+        confirm: true,
+      });
+      setAnalysis(result);
+      setMessage({ type: 'success', text: 'Импорт выполнен. Данные обновлены из JSON-файла.' });
+      await queryClient.invalidateQueries();
+    } catch (error) {
+      const body = (error as { body?: unknown })?.body as SystemDataImportAnalysis | undefined;
+      if (body?.collections) setAnalysis(body);
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось импортировать системные данные.' });
+    } finally {
+      setIsImporting(false);
+    }
+  }, [analysis?.ok, queryClient, selectedPayload]);
+
+  const collectionRows = analysis ? Object.entries(analysis.collections) : [];
+  const conflictCount = analysis
+    ? Object.values(analysis.conflicts || {}).reduce((sum, ids) => sum + ids.length, 0)
+    : 0;
+  const duplicateCount = analysis
+    ? Object.values(analysis.duplicateIds || {}).reduce((sum, ids) => sum + ids.length, 0)
+    : 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle>Безопасный export/import JSON</CardTitle>
+            <CardDescription>
+              Выгрузка и восстановление основных коллекций. Пароли, токены и secrets не экспортируются и не принимаются при импорте.
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => void handleExport()} disabled={!canManageData || isExporting}>
+              <Download className="h-4 w-4" />
+              {isExporting ? 'Готовим...' : 'Export JSON'}
+            </Button>
+            <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={!canManageData || isChecking || isImporting}>
+              <Upload className="h-4 w-4" />
+              Dry-run import
+            </Button>
+            <Button onClick={() => void handleImport()} disabled={!canManageData || !analysis?.ok || !selectedPayload || isImporting}>
+              {isImporting ? 'Импорт...' : 'Импортировать'}
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(event) => void handleFileSelected(event)}
+        />
+
+        {message && (
+          <div className={`rounded-lg border px-4 py-3 text-sm ${
+            message.type === 'success'
+              ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300'
+              : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'
+          }`}>
+            {message.text}
+          </div>
+        )}
+
+        <div className="grid gap-3 md:grid-cols-4">
+          <DiagnosticsField label="Файл" value={selectedFileName || 'Не выбран'} />
+          <DiagnosticsField label="Статус dry-run" value={
+            analysis ? <Badge variant={analysis.ok ? 'success' : 'danger'}>{analysis.ok ? 'Можно импортировать' : 'Есть блокеры'}</Badge> : 'Не выполнен'
+          } />
+          <DiagnosticsField label="Конфликты id" value={conflictCount} />
+          <DiagnosticsField label="Дубликаты id" value={duplicateCount} />
+        </div>
+
+        {analysis && (
+          <div className="space-y-4">
+            {(analysis.errors?.length || analysis.unknownCollections?.length) ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                <p className="font-medium">Импорт заблокирован</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {(analysis.errors || []).map(error => <li key={error}>{error}</li>)}
+                </ul>
+              </div>
+            ) : null}
+
+            {(analysis.strippedSensitiveFields > 0 || analysis.skippedSensitiveSettings > 0) && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                Удалено чувствительных полей: {analysis.strippedSensitiveFields}. Пропущено secret-настроек: {analysis.skippedSensitiveSettings}.
+              </div>
+            )}
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Коллекция</TableHead>
+                  <TableHead>В файле</TableHead>
+                  <TableHead>Сейчас</TableHead>
+                  <TableHead>Конфликты</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {collectionRows.map(([name, item]) => (
+                  <TableRow key={name}>
+                    <TableCell className="font-mono text-xs">{name}</TableCell>
+                    <TableCell>{item.incoming}</TableCell>
+                    <TableCell>{item.existing}</TableCell>
+                    <TableCell>
+                      {(analysis.conflicts?.[name]?.length || 0) > 0
+                        ? <Badge variant="warning">{analysis.conflicts[name].length}</Badge>
+                        : <Badge variant="success">0</Badge>}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function DataManagementSection({ canManageData }: { canManageData: boolean }) {
   const { user } = useAuth();

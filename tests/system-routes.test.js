@@ -66,6 +66,16 @@ async function getJson(baseUrl, path) {
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
 
+async function postJson(baseUrl, path, body) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  return { status: response.status, body: text ? JSON.parse(text) : null };
+}
+
 test('/api/bot-test requires explicit chatId or env chat id', async () => {
   const previousEnabled = process.env.ENABLE_BOT_TEST;
   const previousChatId = process.env.BOT_TEST_CHAT_ID;
@@ -150,3 +160,99 @@ test('/api/admin/production-diagnostics is admin-only', async () => {
   });
 });
 
+test('/api/admin/system-data/export returns safe JSON without passwords or secrets', async () => {
+  const collections = {
+    equipment: [{ id: 'EQ-1', serialNumber: 'SN-1' }],
+    users: [{ id: 'U-1', email: 'admin@example.test', password: 'secret', tokenVersion: 7, name: 'Админ' }],
+    app_settings: [
+      { id: 'S-public', key: 'theme', value: 'dark' },
+      { id: 'S-secret', key: 'bot_secret', value: 'do-not-export' },
+    ],
+  };
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/system-data/export');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.format, 'rental-management-system-data');
+    assert.equal(response.body.collections.equipment.length, 1);
+    assert.equal(response.body.collections.users[0].password, undefined);
+    assert.equal(response.body.collections.users[0].tokenVersion, undefined);
+    assert.equal(response.body.collections.app_settings.length, 1);
+    assert.equal(response.body.collections.app_settings[0].key, 'theme');
+    assert.doesNotMatch(JSON.stringify(response.body), /secret|do-not-export/i);
+  });
+});
+
+test('/api/admin/system-data/import dry-run reports counts unknown collections duplicates and conflicts', async () => {
+  const collections = {
+    equipment: [{ id: 'EQ-1', serialNumber: 'OLD' }],
+    users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password' }],
+  };
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', {
+      collections: {
+        equipment: [
+          { id: 'EQ-1', serialNumber: 'NEW' },
+          { id: 'EQ-1', serialNumber: 'DUP' },
+        ],
+        unknown: [{ id: 'X-1' }],
+        users: [{ id: 'U-1', email: 'admin@example.test', password: 'incoming-password' }],
+      },
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.ok, false);
+    assert.equal(response.body.collections.equipment.incoming, 2);
+    assert.deepEqual(response.body.unknownCollections, ['unknown']);
+    assert.deepEqual(response.body.duplicateIds.equipment, ['EQ-1']);
+    assert.deepEqual(response.body.conflicts.equipment, ['EQ-1', 'EQ-1']);
+    assert.equal(response.body.strippedSensitiveFields, 1);
+    assert.doesNotMatch(JSON.stringify(response.body), /incoming-password|existing-password/);
+  });
+});
+
+test('/api/admin/system-data/import requires confirmation and preserves existing user secrets', async () => {
+  const collections = {
+    equipment: [{ id: 'EQ-1', serialNumber: 'OLD' }],
+    users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password', tokenVersion: 3 }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+      collections: { equipment: [{ id: 'EQ-2', serialNumber: 'NEW' }] },
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(writes.length, 0);
+
+    const imported = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        equipment: [{ id: 'EQ-2', serialNumber: 'NEW' }],
+        users: [{ id: 'U-1', email: 'restored@example.test', password: 'incoming-password', tokenVersion: 99 }],
+      },
+    });
+    assert.equal(imported.status, 200);
+    assert.deepEqual(imported.body.imported, { equipment: 1, users: 1 });
+    assert.equal(collections.equipment[0].id, 'EQ-2');
+    assert.equal(collections.users[0].email, 'restored@example.test');
+    assert.equal(collections.users[0].password, 'existing-password');
+    assert.equal(collections.users[0].tokenVersion, 3);
+    assert.doesNotMatch(JSON.stringify(imported.body), /incoming-password|existing-password/);
+  });
+});

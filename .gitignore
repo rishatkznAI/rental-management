@@ -4,6 +4,7 @@ node_modules/
 # Build output
 dist/
 dist-ssr/
+coverage/
 
 # Environment files
 .env
@@ -41,5 +42,10 @@ test-results/
 server/.env
 server/data/*.json
 server/data/*.sqlite
+server/data/*.sqlite-shm
+server/data/*.sqlite-wal
 server/data/*.sqlite-*
+server/data/backups/*.sqlite
+server/data/backups/*.sqlite-shm
+server/data/backups/*.sqlite-wal
 !server/data/.gitkeep

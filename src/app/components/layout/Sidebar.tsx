@@ -26,6 +26,7 @@ import {
   Shield,
   UserCog,
   WalletCards,
+  ListChecks,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -52,6 +53,7 @@ import { LiftLogo } from './LiftLogo';
 
 const navigation: { name: string; href: string; icon: React.ElementType; section: Section }[] = [
   { name: 'Дашборд',      href: '/',          icon: LayoutDashboard, section: 'dashboard'  },
+  { name: 'Центр задач',  href: '/tasks',     icon: ListChecks,      section: 'tasks_center' },
   { name: 'Техника',      href: '/equipment', icon: Truck,           section: 'equipment'  },
   { name: 'GSM',          href: '/gsm',       icon: MapPinned,       section: 'gsm'        },
   { name: 'База знаний',  href: '/knowledge-base', icon: GraduationCap, section: 'knowledge_base' },

@@ -107,6 +107,7 @@ const { registerRentalChangeRequestRoutes } = require('./routes/rental-change-re
 const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
 const { registerSystemRoutes } = require('./routes/system');
+const { registerTasksCenterRoutes } = require('./routes/tasks-center');
 const { normalizeServiceTicketList } = require('./lib/service-dto');
 const {
   DB_PATH,
@@ -1173,6 +1174,14 @@ apiRouter.use(registerDebtCollectionPlanRoutes({
   auditLog,
   generateId,
   idPrefixes: ID_PREFIXES,
+  nowIso,
+}));
+
+apiRouter.use(registerTasksCenterRoutes({
+  readData,
+  requireAuth,
+  canReadCollection,
+  accessControl,
   nowIso,
 }));
 

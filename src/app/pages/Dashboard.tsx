@@ -20,7 +20,7 @@ import {
   Plus, TrendingUp, AlertTriangle, Wrench, DollarSign, Calendar,
   User, Target, FileText, CreditCard, RefreshCw, CheckCircle, Truck,
   ShieldAlert, Clock, Ban, ArrowRight, ChevronDown, ChevronUp,
-  PackageX, ClipboardX, Zap,
+  PackageX, ClipboardX, Zap, ListChecks,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { formatCurrency, formatDate, getRentalDays } from '../lib/utils';
@@ -61,6 +61,7 @@ import type { GanttRentalData } from '../mock-data';
 import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
 import { buildDebtCollectionDashboardSummary } from '../lib/debtCollectionPlans.js';
+import { tasksCenterService } from '../services/tasks-center.service';
 import {
   buildActiveRentalFleetLookup,
   calculateCurrentFleetUtilization,
@@ -133,6 +134,11 @@ export default function Dashboard() {
   const { data: documents = [] }  = useDocumentsList();
   const { data: debtCollectionPlansResponse } = useDebtCollectionPlans();
   const debtCollectionPlans = debtCollectionPlansResponse?.plans ?? [];
+  const { data: tasksCenterData } = useQuery({
+    queryKey: ['tasks-center', 'dashboard-summary'],
+    queryFn: tasksCenterService.getAll,
+    staleTime: 60_000,
+  });
   const { data: ganttRentals = [] } = useGanttData();
   const { data: mechanicWorkload } = useQuery<MechanicsWorkloadReport>({
     queryKey: ['reports', 'mechanicsWorkload'],
@@ -219,6 +225,7 @@ export default function Dashboard() {
   const canViewService = can('view', 'service');
   const canViewEquipment = can('view', 'equipment');
   const canViewClients = can('view', 'clients');
+  const canViewTasksCenter = can('view', 'tasks_center');
   const shouldShowAttentionSummary =
     user?.role === 'Администратор'
     || user?.role === 'Офис-менеджер'
@@ -1441,6 +1448,27 @@ export default function Dashboard() {
       )}
 
       {/* Header old block removed */}
+
+      {canViewTasksCenter && (
+        <Card className={dashboardCardClass}>
+          <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary">
+                <ListChecks className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Задачи на сегодня</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Critical: {tasksCenterData?.summary?.critical ?? 0} · High: {tasksCenterData?.summary?.high ?? 0} · Просрочено: {tasksCenterData?.summary?.overdue ?? 0} · Сегодня: {tasksCenterData?.summary?.today ?? 0}
+                </p>
+              </div>
+            </div>
+            <Button asChild variant="secondary">
+              <Link to="/tasks">Открыть центр задач</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {shouldShowAttentionSummary && (
         <section className={dashboardSectionClass}>

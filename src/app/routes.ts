@@ -44,6 +44,7 @@ export const router = createHashRouter([
     }),
     children: [
       { index: true, lazy: lazyPage('./pages/Dashboard') },
+      { path: 'tasks', lazy: lazyPage('./pages/TasksCenter') },
       { path: 'planner', lazy: lazyPage('./pages/Planner') },
       { path: 'equipment', lazy: lazyPage('./pages/Equipment') },
       { path: 'equipment/new', lazy: lazyPage('./pages/EquipmentNew') },

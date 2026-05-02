@@ -18,6 +18,7 @@ import { MECHANIC_ROLES, WARRANTY_MECHANIC_ROLE, normalizeUserRole } from './use
 
 export type Section =
   | 'dashboard'
+  | 'tasks_center'
   | 'equipment'
   | 'gsm'
   | 'knowledge_base'
@@ -52,6 +53,7 @@ const VIEW_CREATE_EDIT: Action[] = ['view', 'create', 'edit'];
 const PERMISSIONS: Record<string, RolePermissions> = {
   'Администратор': {
     dashboard:        ALL,
+    tasks_center:     VIEW,
     equipment:        ALL,
     gsm:              ALL,
     knowledge_base:   ALL,
@@ -78,6 +80,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   },
   'Менеджер по аренде': {
     dashboard:        VIEW,        // только своё
+    tasks_center:     VIEW,
     equipment:        VIEW,
     gsm:              VIEW,
     knowledge_base:   ['view', 'create', 'edit'],
@@ -96,6 +99,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   },
   'Офис-менеджер': {
     dashboard:        VIEW,
+    tasks_center:     VIEW,
     equipment:        ALL,
     gsm:              ALL,
     knowledge_base:   ['view', 'create', 'edit'],
@@ -114,6 +118,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   },
   'Менеджер по продажам': {
     dashboard:        VIEW,
+    tasks_center:     VIEW,
     equipment:        VIEW,
     gsm:              VIEW,
     knowledge_base:   ['view', 'create', 'edit'],
@@ -125,6 +130,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     profile_settings: ['view', 'edit'],
   },
   [WARRANTY_MECHANIC_ROLE]: {
+    tasks_center:     VIEW,
     equipment:        VIEW,
     sales:            VIEW,
     rentals:          VIEW,
@@ -133,6 +139,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   ...Object.fromEntries(
     MECHANIC_ROLES.map(role => [role, {
       // dashboard: нет
+      tasks_center:     VIEW,
       equipment:        VIEW,
       gsm:              VIEW,
       planner:          ALL,
@@ -160,6 +167,7 @@ export function pathToRequiredAction(pathname: string): { section: Section; acti
 
 export function pathToSection(pathname: string): Section | null {
   if (pathname === '/')                       return 'dashboard';
+  if (pathname.startsWith('/tasks'))          return 'tasks_center';
   if (pathname.startsWith('/equipment'))      return 'equipment';
   if (pathname.startsWith('/gsm'))            return 'gsm';
   if (pathname.startsWith('/knowledge-base')) return 'knowledge_base';
@@ -185,6 +193,7 @@ export function pathToSection(pathname: string): Section | null {
 
 const SECTION_PATHS: Array<[Section, string]> = [
   ['dashboard',  '/'],
+  ['tasks_center', '/tasks'],
   ['equipment',  '/equipment'],
   ['gsm',        '/gsm'],
   ['knowledge_base', '/knowledge-base'],

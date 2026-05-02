@@ -11,7 +11,7 @@ export interface SidebarNavGroup {
 export const SIDEBAR_NAV_GROUP_SETTING_KEY = 'sidebar_navigation_groups';
 
 export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
-  { id: 'main', title: 'Главное', items: ['dashboard', 'equipment', 'gsm', 'knowledge_base', 'sales', 'deliveries', 'rentals'] },
+  { id: 'main', title: 'Главное', items: ['dashboard', 'tasks_center', 'equipment', 'gsm', 'knowledge_base', 'sales', 'deliveries', 'rentals'] },
   { id: 'operations', title: 'Операции', items: ['planner', 'service', 'service_vehicles'] },
   { id: 'data', title: 'Данные', items: ['clients', 'documents', 'payments', 'finance', 'approvals'] },
   { id: 'other', title: 'Прочее', items: ['bots', 'reports', 'admin_panel'] },
@@ -57,6 +57,7 @@ export function normalizeSidebarGroups(value: unknown): Record<Section, SidebarN
 
 export const SIDEBAR_SECTION_LABELS: Record<Section, string> = {
   dashboard: 'Дашборд',
+  tasks_center: 'Центр задач',
   equipment: 'Техника',
   gsm: 'GSM',
   knowledge_base: 'База знаний',

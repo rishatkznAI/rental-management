@@ -60,6 +60,7 @@ import type {
 import type { GanttRentalData } from '../mock-data';
 import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
+import { buildDocumentControl } from '../lib/documentControl.js';
 import { buildDebtCollectionDashboardSummary } from '../lib/debtCollectionPlans.js';
 import { tasksCenterService } from '../services/tasks-center.service';
 import {
@@ -263,6 +264,17 @@ export default function Dashboard() {
       today: today.toISOString().slice(0, 10),
     }),
     [clientDebtAgingRows, documents, equipmentList, rentalDebtRows, tickets, today, viewPlannerRentals],
+  );
+  const documentControl = useMemo(
+    () => buildDocumentControl({
+      rentals: viewRentals,
+      documents,
+      clients,
+      equipment: equipmentList,
+      today: today.toISOString().slice(0, 10),
+      limit: 10,
+    }),
+    [clients, documents, equipmentList, today, viewRentals],
   );
   const debtCollectionSummary = useMemo(
     () => buildDebtCollectionDashboardSummary({
@@ -1554,25 +1566,38 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                <div className={`rounded-xl border p-4 ${attentionSummary.documents.unsigned > 0 ? 'border-amber-300 bg-amber-50/60 dark:border-amber-900/70 dark:bg-amber-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
+                {canViewDocuments && (
+                <div className={`rounded-xl border p-4 ${documentControl.kpi.unsignedDocuments + documentControl.kpi.closedRentalsWithoutClosingDocs + documentControl.kpi.overdueSignature > 0 ? 'border-amber-300 bg-amber-50/60 dark:border-amber-900/70 dark:bg-amber-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white">Документы без подписи</p>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{attentionSummary.documents.unsigned} документов требуют контроля</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">Контроль документов</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Без подписи: {documentControl.kpi.unsignedDocuments} · закрытые без акта/УПД: {documentControl.kpi.closedRentalsWithoutClosingDocs}
+                      </p>
                     </div>
                     <FileText className="h-5 w-5 text-amber-500" />
                   </div>
+                  <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Отправлено без подписи: <strong>{documentControl.kpi.sentWaiting}</strong></div>
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Просрочено: <strong>{documentControl.kpi.overdueSignature}</strong></div>
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Без договора: <strong>{documentControl.kpi.rentalsWithoutContract}</strong></div>
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Без связи: <strong>{documentControl.kpi.orphanDocuments}</strong></div>
+                  </div>
                   <div className="mt-3 space-y-2">
-                    {attentionSummary.documents.items.length === 0 ? (
-                      <p className="text-sm text-emerald-600 dark:text-emerald-300">Нет неподписанных договоров и актов.</p>
-                    ) : attentionSummary.documents.items.map(item => (
-                      <div key={item.id || `${item.type}-${item.client}-${item.rental}`} className="rounded-lg bg-white/70 px-3 py-2 text-xs dark:bg-gray-900/60">
-                        <p className="font-medium text-gray-900 dark:text-white">{item.type} · {item.client}</p>
-                        <p className="text-gray-500 dark:text-gray-400">{item.rental} · {item.status} · {item.manager}</p>
+                    {documentControl.rows.length === 0 ? (
+                      <p className="text-sm text-emerald-600 dark:text-emerald-300">Критичных документных рисков нет.</p>
+                    ) : documentControl.rows.slice(0, 5).map(item => (
+                      <div key={item.id} className="rounded-lg bg-white/70 px-3 py-2 text-xs dark:bg-gray-900/60">
+                        <p className="font-medium text-gray-900 dark:text-white">{item.statusLabel} · {item.client}</p>
+                        <p className="text-gray-500 dark:text-gray-400">{item.rentalId || item.documentId || 'документ'} · {item.responsible}</p>
                       </div>
                     ))}
                   </div>
+                  <Button asChild variant="secondary" size="sm" className="mt-3">
+                    <Link to="/documents">Открыть контроль</Link>
+                  </Button>
                 </div>
+                )}
 
                 <div className={`rounded-xl border p-4 ${attentionSummary.service.unassigned + attentionSummary.service.waitingParts + attentionSummary.service.urgent > 0 ? 'border-orange-300 bg-orange-50/60 dark:border-orange-900/70 dark:bg-orange-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
                   <div className="flex items-center justify-between gap-3">

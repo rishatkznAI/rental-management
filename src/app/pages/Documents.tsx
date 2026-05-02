@@ -23,6 +23,7 @@ import { Textarea } from '../components/ui/textarea';
 import { getDocumentStatusBadge } from '../components/ui/badge';
 import { ClientCombobox } from '../components/ui/ClientCombobox';
 import {
+  AlertTriangle,
   CheckCircle2,
   Download,
   Eye,
@@ -37,6 +38,7 @@ import { useClientsList } from '../hooks/useClients';
 import { useCreateDocument, useDocumentsList, useUpdateDocument } from '../hooks/useDocuments';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
+import { buildDocumentControl, getDocumentControlStatusLabel } from '../lib/documentControl.js';
 import { downloadPrintableHtml, openPrintableHtml } from '../lib/serviceWorkOrder';
 import { formatDate, formatCurrency, formatDateTime } from '../lib/utils';
 import { mechanicsService } from '../services/mechanics.service';
@@ -56,7 +58,7 @@ import type {
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
-type DocumentsView = 'general' | 'mechanics';
+type DocumentsView = 'general' | 'control' | 'mechanics';
 
 const VALID_DOCUMENT_TYPES = new Set<DocumentType>(['contract', 'act', 'invoice', 'work_order']);
 const VALID_DOCUMENT_STATUSES = new Set<DocumentStatus>(['draft', 'signed', 'sent']);
@@ -309,6 +311,14 @@ export default function Documents() {
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [managerFilter, setManagerFilter] = React.useState<string>('all');
+  const [controlRiskFilter, setControlRiskFilter] = React.useState<string>('all');
+  const [controlStatusFilter, setControlStatusFilter] = React.useState<string>('all');
+  const [controlTypeFilter, setControlTypeFilter] = React.useState<string>('all');
+  const [controlClientFilter, setControlClientFilter] = React.useState<string>('all');
+  const [controlManagerFilter, setControlManagerFilter] = React.useState<string>('all');
+  const [controlOnlyOverdue, setControlOnlyOverdue] = React.useState(false);
+  const [controlOnlyClosedMissing, setControlOnlyClosedMissing] = React.useState(false);
+  const [controlOnlyUnsigned, setControlOnlyUnsigned] = React.useState(false);
   const [showFilters, setShowFilters] = React.useState(false);
   const [view, setView] = React.useState<DocumentsView>('general');
   const [mechanicSearch, setMechanicSearch] = React.useState('');
@@ -442,6 +452,35 @@ export default function Documents() {
     return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesClient && matchesRental && matchesManager;
   });
 
+  const documentControl = React.useMemo(() => buildDocumentControl({
+    rentals: rentals as Rental[],
+    documents,
+    clients: clients as Client[],
+    equipment: equipment as Equipment[],
+  }), [clients, documents, equipment, rentals]);
+  const controlRows = documentControl.rows;
+  const controlStatusOptions = React.useMemo(
+    () => Array.from(new Set(controlRows.map(row => row.status))).sort((left, right) =>
+      getDocumentControlStatusLabel(left).localeCompare(getDocumentControlStatusLabel(right), 'ru'),
+    ),
+    [controlRows],
+  );
+  const filteredControlRows = controlRows.filter(row => {
+    const matchesRisk = controlRiskFilter === 'all' || row.risk === controlRiskFilter;
+    const matchesStatus = controlStatusFilter === 'all' || row.status === controlStatusFilter;
+    const matchesType = controlTypeFilter === 'all' || row.documentType === controlTypeFilter;
+    const matchesClient = controlClientFilter === 'all' || row.clientId === controlClientFilter;
+    const matchesManager = controlManagerFilter === 'all' || row.responsible === controlManagerFilter;
+    const matchesOverdue = !controlOnlyOverdue || row.status === 'overdue_signature';
+    const matchesClosedMissing = !controlOnlyClosedMissing || (row.status === 'missing_closing_docs' && row.rentalClosed);
+    const matchesUnsigned = !controlOnlyUnsigned || ['unsigned', 'sent_waiting', 'overdue_signature'].includes(row.status);
+    return matchesRisk && matchesStatus && matchesType && matchesClient && matchesManager && matchesOverdue && matchesClosedMissing && matchesUnsigned;
+  });
+  const controlTypeOptions = React.useMemo(
+    () => Array.from(new Set(controlRows.map(row => row.documentType).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')),
+    [controlRows],
+  );
+
   const activeFilterCount = [
     search.trim() !== '',
     unsignedOnly,
@@ -450,6 +489,16 @@ export default function Documents() {
     typeFilter !== 'all',
     statusFilter !== 'all',
     managerFilter !== 'all',
+  ].filter(Boolean).length;
+  const controlActiveFilterCount = [
+    controlRiskFilter !== 'all',
+    controlStatusFilter !== 'all',
+    controlTypeFilter !== 'all',
+    controlClientFilter !== 'all',
+    controlManagerFilter !== 'all',
+    controlOnlyOverdue,
+    controlOnlyClosedMissing,
+    controlOnlyUnsigned,
   ].filter(Boolean).length;
 
   const filteredMechanics = React.useMemo(() => (
@@ -653,6 +702,13 @@ export default function Documents() {
             onClick={() => setView('general')}
           >
             Документы
+          </Button>
+          <Button
+            variant={view === 'control' ? 'default' : 'secondary'}
+            onClick={() => setView('control')}
+          >
+            <AlertTriangle className="h-4 w-4" />
+            Контроль
           </Button>
           <Button
             variant={view === 'mechanics' ? 'default' : 'secondary'}
@@ -1075,6 +1131,197 @@ export default function Documents() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+        </>
+      ) : view === 'control' ? (
+        <>
+          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Контроль документов</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Управленческий список аренд и документов, где не хватает договора, акта/УПД, подписи или ответственной связи.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+            {[
+              ['Всего документов', documentControl.kpi.totalDocuments],
+              ['Без подписи', documentControl.kpi.unsignedDocuments],
+              ['Отправлено без подписи', documentControl.kpi.sentWaiting],
+              ['Аренды без договора', documentControl.kpi.rentalsWithoutContract],
+              ['Закрытые без акта/УПД', documentControl.kpi.closedRentalsWithoutClosingDocs],
+              ['Просрочено подписание', documentControl.kpi.overdueSignature],
+              ['Документы без связи', documentControl.kpi.orphanDocuments],
+            ].map(([label, value]) => (
+              <div key={String(label)} className={`rounded-lg border p-4 ${
+                Number(value) > 0 && label !== 'Всего документов'
+                  ? 'border-amber-300 bg-amber-50/60 dark:border-amber-900/70 dark:bg-amber-950/20'
+                  : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
+              }`}>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button variant={controlOnlyOverdue ? 'default' : 'secondary'} onClick={() => setControlOnlyOverdue(value => !value)}>
+              Просроченные
+            </Button>
+            <Button variant={controlOnlyClosedMissing ? 'default' : 'secondary'} onClick={() => setControlOnlyClosedMissing(value => !value)}>
+              Закрытые без акта/УПД
+            </Button>
+            <Button variant={controlOnlyUnsigned ? 'default' : 'secondary'} onClick={() => setControlOnlyUnsigned(value => !value)}>
+              Без подписи
+            </Button>
+            <FilterButton activeCount={controlActiveFilterCount} onClick={() => setShowFilters(true)} />
+          </div>
+
+          <FilterDialog
+            open={showFilters}
+            onOpenChange={setShowFilters}
+            title="Фильтры контроля документов"
+            description="Отбери риски по статусу, типу документа, клиенту и ответственному."
+            onReset={() => {
+              setControlRiskFilter('all');
+              setControlStatusFilter('all');
+              setControlTypeFilter('all');
+              setControlClientFilter('all');
+              setControlManagerFilter('all');
+              setControlOnlyOverdue(false);
+              setControlOnlyClosedMissing(false);
+              setControlOnlyUnsigned(false);
+            }}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <FilterField label="Риск">
+                <Select value={controlRiskFilter} onValueChange={setControlRiskFilter}>
+                  <SelectTrigger className="app-filter-input">
+                    <SelectValue placeholder="Все риски" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все риски</SelectItem>
+                    <SelectItem value="critical">Критичный</SelectItem>
+                    <SelectItem value="high">Высокий</SelectItem>
+                    <SelectItem value="medium">Средний</SelectItem>
+                    <SelectItem value="low">Низкий</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              <FilterField label="Статус контроля">
+                <Select value={controlStatusFilter} onValueChange={setControlStatusFilter}>
+                  <SelectTrigger className="app-filter-input">
+                    <SelectValue placeholder="Все статусы" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все статусы</SelectItem>
+                    {controlStatusOptions.map(status => (
+                      <SelectItem key={status} value={status}>{getDocumentControlStatusLabel(status)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              <FilterField label="Тип документа">
+                <Select value={controlTypeFilter} onValueChange={setControlTypeFilter}>
+                  <SelectTrigger className="app-filter-input">
+                    <SelectValue placeholder="Все типы" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все типы</SelectItem>
+                    {controlTypeOptions.map(type => (
+                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              <FilterField label="Клиент">
+                <Select value={controlClientFilter} onValueChange={setControlClientFilter}>
+                  <SelectTrigger className="app-filter-input">
+                    <SelectValue placeholder="Все клиенты" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все клиенты</SelectItem>
+                    {(clients as Client[]).map(client => (
+                      <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              <FilterField label="Ответственный">
+                <Select value={controlManagerFilter} onValueChange={setControlManagerFilter}>
+                  <SelectTrigger className="app-filter-input">
+                    <SelectValue placeholder="Все ответственные" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все ответственные</SelectItem>
+                    {managerOptions.map(manager => (
+                      <SelectItem key={manager} value={manager}>{manager}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FilterField>
+            </div>
+          </FilterDialog>
+
+          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Риск</TableHead>
+                  <TableHead>Клиент</TableHead>
+                  <TableHead>Аренда</TableHead>
+                  <TableHead>Техника</TableHead>
+                  <TableHead>Документ</TableHead>
+                  <TableHead>Статус</TableHead>
+                  <TableHead>Дата</TableHead>
+                  <TableHead>Дней без подписи</TableHead>
+                  <TableHead>Ответственный</TableHead>
+                  <TableHead>Действие</TableHead>
+                  <TableHead>Ссылки</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredControlRows.map(row => (
+                  <TableRow key={row.id}>
+                    <TableCell>
+                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${
+                        row.risk === 'critical'
+                          ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                          : row.risk === 'high'
+                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                            : row.risk === 'medium'
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
+                              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                      }`}>
+                        {row.risk === 'critical' ? 'Критично' : row.risk === 'high' ? 'Высокий' : row.risk === 'medium' ? 'Средний' : 'Низкий'}
+                      </span>
+                    </TableCell>
+                    <TableCell>{row.client}</TableCell>
+                    <TableCell>{row.rentalId || '—'}</TableCell>
+                    <TableCell>{row.equipment}</TableCell>
+                    <TableCell>{row.documentType}</TableCell>
+                    <TableCell>{row.statusLabel}</TableCell>
+                    <TableCell>{formatDate(row.date)}</TableCell>
+                    <TableCell>{row.daysWithoutSignature > 0 ? row.daysWithoutSignature : '—'}</TableCell>
+                    <TableCell>{row.responsible}</TableCell>
+                    <TableCell>{row.action}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1 text-xs">
+                        {row.rentalUrl ? <a className="text-[--color-primary] hover:underline" href={row.rentalUrl}>Открыть аренду</a> : null}
+                        <a className="text-[--color-primary] hover:underline" href={row.documentsUrl}>Открыть документы</a>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            {filteredControlRows.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <CheckCircle2 className="mb-3 h-9 w-9 text-emerald-500" />
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">Рисков по выбранным фильтрам нет</h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Контроль документов не нашёл строк для действия.</p>
+              </div>
+            )}
+          </div>
         </>
       ) : (
         <>

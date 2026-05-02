@@ -33,7 +33,9 @@ function createState(overrides = {}) {
       { id: 'C-1', company: 'ООО Должник', manager: 'Руслан' },
       { id: 'C-2', company: 'ООО Чужой', manager: 'Анна' },
     ],
-    rentals: [],
+    rentals: [
+      { id: 'R-closed', clientId: 'C-1', client: 'ООО Должник', manager: 'Руслан', equipmentInv: 'SKY-1', status: 'closed', startDate: '2026-03-01', plannedReturnDate: '2026-04-15', actualReturnDate: '2026-04-15' },
+    ],
     gantt_rentals: [
       { id: 'GR-1', clientId: 'C-1', client: 'ООО Должник', manager: 'Руслан', equipmentInv: 'SKY-1', status: 'active', startDate: '2026-03-01', endDate: '2026-05-02', amount: 100000 },
       { id: 'GR-2', clientId: 'C-2', client: 'ООО Чужой', manager: 'Анна', equipmentInv: 'SKY-2', status: 'active', startDate: '2026-03-01', endDate: '2026-04-01', amount: 80000 },
@@ -44,6 +46,7 @@ function createState(overrides = {}) {
     ],
     documents: [
       { id: 'D-1', type: 'contract', status: 'sent', clientId: 'C-1', client: 'ООО Должник', rentalId: 'GR-1', manager: 'Руслан', date: '2026-05-01' },
+      { id: 'D-orphan', type: 'contract', status: 'signed', number: 'DOC-ORPHAN', manager: 'Руслан', date: '2026-05-01' },
     ],
     service: [
       { id: 'S-1', status: 'new', priority: 'high', equipment: 'SKY-1', reason: 'Не работает', createdAt: '2026-05-01' },
@@ -124,6 +127,7 @@ async function request(baseUrl, token) {
 test('tasks center requires auth and handles empty legacy data', async () => {
   const app = createApp(createState({
     clients: [],
+    rentals: [],
     gantt_rentals: [],
     payments: [],
     documents: [],
@@ -148,6 +152,9 @@ test('admin sees tasks from available sections with finance amount', async () =>
     const types = response.body.tasks.map(task => task.type);
     assert.ok(types.includes('rentals.return_today'));
     assert.ok(types.includes('documents.sent_unsigned'));
+    assert.ok(types.includes('documents.missing_contract'));
+    assert.ok(types.includes('documents.closed_missing_closing_docs'));
+    assert.ok(types.includes('documents.orphan'));
     assert.ok(types.includes('service.unassigned'));
     assert.ok(types.includes('deliveries.no_carrier'));
     assert.ok(types.includes('debt_collection.next_action_overdue'));

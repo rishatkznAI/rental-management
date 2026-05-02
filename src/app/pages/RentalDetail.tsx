@@ -36,6 +36,7 @@ import { equipmentService } from '../services/equipment.service';
 import { appendRentalHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { formatRentalAuditEvents } from '../lib/rentalAuditHistory.js';
+import { buildDocumentControl } from '../lib/documentControl.js';
 import {
   EXTENSION_REASONS,
   buildExtensionConflictDisplay,
@@ -169,6 +170,7 @@ export default function RentalDetail() {
   const canEditRentals = can('edit', 'rentals');
   const canEditRentalDates = canEditRentals;
   const canViewFinance = can('view', 'finance');
+  const canViewDocuments = can('view', 'documents');
   const isAdmin = user?.role === 'Администратор';
   const canCreateDocuments = can('create', 'documents');
   const canCreatePayments = can('create', 'payments');
@@ -262,6 +264,13 @@ export default function RentalDetail() {
   const selectedClient = clients.find(c => c.id === ((isEditing ? formState?.clientId : rental?.clientId) || ''))
     ?? clients.find(c => c.company === ((isEditing ? formState?.client : rental?.client) || ''));
   const relatedDocs = documents.filter(d => documentBelongsToRental(d, rental?.id));
+  const documentControl = useMemo(() => buildDocumentControl({
+    rentals,
+    documents,
+    clients,
+    equipment,
+  }), [clients, documents, equipment, rentals]);
+  const rentalDocumentSummary = rental?.id ? documentControl.getRentalSummary(rental.id) : null;
   const pendingChangeRequests = changeRequests.filter(request => request.rentalId === rental?.id && request.status === 'pending');
   const relatedInvoices = relatedDocs.filter(doc => doc.type === 'invoice');
   const relatedPayments = payments.filter(p => p.rentalId === rental?.id);
@@ -1439,17 +1448,55 @@ export default function RentalDetail() {
             </CardContent>
           </Card>
 
+          {canViewDocuments && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-[--color-primary]" />
-                Документы
+                Документы по аренде
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {rentalDocumentSummary && (
+                <div className={`rounded-lg border p-3 ${
+                  rentalDocumentSummary.risk === 'critical'
+                    ? 'border-red-300 bg-red-50/60 dark:border-red-900/70 dark:bg-red-950/20'
+                    : rentalDocumentSummary.risk === 'high'
+                      ? 'border-amber-300 bg-amber-50/60 dark:border-amber-900/70 dark:bg-amber-950/20'
+                      : rentalDocumentSummary.risk === 'medium'
+                        ? 'border-blue-200 bg-blue-50/60 dark:border-blue-900/70 dark:bg-blue-950/20'
+                        : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{rentalDocumentSummary.statusLabel}</p>
+                    <Badge variant={rentalDocumentSummary.risk === 'low' ? 'success' : rentalDocumentSummary.risk === 'critical' ? 'destructive' : 'warning'}>
+                      {rentalDocumentSummary.risk === 'low' ? 'OK' : 'Контроль'}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-gray-700 dark:text-gray-300">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Договор</span>
+                      <span className="font-medium">{rentalDocumentSummary.contract.label}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Акт/УПД</span>
+                      <span className="font-medium">{rentalDocumentSummary.closing.label}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Без подписи</span>
+                      <span className="font-medium">
+                        {rentalDocumentSummary.unsignedCount > 0
+                          ? `${rentalDocumentSummary.unsignedCount} · до ${rentalDocumentSummary.maxDaysWithoutSignature} дн.`
+                          : 'Нет'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {relatedDocs.length > 0 ? (
                 <div className="space-y-2">
-                  {relatedDocs.map(doc => (
+                  {relatedDocs.slice(0, 5).map(doc => (
                     <div key={doc.id} className="flex items-center justify-between rounded-lg border border-gray-200 p-2.5 dark:border-gray-700">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-gray-900 dark:text-white">{doc.number}</p>
@@ -1476,8 +1523,12 @@ export default function RentalDetail() {
                   ))}
                 </div>
               )}
+              <Button variant="secondary" size="sm" onClick={() => navigate('/documents')}>
+                Открыть документы
+              </Button>
             </CardContent>
           </Card>
+          )}
 
           <Card>
             <CardHeader>

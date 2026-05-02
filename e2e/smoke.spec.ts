@@ -270,6 +270,15 @@ test.describe('production smoke', () => {
     await expect(page.getByText(seed.rental.id).first()).toBeVisible();
     await expect(page.getByText(seed.equipment.inventoryNumber).first()).toBeVisible();
 
+    await page.getByRole('button', { name: /Контроль/ }).click();
+    await expect(page.getByText('Контроль документов').first()).toBeVisible();
+    await expect(page.getByText('Без подписи').first()).toBeVisible();
+    await expect(page.getByText(seed.client.company).first()).toBeVisible();
+    await expect(page.getByText('Отправлено, ждём подпись').first()).toBeVisible();
+    await expect(page.getByText(/NaN|undefined|null/)).toHaveCount(0);
+
+    await page.locator('main').getByRole('button', { name: /^Документы$/ }).click();
+
     await page.getByRole('button', { name: /Фильтры/ }).click();
     const filterDialog = page.getByRole('dialog', { name: 'Фильтры документов' });
     await expect(filterDialog.locator('.app-filter-label', { hasText: 'Клиент' })).toBeVisible();
@@ -284,10 +293,11 @@ test.describe('production smoke', () => {
 
     await navigateInApp(page, `/rentals/${seed.rental.id}`);
     await expect(page.getByRole('heading', { name: seed.rental.id })).toBeVisible();
+    await expect(page.getByText('Документы по аренде')).toBeVisible();
     await expect(page.getByText(seed.unsigned.number).first()).toBeVisible();
 
     await navigateInApp(page, '/');
-    await expect(page.getByText('Документы без подписи').first()).toBeVisible();
-    await expect(page.getByText('Есть договоры и акты, которые нужно довести до подписания')).toBeVisible();
+    await expect(page.getByText('Контроль документов').first()).toBeVisible();
+    await expect(page.getByText('Без подписи:').first()).toBeVisible();
   });
 });

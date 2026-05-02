@@ -5,6 +5,7 @@ const { normalizeRole } = require('../lib/role-groups');
 const OPEN_RENTAL_STATUSES = new Set(['active', 'confirmed', 'return_planned']);
 const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'ready']);
 const CLOSED_DEBT_PLAN_STATUSES = new Set(['closed']);
+const CLOSED_RENTAL_STATUSES = new Set(['closed', 'returned', 'completed', 'done']);
 
 function normalizeText(value) {
   return String(value ?? '').trim();
@@ -109,7 +110,44 @@ function isOpenService(ticket) {
 function isUnsignedDocument(doc) {
   const type = normalizeStatus(doc?.type);
   const status = normalizeStatus(doc?.status);
-  return ['contract', 'act'].includes(type) && status !== 'signed';
+  return ['contract', 'act', 'upd'].includes(type) && status !== 'signed';
+}
+
+function isContractDocument(doc) {
+  return normalizeStatus(doc?.type) === 'contract';
+}
+
+function isClosingDocument(doc) {
+  return ['act', 'upd'].includes(normalizeStatus(doc?.type));
+}
+
+function isSentUnsignedDocument(doc) {
+  return isUnsignedDocument(doc) && normalizeStatus(doc?.status) === 'sent';
+}
+
+function documentRentalId(doc) {
+  return normalizeText(doc?.rentalId || doc?.rental);
+}
+
+function documentClientId(doc) {
+  return normalizeText(doc?.clientId);
+}
+
+function documentSentDate(doc) {
+  return dateKey(doc?.sentAt || doc?.sentDate || doc?.date || doc?.createdAt);
+}
+
+function daysBetween(startKey, endKey) {
+  const start = dateKey(startKey);
+  const end = dateKey(endKey);
+  if (!start || !end) return 0;
+  const diff = new Date(`${end}T00:00:00Z`).getTime() - new Date(`${start}T00:00:00Z`).getTime();
+  if (!Number.isFinite(diff) || diff <= 0) return 0;
+  return Math.floor(diff / 86400000);
+}
+
+function isClosedRental(rental) {
+  return CLOSED_RENTAL_STATUSES.has(normalizeStatus(rental?.status)) || Boolean(rental?.actualReturnDate);
 }
 
 function isDebtPlanOpen(plan) {
@@ -156,6 +194,14 @@ function buildTasksCenterPayload(input) {
   const service = collectionData({ readData, accessControl, req, collection: 'service' });
   const deliveries = collectionData({ readData, accessControl, req, collection: 'deliveries' });
   const plans = collectionData({ readData, accessControl, req, collection: 'debt_collection_plans' });
+  const documentsByRentalId = new Map();
+  for (const doc of documents) {
+    const rentalId = documentRentalId(doc);
+    if (!rentalId) continue;
+    const list = documentsByRentalId.get(rentalId) || [];
+    list.push(doc);
+    documentsByRentalId.set(rentalId, list);
+  }
 
   for (const rental of ganttRentals.filter(isOpenRental)) {
     const due = dateKey(rental?.endDate || rental?.plannedReturnDate);
@@ -285,12 +331,14 @@ function buildTasksCenterPayload(input) {
   }
 
   for (const doc of documents.filter(isUnsignedDocument)) {
+    const sentDate = documentSentDate(doc);
+    const unsignedDays = daysBetween(sentDate, todayKey);
     tasks.push(makeTask({
-      type: normalizeStatus(doc?.status) === 'sent' ? 'documents.sent_unsigned' : 'documents.unsigned',
-      title: normalizeStatus(doc?.status) === 'sent' ? 'Документ отправлен, но не подписан' : 'Документ без подписи',
-      description: `${safeClientName(doc?.client)} · ${normalizeText(doc?.type) || 'документ'}`,
-      priority: normalizeStatus(doc?.status) === 'sent' ? 'high' : 'medium',
-      dueDate: dateKey(doc?.date) || '',
+      type: isSentUnsignedDocument(doc) && unsignedDays > 7 ? 'documents.overdue_signature' : isSentUnsignedDocument(doc) ? 'documents.sent_unsigned' : 'documents.unsigned',
+      title: isSentUnsignedDocument(doc) && unsignedDays > 7 ? 'Документ просрочен по подписанию' : isSentUnsignedDocument(doc) ? 'Документ отправлен, но не подписан' : 'Документ без подписи',
+      description: `${safeClientName(doc?.client)} · ${normalizeText(doc?.type) || 'документ'}${unsignedDays > 0 ? ` · ${unsignedDays} дн. без подписи` : ''}`,
+      priority: isSentUnsignedDocument(doc) && unsignedDays > 7 ? 'critical' : isSentUnsignedDocument(doc) ? 'high' : 'medium',
+      dueDate: sentDate || '',
       section: 'documents',
       entityType: 'documents',
       entityId: doc?.id,
@@ -300,6 +348,67 @@ function buildTasksCenterPayload(input) {
       actionUrl: '/documents',
       detectedAt: generatedAt,
     }));
+  }
+
+  for (const doc of documents) {
+    if (documentRentalId(doc) || documentClientId(doc)) continue;
+    tasks.push(makeTask({
+      type: 'documents.orphan',
+      title: 'Документ без связи с арендой или клиентом',
+      description: `${normalizeText(doc?.number) || normalizeText(doc?.id) || 'Документ'} · уточнить clientId/rentalId`,
+      priority: 'high',
+      dueDate: dateKey(doc?.date) || todayKey,
+      section: 'documents',
+      entityType: 'documents',
+      entityId: doc?.id,
+      responsible: doc?.manager,
+      actionUrl: '/documents',
+      detectedAt: generatedAt,
+    }));
+  }
+
+  for (const rental of rentals) {
+    const rentalId = normalizeText(rental?.id);
+    if (!rentalId) continue;
+    const status = normalizeStatus(rental?.status);
+    if (['cancelled', 'canceled'].includes(status)) continue;
+    const rentalDocs = documentsByRentalId.get(rentalId) || [];
+    const hasContract = rentalDocs.some(isContractDocument);
+    const hasClosing = rentalDocs.some(isClosingDocument);
+    if (!hasContract) {
+      tasks.push(makeTask({
+        type: 'documents.missing_contract',
+        title: 'Аренда без договора',
+        description: `${safeClientName(rental?.client)} · ${safeEquipmentName(rental?.equipmentInv, rental?.equipment)}`,
+        priority: isClosedRental(rental) ? 'high' : 'medium',
+        dueDate: dateKey(rental?.startDate) || todayKey,
+        section: 'documents',
+        entityType: 'rentals',
+        entityId: rentalId,
+        clientId: rental?.clientId,
+        clientName: rental?.client,
+        responsible: rental?.manager,
+        actionUrl: `/rentals/${rentalId}`,
+        detectedAt: generatedAt,
+      }));
+    }
+    if (isClosedRental(rental) && !hasClosing) {
+      tasks.push(makeTask({
+        type: 'documents.closed_missing_closing_docs',
+        title: 'Закрытая аренда без акта/УПД',
+        description: `${safeClientName(rental?.client)} · ${safeEquipmentName(rental?.equipmentInv, rental?.equipment)}`,
+        priority: 'critical',
+        dueDate: dateKey(rental?.actualReturnDate || rental?.plannedReturnDate || rental?.endDate) || todayKey,
+        section: 'documents',
+        entityType: 'rentals',
+        entityId: rentalId,
+        clientId: rental?.clientId,
+        clientName: rental?.client,
+        responsible: rental?.manager,
+        actionUrl: `/rentals/${rentalId}`,
+        detectedAt: generatedAt,
+      }));
+    }
   }
 
   for (const ticket of service.filter(isOpenService)) {

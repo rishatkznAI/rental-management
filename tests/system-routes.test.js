@@ -8,13 +8,13 @@ const express = serverRequire('express');
 
 const { registerSystemRoutes } = require('../server/routes/system.js');
 
-function createSystemApp() {
+function createSystemApp(overrides = {}) {
   const app = express();
   const messages = [];
   app.use(express.json());
   registerSystemRoutes(app, {
-    readData: () => [],
-    writeData: () => {},
+    readData: overrides.readData || (() => []),
+    writeData: overrides.writeData || (() => {}),
     getSnapshot: () => ({}),
     saveSnapshot: () => {},
     botToken: 'token-present',
@@ -27,12 +27,23 @@ function createSystemApp() {
     dbPath: ':memory:',
     webhookUrl: '',
     requireAuth: (req, _res, next) => {
-      req.user = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' };
+      req.user = overrides.user || {
+        userId: 'U-admin',
+        userName: 'Админ',
+        userRole: 'Администратор',
+        rawRole: 'admin',
+        normalizedRole: 'Администратор',
+        email: 'admin@example.test',
+      };
       next();
     },
-    requireAdmin: (_req, _res, next) => next(),
+    requireAdmin: overrides.requireAdmin || ((_req, _res, next) => next()),
     auditLog: () => {},
     getBuildInfo: () => ({ version: 'test' }),
+    getRoleAccessSummary: () => ({
+      readableCollections: ['equipment', 'rentals'],
+      writableCollections: ['equipment'],
+    }),
   });
   return { app, messages };
 }
@@ -98,3 +109,44 @@ test('/api/bot-test sends only to provided chatId', async () => {
     else process.env.BOT_TEST_CHAT_ID = previousChatId;
   }
 });
+
+test('/api/admin/production-diagnostics returns safe admin diagnostics', async () => {
+  const collections = {
+    equipment: [{ id: 'E-1' }],
+    rentals: [{ id: 'R-1' }, { id: 'R-2' }],
+    service: [],
+    deliveries: [{ id: 'D-1' }],
+    documents: [],
+    payments: [{ id: 'P-1' }],
+  };
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/production-diagnostics');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.backend.build.version, 'test');
+    assert.equal(response.body.user.email, 'admin@example.test');
+    assert.equal(response.body.user.rawRole, 'admin');
+    assert.deepEqual(response.body.access.readableCollections, ['equipment', 'rentals']);
+    assert.equal(response.body.endpoints.equipment.count, 1);
+    assert.equal(response.body.endpoints.rentals.count, 2);
+
+    const serialized = JSON.stringify(response.body);
+    assert.doesNotMatch(serialized, /password|token-present|secret/i);
+  });
+});
+
+test('/api/admin/production-diagnostics is admin-only', async () => {
+  const { app } = createSystemApp({
+    requireAdmin: (_req, res) => res.status(403).json({ ok: false, error: 'Forbidden' }),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/production-diagnostics');
+    assert.equal(response.status, 403);
+  });
+});
+

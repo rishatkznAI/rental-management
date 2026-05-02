@@ -63,6 +63,8 @@ import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
+import { api, API_BASE_URL } from '../lib/api';
+import { frontendBuildInfo } from '../lib/build-info';
 import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import {
@@ -357,6 +359,7 @@ export default function Settings() {
             { value: 'reference',     label: 'Справочники' },
             { value: 'notifications', label: 'Уведомления' },
             { value: 'data',          label: 'Данные системы' },
+            { value: 'diagnostics',   label: 'Диагностика' },
           ].map(tab => (
             <TabsTrigger
               key={tab.value}
@@ -597,6 +600,10 @@ export default function Settings() {
             <DataResetSection />
           </div>
         </TabsContent>
+
+        <TabsContent value="diagnostics">
+          <ProductionDiagnosticsSection />
+        </TabsContent>
       </Tabs>
 
       {/* ── Диалог добавления / редактирования ─────────────────────────────── */}
@@ -722,6 +729,274 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1">
       <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
       {children}
+    </div>
+  );
+}
+
+type ProductionDiagnostics = {
+  ok: boolean;
+  generatedAt: string;
+  health: { ok: boolean; uptime: number };
+  backend: {
+    build?: {
+      service?: string;
+      commit?: string;
+      commitFull?: string;
+      buildTime?: string;
+      startedAt?: string;
+      deployment?: Record<string, string>;
+      version?: string;
+    } | null;
+  };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    rawRole: string;
+    normalizedRole: string;
+  };
+  access: {
+    readableCollections: string[];
+    writableCollections: string[];
+  };
+  endpoints: Record<string, {
+    ok: boolean;
+    collection: string;
+    count?: number;
+    error?: string;
+  }>;
+};
+
+type ClientEndpointStatus = {
+  name: string;
+  path: string;
+  ok: boolean;
+  status?: number;
+  count?: number;
+  error?: string;
+};
+
+const DIAGNOSTIC_ENDPOINTS = [
+  { name: 'equipment', path: '/api/equipment' },
+  { name: 'rentals', path: '/api/rentals' },
+  { name: 'service', path: '/api/service' },
+  { name: 'deliveries', path: '/api/deliveries' },
+  { name: 'documents', path: '/api/documents' },
+  { name: 'payments', path: '/api/payments' },
+];
+
+async function checkClientEndpoints(): Promise<ClientEndpointStatus[]> {
+  return Promise.all(DIAGNOSTIC_ENDPOINTS.map(async endpoint => {
+    try {
+      const data = await api.get<unknown>(endpoint.path);
+      return {
+        ...endpoint,
+        ok: true,
+        count: Array.isArray(data) ? data.length : undefined,
+      };
+    } catch (error) {
+      return {
+        ...endpoint,
+        ok: false,
+        status: typeof error === 'object' && error && 'status' in error ? Number((error as { status?: number }).status) : undefined,
+        error: error instanceof Error ? error.message : 'Endpoint недоступен',
+      };
+    }
+  }));
+}
+
+function formatValue(value: unknown) {
+  const text = String(value || '').trim();
+  return text || '—';
+}
+
+function DiagnosticsField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+      <p className="text-xs uppercase tracking-[0.16em] text-gray-500">{label}</p>
+      <div className="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white">{value}</div>
+    </div>
+  );
+}
+
+function CollectionList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+      <p className="text-sm font-medium text-gray-900 dark:text-white">{title}</p>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-gray-500">Нет данных.</p>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {items.map(item => (
+            <Badge key={item} variant="secondary">{item}</Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EndpointStatusTable({
+  backendEndpoints,
+  clientEndpoints,
+}: {
+  backendEndpoints: ProductionDiagnostics['endpoints'];
+  clientEndpoints: ClientEndpointStatus[];
+}) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Endpoint</TableHead>
+          <TableHead>Backend</TableHead>
+          <TableHead>Frontend request</TableHead>
+          <TableHead>Count</TableHead>
+          <TableHead>Ошибка</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {DIAGNOSTIC_ENDPOINTS.map(endpoint => {
+          const backend = backendEndpoints?.[endpoint.name];
+          const client = clientEndpoints.find(item => item.name === endpoint.name);
+          const ok = Boolean(backend?.ok && client?.ok);
+          return (
+            <TableRow key={endpoint.name}>
+              <TableCell className="font-mono text-xs">{endpoint.path}</TableCell>
+              <TableCell>
+                <Badge variant={backend?.ok ? 'success' : 'danger'}>
+                  {backend?.ok ? 'OK' : 'Ошибка'}
+                </Badge>
+              </TableCell>
+              <TableCell>
+                <Badge variant={client?.ok ? 'success' : 'danger'}>
+                  {client?.ok ? 'OK' : `Ошибка${client?.status ? ` ${client.status}` : ''}`}
+                </Badge>
+              </TableCell>
+              <TableCell>{client?.count ?? backend?.count ?? '—'}</TableCell>
+              <TableCell className={ok ? 'text-gray-500' : 'text-red-600'}>
+                {client?.error || backend?.error || '—'}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
+function ProductionDiagnosticsSection() {
+  const { user } = useAuth();
+  const diagnosticsQuery = useQuery<ProductionDiagnostics>({
+    queryKey: ['admin-production-diagnostics'],
+    queryFn: () => api.get<ProductionDiagnostics>('/api/admin/production-diagnostics'),
+    retry: 1,
+  });
+  const endpointQuery = useQuery<ClientEndpointStatus[]>({
+    queryKey: ['admin-production-diagnostics-endpoints'],
+    queryFn: checkClientEndpoints,
+    retry: 0,
+  });
+
+  const diagnostics = diagnosticsQuery.data;
+  const backendBuild = diagnostics?.backend?.build;
+  const clientEndpoints = endpointQuery.data || [];
+  const refresh = () => {
+    void diagnosticsQuery.refetch();
+    void endpointQuery.refetch();
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle>Production diagnostics</CardTitle>
+              <CardDescription>Состояние frontend, backend, текущей роли и основных API без секретов и токенов.</CardDescription>
+            </div>
+            <Button variant="secondary" onClick={refresh} disabled={diagnosticsQuery.isFetching || endpointQuery.isFetching}>
+              <RefreshCw className={`h-4 w-4 ${(diagnosticsQuery.isFetching || endpointQuery.isFetching) ? 'animate-spin' : ''}`} />
+              Обновить
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {diagnosticsQuery.isError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300" data-testid="diagnostics-backend-error">
+              Диагностика backend недоступна: {diagnosticsQuery.error instanceof Error ? diagnosticsQuery.error.message : 'неизвестная ошибка'}.
+            </div>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <DiagnosticsField label="Frontend service" value={frontendBuildInfo.service} />
+            <DiagnosticsField label="Frontend commit" value={<span className="font-mono">{formatValue(frontendBuildInfo.commit)}</span>} />
+            <DiagnosticsField label="Frontend build time" value={formatValue(frontendBuildInfo.buildTime)} />
+            <DiagnosticsField label="Frontend mode" value={frontendBuildInfo.mode} />
+            <DiagnosticsField label="VITE_API_URL" value={<span className="font-mono">{API_BASE_URL || '(same origin / Vite proxy)'}</span>} />
+            <DiagnosticsField label="Backend health" value={
+              diagnostics?.health?.ok
+                ? <Badge variant="success">OK · uptime {diagnostics.health.uptime}s</Badge>
+                : diagnosticsQuery.isLoading
+                  ? 'Проверяем...'
+                  : <Badge variant="danger">Недоступен</Badge>
+            } />
+            <DiagnosticsField label="Backend commit" value={<span className="font-mono">{formatValue(backendBuild?.commit)}</span>} />
+            <DiagnosticsField label="Backend started" value={formatValue(backendBuild?.startedAt)} />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Текущий пользователь</CardTitle>
+            <CardDescription>Данные текущей сессии и нормализация роли.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2">
+            <DiagnosticsField label="Имя" value={diagnostics?.user?.name || user?.name || '—'} />
+            <DiagnosticsField label="Email" value={diagnostics?.user?.email || user?.email || '—'} />
+            <DiagnosticsField label="rawRole" value={diagnostics?.user?.rawRole || user?.rawRole || user?.role || '—'} />
+            <DiagnosticsField label="normalizedRole" value={diagnostics?.user?.normalizedRole || user?.normalizedRole || user?.role || '—'} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Backend build</CardTitle>
+            <CardDescription>Версия backend, если она доступна в деплое.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2">
+            <DiagnosticsField label="Service" value={formatValue(backendBuild?.service)} />
+            <DiagnosticsField label="Build time" value={formatValue(backendBuild?.buildTime)} />
+            <DiagnosticsField label="Node env" value={formatValue(backendBuild?.deployment?.nodeEnv)} />
+            <DiagnosticsField label="Railway env" value={formatValue(backendBuild?.deployment?.railwayEnvironment)} />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <CollectionList title="Readable collections" items={diagnostics?.access?.readableCollections || []} />
+        <CollectionList title="Writable collections" items={diagnostics?.access?.writableCollections || []} />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Основные API</CardTitle>
+          <CardDescription>Backend summary и фактическая проверка запросом из frontend.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {endpointQuery.isError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+              Не удалось проверить API из браузера: {endpointQuery.error instanceof Error ? endpointQuery.error.message : 'неизвестная ошибка'}.
+            </div>
+          ) : (
+            <EndpointStatusTable
+              backendEndpoints={diagnostics?.endpoints || {}}
+              clientEndpoints={clientEndpoints}
+            />
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

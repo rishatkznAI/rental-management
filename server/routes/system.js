@@ -132,6 +132,7 @@ function registerSystemRoutes(app, deps) {
     analyzeGanttRentalLinks,
     backfillGanttRentalLinks,
     getBuildInfo,
+    getRoleAccessSummary,
   } = deps;
 
   function buildInfo() {
@@ -320,6 +321,64 @@ function registerSystemRoutes(app, deps) {
       botToken: botToken ? '✅ задан' : '❌ не задан',
       botUsers: Object.keys(botUsers).length,
       webhook: webhookUrl || '(не задан)',
+    });
+  });
+
+  app.get('/api/admin/production-diagnostics', requireAuth, requireAdmin, (req, res) => {
+    const endpointCollections = {
+      equipment: 'equipment',
+      rentals: 'rentals',
+      service: 'service',
+      deliveries: 'deliveries',
+      documents: 'documents',
+      payments: 'payments',
+    };
+
+    const endpoints = Object.entries(endpointCollections).reduce((acc, [name, collection]) => {
+      try {
+        const data = readData(collection);
+        acc[name] = {
+          ok: true,
+          collection,
+          count: Array.isArray(data) ? data.length : (data && typeof data === 'object' ? Object.keys(data).length : 0),
+        };
+      } catch (error) {
+        acc[name] = {
+          ok: false,
+          collection,
+          error: error?.message || 'Endpoint check failed',
+        };
+      }
+      return acc;
+    }, {});
+
+    const role = req.user?.userRole || '';
+    const roleAccess = typeof getRoleAccessSummary === 'function'
+      ? getRoleAccessSummary(role)
+      : null;
+
+    return res.json({
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      health: {
+        ok: true,
+        uptime: Math.round(process.uptime()),
+      },
+      backend: {
+        build: buildInfo(),
+      },
+      user: {
+        id: req.user?.userId || '',
+        name: req.user?.userName || '',
+        email: req.user?.email || '',
+        rawRole: req.user?.rawRole || req.user?.userRole || '',
+        normalizedRole: req.user?.normalizedRole || req.user?.userRole || '',
+      },
+      access: {
+        readableCollections: roleAccess?.readableCollections || [],
+        writableCollections: roleAccess?.writableCollections || [],
+      },
+      endpoints,
     });
   });
 

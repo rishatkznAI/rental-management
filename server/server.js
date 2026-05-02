@@ -2518,6 +2518,7 @@ registerSystemRoutes(app, {
   analyzeGanttRentalLinks,
   backfillGanttRentalLinks,
   getBuildInfo,
+  getRoleAccessSummary: roleAccessSummary,
 });
 
 startServer({

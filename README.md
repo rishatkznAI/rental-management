@@ -56,4 +56,10 @@ PLAYWRIGHT_NODE_PATH=/path/to/node node node_modules/.bin/playwright test
 - `vercel.json` keeps Vercel rewrites compatible with the hash-router shell
 - Backend is deployed separately on Railway
 - Production frontend uses `VITE_API_URL` to talk to the deployed backend
-  
+
+Current production entry points:
+
+- Frontend: <https://rishatkznai.github.io/rental-management/>
+- Backend API: set `VITE_API_URL` to the Railway backend URL
+
+Production operations notes live in `docs/production-operations.md`. Do not commit real `.env` files, bot tokens, webhook secrets, passwords, SQLite databases, backups, or logs. Run production import only after a fresh backup/export.

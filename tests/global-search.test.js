@@ -85,6 +85,169 @@ test('global search hides payment amount without finance permission and does not
   assert.doesNotMatch(`${payment.title} ${payment.subtitle}`, /125000/);
 });
 
+// ─── Русские алиасы типов документов ────────────────────────────────────────
+
+test('russian alias "договор" finds contract documents', () => {
+  const results = flatten(search('договор'));
+  assert.equal(results.some(item => item.id === 'document:DOC-99' && item.group === 'Документы'), true);
+});
+
+test('russian alias "договор аренды" finds contract documents', () => {
+  const results = flatten(search('договор аренды'));
+  assert.equal(results.some(item => item.id === 'document:DOC-99' && item.group === 'Документы'), true);
+});
+
+test('russian alias "акт" finds act documents', () => {
+  const results = flatten(search('акт', allPermissions, {
+    documents: [{ id: 'DOC-ACT', type: 'act', number: 'A-1', status: 'draft', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-ACT' && item.group === 'Документы'), true);
+});
+
+test('russian alias "акт выполненных работ" finds act documents', () => {
+  const results = flatten(search('акт выполненных работ', allPermissions, {
+    documents: [{ id: 'DOC-ACT', type: 'act', number: 'A-1', status: 'draft', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-ACT' && item.group === 'Документы'), true);
+});
+
+test('russian alias "заказ-наряд" finds work_order documents', () => {
+  const results = flatten(search('заказ-наряд', allPermissions, {
+    documents: [{ id: 'DOC-WO', type: 'work_order', number: 'WO-1', status: 'sent', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-WO' && item.group === 'Документы'), true);
+});
+
+test('russian alias "наряд" finds work_order documents', () => {
+  const results = flatten(search('наряд', allPermissions, {
+    documents: [{ id: 'DOC-WO', type: 'work_order', number: 'WO-1', status: 'sent', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-WO' && item.group === 'Документы'), true);
+});
+
+test('russian alias "счёт" finds invoice documents', () => {
+  const results = flatten(search('счёт', allPermissions, {
+    documents: [{ id: 'DOC-INV', type: 'invoice', number: 'I-1', status: 'pending', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-INV' && item.group === 'Документы'), true);
+});
+
+test('russian alias "счет" (without ё) finds invoice documents', () => {
+  const results = flatten(search('счет', allPermissions, {
+    documents: [{ id: 'DOC-INV', type: 'invoice', number: 'I-1', status: 'pending', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-INV' && item.group === 'Документы'), true);
+});
+
+test('russian alias "спецификация" finds specification documents', () => {
+  const results = flatten(search('спецификация', allPermissions, {
+    documents: [{ id: 'DOC-SPEC', type: 'specification', number: 'SP-1', status: 'draft', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-SPEC' && item.group === 'Документы'), true);
+});
+
+// ─── Русские алиасы статусов документов ──────────────────────────────────────
+
+test('russian alias "черновик" finds draft documents', () => {
+  const results = flatten(search('черновик', allPermissions, {
+    documents: [{ id: 'DOC-DRAFT', type: 'act', number: 'A-2', status: 'draft', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-DRAFT' && item.group === 'Документы'), true);
+});
+
+test('russian alias "подписан" finds signed documents', () => {
+  const results = flatten(search('подписан'));
+  assert.equal(results.some(item => item.id === 'document:DOC-99' && item.group === 'Документы'), true);
+});
+
+test('russian alias "подписано" finds signed documents', () => {
+  const results = flatten(search('подписано'));
+  assert.equal(results.some(item => item.id === 'document:DOC-99' && item.group === 'Документы'), true);
+});
+
+test('russian alias "отправлен" finds sent documents', () => {
+  const results = flatten(search('отправлен', allPermissions, {
+    documents: [{ id: 'DOC-SENT', type: 'contract', number: 'C-2', status: 'sent', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-SENT' && item.group === 'Документы'), true);
+});
+
+test('russian alias "ожидает" finds pending documents', () => {
+  const results = flatten(search('ожидает', allPermissions, {
+    documents: [{ id: 'DOC-PEND', type: 'invoice', number: 'I-2', status: 'pending', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-PEND' && item.group === 'Документы'), true);
+});
+
+test('russian alias "отменён" finds cancelled documents', () => {
+  const results = flatten(search('отменён', allPermissions, {
+    documents: [{ id: 'DOC-CANC', type: 'act', number: 'A-3', status: 'cancelled', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-CANC' && item.group === 'Документы'), true);
+});
+
+// ─── Обратная совместимость: английские значения продолжают работать ──────────
+
+test('english "contract" still finds contract documents', () => {
+  const results = flatten(search('contract'));
+  assert.equal(results.some(item => item.id === 'document:DOC-99' && item.group === 'Документы'), true);
+});
+
+test('english "draft" still finds draft documents', () => {
+  const results = flatten(search('draft', allPermissions, {
+    documents: [{ id: 'DOC-DRAFT', type: 'act', number: 'A-2', status: 'draft', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-DRAFT' && item.group === 'Документы'), true);
+});
+
+test('english "signed" still finds signed documents', () => {
+  const results = flatten(search('signed'));
+  assert.equal(results.some(item => item.id === 'document:DOC-99' && item.group === 'Документы'), true);
+});
+
+test('english "work_order" still finds work_order documents', () => {
+  const results = flatten(search('work_order', allPermissions, {
+    documents: [{ id: 'DOC-WO', type: 'work_order', number: 'WO-1', status: 'sent', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-WO' && item.group === 'Документы'), true);
+});
+
+test('english "act" still finds act documents', () => {
+  const results = flatten(search('act', allPermissions, {
+    documents: [{ id: 'DOC-ACT', type: 'act', number: 'A-1', status: 'draft', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  assert.equal(results.some(item => item.id === 'document:DOC-ACT' && item.group === 'Документы'), true);
+});
+
+// ─── Нет дублей результатов ───────────────────────────────────────────────────
+
+test('no duplicate results when querying by russian alias', () => {
+  const groups = search('договор');
+  const docGroup = groups.find(g => g.group === 'Документы');
+  assert.ok(docGroup, 'Документы group should exist');
+  const ids = docGroup.items.map(item => item.id);
+  const uniqueIds = [...new Set(ids)];
+  assert.equal(ids.length, uniqueIds.length, 'No duplicate items in group');
+});
+
+test('subtitle still shows english type and status (display unchanged)', () => {
+  const results = flatten(search('договор'));
+  const doc = results.find(item => item.id === 'document:DOC-99');
+  assert.ok(doc, 'document found');
+  assert.match(doc.subtitle, /contract/);
+  assert.match(doc.subtitle, /signed/);
+});
+
+// ─── Безопасность: секретные поля не индексируются ───────────────────────────
+
+test('secret fields are not indexed even with aliases', () => {
+  const results = flatten(search('договор', allPermissions, {
+    documents: [{ id: 'DOC-SEC', type: 'contract', number: 'password-contract', status: 'draft', clientId: 'client-1', rentalId: 'GR-7788' }],
+  }));
+  // document should NOT be found because 'password' appears in the searchable field text
+  assert.equal(results.some(item => item.id === 'document:DOC-SEC'), false);
+});
+
 test('global search does not render NaN, undefined, null, or object placeholders', () => {
   const results = flatten(search('legacy', allPermissions, {
     documents: [

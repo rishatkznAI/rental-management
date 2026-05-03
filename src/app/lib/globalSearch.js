@@ -11,6 +11,31 @@ const GROUP_ORDER = [
 
 const SECRET_FIELD_RE = /(password|token|secret|session|cookie|apiKey)/i;
 
+// Русские алиасы для типов документов (только для индексации/поиска, не для отображения)
+const DOCUMENT_TYPE_ALIASES = {
+  contract:      ['договор', 'договор аренды'],
+  act:           ['акт', 'акт выполненных работ'],
+  upd:           ['упд', 'универсальный передаточный документ'],
+  work_order:    ['заказ-наряд', 'заказ наряд', 'наряд'],
+  invoice:       ['счёт', 'счет'],
+  specification: ['спецификация'],
+};
+
+// Русские алиасы для статусов документов (только для индексации/поиска, не для отображения)
+const DOCUMENT_STATUS_ALIASES = {
+  draft:     ['черновик'],
+  sent:      ['отправлен', 'отправлено'],
+  signed:    ['подписан', 'подписано'],
+  pending:   ['ожидает', 'на подписании'],
+  cancelled: ['отменён', 'отменен', 'отмена'],
+};
+
+function docAliases(key, aliasMap) {
+  const normalized = safeSearchText(key).toLowerCase();
+  const aliases = aliasMap[normalized];
+  return Array.isArray(aliases) ? aliases : [];
+}
+
 export const GLOBAL_SEARCH_GROUP_LIMIT = 6;
 
 export function normalizeGlobalSearchQuery(value) {
@@ -167,7 +192,18 @@ export function buildGlobalSearchGroups(data, options = {}) {
         group: 'Документы',
         icon: 'fileCheck',
         groupLimit,
-      }, [item?.id, item?.type, item?.status, clientName, rentalId, item?.number, item?.title, item?.name], query);
+      }, [
+        item?.id,
+        item?.type,
+        item?.status,
+        ...docAliases(item?.type, DOCUMENT_TYPE_ALIASES),
+        ...docAliases(item?.status, DOCUMENT_STATUS_ALIASES),
+        clientName,
+        rentalId,
+        item?.number,
+        item?.title,
+        item?.name,
+      ], query);
     }
   }
 

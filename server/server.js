@@ -2557,6 +2557,7 @@ registerSystemRoutes(app, {
   getRoleAccessSummary: roleAccessSummary,
   jsonCollections: JSON_COLLECTIONS,
   createDatabaseBackup: createSqliteBackup,
+  uploadRoot: path.join(path.dirname(DB_PATH), 'uploads'),
   demo: getDemoPublicInfo(),
   resetDemoData: () => seedDemoData({ reset: true, logger: console }),
 });

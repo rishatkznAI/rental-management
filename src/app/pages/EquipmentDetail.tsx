@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import {
 } from '../mock-data';
-import type { ShippingPhoto, ServiceTicket, Payment, EquipmentStatus, EquipmentOperationPhotoCategory, ShippingEventType } from '../types';
+import type { PhotoReference, ShippingPhoto, ServiceTicket, Payment, EquipmentStatus, EquipmentOperationPhotoCategory, ShippingEventType } from '../types';
 import { formatDate, formatDateTime, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
 import { cn } from '../lib/utils';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -43,6 +43,7 @@ import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
 import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
 import { getToken } from '../lib/api';
+import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media';
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
@@ -446,13 +447,21 @@ function printHandoffAct(event: ShippingPhoto, equipment: Equipment) {
 type ShippingPhotoGroup = {
   key: string;
   label: string;
-  photos: string[];
+  photos: PhotoReference[];
 };
 
 type ShippingPhotoAsset = {
   label: string;
   url: string;
 };
+
+function displayPhotoUrl(photo: PhotoReference): string {
+  return absoluteMediaUrl(photoSource(photo));
+}
+
+function fallbackPhotoUrl(photo: PhotoReference): string {
+  return absoluteMediaUrl(photoFallbackSource(photo));
+}
 
 type ShippingComparisonPair = {
   id: string;
@@ -474,7 +483,7 @@ function getShippingPhotoGroups(event: ShippingPhoto): ShippingPhotoGroup[] {
   }
 
   return Array.isArray(event.photos) && event.photos.length > 0
-    ? [{ key: 'generic', label: 'Фотографии', photos: event.photos.filter((photo): photo is string => typeof photo === 'string' && photo.trim().length > 0) }]
+    ? [{ key: 'generic', label: 'Фотографии', photos: event.photos.filter(photo => Boolean(photoSource(photo).trim())) }]
     : [];
 }
 
@@ -484,8 +493,8 @@ function getShippingPhotoAssets(event: ShippingPhoto): ShippingPhotoAsset[] {
         const photos = event.photoCategories?.[key as keyof typeof PHOTO_CATEGORY_LABELS];
         if (!Array.isArray(photos)) return [];
         return photos
-          .filter((photo): photo is string => typeof photo === 'string' && photo.trim().length > 0)
-          .map(photo => ({ label, url: photo.trim() }));
+          .filter(photo => Boolean(photoSource(photo).trim()))
+          .map(photo => ({ label, url: displayPhotoUrl(photo) }));
       })
     : [];
 
@@ -493,8 +502,8 @@ function getShippingPhotoAssets(event: ShippingPhoto): ShippingPhotoAsset[] {
 
   return Array.isArray(event.photos)
     ? event.photos
-        .filter((photo): photo is string => typeof photo === 'string' && photo.trim().length > 0)
-        .map(photo => ({ label: 'Фотографии', url: photo.trim() }))
+        .filter(photo => Boolean(photoSource(photo).trim()))
+        .map(photo => ({ label: 'Фотографии', url: displayPhotoUrl(photo) }))
     : [];
 }
 
@@ -3193,10 +3202,14 @@ export default function EquipmentDetail() {
                                       {photos.map((photo, idx) => (
                                         <img
                                           key={`${key}-${idx}`}
-                                          src={photo}
+                                          src={displayPhotoUrl(photo)}
                                           alt={`${label} ${idx + 1}`}
                                           className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
-                                          onClick={() => setPreviewImage(photo)}
+                                          onError={(event) => {
+                                            const fallback = fallbackPhotoUrl(photo);
+                                            if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                                          }}
+                                          onClick={() => setPreviewImage(displayPhotoUrl(photo))}
                                         />
                                       ))}
                                     </div>
@@ -3207,9 +3220,13 @@ export default function EquipmentDetail() {
                           ) : (
                             <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
                               {event.photos.map((photo, idx) => (
-                                <img key={idx} src={photo} alt={`Фото ${idx + 1}`}
+                                <img key={idx} src={displayPhotoUrl(photo)} alt={`Фото ${idx + 1}`}
                                   className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
-                                  onClick={() => setPreviewImage(photo)}
+                                  onError={(event) => {
+                                    const fallback = fallbackPhotoUrl(photo);
+                                    if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                                  }}
+                                  onClick={() => setPreviewImage(displayPhotoUrl(photo))}
                                 />
                               ))}
                             </div>
@@ -3510,7 +3527,7 @@ function ComparisonPhotoColumn({
 }: {
   title: string;
   tone: 'before' | 'after';
-  photos: string[];
+  photos: PhotoReference[];
   onPreview: (value: string) => void;
 }) {
   return (
@@ -3530,13 +3547,17 @@ function ComparisonPhotoColumn({
             <button
               key={`${title}-${index}`}
               type="button"
-              onClick={() => onPreview(photo)}
+              onClick={() => onPreview(displayPhotoUrl(photo))}
               className="group overflow-hidden rounded-lg border border-border bg-card text-left transition hover:border-primary/40"
             >
               <img
-                src={photo}
+                src={displayPhotoUrl(photo)}
                 alt={`${title} ${index + 1}`}
                 className="h-28 w-full object-cover transition group-hover:scale-[1.02]"
+                onError={(event) => {
+                  const fallback = fallbackPhotoUrl(photo);
+                  if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                }}
               />
             </button>
           ))}

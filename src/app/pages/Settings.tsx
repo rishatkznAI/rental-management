@@ -955,6 +955,23 @@ type BackupHistoryResponse = {
   history: BackupHistoryEntry[];
 };
 
+type ExternalPhotoArchiveSummary = {
+  found: number;
+  archived: number;
+  skipped: number;
+  failed: number;
+  alreadyArchived: number;
+  collections: Record<string, number>;
+  domains: Record<string, number>;
+};
+
+type ExternalPhotoArchiveResponse = {
+  ok: boolean;
+  dryRun: boolean;
+  allowDomains: string[];
+  summary: ExternalPhotoArchiveSummary;
+};
+
 const DIAGNOSTIC_ENDPOINTS = [
   { name: 'equipment', path: '/api/equipment' },
   { name: 'rentals', path: '/api/rentals' },
@@ -2377,13 +2394,20 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
   const [analysis, setAnalysis] = React.useState<SystemDataImportAnalysis | null>(null);
   const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [backupMessage, setBackupMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [archiveMessage, setArchiveMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isDownloadingBackup, setIsDownloadingBackup] = React.useState(false);
+  const [isArchivingExternalPhotos, setIsArchivingExternalPhotos] = React.useState(false);
   const [isExporting, setIsExporting] = React.useState(false);
   const [isChecking, setIsChecking] = React.useState(false);
   const [isImporting, setIsImporting] = React.useState(false);
   const backupHistoryQuery = useQuery<BackupHistoryResponse>({
     queryKey: ['admin-backup-history'],
     queryFn: () => api.get<BackupHistoryResponse>('/api/admin/backup/history'),
+    enabled: canManageData,
+  });
+  const externalPhotoDryRunQuery = useQuery<ExternalPhotoArchiveResponse>({
+    queryKey: ['admin-external-photo-archive-dry-run'],
+    queryFn: () => api.get<ExternalPhotoArchiveResponse>('/api/admin/media/archive-external-photos/dry-run'),
     enabled: canManageData,
   });
 
@@ -2423,6 +2447,27 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
       setIsDownloadingBackup(false);
     }
   }, [backupHistoryQuery]);
+
+  const handleArchiveExternalPhotos = React.useCallback(async () => {
+    setArchiveMessage(null);
+    const confirmed = window.confirm('Скачать внешние фото с разрешённых доменов и сохранить их в /data/uploads для последующих full backup? Записи будут дополнены localPath, originalUrl сохранится.');
+    if (!confirmed) return;
+    setIsArchivingExternalPhotos(true);
+    try {
+      const result = await api.post<ExternalPhotoArchiveResponse>('/api/admin/media/archive-external-photos', {
+        allowDomains: ['i.oneme.ru'],
+      });
+      setArchiveMessage({
+        type: 'success',
+        text: `Архивация завершена: сохранено ${result.summary.archived}, пропущено ${result.summary.skipped}, ошибок ${result.summary.failed}.`,
+      });
+      await externalPhotoDryRunQuery.refetch();
+    } catch (error) {
+      setArchiveMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось архивировать внешние фото.' });
+    } finally {
+      setIsArchivingExternalPhotos(false);
+    }
+  }, [externalPhotoDryRunQuery]);
 
   const handleExport = React.useCallback(async () => {
     setMessage(null);
@@ -2571,6 +2616,71 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
               : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'
           }`}>
             {backupMessage.text}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle>Архивация внешних фото</CardTitle>
+            <CardDescription>
+              Фото будут скачаны с внешних ссылок и сохранены в /data/uploads. Записи будут дополнены localPath, originalUrl сохранится. После этого full backup будет включать сами файлы.
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => void externalPhotoDryRunQuery.refetch()}
+              disabled={!canManageData || externalPhotoDryRunQuery.isFetching}
+            >
+              <RefreshCw className="h-4 w-4" />
+              Dry-run scan
+            </Button>
+            <Button
+              onClick={() => void handleArchiveExternalPhotos()}
+              disabled={!canManageData || isArchivingExternalPhotos}
+            >
+              <Download className="h-4 w-4" />
+              {isArchivingExternalPhotos ? 'Скачиваем фото...' : 'Скачать внешние фото в backup-хранилище'}
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {externalPhotoDryRunQuery.isError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+            Не удалось проверить внешние фото
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="rounded-lg border px-4 py-3">
+              <p className="text-xs text-muted-foreground">Найдено внешних фото</p>
+              <p className="text-2xl font-semibold">{externalPhotoDryRunQuery.data?.summary.found ?? 0}</p>
+            </div>
+            <div className="rounded-lg border px-4 py-3">
+              <p className="text-xs text-muted-foreground">Уже сохранено локально</p>
+              <p className="text-2xl font-semibold">{externalPhotoDryRunQuery.data?.summary.alreadyArchived ?? 0}</p>
+            </div>
+            <div className="rounded-lg border px-4 py-3">
+              <p className="text-xs text-muted-foreground">Разрешённые домены</p>
+              <p className="truncate text-sm font-medium">{externalPhotoDryRunQuery.data?.allowDomains.join(', ') || 'i.oneme.ru'}</p>
+            </div>
+            <div className="rounded-lg border px-4 py-3">
+              <p className="text-xs text-muted-foreground">Коллекций с фото</p>
+              <p className="text-2xl font-semibold">{Object.keys(externalPhotoDryRunQuery.data?.summary.collections || {}).length}</p>
+            </div>
+          </div>
+        )}
+        {archiveMessage && (
+          <div className={`rounded-lg border px-4 py-3 text-sm ${
+            archiveMessage.type === 'success'
+              ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300'
+              : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'
+          }`}>
+            {archiveMessage.text}
           </div>
         )}
       </CardContent>

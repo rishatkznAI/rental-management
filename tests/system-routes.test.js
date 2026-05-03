@@ -41,6 +41,8 @@ function createSystemApp(overrides = {}) {
       next();
     }),
     requireAdmin: overrides.requireAdmin || ((_req, _res, next) => next()),
+    fetchImpl: overrides.fetchImpl || fetch,
+    assertPublicHttpUrlImpl: overrides.assertPublicHttpUrlImpl || (async (url) => new URL(url)),
     auditLog: overrides.auditLog || ((_req, entry) => auditEntries.push(entry)),
     getBuildInfo: () => ({ version: 'test' }),
     getRoleAccessSummary: () => ({
@@ -51,6 +53,7 @@ function createSystemApp(overrides = {}) {
     createDatabaseBackup: overrides.createDatabaseBackup,
     dbPath: overrides.dbPath || ':memory:',
     fileRoots: overrides.fileRoots,
+    uploadRoot: overrides.uploadRoot,
   });
   return { app, messages, auditEntries };
 }
@@ -568,6 +571,177 @@ test('/api/admin/backup/full succeeds with no photos and reports zero embedded p
     const manifest = JSON.parse(entries.find(entry => entry.name === 'manifest.json').data.toString('utf8'));
     assert.equal(manifest.embeddedPhotosCount, 0);
     assert.equal(manifest.externalReferencesCount, 0);
+  });
+});
+
+function fakeFetchResponse({ status = 200, contentType = 'image/jpeg', body = Buffer.from([0xff, 0xd8, 0xff, 0xd9]), contentLength } = {}) {
+  const buffer = Buffer.from(body);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get(name) {
+        const key = String(name || '').toLowerCase();
+        if (key === 'content-type') return contentType;
+        if (key === 'content-length') return String(contentLength ?? buffer.length);
+        return '';
+      },
+    },
+    arrayBuffer: async () => buffer,
+    buffer: async () => buffer,
+  };
+}
+
+test('/api/admin/media/archive-external-photos dry-run summarizes external URLs without exposing full URLs', async () => {
+  const externalPhotoUrl = 'https://i.oneme.ru/i?r=test-photo-token';
+  const collections = {
+    shipping_photos: [{ id: 'SP-1', type: 'shipping', photos: [externalPhotoUrl] }],
+    service: [{ id: 'S-1', photos: ['https://cdn.example.test/photo.jpg'] }],
+  };
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    jsonCollections: ['shipping_photos', 'service'],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/media/archive-external-photos/dry-run');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.dryRun, true);
+    assert.equal(response.body.summary.found, 2);
+    assert.equal(response.body.summary.collections.shipping_photos, 1);
+    assert.equal(response.body.summary.domains['i.oneme.ru'], 1);
+    assert.equal(response.body.summary.domains['cdn.example.test'], 1);
+    assert.doesNotMatch(JSON.stringify(response.body), /test-photo-token|photo\.jpg/);
+  });
+});
+
+test('/api/admin/media/archive-external-photos archives allowed images and backup includes local file', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'external-photo-archive-'));
+  const uploadsDir = path.join(tempDir, 'uploads');
+  const externalPhotoUrl = 'https://i.oneme.ru/i?r=archive-me';
+  const collections = {
+    shipping_photos: [{ id: 'SP-1', type: 'shipping', photos: [externalPhotoUrl] }],
+    equipment: [],
+    clients: [],
+    users: [],
+  };
+  const { app, auditEntries } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, data) => { collections[name] = data; },
+    jsonCollections: ['shipping_photos', 'equipment', 'clients', 'users'],
+    uploadRoot: uploadsDir,
+    dbPath: path.join(tempDir, 'app.sqlite'),
+    fileRoots: [{ label: 'uploads', dir: uploadsDir }],
+    createDatabaseBackup: async (targetPath) => {
+      fs.writeFileSync(targetPath, Buffer.from('sqlite snapshot'));
+      return targetPath;
+    },
+    fetchImpl: async () => fakeFetchResponse({ contentType: 'image/jpeg', body: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }),
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const archive = await postJson(baseUrl, '/api/admin/media/archive-external-photos', {
+        allowDomains: ['i.oneme.ru'],
+      });
+      assert.equal(archive.status, 200);
+      assert.equal(archive.body.summary.archived, 1);
+      assert.equal(archive.body.summary.failed, 0);
+      const archivedPhoto = collections.shipping_photos[0].photos[0];
+      assert.equal(archivedPhoto.originalUrl, externalPhotoUrl);
+      assert.match(archivedPhoto.localPath, /^\/uploads\/external-photos\/shipping_photos\/SP-1\/[a-f0-9]+\.jpg$/);
+      assert.equal(archivedPhoto.mimeType, 'image/jpeg');
+      assert.equal(archivedPhoto.archiveStatus, 'archived');
+      assert.equal(fs.existsSync(path.join(uploadsDir, archivedPhoto.localPath.replace(/^\/uploads\//, ''))), true);
+
+      const fileResponse = await getBuffer(baseUrl, archivedPhoto.localPath);
+      assert.equal(fileResponse.status, 200);
+
+      const backup = await getBuffer(baseUrl, '/api/admin/backup/full');
+      assert.equal(backup.status, 200);
+      const names = listZipEntries(backup.buffer).map(entry => entry.name);
+      assert.equal(names.some(name => /^files\/uploads\/external-photos\/shipping_photos\/SP-1\/[a-f0-9]+\.jpg$/.test(name)), true);
+
+      const auditText = JSON.stringify(auditEntries);
+      assert.equal(auditEntries.some(entry => entry.action === 'media.external_photos.archive'), true);
+      assert.doesNotMatch(auditText, /archive-me|https:\/\/i\.oneme\.ru|base64|password|token/i);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('/api/admin/media/archive-external-photos skips disallowed non-image and too-large content safely', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'external-photo-skip-'));
+  const urls = {
+    disallowed: 'https://cdn.example.test/photo.jpg',
+    nonImage: 'https://i.oneme.ru/i?r=html-response',
+    tooLarge: 'https://i.oneme.ru/i?r=too-large',
+  };
+  const collections = {
+    shipping_photos: [{ id: 'SP-1', photos: [urls.disallowed, urls.nonImage, urls.tooLarge] }],
+  };
+  const { app, auditEntries } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, data) => { collections[name] = data; },
+    jsonCollections: ['shipping_photos'],
+    uploadRoot: path.join(tempDir, 'uploads'),
+    fetchImpl: async (url) => {
+      if (String(url).includes('html-response')) {
+        return fakeFetchResponse({ contentType: 'text/html', body: Buffer.from('<html></html>') });
+      }
+      return fakeFetchResponse({ contentType: 'image/jpeg', body: Buffer.from([1, 2, 3]), contentLength: 11 * 1024 * 1024 });
+    },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/admin/media/archive-external-photos', {
+        allowDomains: ['i.oneme.ru'],
+      });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.summary.archived, 0);
+      assert.equal(response.body.summary.skipped, 3);
+      assert.equal(response.body.summary.failed, 0);
+      assert.equal(response.body.summary.skippedReasons['domain-not-allowed'], 1);
+      assert.equal(response.body.summary.skippedReasons['non-image-content'], 1);
+      assert.equal(response.body.summary.skippedReasons['too-large'], 1);
+      assert.equal(collections.shipping_photos[0].photos[0].archiveStatus, 'skipped');
+      assert.equal(collections.shipping_photos[0].photos[1].archiveStatus, 'skipped');
+      assert.equal(collections.shipping_photos[0].photos[2].archiveStatus, 'skipped');
+      assert.doesNotMatch(JSON.stringify(auditEntries), /html-response|too-large|photo\.jpg|https:\/\/|base64|password|token/i);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('/api/admin/media/archive-external-photos request cannot expand configured allowlist', async () => {
+  const collections = {
+    shipping_photos: [{ id: 'SP-1', photos: ['https://cdn.example.test/photo.jpg'] }],
+  };
+  let fetched = false;
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, data) => { collections[name] = data; },
+    jsonCollections: ['shipping_photos'],
+    fetchImpl: async () => {
+      fetched = true;
+      return fakeFetchResponse();
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/admin/media/archive-external-photos', {
+      allowDomains: ['cdn.example.test'],
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.allowDomains, []);
+    assert.equal(response.body.summary.archived, 0);
+    assert.equal(response.body.summary.skippedReasons['domain-not-allowed'], 1);
+    assert.equal(fetched, false);
+    assert.doesNotMatch(JSON.stringify(response.body), /photo\.jpg|https:\/\//);
   });
 });
 

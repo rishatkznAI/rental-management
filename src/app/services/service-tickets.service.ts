@@ -1,5 +1,5 @@
 import { api } from '../lib/api';
-import type { ServicePriority, ServiceScenario, ServiceStatus, ServiceTicket } from '../types';
+import type { PhotoReference, ServicePriority, ServiceScenario, ServiceStatus, ServiceTicket } from '../types';
 
 const SERVICE_STATUSES = new Set<ServiceStatus>(['new', 'in_progress', 'waiting_parts', 'ready', 'closed']);
 const SERVICE_PRIORITIES = new Set<ServicePriority>(['critical', 'high', 'medium', 'low']);
@@ -129,7 +129,7 @@ export function normalizeServiceTicketDto(value: unknown, index = 0): ServiceTic
     parts: arrayValue(item.parts) as ServiceTicket['parts'],
     createdAt,
     updatedAt,
-    photos: arrayValue<string>(item.photos),
+    photos: arrayValue<PhotoReference>(item.photos),
     serviceVehicleId: stringValue(item.serviceVehicleId) || null,
   } as ServiceTicket;
 }

@@ -1,10 +1,13 @@
 const { isMechanicRole } = require('../lib/role-groups');
 const { redactAuditValue } = require('../lib/security-audit');
 const { cleanupBackupArchive, createFullBackupArchive } = require('../lib/full-backup');
+const { DEFAULT_ALLOWED_DOMAINS, DEFAULT_MAX_BYTES, archiveExternalPhotos } = require('../lib/external-photo-archive');
 const dns = require('dns');
+const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const path = require('path');
 
 const MAX_MEDIA_PROXY_BYTES = 10 * 1024 * 1024;
 const MEDIA_PROXY_TIMEOUT_MS = 10_000;
@@ -377,12 +380,70 @@ function registerSystemRoutes(app, deps) {
     jsonCollections = [],
     createDatabaseBackup,
     fileRoots,
+    uploadRoot,
+    assertPublicHttpUrlImpl = assertPublicHttpUrl,
     demo = { enabled: false, resetAllowed: false },
     resetDemoData,
   } = deps;
 
   function buildInfo() {
     return typeof getBuildInfo === 'function' ? getBuildInfo() : null;
+  }
+
+  const uploadsRoot = path.resolve(uploadRoot || path.join(path.dirname(dbPath || path.join(__dirname, '..', 'data', 'app.sqlite')), 'uploads'));
+
+  async function downloadAllowlistedPhoto(sourceUrl, { maxBytes = DEFAULT_MAX_BYTES, allowDomains = DEFAULT_ALLOWED_DOMAINS } = {}) {
+    const parsedUrl = await assertPublicHttpUrlImpl(sourceUrl);
+    const domain = parsedUrl.hostname.toLowerCase();
+    const allowed = new Set((Array.isArray(allowDomains) ? allowDomains : [])
+      .map(item => String(item || '').trim().toLowerCase())
+      .filter(Boolean));
+    if (!allowed.has(domain)) {
+      const error = new Error('domain-not-allowed');
+      error.code = 'domain-not-allowed';
+      throw error;
+    }
+    const upstream = await fetchImpl(parsedUrl.toString(), {
+      headers: {
+        'user-agent': 'Rental-Management-PhotoArchive/1.0',
+        'accept': 'image/*',
+      },
+      agent: mediaProxyAgent(parsedUrl),
+      redirect: 'manual',
+      size: maxBytes,
+      timeout: MEDIA_PROXY_TIMEOUT_MS,
+    });
+    if (upstream.status >= 300 && upstream.status < 400) {
+      const error = new Error('redirect-not-supported');
+      error.code = 'redirect-not-supported';
+      throw error;
+    }
+    if (!upstream.ok) {
+      const error = new Error('upstream-error');
+      error.code = `upstream-${upstream.status || 'error'}`;
+      throw error;
+    }
+    const declaredLength = Number(upstream.headers?.get?.('content-length') || 0);
+    if (declaredLength > maxBytes) {
+      const error = new Error('too-large');
+      error.code = 'too-large';
+      throw error;
+    }
+    const contentType = String(upstream.headers?.get?.('content-type') || 'application/octet-stream').split(';')[0].trim().toLowerCase();
+    if (!contentType.startsWith('image/')) {
+      const error = new Error('non-image-content');
+      error.code = 'non-image-content';
+      throw error;
+    }
+    const bytes = typeof upstream.buffer === 'function'
+      ? await upstream.buffer()
+      : Buffer.from(await upstream.arrayBuffer());
+    if (bytes.length > maxBytes) {
+      const error = new Error('too-large');
+      error.code = 'too-large';
+      throw error;
+    }
+    return { bytes, mimeType: contentType };
   }
 
   function getSafePublicSettings() {
@@ -711,6 +772,62 @@ function registerSystemRoutes(app, deps) {
     return res.json({ ok: true, history });
   });
 
+  app.get('/api/admin/media/archive-external-photos/dry-run', requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const result = await archiveExternalPhotos({
+        readData,
+        collections: jsonCollections,
+        uploadsRoot,
+        allowDomains: DEFAULT_ALLOWED_DOMAINS,
+        dryRun: true,
+      });
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || 'Не удалось проверить внешние фото.' });
+    }
+  });
+
+  app.post('/api/admin/media/archive-external-photos', requireAuth, requireAdmin, async (req, res) => {
+    const requestedDomains = Array.isArray(req.body?.allowDomains)
+      ? req.body.allowDomains
+      : DEFAULT_ALLOWED_DOMAINS;
+    const configuredDomains = new Set(DEFAULT_ALLOWED_DOMAINS);
+    const allowDomains = requestedDomains
+      .map(item => String(item || '').trim().toLowerCase())
+      .filter(item => configuredDomains.has(item))
+      .filter(Boolean);
+
+    try {
+      const result = await archiveExternalPhotos({
+        readData,
+        writeData,
+        collections: jsonCollections,
+        uploadsRoot,
+        allowDomains,
+        dryRun: false,
+        downloadPhoto: (url) => downloadAllowlistedPhoto(url, { allowDomains, maxBytes: DEFAULT_MAX_BYTES }),
+      });
+      auditLog?.(req, {
+        action: 'media.external_photos.archive',
+        entityType: 'media',
+        entityId: 'external_photos',
+        metadata: {
+          found: result.summary.found,
+          archived: result.summary.archived,
+          skipped: result.summary.skipped,
+          failed: result.summary.failed,
+          alreadyArchived: result.summary.alreadyArchived,
+          allowDomains,
+          collections: result.summary.collections,
+          domains: result.summary.domains,
+        },
+      });
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || 'Не удалось архивировать внешние фото.' });
+    }
+  });
+
   app.get('/api/admin/audit-logs', requireAuth, requireAdmin, (req, res) => {
     const allLogs = readAuditLogs(readData).map(safeAuditLogEntry);
     const limit = Math.min(500, Math.max(1, Number(req.query.limit || 100) || 100));
@@ -728,6 +845,19 @@ function registerSystemRoutes(app, deps) {
       logs,
       filters: { actions, sections },
     });
+  });
+
+  app.get('/uploads/*', requireAuth, (req, res) => {
+    const relative = String(req.params?.[0] || '').replace(/\\/g, '/');
+    const targetPath = path.resolve(uploadsRoot, relative);
+    const inside = path.relative(uploadsRoot, targetPath);
+    if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) {
+      return res.status(400).json({ ok: false, error: 'Некорректный путь файла.' });
+    }
+    if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isFile()) {
+      return res.status(404).json({ ok: false, error: 'Файл не найден.' });
+    }
+    return res.sendFile(targetPath);
   });
 
   app.post('/api/admin/system-data/import/dry-run', requireAuth, requireAdmin, (req, res) => {

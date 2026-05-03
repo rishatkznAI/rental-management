@@ -32,6 +32,7 @@ import type {
   ServiceStatus,
   ServiceWorkPerformed,
   SparePart,
+  PhotoReference,
 } from '../types';
 import { documentsService } from '../services/documents.service';
 import { equipmentService } from '../services/equipment.service';
@@ -51,6 +52,7 @@ import {
   openPrintableHtml,
 } from '../lib/serviceWorkOrder';
 import { buildServiceQuickActions } from '../lib/quickActions.js';
+import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -278,7 +280,7 @@ function RepairPhotoGroup({
   uploadedBy,
 }: {
   title: string;
-  photos?: string[];
+  photos?: PhotoReference[];
   uploadedAt?: string | null;
   uploadedBy?: string | null;
 }) {
@@ -301,16 +303,26 @@ function RepairPhotoGroup({
 
       {safePhotos.length > 0 ? (
         <div className="grid grid-cols-3 gap-2">
-          {safePhotos.map((src, index) => (
+          {safePhotos.map((photo, index) => {
+            const src = absoluteMediaUrl(photoSource(photo));
+            const fallback = absoluteMediaUrl(photoFallbackSource(photo));
+            return (
             <button
               type="button"
               key={`${title}-${index}`}
               onClick={() => window.open(src, '_blank')}
               className="group relative aspect-square overflow-hidden rounded-md border border-gray-200 dark:border-gray-700"
             >
-              <img src={src} alt={`${title} ${index + 1}`} className="h-full w-full object-cover group-hover:opacity-90" />
+              <img
+                src={src}
+                alt={`${title} ${index + 1}`}
+                className="h-full w-full object-cover group-hover:opacity-90"
+                onError={(event) => {
+                  if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                }}
+              />
             </button>
-          ))}
+          );})}
         </div>
       ) : (
         <div className="flex items-center gap-2 rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-gray-800 dark:text-gray-400">
@@ -1439,12 +1451,18 @@ export default function ServiceDetail() {
               {/* Saved photos grid */}
               {(ticket.photos ?? []).length > 0 ? (
                 <div className="grid grid-cols-3 gap-2">
-                  {(ticket.photos ?? []).map((src, i) => (
+                  {(ticket.photos ?? []).map((photo, i) => {
+                    const src = absoluteMediaUrl(photoSource(photo));
+                    const fallback = absoluteMediaUrl(photoFallbackSource(photo));
+                    return (
                     <div key={i} className="group relative aspect-square rounded-md overflow-hidden border border-gray-200 dark:border-gray-700">
                       <img
                         src={src}
                         alt={`Фото ${i + 1}`}
                         className="h-full w-full object-cover cursor-pointer hover:opacity-90"
+                        onError={(event) => {
+                          if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                        }}
                         onClick={() => window.open(src, '_blank')}
                       />
                       {canEditTicketFields && (
@@ -1456,7 +1474,7 @@ export default function ServiceDetail() {
                         </button>
                       )}
                     </div>
-                  ))}
+                  );})}
                 </div>
               ) : photoPending.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-6 text-center">

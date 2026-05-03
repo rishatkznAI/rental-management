@@ -1,5 +1,8 @@
 // Типы данных для системы управления арендой подъёмных платформ
 
+import type { PhotoReference } from './lib/media';
+export type { PhotoReference } from './lib/media';
+
 export type EquipmentStatus = 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive';
 export type EquipmentType = string;
 export type EquipmentDrive = 'diesel' | 'electric';
@@ -97,7 +100,7 @@ export interface Equipment {
   notes?: string;
   currentClient?: string;
   returnDate?: string;
-  photo?: string;
+  photo?: PhotoReference;
   gsmTrackerId?: string;
   gsmImei?: string | null;
   gsmDeviceId?: string | null;
@@ -319,11 +322,11 @@ export interface ShippingPhoto {
   date: string;
   type: ShippingEventType;
   uploadedBy: string;
-  photos: string[];
+  photos: PhotoReference[];
   comment?: string;
   rentalId?: string;
   source: RepairSource;
-  photoCategories?: Partial<Record<EquipmentOperationPhotoCategory, string[]>>;
+  photoCategories?: Partial<Record<EquipmentOperationPhotoCategory, PhotoReference[]>>;
   hoursValue?: number;
   damageDescription?: string;
   operationSessionId?: string;
@@ -580,7 +583,7 @@ export interface ServiceTicket {
   workLog: ServiceWorkLogEntry[];
   parts: ServicePartUsage[];
   createdAt: string;
-  photos?: string[];
+  photos?: PhotoReference[];
   serviceVehicleId?: string | null;   // Служебная машина, используемая в выезде
 }
 

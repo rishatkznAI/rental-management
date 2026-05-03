@@ -387,10 +387,26 @@ test('/api/admin/backup/full returns zip with manifest database and safe audit m
   const collections = {
     equipment: [{ id: 'EQ-1' }],
     clients: [{ id: 'C-1', company: 'Client' }],
+    planner_items: [{ id: 'PI-1' }],
     users: [{ id: 'U-1', email: 'admin@example.test', password: 'stored-hash', token: 'secret-token' }],
   };
+  const manifestCollections = [
+    'equipment',
+    'clients',
+    'users',
+    'planner_items',
+    'service_vehicles',
+    'vehicle_trips',
+    'company_expenses',
+    'debt_collection_plans',
+    'owners',
+    'warranty_claims',
+    'service_work_catalog',
+    'snapshot',
+  ];
   const { app, auditEntries } = createSystemApp({
     readData: name => collections[name] || [],
+    jsonCollections: manifestCollections,
     dbPath: '/tmp/app.sqlite',
     createDatabaseBackup: async (targetPath) => {
       const { writeFileSync } = await import('node:fs');
@@ -418,6 +434,18 @@ test('/api/admin/backup/full returns zip with manifest database and safe audit m
     assert.equal(manifest.counts.equipment, 1);
     assert.equal(manifest.counts.clients, 1);
     assert.equal(manifest.counts.users, 1);
+    assert.equal(manifest.counts.planner_items, 1);
+    for (const collection of manifestCollections) {
+      assert.ok(Object.hasOwn(manifest.counts, collection), `manifest counts should include ${collection}`);
+    }
+    assert.equal(manifest.counts.service_vehicles, 0);
+    assert.equal(manifest.counts.vehicle_trips, 0);
+    assert.equal(manifest.counts.company_expenses, 0);
+    assert.equal(manifest.counts.debt_collection_plans, 0);
+    assert.equal(manifest.counts.owners, 0);
+    assert.equal(manifest.counts.warranty_claims, 0);
+    assert.equal(manifest.counts.service_work_catalog, 0);
+    assert.equal(manifest.counts.snapshot, 0);
     assert.match(manifest.warning, /Не хранить в Git/);
     assert.doesNotMatch(JSON.stringify(manifest), /stored-hash|secret-token|password|token/i);
 

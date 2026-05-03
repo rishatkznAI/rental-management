@@ -83,6 +83,8 @@ const {
 const { getBuildInfo } = require('./lib/build-info');
 const { createGprsGateway } = require('./lib/gprs-gateway');
 const { createMaxApiClient } = require('./lib/max-api');
+const { getDemoPublicInfo, isDemoMode } = require('./lib/demo-mode');
+const { seedDemoData } = require('./scripts/seed-demo-data');
 const { createServiceCore } = require('./lib/service-core');
 const {
   MECHANIC_ROLES,
@@ -122,6 +124,8 @@ const {
   saveSession,
   setData,
 } = require('./db');
+
+const DEMO_MODE = isDemoMode();
 
 // ── Пароли ────────────────────────────────────────────────────────────────────
 
@@ -262,10 +266,10 @@ app.use('/bot-assets', express.static(path.join(__dirname, 'assets', 'bot'), {
 
 // ── Конфигурация ───────────────────────────────────────────────────────────────
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const BOT_TOKEN = DEMO_MODE ? '' : (process.env.BOT_TOKEN || '');
 const MAX_API   = 'https://platform-api.max.ru';
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
-const MAX_WEBHOOK_SECRET = String(process.env.MAX_WEBHOOK_SECRET || '').trim();
+const WEBHOOK_URL = DEMO_MODE ? '' : process.env.WEBHOOK_URL;
+const MAX_WEBHOOK_SECRET = DEMO_MODE ? '' : String(process.env.MAX_WEBHOOK_SECRET || '').trim();
 const MAIN_BOT_WEBHOOK_PATH = '/bot/webhook';
 const MANAGER_BOT_WEBHOOK_PATH = '/bot/webhook/manager';
 const DELIVERY_BOT_WEBHOOK_PATH = '/bot/webhook/delivery';
@@ -372,6 +376,7 @@ const gprsGateway = createGprsGateway({
   readData,
   writeData,
   logger: console,
+  enabled: !DEMO_MODE,
 });
 
 // ── Сессии (SQLite-backed, Bearer-токен) ──────────────────────────────────────
@@ -2547,6 +2552,8 @@ registerSystemRoutes(app, {
   backfillGanttRentalLinks,
   getBuildInfo,
   getRoleAccessSummary: roleAccessSummary,
+  demo: getDemoPublicInfo(),
+  resetDemoData: () => seedDemoData({ reset: true, logger: console }),
 });
 
 startServer({

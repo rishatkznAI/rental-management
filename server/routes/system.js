@@ -351,6 +351,8 @@ function registerSystemRoutes(app, deps) {
     backfillGanttRentalLinks,
     getBuildInfo,
     getRoleAccessSummary,
+    demo = { enabled: false, resetAllowed: false },
+    resetDemoData,
   } = deps;
 
   function buildInfo() {
@@ -494,6 +496,28 @@ function registerSystemRoutes(app, deps) {
 
   app.get('/api/public-settings', (_req, res) => {
     res.json(getSafePublicSettings());
+  });
+
+  app.get('/api/demo/status', (_req, res) => {
+    res.json({ ok: true, demo });
+  });
+
+  app.post('/api/demo/reset', requireAuth, requireAdmin, (req, res) => {
+    if (!demo?.enabled || typeof resetDemoData !== 'function') {
+      return res.status(404).json({ ok: false, error: 'Demo reset endpoint disabled' });
+    }
+    try {
+      resetDemoData();
+      auditLog?.(req, {
+        action: 'demo.reset',
+        entityType: 'system',
+        entityId: 'demo',
+        metadata: { demo: true },
+      });
+      res.json({ ok: true, demo });
+    } catch (error) {
+      res.status(error?.status || 403).json({ ok: false, error: error.message || 'Demo reset refused' });
+    }
   });
 
   app.get('/api/bot-test', requireAuth, requireAdmin, async (req, res) => {

@@ -9,6 +9,7 @@
   "scripts": {
     "build": "node scripts/vite-build.mjs",
     "dev": "CSS_TRANSFORMER_WASM=1 NAPI_RS_FORCE_WASI=1 vite",
+    "demo:reset": "DEMO_MODE=true DB_PATH=server/data/demo.sqlite node server/scripts/seed-demo-data.js --reset",
     "postinstall": "node scripts/fix-lightningcss-wasm.mjs",
     "test": "node --test tests/*.test.js",
     "test:e2e": "playwright test",

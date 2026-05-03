@@ -905,6 +905,16 @@ type ClientEndpointStatus = {
   error?: string;
 };
 
+type DemoStatusResponse = {
+  ok: boolean;
+  demo: {
+    enabled: boolean;
+    resetAllowed: boolean;
+    label: string;
+    message: string;
+  };
+};
+
 type AuditLogEntry = {
   id: string;
   createdAt: string;
@@ -1171,10 +1181,17 @@ function AuditLogSection() {
 
 function ProductionDiagnosticsSection() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [demoResetStatus, setDemoResetStatus] = React.useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const diagnosticsQuery = useQuery<ProductionDiagnostics>({
     queryKey: ['admin-production-diagnostics'],
     queryFn: () => api.get<ProductionDiagnostics>('/api/admin/production-diagnostics'),
     retry: 1,
+  });
+  const demoStatusQuery = useQuery<DemoStatusResponse>({
+    queryKey: ['demo-status'],
+    queryFn: () => api.get<DemoStatusResponse>('/api/demo/status'),
+    retry: 0,
   });
   const endpointQuery = useQuery<ClientEndpointStatus[]>({
     queryKey: ['admin-production-diagnostics-endpoints'],
@@ -1183,12 +1200,35 @@ function ProductionDiagnosticsSection() {
   });
 
   const diagnostics = diagnosticsQuery.data;
+  const demo = demoStatusQuery.data?.demo;
   const backendBuild = diagnostics?.backend?.build;
   const clientEndpoints = endpointQuery.data || [];
   const refresh = () => {
     void diagnosticsQuery.refetch();
+    void demoStatusQuery.refetch();
     void endpointQuery.refetch();
   };
+  const handleDemoReset = React.useCallback(async () => {
+    if (!demo?.enabled || !demo.resetAllowed) return;
+    const confirmed = window.confirm('Сбросить демо-данные к начальному состоянию? Реальные production-данные не затрагиваются.');
+    if (!confirmed) return;
+    setDemoResetStatus(null);
+    try {
+      await api.post('/api/demo/reset', {});
+      setDemoResetStatus({ type: 'success', message: 'Демо-данные сброшены. Если сессия завершилась, войдите demo-пользователем заново.' });
+      await Promise.allSettled([
+        queryClient.invalidateQueries(),
+        diagnosticsQuery.refetch(),
+        demoStatusQuery.refetch(),
+        endpointQuery.refetch(),
+      ]);
+    } catch (error) {
+      setDemoResetStatus({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Не удалось сбросить демо-данные.',
+      });
+    }
+  }, [demo?.enabled, demo?.resetAllowed, diagnosticsQuery, demoStatusQuery, endpointQuery, queryClient]);
 
   return (
     <div className="space-y-6">
@@ -1230,6 +1270,39 @@ function ProductionDiagnosticsSection() {
           </div>
         </CardContent>
       </Card>
+
+      {demo?.enabled && (
+        <Card data-testid="demo-reset-panel">
+          <CardHeader>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle>Демо-режим</CardTitle>
+                <CardDescription>{demo.message}</CardDescription>
+              </div>
+              <Badge variant={demo.resetAllowed ? 'warning' : 'default'}>{demo.label}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-muted-foreground">
+              Сброс заново создаёт только демо-базу и не меняет production database.
+            </div>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDemoReset()}
+              disabled={!demo.resetAllowed}
+              data-testid="demo-reset-button"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Сбросить демо
+            </Button>
+            {demoResetStatus && (
+              <div className={demoResetStatus.type === 'success' ? 'text-sm text-green-700 dark:text-green-300' : 'text-sm text-red-700 dark:text-red-300'}>
+                {demoResetStatus.message}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>

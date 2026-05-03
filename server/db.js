@@ -202,6 +202,19 @@ function cleanupExpiredSessions(now = Date.now()) {
   db.prepare('DELETE FROM app_sessions WHERE expires_at <= ?').run(now);
 }
 
+function resetAppData(collections = JSON_COLLECTIONS) {
+  const db = ensureDb();
+  const names = Array.isArray(collections) && collections.length > 0
+    ? [...new Set(collections.map(name => String(name || '').trim()).filter(Boolean))]
+    : JSON_COLLECTIONS;
+  const deleteData = db.prepare('DELETE FROM app_data WHERE name = ?');
+  const tx = db.transaction((collectionNames) => {
+    for (const name of collectionNames) deleteData.run(name);
+    db.prepare('DELETE FROM app_sessions').run();
+  });
+  tx(names);
+}
+
 function countActiveSessions(now = Date.now()) {
   const db = ensureDb();
   const row = db.prepare('SELECT COUNT(*) AS count FROM app_sessions WHERE expires_at > ?').get(now);
@@ -217,7 +230,9 @@ module.exports = {
   deleteSessionsForUserIds,
   getData,
   getSession,
+  JSON_COLLECTIONS,
   setData,
   migrateJsonFilesToDb,
+  resetAppData,
   saveSession,
 };

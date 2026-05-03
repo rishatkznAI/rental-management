@@ -7,6 +7,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { AppLoadingState } from './components/ui/AppLoadingState';
 import { BuildDebugBadge } from './components/ui/BuildDebugBadge';
+import { DemoModeBadge } from './components/ui/DemoModeBadge';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,6 +36,7 @@ export default function App() {
                 />
               }
             />
+            <DemoModeBadge />
             <BuildDebugBadge />
             <Toaster position="top-right" />
           </ThemeProvider>

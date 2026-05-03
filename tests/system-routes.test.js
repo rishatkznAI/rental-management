@@ -617,6 +617,93 @@ test('/api/admin/backup/full includes archived local photos from uploads', async
   }
 });
 
+test('/api/admin/backup/full streams archived local photos without readFileSync', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'backup-streamed-photo-'));
+  const uploadsDir = path.join(tempDir, 'uploads');
+  const photoPath = path.join(uploadsDir, 'external-photos', 'shipping_photos', 'SP-1', 'streamed.jpg');
+  fs.mkdirSync(path.dirname(photoPath), { recursive: true });
+  fs.writeFileSync(photoPath, Buffer.alloc(128 * 1024, 7));
+  const collections = {
+    shipping_photos: [{
+      id: 'SP-1',
+      photos: [{ localPath: '/uploads/external-photos/shipping_photos/SP-1/streamed.jpg' }],
+    }],
+  };
+  const originalReadFileSync = fs.readFileSync;
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    jsonCollections: ['shipping_photos'],
+    dbPath: path.join(tempDir, 'app.sqlite'),
+    createDatabaseBackup: async (targetPath) => {
+      fs.writeFileSync(targetPath, Buffer.from('sqlite snapshot'));
+      return targetPath;
+    },
+    fileRoots: [{ label: 'uploads', dir: uploadsDir }],
+  });
+
+  try {
+    fs.readFileSync = function patchedReadFileSync(filePath, ...args) {
+      if (path.resolve(String(filePath)) === path.resolve(photoPath)) {
+        throw new Error('local photo should be streamed, not read into memory');
+      }
+      return originalReadFileSync.call(this, filePath, ...args);
+    };
+    await withServer(app, async (baseUrl) => {
+      const response = await getBuffer(baseUrl, '/api/admin/backup/full');
+      assert.equal(response.status, 200);
+      const names = listZipEntries(response.buffer).map(entry => entry.name);
+      assert.ok(names.includes('files/uploads/external-photos/shipping_photos/SP-1/streamed.jpg'));
+    });
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('/api/admin/backup/full uses stable temp copy if archived source disappears during preparation', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'backup-stable-photo-'));
+  const uploadsDir = path.join(tempDir, 'uploads');
+  const photoPath = path.join(uploadsDir, 'external-photos', 'shipping_photos', 'SP-1', 'stable.jpg');
+  fs.mkdirSync(path.dirname(photoPath), { recursive: true });
+  fs.writeFileSync(photoPath, Buffer.alloc(64 * 1024, 3));
+  const collections = {
+    shipping_photos: [{
+      id: 'SP-1',
+      photos: [{ localPath: '/uploads/external-photos/shipping_photos/SP-1/stable.jpg' }],
+    }],
+  };
+  const originalCopyFileSync = fs.copyFileSync;
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    jsonCollections: ['shipping_photos'],
+    dbPath: path.join(tempDir, 'app.sqlite'),
+    createDatabaseBackup: async (targetPath) => {
+      fs.writeFileSync(targetPath, Buffer.from('sqlite snapshot'));
+      return targetPath;
+    },
+    fileRoots: [{ label: 'uploads', dir: uploadsDir }],
+  });
+
+  try {
+    fs.copyFileSync = function patchedCopyFileSync(source, target, ...args) {
+      const result = originalCopyFileSync.call(this, source, target, ...args);
+      if (path.resolve(String(source)) === path.resolve(photoPath)) {
+        fs.rmSync(photoPath, { force: true });
+      }
+      return result;
+    };
+    await withServer(app, async (baseUrl) => {
+      const response = await getBuffer(baseUrl, '/api/admin/backup/full');
+      assert.equal(response.status, 200);
+      const names = listZipEntries(response.buffer).map(entry => entry.name);
+      assert.ok(names.includes('files/uploads/external-photos/shipping_photos/SP-1/stable.jpg'));
+    });
+  } finally {
+    fs.copyFileSync = originalCopyFileSync;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('/api/admin/backup/full skips missing local photo references instead of failing', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'backup-missing-local-photo-'));
   const uploadsDir = path.join(tempDir, 'uploads');

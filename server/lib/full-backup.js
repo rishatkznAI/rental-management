@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { buildZipArchive, normalizeZipPath, readFileEntry } = require('./zip-store');
+const { buildZipArchiveFile, createFileEntry, normalizeZipPath } = require('./zip-store');
 
 const APP_NAME = 'Skytech Rental Management';
 const BACKUP_WARNING = 'Не хранить в Git / содержит чувствительные данные.';
@@ -121,7 +121,13 @@ function resolveLocalReference(value, roots) {
 
   const existingRoots = roots
     .filter(root => root?.dir && fs.existsSync(root.dir))
-    .map(root => ({ ...root, dir: fs.realpathSync(root.dir) }));
+    .flatMap(root => {
+      try {
+        return [{ ...root, dir: fs.realpathSync(root.dir) }];
+      } catch {
+        return [];
+      }
+    });
 
   for (const root of existingRoots) {
     const label = normalizeZipPath(root.label);
@@ -131,9 +137,18 @@ function resolveLocalReference(value, roots) {
     const fullPath = path.resolve(root.dir, withoutLabel);
     if (!isInsideDir(fullPath, root.dir)) return { filePath: '', reason: 'path-traversal' };
     if (!fs.existsSync(fullPath)) continue;
-    const real = fs.realpathSync(fullPath);
+    let real = '';
+    try {
+      real = fs.realpathSync(fullPath);
+    } catch (error) {
+      return { filePath: '', reason: skippedFileReason(error) };
+    }
     if (!isInsideDir(real, root.dir)) return { filePath: '', reason: 'path-traversal' };
-    if (!fs.statSync(real).isFile()) return { filePath: '', reason: 'not-file' };
+    try {
+      if (!fs.statSync(real).isFile()) return { filePath: '', reason: 'not-file' };
+    } catch (error) {
+      return { filePath: '', reason: skippedFileReason(error) };
+    }
     if (shouldSkipFile(real)) return { filePath: '', reason: 'blocked-extension' };
     return {
       filePath: real,
@@ -167,7 +182,7 @@ function skippedFileReason(error, fallback = 'read-file-failed') {
   return fallback;
 }
 
-function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, seenFiles }) {
+async function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, seenFiles, createLocalFileEntry }) {
   const entries = [];
   const includedLocalFiles = [];
   const embeddedPhotoCollections = {};
@@ -183,7 +198,7 @@ function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, see
     increment(skippedReasons, reason || 'unknown');
   }
 
-  function inspectValue(value, context) {
+  async function inspectValue(value, context) {
     if (typeof value === 'string') {
       const embedded = dataUrlImage(value);
       if (embedded) {
@@ -211,7 +226,7 @@ function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, see
         if (seenFiles.has(local.filePath)) return;
         seenFiles.add(local.filePath);
         try {
-          const fileEntry = readFileEntry(local.filePath, local.zipPath);
+          const fileEntry = await createLocalFileEntry(local.filePath, local.zipPath);
           entries.push(fileEntry);
           includedLocalFiles.push({ path: local.zipPath, size: fileEntry.size });
         } catch (error) {
@@ -224,7 +239,9 @@ function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, see
     }
 
     if (Array.isArray(value)) {
-      value.forEach((item, index) => inspectValue(item, { ...context, index }));
+      for (const [index, item] of value.entries()) {
+        await inspectValue(item, { ...context, index });
+      }
       return;
     }
 
@@ -234,9 +251,9 @@ function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, see
         const keyLower = key.toLowerCase();
         if (FILE_REFERENCE_KEYS.has(keyLower)) {
           objectHadFileLikeKey = true;
-          inspectValue(nested, { ...context, fieldName: key, index: context.index });
+          await inspectValue(nested, { ...context, fieldName: key, index: context.index });
         } else if (nested && typeof nested === 'object') {
-          inspectValue(nested, context);
+          await inspectValue(nested, context);
         }
       }
       if (objectHadFileLikeKey && !Array.isArray(value)) {
@@ -250,14 +267,14 @@ function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, see
     const list = Array.isArray(records)
       ? records
       : (records && typeof records === 'object' ? Object.values(records) : []);
-    list.forEach((record, index) => {
-      inspectValue(record, {
+    for (const [index, record] of list.entries()) {
+      await inspectValue(record, {
         collection,
         recordId: recordId(record, index),
         fieldName: 'photo',
         index: 0,
       });
-    });
+    }
   }
 
   return {
@@ -372,6 +389,7 @@ async function createFullBackupArchive({
   const entries = [];
   const skippedReasons = {};
   let skippedFilesCount = 0;
+  let stagedFileCounter = 0;
 
   function skip(reason) {
     skippedFilesCount += 1;
@@ -384,17 +402,33 @@ async function createFullBackupArchive({
     }
   }
 
+  async function createStableFileEntry(filePath, zipEntryPath) {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      const error = new Error('Not a regular file');
+      error.code = 'ENOTFILE';
+      throw error;
+    }
+    const stagingDir = path.join(tempDir, 'staged-files');
+    fs.mkdirSync(stagingDir, { recursive: true });
+    stagedFileCounter += 1;
+    const stagedPath = path.join(stagingDir, String(stagedFileCounter));
+    fs.copyFileSync(filePath, stagedPath);
+    fs.utimesSync(stagedPath, stat.atime, stat.mtime);
+    return createFileEntry(stagedPath, zipEntryPath);
+  }
+
   let stage = 'init';
   try {
     stage = 'snapshot';
     let databaseIncludedAs = '';
     if (typeof createDatabaseBackup === 'function') {
       await createDatabaseBackup(dbSnapshotPath);
-      entries.push(readFileEntry(dbSnapshotPath, 'database/app.sqlite'));
+      entries.push(await createFileEntry(dbSnapshotPath, 'database/app.sqlite'));
       databaseIncludedAs = 'database/app.sqlite';
     } else if (dbPath && fs.existsSync(dbPath)) {
       fs.copyFileSync(dbPath, dbSnapshotPath);
-      entries.push(readFileEntry(dbSnapshotPath, 'database/app.sqlite'));
+      entries.push(await createFileEntry(dbSnapshotPath, 'database/app.sqlite'));
       databaseIncludedAs = 'database/app.sqlite';
     } else {
       const exportPayload = buildDatabaseExport(readData, collections);
@@ -412,7 +446,7 @@ async function createFullBackupArchive({
     mergeSkipped(localFiles.skippedReasons);
     for (const item of localFiles.entries) {
       try {
-        const fileEntry = readFileEntry(item.filePath, item.zipPath);
+        const fileEntry = await createStableFileEntry(item.filePath, item.zipPath);
         entries.push(fileEntry);
         includedFiles.push({ path: item.zipPath, size: fileEntry.size });
       } catch (error) {
@@ -421,12 +455,13 @@ async function createFullBackupArchive({
     }
 
     stage = 'scan-references';
-    const embeddedAndReferencedFiles = scanEmbeddedAndReferencedFiles({
+    const embeddedAndReferencedFiles = await scanEmbeddedAndReferencedFiles({
       readData,
       collections,
       roots: fileRoots || defaultFileRoots(dbPath),
       now,
       seenFiles: new Set(localFiles.entries.map(item => item.realPath || item.filePath).filter(Boolean)),
+      createLocalFileEntry: createStableFileEntry,
     });
     for (const item of embeddedAndReferencedFiles.entries) {
       entries.push(item);
@@ -514,26 +549,25 @@ async function createFullBackupArchive({
       mtime: now,
     });
 
-    let finalZip = buildZipArchive(entries);
+    let finalZipSize = await buildZipArchiveFile(entries, zipPath);
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      manifest.backupSize = finalZip.length;
+      manifest.backupSize = finalZipSize;
       entries[0] = {
         name: 'manifest.json',
         data: JSON.stringify(manifest, null, 2),
         mtime: now,
       };
-      const nextZip = buildZipArchive(entries);
-      finalZip = nextZip;
-      if (nextZip.length === manifest.backupSize) break;
+      const nextZipSize = await buildZipArchiveFile(entries, zipPath);
+      finalZipSize = nextZipSize;
+      if (nextZipSize === manifest.backupSize) break;
     }
-    fs.writeFileSync(zipPath, finalZip, { mode: 0o600 });
 
     return {
       filename,
       path: zipPath,
       cleanupDir: tempDir,
       manifest,
-      size: finalZip.length,
+      size: finalZipSize,
     };
   } catch (error) {
     if (error && typeof error === 'object' && !error.backupStage) {

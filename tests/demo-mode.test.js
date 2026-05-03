@@ -35,6 +35,19 @@ function readCollection(dbPath, name) {
   }
 }
 
+function writeCollection(dbPath, name, value) {
+  const db = new Database(dbPath);
+  try {
+    db.prepare(`
+      INSERT INTO app_data (name, json)
+      VALUES (?, ?)
+      ON CONFLICT(name) DO UPDATE SET json = excluded.json
+    `).run(name, JSON.stringify(value));
+  } finally {
+    db.close();
+  }
+}
+
 test('demo reset guards refuse non-demo environments and production-looking DB paths', () => {
   assert.throws(
     () => assertDemoResetAllowed({ env: { DEMO_MODE: '', NODE_ENV: 'test' }, dbPath: '/tmp/demo.sqlite' }),
@@ -73,6 +86,7 @@ test('seed script creates demo entities and demo users in an isolated DB', () =>
 
     assert.deepEqual(users.map(user => user.id), ['demo-admin', 'demo-office', 'demo-rental-manager', 'demo-service']);
     assert.ok(users.every(user => user.status === 'Активен' && String(user.password || '').startsWith('h2:scrypt:')));
+    assert.ok(clients.every(client => typeof client.creditLimit === 'number' && Number.isFinite(client.creditLimit)));
     assert.ok(clients.length >= 2);
     assert.ok(equipment.length >= 3);
     assert.ok(rentals.length >= 2);
@@ -84,6 +98,72 @@ test('seed script creates demo entities and demo users in an isolated DB', () =>
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('demo seed creates planner-visible equipment and linked gantt rentals', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rental-demo-'));
+  const dbPath = join(dir, 'demo.sqlite');
+  try {
+    runSeed(dbPath);
+    const equipment = readCollection(dbPath, 'equipment');
+    const ganttRentals = readCollection(dbPath, 'gantt_rentals');
+
+    const plannerEquipment = equipment.filter(item =>
+      item.activeInFleet === true &&
+      (item.category === 'own' || item.category === 'partner') &&
+      ['available', 'rented', 'reserved', 'in_service', 'inactive'].includes(item.status) &&
+      ['own', 'investor', 'sublease'].includes(item.owner) &&
+      ['scissor', 'articulated', 'telescopic', 'mast'].includes(item.type) &&
+      ['diesel', 'electric'].includes(item.drive)
+    );
+    assert.equal(plannerEquipment.length, equipment.length);
+
+    const equipmentIds = new Set(equipment.map(item => item.id));
+    assert.ok(ganttRentals.some(item => item.status === 'active'));
+    assert.ok(ganttRentals.some(item => item.status === 'created'));
+    assert.ok(ganttRentals.every(item => item.equipmentId && equipmentIds.has(item.equipmentId)));
+    assert.ok(ganttRentals.every(item => item.rentalId && item.startDate && item.endDate && typeof item.amount === 'number'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('demo reset removes created demo records and restores seed data', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rental-demo-'));
+  const dbPath = join(dir, 'demo.sqlite');
+  try {
+    runSeed(dbPath);
+    const clients = readCollection(dbPath, 'clients');
+    writeCollection(dbPath, 'clients', [
+      ...clients,
+      { id: 'smoke-client', company: 'Demo Smoke Client', creditLimit: 1 },
+    ]);
+
+    runSeed(dbPath);
+    const resetClients = readCollection(dbPath, 'clients');
+    assert.equal(resetClients.some(client => client.id === 'smoke-client'), false);
+    assert.equal(resetClients.some(client => client.id === 'demo-client-alpha'), true);
+    assert.equal(resetClients.length, clients.length);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('demo seed does not contain bad placeholder values in user-visible data', () => {
+  const { buildDemoData } = require('../server/scripts/seed-demo-data.js');
+  const data = buildDemoData();
+  const visibleData = {
+    clients: data.clients,
+    equipment: data.equipment,
+    rentals: data.rentals,
+    gantt_rentals: data.gantt_rentals,
+    documents: data.documents,
+    payments: data.payments,
+    service: data.service,
+    deliveries: data.deliveries,
+    debt_collection_plans: data.debt_collection_plans,
+  };
+  assert.doesNotMatch(JSON.stringify(visibleData), /NaN|undefined|null|\[object Object\]|не число/);
 });
 
 test('seed script refuses production DB path', () => {

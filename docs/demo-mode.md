@@ -11,6 +11,45 @@ Demo mode is a separate, disposable environment for product demos and scenario c
 - Production DB path must remain `/data/app.sqlite` only in production.
 
 This keeps demo data physically separate from production data and makes reset safe.
+Do not create demo users inside the production backend and do not switch databases by login.
+
+## Environment Split
+
+Production frontend:
+
+```env
+VITE_API_URL=https://<production-backend>.up.railway.app
+VITE_DEMO_URL=https://<demo-frontend-url>
+```
+
+`VITE_DEMO_URL` is optional. When it is set, the production login page shows a simple "Открыть демо-режим" link to the separate demo frontend. When it is empty, the link is hidden.
+
+Demo frontend:
+
+```env
+VITE_API_URL=https://<demo-backend>.up.railway.app
+VITE_DEMO_MODE=true
+```
+
+Production backend:
+
+```env
+NODE_ENV=production
+DB_PATH=/data/app.sqlite
+```
+
+Do not set `DEMO_MODE` on the production backend.
+
+Demo backend:
+
+```env
+NODE_ENV=production
+DEMO_MODE=true
+DEMO_ALLOW_RESET=true
+DB_PATH=/data/demo.sqlite
+```
+
+Do not set real `BOT_TOKEN`, `WEBHOOK_URL`, `MAX_WEBHOOK_SECRET`, GPRS, email, 1C, or EDO credentials on the demo backend.
 
 ## Local Run
 
@@ -75,15 +114,27 @@ Reset guards:
 
 Create a separate backend service:
 
+- Root directory: `server`
+- Start command: `npm start`
+- Volume mount: `/data`
 - `DEMO_MODE=true`
 - `DEMO_ALLOW_RESET=true`
 - `DB_PATH=/data/demo.sqlite`
+- `NODE_ENV=production`
 - Do not set real `BOT_TOKEN`, `WEBHOOK_URL`, MAX webhook secrets, email, 1C, or EDO credentials.
+- Open `/api/demo/status` and confirm that `demo.enabled` is `true`.
+- Run the seed/reset once with the demo DB path before handing the environment to users.
 
 Create a separate frontend deployment:
 
 - `VITE_DEMO_MODE=true`
 - `VITE_API_URL=https://<demo-backend>.up.railway.app`
+- Confirm that the `DEMO MODE` badge is visible after opening the app.
+
+Optional production frontend link:
+
+- Set `VITE_DEMO_URL=https://<demo-frontend-url>` on the production frontend if you want the login page to offer a link to demo.
+- This link is only navigation to the separate demo frontend. It does not switch the production backend or database.
 
 The demo backend clears MAX bot/webhook transport in demo mode, and GPRS gateway listening is disabled.
 
@@ -111,3 +162,4 @@ This is enough to show Client 360, Equipment 360, rentals, documents, payments, 
 - Never configure real external notification credentials in demo.
 - Treat demo data as disposable.
 - Production deploy does not need `DEMO_MODE` and will not show the demo badge.
+- Reset from the admin UI can clear demo sessions; after reset, users may need to sign in again with a demo account.

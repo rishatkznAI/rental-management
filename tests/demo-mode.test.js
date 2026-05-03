@@ -181,6 +181,15 @@ test('seed script refuses production DB path', () => {
 
 test('demo public flag and frontend indicator are wired without exposing secrets', () => {
   assert.deepEqual(
+    getDemoPublicInfo({ NODE_ENV: 'production' }),
+    {
+      enabled: false,
+      resetAllowed: false,
+      label: 'Демо-режим',
+      message: 'Данные ненастоящие и могут быть сброшены.',
+    },
+  );
+  assert.deepEqual(
     getDemoPublicInfo({ DEMO_MODE: 'true', NODE_ENV: 'test' }),
     {
       enabled: true,
@@ -192,12 +201,26 @@ test('demo public flag and frontend indicator are wired without exposing secrets
 
   const appSource = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8');
   const badgeSource = readFileSync(new URL('../src/app/components/ui/DemoModeBadge.tsx', import.meta.url), 'utf8');
+  const loginSource = readFileSync(new URL('../src/app/pages/Login.tsx', import.meta.url), 'utf8');
   const routesSource = readFileSync(new URL('../server/routes/system.js', import.meta.url), 'utf8');
+  const serverSource = readFileSync(new URL('../server/server.js', import.meta.url), 'utf8');
+  const packageSource = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
 
   assert.match(appSource, /<DemoModeBadge \/>/);
   assert.match(badgeSource, /VITE_DEMO_MODE/);
   assert.match(badgeSource, /DEMO MODE/);
   assert.match(badgeSource, /Демо-режим · данные будут сброшены/);
+  assert.match(loginSource, /VITE_DEMO_URL/);
+  assert.match(loginSource, /Открыть демо-режим/);
+  assert.match(loginSource, /\{DEMO_URL && \(/);
+  assert.match(loginSource, /href=\{DEMO_URL\}/);
+  assert.match(loginSource, /target="_blank"/);
+  assert.match(loginSource, /rel="noopener noreferrer"/);
   assert.match(routesSource, /\/api\/demo\/reset/);
+  assert.match(routesSource, /requireAuth, requireAdmin/);
+  assert.match(serverSource, /DEMO_MODE \? '' : \(process\.env\.BOT_TOKEN \|\| ''\)/);
+  assert.match(serverSource, /enabled: !DEMO_MODE/);
+  assert.match(packageSource, /"demo:reset": "DEMO_MODE=true DB_PATH=server\/data\/demo\.sqlite/);
+  assert.doesNotMatch(packageSource, /demo:reset[^"]*app\.sqlite/);
   assert.doesNotMatch(badgeSource, /password|token|secret/i);
 });

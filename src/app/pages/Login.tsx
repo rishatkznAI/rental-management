@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Quote, Truck } from 'lucide-react';
+import { ExternalLink, Quote, Truck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { getRandomMotivationalQuote } from '../lib/motivationalQuotes';
+
+const DEMO_URL = String(import.meta.env.VITE_DEMO_URL || '').trim();
 
 export default function Login() {
   const [email, setEmail] = React.useState('');
@@ -87,6 +89,19 @@ export default function Login() {
                 {loading ? 'Вход...' : 'Войти'}
               </Button>
             </form>
+            {DEMO_URL && (
+              <div className="mt-5 border-t border-gray-100 pt-5 text-center dark:border-slate-800">
+                <a
+                  href={DEMO_URL}
+                  className="inline-flex items-center justify-center gap-2 text-sm font-medium text-[--color-primary] hover:underline"
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  Открыть демо-режим
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

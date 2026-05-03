@@ -2203,6 +2203,26 @@ function filenameFromDisposition(disposition: string | null, fallback: string) {
   return match?.[1] || fallback;
 }
 
+async function backupErrorFromResponse(response: Response) {
+  let serverMessage = '';
+  try {
+    const body = await response.json();
+    serverMessage = typeof body?.error === 'string' ? body.error : '';
+  } catch {
+    serverMessage = '';
+  }
+  const base = `Сервер не смог подготовить архив (HTTP ${response.status}).`;
+  return `${base}${serverMessage ? ` ${serverMessage}` : ''} Попробуйте ещё раз или проверьте logs.`;
+}
+
+function backupErrorFromException(error: unknown) {
+  if (error instanceof TypeError) {
+    return 'Не удалось скачать backup: соединение с сервером было прервано. Сервер мог не успеть подготовить архив. Попробуйте ещё раз или проверьте logs.';
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return 'Не удалось скачать backup. Попробуйте ещё раз или проверьте logs.';
+}
+
 function parseCSVRow(line: string) {
   const result: string[] = [];
   let current = '';
@@ -2424,14 +2444,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
         credentials: 'include',
       });
       if (!response.ok) {
-        let error = `HTTP ${response.status}`;
-        try {
-          const body = await response.json();
-          error = body?.error || error;
-        } catch {
-          // keep HTTP status
-        }
-        throw new Error(error);
+        throw new Error(await backupErrorFromResponse(response));
       }
       const blob = await response.blob();
       const filename = filenameFromDisposition(
@@ -2442,7 +2455,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
       setBackupMessage({ type: 'success', text: 'Backup подготовлен и передан браузеру для скачивания.' });
       await backupHistoryQuery.refetch();
     } catch (error) {
-      setBackupMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось скачать backup.' });
+      setBackupMessage({ type: 'error', text: backupErrorFromException(error) });
     } finally {
       setIsDownloadingBackup(false);
     }

@@ -726,6 +726,20 @@ function registerSystemRoutes(app, deps) {
 
   app.get('/api/admin/backup/full', requireAuth, requireAdmin, async (req, res) => {
     let backup = null;
+    const safeBackupErrorMessage = (error) => {
+      const code = typeof error?.code === 'string' ? error.code : '';
+      if (code === 'ENOENT') return 'local file disappeared before backup could read it';
+      if (code === 'EACCES' || code === 'EPERM') return 'local file is not readable';
+      return 'backup operation failed';
+    };
+    const logBackupError = (stage, error, extra = {}) => {
+      console.error('[backup] full backup failed', {
+        stage,
+        code: typeof error?.code === 'string' ? error.code : 'unknown',
+        message: safeBackupErrorMessage(error),
+        ...extra,
+      });
+    };
     try {
       backup = await createFullBackupArchive({
         readData,
@@ -736,30 +750,57 @@ function registerSystemRoutes(app, deps) {
         fileRoots,
       });
 
-      auditLog?.(req, {
-        action: 'system.backup.download',
-        entityType: 'system',
-        entityId: 'backup',
-        metadata: {
-          filename: backup.filename,
-          size: backup.size,
-          collections: backup.manifest?.counts || {},
-          files: backup.manifest?.includedFilesCount || 0,
-          filesCount: backup.manifest?.includedFilesCount || 0,
-          embeddedPhotosCount: backup.manifest?.embeddedPhotosCount || 0,
-          externalReferencesCount: backup.manifest?.externalReferencesCount || 0,
-        },
-      });
-
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Length', String(backup.size));
       res.setHeader('Content-Disposition', `attachment; filename="${backup.filename}"`);
-      res.on('finish', () => cleanupBackupArchive(backup));
-      res.on('close', () => cleanupBackupArchive(backup));
-      return res.sendFile(backup.path);
+      let cleanedUp = false;
+      let completed = false;
+      const cleanupOnce = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        cleanupBackupArchive(backup);
+      };
+      res.on('close', () => {
+        if (!completed) cleanupOnce();
+      });
+      return res.sendFile(backup.path, (error) => {
+        completed = true;
+        cleanupOnce();
+        if (error) {
+          logBackupError('response', error, {
+            filesCount: backup.manifest?.includedFilesCount || 0,
+            embeddedPhotosCount: backup.manifest?.embeddedPhotosCount || 0,
+            externalReferencesCount: backup.manifest?.externalReferencesCount || 0,
+            skippedFilesCount: backup.manifest?.skippedFilesCount || 0,
+          });
+          if (!res.headersSent) {
+            return res.status(500).json({ ok: false, error: 'Сервер не смог передать подготовленный backup.' });
+          }
+          return undefined;
+        }
+
+        auditLog?.(req, {
+          action: 'system.backup.download',
+          entityType: 'system',
+          entityId: 'backup',
+          metadata: {
+            filename: backup.filename,
+            size: backup.size,
+            collections: backup.manifest?.counts || {},
+            files: backup.manifest?.includedFilesCount || 0,
+            filesCount: backup.manifest?.includedFilesCount || 0,
+            embeddedPhotosCount: backup.manifest?.embeddedPhotosCount || 0,
+            externalReferencesCount: backup.manifest?.externalReferencesCount || 0,
+          },
+        });
+        return undefined;
+      });
     } catch (error) {
       if (backup) cleanupBackupArchive(backup);
-      return res.status(500).json({ ok: false, error: error.message || 'Не удалось подготовить backup.' });
+      logBackupError(error?.backupStage || 'prepare', error, {
+        filesCount: backup?.manifest?.includedFilesCount || 0,
+      });
+      return res.status(500).json({ ok: false, error: 'Сервер не смог подготовить backup.' });
     }
   });
 

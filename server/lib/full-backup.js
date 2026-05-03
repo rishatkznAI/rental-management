@@ -19,6 +19,9 @@ const FILE_REFERENCE_KEYS = new Set([
   'dataurl',
   'base64',
   'filename',
+  'localpath',
+  'originalurl',
+  'mimetype',
 ]);
 const IMAGE_MIME_EXTENSIONS = {
   'image/jpeg': 'jpg',
@@ -103,7 +106,7 @@ function localReferenceCandidate(value) {
   const text = String(value || '').trim();
   if (!text || text.length > 1024) return '';
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(text)) return '';
-  if (path.isAbsolute(text)) return '';
+  if (path.isAbsolute(text) && !/^\/(uploads|photos|documents|files|attachments)\//i.test(text)) return '';
   if (!/[\\/]/.test(text)) return '';
   return text;
 }
@@ -156,6 +159,14 @@ function increment(target, key, amount = 1) {
   target[key] = (target[key] || 0) + amount;
 }
 
+function skippedFileReason(error, fallback = 'read-file-failed') {
+  const code = typeof error?.code === 'string' ? error.code.toLowerCase() : '';
+  if (code === 'enoent') return 'missing-local-file';
+  if (code === 'eacces' || code === 'eperm') return 'unreadable-local-file';
+  if (code === 'enotdir') return 'not-file';
+  return fallback;
+}
+
 function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, seenFiles }) {
   const entries = [];
   const includedLocalFiles = [];
@@ -199,9 +210,13 @@ function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, see
       if (local.filePath) {
         if (seenFiles.has(local.filePath)) return;
         seenFiles.add(local.filePath);
-        const fileEntry = readFileEntry(local.filePath, local.zipPath);
-        entries.push(fileEntry);
-        includedLocalFiles.push({ path: local.zipPath, size: fileEntry.size });
+        try {
+          const fileEntry = readFileEntry(local.filePath, local.zipPath);
+          entries.push(fileEntry);
+          includedLocalFiles.push({ path: local.zipPath, size: fileEntry.size });
+        } catch (error) {
+          skip(skippedFileReason(error));
+        }
       } else if (local.reason) {
         skip(local.reason);
       }
@@ -261,22 +276,44 @@ function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, see
 function collectLocalFiles(roots = defaultFileRoots(), seen = new Set()) {
   const entries = [];
   const missing = [];
+  const skippedReasons = {};
+  let skippedFilesCount = 0;
+
+  function skip(reason) {
+    skippedFilesCount += 1;
+    increment(skippedReasons, reason || 'unknown');
+  }
 
   function visit(root, currentDir) {
-    for (const dirent of fs.readdirSync(currentDir, { withFileTypes: true })) {
+    let dirents = [];
+    try {
+      dirents = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch (error) {
+      skip(skippedFileReason(error, 'read-directory-failed'));
+      return;
+    }
+
+    for (const dirent of dirents) {
       const fullPath = path.join(currentDir, dirent.name);
       if (dirent.isDirectory()) {
         visit(root, fullPath);
         continue;
       }
       if (!dirent.isFile() || shouldSkipFile(fullPath)) continue;
-      const real = fs.realpathSync(fullPath);
+      let real = '';
+      try {
+        real = fs.realpathSync(fullPath);
+      } catch (error) {
+        skip(skippedFileReason(error));
+        continue;
+      }
       if (seen.has(real)) continue;
       seen.add(real);
       const relative = normalizeZipPath(path.relative(root.dir, fullPath));
       if (!relative) continue;
       entries.push({
         filePath: fullPath,
+        realPath: real,
         zipPath: `files/${normalizeZipPath(root.label)}/${relative}`,
       });
     }
@@ -287,7 +324,13 @@ function collectLocalFiles(roots = defaultFileRoots(), seen = new Set()) {
       missing.push(root?.dir || '');
       continue;
     }
-    const stat = fs.statSync(root.dir);
+    let stat = null;
+    try {
+      stat = fs.statSync(root.dir);
+    } catch (error) {
+      skip(skippedFileReason(error, 'read-directory-failed'));
+      continue;
+    }
     if (!stat.isDirectory()) {
       missing.push(root.dir);
       continue;
@@ -295,7 +338,7 @@ function collectLocalFiles(roots = defaultFileRoots(), seen = new Set()) {
     visit(root, root.dir);
   }
 
-  return { entries, missing };
+  return { entries, missing, skippedFilesCount, skippedReasons };
 }
 
 function buildDatabaseExport(readData, collections) {
@@ -327,8 +370,23 @@ async function createFullBackupArchive({
   const dbSnapshotPath = path.join(tempDir, 'app.sqlite');
   const includedFiles = [];
   const entries = [];
+  const skippedReasons = {};
+  let skippedFilesCount = 0;
 
+  function skip(reason) {
+    skippedFilesCount += 1;
+    increment(skippedReasons, reason || 'unknown');
+  }
+
+  function mergeSkipped(source = {}) {
+    for (const [reason, count] of Object.entries(source)) {
+      increment(skippedReasons, reason, count);
+    }
+  }
+
+  let stage = 'init';
   try {
+    stage = 'snapshot';
     let databaseIncludedAs = '';
     if (typeof createDatabaseBackup === 'function') {
       await createDatabaseBackup(dbSnapshotPath);
@@ -348,19 +406,27 @@ async function createFullBackupArchive({
       databaseIncludedAs = 'database/database-export.json';
     }
 
+    stage = 'collect-files';
     const localFiles = collectLocalFiles(fileRoots || defaultFileRoots(dbPath));
+    skippedFilesCount += localFiles.skippedFilesCount || 0;
+    mergeSkipped(localFiles.skippedReasons);
     for (const item of localFiles.entries) {
-      const fileEntry = readFileEntry(item.filePath, item.zipPath);
-      entries.push(fileEntry);
-      includedFiles.push({ path: item.zipPath, size: fileEntry.size });
+      try {
+        const fileEntry = readFileEntry(item.filePath, item.zipPath);
+        entries.push(fileEntry);
+        includedFiles.push({ path: item.zipPath, size: fileEntry.size });
+      } catch (error) {
+        skip(skippedFileReason(error));
+      }
     }
 
+    stage = 'scan-references';
     const embeddedAndReferencedFiles = scanEmbeddedAndReferencedFiles({
       readData,
       collections,
       roots: fileRoots || defaultFileRoots(dbPath),
       now,
-      seenFiles: new Set(localFiles.entries.map(item => fs.realpathSync(item.filePath))),
+      seenFiles: new Set(localFiles.entries.map(item => item.realPath || item.filePath).filter(Boolean)),
     });
     for (const item of embeddedAndReferencedFiles.entries) {
       entries.push(item);
@@ -368,12 +434,18 @@ async function createFullBackupArchive({
     for (const item of embeddedAndReferencedFiles.includedLocalFiles) {
       includedFiles.push(item);
     }
+    const totalSkippedReasons = { ...skippedReasons };
+    for (const [reason, count] of Object.entries(embeddedAndReferencedFiles.skippedReasons)) {
+      increment(totalSkippedReasons, reason, count);
+    }
+    const totalSkippedFilesCount = skippedFilesCount + embeddedAndReferencedFiles.skippedFilesCount;
 
     const counts = {};
     for (const collection of collections) {
       counts[collection] = countCollection(readData(collection));
     }
 
+    stage = 'zip';
     const includedFilesCount = includedFiles.length + embeddedAndReferencedFiles.embeddedPhotosCount;
     const manifest = {
       generatedAt: now.toISOString(),
@@ -392,8 +464,8 @@ async function createFullBackupArchive({
         localFilesCount: includedFiles.length,
         embeddedPhotosCount: embeddedAndReferencedFiles.embeddedPhotosCount,
         externalReferencesCount: embeddedAndReferencedFiles.externalReferencesCount,
-        skippedFilesCount: embeddedAndReferencedFiles.skippedFilesCount,
-        skippedReasons: embeddedAndReferencedFiles.skippedReasons,
+        skippedFilesCount: totalSkippedFilesCount,
+        skippedReasons: totalSkippedReasons,
         fileRootsChecked: (fileRoots || defaultFileRoots(dbPath)).map(root => path.basename(root?.dir || root?.label || '')).filter(Boolean),
         embeddedPhotoCollections: embeddedAndReferencedFiles.embeddedPhotoCollections,
         externalFileReferences: {
@@ -411,8 +483,8 @@ async function createFullBackupArchive({
       localFilesCount: includedFiles.length,
       embeddedPhotosCount: embeddedAndReferencedFiles.embeddedPhotosCount,
       externalReferencesCount: embeddedAndReferencedFiles.externalReferencesCount,
-      skippedFilesCount: embeddedAndReferencedFiles.skippedFilesCount,
-      skippedReasons: embeddedAndReferencedFiles.skippedReasons,
+      skippedFilesCount: totalSkippedFilesCount,
+      skippedReasons: totalSkippedReasons,
       fileRootsChecked: (fileRoots || defaultFileRoots(dbPath)).map(root => path.basename(root?.dir || root?.label || '')).filter(Boolean),
       embeddedPhotoCollections: embeddedAndReferencedFiles.embeddedPhotoCollections,
       warning: BACKUP_WARNING,
@@ -464,6 +536,9 @@ async function createFullBackupArchive({
       size: finalZip.length,
     };
   } catch (error) {
+    if (error && typeof error === 'object' && !error.backupStage) {
+      error.backupStage = typeof stage === 'string' ? stage : 'unknown';
+    }
     fs.rmSync(tempDir, { recursive: true, force: true });
     throw error;
   }

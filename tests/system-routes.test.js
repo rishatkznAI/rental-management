@@ -574,6 +574,123 @@ test('/api/admin/backup/full succeeds with no photos and reports zero embedded p
   });
 });
 
+test('/api/admin/backup/full includes archived local photos from uploads', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'backup-archived-photo-'));
+  const uploadsDir = path.join(tempDir, 'uploads');
+  const photoPath = path.join(uploadsDir, 'external-photos', 'shipping_photos', 'SP-1', 'photo.jpg');
+  fs.mkdirSync(path.dirname(photoPath), { recursive: true });
+  fs.writeFileSync(photoPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  const collections = {
+    shipping_photos: [{
+      id: 'SP-1',
+      photos: [{
+        originalUrl: 'https://i.oneme.ru/i?r=archived-local',
+        localPath: '/uploads/external-photos/shipping_photos/SP-1/photo.jpg',
+      }],
+    }],
+  };
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    jsonCollections: ['shipping_photos'],
+    dbPath: path.join(tempDir, 'app.sqlite'),
+    createDatabaseBackup: async (targetPath) => {
+      fs.writeFileSync(targetPath, Buffer.from('sqlite snapshot'));
+      return targetPath;
+    },
+    fileRoots: [{ label: 'uploads', dir: uploadsDir }],
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await getBuffer(baseUrl, '/api/admin/backup/full');
+      assert.equal(response.status, 200);
+      const entries = listZipEntries(response.buffer);
+      const names = entries.map(entry => entry.name);
+      assert.ok(names.includes('database/app.sqlite'));
+      assert.ok(names.includes('files/uploads/external-photos/shipping_photos/SP-1/photo.jpg'));
+      const manifest = JSON.parse(entries.find(entry => entry.name === 'manifest.json').data.toString('utf8'));
+      assert.equal(manifest.localFilesCount, 1);
+      assert.equal(manifest.files.localFilesCount, 1);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('/api/admin/backup/full skips missing local photo references instead of failing', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'backup-missing-local-photo-'));
+  const uploadsDir = path.join(tempDir, 'uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  const collections = {
+    shipping_photos: [{
+      id: 'SP-1',
+      photos: [{
+        originalUrl: 'https://i.oneme.ru/i?r=missing-local',
+        localPath: '/uploads/external-photos/shipping_photos/SP-1/missing.jpg',
+      }],
+    }],
+  };
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    jsonCollections: ['shipping_photos'],
+    dbPath: path.join(tempDir, 'app.sqlite'),
+    createDatabaseBackup: async (targetPath) => {
+      fs.writeFileSync(targetPath, Buffer.from('sqlite snapshot'));
+      return targetPath;
+    },
+    fileRoots: [{ label: 'uploads', dir: uploadsDir }],
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await getBuffer(baseUrl, '/api/admin/backup/full');
+      assert.equal(response.status, 200);
+      const entries = listZipEntries(response.buffer);
+      const names = entries.map(entry => entry.name);
+      assert.ok(names.includes('database/app.sqlite'));
+      assert.equal(names.some(name => name.endsWith('/missing.jpg')), false);
+      const manifest = JSON.parse(entries.find(entry => entry.name === 'manifest.json').data.toString('utf8'));
+      assert.equal(manifest.localFilesCount, 0);
+      assert.equal(manifest.skippedReasons['missing-local-file'], 1);
+      assert.doesNotMatch(JSON.stringify(manifest), /missing-local"|https:\/\//i);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('/api/admin/backup/full cleans up temporary archive after response finishes', async () => {
+  const before = new Set(fs.readdirSync(os.tmpdir()).filter(name => name.startsWith('skytech-backup-')));
+  const { app } = createSystemApp({
+    readData: name => ({ equipment: [{ id: 'EQ-1' }] })[name] || [],
+    jsonCollections: ['equipment'],
+    dbPath: '/tmp/app.sqlite',
+    createDatabaseBackup: async (targetPath) => {
+      fs.writeFileSync(targetPath, Buffer.from('sqlite snapshot'));
+      return targetPath;
+    },
+    fileRoots: [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getBuffer(baseUrl, '/api/admin/backup/full');
+    assert.equal(response.status, 200);
+  });
+
+  const after = fs.readdirSync(os.tmpdir()).filter(name => name.startsWith('skytech-backup-'));
+  const created = after.filter(name => !before.has(name));
+  assert.deepEqual(created, []);
+});
+
+test('settings backup download UI reports actionable errors instead of raw fetch failure', () => {
+  const source = fs.readFileSync(new URL('../src/app/pages/Settings.tsx', import.meta.url), 'utf8');
+  assert.match(source, /backupErrorFromResponse/);
+  assert.match(source, /HTTP \$\{response\.status\}/);
+  assert.match(source, /соединение с сервером было прервано/);
+  assert.match(source, /Сервер мог не успеть подготовить архив/);
+  assert.doesNotMatch(source, /text: error instanceof Error \? error\.message : 'Не удалось скачать backup\.'/);
+});
+
 function fakeFetchResponse({ status = 200, contentType = 'image/jpeg', body = Buffer.from([0xff, 0xd8, 0xff, 0xd9]), contentLength } = {}) {
   const buffer = Buffer.from(body);
   return {

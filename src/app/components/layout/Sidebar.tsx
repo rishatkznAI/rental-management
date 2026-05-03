@@ -40,6 +40,7 @@ import {
   normalizeSidebarOrder,
 } from '../../lib/navigation';
 import { getInvestorBinding, isInvestorUser } from '../../lib/userStorage';
+import { buildGlobalSearchGroups, normalizeGlobalSearchQuery } from '../../lib/globalSearch.js';
 import { NotificationCenter } from './NotificationCenter';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
@@ -47,8 +48,12 @@ import { useEquipmentList } from '../../hooks/useEquipment';
 import { useClientsList } from '../../hooks/useClients';
 import { useGanttData, useRentalsList } from '../../hooks/useRentals';
 import { useServiceTicketsList } from '../../hooks/useServiceTickets';
+import { documentsService } from '../../services/documents.service';
+import { paymentsService } from '../../services/payments.service';
+import { deliveriesService } from '../../services/deliveries.service';
+import { debtCollectionPlansService } from '../../services/debt-collection-plans.service';
 import { appSettingsService } from '../../services/app-settings.service';
-import type { Client, Equipment, Rental, ServiceTicket } from '../../types';
+import type { Equipment, Rental } from '../../types';
 import { LiftLogo } from './LiftLogo';
 
 const navigation: { name: string; href: string; icon: React.ElementType; section: Section }[] = [
@@ -92,16 +97,37 @@ type SearchResult = {
   subtitle: string;
   href: string;
   section: Section;
-  group: 'Техника' | 'Клиенты' | 'Аренды' | 'Сервис';
-  icon: React.ElementType;
+  group: 'Техника' | 'Клиенты' | 'Аренды' | 'Документы' | 'Сервис' | 'Платежи' | 'Доставка' | 'Планы взыскания';
+  icon: keyof typeof SEARCH_ICONS;
 };
 
-function normalizeSearch(text: string): string {
-  return text.trim().toLowerCase();
-}
+type SearchGroup = {
+  group: SearchResult['group'];
+  items: SearchResult[];
+  total: number;
+  hiddenCount: number;
+};
 
-function includesSearch(haystack: Array<string | number | undefined>, needle: string): boolean {
-  return haystack.some(value => String(value ?? '').toLowerCase().includes(needle));
+const SEARCH_ICONS = {
+  truck: Truck,
+  users: Users,
+  fileText: FileText,
+  fileCheck: FileCheck,
+  wrench: Wrench,
+  creditCard: CreditCard,
+  route: Route,
+  listChecks: ListChecks,
+} as const;
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [delayMs, value]);
+
+  return debouncedValue;
 }
 
 function highlightMatch(text: string, query: string): React.ReactNode {
@@ -144,22 +170,48 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
-  const { canView } = usePermissions();
+  const { can, canView } = usePermissions();
   const { data: equipment = [] } = useEquipmentList();
   const { data: clients = [] } = useClientsList();
   const { data: rentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: serviceTickets = [] } = useServiceTicketsList();
+  const [search, setSearch] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const hasSearchInput = search.trim().length > 0;
+  const { data: documents = [] } = useQuery({
+    queryKey: ['documents', 'global-search'],
+    queryFn: documentsService.getAll,
+    enabled: hasSearchInput && canView('documents'),
+    staleTime: 1000 * 60 * 5,
+  });
+  const { data: payments = [] } = useQuery({
+    queryKey: ['payments', 'global-search'],
+    queryFn: paymentsService.getAll,
+    enabled: hasSearchInput && (canView('payments') || can('view', 'finance')),
+    staleTime: 1000 * 60 * 2,
+  });
+  const { data: deliveries = [] } = useQuery({
+    queryKey: ['deliveries', 'global-search'],
+    queryFn: deliveriesService.getAll,
+    enabled: hasSearchInput && canView('deliveries'),
+    staleTime: 1000 * 60 * 2,
+  });
+  const { data: debtPlanResponse } = useQuery({
+    queryKey: ['debt_collection_plans', 'global-search'],
+    queryFn: debtCollectionPlansService.getAll,
+    enabled: hasSearchInput && canView('finance'),
+    staleTime: 1000 * 60 * 2,
+  });
   const { data: appSettings = [] } = useQuery({
     queryKey: ['app-settings'],
     queryFn: appSettingsService.getAll,
     staleTime: 1000 * 60 * 5,
   });
-  const [search, setSearch] = useState('');
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const searchRef = useRef<HTMLDivElement>(null);
-  const deferredSearch = useDeferredValue(search);
-  const normalizedSearch = normalizeSearch(deferredSearch);
+  const debouncedSearch = useDebouncedValue(search, 180);
+  const deferredSearch = useDeferredValue(debouncedSearch);
+  const normalizedSearch = normalizeGlobalSearchQuery(deferredSearch);
   const investorBinding = useMemo(() => getInvestorBinding(user), [user]);
   const isInvestorRole = isInvestorUser({
     role: user?.role,
@@ -259,118 +311,49 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     setIsSearchOpen(normalizedSearch.length > 0);
   }, [normalizedSearch]);
 
-  const searchResults = useMemo(() => {
-    if (!normalizedSearch) return [] as SearchResult[];
-
-    const results: SearchResult[] = [];
-
-    if (canView('equipment')) {
-      for (const item of equipment as Equipment[]) {
-        if (!includesSearch([
-          item.inventoryNumber,
-          item.manufacturer,
-          item.model,
-          item.serialNumber,
-          item.location,
-          item.currentClient,
-        ], normalizedSearch)) continue;
-
-        results.push({
-          id: `equipment:${item.id}`,
-          title: `${item.inventoryNumber} · ${item.manufacturer} ${item.model}`,
-          subtitle: [item.serialNumber, item.location, item.status].filter(Boolean).join(' · '),
-          href: `/equipment/${item.id}`,
-          section: 'equipment',
-          group: 'Техника',
-          icon: Truck,
-        });
-      }
-    }
-
-    if (canView('clients')) {
-      for (const item of clients as Client[]) {
-        if (!includesSearch([
-          item.company,
-          item.inn,
-          item.contact,
-          item.phone,
-          item.email,
-          item.manager,
-        ], normalizedSearch)) continue;
-
-        results.push({
-          id: `client:${item.id}`,
-          title: item.company,
-          subtitle: [item.contact, item.phone, item.inn].filter(Boolean).join(' · '),
-          href: `/clients/${item.id}`,
-          section: 'clients',
-          group: 'Клиенты',
-          icon: Users,
-        });
-      }
-    }
-
-    if (canView('rentals')) {
-      for (const item of visibleRentals) {
-        if (!includesSearch([
-          item.id,
-          item.client,
-          item.contact,
-          item.manager,
-          item.status,
-          ...item.equipment,
-        ], normalizedSearch)) continue;
-
-        results.push({
-          id: `rental:${item.id}`,
-          title: `Аренда ${item.id}`,
-          subtitle: [item.client, item.equipment.join(', '), item.startDate].filter(Boolean).join(' · '),
-          href: `/rentals/${item.id}`,
-          section: 'rentals',
-          group: 'Аренды',
-          icon: FileText,
-        });
-      }
-    }
-
-    if (canView('service')) {
-      for (const item of serviceTickets as ServiceTicket[]) {
-        if (!includesSearch([
-          item.id,
-          item.equipment,
-          item.inventoryNumber,
-          item.serialNumber,
-          item.reason,
-          item.description,
-          item.assignedMechanicName,
-          item.assignedTo,
-          item.status,
-        ], normalizedSearch)) continue;
-
-        results.push({
-          id: `service:${item.id}`,
-          title: `${item.id} · ${item.equipment}`,
-          subtitle: [item.reason, item.assignedMechanicName || item.assignedTo, item.status].filter(Boolean).join(' · '),
-          href: `/service/${item.id}`,
-          section: 'service',
-          group: 'Сервис',
-          icon: Wrench,
-        });
-      }
-    }
-
-    return results.slice(0, 12);
-  }, [canView, clients, equipment, normalizedSearch, serviceTickets, visibleRentals]);
-
   const groupedResults = useMemo(() => {
-    const groups = new Map<SearchResult['group'], SearchResult[]>();
-    for (const result of searchResults) {
-      const group = groups.get(result.group) ?? [];
-      group.push(result);
-      groups.set(result.group, group);
-    }
-    return [...groups.entries()];
-  }, [searchResults]);
+    return buildGlobalSearchGroups({
+      equipment,
+      clients,
+      rentals: visibleRentals,
+      ganttRentals: visibleGanttRentals,
+      documents,
+      serviceTickets,
+      payments,
+      deliveries,
+      debtCollectionPlans: debtPlanResponse?.plans ?? [],
+    }, {
+      query: normalizedSearch,
+      permissions: {
+        clients: canView('clients'),
+        equipment: canView('equipment'),
+        rentals: canView('rentals'),
+        documents: canView('documents'),
+        service: canView('service'),
+        payments: canView('payments'),
+        finance: can('view', 'finance'),
+        deliveries: canView('deliveries'),
+      },
+    }) as SearchGroup[];
+  }, [
+    can,
+    canView,
+    clients,
+    debtPlanResponse?.plans,
+    deliveries,
+    documents,
+    equipment,
+    normalizedSearch,
+    payments,
+    serviceTickets,
+    visibleGanttRentals,
+    visibleRentals,
+  ]);
+
+  const searchResultsCount = useMemo(
+    () => groupedResults.reduce((total, group) => total + group.total, 0),
+    [groupedResults],
+  );
 
   const handleSearchNavigate = (href: string) => {
     navigate(href);
@@ -463,20 +446,21 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
           {isSearchOpen && (
             <div className="mt-2 rounded-2xl border border-sidebar-border bg-card shadow-[0_24px_45px_-30px_rgba(0,0,0,0.85)]">
-              {searchResults.length === 0 ? (
+              {searchResultsCount === 0 ? (
                 <div className="px-4 py-4 text-sm text-muted-foreground">
-                  Ничего не найдено. Попробуйте номер техники, клиента, ID аренды или сервисной заявки.
+                  Ничего не найдено
                 </div>
               ) : (
                 <div className="max-h-96 overflow-y-auto py-2">
-                  {groupedResults.map(([group, items]) => (
+                  {groupedResults.map(({ group, items, hiddenCount }) => (
                     <div key={group}>
-                      <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                        {group}
+                      <div className="flex items-center justify-between px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                        <span>{group}</span>
+                        {hiddenCount > 0 ? <span>ещё {hiddenCount}</span> : null}
                       </div>
                       <div className="space-y-1 px-2 pb-2">
                         {items.map((result) => {
-                          const Icon = result.icon;
+                          const Icon = SEARCH_ICONS[result.icon];
                           return (
                             <button
                               key={result.id}
@@ -487,7 +471,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                               <div className="mt-0.5 rounded-lg bg-sidebar-accent p-2 text-muted-foreground">
                                 <Icon className="h-4 w-4" />
                               </div>
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex-1">
                                 <div className="truncate text-sm font-medium text-sidebar-foreground">
                                   {highlightMatch(result.title, normalizedSearch)}
                                 </div>
@@ -495,6 +479,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                                   {highlightMatch(result.subtitle, normalizedSearch)}
                                 </div>
                               </div>
+                              <span className="mt-1 shrink-0 text-[11px] font-medium text-primary">Открыть</span>
                             </button>
                           );
                         })}

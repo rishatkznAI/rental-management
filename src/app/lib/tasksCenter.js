@@ -5,6 +5,13 @@ export const TASK_PRIORITY_LABELS = {
   critical: 'Критично',
 };
 
+export const TASK_PRIORITY_SUMMARY_LABELS = {
+  low: 'Низкий приоритет',
+  medium: 'Средний приоритет',
+  high: 'Высокий приоритет',
+  critical: 'Критичные',
+};
+
 export const TASK_SECTION_LABELS = {
   rentals: 'Аренды',
   finance: 'Финансы',
@@ -36,6 +43,10 @@ function addDaysKey(todayKey, days) {
 
 export function taskPriorityLabel(priority) {
   return TASK_PRIORITY_LABELS[priority] || TASK_PRIORITY_LABELS.medium;
+}
+
+export function taskPrioritySummaryLabel(priority) {
+  return TASK_PRIORITY_SUMMARY_LABELS[priority] || TASK_PRIORITY_SUMMARY_LABELS.medium;
 }
 
 export function taskSectionLabel(section) {

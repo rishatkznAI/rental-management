@@ -775,7 +775,7 @@ test('settings backup download UI reports actionable errors instead of raw fetch
   assert.match(source, /HTTP \$\{response\.status\}/);
   assert.match(source, /соединение с сервером было прервано/);
   assert.match(source, /Сервер мог не успеть подготовить архив/);
-  assert.doesNotMatch(source, /text: error instanceof Error \? error\.message : 'Не удалось скачать backup\.'/);
+  assert.doesNotMatch(source, /text: error instanceof Error \? error\.message : 'Не удалось скачать резервную копию\.'/);
 });
 
 function fakeFetchResponse({ status = 200, contentType = 'image/jpeg', body = Buffer.from([0xff, 0xd8, 0xff, 0xd9]), contentLength } = {}) {

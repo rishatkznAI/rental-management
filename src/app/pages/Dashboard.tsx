@@ -62,6 +62,7 @@ import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDeb
 import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
 import { buildDocumentControl } from '../lib/documentControl.js';
 import { buildDebtCollectionDashboardSummary } from '../lib/debtCollectionPlans.js';
+import { taskPrioritySummaryLabel } from '../lib/tasksCenter.js';
 import { tasksCenterService } from '../services/tasks-center.service';
 import {
   buildActiveRentalFleetLookup,
@@ -1471,7 +1472,7 @@ export default function Dashboard() {
               <div>
                 <p className="text-sm font-semibold text-foreground">Задачи на сегодня</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Critical: {tasksCenterData?.summary?.critical ?? 0} · High: {tasksCenterData?.summary?.high ?? 0} · Просрочено: {tasksCenterData?.summary?.overdue ?? 0} · Сегодня: {tasksCenterData?.summary?.today ?? 0}
+                  {taskPrioritySummaryLabel('critical')}: {tasksCenterData?.summary?.critical ?? 0} · {taskPrioritySummaryLabel('high')}: {tasksCenterData?.summary?.high ?? 0} · Просрочено: {tasksCenterData?.summary?.overdue ?? 0} · Сегодня: {tasksCenterData?.summary?.today ?? 0}
                 </p>
               </div>
             </div>
@@ -1527,7 +1528,7 @@ export default function Dashboard() {
                   </div>
                   <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                     <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Без плана 30+ дн.: <strong>{debtCollectionSummary.withoutPlan30Plus}</strong></div>
-                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">High/Critical: <strong>{debtCollectionSummary.highPriority}</strong></div>
+                    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-900/60">Высокий/критичный приоритет: <strong>{debtCollectionSummary.highPriority}</strong></div>
                   </div>
                   {debtCollectionSummary.rows.length > 0 && (
                     <div className="mt-3 space-y-2">

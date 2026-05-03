@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { groupTasksByDueDate, buildTaskSummary, normalizeTask } from '../src/app/lib/tasksCenter.js';
+import {
+  buildTaskSummary,
+  groupTasksByDueDate,
+  normalizeTask,
+  taskPriorityLabel,
+  taskPrioritySummaryLabel,
+} from '../src/app/lib/tasksCenter.js';
 
 test('tasks center helper groups due dates and formats legacy values safely', () => {
   const tasks = [
@@ -37,4 +43,13 @@ test('tasks center summary counts priority and due buckets', () => {
     overdue: 1,
     today: 1,
   });
+});
+
+test('tasks center priority labels are localized for visible UI', () => {
+  assert.equal(taskPriorityLabel('critical'), 'Критично');
+  assert.equal(taskPriorityLabel('high'), 'Высокий');
+  assert.equal(taskPriorityLabel('medium'), 'Средний');
+  assert.equal(taskPriorityLabel('low'), 'Низкий');
+  assert.equal(taskPrioritySummaryLabel('critical'), 'Критичные');
+  assert.equal(taskPrioritySummaryLabel('high'), 'Высокий приоритет');
 });

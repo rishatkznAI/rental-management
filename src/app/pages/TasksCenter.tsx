@@ -22,6 +22,7 @@ import {
   groupTasksByDueDate,
   normalizeTask,
   taskPriorityLabel,
+  taskPrioritySummaryLabel,
   taskSectionLabel,
 } from '../lib/tasksCenter.js';
 import { tasksCenterService, type TaskCenterTask } from '../services/tasks-center.service';
@@ -179,13 +180,13 @@ export default function TasksCenter() {
         </Card>
         <Card className={summary.critical > 0 ? 'border-red-300 bg-red-50/50 dark:border-red-900/70 dark:bg-red-950/20' : ''}>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Critical</p>
+            <p className="text-xs text-muted-foreground">{taskPrioritySummaryLabel('critical')}</p>
             <p className="mt-1 text-2xl font-bold">{summary.critical}</p>
           </CardContent>
         </Card>
         <Card className={summary.high > 0 ? 'border-amber-300 bg-amber-50/50 dark:border-amber-900/70 dark:bg-amber-950/20' : ''}>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">High</p>
+            <p className="text-xs text-muted-foreground">{taskPrioritySummaryLabel('high')}</p>
             <p className="mt-1 text-2xl font-bold">{summary.high}</p>
           </CardContent>
         </Card>

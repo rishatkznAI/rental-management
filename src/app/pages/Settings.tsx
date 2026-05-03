@@ -2212,15 +2212,15 @@ async function backupErrorFromResponse(response: Response) {
     serverMessage = '';
   }
   const base = `Сервер не смог подготовить архив (HTTP ${response.status}).`;
-  return `${base}${serverMessage ? ` ${serverMessage}` : ''} Попробуйте ещё раз или проверьте logs.`;
+  return `${base}${serverMessage ? ` ${serverMessage}` : ''} Попробуйте ещё раз или проверьте журналы.`;
 }
 
 function backupErrorFromException(error: unknown) {
   if (error instanceof TypeError) {
-    return 'Не удалось скачать backup: соединение с сервером было прервано. Сервер мог не успеть подготовить архив. Попробуйте ещё раз или проверьте logs.';
+    return 'Не удалось скачать резервную копию: соединение с сервером было прервано. Сервер мог не успеть подготовить архив. Попробуйте ещё раз или проверьте журналы.';
   }
   if (error instanceof Error && error.message) return error.message;
-  return 'Не удалось скачать backup. Попробуйте ещё раз или проверьте logs.';
+  return 'Не удалось скачать резервную копию. Попробуйте ещё раз или проверьте журналы.';
 }
 
 function parseCSVRow(line: string) {
@@ -2452,7 +2452,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
         `skytech-backup-${new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', '-')}.zip`,
       );
       downloadBlob(blob, filename);
-      setBackupMessage({ type: 'success', text: 'Backup подготовлен и передан браузеру для скачивания.' });
+      setBackupMessage({ type: 'success', text: 'Резервная копия подготовлена и передана браузеру для скачивания.' });
       await backupHistoryQuery.refetch();
     } catch (error) {
       setBackupMessage({ type: 'error', text: backupErrorFromException(error) });
@@ -2463,7 +2463,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
 
   const handleArchiveExternalPhotos = React.useCallback(async () => {
     setArchiveMessage(null);
-    const confirmed = window.confirm('Скачать внешние фото с разрешённых доменов и сохранить их в /data/uploads для последующих full backup? Записи будут дополнены localPath, originalUrl сохранится.');
+    const confirmed = window.confirm('Скачать внешние фото с разрешённых доменов и сохранить их в /data/uploads для последующих полных резервных копий? Записи будут дополнены localPath, originalUrl сохранится.');
     if (!confirmed) return;
     setIsArchivingExternalPhotos(true);
     try {
@@ -2513,7 +2513,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
       setIsChecking(true);
       const result = await api.post<SystemDataImportAnalysis>('/api/admin/system-data/import/dry-run', parsed);
       setAnalysis(result);
-      setMessage({ type: 'success', text: 'Dry-run проверка пройдена. Проверьте конфликты перед импортом.' });
+      setMessage({ type: 'success', text: 'Проверка без записи пройдена. Проверьте конфликты перед импортом.' });
     } catch (error) {
       const body = (error as { body?: unknown })?.body as SystemDataImportAnalysis | undefined;
       if (body?.collections) {
@@ -2562,18 +2562,18 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
           <div>
             <CardTitle>Резервная копия</CardTitle>
             <CardDescription>
-              Backup содержит базу данных и файлы/фото системы. Не отправляйте его в общий чат и не храните в Git.
+              Резервная копия содержит базу данных и файлы/фото системы. Не отправляйте её в общий чат и не храните в Git.
             </CardDescription>
           </div>
           <Button onClick={() => void handleFullBackupDownload()} disabled={!canManageData || isDownloadingBackup} data-testid="full-backup-download">
             <Download className="h-4 w-4" />
-            {isDownloadingBackup ? 'Готовим backup...' : 'Скачать полный backup'}
+            {isDownloadingBackup ? 'Готовим резервную копию...' : 'Скачать полную резервную копию'}
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          Архив создаётся на сервере на лету и доступен только администраторам. Восстановление из backup в этой версии не выполняется автоматически.
+          Архив создаётся на сервере на лету и доступен только администраторам. Восстановление из резервной копии в этой версии не выполняется автоматически.
         </p>
         <div className="space-y-2" data-testid="backup-history">
           <div className="flex items-center justify-between gap-3">
@@ -2587,7 +2587,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
           </div>
           {backupHistoryQuery.isError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-              Не удалось загрузить историю backup
+              Не удалось загрузить историю резервных копий
             </div>
           ) : backupHistoryQuery.data?.history?.length ? (
             <div className="overflow-hidden rounded-lg border">
@@ -2640,7 +2640,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
           <div>
             <CardTitle>Архивация внешних фото</CardTitle>
             <CardDescription>
-              Фото будут скачаны с внешних ссылок и сохранены в /data/uploads. Записи будут дополнены localPath, originalUrl сохранится. После этого full backup будет включать сами файлы.
+              Фото будут скачаны с внешних ссылок и сохранены в /data/uploads. Записи будут дополнены localPath, originalUrl сохранится. После этого полная резервная копия будет включать сами файлы.
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -2650,14 +2650,14 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
               disabled={!canManageData || externalPhotoDryRunQuery.isFetching}
             >
               <RefreshCw className="h-4 w-4" />
-              Dry-run scan
+              Проверить без скачивания
             </Button>
             <Button
               onClick={() => void handleArchiveExternalPhotos()}
               disabled={!canManageData || isArchivingExternalPhotos}
             >
               <Download className="h-4 w-4" />
-              {isArchivingExternalPhotos ? 'Скачиваем фото...' : 'Скачать внешние фото в backup-хранилище'}
+              {isArchivingExternalPhotos ? 'Скачиваем фото...' : 'Скачать внешние фото в хранилище резервных копий'}
             </Button>
           </div>
         </div>
@@ -2703,7 +2703,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
       <CardHeader>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <CardTitle>Безопасный export/import JSON</CardTitle>
+            <CardTitle>Безопасный экспорт/импорт JSON</CardTitle>
             <CardDescription>
               Выгрузка и восстановление основных коллекций. Пароли, токены и secrets не экспортируются и не принимаются при импорте.
             </CardDescription>
@@ -2711,11 +2711,11 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => void handleExport()} disabled={!canManageData || isExporting}>
               <Download className="h-4 w-4" />
-              {isExporting ? 'Готовим...' : 'Export JSON'}
+              {isExporting ? 'Готовим...' : 'Экспорт JSON'}
             </Button>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={!canManageData || isChecking || isImporting}>
               <Upload className="h-4 w-4" />
-              Dry-run import
+              Проверить импорт
             </Button>
             <Button onClick={() => void handleImport()} disabled={!canManageData || !analysis?.ok || !selectedPayload || isImporting}>
               {isImporting ? 'Импорт...' : 'Импортировать'}

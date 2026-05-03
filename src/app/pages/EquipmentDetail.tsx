@@ -45,6 +45,7 @@ import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../
 import { getToken } from '../lib/api';
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
+import { buildEquipmentQuickActions } from '../lib/quickActions.js';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -1349,6 +1350,11 @@ export default function EquipmentDetail() {
     inventoryIsUnique: (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1,
     utilizationPercent: utilizationMonth,
   });
+  const quickActions = buildEquipmentQuickActions({
+    equipment,
+    can,
+    currentRental: equipment360.occupancy.currentRental,
+  });
 
   const tabTriggerClass = 'whitespace-nowrap';
 
@@ -1592,6 +1598,31 @@ export default function EquipmentDetail() {
             <CompactMetric label="Локация" value={equipment.location || 'Не указана'} />
             <CompactMetric label="Простой" value={equipment360.downtime.label} tone={equipment360.downtime.reason === 'service' ? 'danger' : 'default'} />
           </div>
+
+          {quickActions.length > 0 && (
+            <div className="space-y-2 rounded-xl border border-border bg-card/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Быстрые действия</p>
+              <div className="flex flex-wrap gap-2">
+                {quickActions.map(action => {
+                  const button = (
+                    <Button
+                      size="sm"
+                      variant={action.kind === 'primary' ? 'default' : 'secondary'}
+                      disabled={action.disabled}
+                      title={action.reason || undefined}
+                    >
+                      {action.id === 'equipment-create-service' && <Wrench className="h-4 w-4" />}
+                      {action.id === 'equipment-create-rental' && <Calendar className="h-4 w-4" />}
+                      {action.label}
+                    </Button>
+                  );
+                  return action.disabled || !action.to
+                    ? <span key={action.id}>{button}</span>
+                    : <Link key={action.id} to={action.to}>{button}</Link>;
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-4 xl:grid-cols-3">
             <div className="rounded-xl border border-border bg-card/70 p-4">

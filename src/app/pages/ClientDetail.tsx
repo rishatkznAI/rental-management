@@ -25,6 +25,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
 import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import { buildClient360Summary } from '../lib/client360.js';
+import { buildClientQuickActions } from '../lib/quickActions.js';
 import {
   debtCollectionActionLabel,
   debtCollectionPriorityLabel,
@@ -163,6 +164,7 @@ export default function ClientDetail() {
   const { user } = useAuth();
   const canEdit = can('edit', 'clients');
   const canEditDebt = user?.role === 'Администратор';
+  const canCreateRentals = can('create', 'rentals');
 
   const { data: fetchedClient } = useClientById(id ?? '');
   const updateClient = useUpdateClient();
@@ -212,6 +214,10 @@ export default function ClientDetail() {
   );
   const canViewFinance = can('view', 'finance');
   const canViewPayments = can('view', 'payments') || canViewFinance;
+  const quickActions = useMemo(
+    () => buildClientQuickActions({ client, can, role: user?.role }),
+    [can, client, user?.role],
+  );
   const clientDebtPlan = useMemo(() => {
     if (!client) return null;
     const byId = debtCollectionPlans.find(plan => plan.clientId && plan.clientId === client.id);
@@ -377,12 +383,14 @@ export default function ClientDetail() {
                   Редактировать
                 </Button>
               )}
-              <Link to={`/rentals/new?clientId=${encodeURIComponent(client.id)}`}>
-                <Button>
-                  <Plus className="h-4 w-4" />
-                  Новая аренда
-                </Button>
-              </Link>
+              {canCreateRentals && (
+                <Link to={`/rentals/new?clientId=${encodeURIComponent(client.id)}`}>
+                  <Button>
+                    <Plus className="h-4 w-4" />
+                    Новая аренда
+                  </Button>
+                </Link>
+              )}
             </>
           ) : (
             <>
@@ -420,18 +428,21 @@ export default function ClientDetail() {
               <Badge variant={client360RiskVariant(client360.debt.riskLevel)}>{client360.debt.riskLabel}</Badge>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
-            <Link to={`/rentals/new?clientId=${encodeURIComponent(client.id)}`}>
-              <Button size="sm">
-                <Plus className="h-4 w-4" />
-                Новая аренда
-              </Button>
-            </Link>
-            <Link to="/rentals"><Button variant="secondary" size="sm">Открыть аренды</Button></Link>
-            <Link to="/documents"><Button variant="secondary" size="sm">Открыть документы</Button></Link>
-            {canViewPayments && <Link to="/payments"><Button variant="secondary" size="sm">Открыть платежи</Button></Link>}
-            {canViewFinance && <Link to="/finance"><Button variant="secondary" size="sm">Финансы</Button></Link>}
-          </div>
+          {quickActions.length > 0 && (
+            <div className="space-y-2 border-t border-gray-100 pt-4 dark:border-gray-800">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Быстрые действия</p>
+              <div className="flex flex-wrap gap-2">
+                {quickActions.map(action => (
+                  <Link key={action.id} to={action.to}>
+                    <Button variant={action.kind === 'primary' ? 'default' : 'secondary'} size="sm">
+                      {action.id === 'client-create-rental' && <Plus className="h-4 w-4" />}
+                      {action.label}
+                    </Button>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

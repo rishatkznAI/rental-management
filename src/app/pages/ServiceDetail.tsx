@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
@@ -50,6 +50,7 @@ import {
   buildServiceWorkOrderHtml,
   openPrintableHtml,
 } from '../lib/serviceWorkOrder';
+import { buildServiceQuickActions } from '../lib/quickActions.js';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -867,6 +868,19 @@ export default function ServiceDetail() {
 
   const canEditTicketFields = canEdit && (ticket.status !== 'closed' || isAdmin);
   const canChangeTicketStatus = canEdit && ticket.status !== 'closed';
+  const quickActions = buildServiceQuickActions({
+    ticket: {
+      ...ticket,
+      equipmentId: ticket.equipmentId || currentEquipment?.id,
+    },
+    can,
+    canEditTicketFields,
+    hasWorkScenario: scenarioIsRepair && workCatalog.length > 0,
+    hasPartScenario: scenarioIsRepair && sparePartsCatalog.length > 0,
+  });
+  const scrollToRepairResult = () => {
+    document.getElementById('service-repair-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   // ── action buttons based on status (only for users with edit permission) ──
 
@@ -1026,6 +1040,42 @@ export default function ServiceDetail() {
         </div>
       )}
 
+      {quickActions.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Быстрые действия</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {quickActions.map(action => {
+                if (action.id === 'service-add-work' || action.id === 'service-add-part') {
+                  return (
+                    <Button
+                      key={action.id}
+                      size="sm"
+                      variant={action.kind === 'primary' ? 'default' : 'secondary'}
+                      onClick={scrollToRepairResult}
+                    >
+                      {action.id === 'service-add-work' ? <Wrench className="h-4 w-4" /> : <Package className="h-4 w-4" />}
+                      {action.label}
+                    </Button>
+                  );
+                }
+                return action.to ? (
+                  <Link key={action.id} to={action.to}>
+                    <Button size="sm" variant={action.kind === 'primary' ? 'default' : 'secondary'}>
+                      {action.id === 'service-queue' && <History className="h-4 w-4" />}
+                      {action.id === 'service-equipment' && <Wrench className="h-4 w-4" />}
+                      {action.label}
+                    </Button>
+                  </Link>
+                ) : null;
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ── Left column (2/3) ───────────────────────────────────────────── */}
         <div className="lg:col-span-2 space-y-6">
@@ -1057,7 +1107,7 @@ export default function ServiceDetail() {
           </Card>
 
           {/* Equipment block */}
-          <Card>
+          <Card id="service-repair-result" className="scroll-mt-24">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Wrench className="h-4 w-4" />

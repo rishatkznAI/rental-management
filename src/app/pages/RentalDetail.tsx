@@ -37,6 +37,7 @@ import { appendRentalHistory, createRentalHistoryEntry } from '../lib/rental-his
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { formatRentalAuditEvents } from '../lib/rentalAuditHistory.js';
 import { buildDocumentControl } from '../lib/documentControl.js';
+import { buildRentalQuickActions } from '../lib/quickActions.js';
 import {
   EXTENSION_REASONS,
   buildExtensionConflictDisplay,
@@ -263,6 +264,16 @@ export default function RentalDetail() {
 
   const selectedClient = clients.find(c => c.id === ((isEditing ? formState?.clientId : rental?.clientId) || ''))
     ?? clients.find(c => c.company === ((isEditing ? formState?.client : rental?.client) || ''));
+  const primaryEquipmentId = resolvedRentalEquipment[0]?.id || '';
+  const quickActions = useMemo(
+    () => buildRentalQuickActions({
+      rental,
+      can,
+      clientId: selectedClient?.id || rental?.clientId || '',
+      equipmentId: primaryEquipmentId,
+    }),
+    [can, primaryEquipmentId, rental, selectedClient?.id],
+  );
   const relatedDocs = documents.filter(d => documentBelongsToRental(d, rental?.id));
   const documentControl = useMemo(() => buildDocumentControl({
     rentals,
@@ -862,10 +873,6 @@ export default function RentalDetail() {
             </>
           ) : canEditRentals ? (
             <>
-              <Button variant="secondary" onClick={openExtensionDialog}>
-                <Calendar className="h-4 w-4" />
-                Продлить аренду
-              </Button>
               <Button variant="secondary" onClick={() => setIsEditing(true)}>
                 <Edit className="h-4 w-4" />
                 Редактировать
@@ -878,10 +885,6 @@ export default function RentalDetail() {
               {isRestoring ? 'Восстановление...' : 'Восстановить аренду'}
             </Button>
           )}
-          <Button variant="secondary" onClick={() => navigate('/documents')}>
-            <FileText className="h-4 w-4" />
-            Документы
-          </Button>
         </div>
       </div>
 
@@ -1249,10 +1252,67 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle>Быстрые действия</CardTitle>
-              <CardDescription>Счёт, акт, договор и регистрация оплаты без ухода с карточки аренды</CardDescription>
+              <CardDescription>Переходы к связанным сценариям и безопасное открытие существующих форм</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <CardContent className="space-y-3">
+              {quickActions.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {quickActions.map(action => {
+                    if (action.id === 'rental-extend') {
+                      return (
+                        <Button key={action.id} size="sm" onClick={openExtensionDialog}>
+                          <Calendar className="h-4 w-4" />
+                          {action.label}
+                        </Button>
+                      );
+                    }
+                    if (action.id === 'rental-create-document') {
+                      return (
+                        <Button
+                          key={action.id}
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            setDocumentForm(prev => ({
+                              ...prev,
+                              type: 'invoice',
+                              number: nextDocumentNumber('invoice', rental.id, relatedDocs.length),
+                              amount: String(Math.max(remainingBalance, 0)),
+                            }));
+                            setDocumentDialogOpen(true);
+                          }}
+                        >
+                          <Plus className="h-4 w-4" />
+                          {action.label}
+                        </Button>
+                      );
+                    }
+                    if (action.id === 'rental-history') {
+                      return (
+                        <Button
+                          key={action.id}
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => document.getElementById('rental-change-history')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                        >
+                          <Clock className="h-4 w-4" />
+                          {action.label}
+                        </Button>
+                      );
+                    }
+                    return action.to ? (
+                      <Link key={action.id} to={action.to}>
+                        <Button size="sm" variant={action.kind === 'primary' ? 'default' : 'secondary'}>
+                          {action.id === 'rental-create-service' && <Wrench className="h-4 w-4" />}
+                          {action.id === 'rental-create-delivery' && <Truck className="h-4 w-4" />}
+                          {action.label}
+                        </Button>
+                      </Link>
+                    ) : null;
+                  })}
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-2 border-t border-gray-100 pt-3 dark:border-gray-800 sm:grid-cols-2">
                 <Button
                   variant="secondary"
                   disabled={!canCreateDocuments}
@@ -1532,7 +1592,7 @@ export default function RentalDetail() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle id="rental-change-history" className="flex items-center gap-2 scroll-mt-24">
                 <Clock className="h-5 w-5 text-[--color-primary]" />
                 История изменений
               </CardTitle>

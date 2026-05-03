@@ -2383,7 +2383,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
   const [isImporting, setIsImporting] = React.useState(false);
   const backupHistoryQuery = useQuery<BackupHistoryResponse>({
     queryKey: ['admin-backup-history'],
-    queryFn: () => api.get<BackupHistoryResponse>('/api/admin/backup/history?limit=10'),
+    queryFn: () => api.get<BackupHistoryResponse>('/api/admin/backup/history'),
     enabled: canManageData,
   });
 
@@ -2519,7 +2519,10 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
         </p>
         <div className="space-y-2" data-testid="backup-history">
           <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold">История резервных копий</h4>
+            <div>
+              <h4 className="text-sm font-semibold">История резервных копий</h4>
+              <p className="text-xs text-muted-foreground">Показаны последние 5 выгрузок</p>
+            </div>
             {backupHistoryQuery.isFetching && (
               <span className="text-xs text-muted-foreground">Обновляем...</span>
             )}
@@ -2541,7 +2544,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {backupHistoryQuery.data.history.slice(0, 10).map(item => (
+                  {backupHistoryQuery.data.history.slice(0, 5).map(item => (
                     <TableRow key={item.id || `${item.createdAt}-${item.filename}`}>
                       <TableCell className="whitespace-nowrap">{formatBackupDateTime(item.createdAt)}</TableCell>
                       <TableCell>{item.userName || item.userEmail || item.role || '—'}</TableCell>

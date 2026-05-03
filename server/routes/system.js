@@ -376,6 +376,7 @@ function registerSystemRoutes(app, deps) {
     getRoleAccessSummary,
     jsonCollections = [],
     createDatabaseBackup,
+    fileRoots,
     demo = { enabled: false, resetAllowed: false },
     resetDemoData,
   } = deps;
@@ -671,6 +672,7 @@ function registerSystemRoutes(app, deps) {
         createDatabaseBackup,
         collections: jsonCollections,
         buildInfo: buildInfo(),
+        fileRoots,
       });
 
       auditLog?.(req, {
@@ -681,7 +683,10 @@ function registerSystemRoutes(app, deps) {
           filename: backup.filename,
           size: backup.size,
           collections: backup.manifest?.counts || {},
-          files: backup.manifest?.files?.includedCount || 0,
+          files: backup.manifest?.includedFilesCount || 0,
+          filesCount: backup.manifest?.includedFilesCount || 0,
+          embeddedPhotosCount: backup.manifest?.embeddedPhotosCount || 0,
+          externalReferencesCount: backup.manifest?.externalReferencesCount || 0,
         },
       });
 
@@ -698,12 +703,11 @@ function registerSystemRoutes(app, deps) {
   });
 
   app.get('/api/admin/backup/history', requireAuth, requireAdmin, (req, res) => {
-    const limit = Math.min(20, Math.max(1, Number(req.query.limit || 10) || 10));
     const history = readAuditLogs(readData)
       .filter(entry => entry?.action === 'system.backup.download')
       .map(backupHistoryEntry)
       .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
-      .slice(0, limit);
+      .slice(0, 5);
     return res.json({ ok: true, history });
   });
 

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
@@ -47,6 +50,7 @@ function createSystemApp(overrides = {}) {
     jsonCollections: overrides.jsonCollections || ['equipment', 'clients', 'users'],
     createDatabaseBackup: overrides.createDatabaseBackup,
     dbPath: overrides.dbPath || ':memory:',
+    fileRoots: overrides.fileRoots,
   });
   return { app, messages, auditEntries };
 }
@@ -371,6 +375,56 @@ test('/api/admin/backup/history returns safe backup download audit entries only'
   });
 });
 
+test('/api/admin/backup/history returns only 5 newest backup download events', async () => {
+  const audit_logs = Array.from({ length: 7 }, (_, index) => {
+    const hour = 7 + index;
+    return {
+      id: `AUD-${index + 1}`,
+      createdAt: `2026-05-03T${String(hour).padStart(2, '0')}:00:00.000Z`,
+      userName: 'Admin',
+      role: 'Администратор',
+      action: 'system.backup.download',
+      entityType: 'system',
+      metadata: {
+        filename: `skytech-backup-2026-05-03-${String(hour).padStart(2, '0')}-00.zip`,
+        size: 1000 + index,
+        collections: { equipment: index },
+        files: index,
+      },
+    };
+  });
+  audit_logs.push({
+    id: 'AUD-other',
+    createdAt: '2026-05-03T14:00:00.000Z',
+    action: 'system_data.export',
+    entityType: 'system',
+    metadata: { filename: 'system-data.json' },
+  });
+  const { app } = createSystemApp({
+    readData: name => (name === 'audit_logs' ? audit_logs : []),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/backup/history?limit=20');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.history.length, 5);
+    assert.deepEqual(
+      response.body.history.map(entry => entry.id),
+      ['AUD-7', 'AUD-6', 'AUD-5', 'AUD-4', 'AUD-3'],
+    );
+    assert.deepEqual(
+      response.body.history.map(entry => entry.createdAt),
+      [
+        '2026-05-03T13:00:00.000Z',
+        '2026-05-03T12:00:00.000Z',
+        '2026-05-03T11:00:00.000Z',
+        '2026-05-03T10:00:00.000Z',
+        '2026-05-03T09:00:00.000Z',
+      ],
+    );
+  });
+});
+
 test('/api/admin/backup/history returns an empty list when no backup was downloaded', async () => {
   const { app } = createSystemApp({
     readData: name => (name === 'audit_logs' ? [] : []),
@@ -384,15 +438,29 @@ test('/api/admin/backup/history returns an empty list when no backup was downloa
 });
 
 test('/api/admin/backup/full returns zip with manifest database and safe audit metadata', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'backup-route-test-'));
+  const uploadsDir = path.join(tempDir, 'uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  fs.writeFileSync(path.join(uploadsDir, 'safe-photo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const embeddedDataUrl = `data:image/png;base64,${Buffer.from('embedded image bytes').toString('base64')}`;
   const collections = {
-    equipment: [{ id: 'EQ-1' }],
+    equipment: [{ id: 'EQ-1', image: 'uploads/safe-photo.png' }],
     clients: [{ id: 'C-1', company: 'Client' }],
+    shipping_photos: [
+      {
+        id: 'SP-1',
+        photo: embeddedDataUrl,
+        url: 'https://cdn.example.test/private/photo.png',
+        attachment: '../outside.png',
+      },
+    ],
     planner_items: [{ id: 'PI-1' }],
     users: [{ id: 'U-1', email: 'admin@example.test', password: 'stored-hash', token: 'secret-token' }],
   };
   const manifestCollections = [
     'equipment',
     'clients',
+    'shipping_photos',
     'users',
     'planner_items',
     'service_vehicles',
@@ -413,48 +481,93 @@ test('/api/admin/backup/full returns zip with manifest database and safe audit m
       writeFileSync(targetPath, Buffer.from('sqlite snapshot'));
       return targetPath;
     },
+    fileRoots: [{ label: 'uploads', dir: uploadsDir }],
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await getBuffer(baseUrl, '/api/admin/backup/full');
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type'), 'application/zip');
+      assert.match(response.headers.get('content-disposition') || '', /skytech-backup-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.zip/);
+      assert.equal(response.buffer.readUInt32LE(0), 0x04034b50);
+
+      const entries = listZipEntries(response.buffer);
+      const names = entries.map(entry => entry.name);
+      assert.ok(names.includes('manifest.json'));
+      assert.ok(names.includes('database/app.sqlite'));
+      assert.ok(names.includes('README-backup.txt'));
+      assert.ok(names.includes('files/uploads/safe-photo.png'));
+      assert.ok(names.includes('files/embedded-photos/shipping_photos/SP-1/photo-0.png'));
+      assert.equal(names.some(name => name.includes('outside.png')), false);
+
+      const manifest = JSON.parse(entries.find(entry => entry.name === 'manifest.json').data.toString('utf8'));
+      assert.equal(manifest.database.type, 'sqlite');
+      assert.equal(manifest.database.includedAs, 'database/app.sqlite');
+      assert.equal(manifest.counts.equipment, 1);
+      assert.equal(manifest.counts.clients, 1);
+      assert.equal(manifest.counts.shipping_photos, 1);
+      assert.equal(manifest.counts.users, 1);
+      assert.equal(manifest.counts.planner_items, 1);
+      for (const collection of manifestCollections) {
+        assert.ok(Object.hasOwn(manifest.counts, collection), `manifest counts should include ${collection}`);
+      }
+      assert.equal(manifest.counts.service_vehicles, 0);
+      assert.equal(manifest.counts.vehicle_trips, 0);
+      assert.equal(manifest.counts.company_expenses, 0);
+      assert.equal(manifest.counts.debt_collection_plans, 0);
+      assert.equal(manifest.counts.owners, 0);
+      assert.equal(manifest.counts.warranty_claims, 0);
+      assert.equal(manifest.counts.service_work_catalog, 0);
+      assert.equal(manifest.counts.snapshot, 0);
+      assert.equal(manifest.includedFilesCount, 2);
+      assert.equal(manifest.localFilesCount, 1);
+      assert.equal(manifest.embeddedPhotosCount, 1);
+      assert.equal(manifest.externalReferencesCount, 1);
+      assert.equal(manifest.skippedReasons['path-traversal'], 1);
+      assert.equal(manifest.files.externalFileReferences.count, 1);
+      assert.equal(manifest.files.externalFileReferences.collections.shipping_photos, 1);
+      assert.equal(manifest.files.externalFileReferences.note, 'External URLs are referenced but not downloaded');
+      assert.equal(manifest.embeddedPhotoCollections.shipping_photos, 1);
+      assert.match(manifest.warning, /Не хранить в Git/);
+      assert.doesNotMatch(JSON.stringify(manifest), /stored-hash|secret-token|password|token|embedded image bytes|data:image|base64/i);
+
+      assert.equal(auditEntries.length, 1);
+      assert.equal(auditEntries[0].action, 'system.backup.download');
+      assert.equal(auditEntries[0].entityType, 'system');
+      assert.match(auditEntries[0].metadata.filename, /^skytech-backup-/);
+      assert.equal(auditEntries[0].metadata.collections.equipment, 1);
+      assert.equal(auditEntries[0].metadata.filesCount, 2);
+      assert.equal(auditEntries[0].metadata.embeddedPhotosCount, 1);
+      assert.equal(auditEntries[0].metadata.externalReferencesCount, 1);
+      assert.doesNotMatch(JSON.stringify(auditEntries), /stored-hash|secret-token|password|token|embedded image bytes|data:image|base64/i);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('/api/admin/backup/full succeeds with no photos and reports zero embedded photos', async () => {
+  const { app } = createSystemApp({
+    readData: name => ({ equipment: [{ id: 'EQ-1' }], clients: [], users: [] })[name] || [],
+    jsonCollections: ['equipment', 'clients', 'users'],
+    dbPath: '/tmp/app.sqlite',
+    createDatabaseBackup: async (targetPath) => {
+      fs.writeFileSync(targetPath, Buffer.from('sqlite snapshot'));
+      return targetPath;
+    },
+    fileRoots: [],
   });
 
   await withServer(app, async (baseUrl) => {
     const response = await getBuffer(baseUrl, '/api/admin/backup/full');
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get('content-type'), 'application/zip');
-    assert.match(response.headers.get('content-disposition') || '', /skytech-backup-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.zip/);
-    assert.equal(response.buffer.readUInt32LE(0), 0x04034b50);
-
     const entries = listZipEntries(response.buffer);
     const names = entries.map(entry => entry.name);
-    assert.ok(names.includes('manifest.json'));
     assert.ok(names.includes('database/app.sqlite'));
-    assert.ok(names.includes('README-backup.txt'));
-
     const manifest = JSON.parse(entries.find(entry => entry.name === 'manifest.json').data.toString('utf8'));
-    assert.equal(manifest.database.type, 'sqlite');
-    assert.equal(manifest.database.includedAs, 'database/app.sqlite');
-    assert.equal(manifest.counts.equipment, 1);
-    assert.equal(manifest.counts.clients, 1);
-    assert.equal(manifest.counts.users, 1);
-    assert.equal(manifest.counts.planner_items, 1);
-    for (const collection of manifestCollections) {
-      assert.ok(Object.hasOwn(manifest.counts, collection), `manifest counts should include ${collection}`);
-    }
-    assert.equal(manifest.counts.service_vehicles, 0);
-    assert.equal(manifest.counts.vehicle_trips, 0);
-    assert.equal(manifest.counts.company_expenses, 0);
-    assert.equal(manifest.counts.debt_collection_plans, 0);
-    assert.equal(manifest.counts.owners, 0);
-    assert.equal(manifest.counts.warranty_claims, 0);
-    assert.equal(manifest.counts.service_work_catalog, 0);
-    assert.equal(manifest.counts.snapshot, 0);
-    assert.match(manifest.warning, /Не хранить в Git/);
-    assert.doesNotMatch(JSON.stringify(manifest), /stored-hash|secret-token|password|token/i);
-
-    assert.equal(auditEntries.length, 1);
-    assert.equal(auditEntries[0].action, 'system.backup.download');
-    assert.equal(auditEntries[0].entityType, 'system');
-    assert.match(auditEntries[0].metadata.filename, /^skytech-backup-/);
-    assert.equal(auditEntries[0].metadata.collections.equipment, 1);
-    assert.doesNotMatch(JSON.stringify(auditEntries), /stored-hash|secret-token|password|token/i);
+    assert.equal(manifest.embeddedPhotosCount, 0);
+    assert.equal(manifest.externalReferencesCount, 0);
   });
 });
 

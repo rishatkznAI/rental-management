@@ -6,6 +6,26 @@ const { buildZipArchive, normalizeZipPath, readFileEntry } = require('./zip-stor
 const APP_NAME = 'Skytech Rental Management';
 const BACKUP_WARNING = 'Не хранить в Git / содержит чувствительные данные.';
 const DEFAULT_FILE_DIR_NAMES = ['uploads', 'photos', 'documents', 'files', 'attachments'];
+const FILE_REFERENCE_KEYS = new Set([
+  'photo',
+  'photos',
+  'image',
+  'images',
+  'file',
+  'files',
+  'attachment',
+  'attachments',
+  'url',
+  'dataurl',
+  'base64',
+  'filename',
+]);
+const IMAGE_MIME_EXTENSIONS = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
 
 function backupTimestamp(date = new Date()) {
   return date.toISOString().slice(0, 16).replace('T', '-').replace(':', '-');
@@ -35,13 +55,212 @@ function shouldSkipFile(filePath) {
     base.endsWith('.sqlite-wal') ||
     base.endsWith('.sqlite-shm') ||
     base.endsWith('.db') ||
-    base.endsWith('.zip');
+    base.endsWith('.zip') ||
+    base === '.env' ||
+    base.startsWith('.env.') ||
+    base.endsWith('.env') ||
+    base.endsWith('.log');
 }
 
-function collectLocalFiles(roots = defaultFileRoots()) {
+function isInsideDir(filePath, dir) {
+  const relative = path.relative(path.resolve(dir), path.resolve(filePath));
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function safeZipSegment(value, fallback = 'record') {
+  const normalized = String(value || fallback)
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  return normalized || fallback;
+}
+
+function dataUrlImage(value) {
+  const match = String(value || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=\s]+)$/);
+  if (!match) return null;
+  const mimeType = match[1].toLowerCase();
+  const ext = IMAGE_MIME_EXTENSIONS[mimeType];
+  if (!ext) return { mimeType, ext: '', data: null };
+  return {
+    mimeType,
+    ext,
+    data: Buffer.from(match[2].replace(/\s+/g, ''), 'base64'),
+  };
+}
+
+function safeDomain(value) {
+  try {
+    const url = new URL(String(value || ''));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function localReferenceCandidate(value) {
+  const text = String(value || '').trim();
+  if (!text || text.length > 1024) return '';
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(text)) return '';
+  if (path.isAbsolute(text)) return '';
+  if (!/[\\/]/.test(text)) return '';
+  return text;
+}
+
+function resolveLocalReference(value, roots) {
+  const candidate = localReferenceCandidate(value);
+  if (!candidate) return { filePath: '', reason: '' };
+  const normalized = candidate.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (normalized.split('/').some(part => part === '..')) {
+    return { filePath: '', reason: 'path-traversal' };
+  }
+
+  const existingRoots = roots
+    .filter(root => root?.dir && fs.existsSync(root.dir))
+    .map(root => ({ ...root, dir: fs.realpathSync(root.dir) }));
+
+  for (const root of existingRoots) {
+    const label = normalizeZipPath(root.label);
+    const withoutLabel = normalized.startsWith(`${label}/`)
+      ? normalized.slice(label.length + 1)
+      : (normalized.startsWith(`data/${label}/`) ? normalized.slice(label.length + 6) : normalized);
+    const fullPath = path.resolve(root.dir, withoutLabel);
+    if (!isInsideDir(fullPath, root.dir)) return { filePath: '', reason: 'path-traversal' };
+    if (!fs.existsSync(fullPath)) continue;
+    const real = fs.realpathSync(fullPath);
+    if (!isInsideDir(real, root.dir)) return { filePath: '', reason: 'path-traversal' };
+    if (!fs.statSync(real).isFile()) return { filePath: '', reason: 'not-file' };
+    if (shouldSkipFile(real)) return { filePath: '', reason: 'blocked-extension' };
+    return {
+      filePath: real,
+      root,
+      zipPath: `files/${label}/${normalizeZipPath(path.relative(root.dir, real))}`,
+      reason: '',
+    };
+  }
+
+  return { filePath: '', reason: 'missing-local-file' };
+}
+
+function recordId(record, index) {
+  if (record && typeof record === 'object') {
+    for (const key of ['id', '_id', 'uuid', 'rentalId', 'equipmentId']) {
+      if (typeof record[key] === 'string' || typeof record[key] === 'number') return record[key];
+    }
+  }
+  return `record-${index + 1}`;
+}
+
+function increment(target, key, amount = 1) {
+  target[key] = (target[key] || 0) + amount;
+}
+
+function scanEmbeddedAndReferencedFiles({ readData, collections, roots, now, seenFiles }) {
+  const entries = [];
+  const includedLocalFiles = [];
+  const embeddedPhotoCollections = {};
+  const externalCollections = {};
+  const externalDomains = {};
+  const skippedReasons = {};
+  let embeddedPhotosCount = 0;
+  let externalReferencesCount = 0;
+  let skippedFilesCount = 0;
+
+  function skip(reason) {
+    skippedFilesCount += 1;
+    increment(skippedReasons, reason || 'unknown');
+  }
+
+  function inspectValue(value, context) {
+    if (typeof value === 'string') {
+      const embedded = dataUrlImage(value);
+      if (embedded) {
+        if (!embedded.data || !embedded.ext) {
+          skip(`unsupported-mime:${embedded.mimeType || 'unknown'}`);
+          return;
+        }
+        const zipPath = `files/embedded-photos/${safeZipSegment(context.collection, 'collection')}/${safeZipSegment(context.recordId)}/${safeZipSegment(context.fieldName, 'field')}-${context.index}.${embedded.ext}`;
+        entries.push({ name: zipPath, data: embedded.data, mtime: now });
+        embeddedPhotosCount += 1;
+        increment(embeddedPhotoCollections, context.collection);
+        return;
+      }
+
+      const domain = safeDomain(value);
+      if (domain) {
+        externalReferencesCount += 1;
+        increment(externalCollections, context.collection);
+        increment(externalDomains, domain);
+        return;
+      }
+
+      const local = resolveLocalReference(value, roots);
+      if (local.filePath) {
+        if (seenFiles.has(local.filePath)) return;
+        seenFiles.add(local.filePath);
+        const fileEntry = readFileEntry(local.filePath, local.zipPath);
+        entries.push(fileEntry);
+        includedLocalFiles.push({ path: local.zipPath, size: fileEntry.size });
+      } else if (local.reason) {
+        skip(local.reason);
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => inspectValue(item, { ...context, index }));
+      return;
+    }
+
+    if (value && typeof value === 'object') {
+      let objectHadFileLikeKey = false;
+      for (const [key, nested] of Object.entries(value)) {
+        const keyLower = key.toLowerCase();
+        if (FILE_REFERENCE_KEYS.has(keyLower)) {
+          objectHadFileLikeKey = true;
+          inspectValue(nested, { ...context, fieldName: key, index: context.index });
+        } else if (nested && typeof nested === 'object') {
+          inspectValue(nested, context);
+        }
+      }
+      if (objectHadFileLikeKey && !Array.isArray(value)) {
+        // Object references are intentionally summarized in the manifest instead of serialized.
+      }
+    }
+  }
+
+  for (const collection of collections) {
+    const records = readData(collection);
+    const list = Array.isArray(records)
+      ? records
+      : (records && typeof records === 'object' ? Object.values(records) : []);
+    list.forEach((record, index) => {
+      inspectValue(record, {
+        collection,
+        recordId: recordId(record, index),
+        fieldName: 'photo',
+        index: 0,
+      });
+    });
+  }
+
+  return {
+    entries,
+    includedLocalFiles,
+    embeddedPhotosCount,
+    externalReferencesCount,
+    skippedFilesCount,
+    skippedReasons,
+    embeddedPhotoCollections,
+    externalCollections,
+    externalDomains,
+  };
+}
+
+function collectLocalFiles(roots = defaultFileRoots(), seen = new Set()) {
   const entries = [];
   const missing = [];
-  const seen = new Set();
 
   function visit(root, currentDir) {
     for (const dirent of fs.readdirSync(currentDir, { withFileTypes: true })) {
@@ -136,11 +355,26 @@ async function createFullBackupArchive({
       includedFiles.push({ path: item.zipPath, size: fileEntry.size });
     }
 
+    const embeddedAndReferencedFiles = scanEmbeddedAndReferencedFiles({
+      readData,
+      collections,
+      roots: fileRoots || defaultFileRoots(dbPath),
+      now,
+      seenFiles: new Set(localFiles.entries.map(item => fs.realpathSync(item.filePath))),
+    });
+    for (const item of embeddedAndReferencedFiles.entries) {
+      entries.push(item);
+    }
+    for (const item of embeddedAndReferencedFiles.includedLocalFiles) {
+      includedFiles.push(item);
+    }
+
     const counts = {};
     for (const collection of collections) {
       counts[collection] = countCollection(readData(collection));
     }
 
+    const includedFilesCount = includedFiles.length + embeddedAndReferencedFiles.embeddedPhotosCount;
     const manifest = {
       generatedAt: now.toISOString(),
       appName: APP_NAME,
@@ -153,12 +387,34 @@ async function createFullBackupArchive({
       counts,
       files: {
         included: includedFiles,
-        includedCount: includedFiles.length,
+        includedCount: includedFilesCount,
+        includedFilesCount,
+        localFilesCount: includedFiles.length,
+        embeddedPhotosCount: embeddedAndReferencedFiles.embeddedPhotosCount,
+        externalReferencesCount: embeddedAndReferencedFiles.externalReferencesCount,
+        skippedFilesCount: embeddedAndReferencedFiles.skippedFilesCount,
+        skippedReasons: embeddedAndReferencedFiles.skippedReasons,
+        fileRootsChecked: (fileRoots || defaultFileRoots(dbPath)).map(root => path.basename(root?.dir || root?.label || '')).filter(Boolean),
+        embeddedPhotoCollections: embeddedAndReferencedFiles.embeddedPhotoCollections,
+        externalFileReferences: {
+          count: embeddedAndReferencedFiles.externalReferencesCount,
+          collections: embeddedAndReferencedFiles.externalCollections,
+          domains: embeddedAndReferencedFiles.externalDomains,
+          note: 'External URLs are referenced but not downloaded',
+        },
         missingLocalFileRoots: localFiles.missing.filter(Boolean).map(item => path.basename(item)),
         note: includedFiles.length
           ? 'Локальные файлы включены из настроенных директорий.'
-          : 'Локальные файлы/фото не найдены. Фото/вложения, сохранённые внутри SQLite JSON или как base64/URL-поля, находятся в database/app.sqlite.',
+          : 'Локальные файлы/фото не найдены. SQLite snapshot всегда содержит исходные JSON-данные приложения.',
       },
+      includedFilesCount,
+      localFilesCount: includedFiles.length,
+      embeddedPhotosCount: embeddedAndReferencedFiles.embeddedPhotosCount,
+      externalReferencesCount: embeddedAndReferencedFiles.externalReferencesCount,
+      skippedFilesCount: embeddedAndReferencedFiles.skippedFilesCount,
+      skippedReasons: embeddedAndReferencedFiles.skippedReasons,
+      fileRootsChecked: (fileRoots || defaultFileRoots(dbPath)).map(root => path.basename(root?.dir || root?.label || '')).filter(Boolean),
+      embeddedPhotoCollections: embeddedAndReferencedFiles.embeddedPhotoCollections,
       warning: BACKUP_WARNING,
     };
 
@@ -176,6 +432,11 @@ async function createFullBackupArchive({
         'Архив может содержать персональные, коммерческие и служебные данные.',
         'Не отправляйте архив в общий чат и не храните его в Git.',
         'Автоматическое восстановление из этого архива в приложении пока не реализовано.',
+        '',
+        'База данных всегда находится внутри архива как database/app.sqlite.',
+        'Локальные файлы и фото включаются при наличии в разрешённых директориях data/uploads, data/photos, data/documents, data/files, data/attachments.',
+        'Фото, сохранённые внутри JSON как data:image/...;base64, выгружаются отдельно в files/embedded-photos.',
+        'Внешние URL учитываются в manifest.json, но не скачиваются.',
         '',
       ].join('\n'),
       mtime: now,

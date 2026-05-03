@@ -38,6 +38,43 @@ test('admin gets client quick actions for working scenarios', () => {
   assert.ok(ids.includes('client-tasks'));
 });
 
+test('client quick actions keep create document separate from filtered document list', () => {
+  const actions = buildClientQuickActions({
+    client: { id: 'client-1', company: 'ООО Альфа' },
+    can: adminCan,
+    role: 'Администратор',
+  });
+  const createDocument = actions.find(action => action.id === 'client-create-document');
+  const clientDocuments = actions.find(action => action.id === 'client-documents');
+
+  assert.ok(createDocument);
+  assert.ok(clientDocuments);
+  assert.notEqual(createDocument.to, clientDocuments.to);
+  assert.match(createDocument.to, /\/documents\?/);
+  assert.match(createDocument.to, /action=create/);
+  assert.match(createDocument.to, /clientId=client-1/);
+  assert.match(createDocument.to, /clientName=/);
+  assert.doesNotMatch(clientDocuments.to, /action=create/);
+});
+
+test('client quick actions pass client context to daily work sections without label duplicates', () => {
+  const actions = buildClientQuickActions({
+    client: { id: 'client-1', company: 'ООО Альфа' },
+    can: adminCan,
+    role: 'Администратор',
+  });
+  const labels = actions.map(action => action.label);
+  const urls = Object.fromEntries(actions.map(action => [action.id, action.to || '']));
+
+  assert.equal(new Set(labels).size, labels.length);
+  assert.match(urls['client-create-rental'], /clientId=client-1/);
+  assert.match(urls['client-create-rental'], /clientName=/);
+  assert.match(urls['client-documents'], /clientId=client-1/);
+  assert.match(urls['client-payments'], /clientId=client-1/);
+  assert.match(urls['client-tasks'], /clientId=client-1/);
+  assert.equal(urls['client-create-debt-plan'].startsWith('/finance'), true);
+});
+
 test('quick actions hide finance and documents when role lacks permissions', () => {
   const can = canFrom({
     clients: ['view'],

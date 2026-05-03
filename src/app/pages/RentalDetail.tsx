@@ -1266,27 +1266,6 @@ export default function RentalDetail() {
                         </Button>
                       );
                     }
-                    if (action.id === 'rental-create-document') {
-                      return (
-                        <Button
-                          key={action.id}
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => {
-                            setDocumentForm(prev => ({
-                              ...prev,
-                              type: 'invoice',
-                              number: nextDocumentNumber('invoice', rental.id, relatedDocs.length),
-                              amount: String(Math.max(remainingBalance, 0)),
-                            }));
-                            setDocumentDialogOpen(true);
-                          }}
-                        >
-                          <Plus className="h-4 w-4" />
-                          {action.label}
-                        </Button>
-                      );
-                    }
                     if (action.id === 'rental-history') {
                       return (
                         <Button

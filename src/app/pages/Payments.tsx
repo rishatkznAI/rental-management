@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -14,6 +15,13 @@ import type { GanttRentalData } from '../mock-data';
 import { formatDate, formatCurrency } from '../lib/utils';
 import type { Payment, PaymentStatus, Client } from '../types';
 import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
+import {
+  buildQuickActionContext,
+  contextFilterLabel,
+  hasClientContext,
+  matchesClientContext,
+  normalizeContextName,
+} from '../lib/quickActionContext.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -301,6 +309,7 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Payments() {
+  const [searchParams] = useSearchParams();
   const { can } = usePermissions();
   const { data: paymentList = [] } = usePaymentsList();
   const { data: ganttRentals = [] } = useGanttData();
@@ -308,19 +317,43 @@ export default function Payments() {
   const createPayment = useCreatePayment();
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
+  const [clientFilter, setClientFilter] = React.useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const quickActionContext = React.useMemo(() => buildQuickActionContext(searchParams), [searchParams]);
+  const hasQuickClientContext = hasClientContext(quickActionContext);
+  const clientsById = useMemo(() => new Map(clients.map(client => [client.id, client])), [clients]);
+
+  React.useEffect(() => {
+    if (!hasQuickClientContext) return;
+    if (quickActionContext.clientId && clientsById.has(quickActionContext.clientId)) {
+      setClientFilter(quickActionContext.clientId);
+      return;
+    }
+    const wantedName = normalizeContextName(quickActionContext.clientName);
+    if (!wantedName) return;
+    const client = clients.find(item => normalizeContextName(item.company) === wantedName);
+    if (client) setClientFilter(client.id);
+  }, [clients, clientsById, hasQuickClientContext, quickActionContext.clientId, quickActionContext.clientName]);
 
   const filteredPayments = useMemo(() => paymentList.filter(p => {
     const q = search.toLowerCase();
+    const selectedClient = clientFilter !== 'all' ? clientsById.get(clientFilter) : undefined;
+    const clientContext = selectedClient
+      ? { clientId: selectedClient.id, clientName: selectedClient.company }
+      : quickActionContext;
     const matchesSearch = !search ||
       p.invoiceNumber.toLowerCase().includes(q) ||
       p.client.toLowerCase().includes(q) ||
       p.rentalId?.toLowerCase().includes(q) ||
       p.comment?.toLowerCase().includes(q);
+    const matchesClient = matchesClientContext({
+      clientId: p.clientId,
+      clientName: p.client,
+    }, clientContext);
     const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  }), [paymentList, search, statusFilter]);
+    return matchesSearch && matchesClient && matchesStatus;
+  }), [clientFilter, clientsById, paymentList, quickActionContext, search, statusFilter]);
 
   const handleAddPayment = (p: Payment) => {
     // id is already pre-generated in the modal; pass it through
@@ -347,6 +380,7 @@ export default function Payments() {
   );
   const activeFilterCount = [
     search.trim() !== '',
+    clientFilter !== 'all' || hasQuickClientContext,
     statusFilter !== 'all',
   ].filter(Boolean).length;
 
@@ -535,6 +569,7 @@ export default function Payments() {
         description="Поиск по счёту, клиенту, аренде и статусу оплаты."
         onReset={() => {
           setSearch('');
+          setClientFilter('all');
           setStatusFilter('all');
         }}
       >
@@ -549,6 +584,18 @@ export default function Payments() {
                 className="app-filter-input pl-10"
               />
             </div>
+          </FilterField>
+          <FilterField label="Клиент">
+            <select
+              value={clientFilter}
+              onChange={(e) => setClientFilter(e.target.value)}
+              className="app-filter-input"
+            >
+              <option value="all">Все клиенты</option>
+              {clients.map(client => (
+                <option key={client.id} value={client.id}>{client.company}</option>
+              ))}
+            </select>
           </FilterField>
           <FilterField label="Статус оплаты">
             <select
@@ -647,12 +694,20 @@ export default function Payments() {
               <DollarSign className="h-8 w-8 text-gray-400 dark:text-gray-500" />
             </div>
             <h3 className="text-base font-medium text-gray-900 dark:text-white">
-              {paymentList.length === 0 ? 'Платежей ещё нет' : 'Платежи не найдены'}
+              {paymentList.length === 0
+                ? 'Платежей ещё нет'
+                : hasQuickClientContext || clientFilter !== 'all'
+                  ? 'Платежи по клиенту не найдены'
+                  : 'Платежи не найдены'}
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               {paymentList.length === 0
                 ? 'Добавьте первый платёж по аренде'
-                : 'Попробуйте изменить параметры поиска или фильтры'}
+                : hasQuickClientContext || clientFilter !== 'all'
+                  ? `Для ${contextFilterLabel(clientFilter !== 'all'
+                    ? { clientId: clientFilter, clientName: clientsById.get(clientFilter)?.company }
+                    : quickActionContext)} нет платежей по выбранным фильтрам`
+                  : 'Попробуйте изменить параметры поиска или фильтры'}
             </p>
             {paymentList.length === 0 && can('create', 'payments') && (
               <Button size="sm" className="mt-4" onClick={() => setShowAddModal(true)}>

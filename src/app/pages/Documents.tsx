@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
@@ -39,6 +40,13 @@ import { useCreateDocument, useDocumentsList, useUpdateDocument } from '../hooks
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { buildDocumentControl, getDocumentControlStatusLabel } from '../lib/documentControl.js';
+import {
+  buildQuickActionContext,
+  contextFilterLabel,
+  hasClientContext,
+  matchesClientContext,
+  normalizeContextName,
+} from '../lib/quickActionContext.js';
 import { downloadPrintableHtml, openPrintableHtml } from '../lib/serviceWorkOrder';
 import { formatDate, formatCurrency, formatDateTime } from '../lib/utils';
 import { mechanicsService } from '../services/mechanics.service';
@@ -284,6 +292,7 @@ function buildContractDraftHtml(params: {
 }
 
 export default function Documents() {
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { can } = usePermissions();
@@ -339,9 +348,12 @@ export default function Documents() {
 
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const signedScanInputRef = React.useRef<HTMLInputElement | null>(null);
+  const appliedQuickActionRef = React.useRef('');
   const [signedScanTargetDoc, setSignedScanTargetDoc] = React.useState<Doc | null>(null);
   const documents = Array.isArray(documentList) ? documentList : [];
   const mechanicList = Array.isArray(mechanics) ? mechanics : [];
+  const quickActionContext = React.useMemo(() => buildQuickActionContext(searchParams), [searchParams]);
+  const hasQuickClientContext = hasClientContext(quickActionContext);
 
   React.useEffect(() => {
     setMechanicDocuments(Array.isArray(mechanicDocsData) ? mechanicDocsData : []);
@@ -379,6 +391,20 @@ export default function Documents() {
       .map(item => [item.inventoryNumber, item])),
     [equipment],
   );
+  const quickActionClient = React.useMemo(() => {
+    if (quickActionContext.clientId) {
+      return clientsById.get(quickActionContext.clientId);
+    }
+    const wantedName = normalizeContextName(quickActionContext.clientName);
+    if (!wantedName) return undefined;
+    return (clients as Client[]).find(client => normalizeContextName(client.company) === wantedName);
+  }, [clients, clientsById, quickActionContext.clientId, quickActionContext.clientName]);
+  const quickActionRental = quickActionContext.rentalId ? rentalsById.get(quickActionContext.rentalId) : undefined;
+  const quickActionEquipment = React.useMemo(() => {
+    if (quickActionContext.equipmentId) return equipmentById.get(quickActionContext.equipmentId);
+    if (quickActionContext.equipmentInv) return equipmentByInventory.get(quickActionContext.equipmentInv);
+    return undefined;
+  }, [equipmentById, equipmentByInventory, quickActionContext.equipmentId, quickActionContext.equipmentInv]);
   const relatedRentals = React.useMemo(() => {
     if (!contractForm.clientId && !contractForm.client) return rentals as Rental[];
     return (rentals as Rental[]).filter(rental => (
@@ -416,6 +442,46 @@ export default function Documents() {
     return Array.from(names).sort((a, b) => a.localeCompare(b, 'ru'));
   }, [documents, rentals, rentalsById]);
 
+  React.useEffect(() => {
+    const hasContext = hasClientContext(quickActionContext)
+      || quickActionContext.rentalId
+      || quickActionContext.equipmentId
+      || quickActionContext.equipmentInv;
+    if (!hasContext && quickActionContext.action !== 'create') return;
+
+    setView('general');
+
+    if (quickActionClient?.id) {
+      setClientFilter(quickActionClient.id);
+    } else if (quickActionRental?.clientId) {
+      setClientFilter(quickActionRental.clientId);
+    }
+    if (quickActionContext.rentalId && rentalsById.has(quickActionContext.rentalId)) {
+      setRentalFilter(quickActionContext.rentalId);
+    }
+
+    if (quickActionContext.action !== 'create' || !canManageDocuments) return;
+
+    const actionKey = searchParams.toString();
+    if (appliedQuickActionRef.current === actionKey) return;
+    appliedQuickActionRef.current = actionKey;
+
+    openContractCreate('rental', {
+      clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
+      client: quickActionClient?.company || quickActionRental?.client || quickActionContext.clientName,
+      rentalId: quickActionRental?.id || '',
+      equipmentId: quickActionEquipment?.id || quickActionContext.equipmentId,
+    });
+  }, [
+    canManageDocuments,
+    quickActionClient,
+    quickActionContext,
+    quickActionEquipment,
+    quickActionRental,
+    rentalsById,
+    searchParams,
+  ]);
+
   const filteredDocuments = documents.filter(doc => {
     const q = search.trim().toLowerCase();
     const rentalId = getDocumentRentalId(doc);
@@ -446,10 +512,14 @@ export default function Documents() {
     const matchesClient = clientFilter === 'all'
       || normalizedClientId === clientFilter
       || normalizedClient === clientsById.get(clientFilter)?.company;
+    const matchesQuickClient = matchesClientContext({
+      clientId: normalizedClientId,
+      clientName: normalizedClient,
+    }, quickActionContext);
     const matchesRental = rentalFilter === 'all' || rentalId === rentalFilter;
     const matchesManager = managerFilter === 'all' || normalizedManager === managerFilter;
 
-    return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesClient && matchesRental && matchesManager;
+    return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesClient && matchesQuickClient && matchesRental && matchesManager;
   });
 
   const documentControl = React.useMemo(() => buildDocumentControl({
@@ -563,7 +633,7 @@ export default function Documents() {
     event.target.value = '';
   };
 
-  function openContractCreate(kind: DocumentContractKind) {
+  function openContractCreate(kind: DocumentContractKind, initial: Partial<ContractFormState> = {}) {
     setCreateContractKind(kind);
     setContractForm({
       clientId: '',
@@ -574,6 +644,7 @@ export default function Documents() {
       signatoryBasis: '',
       date: new Date().toISOString().slice(0, 10),
       comment: '',
+      ...initial,
     });
     setCreateDialogOpen(true);
   }
@@ -979,9 +1050,13 @@ export default function Documents() {
                 <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
                   <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">Документы не найдены</h3>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                  {hasQuickClientContext ? 'Документы по клиенту не найдены' : 'Документы не найдены'}
+                </h3>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  Попробуйте изменить параметры поиска или фильтры
+                  {hasQuickClientContext
+                    ? `Для ${contextFilterLabel(quickActionContext)} нет документов по выбранным фильтрам`
+                    : 'Попробуйте изменить параметры поиска или фильтры'}
                 </p>
               </div>
             )}

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -16,6 +16,7 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { formatCurrency, formatDate } from '../lib/utils';
+import { buildQuickActionContext, contextFilterLabel, hasClientContext, matchesClientContext } from '../lib/quickActionContext.js';
 import { useAuth } from '../contexts/AuthContext';
 import {
   groupTasksByDueDate,
@@ -82,6 +83,7 @@ function taskMatchesSearch(task: TaskCenterTask, query: string) {
 }
 
 export default function TasksCenter() {
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [sectionFilter, setSectionFilter] = useState('all');
@@ -89,6 +91,8 @@ export default function TasksCenter() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [search, setSearch] = useState('');
   const today = todayKey();
+  const quickActionContext = useMemo(() => buildQuickActionContext(searchParams), [searchParams]);
+  const hasQuickClientContext = hasClientContext(quickActionContext);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['tasks-center'],
@@ -107,6 +111,10 @@ export default function TasksCenter() {
   );
   const visibleTasks = useMemo(
     () => tasks.filter(task => {
+      if (!matchesClientContext({
+        clientId: task.clientId,
+        clientName: task.clientName,
+      }, quickActionContext)) return false;
       if (priorityFilter !== 'all' && task.priority !== priorityFilter) return false;
       if (sectionFilter !== 'all' && task.section !== sectionFilter) return false;
       if (dueFilter !== 'all' && dueBucket(task, today) !== dueFilter) return false;
@@ -117,7 +125,7 @@ export default function TasksCenter() {
       }
       return taskMatchesSearch(task, search.trim());
     }),
-    [dueFilter, onlyMine, priorityFilter, search, sectionFilter, tasks, today, user?.email, user?.name],
+    [dueFilter, onlyMine, priorityFilter, quickActionContext, search, sectionFilter, tasks, today, user?.email, user?.name],
   );
   const groupedTasks = useMemo(() => groupTasksByDueDate(visibleTasks, today), [today, visibleTasks]);
   const summary = data?.summary ?? { total: 0, critical: 0, high: 0, overdue: 0, today: 0 };
@@ -234,8 +242,14 @@ export default function TasksCenter() {
           <CardContent className="flex items-center gap-3 p-6">
             <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-300" />
             <div>
-              <p className="font-semibold text-emerald-700 dark:text-emerald-300">Критичных задач нет.</p>
-              <p className="text-sm text-emerald-700/80 dark:text-emerald-200/80">По выбранным фильтрам ничего не требует действия.</p>
+              <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+                {hasQuickClientContext ? 'Задач по клиенту не найдено.' : 'Критичных задач нет.'}
+              </p>
+              <p className="text-sm text-emerald-700/80 dark:text-emerald-200/80">
+                {hasQuickClientContext
+                  ? `Для ${contextFilterLabel(quickActionContext)} нет задач по выбранным фильтрам.`
+                  : 'По выбранным фильтрам ничего не требует действия.'}
+              </p>
             </div>
           </CardContent>
         </Card>

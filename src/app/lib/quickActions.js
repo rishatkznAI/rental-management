@@ -40,14 +40,14 @@ export function buildClientQuickActions({ client, can, role } = {}) {
       id: 'client-create-rental',
       label: 'Создать аренду',
       kind: 'primary',
-      to: withQuery('/rentals/new', { clientId }),
+      to: withQuery('/rentals/new', context),
     });
   }
   if (canDo(can, 'view', 'documents') && canAny(can, MANAGE_ACTIONS, 'documents')) {
     actions.push({
       id: 'client-create-document',
       label: 'Создать документ',
-      to: withQuery('/documents', context),
+      to: withQuery('/documents', { ...context, action: 'create' }),
     });
   }
   if (canDo(can, 'view', 'finance') && (isAdminOrOffice(role) || canAny(can, MANAGE_ACTIONS, 'finance'))) {
@@ -133,7 +133,7 @@ export function buildRentalQuickActions({ rental, can, clientId, equipmentId } =
   const actions = [];
 
   if (canDo(can, 'edit', 'rentals')) actions.push({ id: 'rental-extend', label: 'Продлить аренду', kind: 'primary' });
-  if (canDo(can, 'view', 'documents') && canAny(can, MANAGE_ACTIONS, 'documents')) actions.push({ id: 'rental-create-document', label: 'Создать документ' });
+  if (canDo(can, 'view', 'documents') && canAny(can, MANAGE_ACTIONS, 'documents')) actions.push({ id: 'rental-create-document', label: 'Создать документ', to: withQuery('/documents', { ...context, action: 'create' }) });
   if (canDo(can, 'view', 'deliveries') && canAny(can, MANAGE_ACTIONS, 'deliveries')) actions.push({ id: 'rental-create-delivery', label: 'Создать доставку', to: withQuery('/deliveries', context) });
   if (canDo(can, 'create', 'service')) actions.push({ id: 'rental-create-service', label: 'Создать сервисную заявку', to: withQuery('/service/new', context) });
   if (clientId && canDo(can, 'view', 'clients')) actions.push({ id: 'rental-client', label: 'Открыть клиента', to: `/clients/${encodeURIComponent(clientId)}` });

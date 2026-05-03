@@ -938,6 +938,23 @@ type AuditLogResponse = {
   };
 };
 
+type BackupHistoryEntry = {
+  id: string;
+  createdAt: string;
+  userName?: string | null;
+  userEmail?: string | null;
+  role?: string | null;
+  filename: string;
+  size: number;
+  collectionsCount: number;
+  filesCount: number;
+};
+
+type BackupHistoryResponse = {
+  ok: boolean;
+  history: BackupHistoryEntry[];
+};
+
 const DIAGNOSTIC_ENDPOINTS = [
   { name: 'equipment', path: '/api/equipment' },
   { name: 'rentals', path: '/api/rentals' },
@@ -2332,6 +2349,26 @@ const PAYMENT_STATUS_IMPORT_MAP: Record<string, GanttRentalData['paymentStatus']
   'частично': 'partial',
 };
 
+function formatBackupDateTime(value: string): string {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function formatBackupSize(value: number): string {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—';
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+}
+
 function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) {
   const queryClient = useQueryClient();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -2340,11 +2377,15 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
   const [analysis, setAnalysis] = React.useState<SystemDataImportAnalysis | null>(null);
   const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [backupMessage, setBackupMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [lastBackupDownloadAt, setLastBackupDownloadAt] = React.useState('');
   const [isDownloadingBackup, setIsDownloadingBackup] = React.useState(false);
   const [isExporting, setIsExporting] = React.useState(false);
   const [isChecking, setIsChecking] = React.useState(false);
   const [isImporting, setIsImporting] = React.useState(false);
+  const backupHistoryQuery = useQuery<BackupHistoryResponse>({
+    queryKey: ['admin-backup-history'],
+    queryFn: () => api.get<BackupHistoryResponse>('/api/admin/backup/history?limit=10'),
+    enabled: canManageData,
+  });
 
   const handleFullBackupDownload = React.useCallback(async () => {
     setBackupMessage(null);
@@ -2374,14 +2415,14 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
         `skytech-backup-${new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', '-')}.zip`,
       );
       downloadBlob(blob, filename);
-      setLastBackupDownloadAt(new Date().toLocaleString('ru-RU'));
       setBackupMessage({ type: 'success', text: 'Backup подготовлен и передан браузеру для скачивания.' });
+      await backupHistoryQuery.refetch();
     } catch (error) {
       setBackupMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось скачать backup.' });
     } finally {
       setIsDownloadingBackup(false);
     }
-  }, []);
+  }, [backupHistoryQuery]);
 
   const handleExport = React.useCallback(async () => {
     setMessage(null);
@@ -2476,7 +2517,50 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
         <p className="text-sm text-muted-foreground">
           Архив создаётся на сервере на лету и доступен только администраторам. Восстановление из backup в этой версии не выполняется автоматически.
         </p>
-        <DiagnosticsField label="Последнее скачивание в этой сессии" value={lastBackupDownloadAt || 'Ещё не скачивали'} />
+        <div className="space-y-2" data-testid="backup-history">
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold">История резервных копий</h4>
+            {backupHistoryQuery.isFetching && (
+              <span className="text-xs text-muted-foreground">Обновляем...</span>
+            )}
+          </div>
+          {backupHistoryQuery.isError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+              Не удалось загрузить историю backup
+            </div>
+          ) : backupHistoryQuery.data?.history?.length ? (
+            <div className="overflow-hidden rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Дата</TableHead>
+                    <TableHead>Пользователь</TableHead>
+                    <TableHead>Файл</TableHead>
+                    <TableHead>Размер</TableHead>
+                    <TableHead>Состав</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {backupHistoryQuery.data.history.slice(0, 10).map(item => (
+                    <TableRow key={item.id || `${item.createdAt}-${item.filename}`}>
+                      <TableCell className="whitespace-nowrap">{formatBackupDateTime(item.createdAt)}</TableCell>
+                      <TableCell>{item.userName || item.userEmail || item.role || '—'}</TableCell>
+                      <TableCell className="max-w-[260px] truncate font-mono text-xs">{item.filename || '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap">{formatBackupSize(item.size)}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {item.collectionsCount} коллекций · {item.filesCount} файлов
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+              Резервные копии ещё не скачивали
+            </div>
+          )}
+        </div>
         {backupMessage && (
           <div className={`rounded-lg border px-4 py-3 text-sm ${
             backupMessage.type === 'success'

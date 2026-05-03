@@ -22,6 +22,27 @@ test('admin sees full backup block and download calls backup endpoint', async ({
   await loginAsAdmin(page);
 
   let backupRequested = false;
+  let historyRequests = 0;
+  const history = [
+    {
+      id: 'AUD-test',
+      createdAt: '2026-05-03T11:00:00.000Z',
+      userName: 'Админ',
+      role: 'Администратор',
+      filename: 'skytech-backup-test.zip',
+      size: 6724567,
+      collectionsCount: 35,
+      filesCount: 0,
+    },
+  ];
+  await page.route('**/api/admin/backup/history**', route => {
+    historyRequests += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, history }),
+    });
+  });
   await page.route('**/api/admin/backup/full', route => {
     backupRequested = true;
     return route.fulfill({
@@ -37,6 +58,15 @@ test('admin sees full backup block and download calls backup endpoint', async ({
   await navigateInApp(page, '/admin');
   await page.getByRole('tab', { name: 'Данные системы' }).click();
   await expect(page.getByTestId('full-backup-card')).toContainText('Резервная копия');
+  await expect(page.getByTestId('backup-history')).toContainText('История резервных копий');
+  await expect(page.getByTestId('backup-history')).toContainText('skytech-backup-test.zip');
   await page.getByTestId('full-backup-download').click();
   await expect.poll(() => backupRequested).toBe(true);
+  await expect.poll(() => historyRequests).toBeGreaterThan(1);
+
+  await page.reload();
+  await loginAsAdmin(page);
+  await navigateInApp(page, '/admin');
+  await page.getByRole('tab', { name: 'Данные системы' }).click();
+  await expect(page.getByTestId('backup-history')).toContainText('skytech-backup-test.zip');
 });

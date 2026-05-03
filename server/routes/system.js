@@ -315,6 +315,27 @@ function readAuditLogs(readData) {
   return Array.isArray(legacy) ? legacy : [];
 }
 
+function backupHistoryEntry(entry) {
+  const safe = safeAuditLogEntry(entry);
+  const metadata = safe.metadata && typeof safe.metadata === 'object' ? safe.metadata : {};
+  const collections = metadata.collections && typeof metadata.collections === 'object'
+    ? metadata.collections
+    : {};
+  const collectionsCount = Object.keys(collections).length;
+  const createdAt = safe.createdAt || entry?.timestamp || entry?.created_at || '';
+  return {
+    id: safe.id,
+    createdAt,
+    userName: safe.userName,
+    userEmail: null,
+    role: safe.normalizedRole || safe.role,
+    filename: typeof metadata.filename === 'string' ? metadata.filename : '',
+    size: typeof metadata.size === 'number' ? metadata.size : 0,
+    collectionsCount,
+    filesCount: typeof metadata.files === 'number' ? metadata.files : 0,
+  };
+}
+
 function matchesAuditFilters(entry, query) {
   const user = String(query.user || '').trim().toLowerCase();
   const action = String(query.action || '').trim().toLowerCase();
@@ -674,6 +695,16 @@ function registerSystemRoutes(app, deps) {
       if (backup) cleanupBackupArchive(backup);
       return res.status(500).json({ ok: false, error: error.message || 'Не удалось подготовить backup.' });
     }
+  });
+
+  app.get('/api/admin/backup/history', requireAuth, requireAdmin, (req, res) => {
+    const limit = Math.min(20, Math.max(1, Number(req.query.limit || 10) || 10));
+    const history = readAuditLogs(readData)
+      .filter(entry => entry?.action === 'system.backup.download')
+      .map(backupHistoryEntry)
+      .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+      .slice(0, limit);
+    return res.json({ ok: true, history });
   });
 
   app.get('/api/admin/audit-logs', requireAuth, requireAdmin, (req, res) => {

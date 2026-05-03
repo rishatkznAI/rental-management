@@ -301,6 +301,88 @@ test('/api/admin/backup/full requires auth and admin access', async () => {
   });
 });
 
+test('/api/admin/backup/history requires auth and admin access', async () => {
+  const unauth = createSystemApp({
+    requireAuth: (_req, res) => res.status(401).json({ ok: false, error: 'Unauthorized' }),
+  });
+  await withServer(unauth.app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/backup/history');
+    assert.equal(response.status, 401);
+  });
+
+  const forbidden = createSystemApp({
+    requireAdmin: (_req, res) => res.status(403).json({ ok: false, error: 'Forbidden' }),
+  });
+  await withServer(forbidden.app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/backup/history');
+    assert.equal(response.status, 403);
+  });
+});
+
+test('/api/admin/backup/history returns safe backup download audit entries only', async () => {
+  const audit_logs = [
+    {
+      id: 'AUD-1',
+      createdAt: '2026-05-03T11:00:00.000Z',
+      userName: 'Admin One',
+      role: 'Администратор',
+      action: 'system.backup.download',
+      entityType: 'system',
+      metadata: {
+        filename: 'skytech-backup-2026-05-03-11-00.zip',
+        size: 123456,
+        collections: { clients: 2, rentals: 1 },
+        files: 3,
+        token: 'secret-token',
+        password: 'secret-password',
+      },
+    },
+    {
+      id: 'AUD-2',
+      createdAt: '2026-05-03T10:00:00.000Z',
+      userName: 'Admin Two',
+      role: 'Администратор',
+      action: 'system_data.export',
+      entityType: 'system',
+      metadata: { filename: 'system-data.json' },
+    },
+  ];
+  const { app } = createSystemApp({
+    readData: name => (name === 'audit_logs' ? audit_logs : []),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/backup/history');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.history.length, 1);
+    assert.deepEqual(response.body.history[0], {
+      id: 'AUD-1',
+      createdAt: '2026-05-03T11:00:00.000Z',
+      userName: 'Admin One',
+      userEmail: null,
+      role: 'Администратор',
+      filename: 'skytech-backup-2026-05-03-11-00.zip',
+      size: 123456,
+      collectionsCount: 2,
+      filesCount: 3,
+    });
+    assert.doesNotMatch(JSON.stringify(response.body), /secret-token|secret-password|password|token/i);
+  });
+});
+
+test('/api/admin/backup/history returns an empty list when no backup was downloaded', async () => {
+  const { app } = createSystemApp({
+    readData: name => (name === 'audit_logs' ? [] : []),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/backup/history');
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { ok: true, history: [] });
+  });
+});
+
 test('/api/admin/backup/full returns zip with manifest database and safe audit metadata', async () => {
   const collections = {
     equipment: [{ id: 'EQ-1' }],

@@ -30,6 +30,8 @@ Thumbs.db
 # Temp
 *.tmp
 *.temp
+*.zip
+backups/*.zip
 
 # Local helper scripts
 *.command
@@ -48,4 +50,5 @@ server/data/*.sqlite-*
 server/data/backups/*.sqlite
 server/data/backups/*.sqlite-shm
 server/data/backups/*.sqlite-wal
+server/data/backups/*.zip
 !server/data/.gitkeep

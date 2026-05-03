@@ -1,5 +1,6 @@
 const { isMechanicRole } = require('../lib/role-groups');
 const { redactAuditValue } = require('../lib/security-audit');
+const { cleanupBackupArchive, createFullBackupArchive } = require('../lib/full-backup');
 const dns = require('dns');
 const http = require('http');
 const https = require('https');
@@ -136,6 +137,7 @@ const DEFAULT_AUDIT_ACTIONS = [
   'login.success',
   'login.fail',
   'logout',
+  'system.backup.download',
   'system_data.export',
   'system_data.import',
   'rentals.return',
@@ -351,6 +353,8 @@ function registerSystemRoutes(app, deps) {
     backfillGanttRentalLinks,
     getBuildInfo,
     getRoleAccessSummary,
+    jsonCollections = [],
+    createDatabaseBackup,
     demo = { enabled: false, resetAllowed: false },
     resetDemoData,
   } = deps;
@@ -635,6 +639,41 @@ function registerSystemRoutes(app, deps) {
       },
     });
     return res.json(payload);
+  });
+
+  app.get('/api/admin/backup/full', requireAuth, requireAdmin, async (req, res) => {
+    let backup = null;
+    try {
+      backup = await createFullBackupArchive({
+        readData,
+        dbPath,
+        createDatabaseBackup,
+        collections: jsonCollections,
+        buildInfo: buildInfo(),
+      });
+
+      auditLog?.(req, {
+        action: 'system.backup.download',
+        entityType: 'system',
+        entityId: 'backup',
+        metadata: {
+          filename: backup.filename,
+          size: backup.size,
+          collections: backup.manifest?.counts || {},
+          files: backup.manifest?.files?.includedCount || 0,
+        },
+      });
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Length', String(backup.size));
+      res.setHeader('Content-Disposition', `attachment; filename="${backup.filename}"`);
+      res.on('finish', () => cleanupBackupArchive(backup));
+      res.on('close', () => cleanupBackupArchive(backup));
+      return res.sendFile(backup.path);
+    } catch (error) {
+      if (backup) cleanupBackupArchive(backup);
+      return res.status(500).json({ ok: false, error: error.message || 'Не удалось подготовить backup.' });
+    }
   });
 
   app.get('/api/admin/audit-logs', requireAuth, requireAdmin, (req, res) => {

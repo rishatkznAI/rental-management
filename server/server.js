@@ -115,6 +115,7 @@ const {
   DB_PATH,
   cloneCollectionIfMissing,
   countActiveSessions,
+  createSqliteBackup,
   cleanupExpiredSessions,
   deleteSession,
   deleteSessionsForUserIds,
@@ -123,6 +124,7 @@ const {
   migrateJsonFilesToDb,
   saveSession,
   setData,
+  JSON_COLLECTIONS,
 } = require('./db');
 
 const DEMO_MODE = isDemoMode();
@@ -257,6 +259,7 @@ app.use(cors({
     callback(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,
+  exposedHeaders: ['Content-Disposition', 'Content-Length'],
 }));
 
 app.use('/bot-assets', express.static(path.join(__dirname, 'assets', 'bot'), {
@@ -2552,6 +2555,8 @@ registerSystemRoutes(app, {
   backfillGanttRentalLinks,
   getBuildInfo,
   getRoleAccessSummary: roleAccessSummary,
+  jsonCollections: JSON_COLLECTIONS,
+  createDatabaseBackup: createSqliteBackup,
   demo: getDemoPublicInfo(),
   resetDemoData: () => seedDemoData({ reset: true, logger: console }),
 });

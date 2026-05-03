@@ -11,6 +11,7 @@ const { registerSystemRoutes } = require('../server/routes/system.js');
 function createSystemApp(overrides = {}) {
   const app = express();
   const messages = [];
+  const auditEntries = [];
   app.use(express.json());
   registerSystemRoutes(app, {
     readData: overrides.readData || (() => []),
@@ -24,9 +25,8 @@ function createSystemApp(overrides = {}) {
       return { ok: true };
     },
     countActiveSessions: () => 0,
-    dbPath: ':memory:',
     webhookUrl: '',
-    requireAuth: (req, _res, next) => {
+    requireAuth: overrides.requireAuth || ((req, _res, next) => {
       req.user = overrides.user || {
         userId: 'U-admin',
         userName: 'Админ',
@@ -36,16 +36,19 @@ function createSystemApp(overrides = {}) {
         email: 'admin@example.test',
       };
       next();
-    },
+    }),
     requireAdmin: overrides.requireAdmin || ((_req, _res, next) => next()),
-    auditLog: () => {},
+    auditLog: overrides.auditLog || ((_req, entry) => auditEntries.push(entry)),
     getBuildInfo: () => ({ version: 'test' }),
     getRoleAccessSummary: () => ({
       readableCollections: ['equipment', 'rentals'],
       writableCollections: ['equipment'],
     }),
+    jsonCollections: overrides.jsonCollections || ['equipment', 'clients', 'users'],
+    createDatabaseBackup: overrides.createDatabaseBackup,
+    dbPath: overrides.dbPath || ':memory:',
   });
-  return { app, messages };
+  return { app, messages, auditEntries };
 }
 
 async function withServer(app, fn) {
@@ -64,6 +67,35 @@ async function getJson(baseUrl, path) {
   const response = await fetch(`${baseUrl}${path}`);
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
+}
+
+async function getBuffer(baseUrl, path) {
+  const response = await fetch(`${baseUrl}${path}`);
+  const arrayBuffer = await response.arrayBuffer();
+  return {
+    status: response.status,
+    headers: response.headers,
+    buffer: Buffer.from(arrayBuffer),
+  };
+}
+
+function listZipEntries(buffer) {
+  const entries = [];
+  let offset = 0;
+  while (offset < buffer.length - 4) {
+    const signature = buffer.readUInt32LE(offset);
+    if (signature !== 0x04034b50) break;
+    const compressedSize = buffer.readUInt32LE(offset + 18);
+    const nameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    const name = buffer.subarray(nameStart, nameStart + nameLength).toString('utf8');
+    const data = buffer.subarray(dataStart, dataStart + compressedSize);
+    entries.push({ name, data });
+    offset = dataStart + compressedSize;
+  }
+  return entries;
 }
 
 async function postJson(baseUrl, path, body) {
@@ -248,6 +280,71 @@ test('/api/admin/system-data/export returns safe JSON without passwords or secre
     assert.equal(response.body.collections.app_settings.length, 1);
     assert.equal(response.body.collections.app_settings[0].key, 'theme');
     assert.doesNotMatch(JSON.stringify(response.body), /secret|do-not-export/i);
+  });
+});
+
+test('/api/admin/backup/full requires auth and admin access', async () => {
+  const unauth = createSystemApp({
+    requireAuth: (_req, res) => res.status(401).json({ ok: false, error: 'Unauthorized' }),
+  });
+  await withServer(unauth.app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/backup/full');
+    assert.equal(response.status, 401);
+  });
+
+  const forbidden = createSystemApp({
+    requireAdmin: (_req, res) => res.status(403).json({ ok: false, error: 'Forbidden' }),
+  });
+  await withServer(forbidden.app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/backup/full');
+    assert.equal(response.status, 403);
+  });
+});
+
+test('/api/admin/backup/full returns zip with manifest database and safe audit metadata', async () => {
+  const collections = {
+    equipment: [{ id: 'EQ-1' }],
+    clients: [{ id: 'C-1', company: 'Client' }],
+    users: [{ id: 'U-1', email: 'admin@example.test', password: 'stored-hash', token: 'secret-token' }],
+  };
+  const { app, auditEntries } = createSystemApp({
+    readData: name => collections[name] || [],
+    dbPath: '/tmp/app.sqlite',
+    createDatabaseBackup: async (targetPath) => {
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(targetPath, Buffer.from('sqlite snapshot'));
+      return targetPath;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getBuffer(baseUrl, '/api/admin/backup/full');
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'application/zip');
+    assert.match(response.headers.get('content-disposition') || '', /skytech-backup-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.zip/);
+    assert.equal(response.buffer.readUInt32LE(0), 0x04034b50);
+
+    const entries = listZipEntries(response.buffer);
+    const names = entries.map(entry => entry.name);
+    assert.ok(names.includes('manifest.json'));
+    assert.ok(names.includes('database/app.sqlite'));
+    assert.ok(names.includes('README-backup.txt'));
+
+    const manifest = JSON.parse(entries.find(entry => entry.name === 'manifest.json').data.toString('utf8'));
+    assert.equal(manifest.database.type, 'sqlite');
+    assert.equal(manifest.database.includedAs, 'database/app.sqlite');
+    assert.equal(manifest.counts.equipment, 1);
+    assert.equal(manifest.counts.clients, 1);
+    assert.equal(manifest.counts.users, 1);
+    assert.match(manifest.warning, /Не хранить в Git/);
+    assert.doesNotMatch(JSON.stringify(manifest), /stored-hash|secret-token|password|token/i);
+
+    assert.equal(auditEntries.length, 1);
+    assert.equal(auditEntries[0].action, 'system.backup.download');
+    assert.equal(auditEntries[0].entityType, 'system');
+    assert.match(auditEntries[0].metadata.filename, /^skytech-backup-/);
+    assert.equal(auditEntries[0].metadata.collections.equipment, 1);
+    assert.doesNotMatch(JSON.stringify(auditEntries), /stored-hash|secret-token|password|token/i);
   });
 });
 

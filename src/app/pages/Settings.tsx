@@ -63,7 +63,7 @@ import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
-import { api, API_BASE_URL } from '../lib/api';
+import { api, API_BASE_URL, getToken } from '../lib/api';
 import { frontendBuildInfo } from '../lib/build-info';
 import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
@@ -2153,6 +2153,22 @@ function downloadJSON(content: unknown, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function filenameFromDisposition(disposition: string | null, fallback: string) {
+  const match = String(disposition || '').match(/filename="?([^";]+)"?/i);
+  return match?.[1] || fallback;
+}
+
 function parseCSVRow(line: string) {
   const result: string[] = [];
   let current = '';
@@ -2323,9 +2339,49 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
   const [selectedFileName, setSelectedFileName] = React.useState('');
   const [analysis, setAnalysis] = React.useState<SystemDataImportAnalysis | null>(null);
   const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [backupMessage, setBackupMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [lastBackupDownloadAt, setLastBackupDownloadAt] = React.useState('');
+  const [isDownloadingBackup, setIsDownloadingBackup] = React.useState(false);
   const [isExporting, setIsExporting] = React.useState(false);
   const [isChecking, setIsChecking] = React.useState(false);
   const [isImporting, setIsImporting] = React.useState(false);
+
+  const handleFullBackupDownload = React.useCallback(async () => {
+    setBackupMessage(null);
+    setIsDownloadingBackup(true);
+    try {
+      const token = getToken();
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(`${API_BASE_URL}/api/admin/backup/full`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        let error = `HTTP ${response.status}`;
+        try {
+          const body = await response.json();
+          error = body?.error || error;
+        } catch {
+          // keep HTTP status
+        }
+        throw new Error(error);
+      }
+      const blob = await response.blob();
+      const filename = filenameFromDisposition(
+        response.headers.get('content-disposition'),
+        `skytech-backup-${new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', '-')}.zip`,
+      );
+      downloadBlob(blob, filename);
+      setLastBackupDownloadAt(new Date().toLocaleString('ru-RU'));
+      setBackupMessage({ type: 'success', text: 'Backup подготовлен и передан браузеру для скачивания.' });
+    } catch (error) {
+      setBackupMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось скачать backup.' });
+    } finally {
+      setIsDownloadingBackup(false);
+    }
+  }, []);
 
   const handleExport = React.useCallback(async () => {
     setMessage(null);
@@ -2400,6 +2456,39 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
     : 0;
 
   return (
+    <>
+    <Card data-testid="full-backup-card">
+      <CardHeader>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle>Резервная копия</CardTitle>
+            <CardDescription>
+              Backup содержит базу данных и файлы/фото системы. Не отправляйте его в общий чат и не храните в Git.
+            </CardDescription>
+          </div>
+          <Button onClick={() => void handleFullBackupDownload()} disabled={!canManageData || isDownloadingBackup} data-testid="full-backup-download">
+            <Download className="h-4 w-4" />
+            {isDownloadingBackup ? 'Готовим backup...' : 'Скачать полный backup'}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Архив создаётся на сервере на лету и доступен только администраторам. Восстановление из backup в этой версии не выполняется автоматически.
+        </p>
+        <DiagnosticsField label="Последнее скачивание в этой сессии" value={lastBackupDownloadAt || 'Ещё не скачивали'} />
+        {backupMessage && (
+          <div className={`rounded-lg border px-4 py-3 text-sm ${
+            backupMessage.type === 'success'
+              ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300'
+              : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'
+          }`}>
+            {backupMessage.text}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -2497,6 +2586,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
         )}
       </CardContent>
     </Card>
+    </>
   );
 }
 

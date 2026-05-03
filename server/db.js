@@ -215,6 +215,13 @@ function resetAppData(collections = JSON_COLLECTIONS) {
   tx(names);
 }
 
+async function createSqliteBackup(targetPath) {
+  const db = ensureDb();
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  await db.backup(targetPath);
+  return targetPath;
+}
+
 function countActiveSessions(now = Date.now()) {
   const db = ensureDb();
   const row = db.prepare('SELECT COUNT(*) AS count FROM app_sessions WHERE expires_at > ?').get(now);
@@ -225,6 +232,7 @@ module.exports = {
   DB_PATH,
   cloneCollectionIfMissing,
   countActiveSessions,
+  createSqliteBackup,
   cleanupExpiredSessions,
   deleteSession,
   deleteSessionsForUserIds,

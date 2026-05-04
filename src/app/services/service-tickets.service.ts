@@ -1,6 +1,22 @@
 import { api } from '../lib/api';
 import type { PhotoReference, ServicePriority, ServiceScenario, ServiceStatus, ServiceTicket } from '../types';
 
+export interface ServiceAuditLogEntry {
+  id: string;
+  serviceId: string;
+  action: 'work_added' | 'work_deleted' | 'part_added' | 'part_deleted' | string;
+  entityType: 'repair_work_item' | 'repair_part_item' | string;
+  entityId: string;
+  snapshot?: Record<string, unknown>;
+  actor?: {
+    id?: string | null;
+    name?: string | null;
+    role?: string | null;
+  };
+  source?: 'web' | 'api' | 'sync' | string;
+  createdAt: string;
+}
+
 const SERVICE_STATUSES = new Set<ServiceStatus>(['new', 'in_progress', 'waiting_parts', 'ready', 'closed']);
 const SERVICE_PRIORITIES = new Set<ServicePriority>(['critical', 'high', 'medium', 'low']);
 const SERVICE_SCENARIOS = new Set<ServiceScenario>(['repair', 'to', 'chto', 'pto']);
@@ -160,6 +176,9 @@ export const serviceTicketsService = {
 
   delete: (id: string): Promise<void> =>
     api.del(`/api/service/${id}`),
+
+  getAudit: (id: string): Promise<ServiceAuditLogEntry[]> =>
+    api.get<ServiceAuditLogEntry[]>(`/api/service/${encodeURIComponent(id)}/audit`),
 
   bulkReplace: (list: ServiceTicket[]): Promise<void> =>
     api.put('/api/service', list),

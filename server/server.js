@@ -74,6 +74,7 @@ const {
 } = require('./lib/audit-history');
 const { createAccessControl } = require('./lib/access-control');
 const { createAuditLogger } = require('./lib/security-audit');
+const { createServiceAuditLog } = require('./lib/service-audit-log');
 const { createBotHandlers } = require('./lib/bot-commands');
 const {
   createBotNotificationService,
@@ -331,6 +332,12 @@ const auditLog = createAuditLogger({
   nowIso: () => new Date().toISOString(),
   logger: console,
 });
+const serviceAuditLog = createServiceAuditLog({
+  readData,
+  writeData,
+  generateId,
+  nowIso,
+});
 
 function getBotUsers()    { return readData('bot_users') || {}; }
 function saveBotUsers(u)  { writeData('bot_users', u); }
@@ -451,8 +458,8 @@ const WRITE_PERMISSIONS = {
   spare_parts:    ['Администратор'],
   service_route_norms: ['Администратор'],
   service_field_trips: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
-  repair_work_items: ['Администратор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
-  repair_part_items: ['Администратор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  repair_work_items: ['Администратор'],
+  repair_part_items: ['Администратор'],
   service_work_catalog: ['Администратор'],
   spare_parts_catalog: ['Администратор'],
   planner_items:  ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
@@ -856,6 +863,7 @@ const ID_PREFIXES = {
   service_field_trips: 'SFT',
   repair_work_items: 'RWI',
   repair_part_items: 'RPI',
+  service_audit_log: 'audit',
   planner_items:    'PI',
   service_vehicles: 'SV',
   vehicle_trips:    'VT',
@@ -923,6 +931,9 @@ function migrateReferenceCollections() {
   }
   if (!Array.isArray(readData('repair_part_items'))) {
     writeData('repair_part_items', []);
+  }
+  if (!Array.isArray(readData('service_audit_log'))) {
+    writeData('service_audit_log', []);
   }
 }
 
@@ -1266,6 +1277,7 @@ apiRouter.use(registerCrudRoutes({
   applyServiceTicketCreationEffects,
   accessControl,
   auditLog,
+  serviceAuditLog,
   normalizeRecordClientLink,
   normalizeClientLinks,
 }));
@@ -1292,6 +1304,7 @@ registerServiceRoutes(apiRouter, {
   migrateLegacyRepairFacts,
   accessControl,
   auditLog,
+  serviceAuditLog,
 });
 
 registerBotApiRoutes(apiRouter, {
@@ -1341,6 +1354,7 @@ const {
   serviceStatusLabel,
   accessControl,
   auditLog,
+  serviceAuditLog,
   notificationService: botNotifications,
 });
 
@@ -1370,6 +1384,7 @@ const managerBotHandlers = createBotHandlers({
   serviceStatusLabel,
   accessControl,
   auditLog,
+  serviceAuditLog,
   notificationService: botNotifications,
 });
 
@@ -1400,6 +1415,7 @@ const deliveryBotHandlers = createBotHandlers({
   preferCarrierAutoLogin: true,
   accessControl,
   auditLog,
+  serviceAuditLog,
   notificationService: botNotifications,
 });
 

@@ -41,7 +41,7 @@ import { repairPartItemsService } from '../services/repair-part-items.service';
 import { repairWorkItemsService } from '../services/repair-work-items.service';
 import { rentalsService } from '../services/rentals.service';
 import { serviceWorksService } from '../services/service-works.service';
-import { serviceTicketsService } from '../services/service-tickets.service';
+import { serviceTicketsService, type ServiceAuditLogEntry } from '../services/service-tickets.service';
 import { sparePartsService } from '../services/spare-parts.service';
 import { serviceVehiclesService } from '../services/service-vehicles.service';
 import { getEquipmentTypeLabel } from '../lib/equipmentClassification';
@@ -77,6 +77,8 @@ const SOURCE_LABELS: Record<string, string> = {
   manager: 'Менеджер',
   system: 'Система',
 };
+
+const REPAIR_ITEMS_ADMIN_NOTICE = 'Работы и запчасти может изменять только администратор';
 
 type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'default';
 
@@ -182,6 +184,33 @@ function normalizeWorkPerformed(work: Partial<ServiceWorkPerformed> | undefined)
 function formatServiceDate(value: string | null | undefined) {
   const timestamp = Date.parse(String(value || ''));
   return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : '—';
+}
+
+function repairMutationErrorMessage(error: unknown) {
+  const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: number }).status) : 0;
+  if (status === 403) return REPAIR_ITEMS_ADMIN_NOTICE;
+  return error instanceof Error ? error.message : 'Не удалось изменить работы или запчасти';
+}
+
+function serviceAuditText(entry: ServiceAuditLogEntry) {
+  const role = entry.actor?.role || 'Пользователь';
+  const name = entry.actor?.name || 'Система';
+  const snapshot = entry.snapshot || {};
+  const title = String(snapshot.name || snapshot.nameSnapshot || snapshot.comment || entry.entityId || 'запись');
+  const date = new Date(entry.createdAt).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const actionLabel: Record<string, string> = {
+    work_added: 'добавил работу',
+    work_deleted: 'удалил работу',
+    part_added: 'добавил запчасть',
+    part_deleted: 'удалил запчасть',
+  };
+  return `${role} ${name} ${actionLabel[entry.action] || 'изменил запись'}: ${title} — ${date}`;
 }
 
 function buildRepairResult(ticket: ServiceTicket, workItems: RepairWorkItem[], partItems: RepairPartItem[]): ServiceRepairResult {
@@ -342,9 +371,9 @@ export default function ServiceDetail() {
   const { can } = usePermissions();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const isAdmin = user?.role === 'Администратор';
+  const isAdmin = (user?.normalizedRole || user?.role) === 'Администратор';
   const canEdit = can('edit', 'service');
-  const canDeleteService = user?.role === 'Администратор' && can('delete', 'service');
+  const canDeleteService = isAdmin && can('delete', 'service');
   const canCreateDocuments = can('create', 'documents');
 
   const { data: fetchedTicket } = useServiceTicketById(id ?? '');
@@ -377,6 +406,11 @@ export default function ServiceDetail() {
   const { data: repairPartItems = [] } = useQuery<RepairPartItem[]>({
     queryKey: ['repairPartItems', id],
     queryFn: () => repairPartItemsService.getByRepairId(id ?? ''),
+    enabled: Boolean(id),
+  });
+  const { data: serviceAuditLog = [] } = useQuery<ServiceAuditLogEntry[]>({
+    queryKey: ['serviceAuditLog', id],
+    queryFn: () => serviceTicketsService.getAudit(id ?? ''),
     enabled: Boolean(id),
   });
   const updateTicket = useUpdateServiceTicket();
@@ -711,7 +745,7 @@ export default function ServiceDetail() {
   }, [canDeleteService, navigate, queryClient, ticket]);
 
   const addWorkPerformed = async () => {
-    if (!ticket || !canEditTicketFields || !selectedWorkId) return;
+    if (!ticket || !canManageRepairItems || !selectedWorkId) return;
     const work = workCatalog.find(item => item.id === selectedWorkId);
     const qty = Number(selectedWorkQty);
     if (!work || !Number.isFinite(qty) || qty <= 0) {
@@ -719,41 +753,51 @@ export default function ServiceDetail() {
       return;
     }
 
-    await repairWorkItemsService.add({ repairId: ticket.id, workId: work.id, quantity: qty });
-    persist({
-      ...ticket,
-      workLog: [...ticket.workLog, {
-        date: new Date().toISOString(),
-        text: `Добавлена работа: ${work.name} × ${qty}`,
-        author: user?.name || 'Оператор',
-        type: 'repair_result',
-      }],
-    });
-    await queryClient.invalidateQueries({ queryKey: ['repairWorkItems', ticket.id] });
-    await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
-    setSelectedWorkId('');
-    setSelectedWorkQty('1');
-    setRepairFormError(null);
+    try {
+      await repairWorkItemsService.add({ repairId: ticket.id, workId: work.id, quantity: qty });
+      persist({
+        ...ticket,
+        workLog: [...ticket.workLog, {
+          date: new Date().toISOString(),
+          text: `Добавлена работа: ${work.name} × ${qty}`,
+          author: user?.name || 'Оператор',
+          type: 'repair_result',
+        }],
+      });
+      await queryClient.invalidateQueries({ queryKey: ['repairWorkItems', ticket.id] });
+      await queryClient.invalidateQueries({ queryKey: ['serviceAuditLog', ticket.id] });
+      await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
+      setSelectedWorkId('');
+      setSelectedWorkQty('1');
+      setRepairFormError(null);
+    } catch (error) {
+      setRepairFormError(repairMutationErrorMessage(error));
+    }
   };
 
   const removeWorkPerformed = async (item: RepairWorkItem, name: string) => {
-    if (!ticket || !canEditTicketFields) return;
-    await repairWorkItemsService.remove(item.id);
-    persist({
-      ...ticket,
-      workLog: [...ticket.workLog, {
-        date: new Date().toISOString(),
-        text: `Удалена работа: ${name}`,
-        author: user?.name || 'Оператор',
-        type: 'repair_result',
-      }],
-    });
-    await queryClient.invalidateQueries({ queryKey: ['repairWorkItems', ticket.id] });
-    await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
+    if (!ticket || !canManageRepairItems) return;
+    try {
+      await repairWorkItemsService.remove(item.id);
+      persist({
+        ...ticket,
+        workLog: [...ticket.workLog, {
+          date: new Date().toISOString(),
+          text: `Удалена работа: ${name}`,
+          author: user?.name || 'Оператор',
+          type: 'repair_result',
+        }],
+      });
+      await queryClient.invalidateQueries({ queryKey: ['repairWorkItems', ticket.id] });
+      await queryClient.invalidateQueries({ queryKey: ['serviceAuditLog', ticket.id] });
+      await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
+    } catch (error) {
+      setRepairFormError(repairMutationErrorMessage(error));
+    }
   };
 
   const addPartUsage = async () => {
-    if (!ticket || !canEditTicketFields || !selectedPartId) return;
+    if (!ticket || !canManageRepairItems || !selectedPartId) return;
     const part = sparePartsCatalog.find(item => item.id === selectedPartId);
     const qty = Number(selectedPartQty);
     const cost = Number(selectedPartCost);
@@ -766,38 +810,48 @@ export default function ServiceDetail() {
       return;
     }
 
-    await repairPartItemsService.add({ repairId: ticket.id, partId: part.id, quantity: qty, priceSnapshot: cost });
-    persist({
-      ...ticket,
-      workLog: [...ticket.workLog, {
-        date: new Date().toISOString(),
-        text: `Добавлена запчасть: ${part.name} × ${qty}`,
-        author: user?.name || 'Оператор',
-        type: 'repair_result',
-      }],
-    });
-    await queryClient.invalidateQueries({ queryKey: ['repairPartItems', ticket.id] });
-    await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
-    setSelectedPartId('');
-    setSelectedPartQty('1');
-    setSelectedPartCost('');
-    setRepairFormError(null);
+    try {
+      await repairPartItemsService.add({ repairId: ticket.id, partId: part.id, quantity: qty, priceSnapshot: cost });
+      persist({
+        ...ticket,
+        workLog: [...ticket.workLog, {
+          date: new Date().toISOString(),
+          text: `Добавлена запчасть: ${part.name} × ${qty}`,
+          author: user?.name || 'Оператор',
+          type: 'repair_result',
+        }],
+      });
+      await queryClient.invalidateQueries({ queryKey: ['repairPartItems', ticket.id] });
+      await queryClient.invalidateQueries({ queryKey: ['serviceAuditLog', ticket.id] });
+      await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
+      setSelectedPartId('');
+      setSelectedPartQty('1');
+      setSelectedPartCost('');
+      setRepairFormError(null);
+    } catch (error) {
+      setRepairFormError(repairMutationErrorMessage(error));
+    }
   };
 
   const removePartUsage = async (item: RepairPartItem, name: string) => {
-    if (!ticket || !canEditTicketFields) return;
-    await repairPartItemsService.remove(item.id);
-    persist({
-      ...ticket,
-      workLog: [...ticket.workLog, {
-        date: new Date().toISOString(),
-        text: `Удалена запчасть: ${name}`,
-        author: user?.name || 'Оператор',
-        type: 'repair_result',
-      }],
-    });
-    await queryClient.invalidateQueries({ queryKey: ['repairPartItems', ticket.id] });
-    await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
+    if (!ticket || !canManageRepairItems) return;
+    try {
+      await repairPartItemsService.remove(item.id);
+      persist({
+        ...ticket,
+        workLog: [...ticket.workLog, {
+          date: new Date().toISOString(),
+          text: `Удалена запчасть: ${name}`,
+          author: user?.name || 'Оператор',
+          type: 'repair_result',
+        }],
+      });
+      await queryClient.invalidateQueries({ queryKey: ['repairPartItems', ticket.id] });
+      await queryClient.invalidateQueries({ queryKey: ['serviceAuditLog', ticket.id] });
+      await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
+    } catch (error) {
+      setRepairFormError(repairMutationErrorMessage(error));
+    }
   };
 
   const handleGenerateWorkOrder = useCallback(async () => {
@@ -879,6 +933,7 @@ export default function ServiceDetail() {
   }
 
   const canEditTicketFields = canEdit && (ticket.status !== 'closed' || isAdmin);
+  const canManageRepairItems = isAdmin && canEditTicketFields;
   const canChangeTicketStatus = canEdit && ticket.status !== 'closed';
   const quickActions = buildServiceQuickActions({
     ticket: {
@@ -887,8 +942,8 @@ export default function ServiceDetail() {
     },
     can,
     canEditTicketFields,
-    hasWorkScenario: scenarioIsRepair && workCatalog.length > 0,
-    hasPartScenario: scenarioIsRepair && sparePartsCatalog.length > 0,
+    hasWorkScenario: canManageRepairItems && scenarioIsRepair && workCatalog.length > 0,
+    hasPartScenario: canManageRepairItems && scenarioIsRepair && sparePartsCatalog.length > 0,
   });
   const scrollToRepairResult = () => {
     document.getElementById('service-repair-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1210,7 +1265,7 @@ export default function ServiceDetail() {
                                   {work.equipmentSnapshot ? ` · ${work.equipmentSnapshot}` : ''}
                                 </p>
                               </div>
-                              {canEditTicketFields && item && (
+                              {canManageRepairItems && item && (
                                 <button onClick={() => void removeWorkPerformed(item, work.name)} className="text-xs text-red-500 hover:underline">
                                   Удалить
                                 </button>
@@ -1239,7 +1294,7 @@ export default function ServiceDetail() {
                                   )}
                                 </p>
                               </div>
-                              {canEditTicketFields && item && (
+                              {canManageRepairItems && item && (
                                 <button onClick={() => void removePartUsage(item, part.name)} className="text-xs text-red-500 hover:underline">
                                   Удалить
                                 </button>
@@ -1276,7 +1331,7 @@ export default function ServiceDetail() {
                     {repairFormError && (
                       <p className="text-sm text-red-500">{repairFormError}</p>
                     )}
-                    {scenarioIsRepair ? (
+                    {canManageRepairItems && scenarioIsRepair ? (
                     <>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_auto]">
                       <div>
@@ -1337,9 +1392,13 @@ export default function ServiceDetail() {
                       </div>
                     </div>
                     </>
-                    ) : (
+                    ) : !scenarioIsRepair ? (
                       <div className="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
                         Для сценария {serviceScenarioLabel} сохраняется итог обслуживания и история, без ремонтных работ и расхода запчастей.
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                        Блоки работ и запчастей доступны только для просмотра.
                       </div>
                     )}
                   </div>
@@ -1357,9 +1416,20 @@ export default function ServiceDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {ticket.workLog.length === 0 && (
+              {ticket.workLog.length === 0 && serviceAuditLog.length === 0 && (
                 <p className="text-sm text-gray-400 italic">История пуста</p>
               )}
+              {serviceAuditLog.map(entry => (
+                <div key={entry.id} className="flex gap-3 text-sm">
+                  {logIcon('repair_result')}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-gray-900 dark:text-white">{serviceAuditText(entry)}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {entry.source === 'sync' ? 'Синхронизация' : entry.source === 'api' ? 'API' : 'Web'} · {entry.entityId}
+                    </p>
+                  </div>
+                </div>
+              ))}
               {[...ticket.workLog].reverse().map((entry, i) => (
                 <div key={i} className="flex gap-3 text-sm">
                   {logIcon(entry.type)}

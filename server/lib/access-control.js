@@ -15,6 +15,8 @@ const ROLES = {
   WARRANTY_MECHANIC: WARRANTY_MECHANIC_ROLE,
 };
 
+const REPAIR_ITEMS_ADMIN_MESSAGE = 'Недостаточно прав. Работы и запчасти может изменять только администратор';
+
 const SYSTEM_FIELD_PATTERN = /^(?:__|_)/;
 
 const MASS_ASSIGNMENT_BLOCKED_FIELDS = new Set([
@@ -745,7 +747,10 @@ function canMutateEntity(collection, entity, user, readData) {
     if (isMechanic(user)) return canAccessEntity(collection, entity, user, readData);
     return false;
   }
-  if (collection === 'repair_work_items' || collection === 'repair_part_items' || collection === 'service_field_trips') {
+  if (collection === 'repair_work_items' || collection === 'repair_part_items') {
+    return false;
+  }
+  if (collection === 'service_field_trips') {
     return canAccessEntity(collection, entity, user, readData);
   }
   if (collection === 'deliveries') {
@@ -876,6 +881,9 @@ function assertCanCreateCollection(collection, user, input = {}, readData) {
   if (collection === 'app_settings' && !isAdmin(user)) {
     throw forbidden();
   }
+  if ((collection === 'repair_work_items' || collection === 'repair_part_items') && !isAdmin(user)) {
+    throw forbidden(REPAIR_ITEMS_ADMIN_MESSAGE);
+  }
   if (!isAdmin(user) && !NON_ADMIN_CREATE_FIELDS[collection]) {
     throw forbidden();
   }
@@ -900,6 +908,9 @@ function assertCanDeleteEntity(collection, entity, user, readData) {
     throw forbidden();
   }
   if (!isAdmin(user)) {
+    if (collection === 'repair_work_items' || collection === 'repair_part_items') {
+      throw forbidden(REPAIR_ITEMS_ADMIN_MESSAGE);
+    }
     if (collection === 'payments') {
       throw forbidden('Удаление платежей доступно только администратору.');
     }

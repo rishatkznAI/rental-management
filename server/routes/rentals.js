@@ -1415,7 +1415,7 @@ function registerRentalRoutes(deps) {
 
         const nextGanttRentals = ganttRentals.map(item => {
           if (!ganttRental || item.id !== ganttRental.id) return item;
-          return ensureGanttRentalLink(mergeRentalHistory(
+          const returnedGanttRental = mergeRentalHistory(
             item,
             {
               ...item,
@@ -1423,7 +1423,12 @@ function registerRentalRoutes(deps) {
               status: 'returned',
             },
             author,
-          ), classicRental, readData('equipment') || []);
+          );
+          return {
+            ...ensureGanttRentalLink(returnedGanttRental, classicRental, readData('equipment') || []),
+            endDate: returnDate || returnedGanttRental.endDate,
+            status: 'returned',
+          };
         });
 
         const otherBlockingRental = hasOtherBlockingRental(nextGanttRentals, ganttRental?.id, equipment);

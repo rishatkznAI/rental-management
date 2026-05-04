@@ -7,6 +7,7 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
 const { normalizeRole } = require('../server/lib/role-groups.js');
 const { registerAuthRoutes } = require('../server/routes/auth.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
@@ -43,8 +44,8 @@ const WRITE_PERMISSIONS = {
   equipment: ['Администратор', 'Офис-менеджер'],
   payments: ['Администратор', 'Офис-менеджер'],
   crm_deals: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
-  repair_work_items: ['Администратор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
-  repair_part_items: ['Администратор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  repair_work_items: ['Администратор'],
+  repair_part_items: ['Администратор'],
   service: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   service_works: ['Администратор'],
   spare_parts: ['Администратор'],
@@ -91,6 +92,7 @@ function createState() {
     warranty_claims: [{ id: 'WC-1', serviceTicketId: 'S-other', status: 'draft' }],
     repair_work_items: [{ id: 'RW-1', repairId: 'S-other', workId: 'SW-1', quantity: 1, ratePerHourSnapshot: 2500, normHoursSnapshot: 1 }],
     repair_part_items: [{ id: 'RP-1', repairId: 'S-other', partId: 'SP-1', quantity: 1, priceSnapshot: 5000 }],
+    service_audit_log: [],
     payments: [{ id: 'P-1', rentalId: 'R-own', amount: 1000, status: 'new' }],
     crm_deals: [{
       id: 'CRM-own',
@@ -133,6 +135,12 @@ function createSecurityApp(state = createState()) {
   const readData = name => state[name] || [];
   const writeData = (name, value) => { state[name] = value; };
   const accessControl = createAccessControl({ readData });
+  const serviceAuditLog = createServiceAuditLog({
+    readData,
+    writeData,
+    generateId: prefix => `${prefix}-${state.service_audit_log.length + 1}`,
+    nowIso: () => '2026-04-28T12:00:00.000Z',
+  });
   const auditEntries = [];
 
   function requireAuth(req, res, next) {
@@ -221,6 +229,7 @@ function createSecurityApp(state = createState()) {
     idPrefixes: { rentals: 'R', gantt_rentals: 'GR', rental_change_requests: 'RCR' },
     accessControl,
     auditLog: (_req, entry) => auditEntries.push(entry),
+    serviceAuditLog,
   }));
   apiRouter.use(registerCrudRoutes({
     collections: [
@@ -275,6 +284,7 @@ function createSecurityApp(state = createState()) {
     applyServiceTicketCreationEffects: () => {},
     accessControl,
     auditLog: (_req, entry) => auditEntries.push(entry),
+    serviceAuditLog,
   }));
   app.use('/api', apiRouter);
   registerBotRoutes(app, {
@@ -481,7 +491,21 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     })).status, 200);
     assert.equal(state.service.find(item => item.id === 'S-own').assignedMechanicId, 'M-1');
     assert.equal(state.service.find(item => item.id === 'S-own').assignedUserId, undefined);
-    assert.equal((await request(baseUrl, 'POST', '/api/repair_work_items', 'mechanic-token', { repairId: 'S-other', workId: 'W-1', quantity: 1 })).status, 403);
+    for (const token of ['mechanic-token', 'office-token', 'manager-token', 'sales-token', 'warranty-token']) {
+      const response = await request(baseUrl, 'POST', '/api/repair_work_items', token, { repairId: 'S-other', workId: 'SW-1', quantity: 1 });
+      assert.equal(response.status, 403, token);
+      assert.equal(response.body.error, 'Недостаточно прав. Работы и запчасти может изменять только администратор');
+      const partResponse = await request(baseUrl, 'POST', '/api/repair_part_items', token, { repairId: 'S-other', partId: 'SP-1', quantity: 1 });
+      assert.equal(partResponse.status, 403, token);
+      assert.equal(partResponse.body.error, 'Недостаточно прав. Работы и запчасти может изменять только администратор');
+    }
+    const adminWork = await request(baseUrl, 'POST', '/api/repair_work_items', 'admin-token', { repairId: 'S-other', workId: 'SW-1', quantity: 2, nameSnapshot: 'Диагностика' });
+    assert.equal(adminWork.status, 201);
+    assert.equal(state.service_audit_log.at(-1).action, 'work_added');
+    const adminDeleteWork = await request(baseUrl, 'DELETE', `/api/repair_work_items/${adminWork.body.id}`, 'admin-token');
+    assert.equal(adminDeleteWork.status, 200);
+    assert.equal(state.service_audit_log.at(-1).action, 'work_deleted');
+    assert.equal(state.service_audit_log.at(-1).snapshot.quantity, 2);
     assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-other', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/service/S-other', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/warranty_claims/WC-1', 'warranty-token')).status, 200);
@@ -545,6 +569,57 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal((await request(baseUrl, 'PUT', '/api/users', 'office-token', [{ id: 'U-manager', role: 'Администратор' }])).status, 403);
     assert.equal((await request(baseUrl, 'PUT', '/api/service', 'mechanic-token', [{ id: 'S-own', status: 'done' }])).status, 403);
     assert.equal((await request(baseUrl, 'PUT', '/api/equipment', 'investor-token', [{ id: 'EQ-other', ownerId: 'OW-1' }])).status, 403);
+  });
+});
+
+test('service delete audits cascaded repair item snapshots before removing them', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'DELETE', '/api/service/S-other', 'admin-token');
+
+    assert.equal(response.status, 200);
+    assert.equal(state.repair_work_items.some(item => item.id === 'RW-1'), false);
+    assert.equal(state.repair_part_items.some(item => item.id === 'RP-1'), false);
+    const workAudit = state.service_audit_log.find(item => item.action === 'work_deleted' && item.entityId === 'RW-1');
+    const partAudit = state.service_audit_log.find(item => item.action === 'part_deleted' && item.entityId === 'RP-1');
+    assert.ok(workAudit);
+    assert.ok(partAudit);
+    assert.equal(workAudit.snapshot.workId, 'SW-1');
+    assert.equal(workAudit.snapshot.quantity, 1);
+    assert.equal(partAudit.snapshot.partId, 'SP-1');
+    assert.equal(partAudit.snapshot.quantity, 1);
+  });
+});
+
+test('service_audit_log is not mutable through generic CRUD routes', async () => {
+  const { app, state } = createSecurityApp();
+  state.service_audit_log.push({
+    id: 'audit-locked',
+    serviceId: 'S-other',
+    action: 'work_added',
+    entityType: 'repair_work_item',
+    entityId: 'RW-1',
+    snapshot: { workId: 'SW-1', quantity: 1 },
+    actor: { id: 'U-admin', name: 'Админ', role: 'Администратор' },
+    source: 'web',
+    createdAt: '2026-04-28T12:00:00.000Z',
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const before = JSON.stringify(state.service_audit_log);
+    const attempts = [
+      request(baseUrl, 'POST', '/api/service_audit_log', 'admin-token', { id: 'audit-forged' }),
+      request(baseUrl, 'PATCH', '/api/service_audit_log/audit-locked', 'admin-token', { action: 'part_deleted' }),
+      request(baseUrl, 'DELETE', '/api/service_audit_log/audit-locked', 'admin-token'),
+      request(baseUrl, 'PUT', '/api/service_audit_log', 'admin-token', []),
+    ];
+    const responses = await Promise.all(attempts);
+
+    for (const response of responses) {
+      assert.equal(response.status, 404);
+    }
+    assert.equal(JSON.stringify(state.service_audit_log), before);
   });
 });
 

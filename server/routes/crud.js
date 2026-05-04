@@ -3,6 +3,12 @@ const { syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync')
 const { normalizeRole } = require('../lib/role-groups');
 const { normalizeServiceTicketList, normalizeServiceTicketRecord } = require('../lib/service-dto');
 const {
+  SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
+  assertRepairItemsAdmin,
+  inferServiceAuditSource,
+  isRepairItemCollection,
+} = require('../lib/service-audit-log');
+const {
   RENTAL_CHANGE_REQUEST_STATUS,
   buildRequestDecisionNotificationStatus,
   displayValue,
@@ -32,6 +38,7 @@ function registerCrudRoutes(deps) {
     applyServiceTicketCreationEffects,
     accessControl,
     auditLog,
+    serviceAuditLog,
     normalizeRecordClientLink,
     normalizeClientLinks,
   } = deps;
@@ -57,6 +64,19 @@ function registerCrudRoutes(deps) {
 
   function sendAccessError(res, error) {
     return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+  }
+
+  function writeMiddlewares(collection) {
+    return isRepairItemCollection(collection)
+      ? [requireAuth]
+      : [requireAuth, requireWrite(collection)];
+  }
+
+  function sendRepairItemsAdminError(res, error) {
+    return res.status(error?.status || 403).json({
+      ok: false,
+      error: error?.message || SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
+    });
   }
 
   function isOfficeManager(req) {
@@ -542,7 +562,14 @@ function registerCrudRoutes(deps) {
       return res.json(accessControl.sanitizeEntityForRead(collection, item, req.user));
     });
 
-    router.post(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+    router.post(`/${collection}`, ...writeMiddlewares(collection), (req, res) => {
+      if (isRepairItemCollection(collection)) {
+        try {
+          assertRepairItemsAdmin(req.user);
+        } catch (error) {
+          return sendRepairItemsAdminError(res, error);
+        }
+      }
       const crmForbiddenReason = crmArchiveForbiddenReason(collection);
       if (crmForbiddenReason) {
         return res.status(410).json({ ok: false, error: crmForbiddenReason });
@@ -624,6 +651,26 @@ function registerCrudRoutes(deps) {
             after: newItem,
           });
         }
+        if (collection === 'repair_work_items') {
+          serviceAuditLog?.(req, {
+            serviceId: newItem.repairId,
+            action: 'work_added',
+            entityType: 'repair_work_item',
+            entityId: newItem.id,
+            snapshot: newItem,
+            source: inferServiceAuditSource(req, 'api'),
+          });
+        }
+        if (collection === 'repair_part_items') {
+          serviceAuditLog?.(req, {
+            serviceId: newItem.repairId,
+            action: 'part_added',
+            entityType: 'repair_part_item',
+            entityId: newItem.id,
+            snapshot: newItem,
+            source: inferServiceAuditSource(req, 'api'),
+          });
+        }
         if (collection === 'users' && newItem.status !== 'Активен') {
           invalidateAffectedUserSessions([], [newItem]);
         }
@@ -643,7 +690,14 @@ function registerCrudRoutes(deps) {
       }
     });
 
-    router.patch(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+    router.patch(`/${collection}/:id`, ...writeMiddlewares(collection), (req, res) => {
+      if (isRepairItemCollection(collection)) {
+        try {
+          assertRepairItemsAdmin(req.user);
+        } catch (error) {
+          return sendRepairItemsAdminError(res, error);
+        }
+      }
       const crmForbiddenReason = crmArchiveForbiddenReason(collection);
       if (crmForbiddenReason) {
         return res.status(410).json({ ok: false, error: crmForbiddenReason });
@@ -810,7 +864,14 @@ function registerCrudRoutes(deps) {
       }
     });
 
-    router.delete(`/${collection}/:id`, requireAuth, requireWrite(collection), (req, res) => {
+    router.delete(`/${collection}/:id`, ...writeMiddlewares(collection), (req, res) => {
+      if (isRepairItemCollection(collection)) {
+        try {
+          assertRepairItemsAdmin(req.user);
+        } catch (error) {
+          return sendRepairItemsAdminError(res, error);
+        }
+      }
       const crmForbiddenReason = crmArchiveForbiddenReason(collection);
       if (crmForbiddenReason) {
         return res.status(410).json({ ok: false, error: crmForbiddenReason });
@@ -879,9 +940,49 @@ function registerCrudRoutes(deps) {
         }
       }
       if (collection === 'service') {
-        const repairId = data[idx].id;
+        const repairId = removedItem.id;
+        for (const workItem of (readData('repair_work_items') || []).filter(item => item.repairId === repairId)) {
+          serviceAuditLog?.(req, {
+            serviceId: repairId,
+            action: 'work_deleted',
+            entityType: 'repair_work_item',
+            entityId: workItem.id,
+            snapshot: workItem,
+            source: inferServiceAuditSource(req, 'api'),
+          });
+        }
+        for (const partItem of (readData('repair_part_items') || []).filter(item => item.repairId === repairId)) {
+          serviceAuditLog?.(req, {
+            serviceId: repairId,
+            action: 'part_deleted',
+            entityType: 'repair_part_item',
+            entityId: partItem.id,
+            snapshot: partItem,
+            source: inferServiceAuditSource(req, 'api'),
+          });
+        }
         writeData('repair_work_items', (readData('repair_work_items') || []).filter(item => item.repairId !== repairId));
         writeData('repair_part_items', (readData('repair_part_items') || []).filter(item => item.repairId !== repairId));
+      }
+      if (collection === 'repair_work_items') {
+        serviceAuditLog?.(req, {
+          serviceId: removedItem.repairId,
+          action: 'work_deleted',
+          entityType: 'repair_work_item',
+          entityId: removedItem.id,
+          snapshot: removedItem,
+          source: inferServiceAuditSource(req, 'api'),
+        });
+      }
+      if (collection === 'repair_part_items') {
+        serviceAuditLog?.(req, {
+          serviceId: removedItem.repairId,
+          action: 'part_deleted',
+          entityType: 'repair_part_item',
+          entityId: removedItem.id,
+          snapshot: removedItem,
+          source: inferServiceAuditSource(req, 'api'),
+        });
       }
       data.splice(idx, 1);
       writeData(collection, data);
@@ -909,7 +1010,14 @@ function registerCrudRoutes(deps) {
       return res.json({ ok: true });
     });
 
-    router.put(`/${collection}`, requireAuth, requireWrite(collection), (req, res) => {
+    router.put(`/${collection}`, ...writeMiddlewares(collection), (req, res) => {
+      if (isRepairItemCollection(collection)) {
+        try {
+          assertRepairItemsAdmin(req.user);
+        } catch (error) {
+          return sendRepairItemsAdminError(res, error);
+        }
+      }
       const crmForbiddenReason = crmArchiveForbiddenReason(collection);
       if (crmForbiddenReason) {
         return res.status(410).json({ ok: false, error: crmForbiddenReason });
@@ -1029,6 +1137,37 @@ function registerCrudRoutes(deps) {
           auditUserStatusChanges(req, existingById.get(nextUser.id), nextUser);
         }
         return res.json({ ok: true, count: merged.length });
+      }
+
+      if (isRepairItemCollection(collection)) {
+        const existing = readData(collection) || [];
+        const incomingIds = new Set(list.map(item => String(item?.id || '')).filter(Boolean));
+        const existingIds = new Set(existing.map(item => String(item?.id || '')).filter(Boolean));
+        const source = inferServiceAuditSource(req, 'sync');
+        for (const removed of existing) {
+          if (!incomingIds.has(String(removed?.id || ''))) {
+            serviceAuditLog?.(req, {
+              serviceId: removed.repairId,
+              action: collection === 'repair_work_items' ? 'work_deleted' : 'part_deleted',
+              entityType: collection === 'repair_work_items' ? 'repair_work_item' : 'repair_part_item',
+              entityId: removed.id,
+              snapshot: removed,
+              source,
+            });
+          }
+        }
+        for (const added of list) {
+          if (!existingIds.has(String(added?.id || ''))) {
+            serviceAuditLog?.(req, {
+              serviceId: added.repairId,
+              action: collection === 'repair_work_items' ? 'work_added' : 'part_added',
+              entityType: collection === 'repair_work_items' ? 'repair_work_item' : 'repair_part_item',
+              entityId: added.id,
+              snapshot: added,
+              source,
+            });
+          }
+        }
       }
 
       const normalizedList = list.map(item => withClientLink(collection, item));

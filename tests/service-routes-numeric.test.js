@@ -7,6 +7,7 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
 const { registerServiceRoutes } = require('../server/routes/service.js');
 
 function safeNonNegativeNumber(value, fallback = 0) {
@@ -23,6 +24,7 @@ function createState() {
     spare_parts: [{ id: 'SP-1', name: 'Фильтр', unit: 'шт', defaultPrice: 5000, isActive: true }],
     repair_work_items: [],
     repair_part_items: [],
+    service_audit_log: [],
     service_field_trips: [],
   };
 }
@@ -46,16 +48,22 @@ function normalizeSparePartRecord(record) {
   };
 }
 
-function createServiceApp(state = createState()) {
+function createServiceApp(state = createState(), user = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' }) {
   const app = express();
   app.use(express.json());
   const readData = name => state[name] || [];
   const writeData = (name, value) => { state[name] = value; };
   const accessControl = createAccessControl({ readData });
+  const serviceAuditLog = createServiceAuditLog({
+    readData,
+    writeData,
+    generateId: prefix => `${prefix}-${state.service_audit_log.length + 1}`,
+    nowIso: () => '2026-04-30T10:00:00.000Z',
+  });
   const router = express.Router();
 
   router.use((req, _res, next) => {
-    req.user = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' };
+    req.user = user;
     next();
   });
 
@@ -84,6 +92,7 @@ function createServiceApp(state = createState()) {
     migrateLegacyRepairFacts: () => ({ changed: false }),
     accessControl,
     auditLog: () => {},
+    serviceAuditLog,
   });
 
   app.use('/api', router);
@@ -178,6 +187,54 @@ test('repair_part_items rejects non-numeric quantity', async () => {
   const { response, state } = await postPart({ repairId: 'S-1', partId: 'SP-1', quantity: 'abc', priceSnapshot: 100 });
   assert.equal(response.status, 400);
   assert.equal(state.repair_part_items.length, 0);
+});
+
+test('repair item mutations are admin-only and write service audit entries', async () => {
+  const { app, state } = createServiceApp();
+  await withServer(app, async baseUrl => {
+    const workCreate = await request(baseUrl, 'POST', '/api/repair_work_items', { repairId: 'S-1', workId: 'SW-1', quantity: 1 });
+    assert.equal(workCreate.status, 201);
+    assert.equal(state.service_audit_log.at(-1).action, 'work_added');
+    assert.equal(state.service_audit_log.at(-1).snapshot.nameSnapshot, 'Диагностика');
+
+    const workDelete = await request(baseUrl, 'DELETE', `/api/repair_work_items/${workCreate.body.id}`);
+    assert.equal(workDelete.status, 200);
+    assert.equal(state.service_audit_log.at(-1).action, 'work_deleted');
+    assert.equal(state.service_audit_log.at(-1).entityId, workCreate.body.id);
+
+    const partCreate = await request(baseUrl, 'POST', '/api/repair_part_items', { repairId: 'S-1', partId: 'SP-1', quantity: 1, priceSnapshot: 100 });
+    assert.equal(partCreate.status, 201);
+    assert.equal(state.service_audit_log.at(-1).action, 'part_added');
+
+    const partDelete = await request(baseUrl, 'DELETE', `/api/repair_part_items/${partCreate.body.id}`);
+    assert.equal(partDelete.status, 200);
+    assert.equal(state.service_audit_log.at(-1).action, 'part_deleted');
+
+    const audit = await request(baseUrl, 'GET', '/api/service/S-1/audit');
+    assert.equal(audit.status, 200);
+    assert.equal(audit.body.length, 4);
+  });
+});
+
+test('mechanic can read repair items but cannot mutate them', async () => {
+  const { app, state } = createServiceApp({
+    ...createState(),
+    repair_work_items: [{ id: 'RW-1', repairId: 'S-1', workId: 'SW-1', quantity: 1 }],
+  }, { userId: 'U-mechanic', userName: 'Петров', userRole: 'Механик' });
+  await withServer(app, async baseUrl => {
+    const list = await request(baseUrl, 'GET', '/api/repair_work_items?repair_id=S-1');
+    assert.equal(list.status, 200);
+
+    const create = await request(baseUrl, 'POST', '/api/repair_work_items', { repairId: 'S-1', workId: 'SW-1', quantity: 1 });
+    assert.equal(create.status, 403);
+    assert.equal(create.body.error, 'Недостаточно прав. Работы и запчасти может изменять только администратор');
+
+    const remove = await request(baseUrl, 'DELETE', '/api/repair_work_items/RW-1');
+    assert.equal(remove.status, 403);
+    assert.equal(remove.body.error, 'Недостаточно прав. Работы и запчасти может изменять только администратор');
+    assert.equal(state.repair_work_items.length, 1);
+    assert.equal(state.service_audit_log.length, 0);
+  });
 });
 
 test('legacy non-numeric normHoursSnapshot does not return NaN in service work items', async () => {

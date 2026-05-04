@@ -1,5 +1,10 @@
 function registerServiceRoutes(router, deps) {
   const {
+    SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
+    assertRepairItemsAdmin,
+    inferServiceAuditSource,
+  } = require('../lib/service-audit-log');
+  const {
     readData,
     writeData,
     requireAuth,
@@ -15,8 +20,9 @@ function registerServiceRoutes(router, deps) {
     migrateLegacyRepairFacts,
     accessControl,
     auditLog,
+    serviceAuditLog,
   } = deps;
-  const requiredAccessMethods = ['filterCollectionByScope', 'assertCanUpdateEntity'];
+  const requiredAccessMethods = ['filterCollectionByScope', 'assertCanUpdateEntity', 'canAccessEntity'];
   const missingAccessMethods = !accessControl
     ? requiredAccessMethods
     : requiredAccessMethods.filter(name => typeof accessControl[name] !== 'function');
@@ -150,8 +156,21 @@ function registerServiceRoutes(router, deps) {
     res.json(accessControl.sanitizeCollectionForRead('repair_work_items', scoped, req.user));
   });
 
-  router.post('/repair_work_items', requireAuth, requireWrite('repair_work_items'), (req, res) => {
+  router.get('/service/:id/audit', requireAuth, requireRead('service'), (req, res) => {
+    const ticket = (readData('service') || []).find(item => item.id === req.params.id);
+    if (!ticket) return res.status(404).json({ ok: false, error: 'Заявка на ремонт не найдена' });
+    if (!accessControl.canAccessEntity('service', ticket, req.user)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    const rows = (readData('service_audit_log') || [])
+      .filter(item => item.serviceId === ticket.id)
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    return res.json(rows);
+  });
+
+  router.post('/repair_work_items', requireAuth, (req, res) => {
     try {
+      assertRepairItemsAdmin(req.user);
       const { repairId, workId } = req.body || {};
       requireNonEmptyString(repairId, 'Заявка');
       requireNonEmptyString(workId, 'Работа');
@@ -183,6 +202,14 @@ function registerServiceRoutes(router, deps) {
       };
       list.push(item);
       writeData('repair_work_items', list);
+      serviceAuditLog?.(req, {
+        serviceId: repairId,
+        action: 'work_added',
+        entityType: 'repair_work_item',
+        entityId: item.id,
+        snapshot: item,
+        source: inferServiceAuditSource(req, 'web'),
+      });
       auditLog?.(req, {
         action: 'service.work_item.create',
         entityType: 'repair_work_items',
@@ -191,11 +218,16 @@ function registerServiceRoutes(router, deps) {
       });
       res.status(201).json(accessControl.sanitizeEntityForRead('repair_work_items', item, req.user));
     } catch (error) {
-      res.status(400).json({ ok: false, error: error.message });
+      res.status(error?.status || 400).json({ ok: false, error: error.message });
     }
   });
 
-  router.delete('/repair_work_items/:id', requireAuth, requireWrite('repair_work_items'), (req, res) => {
+  router.delete('/repair_work_items/:id', requireAuth, (req, res) => {
+    try {
+      assertRepairItemsAdmin(req.user);
+    } catch (error) {
+      return res.status(error?.status || 403).json({ ok: false, error: error?.message || SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE });
+    }
     const list = readData('repair_work_items') || [];
     const index = list.findIndex(item => item.id === req.params.id);
     if (index === -1) {
@@ -209,14 +241,22 @@ function registerServiceRoutes(router, deps) {
     } catch (error) {
       return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
     }
-    list.splice(index, 1);
-    writeData('repair_work_items', list);
+    serviceAuditLog?.(req, {
+      serviceId: removed.repairId,
+      action: 'work_deleted',
+      entityType: 'repair_work_item',
+      entityId: removed.id,
+      snapshot: removed,
+      source: inferServiceAuditSource(req, 'web'),
+    });
     auditLog?.(req, {
       action: 'service.work_item.delete',
       entityType: 'repair_work_items',
       entityId: removed.id,
       before: removed,
     });
+    list.splice(index, 1);
+    writeData('repair_work_items', list);
     res.json({ ok: true });
   });
 
@@ -248,8 +288,9 @@ function registerServiceRoutes(router, deps) {
     res.json(accessControl.sanitizeCollectionForRead('repair_part_items', scoped, req.user));
   });
 
-  router.post('/repair_part_items', requireAuth, requireWrite('repair_part_items'), (req, res) => {
+  router.post('/repair_part_items', requireAuth, (req, res) => {
     try {
+      assertRepairItemsAdmin(req.user);
       const { repairId, partId } = req.body || {};
       requireNonEmptyString(repairId, 'Заявка');
       requireNonEmptyString(partId, 'Запчасть');
@@ -287,6 +328,14 @@ function registerServiceRoutes(router, deps) {
       };
       list.push(item);
       writeData('repair_part_items', list);
+      serviceAuditLog?.(req, {
+        serviceId: repairId,
+        action: 'part_added',
+        entityType: 'repair_part_item',
+        entityId: item.id,
+        snapshot: item,
+        source: inferServiceAuditSource(req, 'web'),
+      });
       auditLog?.(req, {
         action: 'service.part_item.create',
         entityType: 'repair_part_items',
@@ -295,11 +344,16 @@ function registerServiceRoutes(router, deps) {
       });
       res.status(201).json(accessControl.sanitizeEntityForRead('repair_part_items', item, req.user));
     } catch (error) {
-      res.status(400).json({ ok: false, error: error.message });
+      res.status(error?.status || 400).json({ ok: false, error: error.message });
     }
   });
 
-  router.delete('/repair_part_items/:id', requireAuth, requireWrite('repair_part_items'), (req, res) => {
+  router.delete('/repair_part_items/:id', requireAuth, (req, res) => {
+    try {
+      assertRepairItemsAdmin(req.user);
+    } catch (error) {
+      return res.status(error?.status || 403).json({ ok: false, error: error?.message || SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE });
+    }
     const list = readData('repair_part_items') || [];
     const index = list.findIndex(item => item.id === req.params.id);
     if (index === -1) {
@@ -313,14 +367,22 @@ function registerServiceRoutes(router, deps) {
     } catch (error) {
       return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
     }
-    list.splice(index, 1);
-    writeData('repair_part_items', list);
+    serviceAuditLog?.(req, {
+      serviceId: removed.repairId,
+      action: 'part_deleted',
+      entityType: 'repair_part_item',
+      entityId: removed.id,
+      snapshot: removed,
+      source: inferServiceAuditSource(req, 'web'),
+    });
     auditLog?.(req, {
       action: 'service.part_item.delete',
       entityType: 'repair_part_items',
       entityId: removed.id,
       before: removed,
     });
+    list.splice(index, 1);
+    writeData('repair_part_items', list);
     res.json({ ok: true });
   });
 

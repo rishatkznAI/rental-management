@@ -2,6 +2,7 @@ const { createBotUi } = require('./bot-ui');
 const { resolveUserByLogin } = require('./auth-login');
 const { createBotFormatters } = require('./bot-formatters');
 const { createBotOperations } = require('./bot-operations');
+const { SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE } = require('./service-audit-log');
 const {
   DELIVERY_STATUS_LABELS,
   canCarrierAccessDelivery,
@@ -49,6 +50,7 @@ function createBotHandlers(deps) {
     preferCarrierAutoLogin = false,
     accessControl = null,
     auditLog = null,
+    serviceAuditLog = null,
     notificationService = null,
   } = deps;
   const requiredAccessMethods = ['canAccessEntity', 'isCarrierDelivery'];
@@ -1420,6 +1422,7 @@ function createBotHandlers(deps) {
     OPERATION_STEP_META,
     SHIPPING_OPERATION_STEPS,
     RECEIVING_OPERATION_STEPS,
+    serviceAuditLog,
   });
 
   function setCurrentRepair(phone, repairId) {
@@ -1911,7 +1914,13 @@ function createBotHandlers(deps) {
       });
     }
 
-    const workItem = addRepairWorkItemFromCatalog(ticket, work, quantity, authUser, { meterHours, equipment });
+    let workItem;
+    try {
+      workItem = addRepairWorkItemFromCatalog(ticket, work, quantity, authUser, { meterHours, equipment });
+    } catch (error) {
+      if (error?.status === 403) return reply(senderId, `⛔ ${SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE}.`);
+      throw error;
+    }
     const updated = appendServiceLog(
       ticket,
       `Добавлена работа через MAX: ${work.name}. Моточасы: ${formatMeterHours(meterHours)}${ticket.equipment ? `. Техника: ${ticket.equipment}` : ''}`,
@@ -2114,7 +2123,12 @@ function createBotHandlers(deps) {
     if (!Number.isFinite(price) || price < 0) {
       return reply(senderId, '❌ Цена должна быть числом не меньше 0.');
     }
-    addRepairPartItemFromCatalog(ticket, part, quantity, price, authUser);
+    try {
+      addRepairPartItemFromCatalog(ticket, part, quantity, price, authUser);
+    } catch (error) {
+      if (error?.status === 403) return reply(senderId, `⛔ ${SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE}.`);
+      throw error;
+    }
     const updated = appendServiceLog(ticket, `Добавлена запчасть через MAX: ${part.name} × ${quantity}`, authUser.userName, 'repair_result');
     saveServiceTicket(updated);
     resetBotFlow(phone);

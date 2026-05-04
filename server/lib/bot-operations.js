@@ -1,3 +1,5 @@
+const { assertRepairItemsAdmin } = require('./service-audit-log');
+
 function createBotOperations(deps) {
   const {
     readData,
@@ -24,6 +26,7 @@ function createBotOperations(deps) {
     OPERATION_STEP_META,
     SHIPPING_OPERATION_STEPS,
     RECEIVING_OPERATION_STEPS,
+    serviceAuditLog,
   } = deps;
 
   function getOperationSteps(type) {
@@ -921,6 +924,7 @@ function createBotOperations(deps) {
   }
 
   function addRepairWorkItemFromCatalog(ticket, work, quantity, authUser = null, options = {}) {
+    assertRepairItemsAdmin(authUser);
     const safeQuantity = requirePositiveNumber(quantity, 'Количество работы');
     const normHoursSnapshot = requireNonNegativeNumber(work?.normHours ?? 0, 'Нормо-часы работы');
     const ratePerHourSnapshot = requireNonNegativeNumber(work?.ratePerHour ?? 0, 'Стоимость нормо-часа');
@@ -946,6 +950,14 @@ function createBotOperations(deps) {
     };
     items.push(nextItem);
     writeData('repair_work_items', items);
+    serviceAuditLog?.(authUser || {}, {
+      serviceId: ticket.id,
+      action: 'work_added',
+      entityType: 'repair_work_item',
+      entityId: nextItem.id,
+      snapshot: nextItem,
+      source: 'bot',
+    });
 
     if (hasMeterHours && equipment?.id) {
       const equipmentList = readData('equipment') || [];
@@ -971,6 +983,7 @@ function createBotOperations(deps) {
   }
 
   function addRepairPartItemFromCatalog(ticket, part, quantity, priceSnapshot, authUser = null) {
+    assertRepairItemsAdmin(authUser);
     const safeQuantity = requirePositiveNumber(quantity, 'Количество запчастей');
     const safePrice = requireNonNegativeNumber(priceSnapshot, 'Цена запчасти');
     const items = readData('repair_part_items') || [];
@@ -989,6 +1002,14 @@ function createBotOperations(deps) {
     };
     items.push(nextItem);
     writeData('repair_part_items', items);
+    serviceAuditLog?.(authUser || {}, {
+      serviceId: ticket.id,
+      action: 'part_added',
+      entityType: 'repair_part_item',
+      entityId: nextItem.id,
+      snapshot: nextItem,
+      source: 'bot',
+    });
     return nextItem;
   }
 

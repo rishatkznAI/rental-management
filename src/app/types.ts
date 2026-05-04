@@ -472,6 +472,9 @@ export interface SparePart {
   defaultPrice: number;
   category?: string;
   manufacturer?: string;
+  supplier?: string;
+  comment?: string;
+  notes?: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

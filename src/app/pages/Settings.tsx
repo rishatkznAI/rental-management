@@ -93,6 +93,10 @@ import {
   resolveEquipmentTypeCatalog,
   type EquipmentTypeCatalogItem,
 } from '../lib/equipmentTypes';
+import {
+  buildSparePartsImportPlan,
+  sparePartsToCsv,
+} from '../lib/sparePartsImportExport.js';
 import type {
   AppSetting,
   Equipment,
@@ -5270,6 +5274,7 @@ function ServiceWorkCatalogReferenceList() {
 
 function SparePartsReferenceList() {
   const queryClient = useQueryClient();
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const { data: partsData = [] } = useQuery<SparePart[]>({
     queryKey: ['spareParts'],
     queryFn: sparePartsService.getAll,
@@ -5284,6 +5289,7 @@ function SparePartsReferenceList() {
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [bulkCategory, setBulkCategory] = React.useState('');
   const [formError, setFormError] = React.useState('');
+  const [importMessage, setImportMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const emptyForm = React.useMemo(() => ({
     name: '',
     article: '',
@@ -5414,6 +5420,57 @@ function SparePartsReferenceList() {
     await reload();
   };
 
+  const downloadCsv = (csv: string, filename: string) => {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportParts = () => {
+    downloadCsv(sparePartsToCsv(partsData), `spare-parts-${new Date().toISOString().slice(0, 10)}.csv`);
+    setImportMessage({ type: 'success', text: `Выгружено запчастей: ${partsData.length}` });
+  };
+
+  const downloadTemplate = () => {
+    downloadCsv(sparePartsToCsv([]), 'spare-parts-template.csv');
+  };
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!/\.csv$/i.test(file.name)) {
+      setImportMessage({ type: 'error', text: 'Поддерживается импорт CSV. XLSX можно сохранить как CSV и загрузить повторно.' });
+      return;
+    }
+    try {
+      const text = await file.text();
+      const plan = buildSparePartsImportPlan(partsData, text);
+      if (plan.stats.errors > 0) {
+        setImportMessage({
+          type: 'error',
+          text: [`Импорт остановлен: ошибок ${plan.stats.errors}.`, ...plan.errors.slice(0, 3)].join(' '),
+        });
+        return;
+      }
+      await sparePartsService.bulkReplace(plan.parts as SparePart[]);
+      await reload();
+      setSelectedIds([]);
+      setImportMessage({
+        type: 'success',
+        text: `Импорт завершён: добавлено ${plan.stats.added}, обновлено ${plan.stats.updated}, пропущено ${plan.stats.skipped}, ошибок ${plan.stats.errors}.`,
+      });
+    } catch (error) {
+      setImportMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось импортировать запчасти' });
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -5422,13 +5479,46 @@ function SparePartsReferenceList() {
             <CardTitle>Запчасти</CardTitle>
             <CardDescription>Каталог запчастей для ремонтов с хранением артикула, единицы и базовой цены</CardDescription>
           </div>
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="h-4 w-4" />
-            Добавить запчасть
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={exportParts}>
+              <Download className="h-4 w-4" />
+              Выгрузить запчасти
+            </Button>
+            <Button size="sm" variant="secondary" onClick={downloadTemplate}>
+              <Download className="h-4 w-4" />
+              Скачать шаблон
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="h-4 w-4" />
+              Загрузить запчасти
+            </Button>
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="h-4 w-4" />
+              Добавить запчасть
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept=".csv,text/csv"
+          onChange={event => void handleImportFile(event)}
+        />
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+          Можно загрузить CSV со списком запчастей. Дубли по артикулу будут обновлены; если артикула нет, совпадение ищется по наименованию.
+        </div>
+        {importMessage && (
+          <div className={`rounded-lg border px-3 py-2 text-sm ${
+            importMessage.type === 'success'
+              ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-200'
+              : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200'
+          }`}>
+            {importMessage.text}
+          </div>
+        )}
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_220px]">
           <Input placeholder="Поиск по названию, артикулу, категории или производителю" value={search} onChange={e => setSearch(e.target.value)} />
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>

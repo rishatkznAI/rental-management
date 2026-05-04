@@ -889,6 +889,8 @@ function normalizeServiceWorkRecord(record) {
 function normalizeSparePartRecord(record) {
   const timestamp = nowIso();
   const article = record.article ?? record.sku;
+  const manufacturer = record.manufacturer ?? record.supplier;
+  const comment = record.comment ?? record.notes;
   return {
     id: record.id || generateId(ID_PREFIXES.spare_parts),
     name: String(record.name || '').trim(),
@@ -897,7 +899,8 @@ function normalizeSparePartRecord(record) {
     unit: String(record.unit || 'шт').trim() || 'шт',
     defaultPrice: safeNonNegativeNumber(record.defaultPrice, 0),
     category: record.category ? String(record.category).trim() : undefined,
-    manufacturer: record.manufacturer ? String(record.manufacturer).trim() : undefined,
+    manufacturer: manufacturer ? String(manufacturer).trim() : undefined,
+    comment: comment ? String(comment).trim() : undefined,
     isActive: record.isActive !== false,
     createdAt: record.createdAt || timestamp,
     updatedAt: record.updatedAt || timestamp,

@@ -10,7 +10,7 @@ import { getRandomMotivationalQuote } from '../lib/motivationalQuotes';
 const DEMO_URL = String(import.meta.env.VITE_DEMO_URL || '').trim();
 
 export default function Login() {
-  const [email, setEmail] = React.useState('');
+  const [loginValue, setLoginValue] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState('');
   const [loading, setLoading] = React.useState(false);
@@ -21,14 +21,14 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
+    if (!loginValue.trim() || !password) {
       setError('Заполните все поля');
       return;
     }
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
+      await login(loginValue, password);
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка входа. Проверьте данные.');
@@ -66,24 +66,36 @@ export default function Login() {
           </CardHeader>
           <CardContent className="px-6 py-6">
             <form onSubmit={handleSubmit} className="space-y-4">
-              <Input
-                type="email"
-                label="Email"
-                placeholder="example@company.ru"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                error={error && !email ? 'Введите email' : undefined}
-                className="h-12 rounded-xl text-base"
-              />
-              <Input
-                type="password"
-                label="Пароль"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                error={error && !password ? 'Введите пароль' : undefined}
-                className="h-12 rounded-xl text-base"
-              />
+              <div className="space-y-2">
+                <label htmlFor="login" className="block text-sm font-medium text-gray-700 dark:text-slate-200">
+                  Логин
+                </label>
+                <Input
+                  id="login"
+                  type="text"
+                  placeholder="Например: ivanov"
+                  value={loginValue}
+                  onChange={(e) => setLoginValue(e.target.value)}
+                  aria-invalid={Boolean(error && !loginValue.trim())}
+                  className="h-12 rounded-xl text-base"
+                />
+                {error && !loginValue.trim() && <p className="text-sm text-red-600">Введите логин</p>}
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-slate-200">
+                  Пароль
+                </label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  aria-invalid={Boolean(error && !password)}
+                  className="h-12 rounded-xl text-base"
+                />
+                {error && !password && <p className="text-sm text-red-600">Введите пароль</p>}
+              </div>
               {error && <p className="text-sm text-red-600">{error}</p>}
               <Button type="submit" className="h-12 w-full rounded-xl text-base" size="lg" disabled={loading}>
                 {loading ? 'Вход...' : 'Войти'}

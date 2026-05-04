@@ -2,6 +2,7 @@ import { expect, type Page } from '@playwright/test';
 
 type Credentials = {
   email: string;
+  login?: string;
   password: string;
 };
 
@@ -17,8 +18,8 @@ export const RENTAL_MANAGER_CREDENTIALS: Credentials = {
 
 export async function login(page: Page, credentials: Credentials) {
   await page.goto('./', { waitUntil: 'domcontentloaded' });
-  await page.getByPlaceholder('example@company.ru').fill(credentials.email);
-  await page.getByPlaceholder('••••••••').fill(credentials.password);
+  await page.getByLabel('Логин').fill(credentials.login ?? credentials.email);
+  await page.getByLabel('Пароль').fill(credentials.password);
   await page.getByRole('button', { name: 'Войти' }).click();
 }
 

@@ -1,4 +1,5 @@
 const { normalizeRole } = require('../lib/role-groups');
+const { normalizeLoginInput, resolveUserByLogin } = require('../lib/auth-login');
 
 function registerAuthRoutes(app, deps) {
   const {
@@ -20,14 +21,14 @@ function registerAuthRoutes(app, deps) {
   const LOGIN_MAX_ATTEMPTS = 10;
   const loginAttempts = new Map();
 
-  function loginAttemptKey(req, email) {
+  function loginAttemptKey(req, login) {
     const forwardedFor = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
     const ip = forwardedFor || req.ip || req.socket?.remoteAddress || 'unknown';
-    return `${ip}:${String(email || '').trim().toLowerCase()}`;
+    return `${ip}:${normalizeLoginInput(login)}`;
   }
 
-  function getLoginAttempt(req, email) {
-    const key = loginAttemptKey(req, email);
+  function getLoginAttempt(req, login) {
+    const key = loginAttemptKey(req, login);
     const now = Date.now();
     const current = loginAttempts.get(key);
     if (!current || current.expiresAt <= now) {
@@ -38,29 +39,29 @@ function registerAuthRoutes(app, deps) {
     return { key, attempt: current };
   }
 
-  function recordFailedLogin(req, email) {
-    const { attempt } = getLoginAttempt(req, email);
+  function recordFailedLogin(req, login) {
+    const { attempt } = getLoginAttempt(req, login);
     attempt.count += 1;
   }
 
-  function clearLoginAttempts(req, email) {
-    loginAttempts.delete(loginAttemptKey(req, email));
+  function clearLoginAttempts(req, login) {
+    loginAttempts.delete(loginAttemptKey(req, login));
   }
 
   function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  async function rejectLogin(req, res, email, status = 401, auditMetadata = {}) {
-    recordFailedLogin(req, email);
+  async function rejectLogin(req, res, login, status = 401, auditMetadata = {}) {
+    recordFailedLogin(req, login);
     auditLog?.(req, {
       action: 'login.fail',
       entityType: 'auth',
-      entityId: String(email || '').trim().toLowerCase() || null,
+      entityId: normalizeLoginInput(login) || null,
       metadata: auditMetadata,
     });
     await sleep(Number(process.env.LOGIN_FAILURE_DELAY_MS || 250));
-    return res.status(status).json({ ok: false, error: 'Неверный email или пароль' });
+    return res.status(status).json({ ok: false, error: 'Неверный логин или пароль' });
   }
 
   function buildSessionUser(user) {
@@ -90,39 +91,48 @@ function registerAuthRoutes(app, deps) {
 
   app.post('/api/auth/login', async (req, res) => {
     try {
-      const { email, password } = req.body || {};
-      if (!email || !password) {
-        return rejectLogin(req, res, email, 401, { reason: 'missing_credentials' });
+      const { email, login, password } = req.body || {};
+      const loginValue = login ?? email;
+      if (!loginValue || !password) {
+        return rejectLogin(req, res, loginValue, 401, { reason: 'missing_credentials' });
       }
 
-      const { attempt } = getLoginAttempt(req, email);
+      const { attempt } = getLoginAttempt(req, loginValue);
       if (attempt.count >= LOGIN_MAX_ATTEMPTS) {
         return res.status(429).json({ ok: false, error: 'Слишком много попыток входа. Попробуйте позже.' });
       }
 
       const users = readData('users') || [];
-      const normalizedEmail = String(email).trim().toLowerCase();
-      const user = users.find(
-        item => String(item.email || '').trim().toLowerCase() === normalizedEmail
-      );
+      const { user, error: loginError } = resolveUserByLogin(users, loginValue);
+
+      if (loginError) {
+        recordFailedLogin(req, loginValue);
+        auditLog?.(req, {
+          action: 'login.fail',
+          entityType: 'auth',
+          entityId: normalizeLoginInput(loginValue) || null,
+          metadata: { reason: 'duplicate_login' },
+        });
+        return res.status(409).json({ ok: false, error: loginError });
+      }
 
       if (!user) {
-        return rejectLogin(req, res, email, 401, { reason: 'invalid_credentials' });
+        return rejectLogin(req, res, loginValue, 401, { reason: 'invalid_credentials' });
       }
 
       if (user.status !== 'Активен') {
-        return rejectLogin(req, res, email, 401, { reason: 'inactive_account' });
+        return rejectLogin(req, res, loginValue, 401, { reason: 'inactive_account' });
       }
 
       if (isBotOnlyCarrierAccount(user)) {
-        return rejectLogin(req, res, email, 401, { reason: 'carrier_bot_only' });
+        return rejectLogin(req, res, loginValue, 401, { reason: 'carrier_bot_only' });
       }
 
       if (!verifyPassword(password, user.password)) {
-        return rejectLogin(req, res, email, 401, { reason: 'invalid_credentials' });
+        return rejectLogin(req, res, loginValue, 401, { reason: 'invalid_credentials' });
       }
 
-      clearLoginAttempts(req, email);
+      clearLoginAttempts(req, loginValue);
 
       if (typeof needsPasswordRehash === 'function' && needsPasswordRehash(user.password)) {
         const userIndex = users.findIndex(item => item.id === user.id);

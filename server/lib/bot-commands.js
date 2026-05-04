@@ -1,4 +1,5 @@
 const { createBotUi } = require('./bot-ui');
+const { resolveUserByLogin } = require('./auth-login');
 const { createBotFormatters } = require('./bot-formatters');
 const { createBotOperations } = require('./bot-operations');
 const {
@@ -914,14 +915,17 @@ function createBotHandlers(deps) {
     return nextCarrier;
   }
 
-  function authorizeUser(phone, email, password, replyTarget = null) {
+  function authorizeUser(phone, login, password, replyTarget = null) {
     const users = readData('users') || [];
-    const found = users.find(
-      user => String(user.email || '').toLowerCase() === String(email || '').toLowerCase() &&
-        verifyPassword(password, user.password) &&
-        user.status === 'Активен'
-    );
+    const { user: found, error: loginError } = resolveUserByLogin(users, login);
+    if (loginError) {
+      const err = new Error(loginError);
+      err.code = 'DUPLICATE_LOGIN';
+      throw err;
+    }
     if (!found) return null;
+    if (found.status !== 'Активен') return null;
+    if (!verifyPassword(password, found.password)) return null;
     if (isCarrierSystemUser(found)) {
       const carrier = ensureCarrierForSystemUser(found);
       if (!carrier) return null;
@@ -1109,7 +1113,7 @@ function createBotHandlers(deps) {
       '🚚 Бот доставки готов к работе.',
       '',
       'Ваш MAX-профиль ещё не привязан к перевозчику в системе.',
-      'Если администратор уже создал пользователя с ролью «Перевозчик» и привязал его в справочнике, нажмите «Войти» и введите email/пароль.',
+      'Если администратор уже создал пользователя с ролью «Перевозчик» и привязал его в справочнике, нажмите «Войти» и введите логин и пароль.',
     ].join('\n');
   }
 
@@ -1158,7 +1162,7 @@ function createBotHandlers(deps) {
   }
 
   function getLoginPromptText() {
-    return '👤 Напишите логин (email) следующим сообщением.';
+    return '👤 Введите логин';
   }
 
   function loginPromptKeyboard() {
@@ -2253,7 +2257,7 @@ function createBotHandlers(deps) {
       updateBotSession(phone, { pendingAction: 'login_email', pendingPayload: null });
       return reply(
         senderId,
-        '👤 Напишите логин (email) следующим сообщением.',
+        getLoginPromptText(),
         {
           attachments: keyboard([backAndMainRow('menu:cancel_login')]),
           phone,
@@ -3573,12 +3577,15 @@ function createBotHandlers(deps) {
           { attachments: loginPromptKeyboard(), brandImage: true, phone, callbackContext, replaceMessage: Boolean(uiContext.replaceMessage), cleanupPrevious: !callbackContext },
         );
       }
-      const [, email, password] = parts;
+      const [, login, password] = parts;
       console.log('[TRACE] authorizing via /start credentials');
       let user;
       try {
-        user = authorizeUser(String(phone), email, password, senderId);
+        user = authorizeUser(String(phone), login, password, senderId);
       } catch (e) {
+        if (e?.code === 'DUPLICATE_LOGIN') {
+          return reply(senderId, `❌ ${e.message}`);
+        }
         console.error('[TRACE] authorizeUser threw:', e.message, e.stack);
         return reply(senderId, '❌ Внутренняя ошибка авторизации. Попробуйте позже.');
       }
@@ -3632,7 +3639,7 @@ function createBotHandlers(deps) {
       if (session.pendingAction === 'login_email') {
         updateBotSession(phone, {
           pendingAction: 'login_password',
-          pendingPayload: { loginEmail: trimmed },
+          pendingPayload: { login: trimmed },
         });
         return reply(
           senderId,
@@ -3642,11 +3649,23 @@ function createBotHandlers(deps) {
       }
 
       if (session.pendingAction === 'login_password') {
-        const email = session.pendingPayload?.loginEmail || '';
+        const login = session.pendingPayload?.login || session.pendingPayload?.loginEmail || '';
         let user;
         try {
-          user = authorizeUser(String(phone), email, trimmed, senderId);
+          user = authorizeUser(String(phone), login, trimmed, senderId);
         } catch (e) {
+          if (e?.code === 'DUPLICATE_LOGIN') {
+            clearAuthorizedUser(phone);
+            updateBotSession(phone, {
+              pendingAction: 'login_email',
+              pendingPayload: null,
+            });
+            return reply(
+              senderId,
+              `❌ ${e.message}`,
+              { attachments: keyboard([backAndMainRow('menu:cancel_login')]) },
+            );
+          }
           console.error('[TRACE] authorizeUser(login flow) threw:', e.message, e.stack);
           return reply(senderId, '❌ Внутренняя ошибка авторизации. Попробуйте позже.');
         }
@@ -3658,7 +3677,7 @@ function createBotHandlers(deps) {
           });
           return reply(
             senderId,
-            '❌ Неверный логин или пароль. Давайте начнём заново: напишите логин (email).',
+            '❌ Неверный логин или пароль. Давайте начнём заново: введите логин.',
             { attachments: keyboard([backAndMainRow('menu:cancel_login')]) },
           );
         }

@@ -299,7 +299,7 @@ test('regular bot_started asks for login when user is not authorized', async () 
 
   assert.equal(state.bot_users['100'], undefined);
   assert.match(messages.at(-1).text, /Добро пожаловать/);
-  assert.match(messages.at(-1).text, /Напишите логин/);
+  assert.match(messages.at(-1).text, /Введите логин/);
   assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
   const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
   assert.equal(menu.payload.buttons[0][0].text, 'Назад');
@@ -348,7 +348,7 @@ test('shared bot delivery command asks for login when user is not authorized', a
   assert.equal(state.bot_users['100'], undefined);
   assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
   assert.match(messages.at(-1).text, /Вы не авторизованы/);
-  assert.match(messages.at(-1).text, /Напишите логин/);
+  assert.match(messages.at(-1).text, /Введите логин/);
 });
 
 test('start command returns menu for an authorized manager', async () => {
@@ -420,7 +420,7 @@ test('MAX webhook without configured secret still processes updates in productio
     });
 
     assert.equal(response.statusCode, 200);
-    assert.match(messages.at(-1).text, /Напишите логин/);
+    assert.match(messages.at(-1).text, /Введите логин/);
     assert.equal(state.bot_sessions['200']?.pendingAction, 'login_email');
   } finally {
     if (previousNodeEnv === undefined) {
@@ -677,7 +677,7 @@ test('shared bot switch to delivery starts authorization when user is not logged
   assert.equal(state.bot_users['100'], undefined);
   assert.equal(state.bot_sessions['100'].pendingAction, 'login_email');
   assert.match(messages.at(-1).text, /Вы не авторизованы/);
-  assert.match(messages.at(-1).text, /Напишите логин/);
+  assert.match(messages.at(-1).text, /Введите логин/);
 });
 
 test('manager login flow greets manager with rental manager menu', async () => {
@@ -696,7 +696,7 @@ test('manager login flow greets manager with rental manager menu', async () => {
 
   await handlers.handleBotStarted({ user_id: 200 }, '200');
   await handlers.handleCallback({ user_id: 200 }, '200', 'auth:start', { callbackId: 'cb-login' });
-  await handlers.handleCommand({ user_id: 200 }, '200', 'manager@example.test');
+  await handlers.handleCommand({ user_id: 200 }, '200', ' manager ');
   await handlers.handleCommand({ user_id: 200 }, '200', 'secret');
 
   assert.match(messages.at(-1).text, /Менеджер по аренде \(Руслан\)/);
@@ -704,6 +704,39 @@ test('manager login flow greets manager with rental manager menu', async () => {
   assert.equal(state.bot_users['200'].userRole, 'Менеджер по аренде');
   const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
   assert.equal(menu.payload.buttons[1][1].text, 'Новая доставка');
+});
+
+test('manager login flow blocks duplicate login local part', async () => {
+  const { state, messages, handlers } = createMemoryBot(false, {
+    verifyPassword: (password, stored) => password === stored,
+  });
+  state.bot_users = {};
+  state.users = [
+    {
+      id: 'U-manager-1',
+      name: 'Руслан',
+      role: 'Менеджер по аренде',
+      email: 'manager@example.test',
+      status: 'Активен',
+      password: 'secret',
+    },
+    {
+      id: 'U-manager-2',
+      name: 'Мария',
+      role: 'Менеджер по аренде',
+      email: 'MANAGER@other.test',
+      status: 'Активен',
+      password: 'secret',
+    },
+  ];
+
+  await handlers.handleBotStarted({ user_id: 200 }, '200');
+  await handlers.handleCallback({ user_id: 200 }, '200', 'auth:start', { callbackId: 'cb-login' });
+  await handlers.handleCommand({ user_id: 200 }, '200', 'manager');
+  await handlers.handleCommand({ user_id: 200 }, '200', 'secret');
+
+  assert.match(messages.at(-1).text, /Найдено несколько пользователей с таким логином/);
+  assert.equal(state.bot_users['200'], undefined);
 });
 
 test('manager free equipment command shows category buttons', async () => {

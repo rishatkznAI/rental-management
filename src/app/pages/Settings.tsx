@@ -309,8 +309,8 @@ export default function Settings() {
 
   const handleSave = async () => {
     if (!form.name.trim())  { setFormError('Введите имя'); return; }
-    if (!form.email.trim()) { setFormError('Введите email'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) { setFormError('Некорректный email'); return; }
+    if (!form.email.trim()) { setFormError('Введите технический email'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) { setFormError('Некорректный технический email'); return; }
     if (form.role === 'Инвестор' && !form.ownerId) { setFormError('Для роли инвестора выберите собственника'); return; }
 
     // Проверка дублирующего email (при добавлении или смене email)
@@ -407,7 +407,7 @@ export default function Settings() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Пользователи системы</CardTitle>
-                  <CardDescription>Управление доступом сотрудников. Вход — по email и паролю.</CardDescription>
+                  <CardDescription>Управление доступом сотрудников. Вход — по логину и паролю; логин берётся из части email до @.</CardDescription>
                 </div>
                 <Button onClick={openAdd}>
                   <Plus className="h-4 w-4" />
@@ -425,7 +425,7 @@ export default function Settings() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Имя</TableHead>
-                      <TableHead>Email (логин)</TableHead>
+                      <TableHead>Технический email</TableHead>
                       <TableHead>Роль</TableHead>
                       <TableHead>Статус</TableHead>
                       <TableHead>Собственник</TableHead>
@@ -679,7 +679,7 @@ export default function Settings() {
             </Field>
 
             {/* Email */}
-            <Field label="Email (используется для входа)">
+            <Field label="Технический email">
               <input
                 type="email"
                 value={form.email}
@@ -687,6 +687,7 @@ export default function Settings() {
                 placeholder="ivanov@company.ru"
                 className={fieldClass}
               />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Логин для входа — часть до @.</p>
             </Field>
 
             {/* Пароль */}
@@ -792,7 +793,7 @@ export default function Settings() {
                   <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
                     Это опасное действие. Лучше деактивировать пользователя, чтобы сохранить историю.
                   </div>
-                  <Field label="Введите email пользователя для подтверждения">
+                  <Field label="Введите технический email пользователя для подтверждения">
                     <Input
                       value={deleteConfirmation}
                       onChange={event => setDeleteConfirmation(event.target.value)}

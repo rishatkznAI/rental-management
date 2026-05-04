@@ -96,13 +96,13 @@ test('auth login 401 follows unauthorized flow without entering the app', async 
   await page.route('**/api/auth/login', route => route.fulfill({
     status: 401,
     contentType: 'application/json',
-    body: JSON.stringify({ ok: false, error: 'Неверный email или пароль' }),
+    body: JSON.stringify({ ok: false, error: 'Неверный логин или пароль' }),
   }));
 
   await login(page, ADMIN_CREDENTIALS);
 
   await expect(page).toHaveURL(/#\/login$/);
-  await expect(page.getByText('Неверный email или пароль')).toBeVisible();
+  await expect(page.getByText('Неверный логин или пароль')).toBeVisible();
 });
 
 test('service tab renders legacy incomplete tickets without crashing', async ({ page }) => {

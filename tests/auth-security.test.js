@@ -45,6 +45,52 @@ function createAuthRoutes(state, overrides = {}) {
   return routes;
 }
 
+async function runLogin(login, body) {
+  const res = createMockResponse();
+  await login({ body, headers: {}, ip: '127.0.0.1' }, res);
+  return res;
+}
+
+test('login works with full email', async () => {
+  const state = {
+    users: [{ id: 'U-1', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Активен', password: 'right' }],
+  };
+  const login = createAuthRoutes(state)['POST /api/auth/login'][0];
+
+  const res = await runLogin(login, { email: 'manager@example.test', password: 'right' });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.ok, true);
+  assert.equal(res.payload.token, 'session-token');
+  assert.equal(res.payload.user.email, 'manager@example.test');
+});
+
+test('login works with local login before @', async () => {
+  const state = {
+    users: [{ id: 'U-1', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Активен', password: 'right' }],
+  };
+  const login = createAuthRoutes(state)['POST /api/auth/login'][0];
+
+  const res = await runLogin(login, { login: 'manager', password: 'right' });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.ok, true);
+  assert.equal(res.payload.user.email, 'manager@example.test');
+});
+
+test('login ignores case and surrounding spaces', async () => {
+  const state = {
+    users: [{ id: 'U-1', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Активен', password: 'right' }],
+  };
+  const login = createAuthRoutes(state)['POST /api/auth/login'][0];
+
+  const res = await runLogin(login, { login: '  MANAGER  ', password: 'right' });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.ok, true);
+  assert.equal(res.payload.user.email, 'manager@example.test');
+});
+
 test('login returns the same error for missing user and wrong password', async () => {
   process.env.LOGIN_FAILURE_DELAY_MS = '0';
   const state = {
@@ -61,8 +107,40 @@ test('login returns the same error for missing user and wrong password', async (
 
   assert.equal(missingUserRes.statusCode, 401);
   assert.equal(wrongPasswordRes.statusCode, 401);
-  assert.deepEqual(missingUserRes.payload, { ok: false, error: 'Неверный email или пароль' });
-  assert.deepEqual(wrongPasswordRes.payload, { ok: false, error: 'Неверный email или пароль' });
+  assert.deepEqual(missingUserRes.payload, { ok: false, error: 'Неверный логин или пароль' });
+  assert.deepEqual(wrongPasswordRes.payload, { ok: false, error: 'Неверный логин или пароль' });
+});
+
+test('inactive user cannot login', async () => {
+  process.env.LOGIN_FAILURE_DELAY_MS = '0';
+  const state = {
+    users: [{ id: 'U-1', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Неактивен', password: 'right' }],
+  };
+  const login = createAuthRoutes(state)['POST /api/auth/login'][0];
+
+  const res = await runLogin(login, { login: 'manager', password: 'right' });
+
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.payload, { ok: false, error: 'Неверный логин или пароль' });
+});
+
+test('duplicate email local part blocks login', async () => {
+  process.env.LOGIN_FAILURE_DELAY_MS = '0';
+  const state = {
+    users: [
+      { id: 'U-1', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Активен', password: 'right' },
+      { id: 'U-2', name: 'Мария', email: 'MANAGER@other.test', role: 'Менеджер по аренде', status: 'Активен', password: 'right' },
+    ],
+  };
+  const login = createAuthRoutes(state)['POST /api/auth/login'][0];
+
+  const res = await runLogin(login, { login: 'manager', password: 'right' });
+
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.payload, {
+    ok: false,
+    error: 'Найдено несколько пользователей с таким логином. Обратитесь к администратору',
+  });
 });
 
 test('frontend login is unavailable for bot-only carrier accounts', async () => {
@@ -86,7 +164,7 @@ test('frontend login is unavailable for bot-only carrier accounts', async () => 
   await login({ body: { email: 'carrier@example.test', password: 'right' }, headers: {}, ip: '127.0.0.1' }, res);
 
   assert.equal(res.statusCode, 401);
-  assert.deepEqual(res.payload, { ok: false, error: 'Неверный email или пароль' });
+  assert.deepEqual(res.payload, { ok: false, error: 'Неверный логин или пароль' });
 });
 
 test('frontend login is unavailable for bot-only carrier alias accounts', async () => {
@@ -110,7 +188,7 @@ test('frontend login is unavailable for bot-only carrier alias accounts', async 
   await login({ body: { email: 'carrier@example.test', password: 'right' }, headers: {}, ip: '127.0.0.1' }, res);
 
   assert.equal(res.statusCode, 401);
-  assert.deepEqual(res.payload, { ok: false, error: 'Неверный email или пароль' });
+  assert.deepEqual(res.payload, { ok: false, error: 'Неверный логин или пароль' });
 });
 
 test('password change increments tokenVersion and revokes existing sessions', () => {

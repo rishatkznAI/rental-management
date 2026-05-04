@@ -634,8 +634,7 @@ function resolveRentalForChangeRequest({
       .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
       .filter(({ rental }) => ganttMatchesClassicRental(ganttRental, rental, { equipmentList: equipment, allowClientMismatch })),
   ));
-  const strictShapeMatches = findShapeMatches(false);
-  const shapeMatches = strictShapeMatches.length > 0 ? strictShapeMatches : findShapeMatches(true);
+  const shapeMatches = findShapeMatches(false);
   if (shapeMatches.length === 1) {
     return buildRentalResolutionSuccess(
       shapeMatches[0],
@@ -653,6 +652,34 @@ function resolveRentalForChangeRequest({
         linkedIds,
         fallbackCandidateCount: shapeMatches.length,
         fallbackCandidateIds: compactResolutionIds(shapeMatches, match => match.rental?.id),
+      },
+    );
+  }
+  const canUseClientDateSnapshotFallback = snapshotMatchesRequestedId;
+  const openClientDateSnapshotMatches = canUseClientDateSnapshotFallback
+    ? uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
+      (rentals || [])
+        .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
+        .filter(({ rental }) => ganttMatchesOpenClassicRentalByClient(ganttRental, rental, { requireDateMatch: true })),
+    ))
+    : [];
+  if (openClientDateSnapshotMatches.length === 1) {
+    return buildRentalResolutionSuccess(
+      openClientDateSnapshotMatches[0],
+      requestedRentalId || requestedGanttId || openClientDateSnapshotMatches[0].linkedGanttRental?.id,
+      openClientDateSnapshotMatches[0].linkedGanttRental,
+    );
+  }
+  if (openClientDateSnapshotMatches.length > 1) {
+    return buildRentalResolutionFailure(
+      409,
+      `РќР°Р№РґРµРЅРѕ РЅРµСЃРєРѕР»СЊРєРѕ РЅРµР·Р°РєСЂС‹С‚С‹С… РєР°СЂС‚РѕС‡РµРє Р°СЂРµРЅРґС‹ РїРѕ РєР»РёРµРЅС‚Сѓ Рё РґР°С‚Р°Рј РґР»СЏ id "${requestedRentalId || requestedGanttId}". РћС‚РєСЂРѕР№С‚Рµ РєР°СЂС‚РѕС‡РєСѓ Р°СЂРµРЅРґС‹ РІСЂСѓС‡РЅСѓСЋ.`,
+      [...searchedIds, ...linkedIds],
+      {
+        ...diagnosticsBase,
+        linkedIds,
+        fallbackCandidateCount: openClientDateSnapshotMatches.length,
+        fallbackCandidateIds: compactResolutionIds(openClientDateSnapshotMatches, match => match.rental?.id),
       },
     );
   }
@@ -711,33 +738,6 @@ function resolveRentalForChangeRequest({
     );
   }
   const canUseClientOnlySnapshotFallback = snapshotMatchesRequestedId && !hasEquipmentReference(snapshotGanttRental);
-  const openClientDateSnapshotMatches = canUseClientOnlySnapshotFallback
-    ? uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
-      (rentals || [])
-        .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
-        .filter(({ rental }) => ganttMatchesOpenClassicRentalByClient(ganttRental, rental, { requireDateMatch: true })),
-    ))
-    : [];
-  if (openClientDateSnapshotMatches.length === 1) {
-    return buildRentalResolutionSuccess(
-      openClientDateSnapshotMatches[0],
-      requestedRentalId || requestedGanttId || openClientDateSnapshotMatches[0].linkedGanttRental?.id,
-      openClientDateSnapshotMatches[0].linkedGanttRental,
-    );
-  }
-  if (openClientDateSnapshotMatches.length > 1) {
-    return buildRentalResolutionFailure(
-      409,
-      `Найдено несколько незакрытых карточек аренды по клиенту и датам для id "${requestedRentalId || requestedGanttId}". Откройте карточку аренды вручную.`,
-      [...searchedIds, ...linkedIds],
-      {
-        ...diagnosticsBase,
-        linkedIds,
-        fallbackCandidateCount: openClientDateSnapshotMatches.length,
-        fallbackCandidateIds: compactResolutionIds(openClientDateSnapshotMatches, match => match.rental?.id),
-      },
-    );
-  }
   const openClientSnapshotMatches = canUseClientOnlySnapshotFallback
     ? uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
       (rentals || [])
@@ -1356,15 +1356,96 @@ function buildRentalChangeRequest({
   };
 }
 
-function ensureGanttRentalLink(ganttRental, rental) {
+function findCanonicalEquipmentForRental(rental, equipmentList = []) {
+  if (!rental) return null;
+  const equipmentById = normalizeRentalIdentifier(rental.equipmentId);
+  if (equipmentById) {
+    const match = (equipmentList || []).find(item => normalizeRentalIdentifier(item?.id) === equipmentById);
+    if (match) return match;
+  }
+
+  const refs = uniqueIdentifiers([
+    rental.equipmentInv,
+    rental.inventoryNumber,
+    rental.serialNumber,
+    ...(Array.isArray(rental.equipment) ? rental.equipment : []),
+  ]);
+  for (const ref of refs) {
+    const byInventory = (equipmentList || []).filter(item => normalizeRentalIdentifier(item?.inventoryNumber || item?.equipmentInv || item?.inv) === ref);
+    if (byInventory.length === 1) return byInventory[0];
+    const bySerial = (equipmentList || []).filter(item => normalizeRentalIdentifier(item?.serialNumber) === ref);
+    if (bySerial.length === 1) return bySerial[0];
+    const byId = (equipmentList || []).find(item => normalizeRentalIdentifier(item?.id) === ref);
+    if (byId) return byId;
+  }
+  return null;
+}
+
+function canonicalGanttEquipmentFields(rental, equipmentList = []) {
+  const matchedEquipment = findCanonicalEquipmentForRental(rental, equipmentList);
+  const rentalEquipment = Array.isArray(rental?.equipment) ? rental.equipment.filter(Boolean) : [];
+  const hasRentalEquipmentReference = Boolean(
+    normalizeRentalIdentifier(rental?.equipmentId) ||
+    normalizeRentalIdentifier(rental?.equipmentInv) ||
+    normalizeRentalIdentifier(rental?.inventoryNumber) ||
+    normalizeRentalIdentifier(rental?.serialNumber) ||
+    rentalEquipment.length > 0
+  );
+  const equipmentInv = normalizeRentalIdentifier(
+    rental?.equipmentInv ||
+    rental?.inventoryNumber ||
+    matchedEquipment?.inventoryNumber ||
+    rentalEquipment[0],
+  );
+  const equipmentId = normalizeRentalIdentifier(rental?.equipmentId || matchedEquipment?.id);
+  const serialNumber = normalizeRentalIdentifier(rental?.serialNumber || matchedEquipment?.serialNumber);
+  return {
+    equipmentId,
+    equipmentInv,
+    inventoryNumber: equipmentInv,
+    serialNumber,
+    equipment: rentalEquipment.length > 0 ? rentalEquipment : (equipmentInv ? [equipmentInv] : []),
+    hasRentalEquipmentReference,
+  };
+}
+
+function ensureGanttRentalLink(ganttRental, rental, equipmentList = []) {
   if (!ganttRental || !rental?.id) return ganttRental;
   const rentalId = normalizeRentalIdentifier(rental.id);
   if (!rentalId) return ganttRental;
-  return {
+  const equipmentFields = canonicalGanttEquipmentFields(rental, equipmentList);
+  const next = {
     ...ganttRental,
     rentalId,
-    sourceRentalId: normalizeRentalIdentifier(ganttRental.sourceRentalId) || rentalId,
+    sourceRentalId: rentalId,
     originalRentalId: normalizeRentalIdentifier(ganttRental.originalRentalId) || rentalId,
+  };
+  if (rental.clientId !== undefined) next.clientId = rental.clientId || '';
+  if (rental.client !== undefined) {
+    next.client = rental.client || '';
+    next.clientShort = String(rental.client || '').substring(0, 20);
+  }
+  if (rental.startDate !== undefined) next.startDate = rental.startDate || '';
+  if (rental.plannedReturnDate !== undefined || rental.endDate !== undefined) {
+    next.endDate = rental.plannedReturnDate || rental.endDate || next.endDate || '';
+  }
+  if (rental.manager !== undefined) {
+    next.manager = rental.manager || '';
+    next.managerInitials = managerInitials(rental.manager);
+  }
+  if (rental.managerId !== undefined) next.managerId = rental.managerId || '';
+  if (rental.status !== undefined) next.status = rentalStatusToGanttStatus(rental.status);
+  if (rental.price !== undefined) next.amount = Number(rental.price) || 0;
+  if (rental.paymentStatus !== undefined) next.paymentStatus = rental.paymentStatus || next.paymentStatus;
+  if (equipmentFields.hasRentalEquipmentReference) {
+    next.equipmentId = equipmentFields.equipmentId;
+    next.equipmentInv = equipmentFields.equipmentInv;
+    next.inventoryNumber = equipmentFields.inventoryNumber;
+    next.serialNumber = equipmentFields.serialNumber;
+    next.equipment = equipmentFields.equipment;
+  }
+  return {
+    ...next,
   };
 }
 
@@ -1449,9 +1530,9 @@ function applyRentalFieldToGantt(ganttRental, field, value) {
   return ganttRental;
 }
 
-function syncGanttRentalFields(ganttRental, previousRental, nextRental, author) {
+function syncGanttRentalFields(ganttRental, previousRental, nextRental, author, equipmentList = []) {
   if (!ganttRental) return ganttRental;
-  let nextGantt = ensureGanttRentalLink({ ...ganttRental }, nextRental || previousRental);
+  let nextGantt = ensureGanttRentalLink({ ...ganttRental }, nextRental || previousRental, equipmentList);
   const entries = [];
   for (const field of getChangedFields(previousRental, nextRental)) {
     const beforeGantt = nextGantt;
@@ -1472,8 +1553,8 @@ function syncGanttRentalFields(ganttRental, previousRental, nextRental, author) 
 
 function applyApprovedRentalChangeToGantt(ganttRental, request, author) {
   if (!ganttRental) return ganttRental;
-  const linkedRental = request?.rentalId ? { id: request.rentalId } : null;
-  const nextGantt = applyRentalFieldToGantt(ensureGanttRentalLink(ganttRental, linkedRental), request.field, request.newValue);
+  const linkedRental = request?.rental || (request?.rentalId ? { id: request.rentalId } : null);
+  const nextGantt = applyRentalFieldToGantt(ensureGanttRentalLink(ganttRental, linkedRental, request?.equipment || []), request.field, request.newValue);
   if (nextGantt === ganttRental) return nextGantt;
   return {
     ...nextGantt,

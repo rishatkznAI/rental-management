@@ -9,6 +9,7 @@ const {
   analyzeGanttRentalLinks,
   backfillGanttRentalLinks,
   classifyRentalFieldChange,
+  ensureGanttRentalLink,
   resolveRentalForChangeRequest,
   splitRentalPatch,
 } = require('../server/lib/rental-change-requests.js');
@@ -1302,6 +1303,8 @@ test('conflict-free extension applies immediately and does not create approval',
     assert.equal(update.body.changeRequestSummary.pendingCount, 0);
     assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').endDate, '2026-05-30');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').equipmentId, 'EQ-1');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').equipmentInv, '083');
   });
 });
 
@@ -1599,5 +1602,124 @@ test('rentals patch returns clear error when legacy gantt has no rental match', 
       __changeReason: 'missing legacy gantt repair',
     });
     assert.equal(update.status, 404);
+  });
+});
+
+test('gantt create canonicalizes wrong equipment from the matched rental', async () => {
+  const { app, state } = createApprovalApp();
+  const classicRental = state.rentals.find(item => item.id === 'R-1');
+
+  await withServer(app, async (baseUrl) => {
+    const created = await request(baseUrl, 'POST', '/api/gantt_rentals', 'admin-token', {
+      client: classicRental.client,
+      equipmentId: 'EQ-032',
+      equipmentInv: '03291436',
+      startDate: classicRental.startDate,
+      endDate: classicRental.plannedReturnDate,
+      manager: classicRental.manager,
+      managerId: classicRental.managerId,
+      status: 'active',
+      paymentStatus: 'unpaid',
+      amount: 100000,
+      comments: [],
+    });
+
+    assert.equal(created.status, 201);
+    assert.equal(created.body.rentalId, 'R-1');
+    assert.equal(created.body.equipmentId, 'EQ-1');
+    assert.equal(created.body.equipmentInv, '083');
+    assert.equal(state.gantt_rentals.at(-1).equipmentId, 'EQ-1');
+  });
+});
+
+test('ensureGanttRentalLink clears stale equipmentId when rental only has inventory reference', () => {
+  const linked = ensureGanttRentalLink(
+    {
+      id: 'GR-stale-equipment',
+      rentalId: 'R-1',
+      equipmentId: 'EQ-032',
+      equipmentInv: '03291436',
+      inventoryNumber: '03291436',
+      equipment: ['03291436'],
+    },
+    {
+      id: 'R-1',
+      client: 'ЭМ-СТРОЙ',
+      clientId: 'C-1',
+      startDate: '2026-04-10',
+      plannedReturnDate: '2026-04-20',
+      equipment: ['083'],
+    },
+    [],
+  );
+
+  assert.equal(linked.equipmentId, '');
+  assert.equal(linked.equipmentInv, '083');
+  assert.equal(linked.inventoryNumber, '083');
+  assert.deepEqual(linked.equipment, ['083']);
+});
+
+test('rentals patch repairs wrong legacy gantt equipment from matched rental', async () => {
+  const { app, state } = createApprovalApp();
+  const gantt = state.gantt_rentals.find(item => item.id === 'GR-1');
+  delete gantt.rentalId;
+  delete gantt.sourceRentalId;
+  delete gantt.originalRentalId;
+  gantt.equipmentId = 'EQ-032';
+  gantt.equipmentInv = '03291436';
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1', 'manager-token', {
+      price: 123000,
+      ganttRentalId: 'GR-1',
+      __ganttSnapshot: gantt,
+      oldValues: { price: 100000 },
+      newValues: { price: 123000 },
+      changes: [{ field: 'price', oldValue: 100000, newValue: 123000 }],
+      __changeReason: 'legacy gantt equipment repair',
+    });
+
+    assert.equal(update.status, 200);
+    const repaired = state.gantt_rentals.find(item => item.id === 'GR-1');
+    assert.equal(repaired.rentalId, 'R-1');
+    assert.equal(repaired.equipmentId, 'EQ-1');
+    assert.equal(repaired.equipmentInv, '083');
+
+    const listed = await request(baseUrl, 'GET', '/api/gantt_rentals', 'manager-token');
+    const dto = listed.body.find(item => item.id === 'GR-1');
+    assert.equal(dto.equipmentId, 'EQ-1');
+    assert.equal(dto.equipmentInv, '083');
+  });
+});
+
+test('rentals patch refuses ambiguous client/date repair when legacy equipment is unusable', async () => {
+  const { app, state } = createApprovalApp();
+  const gantt = state.gantt_rentals.find(item => item.id === 'GR-1');
+  delete gantt.rentalId;
+  delete gantt.sourceRentalId;
+  delete gantt.originalRentalId;
+  gantt.equipmentId = 'EQ-missing';
+  gantt.equipmentInv = 'NO-SUCH-INV';
+  state.rentals.push({
+    ...state.rentals.find(item => item.id === 'R-1'),
+    id: 'R-same-client-date-other-equipment',
+    equipment: ['03291436'],
+    equipmentId: 'EQ-032',
+    history: [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1', 'manager-token', {
+      price: 123000,
+      ganttRentalId: 'GR-1',
+      __ganttSnapshot: gantt,
+      oldValues: { price: 100000 },
+      newValues: { price: 123000 },
+      changes: [{ field: 'price', oldValue: 100000, newValue: 123000 }],
+      __changeReason: 'ambiguous legacy gantt equipment repair',
+    });
+
+    assert.equal(update.status, 409);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').rentalId, undefined);
   });
 });

@@ -263,6 +263,75 @@ function mergeGanttRentalContext(primary: GanttRentalData, fallback: GanttRental
   };
 }
 
+type RentalEquipmentFields = Rental & {
+  equipmentId?: string;
+  equipmentInv?: string;
+  inventoryNumber?: string;
+  serialNumber?: string;
+  endDate?: string;
+};
+
+function findEquipmentForRentalRecord(rental: RentalEquipmentFields, equipmentList: Equipment[]): Equipment | null {
+  if (rental.equipmentId) {
+    return equipmentList.find(item => item.id === rental.equipmentId) || null;
+  }
+  const refs = [
+    rental.equipmentInv,
+    rental.inventoryNumber,
+    rental.serialNumber,
+    ...(Array.isArray(rental.equipment) ? rental.equipment : []),
+  ].map(normalizeMatchRef).filter(Boolean);
+  for (const ref of refs) {
+    const byInventory = equipmentList.filter(item => normalizeMatchRef(item.inventoryNumber) === ref);
+    if (byInventory.length === 1) return byInventory[0];
+    const bySerial = equipmentList.filter(item => normalizeMatchRef(item.serialNumber) === ref);
+    if (bySerial.length === 1) return bySerial[0];
+    const byId = equipmentList.find(item => normalizeMatchRef(item.id) === ref);
+    if (byId) return byId;
+  }
+  return null;
+}
+
+function canonicalizeGanttRentalFromClassic(
+  ganttRental: GanttRentalData,
+  rental: Rental,
+  equipmentList: Equipment[],
+): GanttRentalData {
+  const rentalWithEquipment = rental as RentalEquipmentFields;
+  const matchedEquipment = findEquipmentForRentalRecord(rentalWithEquipment, equipmentList);
+  const equipmentInv = normalizeMatchRef(
+    rentalWithEquipment.equipmentInv ||
+    rentalWithEquipment.inventoryNumber ||
+    matchedEquipment?.inventoryNumber ||
+    rental.equipment?.[0] ||
+    ''
+  );
+  const hasRentalEquipmentReference = Boolean(
+    normalizeMatchRef(rentalWithEquipment.equipmentId) ||
+    equipmentInv ||
+    normalizeMatchRef(rentalWithEquipment.serialNumber) ||
+    (Array.isArray(rental.equipment) && rental.equipment.length > 0)
+  );
+  const equipmentId = hasRentalEquipmentReference
+    ? normalizeMatchRef(rentalWithEquipment.equipmentId || matchedEquipment?.id)
+    : normalizeMatchRef(ganttRental.equipmentId);
+  return {
+    ...ganttRental,
+    rentalId: rental.id,
+    sourceRentalId: rental.id,
+    originalRentalId: ganttRental.originalRentalId || rental.id,
+    clientId: rental.clientId || ganttRental.clientId,
+    client: rental.client || ganttRental.client,
+    clientShort: (rental.client || ganttRental.client || '').substring(0, 20),
+    equipmentId,
+    equipmentInv: hasRentalEquipmentReference ? equipmentInv : ganttRental.equipmentInv,
+    startDate: rental.startDate || ganttRental.startDate,
+    endDate: rental.plannedReturnDate || rentalWithEquipment.endDate || ganttRental.endDate,
+    manager: rental.manager || ganttRental.manager,
+    status: rental.status === 'closed' ? 'closed' : ganttRental.status,
+  };
+}
+
 function withEquipmentRowContext(rental: GanttRentalData, equipment: Equipment): GanttRentalData {
   return {
     ...rental,
@@ -584,6 +653,10 @@ export default function Rentals() {
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
   });
+  const { data: classicRentalData = [] } = useQuery({
+    queryKey: RENTAL_KEYS.all,
+    queryFn: rentalsService.getAll,
+  });
   const { data: equipmentData = [] } = useQuery({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
@@ -653,15 +726,23 @@ export default function Rentals() {
   }, [equipmentData, investorBinding, isInvestorRole]);
 
   useEffect(() => {
+    const classicById = new Map(classicRentalData.map(item => [item.id, item]));
+    const canonicalGanttData = ganttData.map(item => {
+      const sourceRentalId = getGanttRentalSourceId(item);
+      const classicRental = sourceRentalId ? classicById.get(sourceRentalId) : null;
+      return classicRental
+        ? canonicalizeGanttRentalFromClassic(item, classicRental, equipmentData)
+        : item;
+    });
     if (!isInvestorRole || !investorEquipmentIds || !investorInventoryNumbers) {
-      setGanttRentals(ganttData);
+      setGanttRentals(canonicalGanttData);
       return;
     }
-    setGanttRentals(ganttData.filter(item =>
+    setGanttRentals(canonicalGanttData.filter(item =>
       (item.equipmentId && investorEquipmentIds.has(item.equipmentId))
       || (!item.equipmentId && investorInventoryNumbers.has(item.equipmentInv)),
     ));
-  }, [ganttData, investorEquipmentIds, investorInventoryNumbers, isInvestorRole]);
+  }, [classicRentalData, equipmentData, ganttData, investorEquipmentIds, investorInventoryNumbers, isInvestorRole]);
 
   useEffect(() => {
     if (!isInvestorRole || !investorEquipmentIds) {

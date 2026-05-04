@@ -145,13 +145,15 @@ function registerRentalChangeRequestRoutes(deps) {
       if (ganttLinksRental(item, request.rentalId)) ganttIndexesToUpdate.add(index);
     });
 
+    const equipment = readData('equipment') || [];
+    const requestWithRentalContext = { ...request, rental: nextRental, equipment };
     for (const ganttIdx of ganttIndexesToUpdate) {
-      const nextGanttRental = applyApprovedRentalChangeToGantt(ganttRentals[ganttIdx], request, adminName);
+      const nextGanttRental = applyApprovedRentalChangeToGantt(ganttRentals[ganttIdx], requestWithRentalContext, adminName);
       const ganttValidation = validateRentalPayload(
         'gantt_rentals',
         nextGanttRental,
         ganttRentals,
-        readData('equipment') || [],
+        equipment,
         nextGanttRental.id,
         { skipConflictCheck: true },
       );
@@ -168,7 +170,7 @@ function registerRentalChangeRequestRoutes(deps) {
 
     if (ganttIndexesToUpdate.size > 0) {
       for (const ganttIdx of ganttIndexesToUpdate) {
-        ganttRentals[ganttIdx] = applyApprovedRentalChangeToGantt(ganttRentals[ganttIdx], request, adminName);
+        ganttRentals[ganttIdx] = applyApprovedRentalChangeToGantt(ganttRentals[ganttIdx], requestWithRentalContext, adminName);
       }
       writeData('gantt_rentals', ganttRentals);
     }

@@ -255,7 +255,7 @@ function registerRentalRoutes(deps) {
       return {
         ganttRentals,
         ganttIdx,
-        nextGanttRental: syncGanttRentalFields(ganttRentals[ganttIdx], previousRental, nextRental, author),
+        nextGanttRental: syncGanttRentalFields(ganttRentals[ganttIdx], previousRental, nextRental, author, readData('equipment') || []),
       };
     }
 
@@ -275,7 +275,7 @@ function registerRentalRoutes(deps) {
       const update = buildLinkedGanttRentalUpdate(linkedGanttRentalId, previousRental, nextRental, author);
       if (!update) return;
       const { ganttRentals, ganttIdx, nextGanttRental } = update;
-      ganttRentals[ganttIdx] = ensureGanttRentalLink(nextGanttRental, nextRental || previousRental);
+      ganttRentals[ganttIdx] = ensureGanttRentalLink(nextGanttRental, nextRental || previousRental, readData('equipment') || []);
       writeData('gantt_rentals', ganttRentals);
     }
 
@@ -284,11 +284,18 @@ function registerRentalRoutes(deps) {
       const ganttRentals = readData('gantt_rentals') || [];
       const idx = ganttRentals.findIndex(item => String(item?.id || '') === String(ganttRental.id || ''));
       if (idx === -1) return;
-      const repaired = ensureGanttRentalLink(ganttRentals[idx], { id: resolution.rentalId });
+      const equipment = readData('equipment') || [];
+      const repaired = ensureGanttRentalLink(ganttRentals[idx], resolution.rental || { id: resolution.rentalId }, equipment);
       if (
         repaired.rentalId === ganttRentals[idx].rentalId &&
         repaired.sourceRentalId === ganttRentals[idx].sourceRentalId &&
-        repaired.originalRentalId === ganttRentals[idx].originalRentalId
+        repaired.originalRentalId === ganttRentals[idx].originalRentalId &&
+        repaired.equipmentId === ganttRentals[idx].equipmentId &&
+        repaired.equipmentInv === ganttRentals[idx].equipmentInv &&
+        repaired.clientId === ganttRentals[idx].clientId &&
+        repaired.client === ganttRentals[idx].client &&
+        repaired.startDate === ganttRentals[idx].startDate &&
+        repaired.endDate === ganttRentals[idx].endDate
       ) return;
       ganttRentals[idx] = repaired;
       writeData('gantt_rentals', ganttRentals);
@@ -308,7 +315,7 @@ function registerRentalRoutes(deps) {
       if (!resolution.ok) return resolution;
       return {
         ok: true,
-        item: ensureGanttRentalLink(ganttRental, { id: resolution.rentalId }),
+        item: ensureGanttRentalLink(ganttRental, resolution.rental || { id: resolution.rentalId }, equipment),
       };
     }
 
@@ -417,7 +424,7 @@ function registerRentalRoutes(deps) {
           if (resolution.ok) {
             classicRental = resolution.rental;
             repairGanttRentalLinkIfResolved(ganttRental, resolution);
-            ganttRental = ensureGanttRentalLink(ganttRental, classicRental);
+            ganttRental = ensureGanttRentalLink(ganttRental, classicRental, readData('equipment') || []);
           } else {
             return { classicRental: null, ganttRental, resolution };
           }
@@ -1258,7 +1265,7 @@ function registerRentalRoutes(deps) {
               ...ganttRental,
               endDate: newPlannedReturnDate,
               plannedReturnDate: newPlannedReturnDate,
-            }, author), nextClassic || classicRental)
+            }, author), nextClassic || classicRental, equipmentList)
           : null;
 
         if (nextClassic) {
@@ -1416,7 +1423,7 @@ function registerRentalRoutes(deps) {
               status: 'returned',
             },
             author,
-          ), classicRental);
+          ), classicRental, readData('equipment') || []);
         });
 
         const otherBlockingRental = hasOtherBlockingRental(nextGanttRentals, ganttRental?.id, equipment);

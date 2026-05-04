@@ -158,7 +158,7 @@ function registerRentalChangeRequestRoutes(deps) {
       if (!ganttValidation.ok) return ganttValidation;
     }
 
-    rentals[rentalIdx] = appendRentalHistory(nextRental, [
+    rentals[rentalIdx] = Array.isArray(nextRental.history) && nextRental.history.length > 0 ? nextRental : appendRentalHistory(nextRental, [
       createRentalHistoryEntry(
         adminName,
         `Согласовано и применено: ${request.fieldLabel || request.field}: ${displayValue(request.oldValue)} → ${displayValue(request.newValue)}`,

@@ -80,6 +80,14 @@ function displayValue(value) {
   return String(value).trim() || '—';
 }
 
+function normalizeText(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ');
+}
+
 function getFieldLabel(field) {
   return RENTAL_CHANGE_FIELD_LABELS[field] || field;
 }
@@ -223,6 +231,7 @@ function equipmentReferenceTokens(value) {
 function mergeGanttRentalContext(primary, fallback) {
   if (!primary) return fallback || null;
   if (!fallback) return primary;
+  const primaryHasEquipmentRef = equipmentReferenceValues(primary).some(value => normalizeRentalIdentifier(value));
   return {
     ...fallback,
     ...primary,
@@ -235,10 +244,10 @@ function mergeGanttRentalContext(primary, fallback) {
     clientId: primary.clientId || fallback.clientId,
     client: primary.client || fallback.client,
     clientShort: primary.clientShort || fallback.clientShort,
-    equipmentId: primary.equipmentId || fallback.equipmentId,
-    equipmentInv: primary.equipmentInv || fallback.equipmentInv,
-    inventoryNumber: primary.inventoryNumber || fallback.inventoryNumber,
-    serialNumber: primary.serialNumber || fallback.serialNumber,
+    equipmentId: primary.equipmentId || (primaryHasEquipmentRef ? '' : fallback.equipmentId),
+    equipmentInv: primary.equipmentInv || (primaryHasEquipmentRef ? '' : fallback.equipmentInv),
+    inventoryNumber: primary.inventoryNumber || (primaryHasEquipmentRef ? '' : fallback.inventoryNumber),
+    serialNumber: primary.serialNumber || (primaryHasEquipmentRef ? '' : fallback.serialNumber),
     equipmentName: primary.equipmentName || fallback.equipmentName,
     equipmentLabel: primary.equipmentLabel || fallback.equipmentLabel,
     equipmentRef: primary.equipmentRef || fallback.equipmentRef,
@@ -286,14 +295,21 @@ function buildEquipmentAliases(record, equipmentList = []) {
   const explicitEquipmentId = normalizeRentalIdentifier(record?.equipmentId);
   const explicitInventory = normalizeRentalIdentifier(record?.equipmentInv || record?.inventoryNumber);
   const explicitSerial = normalizeRentalIdentifier(record?.serialNumber);
+  const equipmentByExplicitId = explicitEquipmentId ? indexes.byId.get(explicitEquipmentId) : null;
+  const explicitIdConflictsWithInventory = Boolean(
+    equipmentByExplicitId &&
+    explicitInventory &&
+    normalizeRentalIdentifier(equipmentByExplicitId.inventoryNumber || equipmentByExplicitId.equipmentInv || equipmentByExplicitId.inv) !== explicitInventory,
+  );
 
-  if (explicitEquipmentId) aliases.ids.add(explicitEquipmentId);
+  if (explicitEquipmentId && !explicitIdConflictsWithInventory) aliases.ids.add(explicitEquipmentId);
   if (explicitInventory) aliases.inventoryNumbers.add(explicitInventory);
   if (explicitSerial) aliases.serialNumbers.add(explicitSerial);
 
   const refs = uniqueIdentifiers(equipmentReferenceValues(record).flatMap(equipmentReferenceTokens));
 
   for (const ref of refs) {
+    if (explicitIdConflictsWithInventory && ref === explicitEquipmentId) continue;
     aliases.raw.add(ref);
     if (indexes.byId.has(ref)) {
       addEquipmentAliases(aliases, indexes.byId.get(ref));
@@ -310,7 +326,7 @@ function buildEquipmentAliases(record, equipmentList = []) {
     }
   }
 
-  if (explicitEquipmentId && indexes.byId.has(explicitEquipmentId)) {
+  if (explicitEquipmentId && !explicitIdConflictsWithInventory && indexes.byId.has(explicitEquipmentId)) {
     addEquipmentAliases(aliases, indexes.byId.get(explicitEquipmentId));
   }
   if (explicitInventory && (indexes.inventoryCounts.get(explicitInventory) || 0) === 1) {
@@ -412,6 +428,11 @@ function isOpenClassicRental(rental) {
 function ganttMatchesOpenClassicRentalByEquipment(ganttRental, rental, options = {}) {
   if (!isOpenClassicRental(rental)) return false;
   return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
+}
+
+function hasEquipmentReference(record) {
+  const refs = buildEquipmentAliases(record, []);
+  return refs.raw.size > 0 || refs.ids.size > 0 || refs.inventoryNumbers.size > 0 || refs.serialNumbers.size > 0;
 }
 
 function dateRangeVariantsForGantt(ganttRental) {
@@ -689,7 +710,8 @@ function resolveRentalForChangeRequest({
       },
     );
   }
-  const openClientDateSnapshotMatches = snapshotMatchesRequestedId
+  const canUseClientOnlySnapshotFallback = snapshotMatchesRequestedId && !hasEquipmentReference(snapshotGanttRental);
+  const openClientDateSnapshotMatches = canUseClientOnlySnapshotFallback
     ? uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
       (rentals || [])
         .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
@@ -716,7 +738,7 @@ function resolveRentalForChangeRequest({
       },
     );
   }
-  const openClientSnapshotMatches = snapshotMatchesRequestedId
+  const openClientSnapshotMatches = canUseClientOnlySnapshotFallback
     ? uniqueRentalMatches(ganttCandidates.flatMap(({ rental: ganttRental }) =>
       (rentals || [])
         .map((rental, index) => ({ rental, index, linkedGanttRental: ganttRental }))
@@ -1277,6 +1299,7 @@ function buildRentalChangeRequest({
   const primaryEquipment = equipmentSnapshots[0] || null;
   const isDateChange = change.field === 'startDate' || change.field === 'plannedReturnDate' || change.field === 'actualReturnDate';
   const isBackdated = isDateChange && String(change.type || '').includes('задним числом');
+  const isBackdatedDateChange = isBackdated || change.field === 'startDate';
   return {
     id,
     entityType: 'rental',
@@ -1294,7 +1317,7 @@ function buildRentalChangeRequest({
     createdAt,
     status: RENTAL_CHANGE_REQUEST_STATUS.PENDING,
     statusLabel: buildRequestDecisionNotificationStatus(RENTAL_CHANGE_REQUEST_STATUS.PENDING),
-    type: isDateChange ? (isBackdated ? 'backdated_rental_date_change' : 'rental_date_change') : change.type,
+    type: isDateChange ? (isBackdatedDateChange ? 'backdated_rental_date_change' : 'rental_date_change') : change.type,
     typeLabel: change.type,
     field: change.field,
     fieldLabel: change.label,
@@ -1331,6 +1354,45 @@ function buildRentalChangeRequest({
     attachments: Array.isArray(attachments) ? attachments : [],
     financialImpact: calculateFinancialImpact(rental, change.field, change.newValue),
   };
+}
+
+function ensureGanttRentalLink(ganttRental, rental) {
+  if (!ganttRental || !rental?.id) return ganttRental;
+  const rentalId = normalizeRentalIdentifier(rental.id);
+  if (!rentalId) return ganttRental;
+  return {
+    ...ganttRental,
+    rentalId,
+    sourceRentalId: normalizeRentalIdentifier(ganttRental.sourceRentalId) || rentalId,
+    originalRentalId: normalizeRentalIdentifier(ganttRental.originalRentalId) || rentalId,
+  };
+}
+
+function resolveGanttRentalLink({ ganttRental, rentals = [], ganttRentals = [], equipment = [], context = '' } = {}) {
+  if (!ganttRental) {
+    return buildRentalResolutionFailure(400, 'Gantt rental is required.', [], { context });
+  }
+  const linkedIds = rentalLinkIdsFromGantt(ganttRental);
+  if (linkedIds.length > 0) {
+    return resolveRentalForChangeRequest({
+      rentalId: linkedIds[0],
+      linkedGanttRentalId: ganttRental.id,
+      fallbackGanttRental: ganttRental,
+      rentals,
+      ganttRentals,
+      equipment,
+      context,
+    });
+  }
+  return resolveRentalForChangeRequest({
+    rentalId: ganttRental.id,
+    linkedGanttRentalId: ganttRental.id,
+    fallbackGanttRental: ganttRental,
+    rentals,
+    ganttRentals,
+    equipment,
+    context,
+  });
 }
 
 function buildRentalImmediateHistoryEntries(previousRental, nextRental, author) {
@@ -1389,7 +1451,7 @@ function applyRentalFieldToGantt(ganttRental, field, value) {
 
 function syncGanttRentalFields(ganttRental, previousRental, nextRental, author) {
   if (!ganttRental) return ganttRental;
-  let nextGantt = { ...ganttRental };
+  let nextGantt = ensureGanttRentalLink({ ...ganttRental }, nextRental || previousRental);
   const entries = [];
   for (const field of getChangedFields(previousRental, nextRental)) {
     const beforeGantt = nextGantt;
@@ -1410,7 +1472,8 @@ function syncGanttRentalFields(ganttRental, previousRental, nextRental, author) 
 
 function applyApprovedRentalChangeToGantt(ganttRental, request, author) {
   if (!ganttRental) return ganttRental;
-  const nextGantt = applyRentalFieldToGantt(ganttRental, request.field, request.newValue);
+  const linkedRental = request?.rentalId ? { id: request.rentalId } : null;
+  const nextGantt = applyRentalFieldToGantt(ensureGanttRentalLink(ganttRental, linkedRental), request.field, request.newValue);
   if (nextGantt === ganttRental) return nextGantt;
   return {
     ...nextGantt,
@@ -1445,10 +1508,12 @@ module.exports = {
   calculateRentalDebt,
   classifyRentalFieldChange,
   displayValue,
+  ensureGanttRentalLink,
   getChangedFields,
   getFieldLabel,
   logGanttRentalLinkDiagnostics,
   normalizeRentalIdentifier,
+  resolveGanttRentalLink,
   resolveRentalForChangeRequest,
   splitRentalPatch,
   stripRentalPatchMeta,

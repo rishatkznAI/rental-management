@@ -1504,3 +1504,100 @@ test('approve detects stale old values and does not overwrite newer rental dates
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').startDate, '2026-04-10');
   });
 });
+
+test('gantt create restores rentalId from one exact classic rental match', async () => {
+  const { app, state } = createApprovalApp();
+  const classicRental = state.rentals.find(item => item.id === 'R-1');
+
+  await withServer(app, async (baseUrl) => {
+    const created = await request(baseUrl, 'POST', '/api/gantt_rentals', 'admin-token', {
+      client: classicRental.client,
+      equipmentInv: '083',
+      startDate: '2026-04-10',
+      endDate: '2026-04-20',
+      manager: classicRental.manager,
+      managerId: classicRental.managerId,
+      status: 'active',
+      paymentStatus: 'unpaid',
+      amount: 100000,
+      comments: [],
+    });
+
+    assert.equal(created.status, 201);
+    assert.equal(created.body.rentalId, 'R-1');
+    assert.equal(created.body.sourceRentalId, 'R-1');
+    assert.equal(state.gantt_rentals.at(-1).rentalId, 'R-1');
+  });
+});
+
+test('rentals patch repairs old gantt entry without rentalId when exactly one rental matches', async () => {
+  const { app, state } = createApprovalApp();
+  const gantt = state.gantt_rentals.find(item => item.id === 'GR-1');
+  delete gantt.rentalId;
+  delete gantt.sourceRentalId;
+  delete gantt.originalRentalId;
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1', 'manager-token', {
+      price: 123000,
+      ganttRentalId: 'GR-1',
+      __ganttSnapshot: gantt,
+      oldValues: { price: 100000 },
+      newValues: { price: 123000 },
+      changes: [{ field: 'price', oldValue: 100000, newValue: 123000 }],
+      __changeReason: 'legacy gantt repair',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').rentalId, 'R-1');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').sourceRentalId, 'R-1');
+    assert.equal(state.rental_change_requests[0].rentalId, 'R-1');
+  });
+});
+
+test('rentals patch refuses ambiguous legacy gantt matches', async () => {
+  const { app, state } = createApprovalApp();
+  const gantt = state.gantt_rentals.find(item => item.id === 'GR-1');
+  delete gantt.rentalId;
+  delete gantt.sourceRentalId;
+  delete gantt.originalRentalId;
+  state.rentals.push({ ...state.rentals.find(item => item.id === 'R-1'), id: 'R-duplicate', history: [] });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1', 'manager-token', {
+      price: 123000,
+      ganttRentalId: 'GR-1',
+      __ganttSnapshot: gantt,
+      oldValues: { price: 100000 },
+      newValues: { price: 123000 },
+      changes: [{ field: 'price', oldValue: 100000, newValue: 123000 }],
+      __changeReason: 'ambiguous legacy gantt repair',
+    });
+
+    assert.equal(update.status, 409);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').rentalId, undefined);
+  });
+});
+
+test('rentals patch returns clear error when legacy gantt has no rental match', async () => {
+  const { app, state } = createApprovalApp();
+  state.rentals = state.rentals.filter(item => item.id !== 'R-1');
+  const gantt = state.gantt_rentals.find(item => item.id === 'GR-1');
+  delete gantt.rentalId;
+  delete gantt.sourceRentalId;
+  delete gantt.originalRentalId;
+  gantt.equipmentInv = 'NO-SUCH-INV';
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1', 'manager-token', {
+      price: 123000,
+      ganttRentalId: 'GR-1',
+      __ganttSnapshot: gantt,
+      oldValues: { price: 100000 },
+      newValues: { price: 123000 },
+      changes: [{ field: 'price', oldValue: 100000, newValue: 123000 }],
+      __changeReason: 'missing legacy gantt repair',
+    });
+    assert.equal(update.status, 404);
+  });
+});

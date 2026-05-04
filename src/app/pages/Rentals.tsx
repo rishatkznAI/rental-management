@@ -778,20 +778,10 @@ export default function Rentals() {
         ? mergeGanttRentalContext(exactFreshGanttRental, ganttRental)
         : ganttRental;
       const sourceRentalId = getGanttRentalSourceId(currentGanttRental);
-      if (!sourceRentalId) {
-        showToast(
-          'У Gantt-записи нет ссылки на аренду. Откройте карточку аренды и повторите изменение.',
-          'error',
-        );
-        return false;
-      }
       const previousRental = classicRentals.find(item => item.id === sourceRentalId) || null;
-      if (!previousRental) {
-        showToast('Аренда не найдена. Согласование изменения дат заблокировано.', 'error');
-        return false;
-      }
+      const requestRentalId = previousRental?.id || sourceRentalId || currentGanttRental.id;
       const oldValues = Object.fromEntries(Object.keys(patch).map(field => {
-        if (field in previousRental) return [field, previousRental[field as keyof Rental]];
+        if (previousRental && field in previousRental) return [field, previousRental[field as keyof Rental]];
         if (field === 'plannedReturnDate') return [field, currentGanttRental.endDate];
         if (field === 'startDate') return [field, currentGanttRental.startDate];
         if (field === 'price') return [field, currentGanttRental.amount];
@@ -801,9 +791,9 @@ export default function Rentals() {
         return [field, undefined];
       }));
 
-      const saved = await rentalsService.update(previousRental.id, {
+      const saved = await rentalsService.update(requestRentalId, {
         ...patch,
-        rentalId: previousRental.id,
+        rentalId: previousRental?.id || sourceRentalId || '',
         ganttRentalId: currentGanttRental.id,
         ganttSnapshot: currentGanttRental,
         entityType: 'rental',
@@ -815,10 +805,10 @@ export default function Rentals() {
           oldValue: oldValues[field],
           newValue: patch[field as keyof Rental],
         })),
-        __rentalId: previousRental.id,
+        __rentalId: previousRental?.id || sourceRentalId || '',
         __linkedGanttRentalId: currentGanttRental.id,
         __ganttRentalId: currentGanttRental.id,
-        __sourceRentalId: previousRental.id,
+        __sourceRentalId: previousRental?.id || sourceRentalId || '',
         __ganttSnapshot: currentGanttRental,
         __changeReason: reason,
       } as Partial<Rental> & Record<string, unknown>);
@@ -828,7 +818,7 @@ export default function Rentals() {
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
-        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail((saved as Rental).id || previousRental.id) }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail((saved as Rental).id || requestRentalId) }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
         queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
       ]);

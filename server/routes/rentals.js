@@ -675,9 +675,11 @@ function registerRentalRoutes(deps) {
     function createApprovalRequests(previousRental, changes, meta, req) {
       if (!changes.length) return [];
       const requests = readData('rental_change_requests') || [];
+      const equipment = readData('equipment') || [];
       const created = changes.map(change => buildRentalChangeRequest({
         id: generateId(requestPrefix),
         rental: previousRental,
+        equipment,
         linkedGanttRentalId: meta.linkedGanttRentalId,
         sourceRentalId: meta.sourceRentalId,
         change,
@@ -906,10 +908,22 @@ function registerRentalRoutes(deps) {
           });
         }
         idx = resolution.rentalIndex;
+        const linkedGanttRental = resolution.linkedGanttRental || null;
+        const linkedGanttMatchesRental = [
+          linkedGanttRental?.rentalId,
+          linkedGanttRental?.sourceRentalId,
+          linkedGanttRental?.originalRentalId,
+        ].some(id => String(id || '').trim() === String(resolution.rentalId || '').trim());
         meta = {
           ...rawMeta,
           sourceRentalId: safeSourceRentalId || resolution.sourceRentalId || '',
           linkedGanttRentalId: rawMeta.linkedGanttRentalId || rawMeta.ganttRentalId || resolution.linkedGanttRentalId || '',
+          canonicalRentalIdVerified: Boolean(
+            safeRentalId ||
+            safeSourceRentalId ||
+            String(req.params.id || '').trim() === String(resolution.rentalId || '').trim() ||
+            linkedGanttMatchesRental
+          ),
         };
       }
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
@@ -943,6 +957,13 @@ function registerRentalRoutes(deps) {
         const immediateValidation = validateImmediateRentalPatch(previousRental, immediatePatch, data, approvalChanges, meta, req.user.userName);
         if (!immediateValidation.ok) {
           return res.status(immediateValidation.status).json({ ok: false, error: immediateValidation.error });
+        }
+
+        if (approvalChanges.some(change => ['startDate', 'plannedReturnDate', 'actualReturnDate'].includes(change.field)) && !meta.canonicalRentalIdVerified) {
+          return res.status(400).json({
+            ok: false,
+            error: 'Нельзя создать согласование изменения дат без канонического rentalId редактируемой аренды.',
+          });
         }
 
         const createdRequests = createApprovalRequests(previousRental, approvalChanges, meta, req);

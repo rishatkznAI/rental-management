@@ -58,6 +58,37 @@ function registerRentalChangeRequestRoutes(deps) {
     writeData('gantt_rentals', syncGanttRentalPaymentStatuses(currentGanttRentals, payments));
   }
 
+  function sameId(left, right) {
+    return String(left || '').trim() === String(right || '').trim();
+  }
+
+  function ganttLinksRental(ganttRental, rentalId) {
+    return [
+      ganttRental?.rentalId,
+      ganttRental?.sourceRentalId,
+      ganttRental?.originalRentalId,
+    ].some(id => sameId(id, rentalId));
+  }
+
+  function validateExpectedOldValue(request, rental) {
+    const field = request.field;
+    if (!field) {
+      return { ok: false, status: 400, error: 'В заявке не указано поле изменения.' };
+    }
+    const expected = Object.prototype.hasOwnProperty.call(request.oldValues || {}, field)
+      ? request.oldValues[field]
+      : request.oldValue;
+    const actual = rental?.[field];
+    if (String(expected ?? '') !== String(actual ?? '')) {
+      return {
+        ok: false,
+        status: 409,
+        error: 'Даты или поля аренды уже изменились. Обновите заявку и повторите согласование.',
+      };
+    }
+    return { ok: true };
+  }
+
   function appendRelatedRentalHistory(rentalId, entry) {
     if (!rentalId || !entry) return;
     const rentals = readData('rentals') || [];
@@ -73,23 +104,20 @@ function registerRentalChangeRequestRoutes(deps) {
   }
 
   function applyRentalRequest(request, adminName) {
-    const rentals = readData('rentals') || [];
-    const resolution = resolveRentalForChangeRequest({
-      rentalId: request.rentalId || request.entityId || request.sourceRentalId,
-      linkedGanttRentalId: request.linkedGanttRentalId,
-      rentals,
-      ganttRentals: readData('gantt_rentals') || [],
-    });
-    if (!resolution.ok) {
-      return {
-        ok: false,
-        status: resolution.status,
-        error: resolution.error || 'Аренда для заявки не найдена',
-      };
+    if (!request.rentalId) {
+      return { ok: false, status: 400, error: 'В заявке отсутствует rentalId. Согласование заблокировано.' };
     }
 
-    const rentalIdx = resolution.rentalIndex;
+    const rentals = readData('rentals') || [];
+    const rentalIdx = rentals.findIndex(item => sameId(item?.id, request.rentalId));
+    if (rentalIdx === -1) {
+      return { ok: false, status: 404, error: 'Аренда не найдена. Согласование заблокировано.' };
+    }
+
     const previousRental = rentals[rentalIdx];
+    const oldValueValidation = validateExpectedOldValue(request, previousRental);
+    if (!oldValueValidation.ok) return oldValueValidation;
+
     const nextRental = {
       ...previousRental,
       [request.field]: request.newValue,
@@ -103,25 +131,31 @@ function registerRentalChangeRequestRoutes(deps) {
       previousRental.id,
       { skipConflictCheck: true },
     );
-    if (!validation.ok) {
-      return validation;
-    }
+    if (!validation.ok) return validation;
 
+    const ganttRentals = readData('gantt_rentals') || [];
+    const ganttIndexesToUpdate = new Set();
     if (request.linkedGanttRentalId) {
-      const ganttRentals = readData('gantt_rentals') || [];
-      const ganttRental = ganttRentals.find(item => item.id === request.linkedGanttRentalId);
-      if (ganttRental) {
-        const nextGanttRental = applyApprovedRentalChangeToGantt(ganttRental, request, adminName);
-        const ganttValidation = validateRentalPayload(
-          'gantt_rentals',
-          nextGanttRental,
-          ganttRentals,
-          readData('equipment') || [],
-          nextGanttRental.id,
-          { skipConflictCheck: true },
-        );
-        if (!ganttValidation.ok) return ganttValidation;
+      const linkedIdx = ganttRentals.findIndex(item => sameId(item?.id, request.linkedGanttRentalId));
+      if (linkedIdx !== -1 && ganttLinksRental(ganttRentals[linkedIdx], request.rentalId)) {
+        ganttIndexesToUpdate.add(linkedIdx);
       }
+    }
+    ganttRentals.forEach((item, index) => {
+      if (ganttLinksRental(item, request.rentalId)) ganttIndexesToUpdate.add(index);
+    });
+
+    for (const ganttIdx of ganttIndexesToUpdate) {
+      const nextGanttRental = applyApprovedRentalChangeToGantt(ganttRentals[ganttIdx], request, adminName);
+      const ganttValidation = validateRentalPayload(
+        'gantt_rentals',
+        nextGanttRental,
+        ganttRentals,
+        readData('equipment') || [],
+        nextGanttRental.id,
+        { skipConflictCheck: true },
+      );
+      if (!ganttValidation.ok) return ganttValidation;
     }
 
     rentals[rentalIdx] = appendRentalHistory(nextRental, [
@@ -132,18 +166,15 @@ function registerRentalChangeRequestRoutes(deps) {
     ]);
     writeData('rentals', rentals);
 
-    if (request.linkedGanttRentalId) {
-      const ganttRentals = readData('gantt_rentals') || [];
-      const ganttIdx = ganttRentals.findIndex(item => item.id === request.linkedGanttRentalId);
-      if (ganttIdx !== -1) {
+    if (ganttIndexesToUpdate.size > 0) {
+      for (const ganttIdx of ganttIndexesToUpdate) {
         ganttRentals[ganttIdx] = applyApprovedRentalChangeToGantt(ganttRentals[ganttIdx], request, adminName);
-        writeData('gantt_rentals', ganttRentals);
       }
+      writeData('gantt_rentals', ganttRentals);
     }
 
     return { ok: true };
   }
-
   function applyPaymentRequest(request, adminName) {
     const payments = readData('payments') || [];
     const paymentId = request.entityId || request.paymentId;
@@ -262,13 +293,6 @@ function registerRentalChangeRequestRoutes(deps) {
       rejectionReason,
     };
     writeRequests(requests);
-    appendRelatedRentalHistory(
-      request.rentalId || request.entityId || request.sourceRentalId,
-      createRentalHistoryEntry(
-        req.user?.userName || 'Администратор',
-        `Отклонено изменение: ${request.fieldLabel || request.field}: ${displayValue(request.oldValue)} → ${displayValue(request.newValue)}. Причина: ${rejectionReason}`,
-      ),
-    );
     return res.json(requests[idx]);
   });
 

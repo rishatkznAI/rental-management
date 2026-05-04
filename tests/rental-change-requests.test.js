@@ -674,6 +674,7 @@ function createApprovalApp() {
     gantt_rentals: [
       {
         id: 'GR-1',
+        rentalId: 'R-1',
         client: 'ЭМ-СТРОЙ',
         startDate: '2026-04-10',
         endDate: '2026-04-20',
@@ -687,6 +688,7 @@ function createApprovalApp() {
       },
       {
         id: 'GR-2',
+        rentalId: 'R-2',
         client: 'Будущая аренда',
         startDate: '2026-04-23',
         endDate: '2026-04-25',
@@ -847,10 +849,7 @@ test('editing existing rental through gantt id creates approval without losing r
     assert.equal(approved.status, 200);
     assert.equal(state.rentals.find(item => item.id === 'R-1').price, 120000);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').amount, 120000);
-    assert.match(
-      state.rentals.find(item => item.id === 'R-1').history.at(-1).text,
-      /Согласовано и применено/,
-    );
+    assert.equal(state.rentals.find(item => item.id === 'R-1').history.length, 1);
   });
 });
 
@@ -1350,7 +1349,7 @@ test('comments and attachment additions apply immediately without approval', asy
   });
 });
 
-test('rejected approval keeps rental unchanged and writes history entry', async () => {
+test('rejected approval keeps rental unchanged and does not mutate rental history', async () => {
   const { app, state } = createApprovalApp();
 
   await withServer(app, async (baseUrl) => {
@@ -1370,9 +1369,138 @@ test('rejected approval keeps rental unchanged and writes history entry', async 
     assert.equal(rejected.body.status, 'rejected');
     assert.equal(state.rentals.find(item => item.id === 'R-1').price, 100000);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').amount, 100000);
-    assert.match(
-      state.rentals.find(item => item.id === 'R-1').history.at(-1).text,
-      /Отклонено изменение/,
-    );
+    assert.equal(state.rentals.find(item => item.id === 'R-1').history.length, 1);
+  });
+});
+
+test('date approval keeps canonical rentalId and approve mutates only that rental', async () => {
+  const { app, state } = createApprovalApp();
+  state.rentals = [
+    {
+      id: 'R-A',
+      clientId: 'C-A',
+      client: 'Client A',
+      startDate: '2026-04-10',
+      plannedReturnDate: '2026-04-20',
+      equipment: ['INV-A'],
+      manager: 'Manager',
+      managerId: 'U-manager',
+      status: 'active',
+      price: 1000,
+      discount: 0,
+      history: [],
+    },
+    {
+      id: 'R-B',
+      clientId: 'C-B',
+      client: 'Client B',
+      startDate: '2026-04-10',
+      plannedReturnDate: '2026-04-20',
+      equipment: ['INV-B'],
+      manager: 'Manager',
+      managerId: 'U-manager',
+      status: 'active',
+      price: 2000,
+      discount: 0,
+      history: [],
+    },
+  ];
+  state.equipment = [
+    { id: 'EQ-A', inventoryNumber: 'INV-A', manufacturer: 'Maker', model: 'A', serialNumber: 'SN-A', category: 'own', activeInFleet: true },
+    { id: 'EQ-B', inventoryNumber: 'INV-B', manufacturer: 'Maker', model: 'B', serialNumber: 'SN-B', category: 'own', activeInFleet: true },
+  ];
+  state.gantt_rentals = [
+    { id: 'GR-A', rentalId: 'R-A', client: 'Client A', startDate: '2026-04-10', endDate: '2026-04-20', equipmentInv: 'INV-A', status: 'active', amount: 1000, comments: [] },
+    { id: 'GR-B', rentalId: 'R-B', client: 'Client B', startDate: '2026-04-10', endDate: '2026-04-20', equipmentInv: 'INV-B', status: 'active', amount: 2000, comments: [] },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-A', 'manager-token', {
+      startDate: '2026-04-07',
+      __linkedGanttRentalId: 'GR-A',
+      __changeReason: 'Backdated start change for A',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(state.rental_change_requests.length, 1);
+    const changeRequest = state.rental_change_requests[0];
+    assert.equal(changeRequest.rentalId, 'R-A');
+    assert.equal(changeRequest.entityId, 'R-A');
+    assert.equal(changeRequest.type, 'backdated_rental_date_change');
+    assert.equal(changeRequest.clientName, 'Client A');
+    assert.equal(changeRequest.equipmentInventoryNumber, 'INV-A');
+    assert.notEqual(changeRequest.clientName, 'Client B');
+    assert.notEqual(changeRequest.equipmentInventoryNumber, 'INV-B');
+
+    const listed = await request(baseUrl, 'GET', '/api/rental_change_requests', 'admin-token');
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body[0].rentalId, 'R-A');
+    assert.equal(listed.body[0].clientName, 'Client A');
+
+    const approved = await request(baseUrl, 'POST', `/api/rental_change_requests/${changeRequest.id}/approve`, 'admin-token', {});
+    assert.equal(approved.status, 200);
+    assert.equal(state.rentals.find(item => item.id === 'R-A').startDate, '2026-04-07');
+    assert.equal(state.rentals.find(item => item.id === 'R-B').startDate, '2026-04-10');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-A').startDate, '2026-04-07');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-B').startDate, '2026-04-10');
+  });
+});
+
+test('approve rejects missing and unknown rentalId without mutating rentals', async () => {
+  const { app, state } = createApprovalApp();
+  state.gantt_rentals[0].rentalId = 'R-1';
+  state.rental_change_requests.push(
+    {
+      id: 'RCR-missing-id',
+      entityType: 'rental',
+      entityId: 'R-1',
+      status: 'pending',
+      field: 'startDate',
+      fieldLabel: 'Start',
+      oldValue: '2026-04-10',
+      newValue: '2026-04-07',
+    },
+    {
+      id: 'RCR-unknown-id',
+      entityType: 'rental',
+      entityId: 'R-missing',
+      rentalId: 'R-missing',
+      status: 'pending',
+      field: 'startDate',
+      fieldLabel: 'Start',
+      oldValue: '2026-04-10',
+      newValue: '2026-04-07',
+    },
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const missing = await request(baseUrl, 'POST', '/api/rental_change_requests/RCR-missing-id/approve', 'admin-token', {});
+    assert.equal(missing.status, 400);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').startDate, '2026-04-10');
+
+    const unknown = await request(baseUrl, 'POST', '/api/rental_change_requests/RCR-unknown-id/approve', 'admin-token', {});
+    assert.equal(unknown.status, 404);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').startDate, '2026-04-10');
+  });
+});
+
+test('approve detects stale old values and does not overwrite newer rental dates', async () => {
+  const { app, state } = createApprovalApp();
+  state.gantt_rentals[0].rentalId = 'R-1';
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'manager-token', {
+      startDate: '2026-04-07',
+      __linkedGanttRentalId: 'GR-1',
+      __changeReason: 'Backdated start change',
+    });
+    assert.equal(update.status, 200);
+    const changeRequest = state.rental_change_requests[0];
+    state.rentals.find(item => item.id === 'R-1').startDate = '2026-04-09';
+
+    const approved = await request(baseUrl, 'POST', `/api/rental_change_requests/${changeRequest.id}/approve`, 'admin-token', {});
+    assert.equal(approved.status, 409);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').startDate, '2026-04-09');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').startDate, '2026-04-10');
   });
 });

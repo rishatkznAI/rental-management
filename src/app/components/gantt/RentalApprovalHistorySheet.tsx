@@ -19,13 +19,15 @@ import {
 } from '../ui/sheet';
 import { Textarea } from '../ui/textarea';
 import { useAuth } from '../../contexts/AuthContext';
+import { useClientsList } from '../../hooks/useClients';
 import { useEquipmentList } from '../../hooks/useEquipment';
 import {
   useApproveRentalChangeRequest,
   useRejectRentalChangeRequest,
 } from '../../hooks/useRentalChangeRequests';
+import { useRentalsList } from '../../hooks/useRentals';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
-import type { Equipment, RentalChangeRequest, RentalChangeRequestStatus } from '../../types';
+import type { Client, Equipment, Rental, RentalChangeRequest, RentalChangeRequestStatus } from '../../types';
 
 const statusLabels: Record<RentalChangeRequestStatus, string> = {
   pending: 'На согласовании',
@@ -94,22 +96,31 @@ function buildEquipmentTitle(equipment: Equipment, fallbackRef = '') {
   return meta ? `${title} · ${meta}` : title;
 }
 
-function resolveEquipmentDisplayItems(request: RentalChangeRequest, equipmentList: Equipment[]) {
-  const refs = [
-    ...(Array.isArray(request.equipment) ? request.equipment : []),
-    ...asStringList(request.oldValues?.equipment),
-    ...asStringList(request.newValues?.equipment),
-  ].map(item => String(item || '').trim()).filter(Boolean);
-  const uniqueRefs = [...new Set(refs)];
-
-  if (uniqueRefs.length === 0) return ['—'];
-
-  return uniqueRefs.map((ref) => {
-    const matched = equipmentList.find(item => equipmentMatchesRef(item, ref));
-    return matched ? buildEquipmentTitle(matched, ref) : ref;
-  });
+function resolveRentalForRequest(request: RentalChangeRequest, rentals: Rental[]) {
+  if (!request.rentalId) return null;
+  return rentals.find(item => item.id === request.rentalId) || null;
 }
 
+function resolveClientDisplay(rental: Rental | null, request: RentalChangeRequest, clients: Client[]) {
+  if (!rental) return 'Аренда не найдена';
+  if (rental.clientId) {
+    const client = clients.find(item => item.id === rental.clientId);
+    if (!client) return 'Не найдено';
+    return client.company || 'Не найдено';
+  }
+  return rental.client || 'Не найдено';
+}
+
+function resolveEquipmentDisplayItemsForRental(rental: Rental | null, equipmentList: Equipment[]) {
+  if (!rental) return ['Аренда не найдена'];
+  const refs = Array.isArray(rental.equipment) ? rental.equipment : [];
+  if (refs.length === 0) return ['Не найдено'];
+
+  return refs.map((ref) => {
+    const matched = equipmentList.find(item => equipmentMatchesRef(item, ref));
+    return matched ? buildEquipmentTitle(matched, ref) : 'Не найдено';
+  });
+}
 function getRequestDecisionText(request: RentalChangeRequest): string {
   if (request.status === 'approved') {
     return `Согласовал: ${request.decidedByName || '—'}${request.appliedAt ? ` · применено ${formatDateTime(request.appliedAt)}` : ''}`;
@@ -155,6 +166,8 @@ export function RentalApprovalHistorySheet({
 }: RentalApprovalHistorySheetProps) {
   const { user } = useAuth();
   const { data: equipmentList = [] } = useEquipmentList();
+  const { data: rentals = [] } = useRentalsList();
+  const { data: clients = [] } = useClientsList();
   const approveMutation = useApproveRentalChangeRequest();
   const rejectMutation = useRejectRentalChangeRequest();
   const [rejecting, setRejecting] = React.useState<RentalChangeRequest | null>(null);
@@ -164,12 +177,15 @@ export function RentalApprovalHistorySheet({
   const approvedCount = requests.filter(item => item.status === 'approved').length;
   const rejectedCount = requests.filter(item => item.status === 'rejected').length;
   const isAdmin = String(user?.role || '').trim() === 'Администратор';
+  const rentalByRequestId = React.useMemo(() => (
+    new Map(requests.map(request => [request.id, resolveRentalForRequest(request, rentals)]))
+  ), [rentals, requests]);
   const equipmentDisplayByRequestId = React.useMemo(() => (
     new Map(requests.map(request => [
       request.id,
-      resolveEquipmentDisplayItems(request, equipmentList),
+      resolveEquipmentDisplayItemsForRental(rentalByRequestId.get(request.id) || null, equipmentList),
     ]))
-  ), [equipmentList, requests]);
+  ), [equipmentList, rentalByRequestId, requests]);
 
   const renderEquipmentList = (request: RentalChangeRequest) => {
     const items = equipmentDisplayByRequestId.get(request.id) || ['—'];
@@ -275,7 +291,7 @@ export function RentalApprovalHistorySheet({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         {statusIcon(request.status)}
-                        <p className="font-semibold text-gray-900 dark:text-white">{request.type || 'Изменение аренды'}</p>
+                        <p className="font-semibold text-gray-900 dark:text-white">{request.typeLabel || request.type || 'Изменение аренды'}</p>
                         {statusBadge(request.status)}
                       </div>
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -293,7 +309,7 @@ export function RentalApprovalHistorySheet({
                           <Button
                             size="sm"
                             onClick={() => void handleApprove(request)}
-                            disabled={approveMutation.isPending || rejectMutation.isPending}
+                            disabled={approveMutation.isPending || rejectMutation.isPending || !rentalByRequestId.get(request.id)}
                           >
                             <Check className="h-4 w-4" />
                             Согласовать
@@ -319,7 +335,7 @@ export function RentalApprovalHistorySheet({
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 dark:text-gray-400">Клиент</p>
-                      <p className="font-medium text-gray-900 dark:text-white">{request.client || '—'}</p>
+                      <p className="font-medium text-gray-900 dark:text-white">{resolveClientDisplay(rentalByRequestId.get(request.id) || null, request, clients)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 dark:text-gray-400">Техника</p>

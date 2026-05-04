@@ -1253,6 +1253,7 @@ function calculateFinancialImpact(previousRental, field, newValue) {
 function buildRentalChangeRequest({
   id,
   rental,
+  equipment = [],
   linkedGanttRentalId,
   sourceRentalId,
   change,
@@ -1262,6 +1263,20 @@ function buildRentalChangeRequest({
   attachments,
 }) {
   const createdAt = nowIso();
+  const equipmentRefs = Array.isArray(rental.equipment) ? rental.equipment : [];
+  const equipmentSnapshots = equipmentRefs
+    .map(ref => {
+      const normalizedRef = normalizeText(ref);
+      return (equipment || []).find(item => [
+        item?.id,
+        item?.inventoryNumber,
+        item?.serialNumber,
+      ].some(value => normalizeText(value) === normalizedRef)) || null;
+    })
+    .filter(Boolean);
+  const primaryEquipment = equipmentSnapshots[0] || null;
+  const isDateChange = change.field === 'startDate' || change.field === 'plannedReturnDate' || change.field === 'actualReturnDate';
+  const isBackdated = isDateChange && String(change.type || '').includes('задним числом');
   return {
     id,
     entityType: 'rental',
@@ -1279,11 +1294,18 @@ function buildRentalChangeRequest({
     createdAt,
     status: RENTAL_CHANGE_REQUEST_STATUS.PENDING,
     statusLabel: buildRequestDecisionNotificationStatus(RENTAL_CHANGE_REQUEST_STATUS.PENDING),
-    type: change.type,
+    type: isDateChange ? (isBackdated ? 'backdated_rental_date_change' : 'rental_date_change') : change.type,
+    typeLabel: change.type,
     field: change.field,
     fieldLabel: change.label,
     oldValue: change.oldValue,
     newValue: change.newValue,
+    oldStartDate: change.field === 'startDate' ? change.oldValue : rental.startDate,
+    oldPlannedReturnDate: change.field === 'plannedReturnDate' ? change.oldValue : rental.plannedReturnDate,
+    oldEndDate: change.field === 'plannedReturnDate' ? change.oldValue : rental.plannedReturnDate,
+    newStartDate: change.field === 'startDate' ? change.newValue : rental.startDate,
+    newPlannedReturnDate: change.field === 'plannedReturnDate' ? change.newValue : rental.plannedReturnDate,
+    newEndDate: change.field === 'plannedReturnDate' ? change.newValue : rental.plannedReturnDate,
     oldValues: { [change.field]: change.oldValue },
     newValues: { [change.field]: change.newValue },
     changes: [{
@@ -1297,6 +1319,15 @@ function buildRentalChangeRequest({
     reason: String(reason || '').trim() || change.reason,
     systemReason: change.reason,
     comment: String(comment || '').trim(),
+    createdBy: initiator?.userId || '',
+    createdByName: initiator?.userName || 'Система',
+    rentalNumber: rental.number || rental.id,
+    clientName: rental.client || '',
+    equipmentName: primaryEquipment
+      ? [primaryEquipment.manufacturer, primaryEquipment.model].filter(Boolean).join(' ').trim()
+      : String(equipmentRefs[0] || ''),
+    equipmentInventoryNumber: primaryEquipment?.inventoryNumber || String(equipmentRefs[0] || ''),
+    equipmentSerialNumber: primaryEquipment?.serialNumber || '',
     attachments: Array.isArray(attachments) ? attachments : [],
     financialImpact: calculateFinancialImpact(rental, change.field, change.newValue),
   };

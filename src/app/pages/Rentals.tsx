@@ -774,46 +774,24 @@ export default function Rentals() {
         rentalsService.getGanttData().catch(() => [] as GanttRentalData[]),
       ]);
       const exactFreshGanttRental = freshGanttRentals.find(item => item.id === ganttRental.id);
-      const shapeFreshGanttRental = freshGanttRentals.find(item =>
-          item.equipmentInv === ganttRental.equipmentInv &&
-          item.startDate === ganttRental.startDate &&
-          item.endDate === ganttRental.endDate &&
-          (item.clientId && ganttRental.clientId ? item.clientId === ganttRental.clientId : item.client === ganttRental.client)
-        );
       const currentGanttRental = exactFreshGanttRental
         ? mergeGanttRentalContext(exactFreshGanttRental, ganttRental)
-        : shapeFreshGanttRental
-          ? mergeGanttRentalContext(shapeFreshGanttRental, ganttRental)
-          : ganttRental;
-      const strictLinkedRentals = classicRentals.filter(item => matchesClassicRentalForGantt(currentGanttRental, item, equipmentList));
-      const shapeLinkedRentals = strictLinkedRentals.length > 0
-        ? strictLinkedRentals
-        : classicRentals.filter(item => matchesClassicRentalForGanttByShape(currentGanttRental, item, equipmentList));
-      const linkedRentals = shapeLinkedRentals.length > 0
-        ? shapeLinkedRentals
-        : classicRentals.filter(item => matchesClassicRentalForGanttByClientEquipment(currentGanttRental, item, equipmentList));
-      const finalLinkedRentals = linkedRentals.length > 0
-        ? linkedRentals
-        : classicRentals.filter(item => matchesOpenClassicRentalForGanttByEquipment(currentGanttRental, item, equipmentList));
-      const clientDateLinkedRentals = finalLinkedRentals.length > 0
-        ? finalLinkedRentals
-        : classicRentals.filter(item => matchesOpenClassicRentalForGanttByClient(currentGanttRental, item, true));
-      const clientLinkedRentals = clientDateLinkedRentals.length > 0
-        ? clientDateLinkedRentals
-        : classicRentals.filter(item => matchesOpenClassicRentalForGanttByClient(currentGanttRental, item, false));
+        : ganttRental;
       const sourceRentalId = getGanttRentalSourceId(currentGanttRental);
-      if (!sourceRentalId && clientLinkedRentals.length > 1) {
+      if (!sourceRentalId) {
         showToast(
-          'Найдено несколько похожих карточек аренды, откройте карточку аренды',
+          'У Gantt-записи нет ссылки на аренду. Откройте карточку аренды и повторите изменение.',
           'error',
         );
         return false;
       }
-      const resolvedRentalId = sourceRentalId || clientLinkedRentals[0]?.id || '';
-      const targetRentalId = resolvedRentalId || currentGanttRental.id;
-      const previousRental = clientLinkedRentals.find(item => item.id === resolvedRentalId) || clientLinkedRentals[0] || null;
+      const previousRental = classicRentals.find(item => item.id === sourceRentalId) || null;
+      if (!previousRental) {
+        showToast('Аренда не найдена. Согласование изменения дат заблокировано.', 'error');
+        return false;
+      }
       const oldValues = Object.fromEntries(Object.keys(patch).map(field => {
-        if (previousRental && field in previousRental) return [field, previousRental[field as keyof Rental]];
+        if (field in previousRental) return [field, previousRental[field as keyof Rental]];
         if (field === 'plannedReturnDate') return [field, currentGanttRental.endDate];
         if (field === 'startDate') return [field, currentGanttRental.startDate];
         if (field === 'price') return [field, currentGanttRental.amount];
@@ -823,9 +801,9 @@ export default function Rentals() {
         return [field, undefined];
       }));
 
-      const saved = await rentalsService.update(targetRentalId, {
+      const saved = await rentalsService.update(previousRental.id, {
         ...patch,
-        rentalId: resolvedRentalId,
+        rentalId: previousRental.id,
         ganttRentalId: currentGanttRental.id,
         ganttSnapshot: currentGanttRental,
         entityType: 'rental',
@@ -837,10 +815,10 @@ export default function Rentals() {
           oldValue: oldValues[field],
           newValue: patch[field as keyof Rental],
         })),
-        __rentalId: resolvedRentalId,
+        __rentalId: previousRental.id,
         __linkedGanttRentalId: currentGanttRental.id,
         __ganttRentalId: currentGanttRental.id,
-        __sourceRentalId: resolvedRentalId,
+        __sourceRentalId: previousRental.id,
         __ganttSnapshot: currentGanttRental,
         __changeReason: reason,
       } as Partial<Rental> & Record<string, unknown>);
@@ -850,7 +828,7 @@ export default function Rentals() {
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
-        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail((saved as Rental).id || targetRentalId) }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail((saved as Rental).id || previousRental.id) }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
         queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
       ]);
@@ -865,8 +843,7 @@ export default function Rentals() {
       showToast(rentalApprovalErrorMessage(error), 'error');
       return false;
     }
-  }, [equipmentList, queryClient, showToast]);
-
+  }, [queryClient, showToast]);
   // Очистка только «призрачных» черновиков:
   // - 'created' с прошедшей endDate → 'closed'
   // Просроченные активные аренды НЕ меняем автоматически:

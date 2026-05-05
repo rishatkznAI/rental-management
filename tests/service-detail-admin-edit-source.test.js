@@ -16,5 +16,10 @@ test('ServiceDetail keeps repair work and part mutation controls admin-only', ()
   assert.match(serviceDetailSource, /const canManageRepairItems = isAdmin && canEditTicketFields/);
   assert.match(serviceDetailSource, /if \(!ticket \|\| !canManageRepairItems \|\| !selectedWorkId\) return/);
   assert.match(serviceDetailSource, /if \(!ticket \|\| !canManageRepairItems \|\| !selectedPartId\) return/);
-  assert.match(serviceDetailSource, /canManageRepairItems && scenarioIsRepair/);
+  assert.match(serviceDetailSource, /hasWorkScenario: canManageRepairItems && workCatalog\.length > 0/);
+  assert.match(serviceDetailSource, /hasPartScenario: canManageRepairItems && sparePartsCatalog\.length > 0/);
+  assert.match(serviceDetailSource, /\{canManageRepairItems \? \(/);
+  assert.doesNotMatch(serviceDetailSource, /canManageRepairItems && scenarioIsRepair/);
+  assert.doesNotMatch(serviceDetailSource, /scenarioIsRepair && repairResult\.worksPerformed\.length > 0/);
+  assert.doesNotMatch(serviceDetailSource, /scenarioIsRepair && repairResult\.partsUsed\.length > 0/);
 });

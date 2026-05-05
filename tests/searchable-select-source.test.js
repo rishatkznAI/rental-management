@@ -26,5 +26,6 @@ test('Service detail keeps part picker controlled by selectedPartId and admin-on
   assert.match(serviceDetailSource, /value=\{selectedPartId\}/);
   assert.match(serviceDetailSource, /setSelectedPartId\(nextId\)/);
   assert.match(serviceDetailSource, /disabled=\{!selectedPartId\}/);
-  assert.match(serviceDetailSource, /canManageRepairItems && scenarioIsRepair/);
+  assert.match(serviceDetailSource, /const canManageRepairItems = isAdmin && canEditTicketFields/);
+  assert.match(serviceDetailSource, /\{canManageRepairItems \? \(/);
 });

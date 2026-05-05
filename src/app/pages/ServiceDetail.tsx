@@ -947,8 +947,8 @@ export default function ServiceDetail() {
     },
     can,
     canEditTicketFields,
-    hasWorkScenario: canManageRepairItems && scenarioIsRepair && workCatalog.length > 0,
-    hasPartScenario: canManageRepairItems && scenarioIsRepair && sparePartsCatalog.length > 0,
+    hasWorkScenario: canManageRepairItems && workCatalog.length > 0,
+    hasPartScenario: canManageRepairItems && sparePartsCatalog.length > 0,
   });
   const scrollToRepairResult = () => {
     document.getElementById('service-repair-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1245,7 +1245,7 @@ export default function ServiceDetail() {
                         {repairResult.summary || (scenarioIsRepair ? 'Результат в текстовом виде не указан' : 'Описание выполненного обслуживания не указано')}
                       </p>
                     </div>
-                    {scenarioIsRepair && repairResult.worksPerformed.length > 0 && (
+                    {repairResult.worksPerformed.length > 0 && (
                       <div>
                         <p className="mb-2 text-xs text-gray-500 uppercase tracking-wide">Выполненные работы</p>
                         <div className="space-y-2">
@@ -1280,7 +1280,7 @@ export default function ServiceDetail() {
                         </div>
                       </div>
                     )}
-                    {scenarioIsRepair && repairResult.partsUsed.length > 0 && (
+                    {repairResult.partsUsed.length > 0 && (
                       <div>
                         <p className="mb-2 text-xs text-gray-500 uppercase tracking-wide">Использованные запчасти</p>
                         <div className="space-y-2">
@@ -1336,7 +1336,7 @@ export default function ServiceDetail() {
                     {repairFormError && (
                       <p className="text-sm text-red-500">{repairFormError}</p>
                     )}
-                    {canManageRepairItems && scenarioIsRepair ? (
+                    {canManageRepairItems ? (
                     <>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_auto]">
                       <div>

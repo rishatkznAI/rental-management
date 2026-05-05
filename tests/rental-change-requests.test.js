@@ -641,6 +641,7 @@ function createApprovalApp() {
     users: [
       { id: 'U-admin', name: 'Админ', role: 'Администратор' },
       { id: 'U-manager', name: 'Руслан', role: 'Менеджер по аренде' },
+      { id: 'U-office', name: 'Офис', role: 'Офис-менеджер' },
     ],
     equipment: [
       { id: 'EQ-1', inventoryNumber: '083', category: 'own', activeInFleet: true },
@@ -733,7 +734,9 @@ function createApprovalApp() {
       ? state.users[0]
       : token === 'manager-token'
         ? state.users[1]
-        : null;
+        : token === 'office-token'
+          ? state.users[2]
+          : null;
     if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     req.user = {
       userId: user.id,
@@ -800,6 +803,102 @@ async function request(baseUrl, method, path, token, body) {
     status: response.status,
     body: text ? JSON.parse(text) : null,
   };
+}
+
+function setupClientAWithTwoRentals(state, options = {}) {
+  const {
+    staleLegacyEquipment = false,
+    staleGanttEquipment = false,
+  } = options;
+  state.equipment = [
+    {
+      id: 'EQ-X',
+      inventoryNumber: 'INV-X',
+      manufacturer: 'Genie',
+      model: 'X',
+      serialNumber: 'SN-X',
+      category: 'own',
+      activeInFleet: true,
+    },
+    {
+      id: 'EQ-Y',
+      inventoryNumber: 'INV-Y',
+      manufacturer: 'Genie',
+      model: 'Y',
+      serialNumber: 'SN-Y',
+      category: 'own',
+      activeInFleet: true,
+    },
+  ];
+  state.rentals = [
+    {
+      id: 'R-X',
+      clientId: 'C-A',
+      client: 'Client A',
+      startDate: '2026-04-10',
+      plannedReturnDate: '2026-04-20',
+      equipmentId: 'EQ-X',
+      equipmentInv: 'INV-X',
+      inventoryNumber: 'INV-X',
+      serialNumber: 'SN-X',
+      equipment: ['INV-X'],
+      manager: 'Офис',
+      managerId: 'U-office',
+      status: 'active',
+      price: 1000,
+      discount: 0,
+      history: [],
+    },
+    {
+      id: 'R-Y',
+      clientId: 'C-A',
+      client: 'Client A',
+      startDate: '2026-05-10',
+      plannedReturnDate: '2026-05-20',
+      equipmentId: 'EQ-Y',
+      equipmentInv: 'INV-Y',
+      inventoryNumber: 'INV-Y',
+      serialNumber: 'SN-Y',
+      equipment: [staleLegacyEquipment ? 'INV-X' : 'INV-Y'],
+      manager: 'Офис',
+      managerId: 'U-office',
+      status: 'active',
+      price: 2000,
+      discount: 0,
+      history: [],
+    },
+  ];
+  state.gantt_rentals = [
+    {
+      id: 'GR-X',
+      rentalId: 'R-X',
+      clientId: 'C-A',
+      client: 'Client A',
+      startDate: '2026-04-10',
+      endDate: '2026-04-20',
+      equipmentId: 'EQ-X',
+      equipmentInv: 'INV-X',
+      inventoryNumber: 'INV-X',
+      status: 'active',
+      amount: 1000,
+      comments: [],
+    },
+    {
+      id: 'GR-Y',
+      rentalId: 'R-Y',
+      clientId: 'C-A',
+      client: 'Client A',
+      startDate: '2026-05-10',
+      endDate: '2026-05-20',
+      equipmentId: staleGanttEquipment ? 'EQ-X' : 'EQ-Y',
+      equipmentInv: staleGanttEquipment ? 'INV-X' : 'INV-Y',
+      inventoryNumber: staleGanttEquipment ? 'INV-X' : 'INV-Y',
+      status: 'active',
+      amount: 2000,
+      comments: [],
+    },
+  ];
+  state.rental_change_requests = [];
 }
 
 test('approved rental date change applies even when it originally required conflict approval', async () => {
@@ -875,6 +974,135 @@ test('rental manager cannot replace rental client directly', async () => {
     assert.equal(state.rentals[0].client, 'ЭМ-СТРОЙ');
     assert.equal(state.gantt_rentals[0].clientId, 'C-old');
     assert.deepEqual(state.rental_change_requests.map(item => item.field).sort(), ['client', 'clientId']);
+  });
+});
+
+test('office manager change request uses equipment from edited rental when client has multiple rentals', async () => {
+  const { app, state } = createApprovalApp();
+  setupClientAWithTwoRentals(state, { staleLegacyEquipment: true });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-Y', 'office-token', {
+      price: 2500,
+      rentalId: 'R-Y',
+      __linkedGanttRentalId: 'GR-Y',
+      __changeReason: 'Коррекция условий аренды Y',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.id, 'R-Y');
+    assert.equal(update.body.changeRequestSummary.pendingCount, 1);
+    assert.equal(state.rental_change_requests.length, 1);
+
+    const changeRequest = state.rental_change_requests[0];
+    assert.equal(changeRequest.requestedBy, 'U-office');
+    assert.equal(changeRequest.rentalId, 'R-Y');
+    assert.equal(changeRequest.entityId, 'R-Y');
+    assert.equal(changeRequest.linkedGanttRentalId, 'GR-Y');
+    assert.equal(changeRequest.equipmentId, 'EQ-Y');
+    assert.equal(changeRequest.equipmentInv, 'INV-Y');
+    assert.equal(changeRequest.inventoryNumber, 'INV-Y');
+    assert.equal(changeRequest.equipmentInventoryNumber, 'INV-Y');
+    assert.equal(changeRequest.equipmentSerialNumber, 'SN-Y');
+    assert.match(changeRequest.equipmentName, /Y/);
+    assert.notEqual(changeRequest.rentalId, 'R-X');
+    assert.notEqual(changeRequest.equipmentId, 'EQ-X');
+    assert.notEqual(changeRequest.equipmentInventoryNumber, 'INV-X');
+  });
+});
+
+test('office manager date-only edit keeps current rental equipment in approval request', async () => {
+  const { app, state } = createApprovalApp();
+  setupClientAWithTwoRentals(state, { staleLegacyEquipment: true });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-Y', 'office-token', {
+      startDate: '2026-05-09',
+      rentalId: 'R-Y',
+      __linkedGanttRentalId: 'GR-Y',
+      __changeReason: 'Коррекция даты аренды Y',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.changeRequestSummary.pendingCount, 1);
+    assert.equal(state.rentals.find(item => item.id === 'R-Y').startDate, '2026-05-10');
+    assert.equal(state.rentals.find(item => item.id === 'R-X').startDate, '2026-04-10');
+
+    const changeRequest = state.rental_change_requests[0];
+    assert.equal(changeRequest.field, 'startDate');
+    assert.equal(changeRequest.rentalId, 'R-Y');
+    assert.equal(changeRequest.equipmentId, 'EQ-Y');
+    assert.equal(changeRequest.equipmentInventoryNumber, 'INV-Y');
+    assert.notEqual(changeRequest.equipmentInventoryNumber, 'INV-X');
+  });
+});
+
+test('office manager client change does not borrow equipment from another rental of same client', async () => {
+  const { app, state } = createApprovalApp();
+  setupClientAWithTwoRentals(state, { staleLegacyEquipment: true });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-Y', 'office-token', {
+      clientId: 'C-B',
+      client: 'Client B',
+      rentalId: 'R-Y',
+      __linkedGanttRentalId: 'GR-Y',
+      __changeReason: 'Перенос аренды на другого клиента',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.changeRequestSummary.pendingCount, 2);
+    assert.deepEqual(state.rental_change_requests.map(item => item.field).sort(), ['client', 'clientId']);
+    for (const changeRequest of state.rental_change_requests) {
+      assert.equal(changeRequest.rentalId, 'R-Y');
+      assert.equal(changeRequest.equipmentId, 'EQ-Y');
+      assert.equal(changeRequest.equipmentInventoryNumber, 'INV-Y');
+      assert.notEqual(changeRequest.equipmentId, 'EQ-X');
+      assert.notEqual(changeRequest.equipmentInventoryNumber, 'INV-X');
+    }
+    assert.equal(state.rentals.find(item => item.id === 'R-Y').clientId, 'C-A');
+    assert.equal(state.rentals.find(item => item.id === 'R-X').clientId, 'C-A');
+  });
+});
+
+test('linked stale gantt equipment does not override rental equipment and approve syncs only edited rental', async () => {
+  const { app, state } = createApprovalApp();
+  setupClientAWithTwoRentals(state, {
+    staleLegacyEquipment: true,
+    staleGanttEquipment: true,
+  });
+
+  await withServer(app, async (baseUrl) => {
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-Y').equipmentId, 'EQ-X');
+
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-Y', 'office-token', {
+      startDate: '2026-05-09',
+      rentalId: 'R-Y',
+      __linkedGanttRentalId: 'GR-Y',
+      __changeReason: 'Коррекция даты при старых данных Gantt',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(state.rental_change_requests.length, 1);
+    const changeRequest = state.rental_change_requests[0];
+    assert.equal(changeRequest.rentalId, 'R-Y');
+    assert.equal(changeRequest.linkedGanttRentalId, 'GR-Y');
+    assert.equal(changeRequest.equipmentId, 'EQ-Y');
+    assert.equal(changeRequest.equipmentInventoryNumber, 'INV-Y');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-Y').equipmentId, 'EQ-Y');
+
+    const approved = await request(baseUrl, 'POST', `/api/rental_change_requests/${changeRequest.id}/approve`, 'admin-token', {});
+
+    assert.equal(approved.status, 200);
+    assert.equal(state.rentals.find(item => item.id === 'R-Y').startDate, '2026-05-09');
+    assert.equal(state.rentals.find(item => item.id === 'R-Y').equipmentId, 'EQ-Y');
+    assert.equal(state.rentals.find(item => item.id === 'R-X').startDate, '2026-04-10');
+    assert.equal(state.rentals.find(item => item.id === 'R-X').equipmentId, 'EQ-X');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-Y').startDate, '2026-05-09');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-Y').equipmentId, 'EQ-Y');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-Y').equipmentInv, 'INV-Y');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-X').startDate, '2026-04-10');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-X').equipmentId, 'EQ-X');
   });
 });
 

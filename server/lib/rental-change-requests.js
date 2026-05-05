@@ -1316,18 +1316,20 @@ function buildRentalChangeRequest({
   attachments,
 }) {
   const createdAt = nowIso();
-  const equipmentRefs = Array.isArray(rental.equipment) ? rental.equipment : [];
-  const equipmentSnapshots = equipmentRefs
-    .map(ref => {
-      const normalizedRef = normalizeText(ref);
-      return (equipment || []).find(item => [
-        item?.id,
-        item?.inventoryNumber,
-        item?.serialNumber,
-      ].some(value => normalizeText(value) === normalizedRef)) || null;
-    })
-    .filter(Boolean);
-  const primaryEquipment = equipmentSnapshots[0] || null;
+  const equipmentRefs = uniqueIdentifiers([
+    rental?.equipmentId,
+    rental?.equipmentInv,
+    rental?.inventoryNumber,
+    rental?.serialNumber,
+    ...(Array.isArray(rental?.equipment) ? rental.equipment : []),
+  ]);
+  const primaryEquipment = findCanonicalEquipmentForRental(rental, equipment || []);
+  const fallbackEquipmentRef = equipmentRefs[0] || '';
+  const canonicalEquipmentInv = primaryEquipment?.inventoryNumber
+    || normalizeRentalIdentifier(rental?.equipmentInv || rental?.inventoryNumber)
+    || fallbackEquipmentRef;
+  const canonicalEquipmentId = primaryEquipment?.id || normalizeRentalIdentifier(rental?.equipmentId);
+  const canonicalSerialNumber = primaryEquipment?.serialNumber || normalizeRentalIdentifier(rental?.serialNumber);
   const isDateChange = change.field === 'startDate' || change.field === 'plannedReturnDate' || change.field === 'actualReturnDate';
   const isBackdated = isDateChange && String(change.type || '').includes('задним числом');
   const isBackdatedDateChange = isBackdated || change.field === 'startDate';
@@ -1377,11 +1379,14 @@ function buildRentalChangeRequest({
     createdByName: initiator?.userName || 'Система',
     rentalNumber: rental.number || rental.id,
     clientName: rental.client || '',
+    equipmentId: canonicalEquipmentId,
+    equipmentInv: canonicalEquipmentInv,
+    inventoryNumber: canonicalEquipmentInv,
     equipmentName: primaryEquipment
       ? [primaryEquipment.manufacturer, primaryEquipment.model].filter(Boolean).join(' ').trim()
-      : String(equipmentRefs[0] || ''),
-    equipmentInventoryNumber: primaryEquipment?.inventoryNumber || String(equipmentRefs[0] || ''),
-    equipmentSerialNumber: primaryEquipment?.serialNumber || '',
+      : String(canonicalEquipmentInv || fallbackEquipmentRef),
+    equipmentInventoryNumber: canonicalEquipmentInv,
+    equipmentSerialNumber: canonicalSerialNumber,
     attachments: Array.isArray(attachments) ? attachments : [],
     financialImpact: calculateFinancialImpact(rental, change.field, change.newValue),
   };

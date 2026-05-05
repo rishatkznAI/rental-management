@@ -247,13 +247,43 @@ export default function RentalDetail() {
     return map;
   }, [equipment, inventoryCounts]);
 
-  const equipmentList = equipment.filter(e => (rental?.equipment || []).includes(e.inventoryNumber));
-  const resolvedRentalEquipment = useMemo(
-    () => (equipmentList.length > 0
-      ? equipmentList
-      : (rental?.equipment || []).map(inv => uniqueEquipmentByInventory.get(inv)).filter(Boolean) as Equipment[]),
-    [equipmentList, rental?.equipment, uniqueEquipmentByInventory],
-  );
+  const resolvedRentalEquipment = useMemo(() => {
+    if (!rental) return [];
+    const rentalEquipment = rental as Rental & {
+      equipmentId?: string;
+      equipmentInv?: string;
+      inventoryNumber?: string;
+      serialNumber?: string;
+    };
+    const normalizeRef = (value?: string | null) => String(value || '').trim();
+    const uniqueRefs = (refs: Array<string | undefined>) => Array.from(new Set(refs.map(normalizeRef).filter(Boolean)));
+    const resolveRefs = (refs: string[]) => {
+      const seen = new Set<string>();
+      return refs
+        .map(ref => equipment.find(item => (
+          item.id === ref ||
+          item.inventoryNumber === ref ||
+          item.serialNumber === ref
+        )) || null)
+        .filter((item): item is Equipment => {
+          if (!item) return false;
+          const key = item.id || item.inventoryNumber;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+    };
+    const directMatches = resolveRefs(uniqueRefs([
+      rentalEquipment.equipmentId,
+      rentalEquipment.equipmentInv,
+      rentalEquipment.inventoryNumber,
+      rentalEquipment.serialNumber,
+    ]));
+    if (directMatches.length > 0) return directMatches;
+    const legacyMatches = resolveRefs(uniqueRefs(rental.equipment || []));
+    if (legacyMatches.length > 0) return legacyMatches;
+    return (rental.equipment || []).map(inv => uniqueEquipmentByInventory.get(inv)).filter(Boolean) as Equipment[];
+  }, [equipment, rental, uniqueEquipmentByInventory]);
   const safelyMatchesResolvedEquipment = React.useCallback((entry: GanttRentalData) => {
     return resolvedRentalEquipment.some(eq => {
       if (entry.equipmentId) {

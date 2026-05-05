@@ -65,7 +65,7 @@ test('frontend verifies session before clearing auth after data endpoint 401', (
   assert.match(apiSource, /let unauthorizedSessionCheck: Promise<boolean> \| null = null/);
   assert.match(apiSource, /async function checkSessionAfterDataUnauthorized\(\): Promise<boolean>/);
   assert.match(apiSource, /fetch\(`\$\{API_BASE_URL\}\/api\/auth\/me`/);
-  assert.match(apiSource, /if \(res\.status === 401\) \{[\s\S]*dispatchUnauthorized\(\);[\s\S]*return false;/);
-  assert.match(apiSource, /if \(shouldClearTokenForUnauthorized\(path\)\) \{[\s\S]*dispatchUnauthorized\(\);[\s\S]*\} else \{[\s\S]*await checkSessionAfterDataUnauthorized\(\);/);
+  assert.match(apiSource, /if \(res\.status === 401\) \{[\s\S]*dispatchUnauthorizedForToken\(token\);[\s\S]*return false;/);
+  assert.match(apiSource, /if \(shouldClearTokenForUnauthorized\(path\)\) \{[\s\S]*dispatchUnauthorizedForToken\(token\);[\s\S]*\} else \{[\s\S]*await checkSessionAfterDataUnauthorized\(\);/);
   assert.match(apiSource, /unauthorizedSessionCheck = null/);
 });

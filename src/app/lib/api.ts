@@ -91,7 +91,10 @@ async function parseErrorResponse(res: Response) {
   return { message, details, body };
 }
 
-function dispatchUnauthorized(): void {
+function dispatchUnauthorizedForToken(tokenUsed: string | null): void {
+  if (getToken() !== tokenUsed) {
+    return;
+  }
   clearToken();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('auth:unauthorized'));
@@ -116,7 +119,7 @@ async function checkSessionAfterDataUnauthorized(): Promise<boolean> {
           credentials: 'include',
         });
         if (res.status === 401) {
-          dispatchUnauthorized();
+          dispatchUnauthorizedForToken(token);
           return false;
         }
         return true;
@@ -153,7 +156,7 @@ async function request<T>(
   if (res.status === 401) {
     const { message, details, body } = await parseErrorResponse(res);
     if (shouldClearTokenForUnauthorized(path)) {
-      dispatchUnauthorized();
+      dispatchUnauthorizedForToken(token);
     } else {
       await checkSessionAfterDataUnauthorized();
     }

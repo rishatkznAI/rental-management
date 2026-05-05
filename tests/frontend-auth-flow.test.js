@@ -30,9 +30,21 @@ test('frontend verifies persisted sessions with auth me without clearing on tran
 });
 
 test('frontend data endpoint 401 still verifies auth me before clearing the session', () => {
-  assert.match(apiSource, /if \(shouldClearTokenForUnauthorized\(path\)\) \{[\s\S]*dispatchUnauthorized\(\);[\s\S]*\} else \{[\s\S]*await checkSessionAfterDataUnauthorized\(\);/);
-  assert.match(apiSource, /if \(res\.status === 401\) \{[\s\S]*dispatchUnauthorized\(\);[\s\S]*return false;/);
+  assert.match(apiSource, /function dispatchUnauthorizedForToken\(tokenUsed: string \| null\): void/);
+  assert.match(apiSource, /if \(getToken\(\) !== tokenUsed\) \{[\s\S]*return;[\s\S]*\}/);
+  assert.match(apiSource, /if \(shouldClearTokenForUnauthorized\(path\)\) \{[\s\S]*dispatchUnauthorizedForToken\(token\);[\s\S]*\} else \{[\s\S]*await checkSessionAfterDataUnauthorized\(\);/);
+  assert.match(apiSource, /if \(res\.status === 401\) \{[\s\S]*dispatchUnauthorizedForToken\(token\);[\s\S]*return false;/);
   assert.match(apiSource, /\} catch \{[\s\S]*return true;[\s\S]*\} finally \{/);
+});
+
+test('stale auth me 401 cannot clear a newer login token', () => {
+  assert.match(apiSource, /const token = getToken\(\);[\s\S]*api\/auth\/me/);
+  assert.match(apiSource, /dispatchUnauthorizedForToken\(token\);[\s\S]*return false;/);
+  assert.match(apiSource, /const token = getToken\(\);[\s\S]*if \(res\.status === 401\)/);
+  assert.match(apiSource, /if \(shouldClearTokenForUnauthorized\(path\)\) \{[\s\S]*dispatchUnauthorizedForToken\(token\);/);
+  assert.match(authContextSource, /const restoreToken = getToken\(\);[\s\S]*if \(!restoreToken\)/);
+  assert.match(authContextSource, /refreshUser\(\)\.catch\(\(error\) => \{[\s\S]*if \(getToken\(\) !== restoreToken\) return;[\s\S]*error instanceof ApiError && error\.status === 401/);
+  assert.doesNotMatch(apiSource, /function dispatchUnauthorized\(\): void/);
 });
 
 test('authenticated users with no accessible section are not redirected to login', () => {

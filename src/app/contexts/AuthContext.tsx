@@ -124,7 +124,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // confirmed 401 clears the session; transient /me failures keep the last
   // known user so the app doesn't throw a valid session back to Login.
   useEffect(() => {
-    if (!getToken()) {
+    const restoreToken = getToken();
+    if (!restoreToken) {
       clearStoredUser();
       setState({ user: null, isAuthenticated: false, isLoading: false });
       return;
@@ -133,6 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let disposed = false;
     refreshUser().catch((error) => {
       if (disposed) return;
+      if (getToken() !== restoreToken) return;
       if (error instanceof ApiError && error.status === 401) {
         clearStoredUser();
         setState({ user: null, isAuthenticated: false, isLoading: false });

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X } from 'lucide-react';
 import { cn } from './utils';
 
@@ -29,9 +30,12 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [highlighted, setHighlighted] = useState(-1);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const mouseSelectedValueRef = useRef<string | null>(null);
+  const canUseDom = typeof window !== 'undefined' && typeof document !== 'undefined';
 
   const selected = useMemo(() => options.find(option => option.value === value), [options, value]);
   const filtered = useMemo(() => {
@@ -47,8 +51,14 @@ export function SearchableSelect({
   }, [options, query]);
 
   useEffect(() => {
+    if (!canUseDom) return;
+
     const onMouseDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !containerRef.current?.contains(target) &&
+        !dropdownRef.current?.contains(target)
+      ) {
         setOpen(false);
         setQuery('');
         setHighlighted(-1);
@@ -56,7 +66,38 @@ export function SearchableSelect({
     };
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
-  }, []);
+  }, [canUseDom]);
+
+  useEffect(() => {
+    if (!open) {
+      setDropdownStyle(null);
+      return;
+    }
+    if (!canUseDom) return;
+
+    const updateDropdownPosition = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportGap = 12;
+      const availableBelow = Math.max(160, window.innerHeight - rect.bottom - viewportGap);
+      setDropdownStyle({
+        position: 'fixed',
+        left: rect.left,
+        top: rect.bottom + 4,
+        width: rect.width,
+        maxHeight: Math.min(288, availableBelow),
+        zIndex: 1000,
+      });
+    };
+
+    updateDropdownPosition();
+    window.addEventListener('resize', updateDropdownPosition);
+    window.addEventListener('scroll', updateDropdownPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateDropdownPosition);
+      window.removeEventListener('scroll', updateDropdownPosition, true);
+    };
+  }, [canUseDom, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -138,10 +179,11 @@ export function SearchableSelect({
         )}
       </div>
 
-      {open && (
+      {open && dropdownStyle && canUseDom && createPortal(
         <div
           ref={dropdownRef}
-          className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
+          style={dropdownStyle}
+          className="overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
         >
           {filtered.length === 0 ? (
             <p className="px-3 py-4 text-center text-sm text-gray-400">{emptyText}</p>
@@ -161,6 +203,15 @@ export function SearchableSelect({
                   onMouseEnter={() => setHighlighted(index)}
                   onMouseDown={event => {
                     event.preventDefault();
+                    mouseSelectedValueRef.current = option.value;
+                    selectValue(option.value);
+                  }}
+                  onClick={event => {
+                    event.preventDefault();
+                    if (mouseSelectedValueRef.current === option.value) {
+                      mouseSelectedValueRef.current = null;
+                      return;
+                    }
                     selectValue(option.value);
                   }}
                 >
@@ -173,7 +224,8 @@ export function SearchableSelect({
               ))}
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

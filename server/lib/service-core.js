@@ -14,6 +14,7 @@ function createServiceCore(deps) {
       new: 'Новый',
       in_progress: 'В работе',
       waiting_parts: 'Ожидание запчастей',
+      needs_revision: 'На доработке',
       ready: 'Готово',
       closed: 'Закрыто',
     })[status] || status;
@@ -29,7 +30,7 @@ function createServiceCore(deps) {
   }
 
   function openServiceStatuses() {
-    return ['new', 'in_progress', 'waiting_parts'];
+    return ['new', 'in_progress', 'waiting_parts', 'needs_revision'];
   }
 
   function readServiceTickets() {
@@ -192,6 +193,124 @@ function createServiceCore(deps) {
     return updated;
   }
 
+  function latestOpenRevision(ticket) {
+    const history = Array.isArray(ticket?.revisionHistory) ? ticket.revisionHistory : [];
+    return [...history].reverse().find(item => item && !item.resolvedAt) || null;
+  }
+
+  function returnServiceTicketForRevision(ticket, payload = {}, actor = {}) {
+    if (!['ready', 'closed'].includes(String(ticket?.status || ''))) {
+      const error = new Error('Вернуть на доработку можно только готовую или закрытую заявку');
+      error.status = 400;
+      throw error;
+    }
+    const reason = String(payload.reason || '').trim();
+    if (!reason) {
+      const error = new Error('Укажите причину возврата на доработку');
+      error.status = 400;
+      throw error;
+    }
+    const mechanicId = String(ticket?.assignedMechanicId || ticket?.mechanicId || '').trim();
+    const mechanicName = String(ticket?.assignedMechanicName || ticket?.assignedTo || '').trim();
+    if (!mechanicId && !mechanicName) {
+      const error = new Error('Нельзя вернуть заявку без назначенного механика');
+      error.status = 400;
+      throw error;
+    }
+
+    const now = nowIso();
+    const checklist = Array.isArray(payload.checklist)
+      ? payload.checklist.map(item => String(item || '').trim()).filter(Boolean)
+      : [];
+    const details = String(payload.details || payload.comment || '').trim();
+    const revision = {
+      id: generateRevisionId(),
+      createdAt: now,
+      createdBy: actor.userId || actor.id || '',
+      createdByName: actor.userName || actor.name || 'Оператор',
+      assignedMechanicId: mechanicId,
+      mechanicName,
+      previousStatus: ticket.status || '',
+      reason,
+      checklist,
+      details,
+      resolvedAt: null,
+      resolvedBy: null,
+      resolvedByName: null,
+      resolutionComment: '',
+    };
+    const checklistText = checklist.length ? ` (${checklist.join(', ')})` : '';
+    const detailText = details ? `. Уточнить: ${details}` : '';
+    const updated = appendServiceLog({
+      ...ticket,
+      status: 'needs_revision',
+      revisionReason: reason,
+      revisionDetails: details,
+      revisionChecklist: checklist,
+      revisionReturnedAt: now,
+      revisionReturnedBy: revision.createdBy,
+      revisionReturnedByName: revision.createdByName,
+      revisionPreviousStatus: revision.previousStatus,
+      revisionHistory: [
+        ...(Array.isArray(ticket.revisionHistory) ? ticket.revisionHistory : []),
+        revision,
+      ],
+    }, `Заявка возвращена механику на доработку: ${reason}${checklistText}${detailText}`, revision.createdByName, 'status_change');
+    saveServiceTicket(updated);
+    syncEquipmentStatusForService(updated, 'needs_revision');
+    return updated;
+  }
+
+  function resolveServiceTicketRevision(ticket, payload = {}, actor = {}) {
+    if (ticket?.status !== 'needs_revision') {
+      const error = new Error('Повторно отправить можно только заявку в статусе «На доработке»');
+      error.status = 400;
+      throw error;
+    }
+    const now = nowIso();
+    const comment = String(payload.resolutionComment || payload.comment || '').trim();
+    const history = Array.isArray(ticket.revisionHistory) ? ticket.revisionHistory : [];
+    const latest = latestOpenRevision(ticket);
+    let resolved = false;
+    const nextHistory = history.map(item => {
+      if (resolved || item?.resolvedAt || item?.id !== latest?.id) return item;
+      resolved = true;
+      return {
+        ...item,
+        resolvedAt: now,
+        resolvedBy: actor.userId || actor.id || '',
+        resolvedByName: actor.userName || actor.name || 'Механик',
+        resolutionComment: comment,
+      };
+    });
+    if (!resolved && latest) {
+      nextHistory.push({
+        ...latest,
+        resolvedAt: now,
+        resolvedBy: actor.userId || actor.id || '',
+        resolvedByName: actor.userName || actor.name || 'Механик',
+        resolutionComment: comment,
+      });
+    }
+    const updated = appendServiceLog({
+      ...ticket,
+      status: 'ready',
+      revisionResolvedAt: now,
+      revisionResolvedBy: actor.userId || actor.id || '',
+      revisionResolvedByName: actor.userName || actor.name || 'Механик',
+      revisionResolutionComment: comment,
+      revisionHistory: nextHistory,
+      closedAt: now,
+    }, `Заявка повторно отправлена после доработки${comment ? `: ${comment}` : ''}`, actor.userName || actor.name || 'Механик', 'status_change');
+    saveServiceTicket(updated);
+    syncEquipmentStatusForService(updated, 'ready');
+    return updated;
+  }
+
+  function generateRevisionId() {
+    return `revision_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  }
+
   function getOpenTicketByEquipment(equipment) {
     const equipmentList = readData('equipment') || [];
     return readServiceTickets().find(ticket =>
@@ -214,6 +333,8 @@ function createServiceCore(deps) {
     applyServiceTicketCreationEffects,
     syncEquipmentStatusForService,
     updateServiceTicketStatus,
+    returnServiceTicketForRevision,
+    resolveServiceTicketRevision,
     getOpenTicketByEquipment,
   };
 }

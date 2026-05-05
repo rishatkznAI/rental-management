@@ -22,10 +22,10 @@ test('SearchableSelect keeps portal option clicks inside the component and selec
   assert.match(source, /onClick=\{event => \{[\s\S]*selectValue\(option\.value\);[\s\S]*\}\}/);
 });
 
-test('Service detail keeps part picker controlled by selectedPartId and admin-only', () => {
+test('Service detail keeps part picker controlled by selectedPartId and guarded by repair item permission', () => {
   assert.match(serviceDetailSource, /value=\{selectedPartId\}/);
   assert.match(serviceDetailSource, /setSelectedPartId\(nextId\)/);
   assert.match(serviceDetailSource, /disabled=\{!selectedPartId\}/);
-  assert.match(serviceDetailSource, /const canManageRepairItems = isAdmin && canEditTicketFields/);
-  assert.match(serviceDetailSource, /\{canManageRepairItems \? \(/);
+  assert.match(serviceDetailSource, /const canAddRepairItems = \(isAdmin \|\| \(ticket\.status === 'needs_revision' && isAssignedMechanic\)\) && canEditTicketFields/);
+  assert.match(serviceDetailSource, /\{canAddRepairItems \? \(/);
 });

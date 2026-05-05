@@ -331,6 +331,75 @@ test('notification diagnostics expose sent failed skipped summaries and latest e
   assert.equal(state.bot_notifications.length, 3);
 });
 
+test('service revision return notifies assigned mechanic and resolution notifies return author', async () => {
+  const { state, messages, service } = createMemoryNotifications({
+    users: [
+      { id: 'U-office', name: 'Офис', role: 'Офис-менеджер', status: 'Активен' },
+      { id: 'U-mechanic', name: 'Механик', role: 'Механик', status: 'Активен' },
+    ],
+    bot_users: {
+      '200': {
+        userId: 'U-office',
+        userName: 'Офис',
+        userRole: 'Офис-менеджер',
+        isActive: true,
+        replyTarget: { user_id: 200, chat_id: null },
+      },
+      '201': {
+        userId: 'U-mechanic',
+        userName: 'Механик',
+        userRole: 'Механик',
+        isActive: true,
+        replyTarget: { user_id: 201, chat_id: null },
+      },
+    },
+  });
+  const ticket = {
+    id: 'S-revision',
+    equipment: 'Mantall XE80N',
+    status: 'needs_revision',
+    assignedMechanicId: 'U-mechanic',
+    assignedMechanicName: 'Механик',
+    revisionReason: 'Нет фото',
+    revisionReturnedBy: 'U-office',
+    revisionReturnedByName: 'Офис',
+    revisionHistory: [{
+      id: 'revision-1',
+      createdAt: '2026-04-30T08:00:00.000Z',
+      createdBy: 'U-office',
+      createdByName: 'Офис',
+      assignedMechanicId: 'U-mechanic',
+      mechanicName: 'Механик',
+      reason: 'Нет фото',
+      checklist: ['Нет фото'],
+    }],
+  };
+
+  await service.notifyServiceRevisionReturned(ticket);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].target.user_id, 201);
+  assert.match(messages[0].text, /Заявка возвращена на доработку/);
+  assert.match(messages[0].text, /Нет фото/);
+
+  await service.notifyServiceRevisionResolved({
+    ...ticket,
+    status: 'ready',
+    revisionResolvedByName: 'Механик',
+    revisionHistory: [{
+      ...ticket.revisionHistory[0],
+      resolvedAt: '2026-04-30T09:00:00.000Z',
+      resolvedBy: 'U-mechanic',
+      resolvedByName: 'Механик',
+    }],
+  });
+
+  assert.equal(messages.length, 2);
+  assert.equal(messages[1].target.user_id, 200);
+  assert.match(messages[1].text, /Механик отправил заявку после доработки/);
+  assert.equal(state.bot_notifications.filter(item => item.status === 'sent').length, 2);
+});
+
 test('notification scheduler is disabled in NODE_ENV=test without timers', () => {
   let timeoutCalls = 0;
   let intervalCalls = 0;

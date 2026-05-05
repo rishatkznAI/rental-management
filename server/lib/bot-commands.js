@@ -45,6 +45,8 @@ function createBotHandlers(deps) {
     getMechanicReferenceByUser,
     syncEquipmentStatusForService,
     updateServiceTicketStatus,
+    returnServiceTicketForRevision,
+    resolveServiceTicketRevision,
     getOpenTicketByEquipment,
     serviceStatusLabel,
     preferCarrierAutoLogin = false,
@@ -144,6 +146,14 @@ function createBotHandlers(deps) {
   function deleteBotMessageLater(messageId, replacementMessageId = null) {
     if (!messageId || messageId === replacementMessageId) return;
     runBotSideEffect(() => deleteMessage(messageId), `Не удалось удалить сообщение ${messageId}`);
+  }
+
+  function currentRepairKeyboardFor(ticket) {
+    return currentRepairKeyboard(ticket?.id || '', { showResubmit: ticket?.status === 'needs_revision' });
+  }
+
+  function repairActionsKeyboardFor(ticket) {
+    return repairActionsKeyboard(ticket?.id || '', { showResubmit: ticket?.status === 'needs_revision' });
   }
 
   async function rememberBotMessage(phone, payload, fallbackMessageId = null) {
@@ -1228,6 +1238,7 @@ function createBotHandlers(deps) {
       'фото до',
       'фото после',
       'отчет за день',
+      'отправить повторно',
       'отчёт за день',
     ].includes(commandText)) {
       return true;
@@ -1252,6 +1263,7 @@ function createBotHandlers(deps) {
       '/фотопосле',
       '/добавитьработу',
       '/добавитьзапчасть',
+      '/отправитьповторно',
       '/вработу',
       '/ремонт',
     ].some(prefix => lower === prefix || lower.startsWith(`${prefix} `));
@@ -1576,7 +1588,7 @@ function createBotHandlers(deps) {
         '',
         'Я открыл её как текущую.',
       ].join('\n'), ['черновик', 'работы гидравлика', 'запчасти фильтр', 'готово']), {
-        attachments: currentRepairKeyboard(existingOpenTicket.id),
+        attachments: currentRepairKeyboardFor(existingOpenTicket),
         mechanicStage: resultStage,
         phone,
         callbackContext: uiContext.callbackContext,
@@ -1593,7 +1605,7 @@ function createBotHandlers(deps) {
       '',
       'Заявка открыта как текущая.',
     ].join('\n'), ['итог', 'работы гидравлика', 'запчасти фильтр', 'черновик', 'готово']), {
-      attachments: currentRepairKeyboard(ticket.id),
+      attachments: currentRepairKeyboardFor(ticket),
       mechanicStage: resultStage,
       phone,
       callbackContext: uiContext.callbackContext,
@@ -2578,7 +2590,7 @@ function createBotHandlers(deps) {
           ? `Выберите действие по заявке ${currentTicket.id}.`
           : 'Сначала откройте заявку, либо выберите действие заранее.',
         {
-          attachments: repairActionsKeyboard(currentTicket?.id || ''),
+          attachments: repairActionsKeyboardFor(currentTicket),
           mechanicStage: 'repair',
           phone,
           callbackContext,
@@ -2949,6 +2961,7 @@ function createBotHandlers(deps) {
       'menu:parts': '/запчасти',
       'menu:field_trip': '/выезд',
       'menu:ready': '/готово',
+      'menu:resubmit': '/отправитьповторно',
       'menu:waiting': '/ожидание',
     };
 
@@ -4345,7 +4358,7 @@ function createBotHandlers(deps) {
         '',
         'Теперь можно работать по заявке.',
       ].join('\n'), ['итог', 'работы поиск', 'запчасти поиск', 'черновик']), {
-        attachments: currentRepairKeyboard(ticket.id),
+        attachments: currentRepairKeyboardFor(ticket),
         mechanicStage: 'repair',
       });
     }
@@ -4366,7 +4379,7 @@ function createBotHandlers(deps) {
         });
       }
       return replyWithUi(formatCurrentRepairDraft(ticket), {
-        attachments: currentRepairKeyboard(ticket.id),
+        attachments: currentRepairKeyboardFor(ticket),
         mechanicStage: 'repair',
       });
     }
@@ -4488,6 +4501,49 @@ function createBotHandlers(deps) {
         `✅ Заявка ${updated.id} переведена в статус «Готово»`,
         'Теперь бригадир может проверить работу в программе и либо закрыть заявку, либо вернуть её на доработку.',
         'Если нужно, можно посмотреть отчет: /черновик',
+      ].join('\n'), ['черновик', 'мои заявки', 'меню']), {
+        attachments: currentRepairKeyboard(updated.id),
+        mechanicStage: 'complete',
+      });
+    }
+
+    if ((lower === '/отправитьповторно' || commandText === 'отправить повторно') && canManageRepair) {
+      const ticket = getCurrentRepair(phone);
+      if (!ticket) {
+        return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+      }
+      if (ticket.status !== 'needs_revision') {
+        return replyWithUi('ℹ️ Повторно отправить можно только заявку в статусе «На доработке».', {
+          attachments: currentRepairKeyboardFor(ticket),
+          mechanicStage: 'repair',
+        });
+      }
+      if (!canBotUserAccessServiceTicket(ticket, authUser)) {
+        return sendMessage(senderId, '⛔ Эта сервисная заявка не назначена вам.');
+      }
+      let updated;
+      try {
+        updated = typeof resolveServiceTicketRevision === 'function'
+          ? resolveServiceTicketRevision(ticket, {}, authUser)
+          : appendServiceLog({
+              ...ticket,
+              status: 'ready',
+              revisionResolvedAt: nowIso(),
+              revisionResolvedBy: authUser.userId,
+              revisionResolvedByName: authUser.userName,
+            }, 'Заявка повторно отправлена после доработки через MAX', authUser.userName, 'status_change');
+        if (!resolveServiceTicketRevision) saveServiceTicket(updated);
+        await notificationService?.notifyServiceRevisionResolved?.(updated);
+      } catch (error) {
+        return replyWithUi(`❌ ${error.message || 'Не удалось отправить заявку повторно'}`, {
+          attachments: currentRepairKeyboardFor(ticket),
+          mechanicStage: 'repair',
+        });
+      }
+      setCurrentRepair(phone, updated.id);
+      return replyWithUi(withBotMenu([
+        `✅ Заявка ${updated.id} повторно отправлена после доработки.`,
+        'Ответственный увидит её в статусе «Готово» и сможет закрыть после проверки.',
       ].join('\n'), ['черновик', 'мои заявки', 'меню']), {
         attachments: currentRepairKeyboard(updated.id),
         mechanicStage: 'complete',

@@ -65,6 +65,7 @@ export function getServiceStatusBadge(status: ServiceStatus) {
     new: { label: 'Новый', variant: 'default' },
     in_progress: { label: 'В работе', variant: 'info' },
     waiting_parts: { label: 'Ожидание запчастей', variant: 'warning' },
+    needs_revision: { label: 'На доработке', variant: 'warning' },
     ready: { label: 'Готово', variant: 'success' },
     closed: { label: 'Закрыто', variant: 'default' },
   };

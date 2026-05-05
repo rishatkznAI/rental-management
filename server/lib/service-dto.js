@@ -1,4 +1,4 @@
-const SERVICE_STATUSES = new Set(['new', 'in_progress', 'waiting_parts', 'ready', 'closed']);
+const SERVICE_STATUSES = new Set(['new', 'in_progress', 'waiting_parts', 'needs_revision', 'ready', 'closed']);
 const SERVICE_PRIORITIES = new Set(['critical', 'high', 'medium', 'low']);
 const SERVICE_KINDS = new Set(['repair', 'to', 'chto', 'pto']);
 
@@ -12,6 +12,10 @@ const STATUS_ALIASES = new Map([
   ['waiting', 'waiting_parts'],
   ['waitingparts', 'waiting_parts'],
   ['waiting_parts', 'waiting_parts'],
+  ['needsrevision', 'needs_revision'],
+  ['needs_revision', 'needs_revision'],
+  ['revision', 'needs_revision'],
+  ['rework', 'needs_revision'],
   ['done', 'closed'],
   ['complete', 'closed'],
   ['completed', 'closed'],

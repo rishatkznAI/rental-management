@@ -572,6 +572,15 @@ function isMechanicLinkedEntity(entity, user, readData) {
   return userKeys.some(left => entityKeys.some(right => sameText(left, right)));
 }
 
+function canMechanicAddRepairItemDuringRevision(collection, input, user, readData) {
+  if (!(collection === 'repair_work_items' || collection === 'repair_part_items')) return false;
+  if (!isMechanic(user)) return false;
+  const repairId = String(input?.repairId || input?.serviceId || '').trim();
+  if (!repairId) return false;
+  const ticket = (readData('service') || []).find(item => String(item?.id || '') === repairId);
+  return Boolean(ticket && ticket.status === 'needs_revision' && isAssignedMechanic(ticket, user, readData));
+}
+
 function matchesScopedRental(entity, user, readData) {
   const scopedRentals = getScopedRentals(user, readData);
   const scopedIds = compact(scopedRentals.map(item => item.id));
@@ -881,13 +890,20 @@ function assertCanCreateCollection(collection, user, input = {}, readData) {
   if (collection === 'app_settings' && !isAdmin(user)) {
     throw forbidden();
   }
-  if ((collection === 'repair_work_items' || collection === 'repair_part_items') && !isAdmin(user)) {
+  if (
+    (collection === 'repair_work_items' || collection === 'repair_part_items') &&
+    !isAdmin(user) &&
+    !canMechanicAddRepairItemDuringRevision(collection, input, user, readData)
+  ) {
     throw forbidden(REPAIR_ITEMS_ADMIN_MESSAGE);
   }
   if (!isAdmin(user) && !NON_ADMIN_CREATE_FIELDS[collection]) {
     throw forbidden();
   }
-  if (['repair_work_items', 'repair_part_items', 'service_field_trips', 'warranty_claims'].includes(collection)) {
+  if (
+    ['repair_work_items', 'repair_part_items', 'service_field_trips', 'warranty_claims'].includes(collection) &&
+    !canMechanicAddRepairItemDuringRevision(collection, input, user, readData)
+  ) {
     if (!canMutateEntity(collection, input, user, readData)) {
       throw forbidden();
     }
@@ -958,6 +974,7 @@ function createAccessControl({ readData }) {
     assertCanReadCollection,
     assertCanUpdateEntity: (collection, entity, user) => assertCanUpdateEntity(collection, entity, user, readData),
     canAccessEntity: (collection, entity, user) => canAccessEntity(collection, entity, user, readData),
+    canMechanicAddRepairItemDuringRevision: (collection, input, user) => canMechanicAddRepairItemDuringRevision(collection, input, user, readData),
     canMutateEntity: (collection, entity, user) => canMutateEntity(collection, entity, user, readData),
     filterCollectionByScope: (collection, list, user) => filterCollectionByScope(collection, list, user, readData),
     getScopedEquipment: user => getScopedEquipment(user, readData),

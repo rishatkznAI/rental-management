@@ -1,4 +1,5 @@
 function registerServiceRoutes(router, deps) {
+  const { isMechanicRole, normalizeRole } = require('../lib/role-groups');
   const {
     SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
     assertRepairItemsAdmin,
@@ -21,6 +22,9 @@ function registerServiceRoutes(router, deps) {
     accessControl,
     auditLog,
     serviceAuditLog,
+    returnServiceTicketForRevision,
+    resolveServiceTicketRevision,
+    botNotifications,
   } = deps;
   const requiredAccessMethods = ['filterCollectionByScope', 'assertCanUpdateEntity', 'canAccessEntity'];
   const missingAccessMethods = !accessControl
@@ -72,6 +76,34 @@ function registerServiceRoutes(router, deps) {
       throw new Error(`${fieldLabel} должно быть числом не меньше 0`);
     }
     return numeric;
+  }
+
+  function currentRole(user) {
+    return normalizeRole(user?.userRole || user?.role || '');
+  }
+
+  function canReturnForRevision(req, ticket) {
+    const role = currentRole(req.user);
+    if (role === 'Администратор' || role === 'Офис-менеджер') return true;
+    if (role === 'Старший стационарный механик') {
+      return accessControl.canAccessEntity('service', ticket, req.user);
+    }
+    return false;
+  }
+
+  function canResolveRevision(req, ticket) {
+    const role = currentRole(req.user);
+    if (role === 'Администратор') return true;
+    return isMechanicRole(role) && accessControl.canAccessEntity('service', ticket, req.user);
+  }
+
+  function requireRevisionPayload(req) {
+    const reason = String(req.body?.reason || '').trim();
+    const details = String(req.body?.details || req.body?.comment || '').trim();
+    const checklist = Array.isArray(req.body?.checklist)
+      ? req.body.checklist.map(item => String(item || '').trim()).filter(Boolean)
+      : [];
+    return { reason, details, checklist };
   }
 
   router.get('/service_works/active', requireAuth, requireRead('service'), (req, res) => {
@@ -168,15 +200,78 @@ function registerServiceRoutes(router, deps) {
     return res.json(rows);
   });
 
+  router.post('/service/:id/revision', requireAuth, (req, res) => {
+    const ticket = (readData('service') || []).find(item => item.id === req.params.id);
+    if (!ticket) return res.status(404).json({ ok: false, error: 'Заявка на ремонт не найдена' });
+    if (!accessControl.canAccessEntity('service', ticket, req.user)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    if (!canReturnForRevision(req, ticket)) {
+      return res.status(403).json({ ok: false, error: 'Вернуть заявку на доработку может только администратор, офис-менеджер или старший механик' });
+    }
+    try {
+      const payload = requireRevisionPayload(req);
+      const updated = returnServiceTicketForRevision
+        ? returnServiceTicketForRevision(ticket, payload, req.user)
+        : {
+            ...ticket,
+            status: 'needs_revision',
+            revisionReason: payload.reason,
+            revisionDetails: payload.details,
+            revisionChecklist: payload.checklist,
+          };
+      auditLog?.(req, {
+        action: 'service.revision.return',
+        entityType: 'service',
+        entityId: ticket.id,
+        before: { status: ticket.status },
+        after: { status: updated.status, reason: payload.reason, checklist: payload.checklist },
+      });
+      botNotifications?.notifyServiceRevisionReturned?.(updated);
+      return res.json(accessControl.sanitizeEntityForRead('service', updated, req.user));
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error.message });
+    }
+  });
+
+  router.post('/service/:id/revision/resolve', requireAuth, (req, res) => {
+    const ticket = (readData('service') || []).find(item => item.id === req.params.id);
+    if (!ticket) return res.status(404).json({ ok: false, error: 'Заявка на ремонт не найдена' });
+    if (!accessControl.canAccessEntity('service', ticket, req.user)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    if (!canResolveRevision(req, ticket)) {
+      return res.status(403).json({ ok: false, error: 'Отправить заявку повторно может только назначенный механик или администратор' });
+    }
+    try {
+      const updated = resolveServiceTicketRevision
+        ? resolveServiceTicketRevision(ticket, {
+            resolutionComment: String(req.body?.resolutionComment || req.body?.comment || '').trim(),
+          }, req.user)
+        : { ...ticket, status: 'ready' };
+      auditLog?.(req, {
+        action: 'service.revision.resolve',
+        entityType: 'service',
+        entityId: ticket.id,
+        before: { status: ticket.status },
+        after: { status: updated.status },
+      });
+      botNotifications?.notifyServiceRevisionResolved?.(updated);
+      return res.json(accessControl.sanitizeEntityForRead('service', updated, req.user));
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error.message });
+    }
+  });
+
   router.post('/repair_work_items', requireAuth, (req, res) => {
     try {
-      assertRepairItemsAdmin(req.user);
       const { repairId, workId } = req.body || {};
       requireNonEmptyString(repairId, 'Заявка');
       requireNonEmptyString(workId, 'Работа');
       const quantity = parseRequiredPositiveNumber(req.body?.quantity, 'Количество работы');
       const ticket = findServiceTicketOr404(repairId, res);
       if (!ticket) return;
+      assertRepairItemsAdmin(req.user, { mode: 'create', ticket });
       try {
         accessControl.assertCanUpdateEntity('service', ticket, req.user);
       } catch (error) {
@@ -290,13 +385,13 @@ function registerServiceRoutes(router, deps) {
 
   router.post('/repair_part_items', requireAuth, (req, res) => {
     try {
-      assertRepairItemsAdmin(req.user);
       const { repairId, partId } = req.body || {};
       requireNonEmptyString(repairId, 'Заявка');
       requireNonEmptyString(partId, 'Запчасть');
       const quantity = parseRequiredPositiveNumber(req.body?.quantity, 'Количество запчастей');
       const ticket = findServiceTicketOr404(repairId, res);
       if (!ticket) return;
+      assertRepairItemsAdmin(req.user, { mode: 'create', ticket });
       try {
         accessControl.assertCanUpdateEntity('service', ticket, req.user);
       } catch (error) {

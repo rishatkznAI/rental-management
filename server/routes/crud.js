@@ -600,7 +600,7 @@ function registerCrudRoutes(deps) {
     router.post(`/${collection}`, ...writeMiddlewares(collection), (req, res) => {
       if (isRepairItemCollection(collection)) {
         try {
-          assertRepairItemsAdmin(req.user);
+          assertRepairItemsAdmin(req.user, { mode: 'create', input: req.body, readData });
         } catch (error) {
           return sendRepairItemsAdminError(res, error);
         }

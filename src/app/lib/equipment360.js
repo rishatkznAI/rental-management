@@ -1,6 +1,6 @@
 const OPEN_RENTAL_STATUSES = new Set(['active', 'created', 'confirmed', 'return_planned']);
 const CLOSED_RENTAL_STATUSES = new Set(['returned', 'closed', 'cancelled']);
-const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'ready']);
+const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'needs_revision', 'ready']);
 const IGNORED_PAYMENT_STATUSES = new Set(['cancelled', 'canceled', 'void', 'error', 'failed', 'closed', 'deleted', 'reversed']);
 const IGNORED_FINANCE_RENTAL_STATUSES = new Set(['created', 'cancelled', 'canceled', 'deleted', 'archived']);
 
@@ -74,6 +74,7 @@ function serviceStatusLabel(status) {
   if (value === 'assigned') return 'Назначена';
   if (value === 'in_progress') return 'В работе';
   if (value === 'waiting_parts') return 'Ожидание запчастей';
+  if (value === 'needs_revision') return 'На доработке';
   if (value === 'ready') return 'Готово';
   if (value === 'closed') return 'Закрыта';
   return text(status) || 'Без статуса';

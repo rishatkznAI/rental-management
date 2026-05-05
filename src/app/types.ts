@@ -429,7 +429,7 @@ export interface RentalChangeRequest {
 }
 
 export type ServicePriority = 'low' | 'medium' | 'high' | 'critical';
-export type ServiceStatus = 'new' | 'in_progress' | 'waiting_parts' | 'ready' | 'closed';
+export type ServiceStatus = 'new' | 'in_progress' | 'waiting_parts' | 'needs_revision' | 'ready' | 'closed';
 export type ServiceScenario = 'repair' | 'to' | 'chto' | 'pto';
 export type WarrantyClaimStatus =
   | 'draft'
@@ -565,6 +565,23 @@ export interface ServiceCloseChecklist {
   summaryFilled: boolean;
 }
 
+export interface ServiceRevisionHistoryEntry {
+  id: string;
+  createdAt: string;
+  createdBy?: string;
+  createdByName?: string;
+  assignedMechanicId?: string;
+  mechanicName?: string;
+  previousStatus?: ServiceStatus | string;
+  reason: string;
+  checklist?: string[];
+  details?: string;
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
+  resolvedByName?: string | null;
+  resolutionComment?: string;
+}
+
 export type ServiceWorkCatalogItem = ServiceWork;
 export type SparePartCatalogItem = SparePart;
 
@@ -597,6 +614,18 @@ export interface ServiceTicket {
   resultData?: ServiceRepairResult;
   repairPhotos?: ServiceRepairPhotos;
   closeChecklist?: ServiceCloseChecklist;
+  revisionHistory?: ServiceRevisionHistoryEntry[];
+  revisionReason?: string;
+  revisionDetails?: string;
+  revisionChecklist?: string[];
+  revisionReturnedAt?: string;
+  revisionReturnedBy?: string;
+  revisionReturnedByName?: string;
+  revisionPreviousStatus?: ServiceStatus | string;
+  revisionResolvedAt?: string;
+  revisionResolvedBy?: string;
+  revisionResolvedByName?: string;
+  revisionResolutionComment?: string;
   workLog: ServiceWorkLogEntry[];
   parts: ServicePartUsage[];
   createdAt: string;

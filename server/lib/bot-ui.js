@@ -80,13 +80,16 @@ function createBotUi() {
     ]);
   }
 
-  function currentRepairKeyboard(ticketId = '') {
-    return keyboard([
+  function currentRepairKeyboard(ticketId = '', options = {}) {
+    const rows = [
       [button('Текущий отчёт', 'menu:draft'), button('Действия по заявке', 'menu:repair_actions')],
-      [button('Завершить ремонт', 'menu:ready')],
+      options.showResubmit
+        ? [button('Завершить ремонт', 'menu:ready'), button('Отправить повторно', 'menu:resubmit')]
+        : [button('Завершить ремонт', 'menu:ready')],
       [button('Главное меню', 'menu:main')],
       [button('Мои заявки', 'menu:myrepairs'), button('Отчёт за день', 'menu:day_report')],
-    ]);
+    ];
+    return keyboard(rows);
   }
 
   function operationsKeyboard() {
@@ -96,8 +99,8 @@ function createBotUi() {
     ]);
   }
 
-  function repairActionsKeyboard(ticketId = '') {
-    return keyboard([
+  function repairActionsKeyboard(ticketId = '', options = {}) {
+    const rows = [
       [button('Комментарий по результату', 'menu:summary'), button('Текущий отчёт', 'menu:draft')],
       [button('Добавить работы', 'menu:works'), button('Добавить запчасти', 'menu:parts')],
       [button('Выезд', 'menu:field_trip')],
@@ -105,7 +108,11 @@ function createBotUi() {
       [button('Ожидание запчастей', 'menu:waiting'), button('Завершить ремонт', 'menu:ready')],
       [button('К заявкам', 'menu:myrepairs')],
       [button('Главное меню', 'menu:main')],
-    ]);
+    ];
+    if (options.showResubmit) {
+      rows.splice(5, 0, [button('Отправить повторно', 'menu:resubmit')]);
+    }
+    return keyboard(rows);
   }
 
   const REPAIR_REASON_TEMPLATES = [

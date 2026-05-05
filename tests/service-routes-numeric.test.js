@@ -8,6 +8,7 @@ const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
+const { createServiceCore } = require('../server/lib/service-core.js');
 const { registerServiceRoutes } = require('../server/routes/service.js');
 
 function safeNonNegativeNumber(value, fallback = 0) {
@@ -54,6 +55,12 @@ function createServiceApp(state = createState(), user = { userId: 'U-admin', use
   const readData = name => state[name] || [];
   const writeData = (name, value) => { state[name] = value; };
   const accessControl = createAccessControl({ readData });
+  const serviceCore = createServiceCore({
+    readData,
+    writeData,
+    nowIso: () => '2026-04-30T10:00:00.000Z',
+    equipmentMatchesServiceTicket: (ticket, equipment) => ticket.equipmentId && ticket.equipmentId === equipment.id,
+  });
   const serviceAuditLog = createServiceAuditLog({
     readData,
     writeData,
@@ -93,6 +100,8 @@ function createServiceApp(state = createState(), user = { userId: 'U-admin', use
     accessControl,
     auditLog: () => {},
     serviceAuditLog,
+    returnServiceTicketForRevision: serviceCore.returnServiceTicketForRevision,
+    resolveServiceTicketRevision: serviceCore.resolveServiceTicketRevision,
   });
 
   app.use('/api', router);
@@ -234,6 +243,157 @@ test('mechanic can read repair items but cannot mutate them', async () => {
     assert.equal(remove.body.error, 'Недостаточно прав. Работы и запчасти может изменять только администратор');
     assert.equal(state.repair_work_items.length, 1);
     assert.equal(state.service_audit_log.length, 0);
+  });
+});
+
+test('admin returns service ticket for revision and assigned mechanic resolves it', async () => {
+  const { app, state } = createServiceApp({
+    ...createState(),
+    service: [{
+      id: 'S-1',
+      assignedMechanicId: 'M-1',
+      assignedMechanicName: 'Петров',
+      status: 'closed',
+      equipmentId: 'EQ-1',
+      reason: 'ТО',
+      workLog: [],
+      revisionHistory: [],
+    }],
+  });
+
+  await withServer(app, async baseUrl => {
+    const returned = await request(baseUrl, 'POST', '/api/service/S-1/revision', {
+      reason: 'Не указан фильтр',
+      details: 'Выбрать запчасть из справочника',
+      checklist: ['Не указаны запчасти'],
+    });
+    assert.equal(returned.status, 200);
+    assert.equal(returned.body.status, 'needs_revision');
+    assert.equal(returned.body.revisionHistory.length, 1);
+    assert.equal(returned.body.revisionHistory[0].previousStatus, 'closed');
+    assert.equal(state.service[0].status, 'needs_revision');
+
+    const mechanicApp = createServiceApp(state, { userId: 'U-mechanic', userName: 'Петров', userRole: 'Механик' }).app;
+    await withServer(mechanicApp, async mechanicBaseUrl => {
+      const resolved = await request(mechanicBaseUrl, 'POST', '/api/service/S-1/revision/resolve', {
+        resolutionComment: 'Фильтр добавлен',
+      });
+      assert.equal(resolved.status, 200);
+      assert.equal(resolved.body.status, 'ready');
+      assert.equal(resolved.body.revisionHistory[0].resolvedByName, 'Петров');
+      assert.equal(resolved.body.revisionHistory[0].resolutionComment, 'Фильтр добавлен');
+    });
+  });
+});
+
+test('revision return validates role, reason and assigned mechanic', async () => {
+  const notReady = createServiceApp();
+  await withServer(notReady.app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service/S-1/revision', { reason: 'Нет фото' });
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /готовую или закрытую/);
+  });
+
+  const noReason = createServiceApp();
+  noReason.state.service[0].status = 'ready';
+  await withServer(noReason.app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service/S-1/revision', { reason: ' ' });
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /причину/);
+  });
+
+  const noMechanic = createServiceApp({
+    ...createState(),
+    service: [{ id: 'S-1', status: 'ready', equipmentId: 'EQ-1', reason: 'ТО', workLog: [] }],
+  });
+  await withServer(noMechanic.app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service/S-1/revision', { reason: 'Нет фото' });
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /назначенного механика/);
+  });
+
+  const mechanic = createServiceApp(createState(), { userId: 'U-mechanic', userName: 'Петров', userRole: 'Механик' });
+  mechanic.state.service[0].status = 'ready';
+  await withServer(mechanic.app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service/S-1/revision', { reason: 'Нет фото' });
+    assert.equal(response.status, 403);
+  });
+
+  const repeated = createServiceApp({
+    ...createState(),
+    service: [{
+      id: 'S-1',
+      assignedMechanicId: 'M-1',
+      assignedMechanicName: 'Петров',
+      status: 'needs_revision',
+      equipmentId: 'EQ-1',
+      reason: 'ТО',
+      workLog: [],
+      revisionHistory: [{ id: 'revision-old', reason: 'Нет фото', resolvedAt: null }],
+    }],
+  });
+  await withServer(repeated.app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service/S-1/revision', { reason: 'Нет фильтра' });
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /готовую или закрытую/);
+    assert.equal(repeated.state.service[0].revisionHistory.length, 1);
+  });
+});
+
+test('revision resolve is limited to assigned mechanic or admin', async () => {
+  const state = {
+    ...createState(),
+    service: [{
+      id: 'S-1',
+      assignedMechanicId: 'M-1',
+      assignedMechanicName: 'Петров',
+      status: 'needs_revision',
+      equipmentId: 'EQ-1',
+      reason: 'ТО',
+      workLog: [],
+      revisionHistory: [{ id: 'revision-1', reason: 'Нет фото', resolvedAt: null }],
+    }],
+  };
+
+  const office = createServiceApp(state, { userId: 'U-office', userName: 'Офис', userRole: 'Офис-менеджер' });
+  await withServer(office.app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service/S-1/revision/resolve', {});
+    assert.equal(response.status, 403);
+    assert.equal(state.service[0].status, 'needs_revision');
+  });
+
+  const otherMechanic = createServiceApp(state, { userId: 'U-other', userName: 'Иванов', userRole: 'Механик' });
+  await withServer(otherMechanic.app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service/S-1/revision/resolve', {});
+    assert.equal(response.status, 403);
+    assert.equal(state.service[0].status, 'needs_revision');
+  });
+
+  const admin = createServiceApp(state, { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' });
+  await withServer(admin.app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service/S-1/revision/resolve', {});
+    assert.equal(response.status, 200);
+    assert.equal(response.body.status, 'ready');
+    assert.equal(response.body.revisionHistory[0].resolvedByName, 'Админ');
+  });
+});
+
+test('assigned mechanic can add but not delete repair items only while ticket needs revision', async () => {
+  const state = {
+    ...createState(),
+    service: [{ id: 'S-1', assignedMechanicId: 'M-1', assignedMechanicName: 'Петров', status: 'needs_revision', equipmentId: 'EQ-1', reason: 'ТО', workLog: [] }],
+  };
+  const { app } = createServiceApp(state, { userId: 'U-mechanic', userName: 'Петров', userRole: 'Механик' });
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/repair_part_items', { repairId: 'S-1', partId: 'SP-1', quantity: 1 });
+    assert.equal(created.status, 201);
+    assert.equal(state.repair_part_items.length, 1);
+    assert.equal(state.service_audit_log.at(-1).action, 'part_added');
+
+    const remove = await request(baseUrl, 'DELETE', `/api/repair_part_items/${created.body.id}`);
+    assert.equal(remove.status, 403);
+    assert.equal(state.repair_part_items.length, 1);
   });
 });
 

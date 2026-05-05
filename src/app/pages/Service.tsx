@@ -40,12 +40,13 @@ const SERVICE_STATUS_ORDER: Record<ServiceTicket['status'], number> = {
   new: 0,
   in_progress: 1,
   waiting_parts: 2,
-  ready: 3,
-  closed: 4,
+  needs_revision: 3,
+  ready: 4,
+  closed: 5,
 };
 
 const SERVICE_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
-const SERVICE_STATUSES = ['new', 'in_progress', 'waiting_parts', 'ready', 'closed'] as const;
+const SERVICE_STATUSES = ['new', 'in_progress', 'waiting_parts', 'needs_revision', 'ready', 'closed'] as const;
 
 const WORKFLOW_FILTER_OPTIONS = [
   { value: 'all', label: 'Все' },
@@ -111,7 +112,7 @@ function serviceFilterReasons(
     scenarioFilter: string;
     mechanicFilter: string;
     workflowFilter: ServiceWorkflowFilter;
-    preset: 'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'maintenance';
+    preset: 'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'needs_revision' | 'maintenance';
     effectiveDateFrom: string;
     effectiveDateTo: string;
   },
@@ -135,6 +136,7 @@ function serviceFilterReasons(
     || (filters.preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
     || (filters.preset === 'urgent' && ['high', 'critical'].includes(ticketPriority))
     || (filters.preset === 'waiting_parts' && ticketStatus === 'waiting_parts')
+    || (filters.preset === 'needs_revision' && ticketStatus === 'needs_revision')
     || (filters.preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
   if (!matchesPreset) reasons.push(`preset:${filters.preset}`);
   return reasons;
@@ -182,6 +184,7 @@ function serviceQueueGroupTone(group: string) {
   if (group === 'critical') return 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-200';
   if (group === 'high') return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200';
   if (group === 'waiting_parts') return 'border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-200';
+  if (group === 'revision') return 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-200';
   if (group === 'unassigned') return 'border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-200';
   if (group === 'long_running') return 'border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-200';
   return 'border-gray-200 bg-gray-50 text-gray-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-gray-300';
@@ -327,6 +330,7 @@ function ServiceQueueTab({
               <SelectItem value="new">Новая</SelectItem>
               <SelectItem value="in_progress">В работе</SelectItem>
               <SelectItem value="waiting_parts">Ожидание запчастей</SelectItem>
+              <SelectItem value="needs_revision">На доработке</SelectItem>
               <SelectItem value="ready">Готово</SelectItem>
             </SelectContent>
           </Select>
@@ -459,7 +463,7 @@ export default function Service() {
   const [scenarioFilter, setScenarioFilter] = React.useState<string>('all');
   const [mechanicFilter, setMechanicFilter] = React.useState<string>('all');
   const [workflowFilter, setWorkflowFilter] = React.useState<ServiceWorkflowFilter>('all');
-  const [preset, setPreset] = React.useState<'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'maintenance'>('all');
+  const [preset, setPreset] = React.useState<'all' | 'unassigned' | 'urgent' | 'waiting_parts' | 'needs_revision' | 'maintenance'>('all');
   const [datePreset, setDatePreset] = React.useState<'all' | 'today' | 'last7' | 'month'>('all');
   const [dateFrom, setDateFrom] = React.useState('');
   const [dateTo, setDateTo] = React.useState('');
@@ -523,6 +527,7 @@ export default function Service() {
   const metrics = React.useMemo(() => ({
     total: activeTickets.length,
     high: activeTickets.filter(ticket => ['critical', 'high'].includes(normalizeServicePriority(ticket.priority))).length,
+    revision: activeTickets.filter(ticket => normalizeServiceStatus(ticket.status) === 'needs_revision').length,
     medium: activeTickets.filter(ticket => normalizeServicePriority(ticket.priority) === 'medium').length,
     low: activeTickets.filter(ticket => normalizeServicePriority(ticket.priority) === 'low').length,
   }), [activeTickets]);
@@ -568,6 +573,7 @@ export default function Service() {
           || (preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
           || (preset === 'urgent' && ['high', 'critical'].includes(ticketPriority))
           || (preset === 'waiting_parts' && ticketStatus === 'waiting_parts')
+          || (preset === 'needs_revision' && ticketStatus === 'needs_revision')
           || (preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
 
         return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesMechanic && matchesWorkflow && matchesDate && matchesPreset;
@@ -605,6 +611,7 @@ export default function Service() {
     { value: 'unassigned', label: 'Без механика' },
     { value: 'urgent', label: 'Срочные' },
     { value: 'waiting_parts', label: 'Ждут запчасти' },
+    { value: 'needs_revision', label: 'На доработке' },
     { value: 'maintenance', label: 'ТО / ЧТО / ПТО' },
   ] as const;
 
@@ -765,6 +772,7 @@ export default function Service() {
                   <SelectItem value="new">Новый</SelectItem>
                   <SelectItem value="in_progress">В работе</SelectItem>
                   <SelectItem value="waiting_parts">Ожидание запчастей</SelectItem>
+                  <SelectItem value="needs_revision">На доработке</SelectItem>
                   <SelectItem value="ready">Готово</SelectItem>
                   <SelectItem value="closed">Закрыто</SelectItem>
                 </SelectContent>
@@ -828,9 +836,10 @@ export default function Service() {
         </TabsList>
 
         <TabsContent value="tickets" className="space-y-5">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <ServiceMetricCard title="Всего заявок" value={metrics.total} caption="Активных сейчас" tone="lime" />
             <ServiceMetricCard title="Высокий приоритет" value={metrics.high} caption="Требуют внимания" tone="red" />
+            <ServiceMetricCard title="На доработке" value={metrics.revision} caption="Нужно уточнить" tone="amber" />
             <ServiceMetricCard title="Средний приоритет" value={metrics.medium} caption="SLA 24ч" tone="amber" />
             <ServiceMetricCard title="Низкий приоритет" value={metrics.low} caption="В очереди" tone="neutral" />
           </div>
@@ -910,6 +919,11 @@ export default function Service() {
                     <div className="flex min-w-0 flex-wrap items-center gap-2 md:justify-end">
                       {getServicePriorityBadge(normalizeServicePriority(ticket.priority))}
                       {getServiceStatusBadge(normalizeServiceStatus(ticket.status))}
+                      {normalizeServiceStatus(ticket.status) === 'needs_revision' && (
+                        <span className="max-w-[220px] truncate rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">
+                          {ticket.revisionReason || 'Требует уточнения'}
+                        </span>
+                      )}
                       <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/8 dark:text-gray-300">
                         {getServiceScenarioLabel(ticket)}
                       </span>

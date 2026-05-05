@@ -1253,6 +1253,8 @@ const {
   applyServiceTicketCreationEffects,
   syncEquipmentStatusForService,
   updateServiceTicketStatus,
+  returnServiceTicketForRevision,
+  resolveServiceTicketRevision,
   getOpenTicketByEquipment,
 } = serviceCore;
 
@@ -1307,6 +1309,9 @@ registerServiceRoutes(apiRouter, {
   accessControl,
   auditLog,
   serviceAuditLog,
+  returnServiceTicketForRevision,
+  resolveServiceTicketRevision,
+  botNotifications,
 });
 
 registerBotApiRoutes(apiRouter, {
@@ -1352,6 +1357,8 @@ const {
   getMechanicReferenceByUser,
   syncEquipmentStatusForService,
   updateServiceTicketStatus,
+  returnServiceTicketForRevision,
+  resolveServiceTicketRevision,
   getOpenTicketByEquipment,
   serviceStatusLabel,
   accessControl,
@@ -1382,6 +1389,8 @@ const managerBotHandlers = createBotHandlers({
   getMechanicReferenceByUser,
   syncEquipmentStatusForService,
   updateServiceTicketStatus,
+  returnServiceTicketForRevision,
+  resolveServiceTicketRevision,
   getOpenTicketByEquipment,
   serviceStatusLabel,
   accessControl,
@@ -1412,6 +1421,8 @@ const deliveryBotHandlers = createBotHandlers({
   getMechanicReferenceByUser,
   syncEquipmentStatusForService,
   updateServiceTicketStatus,
+  returnServiceTicketForRevision,
+  resolveServiceTicketRevision,
   getOpenTicketByEquipment,
   serviceStatusLabel,
   preferCarrierAutoLogin: true,

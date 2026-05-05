@@ -103,6 +103,13 @@ function roleIsManager(role) {
   return normalizeRole(role) === 'Менеджер по аренде';
 }
 
+function roleIsServiceLead(role) {
+  const normalized = normalizeRole(role);
+  return normalized === 'Администратор' ||
+    normalized === 'Офис-менеджер' ||
+    normalized === 'Старший стационарный механик';
+}
+
 function isRentalClosed(rental) {
   return RENTAL_CLOSED_STATUSES.has(normalizeStatus(rental?.status));
 }
@@ -429,6 +436,8 @@ function createBotNotificationService(deps = {}) {
   }
 
   function getRecipientsForEvent(event) {
+    const directRecipients = getDirectRecipientsForEvent(event);
+    if (directRecipients.length) return directRecipients;
     return Object.entries(getBotUsers())
       .map(([phone, botUser]) => {
         const role = getBotUserRole(botUser);
@@ -445,6 +454,31 @@ function createBotNotificationService(deps = {}) {
         };
       })
       .filter(Boolean);
+  }
+
+  function getDirectRecipientsForEvent(event) {
+    const refs = compact(event?.targetUserRefs || []);
+    if (!refs.length) return [];
+    return uniqBy(Object.entries(getBotUsers())
+      .map(([phone, botUser]) => {
+        const userRefs = compact([
+          phone,
+          botUser?.userId,
+          botUser?.id,
+          botUser?.email,
+          botUser?.userName,
+          botUser?.name,
+        ]);
+        if (!refs.some(ref => userRefs.some(userRef => sameText(ref, userRef)))) return null;
+        return {
+          phone,
+          botUser,
+          role: getBotUserRole(botUser),
+          recipientId: getRecipientId(phone, botUser),
+          userName: getBotUserName(botUser),
+        };
+      })
+      .filter(Boolean), recipient => recipient.recipientId);
   }
 
   function eventKeyForRecipient(event, recipient) {
@@ -688,6 +722,91 @@ function createBotNotificationService(deps = {}) {
     };
   }
 
+  function getLatestRevision(ticket) {
+    const history = Array.isArray(ticket?.revisionHistory) ? ticket.revisionHistory : [];
+    return history[history.length - 1] || null;
+  }
+
+  function buildServiceRevisionMessage(kind, ticket) {
+    const revision = getLatestRevision(ticket);
+    const title = kind === 'service_revision_resolved'
+      ? '✅ Механик отправил заявку после доработки'
+      : '🔧 Заявка возвращена на доработку';
+    const reason = ticket?.revisionReason || revision?.reason || '';
+    const details = ticket?.revisionDetails || revision?.details || '';
+    const checklist = Array.isArray(ticket?.revisionChecklist) && ticket.revisionChecklist.length
+      ? ticket.revisionChecklist
+      : (Array.isArray(revision?.checklist) ? revision.checklist : []);
+    const returnedBy = ticket?.revisionReturnedByName || revision?.createdByName || '';
+    const resolvedBy = ticket?.revisionResolvedByName || revision?.resolvedByName || '';
+    return [
+      title,
+      '',
+      `Заявка: №${ticket?.number || ticket?.id || 'не указана'}`,
+      `Техника: ${formatEquipment(ticket || {})}`,
+      reason ? `Причина: ${reason}` : null,
+      details ? `Уточнить: ${details}` : null,
+      checklist.length ? `Пункты: ${checklist.join(', ')}` : null,
+      kind === 'service_revision_resolved'
+        ? `Отправил: ${resolvedBy || 'механик'}`
+        : `Вернул: ${returnedBy || 'ответственный'}`,
+      '',
+      kind === 'service_revision_resolved'
+        ? 'Действие: проверить заявку и закрыть её после контроля.'
+        : 'Действие: откройте заявку в разделе «Мои заявки», добавьте недостающие данные и нажмите «Отправить повторно».',
+    ].filter(Boolean).join('\n');
+  }
+
+  function buildServiceRevisionReturnedEvent(ticket) {
+    const ticketId = String(ticket?.id || '').trim();
+    if (!ticketId) return null;
+    const revision = getLatestRevision(ticket);
+    return {
+      type: 'service_revision_returned',
+      entityType: 'service',
+      entityId: ticketId,
+      keyBase: `service_revision_returned:${ticketId}:${revision?.id || ticket?.revisionReturnedAt || dateKeyFor(nowIso(), timeZone)}`,
+      text: buildServiceRevisionMessage('service_revision_returned', ticket),
+      entity: ticket,
+      targetUserRefs: compact([
+        ticket?.assignedMechanicId,
+        ticket?.mechanicId,
+        ticket?.assignedMechanicName,
+        ticket?.assignedTo,
+        revision?.assignedMechanicId,
+        revision?.mechanicName,
+      ]),
+      metadata: {
+        status: ticket?.status || null,
+        reason: ticket?.revisionReason || revision?.reason || null,
+      },
+    };
+  }
+
+  function buildServiceRevisionResolvedEvent(ticket) {
+    const ticketId = String(ticket?.id || '').trim();
+    if (!ticketId) return null;
+    const revision = getLatestRevision(ticket);
+    return {
+      type: 'service_revision_resolved',
+      entityType: 'service',
+      entityId: ticketId,
+      keyBase: `service_revision_resolved:${ticketId}:${revision?.id || ticket?.revisionResolvedAt || dateKeyFor(nowIso(), timeZone)}`,
+      text: buildServiceRevisionMessage('service_revision_resolved', ticket),
+      entity: ticket,
+      targetUserRefs: compact([
+        revision?.createdBy,
+        revision?.createdByName,
+        ticket?.revisionReturnedBy,
+        ticket?.revisionReturnedByName,
+      ]),
+      metadata: {
+        status: ticket?.status || null,
+        reason: ticket?.revisionReason || revision?.reason || null,
+      },
+    };
+  }
+
   function buildEquipmentRentedEvent(rental, equipment) {
     if (!rental) return null;
     const rentalId = String(rental.id || rental.rentalId || '').trim();
@@ -823,6 +942,32 @@ function createBotNotificationService(deps = {}) {
   async function notifyEquipmentRented(rental, equipment) {
     const event = buildEquipmentRentedEvent(rental, equipment);
     return event ? dispatchEvent(event) : null;
+  }
+
+  async function notifyServiceRevisionReturned(ticket) {
+    const event = buildServiceRevisionReturnedEvent(ticket);
+    return event ? dispatchEvent(event) : null;
+  }
+
+  async function notifyServiceRevisionResolved(ticket) {
+    const event = buildServiceRevisionResolvedEvent(ticket);
+    if (!event) return null;
+    const direct = getDirectRecipientsForEvent(event);
+    if (direct.length) return dispatchEvent(event);
+    const recipients = Object.entries(getBotUsers())
+      .map(([phone, botUser]) => ({
+        phone,
+        botUser,
+        role: getBotUserRole(botUser),
+        recipientId: getRecipientId(phone, botUser),
+        userName: getBotUserName(botUser),
+      }))
+      .filter(recipient => roleIsServiceLead(recipient.role));
+    const results = [];
+    for (const recipient of recipients) {
+      results.push(await sendEventToRecipient(event, recipient));
+    }
+    return { event, recipients, results };
   }
 
   function summarizeRental(rental) {
@@ -1044,6 +1189,8 @@ function createBotNotificationService(deps = {}) {
     notifyEquipmentRented: (rental, equipment) => safely('equipment rented notification failed', () => notifyEquipmentRented(rental, equipment)),
     notifyRentalChanged: (previousRental, nextRental, options) => safely('rental notification failed', () => notifyRentalChanged(previousRental, nextRental, options)),
     notifyRentalReturned: (rental, options) => safely('rental returned notification failed', () => notifyRentalReturned(rental, options)),
+    notifyServiceRevisionResolved: ticket => safely('service revision resolved notification failed', () => notifyServiceRevisionResolved(ticket)),
+    notifyServiceRevisionReturned: ticket => safely('service revision returned notification failed', () => notifyServiceRevisionReturned(ticket)),
     readNotificationEvents,
     runScheduledNotifications: options => safely('scheduled notifications failed', () => runScheduledNotifications(options)),
   };

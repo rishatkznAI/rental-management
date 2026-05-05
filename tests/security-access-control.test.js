@@ -217,6 +217,7 @@ test('service child records require access to the parent ticket', () => {
     mechanics: [{ id: 'M-1', name: 'Петров' }],
     service: [
       { id: 'S-own', assignedMechanicId: 'M-1', assignedMechanicName: 'Петров' },
+      { id: 'S-revision', assignedMechanicId: 'M-1', assignedMechanicName: 'Петров', status: 'needs_revision' },
       { id: 'S-other', assignedMechanicId: 'M-2', assignedMechanicName: 'Другой' },
     ],
   };
@@ -227,5 +228,6 @@ test('service child records require access to the parent ticket', () => {
   assert.equal(access.canAccessEntity('repair_work_items', { id: 'RW-2', repairId: 'S-other' }, mechanic), false);
   assert.equal(access.canAccessEntity('warranty_claims', { id: 'WC-1', serviceTicketId: 'S-other' }, mechanic), false);
   assert.throws(() => access.assertCanCreateCollection('repair_work_items', mechanic, { repairId: 'S-own', workId: 'W-1' }), /только администратор/);
+  assert.doesNotThrow(() => access.assertCanCreateCollection('repair_work_items', mechanic, { repairId: 'S-revision', workId: 'W-1' }));
   assert.throws(() => access.assertCanCreateCollection('repair_work_items', mechanic, { repairId: 'S-other', workId: 'W-1' }), /только администратор/);
 });

@@ -1,5 +1,5 @@
 const OPEN_RENTAL_STATUSES = new Set(['active', 'confirmed', 'return_planned']);
-const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'ready']);
+const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'needs_revision', 'ready']);
 
 function normalizeText(value) {
   return String(value ?? '').trim();

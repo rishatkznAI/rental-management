@@ -81,6 +81,7 @@ const SERVICE_STATUS_LABELS: Record<string, string> = {
   new: 'Новая',
   in_progress: 'В работе',
   waiting_parts: 'Ожидание запчастей',
+  needs_revision: 'На доработке',
   ready: 'Готово',
   closed: 'Закрыта',
 };

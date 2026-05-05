@@ -215,7 +215,10 @@ function createBotFormatters(deps) {
 
   function formatTicketLine(ticket) {
     const assigned = ticket.assignedMechanicName ? ` · ${ticket.assignedMechanicName}` : '';
-    return `• ${ticket.id} · ${serviceStatusLabel(ticket.status)} · ${ticket.equipment}\n  ${ticket.reason}${assigned}`;
+    const revision = ticket.status === 'needs_revision'
+      ? `\n  Вернули на доработку: ${ticket.revisionReason || 'требуется уточнение'}`
+      : '';
+    return `• ${ticket.id} · ${serviceStatusLabel(ticket.status)} · ${ticket.equipment}\n  ${ticket.reason}${assigned}${revision}`;
   }
 
   function formatCurrentRepairDraft(ticket) {
@@ -286,7 +289,12 @@ function createBotFormatters(deps) {
         : '✅ Открытых сервисных заявок нет.';
     }
 
-    const lines = tickets.slice(0, 10).map(formatTicketLine);
+    const orderedTickets = [...tickets].sort((left, right) => {
+      if (left.status === 'needs_revision' && right.status !== 'needs_revision') return -1;
+      if (right.status === 'needs_revision' && left.status !== 'needs_revision') return 1;
+      return String(right.createdAt || '').localeCompare(String(left.createdAt || ''));
+    });
+    const lines = orderedTickets.slice(0, 10).map(formatTicketLine);
     return [
       isMechanicRole(authUser.userRole) && mode === 'assigned'
         ? `🧰 Мои сервисные заявки (${tickets.length}):`

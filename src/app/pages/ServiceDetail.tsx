@@ -61,6 +61,7 @@ const STATUS_LABELS: Record<ServiceStatus, string> = {
   new: 'Новый',
   in_progress: 'В работе',
   waiting_parts: 'Ожидание запчастей',
+  needs_revision: 'На доработке',
   ready: 'Готово',
   closed: 'Закрыто',
 };
@@ -84,7 +85,7 @@ const REPAIR_ITEMS_ADMIN_NOTICE = 'Работы и запчасти может �
 type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'default';
 
 function statusVariant(s: ServiceStatus): BadgeVariant {
-  return ({ new: 'default', in_progress: 'info', waiting_parts: 'warning', ready: 'success', closed: 'default' } as Record<ServiceStatus, BadgeVariant>)[s] ?? 'default';
+  return ({ new: 'default', in_progress: 'info', waiting_parts: 'warning', needs_revision: 'warning', ready: 'success', closed: 'default' } as Record<ServiceStatus, BadgeVariant>)[s] ?? 'default';
 }
 function priorityVariant(p: string): BadgeVariant {
   return ({ low: 'default', medium: 'info', high: 'warning', critical: 'error' } as Record<string, BadgeVariant>)[p] ?? 'default';
@@ -263,6 +264,8 @@ function normalizeTicket(ticket: ServiceTicket): ServiceTicket {
       afterUploadedAt: ticket.repairPhotos?.afterUploadedAt,
       afterUploadedBy: ticket.repairPhotos?.afterUploadedBy,
     },
+    revisionHistory: Array.isArray(ticket.revisionHistory) ? ticket.revisionHistory : [],
+    revisionChecklist: Array.isArray(ticket.revisionChecklist) ? ticket.revisionChecklist : [],
   };
 }
 
@@ -274,6 +277,16 @@ const CLOSE_CHECKLIST_LABELS: Record<keyof ServiceCloseChecklist, string> = {
   afterPhotosAttached: 'Фото ПОСЛЕ приложены',
   summaryFilled: 'Итог ремонта заполнен',
 };
+
+const REVISION_CHECKLIST_OPTIONS = [
+  'Не указаны запчасти',
+  'Не указан фильтр/расходник',
+  'Нет фото',
+  'Не указаны моточасы',
+  'Некорректное описание работ',
+  'Не заполнен итог ремонта',
+  'Другое',
+] as const;
 
 function repairCloseChecklistEntries(ticket: ServiceTicket, workItems: RepairWorkItem[], partItems: RepairPartItem[]) {
   const repairPhotos = ticket.repairPhotos ?? { before: [], after: [] };
@@ -377,6 +390,11 @@ export default function ServiceDetail() {
     user?.role,
     user?.rawRole,
   ].some(role => normalizeUserRole(role) === 'Администратор');
+  const currentUserRole = [
+    user?.normalizedRole,
+    user?.role,
+    user?.rawRole,
+  ].map(role => normalizeUserRole(role)).find(Boolean) || '';
   const canEdit = can('edit', 'service');
   const canDeleteService = isAdmin && can('delete', 'service');
   const canCreateDocuments = can('create', 'documents');
@@ -436,6 +454,13 @@ export default function ServiceDetail() {
   const [selectedPartQty, setSelectedPartQty] = useState('1');
   const [selectedPartCost, setSelectedPartCost] = useState('');
   const [repairFormError, setRepairFormError] = useState<string | null>(null);
+  const [revisionModalOpen, setRevisionModalOpen] = useState(false);
+  const [revisionReason, setRevisionReason] = useState('');
+  const [revisionDetails, setRevisionDetails] = useState('');
+  const [revisionChecklist, setRevisionChecklist] = useState<string[]>([]);
+  const [revisionError, setRevisionError] = useState<string | null>(null);
+  const [revisionBusy, setRevisionBusy] = useState(false);
+  const [resolutionComment, setResolutionComment] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [workOrderError, setWorkOrderError] = useState<string | null>(null);
@@ -558,7 +583,7 @@ export default function ServiceDetail() {
         rentalsService.getGanttData(),
       ]);
 
-      const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts'];
+      const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'needs_revision'];
       const ticketInventoryIsUnique = ticket.inventoryNumber
         ? allEquipment.filter(item => item.inventoryNumber === ticket.inventoryNumber).length === 1
         : false;
@@ -670,6 +695,70 @@ export default function ServiceDetail() {
     setNewPlannedDate('');
   };
 
+  const toggleRevisionChecklist = (label: string) => {
+    setRevisionChecklist(prev => (
+      prev.includes(label)
+        ? prev.filter(item => item !== label)
+        : [...prev, label]
+    ));
+  };
+
+  const returnForRevision = async () => {
+    if (!ticket || !canReturnForRevision) return;
+    const reason = revisionReason.trim();
+    if (!reason) {
+      setRevisionError('Укажите причину возврата');
+      return;
+    }
+    if (!ticket.assignedMechanicId && !ticket.assignedMechanicName && !ticket.assignedTo) {
+      setRevisionError('Нельзя вернуть заявку без назначенного механика');
+      return;
+    }
+    setRevisionBusy(true);
+    setRevisionError(null);
+    try {
+      const updated = await serviceTicketsService.returnForRevision(ticket.id, {
+        reason,
+        details: revisionDetails.trim(),
+        checklist: revisionChecklist,
+      });
+      setTicket(normalizeTicket(updated));
+      setRevisionModalOpen(false);
+      setRevisionReason('');
+      setRevisionDetails('');
+      setRevisionChecklist([]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.detail(ticket.id) }),
+      ]);
+    } catch (error) {
+      setRevisionError(error instanceof Error ? error.message : 'Не удалось вернуть заявку на доработку');
+    } finally {
+      setRevisionBusy(false);
+    }
+  };
+
+  const resolveRevision = async () => {
+    if (!ticket || !canResolveRevision) return;
+    setRevisionBusy(true);
+    setRevisionError(null);
+    try {
+      const updated = await serviceTicketsService.resolveRevision(ticket.id, {
+        resolutionComment: resolutionComment.trim(),
+      });
+      setTicket(normalizeTicket(updated));
+      setResolutionComment('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.detail(ticket.id) }),
+      ]);
+    } catch (error) {
+      setRevisionError(error instanceof Error ? error.message : 'Не удалось отправить заявку повторно');
+    } finally {
+      setRevisionBusy(false);
+    }
+  };
+
   const handleDeleteTicket = useCallback(async () => {
     if (!ticket || !canDeleteService) return;
 
@@ -686,7 +775,7 @@ export default function ServiceDetail() {
           rentalsService.getGanttData(),
         ]);
 
-        const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts'];
+        const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'needs_revision'];
         const inventoryIsUnique = deletedTicket.inventoryNumber
           ? allEquipment.filter(item => item.inventoryNumber === deletedTicket.inventoryNumber).length === 1
           : false;
@@ -750,7 +839,7 @@ export default function ServiceDetail() {
   }, [canDeleteService, navigate, queryClient, ticket]);
 
   const addWorkPerformed = async () => {
-    if (!ticket || !canManageRepairItems || !selectedWorkId) return;
+    if (!ticket || !canAddRepairItems || !selectedWorkId) return;
     const work = workCatalog.find(item => item.id === selectedWorkId);
     const qty = Number(selectedWorkQty);
     if (!work || !Number.isFinite(qty) || qty <= 0) {
@@ -781,7 +870,7 @@ export default function ServiceDetail() {
   };
 
   const removeWorkPerformed = async (item: RepairWorkItem, name: string) => {
-    if (!ticket || !canManageRepairItems) return;
+    if (!ticket || !canDeleteRepairItems) return;
     try {
       await repairWorkItemsService.remove(item.id);
       persist({
@@ -802,7 +891,7 @@ export default function ServiceDetail() {
   };
 
   const addPartUsage = async () => {
-    if (!ticket || !canManageRepairItems || !selectedPartId) return;
+    if (!ticket || !canAddRepairItems || !selectedPartId) return;
     const part = sparePartsCatalog.find(item => item.id === selectedPartId);
     const qty = Number(selectedPartQty);
     const cost = Number(selectedPartCost);
@@ -839,7 +928,7 @@ export default function ServiceDetail() {
   };
 
   const removePartUsage = async (item: RepairPartItem, name: string) => {
-    if (!ticket || !canManageRepairItems) return;
+    if (!ticket || !canDeleteRepairItems) return;
     try {
       await repairPartItemsService.remove(item.id);
       persist({
@@ -937,8 +1026,22 @@ export default function ServiceDetail() {
     );
   }
 
+  const isAssignedMechanic = [user?.id, user?.name, user?.email]
+    .filter(Boolean)
+    .some(value => [
+      ticket.assignedMechanicId,
+      ticket.assignedMechanicName,
+      ticket.assignedTo,
+    ].filter(Boolean).some(ticketValue => String(ticketValue).trim().toLowerCase() === String(value).trim().toLowerCase()));
   const canEditTicketFields = canEdit && (ticket.status !== 'closed' || isAdmin);
-  const canManageRepairItems = isAdmin && canEditTicketFields;
+  const canReturnForRevision = canEdit && ['ready', 'closed'].includes(ticket.status) && (
+    isAdmin ||
+    currentUserRole === 'Офис-менеджер' ||
+    (currentUserRole === 'Старший стационарный механик' && isAssignedMechanic)
+  );
+  const canResolveRevision = canEdit && ticket.status === 'needs_revision' && (isAdmin || isAssignedMechanic);
+  const canAddRepairItems = (isAdmin || (ticket.status === 'needs_revision' && isAssignedMechanic)) && canEditTicketFields;
+  const canDeleteRepairItems = isAdmin && canEditTicketFields;
   const canChangeTicketStatus = canEdit && ticket.status !== 'closed';
   const quickActions = buildServiceQuickActions({
     ticket: {
@@ -947,8 +1050,8 @@ export default function ServiceDetail() {
     },
     can,
     canEditTicketFields,
-    hasWorkScenario: canManageRepairItems && workCatalog.length > 0,
-    hasPartScenario: canManageRepairItems && sparePartsCatalog.length > 0,
+    hasWorkScenario: canAddRepairItems && workCatalog.length > 0,
+    hasPartScenario: canAddRepairItems && sparePartsCatalog.length > 0,
   });
   const scrollToRepairResult = () => {
     document.getElementById('service-repair-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -996,6 +1099,22 @@ export default function ServiceDetail() {
         <CheckCircle className="h-4 w-4" />
         {scenarioIsRepair ? 'Закрыть заявку' : 'Закрыть запись'}
       </Button>
+    );
+  }
+  if (canReturnForRevision) {
+    actions.push(
+      <Button key="revision" variant="secondary" className="w-full sm:w-auto" onClick={() => setRevisionModalOpen(true)}>
+        <AlertTriangle className="h-4 w-4" />
+        Вернуть механику
+      </Button>,
+    );
+  }
+  if (canResolveRevision) {
+    actions.push(
+      <Button key="resolve-revision" className="w-full sm:w-auto" onClick={() => void resolveRevision()} disabled={revisionBusy}>
+        <CheckCircle className="h-4 w-4" />
+        Отправить повторно
+      </Button>,
     );
   }
   if (canChangeTicketStatus) {
@@ -1109,6 +1228,20 @@ export default function ServiceDetail() {
       {isAdmin && ticket.status === 'closed' && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/40 dark:text-blue-300">
           Закрытая заявка открыта в режиме редактирования администратора.
+        </div>
+      )}
+      {ticket.status === 'needs_revision' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
+          <div className="font-semibold">Заявка возвращена механику на доработку.</div>
+          <div className="mt-1">
+            Причина: {ticket.revisionReason || 'не указана'}
+            {ticket.revisionDetails ? ` · Нужно уточнить: ${ticket.revisionDetails}` : ''}
+          </div>
+        </div>
+      )}
+      {revisionError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+          {revisionError}
         </div>
       )}
 
@@ -1270,7 +1403,7 @@ export default function ServiceDetail() {
                                   {work.equipmentSnapshot ? ` · ${work.equipmentSnapshot}` : ''}
                                 </p>
                               </div>
-                              {canManageRepairItems && item && (
+                              {canDeleteRepairItems && item && (
                                 <button onClick={() => void removeWorkPerformed(item, work.name)} className="text-xs text-red-500 hover:underline">
                                   Удалить
                                 </button>
@@ -1299,7 +1432,7 @@ export default function ServiceDetail() {
                                   )}
                                 </p>
                               </div>
-                              {canManageRepairItems && item && (
+                              {canDeleteRepairItems && item && (
                                 <button onClick={() => void removePartUsage(item, part.name)} className="text-xs text-red-500 hover:underline">
                                   Удалить
                                 </button>
@@ -1336,7 +1469,24 @@ export default function ServiceDetail() {
                     {repairFormError && (
                       <p className="text-sm text-red-500">{repairFormError}</p>
                     )}
-                    {canManageRepairItems ? (
+                    {canResolveRevision && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
+                        <label className="mb-1 block text-xs text-amber-700 uppercase tracking-wide dark:text-amber-300">Комментарий к повторной отправке</label>
+                        <textarea
+                          className="w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-amber-900/50 dark:bg-gray-800 dark:text-white"
+                          rows={2}
+                          value={resolutionComment}
+                          onChange={event => setResolutionComment(event.target.value)}
+                          placeholder="Что исправлено или уточнено"
+                        />
+                        <div className="mt-2">
+                          <Button size="sm" onClick={() => void resolveRevision()} disabled={revisionBusy}>
+                            Отправить повторно
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {canAddRepairItems ? (
                     <>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_auto]">
                       <div>
@@ -1421,9 +1571,38 @@ export default function ServiceDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {ticket.workLog.length === 0 && serviceAuditLog.length === 0 && (
+              {ticket.workLog.length === 0 && serviceAuditLog.length === 0 && (ticket.revisionHistory ?? []).length === 0 && (
                 <p className="text-sm text-gray-400 italic">История пуста</p>
               )}
+              {[...(ticket.revisionHistory ?? [])].reverse().map(entry => (
+                <div key={entry.id} className="flex gap-3 text-sm">
+                  {logIcon('status_change')}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-gray-900 dark:text-white">
+                      {entry.createdByName || 'Ответственный'} вернул заявку на доработку: {entry.reason}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {formatServiceDate(entry.createdAt)}
+                      {entry.mechanicName ? ` · Механик: ${entry.mechanicName}` : ''}
+                      {entry.previousStatus ? ` · Было: ${STATUS_LABELS[entry.previousStatus as ServiceStatus] ?? entry.previousStatus}` : ''}
+                    </p>
+                    {entry.checklist && entry.checklist.length > 0 && (
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Причины: {entry.checklist.join(', ')}
+                      </p>
+                    )}
+                    {entry.details && (
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Уточнить: {entry.details}</p>
+                    )}
+                    {entry.resolvedAt && (
+                      <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-300">
+                        Исправлено: {entry.resolvedByName || 'Механик'} · {formatServiceDate(entry.resolvedAt)}
+                        {entry.resolutionComment ? ` · ${entry.resolutionComment}` : ''}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
               {serviceAuditLog.map(entry => (
                 <div key={entry.id} className="flex gap-3 text-sm">
                   {logIcon('repair_result')}
@@ -1866,6 +2045,74 @@ export default function ServiceDetail() {
                 Отменить
               </Button>
             )}
+          </div>
+        </div>
+      )}
+      {revisionModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-xl rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Вернуть механику на доработку</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Укажите причину, чтобы механик увидел заявку в активных и понял, что нужно уточнить.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRevisionModalOpen(false)}
+                className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Причина возврата</label>
+                <textarea
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  rows={3}
+                  value={revisionReason}
+                  onChange={event => setRevisionReason(event.target.value)}
+                  placeholder="Например: указана замена фильтра, но запчасть не выбрана из справочника"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-xs text-gray-500 uppercase tracking-wide">Быстрые причины</label>
+                <div className="flex flex-wrap gap-2">
+                  {REVISION_CHECKLIST_OPTIONS.map(option => (
+                    <label
+                      key={option}
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-gray-200 px-3 py-1 text-sm text-gray-700 dark:border-gray-700 dark:text-gray-200"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={revisionChecklist.includes(option)}
+                        onChange={() => toggleRevisionChecklist(option)}
+                      />
+                      {option}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Что нужно уточнить</label>
+                <textarea
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  rows={2}
+                  value={revisionDetails}
+                  onChange={event => setRevisionDetails(event.target.value)}
+                  placeholder="Необязательный комментарий для механика"
+                />
+              </div>
+              {revisionError && <p className="text-sm text-red-500">{revisionError}</p>}
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setRevisionModalOpen(false)}>Отмена</Button>
+                <Button onClick={() => void returnForRevision()} disabled={revisionBusy || !revisionReason.trim()}>
+                  Вернуть механику
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}

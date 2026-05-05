@@ -17,7 +17,7 @@ export interface ServiceAuditLogEntry {
   createdAt: string;
 }
 
-const SERVICE_STATUSES = new Set<ServiceStatus>(['new', 'in_progress', 'waiting_parts', 'ready', 'closed']);
+const SERVICE_STATUSES = new Set<ServiceStatus>(['new', 'in_progress', 'waiting_parts', 'needs_revision', 'ready', 'closed']);
 const SERVICE_PRIORITIES = new Set<ServicePriority>(['critical', 'high', 'medium', 'low']);
 const SERVICE_SCENARIOS = new Set<ServiceScenario>(['repair', 'to', 'chto', 'pto']);
 
@@ -31,6 +31,10 @@ const STATUS_ALIASES: Record<string, ServiceStatus> = {
   waiting: 'waiting_parts',
   waitingparts: 'waiting_parts',
   waiting_parts: 'waiting_parts',
+  needsrevision: 'needs_revision',
+  needs_revision: 'needs_revision',
+  revision: 'needs_revision',
+  rework: 'needs_revision',
   done: 'closed',
   complete: 'closed',
   completed: 'closed',
@@ -141,6 +145,18 @@ export function normalizeServiceTicketDto(value: unknown, index = 0): ServiceTic
     resultData: objectValue(item.resultData, { summary: '', partsUsed: [], worksPerformed: [] }) as ServiceTicket['resultData'],
     repairPhotos: objectValue(item.repairPhotos, { before: [], after: [] }) as ServiceTicket['repairPhotos'],
     closeChecklist: item.closeChecklist as ServiceTicket['closeChecklist'],
+    revisionHistory: arrayValue(item.revisionHistory) as ServiceTicket['revisionHistory'],
+    revisionReason: stringValue(item.revisionReason) || undefined,
+    revisionDetails: stringValue(item.revisionDetails) || undefined,
+    revisionChecklist: arrayValue<string>(item.revisionChecklist),
+    revisionReturnedAt: stringValue(item.revisionReturnedAt) || undefined,
+    revisionReturnedBy: stringValue(item.revisionReturnedBy) || undefined,
+    revisionReturnedByName: stringValue(item.revisionReturnedByName) || undefined,
+    revisionPreviousStatus: stringValue(item.revisionPreviousStatus) || undefined,
+    revisionResolvedAt: stringValue(item.revisionResolvedAt) || undefined,
+    revisionResolvedBy: stringValue(item.revisionResolvedBy) || undefined,
+    revisionResolvedByName: stringValue(item.revisionResolvedByName) || undefined,
+    revisionResolutionComment: stringValue(item.revisionResolutionComment) || undefined,
     workLog: arrayValue(item.workLog) as ServiceTicket['workLog'],
     parts: arrayValue(item.parts) as ServiceTicket['parts'],
     createdAt,
@@ -173,6 +189,18 @@ export const serviceTicketsService = {
 
   update: (id: string, data: Partial<ServiceTicket>): Promise<ServiceTicket> =>
     api.patch<ServiceTicket>(`/api/service/${id}`, data),
+
+  returnForRevision: (
+    id: string,
+    data: { reason: string; details?: string; checklist?: string[] },
+  ): Promise<ServiceTicket> =>
+    api.post<ServiceTicket>(`/api/service/${encodeURIComponent(id)}/revision`, data),
+
+  resolveRevision: (
+    id: string,
+    data: { resolutionComment?: string } = {},
+  ): Promise<ServiceTicket> =>
+    api.post<ServiceTicket>(`/api/service/${encodeURIComponent(id)}/revision/resolve`, data),
 
   delete: (id: string): Promise<void> =>
     api.del(`/api/service/${id}`),

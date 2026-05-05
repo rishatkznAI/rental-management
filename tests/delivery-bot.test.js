@@ -58,6 +58,7 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     service: [],
     repair_work_items: [],
     repair_part_items: [],
+    service_audit_log: [],
     equipment_operation_sessions: [],
     bot_activity: [],
     bot_notifications: [],
@@ -122,6 +123,13 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     serviceStatusLabel: (status) => status,
     preferCarrierAutoLogin,
     accessControl,
+    serviceAuditLog: (_reqOrUser, entry) => {
+      state.service_audit_log.push({
+        id: `audit-${state.service_audit_log.length + 1}`,
+        ...entry,
+        createdAt: '2026-04-24T08:00:00.000Z',
+      });
+    },
     notificationService,
   });
 
@@ -1134,6 +1142,22 @@ test('mechanic work add with unchanged meter hours is still blocked by admin rul
   assert.match(messages.at(-1).text, /Работы и запчасти может изменять только администратор/);
 });
 
+test('mechanic can add work after ticket is returned for revision', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithWorks([
+    makeWork(1, { name: 'Диагностика гидравлики' }),
+  ], { hours: 500, history: [] });
+  state.service[0].status = 'needs_revision';
+  state.service[0].revisionReason = 'Не указаны моточасы';
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'work:choose:W-1', { callbackId: 'cb-1' });
+  await handlers.handleCommand({ user_id: 100 }, '100', '500');
+
+  assert.equal(state.repair_work_items.length, 1);
+  assert.equal(state.repair_work_items[0].nameSnapshot, 'Диагностика гидравлики');
+  assert.equal(state.service_audit_log.at(-1).action, 'work_added');
+  assert.match(messages.at(-1).text, /Работа сохранена/);
+});
+
 test('mechanic work add does not overwrite a newer equipment hours value', async () => {
   const { state, messages, handlers } = setupMechanicRepairWithWorks([
     makeWork(1, { name: 'Диагностика гидравлики' }),
@@ -1369,6 +1393,23 @@ test('mechanic cannot add selected spare part to service ticket', async () => {
 
   assert.equal(state.repair_part_items.length, 0);
   assert.match(messages.at(-1).text, /Работы и запчасти может изменять только администратор/);
+});
+
+test('mechanic can add selected spare part after ticket is returned for revision', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200 }),
+  ]);
+  state.service[0].status = 'needs_revision';
+  state.service[0].revisionReason = 'Не указаны запчасти';
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти фильтр');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:choose:P-1', { callbackId: 'cb-1' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'qty:part:2', { callbackId: 'cb-2' });
+
+  assert.equal(state.repair_part_items.length, 1);
+  assert.equal(state.repair_part_items[0].nameSnapshot, 'Фильтр масляный');
+  assert.equal(state.service_audit_log.at(-1).action, 'part_added');
+  assert.match(messages.at(-1).text, /Добавлена запчасть/);
 });
 
 test('mechanic parts menu explains empty catalog', async () => {

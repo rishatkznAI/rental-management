@@ -1,4 +1,4 @@
-const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'ready']);
+const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'needs_revision', 'ready']);
 const OPEN_RENTAL_STATUSES = new Set(['created', 'confirmed', 'active', 'return_planned']);
 
 function text(value) {
@@ -39,6 +39,7 @@ function normalizePriority(priority) {
 function normalizeStatus(status) {
   const value = lower(status);
   if (value === 'waitingparts' || value === 'waiting_parts' || value === 'waiting') return 'waiting_parts';
+  if (value === 'needsrevision' || value === 'needs_revision' || value === 'revision' || value === 'rework') return 'needs_revision';
   if (value === 'inprogress' || value === 'in_progress' || value === 'progress') return 'in_progress';
   if (value === 'done' || value === 'complete' || value === 'completed' || value === 'closed') return 'closed';
   if (value === 'ready') return 'ready';
@@ -92,6 +93,7 @@ function classifyGroup({ score, priority, status, ageDays, waitingParts, unassig
   if (priority === 'critical' || currentRental || (nextRentalDays !== null && nextRentalDays <= 3) || score >= 120) return 'critical';
   if (priority === 'high' || score >= 80) return 'high';
   if (waitingParts || status === 'waiting_parts') return 'waiting_parts';
+  if (status === 'needs_revision') return 'revision';
   if (unassigned) return 'unassigned';
   if (ageDays >= 7) return 'long_running';
   return 'other';
@@ -102,6 +104,7 @@ function groupLabel(group) {
     critical: 'Критично',
     high: 'Высокий приоритет',
     waiting_parts: 'Ожидание запчастей',
+    revision: 'На доработке',
     unassigned: 'Без механика',
     long_running: 'Долго в ремонте',
     other: 'Остальные',

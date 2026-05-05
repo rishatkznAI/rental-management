@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { api, setToken, clearToken, getToken } from '../lib/api';
+import { ApiError, api, setToken, clearToken, getToken } from '../lib/api';
 
 export interface AuthUser {
   id: string;
@@ -28,45 +28,134 @@ interface AuthContextValue extends AuthState {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const AUTH_USER_KEY = 'app_auth_user';
+
+function readStoredUser(): AuthUser | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(AUTH_USER_KEY);
+    if (!raw) return null;
+    const user = JSON.parse(raw) as Partial<AuthUser>;
+    if (!user || typeof user.id !== 'string' || typeof user.name !== 'string' || typeof user.role !== 'string') {
+      return null;
+    }
+    return {
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      rawRole: user.rawRole,
+      normalizedRole: user.normalizedRole,
+      permissions: user.permissions,
+      email: typeof user.email === 'string' ? user.email : '',
+      profilePhoto: user.profilePhoto,
+      ownerId: user.ownerId,
+      ownerName: user.ownerName,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredUser(user: AuthUser): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+  } catch {
+    // Session can continue in memory even if persistent storage is unavailable.
+  }
+}
+
+function clearStoredUser(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(AUTH_USER_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function sessionUserToAuthUser(session: {
+  userId: string;
+  userName: string;
+  userRole: string;
+  rawRole?: string;
+  normalizedRole?: string;
+  permissions?: unknown;
+  email: string;
+  profilePhoto?: string;
+  ownerId?: string;
+  ownerName?: string;
+}): AuthUser {
+  return {
+    id: session.userId,
+    name: session.userName,
+    role: session.userRole,
+    rawRole: session.rawRole,
+    normalizedRole: session.normalizedRole,
+    permissions: session.permissions,
+    email: session.email,
+    profilePhoto: session.profilePhoto,
+    ownerId: session.ownerId,
+    ownerName: session.ownerName,
+  };
+}
 
 // ── Провайдер ─────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    isAuthenticated: false,
-    isLoading: true,
+  const [state, setState] = useState<AuthState>(() => {
+    const storedToken = getToken();
+    const storedUser = storedToken ? readStoredUser() : null;
+    return {
+      user: storedUser,
+      isAuthenticated: Boolean(storedToken && storedUser),
+      isLoading: Boolean(storedToken),
+    };
   });
 
   const refreshUser = useCallback(async () => {
     const result = await api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; rawRole?: string; normalizedRole?: string; permissions?: unknown; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>('/api/auth/me');
-    const session = result.user;
-    const user: AuthUser = {
-      id: session.userId,
-      name: session.userName,
-      role: session.userRole,
-      rawRole: session.rawRole,
-      normalizedRole: session.normalizedRole,
-      permissions: session.permissions,
-      email: session.email,
-      profilePhoto: session.profilePhoto,
-      ownerId: session.ownerId,
-      ownerName: session.ownerName,
-    };
+    const user = sessionUserToAuthUser(result.user);
+    writeStoredUser(user);
     setState({ user, isAuthenticated: true, isLoading: false });
   }, []);
 
-  // Bearer token is memory-only. On reload we intentionally drop the session
-  // until backend refresh cookies are introduced.
+  // Restore a persisted bearer session and verify it with the backend. Only a
+  // confirmed 401 clears the session; transient /me failures keep the last
+  // known user so the app doesn't throw a valid session back to Login.
   useEffect(() => {
-    clearToken();
-    setState({ user: null, isAuthenticated: false, isLoading: false });
+    if (!getToken()) {
+      clearStoredUser();
+      setState({ user: null, isAuthenticated: false, isLoading: false });
+      return;
+    }
+
+    let disposed = false;
+    refreshUser().catch((error) => {
+      if (disposed) return;
+      if (error instanceof ApiError && error.status === 401) {
+        clearStoredUser();
+        setState({ user: null, isAuthenticated: false, isLoading: false });
+        return;
+      }
+      const fallbackUser = readStoredUser();
+      setState({
+        user: fallbackUser,
+        isAuthenticated: Boolean(fallbackUser),
+        isLoading: false,
+      });
+    });
+
+    return () => {
+      disposed = true;
+    };
   }, [refreshUser]);
 
   // Слушаем событие из api.ts: auth endpoint или silent session check подтвердил,
   // что сессия истекла. Ошибки обычных разделов остаются локальными.
   useEffect(() => {
     function handleUnauthorized() {
+      clearStoredUser();
       setState({ user: null, isAuthenticated: false, isLoading: false });
     }
     window.addEventListener('auth:unauthorized', handleUnauthorized);
@@ -115,6 +204,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ownerId: result.user.ownerId,
       ownerName: result.user.ownerName,
     };
+    writeStoredUser(user);
     setState({ user, isAuthenticated: true, isLoading: false });
   }, []);
 
@@ -125,6 +215,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       api.post('/api/auth/logout', {}).catch(() => {});
     }
     clearToken();
+    clearStoredUser();
     setState({ user: null, isAuthenticated: false, isLoading: false });
   }, []);
 

@@ -6,14 +6,42 @@
  *  - Development (vite dev server): empty string, vite proxy forwards /api → localhost:3000
  *
  * Auth:
- *  Temporary hardening: bearer token is kept in memory only.
- *  Reloading the page drops the session until the backend moves to httpOnly cookies.
+ *  Bearer token is persisted under AUTH_TOKEN_KEY and mirrored in memory.
+ *  AuthProvider verifies restored sessions through /api/auth/me.
  */
 
 export const AUTH_TOKEN_KEY = 'app_auth_token';
 
 export const API_BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
-let authToken: string | null = null;
+
+function readStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(AUTH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredToken(token: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+  } catch {
+    // Keep the in-memory token even if persistent storage is unavailable.
+  }
+}
+
+function removeStoredToken(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+let authToken: string | null = readStoredToken();
 let unauthorizedSessionCheck: Promise<boolean> | null = null;
 
 export function getToken(): string | null {
@@ -22,12 +50,12 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   authToken = token;
-  localStorage.removeItem(AUTH_TOKEN_KEY);
+  writeStoredToken(token);
 }
 
 export function clearToken(): void {
   authToken = null;
-  localStorage.removeItem(AUTH_TOKEN_KEY);
+  removeStoredToken();
 }
 
 export class ApiError extends Error {

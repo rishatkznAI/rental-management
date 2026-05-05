@@ -7,6 +7,7 @@ import { NotificationCenter } from './NotificationCenter';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, pathToSection, pathToRequiredAction } from '../../lib/permissions';
 import { AppLoadingState } from '../ui/AppLoadingState';
+import { AppErrorState } from '../ui/AppErrorState';
 import { LiftLogo } from './LiftLogo';
 
 const BOTTOM_NAV = [
@@ -25,6 +26,8 @@ export function Layout() {
 
   const { isAuthenticated, isLoading } = useAuth();
   const { can, canView, defaultPath } = usePermissions();
+  const firstAllowedPath = defaultPath();
+  const hasAccessibleSection = firstAllowedPath !== '/login';
   const visibleBottomNav = BOTTOM_NAV.filter(item => canView(pathToSection(item.href) || 'dashboard'));
   const section = pathToSection(location.pathname);
   const requiredAction = pathToRequiredAction(location.pathname);
@@ -43,8 +46,8 @@ export function Layout() {
       return;
     }
 
-    if (shouldRedirectBySection) {
-      navigate(defaultPath(), { replace: true });
+    if (shouldRedirectBySection && hasAccessibleSection) {
+      navigate(firstAllowedPath, { replace: true });
       return;
     }
 
@@ -54,7 +57,7 @@ export function Layout() {
     }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultPath, isAuthenticated, isLoading, location.pathname, navigate, requiredAction, section, shouldRedirectByAction, shouldRedirectBySection]);
+  }, [firstAllowedPath, hasAccessibleSection, isAuthenticated, isLoading, location.pathname, navigate, requiredAction, section, shouldRedirectByAction, shouldRedirectBySection]);
 
   // While checking auth, show the same calm loading state as route transitions.
   if (isLoading) {
@@ -67,6 +70,15 @@ export function Layout() {
   }
   // Not authenticated yet — useEffect will redirect; render nothing in the meantime
   if (!isAuthenticated) return null;
+  if (!hasAccessibleSection) {
+    return (
+      <AppErrorState
+        title="Нет доступных разделов"
+        description="Сессия активна, но для этой роли не настроен доступ ни к одному разделу. Обратитесь к администратору."
+        onReload={() => window.location.reload()}
+      />
+    );
+  }
   // Do not mount a forbidden screen even for one render tick.
   if (shouldRedirectBySection || shouldRedirectByAction) return null;
 

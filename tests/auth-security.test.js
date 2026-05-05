@@ -35,8 +35,8 @@ function createAuthRoutes(state, overrides = {}) {
     hashPassword: (plain) => `hash:${plain}`,
     needsPasswordRehash: () => false,
     createSession: () => 'session-token',
-    requireAuth: (_req, _res, next) => next(),
-    destroySession: () => {},
+    requireAuth: overrides.requireAuth || ((_req, _res, next) => next()),
+    destroySession: overrides.destroySession || (() => {}),
     deleteSessionsForUserIds: overrides.deleteSessionsForUserIds || (() => 0),
     auditLog: () => {},
     nowIso: () => '2026-04-28T12:00:00.000Z',
@@ -215,4 +215,65 @@ test('password change increments tokenVersion and revokes existing sessions', ()
   assert.equal(state.users[0].tokenVersion, 3);
   assert.equal(state.users[0].passwordChangedAt, '2026-04-28T12:00:00.000Z');
   assert.deepEqual(revokedIds, ['U-1']);
+});
+
+test('/api/auth/me returns the current user shape for a valid token', () => {
+  const state = {
+    users: [{
+      id: 'U-1',
+      name: 'Руслан',
+      email: 'manager@example.test',
+      role: 'rental_manager',
+      status: 'Активен',
+      password: 'right',
+      tokenVersion: 0,
+    }],
+  };
+  const routes = createAuthRoutes(state, {
+    requireAuth: (req, _res, next) => {
+      req.user = { userId: 'U-1' };
+      next();
+    },
+  });
+  const me = routes['GET /api/auth/me'][1];
+  const res = createMockResponse();
+
+  me({ headers: { authorization: 'Bearer session-token' }, user: { userId: 'U-1' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.ok, true);
+  assert.deepEqual(res.payload.user, {
+    userId: 'U-1',
+    userName: 'Руслан',
+    userRole: 'Менеджер по аренде',
+    rawRole: 'rental_manager',
+    normalizedRole: 'Менеджер по аренде',
+    permissions: undefined,
+    email: 'manager@example.test',
+    profilePhoto: undefined,
+    ownerId: undefined,
+    ownerName: undefined,
+  });
+});
+
+test('/api/auth/me rejects inactive users and destroys the bearer session', () => {
+  const destroyedTokens = [];
+  const state = {
+    users: [{ id: 'U-1', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Неактивен', password: 'right' }],
+  };
+  const routes = createAuthRoutes(state, {
+    requireAuth: (req, _res, next) => {
+      req.user = { userId: 'U-1' };
+      next();
+    },
+    destroySession: token => destroyedTokens.push(token),
+  });
+  const me = routes['GET /api/auth/me'][1];
+  const res = createMockResponse();
+
+  me({ headers: { authorization: 'Bearer session-token' }, user: { userId: 'U-1' } }, res);
+
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.payload, { ok: false, error: 'Аккаунт отключён или удалён' });
+  assert.deepEqual(destroyedTokens, ['session-token']);
 });

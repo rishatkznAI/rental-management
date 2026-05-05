@@ -6,6 +6,7 @@ function registerFinanceRoutes(router, deps) {
     requireRead,
     readData,
     accessControl,
+    getEffectivePaidAmount,
     buildRentalDebtRows,
     getRentalDebtOverdueDays,
     buildClientReceivables,
@@ -115,11 +116,9 @@ function registerFinanceRoutes(router, deps) {
         id: payment.id,
         invoiceNumber: payment.invoiceNumber,
         amount: payment.amount || 0,
-        paidAmount: typeof payment.paidAmount === 'number'
-          ? payment.paidAmount
-          : payment.status === 'paid'
-            ? payment.amount || 0
-            : 0,
+        paidAmount: typeof getEffectivePaidAmount === 'function'
+          ? getEffectivePaidAmount(payment)
+          : 0,
         dueDate: payment.dueDate,
         paidDate: payment.paidDate,
         status: payment.status,

@@ -73,6 +73,25 @@ test('equipment 360 avoids unsafe inventory matching when inventory is not uniqu
   assert.equal(summary.finance.revenue, 2);
 });
 
+test('equipment 360 counts only factual non-cancelled payments in outstanding finance', () => {
+  const summary = buildEquipment360Summary({
+    equipment: { id: 'E-1', inventoryNumber: 'INV-1', status: 'rented' },
+    inventoryIsUnique: true,
+    rentals: [
+      { id: 'R-paid', equipmentId: 'E-1', equipmentInv: 'INV-1', client: 'Клиент', startDate: '2026-04-01', endDate: '2026-04-10', status: 'closed', amount: 100000 },
+      { id: 'R-cancelled-payment', equipmentId: 'E-1', equipmentInv: 'INV-1', client: 'Клиент', startDate: '2026-04-11', endDate: '2026-04-20', status: 'closed', amount: 50000 },
+      { id: 'R-cancelled-rental', equipmentId: 'E-1', equipmentInv: 'INV-1', client: 'Клиент', startDate: '2026-04-21', endDate: '2026-04-25', status: 'cancelled', amount: 30000 },
+    ],
+    payments: [
+      { id: 'P-paid', rentalId: 'R-paid', amount: 100000, status: 'paid' },
+      { id: 'P-cancelled', rentalId: 'R-cancelled-payment', amount: 50000, paidAmount: 50000, status: 'cancelled' },
+    ],
+  });
+
+  assert.equal(summary.finance.revenue, 150000);
+  assert.equal(summary.finance.outstanding, 0);
+});
+
 test('equipment 360 does not treat inventory number as unique by default', () => {
   const summary = buildEquipment360Summary({
     equipment: { id: 'E-1', inventoryNumber: 'INV-legacy', status: 'available' },

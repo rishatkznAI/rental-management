@@ -99,6 +99,19 @@ test('splitRentalPatch sends closing with debt to approval', () => {
   assert.equal(result.approvalChanges[0].type, 'Закрытие аренды с долгом');
 });
 
+test('splitRentalPatch ignores cancelled payments when detecting closing with debt', () => {
+  const result = splitRentalPatch({
+    previousRental: rental,
+    patch: { status: 'closed' },
+    payments: [{ id: 'P-cancelled', rentalId: 'R-1', amount: 100000, paidAmount: 100000, status: 'cancelled' }],
+    today: '2026-04-12',
+  });
+
+  assert.deepEqual(result.immediatePatch, {});
+  assert.equal(result.approvalChanges.length, 1);
+  assert.equal(result.approvalChanges[0].type, 'Закрытие аренды с долгом');
+});
+
 test('resolveRentalForChangeRequest accepts numeric and string rental ids', () => {
   const result = resolveRentalForChangeRequest({
     rentalId: 101,

@@ -52,6 +52,19 @@ test('deriveRentalPaymentStatus ignores negative legacy paid amounts defensively
   assert.equal(status, 'unpaid');
 });
 
+test('deriveRentalPaymentStatus ignores cancelled error and reversed payments', () => {
+  const status = deriveRentalPaymentStatus(
+    { id: 'gr-1', amount: 50000, paymentStatus: 'unpaid' },
+    [
+      { id: 'p-cancelled', rentalId: 'gr-1', amount: 50000, paidAmount: 50000, status: 'cancelled' },
+      { id: 'p-error', rentalId: 'gr-1', amount: 50000, paidAmount: 50000, status: 'error' },
+      { id: 'p-reversed', rentalId: 'gr-1', amount: 50000, paidAmount: 50000, status: 'reversed' },
+    ],
+  );
+
+  assert.equal(status, 'unpaid');
+});
+
 test('deriveRentalPaymentStatus treats overpayment as paid', () => {
   const status = deriveRentalPaymentStatus(
     { id: 'gr-1', amount: 50000, paymentStatus: 'unpaid' },

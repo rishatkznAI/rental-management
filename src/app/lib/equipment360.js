@@ -1,6 +1,8 @@
 const OPEN_RENTAL_STATUSES = new Set(['active', 'created', 'confirmed', 'return_planned']);
 const CLOSED_RENTAL_STATUSES = new Set(['returned', 'closed', 'cancelled']);
 const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'ready']);
+const IGNORED_PAYMENT_STATUSES = new Set(['cancelled', 'canceled', 'void', 'error', 'failed', 'closed', 'deleted', 'reversed']);
+const IGNORED_FINANCE_RENTAL_STATUSES = new Set(['created', 'cancelled', 'canceled', 'deleted', 'archived']);
 
 function text(value) {
   return String(value ?? '').trim();
@@ -111,7 +113,18 @@ function clientDebtForRental(rental, clients) {
 }
 
 function paymentOutstanding(payment) {
-  return Math.max(0, number(payment?.amount) - number(payment?.paidAmount));
+  return Math.max(0, number(payment?.amount) - getEffectivePaidAmount(payment));
+}
+
+function shouldCountPayment(payment) {
+  return !IGNORED_PAYMENT_STATUSES.has(lower(payment?.status));
+}
+
+function getEffectivePaidAmount(payment) {
+  if (!shouldCountPayment(payment)) return 0;
+  if (typeof payment?.paidAmount === 'number') return number(payment.paidAmount);
+  if (lower(payment?.status) === 'paid') return number(payment?.amount);
+  return 0;
 }
 
 export function buildEquipment360Summary(input = {}) {
@@ -170,8 +183,8 @@ export function buildEquipment360Summary(input = {}) {
 
   const rentalIds = new Set(rentals.map(item => text(item?.id)).filter(Boolean));
   const payments = (Array.isArray(input.payments) ? input.payments : [])
-    .filter(item => item?.rentalId && rentalIds.has(text(item.rentalId)));
-  const financeRentals = rentals.filter(item => !['created', 'cancelled'].includes(lower(item?.status)));
+    .filter(item => item?.rentalId && rentalIds.has(text(item.rentalId)) && shouldCountPayment(item));
+  const financeRentals = rentals.filter(item => !IGNORED_FINANCE_RENTAL_STATUSES.has(lower(item?.status)));
   const revenue = financeRentals.reduce((sum, item) => sum + number(item?.amount ?? item?.price), 0);
   const outstanding = payments.reduce((sum, item) => sum + paymentOutstanding(item), 0);
   const durations = financeRentals.map(item => daysBetween(item?.startDate, item?.endDate)).filter(Boolean);

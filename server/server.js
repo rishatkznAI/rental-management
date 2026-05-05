@@ -56,6 +56,7 @@ const {
   logGanttRentalLinkDiagnostics,
 } = require('./lib/rental-change-requests');
 const {
+  getEffectivePaidAmount,
   getRentalDebtOverdueDays,
   buildRentalDebtRows,
   buildClientReceivables,
@@ -1176,6 +1177,7 @@ registerFinanceRoutes(apiRouter, {
   requireRead,
   readData,
   accessControl,
+  getEffectivePaidAmount,
   getRentalDebtOverdueDays,
   buildRentalDebtRows,
   buildClientReceivables,

@@ -1,5 +1,5 @@
 const express = require('express');
-const { syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
+const { getEffectivePaidAmount, syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
 const { normalizeRole } = require('../lib/role-groups');
 const { normalizeServiceTicketList, normalizeServiceTicketRecord } = require('../lib/service-dto');
 const {
@@ -328,11 +328,11 @@ function registerCrudRoutes(deps) {
 
   function buildPaymentFinancialImpact(payment, nextValue, operation) {
     if (operation === 'delete') {
-      const amount = -(payment?.paidAmount ?? payment?.amount ?? 0);
+      const amount = -getEffectivePaidAmount(payment);
       return { amount, description: `${amount}` };
     }
-    const oldAmount = Number(payment?.paidAmount ?? payment?.amount ?? 0) || 0;
-    const nextAmount = Number(nextValue?.paidAmount ?? nextValue?.amount ?? oldAmount) || 0;
+    const oldAmount = getEffectivePaidAmount(payment);
+    const nextAmount = getEffectivePaidAmount({ ...payment, ...nextValue });
     const amount = nextAmount - oldAmount;
     return {
       amount,

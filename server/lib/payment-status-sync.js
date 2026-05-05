@@ -1,5 +1,25 @@
+const IGNORED_PAYMENT_STATUSES = new Set([
+  'cancelled',
+  'canceled',
+  'void',
+  'error',
+  'failed',
+  'closed',
+  'deleted',
+  'reversed',
+]);
+
+function normalizeStatus(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function shouldCountPayment(payment) {
+  return !IGNORED_PAYMENT_STATUSES.has(normalizeStatus(payment?.status));
+}
+
 function getEffectivePaidAmount(payment) {
   if (!payment) return 0;
+  if (!shouldCountPayment(payment)) return 0;
   if (typeof payment.paidAmount === 'number') {
     return Number.isFinite(payment.paidAmount) && payment.paidAmount > 0 ? payment.paidAmount : 0;
   }
@@ -36,6 +56,7 @@ function syncGanttRentalPaymentStatuses(ganttRentals, payments) {
 }
 
 module.exports = {
+  shouldCountPayment,
   getEffectivePaidAmount,
   deriveRentalPaymentStatus,
   syncGanttRentalPaymentStatuses,

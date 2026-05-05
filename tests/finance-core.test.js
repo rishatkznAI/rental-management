@@ -95,6 +95,144 @@ test('buildRentalDebtRows ignores closed error payments and duplicate ids', () =
   assert.equal(rows[0].outstanding, 75000);
 });
 
+test('buildRentalDebtRows keeps stale paid status from hiding debt without factual payments', () => {
+  const rows = buildRentalDebtRows(
+    [
+      {
+        id: 'gr-stale-paid',
+        clientId: 'c-1',
+        client: 'ЭМ-СТРОЙ',
+        equipmentInv: '083',
+        manager: 'Руслан',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        amount: 100000,
+        paymentStatus: 'paid',
+        status: 'closed',
+      },
+    ],
+    [],
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].paidAmount, 0);
+  assert.equal(rows[0].outstanding, 100000);
+  assert.equal(rows[0].paymentStatus, 'unpaid');
+});
+
+test('buildRentalDebtRows excludes cancelled deleted archived rentals and keeps closed unpaid rentals', () => {
+  const rows = buildRentalDebtRows(
+    [
+      {
+        id: 'gr-cancelled',
+        clientId: 'c-1',
+        client: 'ЭМ-СТРОЙ',
+        equipmentInv: '083',
+        manager: 'Руслан',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        amount: 100000,
+        paymentStatus: 'unpaid',
+        status: 'cancelled',
+      },
+      {
+        id: 'gr-deleted',
+        clientId: 'c-1',
+        client: 'ЭМ-СТРОЙ',
+        equipmentInv: '084',
+        manager: 'Руслан',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        amount: 100000,
+        paymentStatus: 'unpaid',
+        status: 'deleted',
+      },
+      {
+        id: 'gr-archived',
+        clientId: 'c-1',
+        client: 'ЭМ-СТРОЙ',
+        equipmentInv: '085',
+        manager: 'Руслан',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        amount: 100000,
+        paymentStatus: 'unpaid',
+        status: 'archived',
+      },
+      {
+        id: 'gr-closed',
+        clientId: 'c-1',
+        client: 'ЭМ-СТРОЙ',
+        equipmentInv: '086',
+        manager: 'Руслан',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        amount: 100000,
+        paymentStatus: 'unpaid',
+        status: 'closed',
+      },
+    ],
+    [],
+  );
+
+  assert.deepEqual(rows.map(row => row.rentalId), ['gr-closed']);
+  assert.equal(rows[0].outstanding, 100000);
+});
+
+test('expected and client-only payments do not reduce factual rental debt', () => {
+  const rows = buildRentalDebtRows(
+    [
+      {
+        id: 'gr-expected',
+        clientId: 'c-1',
+        client: 'ЭМ-СТРОЙ',
+        equipmentInv: '083',
+        manager: 'Руслан',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        amount: 100000,
+        paymentStatus: 'unpaid',
+        status: 'active',
+      },
+    ],
+    [
+      { id: 'p-expected', rentalId: 'gr-expected', clientId: 'c-1', amount: 100000, status: 'pending' },
+      { id: 'p-client-only', clientId: 'c-1', amount: 100000, paidAmount: 100000, status: 'paid' },
+    ],
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].paidAmount, 0);
+  assert.equal(rows[0].outstanding, 100000);
+});
+
+test('non-finite legacy paidAmount cannot poison debt rows with NaN', () => {
+  const rows = buildRentalDebtRows(
+    [
+      {
+        id: 'gr-nan-payment',
+        clientId: 'c-1',
+        client: 'ЭМ-СТРОЙ',
+        equipmentInv: '083',
+        manager: 'Руслан',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        amount: 100000,
+        paymentStatus: 'partial',
+        status: 'active',
+      },
+    ],
+    [
+      { id: 'p-nan', rentalId: 'gr-nan-payment', amount: 100000, paidAmount: NaN, status: 'partial' },
+    ],
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].paidAmount, 0);
+  assert.equal(rows[0].outstanding, 100000);
+  assert.doesNotMatch(JSON.stringify(rows), /NaN/);
+});
+
 test('getRentalDebtOverdueDays returns zero for fully paid rentals', () => {
   assert.equal(
     getRentalDebtOverdueDays(
@@ -317,6 +455,71 @@ test('buildFinanceReport returns aggregated totals and slices', () => {
   assert.equal(report.totals.overdueDebt, 60000);
 });
 
+test('finance report receivable invariants hold for partial full and multiple rental payments', () => {
+  const report = buildFinanceReport(
+    {
+      clients: [
+        { id: 'c-1', company: 'ООО Один', creditLimit: 0, manager: 'Анна' },
+        { id: 'c-2', company: 'ООО Два', creditLimit: 0, manager: 'Борис' },
+      ],
+      rentals: [
+        {
+          id: 'gr-a',
+          clientId: 'c-1',
+          client: 'ООО Один',
+          equipmentInv: '101',
+          manager: 'Анна',
+          startDate: '2026-04-01',
+          endDate: '2026-04-10',
+          expectedPaymentDate: '2026-04-05',
+          amount: 100000,
+          paymentStatus: 'partial',
+          status: 'active',
+        },
+        {
+          id: 'gr-b',
+          clientId: 'c-1',
+          client: 'ООО Один',
+          equipmentInv: '102',
+          manager: 'Анна',
+          startDate: '2026-04-03',
+          endDate: '2026-04-12',
+          expectedPaymentDate: '2026-04-06',
+          amount: 50000,
+          paymentStatus: 'partial',
+          status: 'active',
+        },
+        {
+          id: 'gr-paid',
+          clientId: 'c-2',
+          client: 'ООО Два',
+          equipmentInv: '201',
+          manager: 'Борис',
+          startDate: '2026-04-01',
+          endDate: '2026-04-10',
+          expectedPaymentDate: '2026-04-05',
+          amount: 100000,
+          paymentStatus: 'paid',
+          status: 'closed',
+        },
+      ],
+      payments: [
+        { id: 'p-a-1', rentalId: 'gr-a', clientId: 'c-1', amount: 40000, paidAmount: 40000, status: 'paid' },
+        { id: 'p-b-1', rentalId: 'gr-b', clientId: 'c-1', amount: 30000, paidAmount: 30000, status: 'partial' },
+        { id: 'p-b-2', rentalId: 'gr-b', clientId: 'c-1', amount: 50000, paidAmount: 40000, status: 'paid' },
+        { id: 'p-paid', rentalId: 'gr-paid', clientId: 'c-2', amount: 100000, paidAmount: 100000, status: 'paid' },
+      ],
+    },
+    '2026-04-18',
+  );
+
+  assert.equal(report.totals.debt, 60000);
+  assert.equal(report.clientReceivables.reduce((sum, item) => sum + item.currentDebt, 0), report.totals.debt);
+  assert.equal(report.managerReceivables.reduce((sum, item) => sum + item.currentDebt, 0), report.totals.debt);
+  assert.equal(report.debtRows.length, 1);
+  assert.equal(report.debtRows[0].rentalId, 'gr-a');
+});
+
 test('manual client debt contributes to receivables and manager totals', () => {
   const report = buildFinanceReport(
     {
@@ -403,6 +606,39 @@ test('client rename keeps partial payment remainder by clientId', () => {
   assert.equal(report.totals.debt, 60000);
   assert.equal(report.clientSnapshots[0].currentDebt, 60000);
   assert.equal(report.clientReceivables[0].currentDebt, 60000);
+});
+
+test('changing rental clientId moves receivable to the new client id', () => {
+  const report = buildFinanceReport(
+    {
+      clients: [
+        { id: 'c-old', company: 'Старый клиент', creditLimit: 0 },
+        { id: 'c-new', company: 'Новый клиент', creditLimit: 0 },
+      ],
+      rentals: [
+        {
+          id: 'gr-client-moved',
+          clientId: 'c-new',
+          client: 'Старый клиент',
+          equipmentInv: '105',
+          manager: 'Руслан',
+          startDate: '2026-04-01',
+          endDate: '2026-04-10',
+          expectedPaymentDate: '2026-04-05',
+          amount: 100000,
+          paymentStatus: 'unpaid',
+          status: 'active',
+        },
+      ],
+      payments: [],
+    },
+    '2026-04-18',
+  );
+
+  assert.equal(report.clientReceivables.length, 1);
+  assert.equal(report.clientReceivables[0].clientId, 'c-new');
+  assert.equal(report.clientReceivables[0].client, 'Новый клиент');
+  assert.equal(report.clientReceivables[0].currentDebt, 100000);
 });
 
 test('renamed client keeps report slices unchanged', () => {

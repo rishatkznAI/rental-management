@@ -13,6 +13,7 @@ import { findConflictingRental } from '../../lib/rental-conflicts';
 import type { GanttRentalData } from '../../mock-data';
 import type { Client, Equipment, Payment } from '../../types';
 import type { ClientReceivableRow } from '../../lib/finance';
+import { getEffectivePaidAmount } from '../../lib/finance';
 import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
 
 interface RentalDrawerProps {
@@ -152,10 +153,7 @@ export function RentalDrawer({
 
   // Payments for this rental
   const rentalPayments = payments.filter(p => p.rentalId === rental.id);
-  const explicitPaidAmount = rentalPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
-  const totalPaid = rentalPayments.length === 0 && rental.paymentStatus === 'paid'
-    ? rental.amount
-    : explicitPaidAmount;
+  const totalPaid = rentalPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const remaining = Math.max(0, rental.amount - totalPaid);
   const canRegisterPayment = canCreatePayments && remaining > 0;
   const todayKey = new Date().toISOString().slice(0, 10);
@@ -735,7 +733,7 @@ export function RentalDrawer({
                   <div key={p.id} className="flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900/30">
                     <div>
                       <div className="text-xs font-medium text-gray-900 dark:text-white">
-                        {formatCurrency(p.paidAmount ?? p.amount)}
+                        {formatCurrency(getEffectivePaidAmount(p))}
                       </div>
                       {p.comment && <div className="text-xs text-gray-500">{p.comment}</div>}
                     </div>

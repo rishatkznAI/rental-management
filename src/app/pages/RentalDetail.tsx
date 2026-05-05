@@ -38,6 +38,7 @@ import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { formatRentalAuditEvents } from '../lib/rentalAuditHistory.js';
 import { buildDocumentControl } from '../lib/documentControl.js';
 import { buildRentalQuickActions } from '../lib/quickActions.js';
+import { getEffectivePaidAmount } from '../lib/finance';
 import {
   EXTENSION_REASONS,
   buildExtensionConflictDisplay,
@@ -285,7 +286,7 @@ export default function RentalDetail() {
   const pendingChangeRequests = changeRequests.filter(request => request.rentalId === rental?.id && request.status === 'pending');
   const relatedInvoices = relatedDocs.filter(doc => doc.type === 'invoice');
   const relatedPayments = payments.filter(p => p.rentalId === rental?.id);
-  const paidAmount = relatedPayments.reduce((sum, p) => sum + (p.paidAmount ?? (p.status === 'paid' ? p.amount : 0)), 0);
+  const paidAmount = relatedPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const relatedService = serviceTickets.filter(ticket =>
     resolvedRentalEquipment.some(eq => eq.id === ticket.equipmentId),
   );
@@ -399,7 +400,7 @@ export default function RentalDetail() {
 
     const invoiceDocs = relatedInvoices.map(invoice => {
       const invoicePayments = paymentsByInvoice.get(invoice.number) ?? [];
-      const invoicePaid = invoicePayments.reduce((sum, payment) => sum + (payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0)), 0);
+      const invoicePaid = invoicePayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
       return {
         key: `invoice-${invoice.id}`,
         label: invoice.number,
@@ -421,7 +422,7 @@ export default function RentalDetail() {
         documentStatus: 'sent' as const,
         documentAmount: payment.amount,
         dueDate: payment.dueDate,
-        paidAmount: payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0),
+        paidAmount: getEffectivePaidAmount(payment),
         payments: [payment],
       }));
 
@@ -635,7 +636,7 @@ export default function RentalDetail() {
   const syncPaymentStatus = React.useCallback(async (nextPayments: typeof relatedPayments) => {
     if (!linkedGanttRental) return;
     const totalPaidForRental = nextPayments.reduce((sum, payment) => {
-      return sum + (payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0));
+      return sum + getEffectivePaidAmount(payment);
     }, 0);
     let paymentStatus: GanttRentalData['paymentStatus'] = 'unpaid';
     if (totalPaidForRental >= (linkedGanttRental.amount || rental.price || 0)) paymentStatus = 'paid';
@@ -1420,7 +1421,7 @@ export default function RentalDetail() {
                                   {payment.paidDate ? `Оплата ${formatDate(payment.paidDate)}` : `Платёж со сроком ${formatDate(payment.dueDate)}`}
                                 </span>
                                 <span className="font-medium text-gray-900 dark:text-white">
-                                  {formatCurrency(payment.paidAmount ?? payment.amount)}
+                                  {formatCurrency(getEffectivePaidAmount(payment))}
                                 </span>
                               </div>
                               {payment.comment && (

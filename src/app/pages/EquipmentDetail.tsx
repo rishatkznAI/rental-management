@@ -47,6 +47,7 @@ import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
+import { getEffectivePaidAmount } from '../lib/finance';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -1348,7 +1349,7 @@ export default function EquipmentDetail() {
   // ── Payments for equipment rentals ──
   const equipmentRentalIds = new Set(ganttRentals.map(r => r.id));
   const equipmentPayments = allPayments.filter(p => p.rentalId && equipmentRentalIds.has(p.rentalId));
-  const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
+  const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const equipment360 = buildEquipment360Summary({
     equipment,
     rentals: canViewRentals ? allGanttRentals : [],
@@ -2387,7 +2388,7 @@ export default function EquipmentDetail() {
                     {ganttRentals.map(gr => {
                       const days = Math.ceil((new Date(gr.endDate).getTime() - new Date(gr.startDate).getTime()) / (1000 * 60 * 60 * 24));
                       const rentalPmts = allPayments.filter(p => p.rentalId === gr.id);
-                      const paid = rentalPmts.reduce((s, p) => s + (p.paidAmount ?? p.amount), 0);
+                      const paid = rentalPmts.reduce((s, p) => s + getEffectivePaidAmount(p), 0);
                       return (
                         <TableRow key={gr.id}>
                           <TableCell>

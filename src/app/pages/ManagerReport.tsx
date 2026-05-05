@@ -20,6 +20,7 @@ import { paymentsService } from '../services/payments.service';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
+import { getEffectivePaidAmount, shouldCountPayment, shouldCountRental } from '../lib/finance';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -139,6 +140,7 @@ function buildRows(
 
   const paysByRental = new Map<string, Payment[]>();
   for (const p of payments) {
+    if (!shouldCountPayment(p)) continue;
     if (p.rentalId) {
       const list = paysByRental.get(p.rentalId) ?? [];
       list.push(p);
@@ -146,7 +148,7 @@ function buildRows(
     }
   }
 
-  return rentals.map(r => {
+  return rentals.filter(shouldCountRental).map(r => {
     const eq = (r.equipmentId ? eqById.get(r.equipmentId) : undefined) ?? eqByUniqueInv.get(r.equipmentInv);
     const d = new Date(r.startDate);
     const valid = !isNaN(d.getTime());
@@ -158,28 +160,18 @@ function buildRows(
       : (r.startDate || '—');
 
     const related = paysByRental.get(r.id) ?? [];
-    let paidAmount = related.reduce((sum, p) => {
-      if (p.status === 'paid')    return sum + p.amount;
-      if (p.status === 'partial') return sum + (p.paidAmount ?? 0);
-      return sum;
-    }, 0);
+    const paidAmount = related.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
     let latestPaidDate = '';
     for (const p of related) {
       if (p.paidDate && p.paidDate > latestPaidDate) latestPaidDate = p.paidDate;
     }
 
-    if (related.length === 0 && r.paymentStatus === 'paid') paidAmount = r.amount ?? 0;
-
     const debt = Math.max(0, (r.amount ?? 0) - paidAmount);
 
     let paymentStatus: 'paid' | 'partial' | 'unpaid';
-    if (related.length > 0) {
-      if (paidAmount >= (r.amount ?? 0))  paymentStatus = 'paid';
-      else if (paidAmount > 0)            paymentStatus = 'partial';
-      else                                paymentStatus = 'unpaid';
-    } else {
-      paymentStatus = r.paymentStatus ?? 'unpaid';
-    }
+    if (paidAmount >= (r.amount ?? 0))  paymentStatus = 'paid';
+    else if (paidAmount > 0)            paymentStatus = 'partial';
+    else                                paymentStatus = 'unpaid';
 
     return {
       rentalId:        r.id,

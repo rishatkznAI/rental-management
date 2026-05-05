@@ -41,7 +41,7 @@ import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
 import { canEquipmentParticipateInRentals, compareEquipmentByPriority } from '../lib/equipmentClassification';
-import { buildClientReceivables, buildRentalDebtRows, mergeClientsWithFinancials } from '../lib/finance';
+import { buildClientReceivables, buildRentalDebtRows, getEffectivePaidAmount, mergeClientsWithFinancials } from '../lib/finance';
 import {
   appendRentalHistory,
   buildRentalCreationHistory,
@@ -776,11 +776,11 @@ export default function Rentals() {
     const map = new Map<string, number>();
     ganttRentals.forEach(r => {
       const ps = byRentalId.get(r.id) ?? [];
-      const paid = ps.reduce((s, p) => s + (p.paidAmount ?? p.amount ?? 0), 0);
+      const paid = ps.reduce((s, p) => s + getEffectivePaidAmount(p), 0);
       const total = r.amount || 0;
       const fraction = total > 0
         ? Math.min(1, paid / total)
-        : r.paymentStatus === 'paid' ? 1 : 0;
+        : 0;
       if (fraction > 0) map.set(r.id, fraction);
     });
     return map;
@@ -1556,7 +1556,7 @@ export default function Rentals() {
 
     // Recalculate paymentStatus for this rental
     const rentalPayments = allPayments.filter(p => p.rentalId === rentalId);
-    const totalPaid = rentalPayments.reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0);
+    const totalPaid = rentalPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
     let newPaymentStatus: GanttRentalData['paymentStatus'] = 'unpaid';
     if (totalPaid >= rental.amount) newPaymentStatus = 'paid';
     else if (totalPaid > 0) newPaymentStatus = 'partial';
@@ -1598,13 +1598,7 @@ export default function Rentals() {
       ? Math.round(calculateRentalAmount(inferredDailyRate, rental.startDate, newEndDate))
       : rental.amount || 0;
     const rentalPayments = payments.filter(payment => payment.rentalId === rental.id);
-    const paidAmount = rentalPayments.length === 0 && rental.paymentStatus === 'paid'
-      ? rental.amount || 0
-      : rentalPayments.reduce((sum, payment) => {
-          if (typeof payment.paidAmount === 'number') return sum + payment.paidAmount;
-          if (payment.status === 'paid') return sum + (payment.amount || 0);
-          return sum;
-        }, 0);
+    const paidAmount = rentalPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
     const nextPaymentStatus: GanttRentalData['paymentStatus'] =
       paidAmount >= nextAmount
         ? 'paid'
@@ -3521,7 +3515,7 @@ function EquipmentRow({
               ? Math.round((rowHeight - barHeight) / 2)
               : (isCompact ? 4 : 6) + stackIndex * (barHeight + rentalStackGap);
 
-          const paidFraction = paymentFractions.get(rental.id) ?? (rental.paymentStatus === 'paid' ? 1 : 0);
+          const paidFraction = paymentFractions.get(rental.id) ?? 0;
           const showUpdAlert = !rental.updSigned;
           const showPaymentAlert = rental.paymentStatus !== 'paid';
           const showOverdueAlert = rental.status === 'active' && rental.endDate < todayStr;

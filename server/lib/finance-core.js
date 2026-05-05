@@ -19,6 +19,16 @@ const IGNORED_PAYMENT_STATUSES = new Set([
   'reversed',
 ]);
 
+const IGNORED_RENTAL_STATUSES = new Set([
+  'cancelled',
+  'canceled',
+  'void',
+  'error',
+  'failed',
+  'deleted',
+  'archived',
+]);
+
 const DEBT_AGE_BUCKETS = [
   { key: '0_7', label: '0-7 дней', rentals: 0, debt: 0 },
   { key: '8_14', label: '8-14 дней', rentals: 0, debt: 0 },
@@ -35,9 +45,15 @@ function shouldCountPayment(payment) {
   return !IGNORED_PAYMENT_STATUSES.has(normalizeStatus(payment?.status));
 }
 
+function shouldCountRental(rental) {
+  return !IGNORED_RENTAL_STATUSES.has(normalizeStatus(rental?.status));
+}
+
 function getEffectivePaidAmount(payment) {
   if (!shouldCountPayment(payment)) return 0;
-  if (typeof payment?.paidAmount === 'number') return Math.max(0, payment.paidAmount);
+  if (typeof payment?.paidAmount === 'number') {
+    return Number.isFinite(payment.paidAmount) ? Math.max(0, payment.paidAmount) : 0;
+  }
   if (payment?.status === 'paid') return Math.max(0, toNumber(payment.amount));
   return 0;
 }
@@ -93,11 +109,17 @@ function buildRentalDebtRows(rentals, payments) {
   });
 
   return (rentals || [])
+    .filter(shouldCountRental)
     .map(rental => {
       const relatedPayments = byRentalId.get(rental.id) || [];
       const paidAmount = relatedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
       const amount = toNumber(rental.amount);
       const outstanding = Math.max(0, amount - paidAmount);
+      const paymentStatus = outstanding <= 0
+        ? 'paid'
+        : paidAmount > 0
+          ? 'partial'
+          : 'unpaid';
       return {
         rentalId: rental.id,
         clientId: getStableClientId(rental) || '',
@@ -111,7 +133,7 @@ function buildRentalDebtRows(rentals, payments) {
         amount,
         paidAmount,
         outstanding,
-        paymentStatus: rental.paymentStatus || 'unpaid',
+        paymentStatus,
         rentalStatus: rental.status || 'created',
       };
     })
@@ -359,6 +381,9 @@ function buildFinanceReport({ clients, rentals, payments }, today = new Date().t
 }
 
 module.exports = {
+  shouldCountPayment,
+  shouldCountRental,
+  getEffectivePaidAmount,
   getRentalDebtOverdueDays,
   buildRentalDebtRows,
   buildClientReceivables,

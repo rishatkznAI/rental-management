@@ -75,6 +75,16 @@ const IGNORED_PAYMENT_STATUSES = new Set([
   'reversed',
 ]);
 
+const IGNORED_RENTAL_STATUSES = new Set([
+  'cancelled',
+  'canceled',
+  'void',
+  'error',
+  'failed',
+  'deleted',
+  'archived',
+]);
+
 const DEBT_AGE_BUCKETS: OverdueBucketRow[] = [
   { key: '0_7', label: '0-7 дней', rentals: 0, debt: 0 },
   { key: '8_14', label: '8-14 дней', rentals: 0, debt: 0 },
@@ -87,11 +97,15 @@ function normalizeStatus(value: unknown): string {
   return String(value ?? '').trim().toLowerCase();
 }
 
-function shouldCountPayment(payment: Payment): boolean {
-  return !IGNORED_PAYMENT_STATUSES.has(normalizeStatus(payment.status));
+export function shouldCountPayment(payment: Payment | undefined | null): boolean {
+  return !IGNORED_PAYMENT_STATUSES.has(normalizeStatus(payment?.status));
 }
 
-function getEffectivePaidAmount(payment: Payment): number {
+export function shouldCountRental(rental: Pick<GanttRentalData, 'status'> | undefined | null): boolean {
+  return !IGNORED_RENTAL_STATUSES.has(normalizeStatus(rental?.status));
+}
+
+export function getEffectivePaidAmount(payment: Payment): number {
   if (!shouldCountPayment(payment)) return 0;
   if (typeof payment.paidAmount === 'number') return toMoney(payment.paidAmount);
   if (payment.status === 'paid') return toMoney(payment.amount);
@@ -156,13 +170,16 @@ export function buildRentalDebtRows(
   });
 
   return rentals
+    .filter(shouldCountRental)
     .map(rental => {
       const relatedPayments = byRentalId.get(rental.id) ?? [];
-      let paidAmount = relatedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
-      if (relatedPayments.length === 0 && rental.paymentStatus === 'paid') {
-        paidAmount = rental.amount || 0;
-      }
+      const paidAmount = relatedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
       const outstanding = Math.max(0, (rental.amount || 0) - paidAmount);
+      const paymentStatus: GanttRentalData['paymentStatus'] = outstanding <= 0
+        ? 'paid'
+        : paidAmount > 0
+          ? 'partial'
+          : 'unpaid';
       return {
         rentalId: rental.id,
         clientId: stableClientId(rental) || undefined,
@@ -175,13 +192,7 @@ export function buildRentalDebtRows(
         amount: rental.amount || 0,
         paidAmount,
         outstanding,
-        paymentStatus: relatedPayments.length > 0
-          ? outstanding <= 0
-            ? 'paid'
-            : paidAmount > 0
-              ? 'partial'
-              : 'unpaid'
-          : rental.paymentStatus,
+        paymentStatus,
         rentalStatus: rental.status,
       };
     })

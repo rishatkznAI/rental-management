@@ -1,6 +1,7 @@
 const OPEN_RENTAL_STATUSES = new Set(['active', 'created', 'confirmed', 'return_planned']);
 const CLOSED_RENTAL_STATUSES = new Set(['returned', 'closed', 'cancelled']);
 const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'ready']);
+const IGNORED_PAYMENT_STATUSES = new Set(['cancelled', 'canceled', 'void', 'error', 'failed', 'closed', 'deleted', 'reversed']);
 
 function normalizeText(value) {
   return String(value ?? '').trim();
@@ -74,6 +75,17 @@ function paymentStatusLabel(status) {
   if (status === 'overdue') return 'Просрочен';
   if (status === 'pending') return 'Ожидает';
   return normalizeText(status) || 'Без статуса';
+}
+
+function shouldCountPayment(payment) {
+  return !IGNORED_PAYMENT_STATUSES.has(normalizeKey(payment?.status));
+}
+
+function getEffectivePaidAmount(payment) {
+  if (!shouldCountPayment(payment)) return 0;
+  if (typeof payment?.paidAmount === 'number') return safeNumber(payment.paidAmount);
+  if (normalizeKey(payment?.status) === 'paid') return safeNumber(payment?.amount);
+  return 0;
 }
 
 function riskLevelLabel(level) {
@@ -167,7 +179,7 @@ export function buildClient360Summary(input = {}) {
       id: normalizeText(item?.id),
       invoiceNumber: normalizeText(item?.invoiceNumber) || normalizeText(item?.id),
       date: dateKey(item?.paidDate || item?.dueDate),
-      amount: safeNumber(item?.paidAmount ?? item?.amount),
+      amount: getEffectivePaidAmount(item),
       status: paymentStatusLabel(item?.status),
       rentalId: normalizeText(item?.rentalId) || 'Аренда не указана',
     }))

@@ -41,6 +41,17 @@ const PROTECTED_KEYWORDS = [
   'paymentAdjustment',
 ];
 
+const IGNORED_PAYMENT_STATUSES = new Set([
+  'cancelled',
+  'canceled',
+  'void',
+  'error',
+  'failed',
+  'closed',
+  'deleted',
+  'reversed',
+]);
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -126,6 +137,26 @@ function rentalLinkIdsFromGantt(ganttRental) {
 
 function normalizedText(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+function normalizeStatus(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function shouldCountPayment(payment) {
+  return !IGNORED_PAYMENT_STATUSES.has(normalizeStatus(payment?.status));
+}
+
+function getEffectivePaidAmount(payment) {
+  if (!shouldCountPayment(payment)) return 0;
+  if (typeof payment?.paidAmount === 'number') {
+    return Number.isFinite(payment.paidAmount) && payment.paidAmount > 0 ? payment.paidAmount : 0;
+  }
+  if (payment?.status === 'paid') {
+    const amount = Number(payment.amount);
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  }
+  return 0;
 }
 
 function normalizedClientKey(value) {
@@ -1120,7 +1151,7 @@ function calculateRentalDebt(rental, payments = []) {
   if (!rental) return 0;
   const paidAmount = (payments || [])
     .filter(payment => payment.rentalId === rental.id)
-    .reduce((sum, payment) => sum + (payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0)), 0);
+    .reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
   return Math.max((Number(rental.price) || 0) - (Number(rental.discount) || 0) - paidAmount, 0);
 }
 

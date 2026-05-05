@@ -10,6 +10,8 @@
  *  AuthProvider verifies restored sessions through /api/auth/me.
  */
 
+import { tokenMarker, traceAuth } from './authDebug';
+
 export const AUTH_TOKEN_KEY = 'app_auth_token';
 
 export const API_BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
@@ -51,9 +53,17 @@ export function getToken(): string | null {
 export function setToken(token: string): void {
   authToken = token;
   writeStoredToken(token);
+  traceAuth('token saved', {
+    memoryToken: tokenMarker(authToken),
+    storageToken: tokenMarker(readStoredToken()),
+  });
 }
 
 export function clearToken(): void {
+  traceAuth('clearToken called', {
+    memoryToken: tokenMarker(authToken),
+    storageToken: tokenMarker(readStoredToken()),
+  }, { stack: true });
   authToken = null;
   removeStoredToken();
 }
@@ -92,7 +102,15 @@ async function parseErrorResponse(res: Response) {
 }
 
 function dispatchUnauthorizedForToken(tokenUsed: string | null): void {
+  traceAuth('dispatchUnauthorizedForToken called', {
+    tokenUsed: tokenMarker(tokenUsed),
+    currentToken: tokenMarker(getToken()),
+  }, { stack: true });
   if (getToken() !== tokenUsed) {
+    traceAuth('dispatchUnauthorizedForToken ignored because token changed', {
+      tokenUsed: tokenMarker(tokenUsed),
+      currentToken: tokenMarker(getToken()),
+    });
     return;
   }
   clearToken();
@@ -113,17 +131,33 @@ async function checkSessionAfterDataUnauthorized(): Promise<boolean> {
       }
 
       try {
+        traceAuth('/api/auth/me request start', {
+          reason: 'data endpoint 401 session check',
+          apiBaseUrl: API_BASE_URL || '(same-origin)',
+          hasAuthorization: Boolean(token),
+          token: tokenMarker(token),
+        });
         const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
           method: 'GET',
           headers,
           credentials: 'include',
+        });
+        traceAuth('/api/auth/me response status', {
+          reason: 'data endpoint 401 session check',
+          status: res.status,
+          token: tokenMarker(token),
         });
         if (res.status === 401) {
           dispatchUnauthorizedForToken(token);
           return false;
         }
         return true;
-      } catch {
+      } catch (error) {
+        traceAuth('/api/auth/me request failure', {
+          reason: 'data endpoint 401 session check',
+          error: error instanceof Error ? error.message : String(error),
+          token: tokenMarker(token),
+        });
         return true;
       } finally {
         unauthorizedSessionCheck = null;
@@ -146,14 +180,46 @@ async function request<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  traceAuth('api request start', {
     method,
-    headers,
-    credentials: 'include',
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    path,
+    apiBaseUrl: API_BASE_URL || '(same-origin)',
+    hasAuthorization: Boolean(token),
+    token: tokenMarker(token),
+  });
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      credentials: 'include',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    traceAuth('api request failure', {
+      method,
+      path,
+      token: tokenMarker(token),
+      error: error instanceof Error ? error.message : String(error),
+    }, { stack: true });
+    throw error;
+  }
+
+  traceAuth('api response status', {
+    method,
+    path,
+    status: res.status,
+    token: tokenMarker(token),
   });
 
   if (res.status === 401) {
+    traceAuth('any API 401', {
+      method,
+      path,
+      token: tokenMarker(token),
+      authEndpoint: shouldClearTokenForUnauthorized(path),
+    }, { stack: true });
     const { message, details, body } = await parseErrorResponse(res);
     if (shouldClearTokenForUnauthorized(path)) {
       dispatchUnauthorizedForToken(token);
@@ -171,7 +237,19 @@ async function request<T>(
   // 204 No Content or empty body
   const text = await res.text();
   if (!text) return undefined as unknown as T;
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch (error) {
+    traceAuth('api response JSON parse error', {
+      method,
+      path,
+      status: res.status,
+      token: tokenMarker(token),
+      error: error instanceof Error ? error.message : String(error),
+      bodyLength: text.length,
+    }, { stack: true });
+    throw error;
+  }
 }
 
 export const api = {

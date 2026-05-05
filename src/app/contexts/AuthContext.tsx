@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { ApiError, api, setToken, clearToken, getToken } from '../lib/api';
+import { tokenMarker, traceAuth } from '../lib/authDebug';
 
 export interface AuthUser {
   id: string;
@@ -60,6 +61,13 @@ function writeStoredUser(user: AuthUser): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+    traceAuth('user saved', {
+      hasUser: true,
+      role: user.role,
+      rawRole: user.rawRole,
+      normalizedRole: user.normalizedRole,
+      hasPermissions: Boolean(user.permissions),
+    });
   } catch {
     // Session can continue in memory even if persistent storage is unavailable.
   }
@@ -67,6 +75,7 @@ function writeStoredUser(user: AuthUser): void {
 
 function clearStoredUser(): void {
   if (typeof window === 'undefined') return;
+  traceAuth('stored user cleared', {}, { stack: true });
   try {
     window.localStorage.removeItem(AUTH_USER_KEY);
   } catch {
@@ -106,6 +115,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>(() => {
     const storedToken = getToken();
     const storedUser = storedToken ? readStoredUser() : null;
+    traceAuth('app boot', {
+      token: tokenMarker(storedToken),
+      hasStoredUser: Boolean(storedUser),
+    });
+    traceAuth('AuthProvider initial state', {
+      isAuthenticated: Boolean(storedToken && storedUser),
+      isLoading: Boolean(storedToken),
+      hasUser: Boolean(storedUser),
+      role: storedUser?.role,
+      rawRole: storedUser?.rawRole,
+      normalizedRole: storedUser?.normalizedRole,
+    });
     return {
       user: storedUser,
       isAuthenticated: Boolean(storedToken && storedUser),
@@ -114,10 +135,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   const refreshUser = useCallback(async () => {
+    traceAuth('/api/auth/me request start', {
+      reason: 'refreshUser',
+      token: tokenMarker(getToken()),
+      hasAuthorization: Boolean(getToken()),
+    });
     const result = await api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; rawRole?: string; normalizedRole?: string; permissions?: unknown; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>('/api/auth/me');
     const user = sessionUserToAuthUser(result.user);
+    traceAuth('restore success', {
+      role: user.role,
+      rawRole: user.rawRole,
+      normalizedRole: user.normalizedRole,
+      hasPermissions: Boolean(user.permissions),
+      token: tokenMarker(getToken()),
+    });
     writeStoredUser(user);
     setState({ user, isAuthenticated: true, isLoading: false });
+  }, []);
+
+  useEffect(() => {
+    traceAuth('AuthProvider mount', {
+      token: tokenMarker(getToken()),
+      isAuthenticated: state.isAuthenticated,
+      isLoading: state.isLoading,
+      hasUser: Boolean(state.user),
+    });
+    return () => {
+      traceAuth('AuthProvider unmount', {
+        token: tokenMarker(getToken()),
+      }, { stack: true });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Restore a persisted bearer session and verify it with the backend. Only a
@@ -125,8 +173,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // known user so the app doesn't throw a valid session back to Login.
   useEffect(() => {
     const restoreToken = getToken();
+    traceAuth('restore start', {
+      token: tokenMarker(restoreToken),
+      hasStoredUser: Boolean(readStoredUser()),
+    });
     if (!restoreToken) {
       clearStoredUser();
+      traceAuth('setIsAuthenticated false', {
+        reason: 'restore no token',
+      }, { stack: true });
       setState({ user: null, isAuthenticated: false, isLoading: false });
       return;
     }
@@ -134,13 +189,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let disposed = false;
     refreshUser().catch((error) => {
       if (disposed) return;
-      if (getToken() !== restoreToken) return;
+      traceAuth('restore failure', {
+        status: error instanceof ApiError ? error.status : 'network-or-runtime',
+        message: error instanceof Error ? error.message : String(error),
+        restoreToken: tokenMarker(restoreToken),
+        currentToken: tokenMarker(getToken()),
+      }, { stack: true });
+      if (getToken() !== restoreToken) {
+        traceAuth('restore failure ignored because token changed', {
+          restoreToken: tokenMarker(restoreToken),
+          currentToken: tokenMarker(getToken()),
+        });
+        return;
+      }
       if (error instanceof ApiError && error.status === 401) {
         clearStoredUser();
+        traceAuth('setIsAuthenticated false', {
+          reason: 'restore 401',
+          token: tokenMarker(restoreToken),
+        }, { stack: true });
         setState({ user: null, isAuthenticated: false, isLoading: false });
         return;
       }
       const fallbackUser = readStoredUser();
+      traceAuth('restore fallback after non-401 failure', {
+        hasFallbackUser: Boolean(fallbackUser),
+        status: error instanceof ApiError ? error.status : 'network-or-runtime',
+      });
       setState({
         user: fallbackUser,
         isAuthenticated: Boolean(fallbackUser),
@@ -157,7 +232,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // что сессия истекла. Ошибки обычных разделов остаются локальными.
   useEffect(() => {
     function handleUnauthorized() {
+      traceAuth('auth:unauthorized event handled', {
+        token: tokenMarker(getToken()),
+      }, { stack: true });
       clearStoredUser();
+      traceAuth('setIsAuthenticated false', {
+        reason: 'auth:unauthorized event',
+      }, { stack: true });
       setState({ user: null, isAuthenticated: false, isLoading: false });
     }
     window.addEventListener('auth:unauthorized', handleUnauthorized);
@@ -187,12 +268,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshUser, state.isAuthenticated]);
 
   const login = useCallback(async (loginValue: string, password: string) => {
+    traceAuth('login submit', {
+      loginProvided: Boolean(loginValue),
+      tokenBefore: tokenMarker(getToken()),
+    });
     const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; rawRole?: string; normalizedRole?: string; permissions?: unknown; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string } }>(
       '/api/auth/login',
       { login: loginValue, password }
     );
 
     setToken(result.token);
+    traceAuth('login success', {
+      responseHasToken: Boolean(result.token),
+      token: tokenMarker(result.token),
+      responseHasUser: Boolean(result.user),
+      role: result.user?.role,
+      rawRole: result.user?.rawRole,
+      normalizedRole: result.user?.normalizedRole,
+    });
 
     const user: AuthUser = {
       id:    result.user.id,
@@ -212,12 +305,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     const token = getToken();
+    traceAuth('logout called', {
+      token: tokenMarker(token),
+    }, { stack: true });
     // Fire-and-forget — don't block UI
     if (token) {
       api.post('/api/auth/logout', {}).catch(() => {});
     }
     clearToken();
     clearStoredUser();
+    traceAuth('setIsAuthenticated false', {
+      reason: 'logout called',
+    }, { stack: true });
     setState({ user: null, isAuthenticated: false, isLoading: false });
   }, []);
 

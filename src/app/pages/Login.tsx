@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { ExternalLink, Quote, Truck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { getRandomMotivationalQuote } from '../lib/motivationalQuotes';
+import { traceAuth } from '../lib/authDebug';
 
 const DEMO_URL = String(import.meta.env.VITE_DEMO_URL || '').trim();
 
@@ -29,8 +30,15 @@ export default function Login() {
     setLoading(true);
     try {
       await login(loginValue, password);
+      traceAuth('first route after login', {
+        from: '/login',
+        to: '/',
+      });
       navigate('/', { replace: true });
     } catch (err) {
+      traceAuth('login failure displayed', {
+        message: err instanceof Error ? err.message : 'unknown',
+      });
       setError(err instanceof Error ? err.message : 'Ошибка входа. Проверьте данные.');
     } finally {
       setLoading(false);

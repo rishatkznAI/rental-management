@@ -5,6 +5,10 @@ import { readFileSync } from 'node:fs';
 const apiSource = readFileSync(new URL('../src/app/lib/api.ts', import.meta.url), 'utf8');
 const authContextSource = readFileSync(new URL('../src/app/contexts/AuthContext.tsx', import.meta.url), 'utf8');
 const layoutSource = readFileSync(new URL('../src/app/components/layout/Layout.tsx', import.meta.url), 'utf8');
+const authDebugSource = readFileSync(new URL('../src/app/lib/authDebug.ts', import.meta.url), 'utf8');
+const errorBoundarySource = readFileSync(new URL('../src/app/components/ui/ErrorBoundary.tsx', import.meta.url), 'utf8');
+const buildInfoSource = readFileSync(new URL('../src/app/lib/build-info.ts', import.meta.url), 'utf8');
+const buildDebugBadgeSource = readFileSync(new URL('../src/app/components/ui/BuildDebugBadge.tsx', import.meta.url), 'utf8');
 
 test('frontend login persists bearer token under the auth token key', () => {
   assert.match(apiSource, /export const AUTH_TOKEN_KEY = 'app_auth_token'/);
@@ -43,8 +47,36 @@ test('stale auth me 401 cannot clear a newer login token', () => {
   assert.match(apiSource, /const token = getToken\(\);[\s\S]*if \(res\.status === 401\)/);
   assert.match(apiSource, /if \(shouldClearTokenForUnauthorized\(path\)\) \{[\s\S]*dispatchUnauthorizedForToken\(token\);/);
   assert.match(authContextSource, /const restoreToken = getToken\(\);[\s\S]*if \(!restoreToken\)/);
-  assert.match(authContextSource, /refreshUser\(\)\.catch\(\(error\) => \{[\s\S]*if \(getToken\(\) !== restoreToken\) return;[\s\S]*error instanceof ApiError && error\.status === 401/);
+  assert.match(authContextSource, /refreshUser\(\)\.catch\(\(error\) => \{[\s\S]*if \(getToken\(\) !== restoreToken\) \{[\s\S]*return;[\s\S]*\}[\s\S]*error instanceof ApiError && error\.status === 401/);
   assert.doesNotMatch(apiSource, /function dispatchUnauthorized\(\): void/);
+});
+
+test('auth flight recorder traces logout causes without full bearer tokens', () => {
+  assert.match(authDebugSource, /__SKYTECH_AUTH_TRACE__/);
+  assert.match(authDebugSource, /console\.warn\('\[AUTH TRACE\]'/);
+  assert.match(authDebugSource, /if \(!isAuthDebugEnabled\(\)\) return;/);
+  assert.match(authDebugSource, /params\.get\('debugVersion'\) === '1'/);
+  assert.match(authDebugSource, /AUTH_DEBUG_STORAGE_KEY = 'skytech_auth_debug'/);
+  assert.match(authDebugSource, /tokenMarker/);
+  assert.match(authDebugSource, /value\.slice\(-6\)/);
+  assert.match(apiSource, /traceAuth\('clearToken called'/);
+  assert.match(apiSource, /bodyLength: text\.length/);
+  assert.doesNotMatch(apiSource, /bodyPreview/);
+  assert.match(authContextSource, /traceAuth\('logout called'/);
+  assert.match(layoutSource, /traceAuth\('Layout redirect to \/login'/);
+  assert.match(errorBoundarySource, /traceAuth\('ErrorBoundary caught error'/);
+  assert.match(authDebugSource, /\[A-Za-z0-9_-\]\+\\\.\[A-Za-z0-9_-\]\+\\\.\[A-Za-z0-9_-\]\+/);
+  assert.doesNotMatch(authDebugSource, /Bearer \$\{token\}|Authorization': `Bearer/);
+});
+
+test('frontend build info exposes the active auth patch marker only through debug UI', () => {
+  assert.match(buildInfoSource, /authPatch: string/);
+  assert.match(buildInfoSource, /token-scoped-unauthorized-v2-flight-recorder/);
+  assert.match(buildInfoSource, /if \(!isAuthDebugEnabled\(\)\) return;[\s\S]*window\.__SKYTECH_BUILD_INFO__ = frontendBuildInfo;[\s\S]*console\.info\('\[Skytech build\]'/);
+  assert.match(buildInfoSource, /params\.get\('debugVersion'\) === '1'/);
+  assert.match(buildInfoSource, /AUTH_DEBUG_STORAGE_KEY/);
+  assert.match(buildDebugBadgeSource, /setVisible\(shouldShowBuildDebug\(\)\)/);
+  assert.match(buildDebugBadgeSource, /frontendBuildInfo\.authPatch/);
 });
 
 test('authenticated users with no accessible section are not redirected to login', () => {

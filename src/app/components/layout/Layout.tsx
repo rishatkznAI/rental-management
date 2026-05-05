@@ -6,6 +6,7 @@ import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, pathToSection, pathToRequiredAction } from '../../lib/permissions';
+import { traceAuth } from '../../lib/authDebug';
 import { AppLoadingState } from '../ui/AppLoadingState';
 import { AppErrorState } from '../ui/AppErrorState';
 import { LiftLogo } from './LiftLogo';
@@ -24,7 +25,7 @@ export function Layout() {
   const navigate = useNavigate();
   const navigation = useNavigation();
 
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const { can, canView, defaultPath } = usePermissions();
   const firstAllowedPath = defaultPath();
   const hasAccessibleSection = firstAllowedPath !== '/login';
@@ -39,25 +40,68 @@ export function Layout() {
   // Auth + permission guard via useEffect — avoids render-time <Navigate> which
   // conflicts with React 18 concurrent rendering and breaks Outlet updates.
   useEffect(() => {
+    traceAuth('Layout guard evaluated', {
+      path: location.pathname,
+      isLoading,
+      isAuthenticated,
+      hasUser: Boolean(user),
+      role: user?.role,
+      rawRole: user?.rawRole,
+      normalizedRole: user?.normalizedRole,
+      firstAllowedPath,
+      hasAccessibleSection,
+      section,
+      shouldRedirectBySection,
+      shouldRedirectByAction,
+    });
     if (isLoading) return;
 
     if (!isAuthenticated) {
+      traceAuth('Layout redirect to /login', {
+        reason: 'not authenticated',
+        path: location.pathname,
+        isLoading,
+        isAuthenticated,
+        hasUser: Boolean(user),
+        role: user?.role,
+        rawRole: user?.rawRole,
+        normalizedRole: user?.normalizedRole,
+        firstAllowedPath,
+        hasAccessibleSection,
+      }, { stack: true });
       navigate('/login', { replace: true });
       return;
     }
 
     if (shouldRedirectBySection && hasAccessibleSection) {
+      traceAuth('Layout redirect to first allowed route', {
+        from: location.pathname,
+        to: firstAllowedPath,
+        section,
+        role: user?.role,
+        rawRole: user?.rawRole,
+        normalizedRole: user?.normalizedRole,
+      });
       navigate(firstAllowedPath, { replace: true });
       return;
     }
 
     if (requiredAction && shouldRedirectByAction) {
+      traceAuth('Layout redirect by action permission', {
+        from: location.pathname,
+        to: `/${requiredAction.section}`,
+        section: requiredAction.section,
+        action: requiredAction.action,
+        role: user?.role,
+        rawRole: user?.rawRole,
+        normalizedRole: user?.normalizedRole,
+      });
       navigate(`/${requiredAction.section}`, { replace: true });
       return;
     }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firstAllowedPath, hasAccessibleSection, isAuthenticated, isLoading, location.pathname, navigate, requiredAction, section, shouldRedirectByAction, shouldRedirectBySection]);
+  }, [firstAllowedPath, hasAccessibleSection, isAuthenticated, isLoading, location.pathname, navigate, requiredAction, section, shouldRedirectByAction, shouldRedirectBySection, user]);
 
   // While checking auth, show the same calm loading state as route transitions.
   if (isLoading) {

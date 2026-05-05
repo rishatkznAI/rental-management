@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './api';
+import { AUTH_DEBUG_STORAGE_KEY, isAuthDebugEnabled } from './authDebug';
 
 declare const __APP_COMMIT_HASH__: string;
 declare const __APP_BUILD_TIME__: string;
@@ -9,6 +10,7 @@ export type FrontendBuildInfo = {
   buildTime: string;
   apiBaseUrl: string;
   mode: string;
+  authPatch: string;
 };
 
 export const frontendBuildInfo: FrontendBuildInfo = {
@@ -17,6 +19,7 @@ export const frontendBuildInfo: FrontendBuildInfo = {
   buildTime: typeof __APP_BUILD_TIME__ === 'string' ? __APP_BUILD_TIME__ : '',
   apiBaseUrl: API_BASE_URL || window.location.origin,
   mode: import.meta.env.MODE,
+  authPatch: 'token-scoped-unauthorized-v2-flight-recorder',
 };
 
 declare global {
@@ -26,6 +29,7 @@ declare global {
 }
 
 export function installFrontendBuildInfo() {
+  if (!isAuthDebugEnabled()) return;
   window.__SKYTECH_BUILD_INFO__ = frontendBuildInfo;
   console.info('[Skytech build]', frontendBuildInfo);
 }
@@ -33,12 +37,12 @@ export function installFrontendBuildInfo() {
 export function shouldShowBuildDebug(search = window.location.search) {
   const params = new URLSearchParams(search);
   if (params.get('debugVersion') === '1') {
-    window.localStorage.setItem('skytech_debug_version', '1');
     return true;
   }
   if (params.get('debugVersion') === '0') {
+    window.localStorage.removeItem(AUTH_DEBUG_STORAGE_KEY);
     window.localStorage.removeItem('skytech_debug_version');
     return false;
   }
-  return window.localStorage.getItem('skytech_debug_version') === '1';
+  return isAuthDebugEnabled(search);
 }

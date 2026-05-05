@@ -1,6 +1,6 @@
 import type { GanttRentalData } from '../mock-data';
 import type { Equipment, Payment, RentalChangeRequest, ServiceTicket, ShippingPhoto } from '../types';
-import { buildRentalDebtRows } from './finance';
+import { buildRentalDebtRows, getRentalDebtOverdueDays } from './finance';
 import { formatCurrency, formatDate } from './utils';
 
 export type NotificationSection = 'rentals' | 'service' | 'equipment' | 'payments' | 'approvals';

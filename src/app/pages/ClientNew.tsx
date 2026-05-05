@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -13,7 +13,7 @@ import {
 } from '../components/ui/select';
 import { ArrowLeft, Info } from 'lucide-react';
 import { useCreateClient } from '../hooks/useClients';
-import { api } from '../lib/api';
+import { ApiError, api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { createAuditEntry } from '../lib/entity-history';
 import type { Client } from '../types';
@@ -26,6 +26,13 @@ const PAYMENT_TERMS_OPTIONS = [
   { value: 'Предоплата 50%',     label: 'Предоплата 50%' },
   { value: 'Без предоплаты',     label: 'Без предоплаты' },
 ];
+
+function getDuplicateClient(error: unknown): { id?: string; company?: string } | null {
+  if (!(error instanceof ApiError)) return null;
+  const body = error.body as { code?: string; conflictClient?: { id?: string; company?: string } } | undefined;
+  if (body?.code !== 'CLIENT_INN_DUPLICATE') return null;
+  return body.conflictClient || {};
+}
 
 // ── вспомогательный компонент поля ───────────────────────────────────────────
 
@@ -65,6 +72,7 @@ export default function ClientNew() {
   const { user } = useAuth();
   const createClient = useCreateClient();
   const [managers, setManagers] = React.useState<{ id: string; name: string; role: string; status: string }[]>([]);
+  const [duplicateClient, setDuplicateClient] = useState<{ id?: string; company?: string } | null>(null);
   const isAdmin = user?.role === 'Администратор';
 
   useEffect(() => {
@@ -95,6 +103,7 @@ export default function ClientNew() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const now = new Date().toISOString();
+    setDuplicateClient(null);
     createClient.mutate({
       company:      formData.companyName,
       inn:          formData.inn,
@@ -117,7 +126,17 @@ export default function ClientNew() {
           `Клиент создан: ${formData.companyName}`,
         ),
       ],
-    }, { onSuccess: (newClient) => navigate(`/clients/${newClient.id}`) });
+    }, {
+      onSuccess: (newClient) => navigate(`/clients/${newClient.id}`),
+      onError: (error) => {
+        const duplicate = getDuplicateClient(error);
+        if (duplicate) {
+          setDuplicateClient(duplicate);
+          return;
+        }
+        setDuplicateClient(null);
+      },
+    });
   };
 
   const fieldClass =
@@ -154,13 +173,28 @@ export default function ClientNew() {
               required
             />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Input
-                label="ИНН"
-                placeholder="1234567890"
-                value={formData.inn}
-                onChange={e => setFormData({ ...formData, inn: e.target.value })}
-                required
-              />
+              <div className="space-y-2">
+                <Input
+                  label="ИНН"
+                  placeholder="1234567890"
+                  value={formData.inn}
+                  onChange={e => setFormData({ ...formData, inn: e.target.value })}
+                  required
+                />
+                {duplicateClient && (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                    Клиент с таким ИНН уже существует
+                    {duplicateClient.id && (
+                      <>
+                        :{' '}
+                        <Link className="font-medium underline" to={`/clients/${duplicateClient.id}`}>
+                          {duplicateClient.company || duplicateClient.id}
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
               <Input
                 label="Email"
                 placeholder="info@company.ru"

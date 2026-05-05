@@ -2,6 +2,7 @@ const { isMechanicRole } = require('../lib/role-groups');
 const { redactAuditValue } = require('../lib/security-audit');
 const { cleanupBackupArchive, createFullBackupArchive } = require('../lib/full-backup');
 const { DEFAULT_ALLOWED_DOMAINS, DEFAULT_MAX_BYTES, archiveExternalPhotos } = require('../lib/external-photo-archive');
+const { buildClientInnDuplicateReport } = require('../lib/client-inn');
 const dns = require('dns');
 const fs = require('fs');
 const http = require('http');
@@ -218,6 +219,7 @@ function analyzeSystemDataImport(payload, readData) {
   const stats = { strippedSensitiveFields: 0, skippedSensitiveSettings: 0 };
   const collections = {};
   const duplicates = {};
+  const clientInnDuplicates = [];
   const conflicts = {};
   const invalidCollections = [];
   const sanitizedCollections = {};
@@ -248,6 +250,9 @@ function analyzeSystemDataImport(payload, readData) {
       seen.add(id);
     });
     if (duplicateIds.size > 0) duplicates[collection] = Array.from(duplicateIds);
+    if (collection === 'clients') {
+      clientInnDuplicates.push(...buildClientInnDuplicateReport(sanitized));
+    }
 
     const existingById = new Map((readData(collection) || [])
       .filter(item => item?.id)
@@ -263,6 +268,7 @@ function analyzeSystemDataImport(payload, readData) {
     ...unknownCollections.map(name => `Неизвестная коллекция: ${name}`),
     ...invalidCollections.map(name => `Коллекция ${name} должна быть массивом`),
     ...Object.entries(duplicates).map(([name, ids]) => `Дубликаты id в ${name}: ${ids.join(', ')}`),
+    ...(clientInnDuplicates.length > 0 ? ['SYSTEM_IMPORT_CLIENT_INN_DUPLICATES: импорт содержит клиентов с одинаковым ИНН'] : []),
   ];
 
   return {
@@ -271,7 +277,9 @@ function analyzeSystemDataImport(payload, readData) {
     collections,
     unknownCollections,
     duplicateIds: duplicates,
+    clientInnDuplicates,
     conflicts,
+    errorCode: clientInnDuplicates.length > 0 ? 'SYSTEM_IMPORT_CLIENT_INN_DUPLICATES' : undefined,
     strippedSensitiveFields: stats.strippedSensitiveFields,
     skippedSensitiveSettings: stats.skippedSensitiveSettings,
     errors: blockingErrors,

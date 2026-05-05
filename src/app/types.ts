@@ -683,6 +683,7 @@ export interface Client {
   id: string;
   company: string;
   inn: string;
+  innNormalized?: string;
   contact: string;
   phone: string;
   email: string;

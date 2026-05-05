@@ -3414,13 +3414,22 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
         } satisfies Client;
       });
 
-      const existingByInn = new Map(clients.map(item => [item.inn, item]));
+      const normalizeInn = (value: string | undefined) => String(value || '').replace(/\D+/g, '');
+      const existingByInn = new Map(clients
+        .map(item => [normalizeInn(item.inn), item] as const)
+        .filter(([inn]) => inn));
       const merged = [...clients];
+      const importedByInn = new Map<string, Client>();
       let created = 0;
       let updated = 0;
 
       for (const imported of importedItems) {
-        const existing = existingByInn.get(imported.inn);
+        const innKey = normalizeInn(imported.inn);
+        if (innKey && importedByInn.has(innKey)) {
+          throw new Error(`Строка импорта содержит дубль ИНН ${imported.inn}`);
+        }
+        if (innKey) importedByInn.set(innKey, imported);
+        const existing = innKey ? existingByInn.get(innKey) : undefined;
         if (existing) {
           const next = { ...existing, ...imported, id: existing.id };
           const idx = merged.findIndex(item => item.id === existing.id);

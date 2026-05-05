@@ -20,6 +20,7 @@ import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
 import type { Client, ClientStatus } from '../types';
+import { ApiError } from '../lib/api';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
@@ -106,6 +107,13 @@ function normalizeClientName(value?: string | null) {
   return String(value || '').trim().toLowerCase();
 }
 
+function getDuplicateClient(error: unknown): { id?: string; company?: string } | null {
+  if (!(error instanceof ApiError)) return null;
+  const body = error.body as { code?: string; conflictClient?: { id?: string; company?: string } } | undefined;
+  if (body?.code !== 'CLIENT_INN_DUPLICATE') return null;
+  return body.conflictClient || {};
+}
+
 function Divider() {
   return <hr className="border-gray-100 dark:border-gray-800" />;
 }
@@ -177,6 +185,7 @@ export default function ClientDetail() {
 
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Client>>({});
+  const [duplicateClient, setDuplicateClient] = useState<{ id?: string; company?: string } | null>(null);
 
   // Related data via react-query
   const { data: ganttRentals = [] } = useGanttData();
@@ -240,12 +249,14 @@ export default function ClientDetail() {
   const startEdit = () => {
     if (!client || !canEdit) return;
     setEditData({ ...client });
+    setDuplicateClient(null);
     setEditing(true);
   };
 
   const cancelEdit = () => {
     setEditing(false);
     setEditData({});
+    setDuplicateClient(null);
   };
 
   const saveEdit = () => {
@@ -278,9 +289,25 @@ export default function ClientDetail() {
       user?.name || 'Система',
       'Обновлён клиент',
     );
-    persist(appendAuditHistory(nextClient, ...historyEntries));
-    setEditing(false);
-    setEditData({});
+    const updatedClient = appendAuditHistory(nextClient, ...historyEntries);
+    setClient(updatedClient);
+    setDuplicateClient(null);
+    updateClient.mutate({ id: updatedClient.id, data: updatedClient }, {
+      onSuccess: (savedClient) => {
+        setClient(savedClient);
+        setEditing(false);
+        setEditData({});
+      },
+      onError: (error) => {
+        setClient(client);
+        const duplicate = getDuplicateClient(error);
+        if (duplicate) {
+          setDuplicateClient(duplicate);
+          return;
+        }
+        toast.error(error instanceof Error ? error.message : 'Не удалось сохранить клиента.');
+      },
+    });
   };
 
   async function handlePartnerCardUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -542,6 +569,19 @@ export default function ClientDetail() {
                     <Input label="ИНН" value={editData.inn ?? ''} onChange={e => setEditData({ ...editData, inn: e.target.value })} />
                     <Input label="Email" type="email" value={editData.email ?? ''} onChange={e => setEditData({ ...editData, email: e.target.value })} />
                   </div>
+                  {duplicateClient && (
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                      Клиент с таким ИНН уже существует
+                      {duplicateClient.id && (
+                        <>
+                          :{' '}
+                          <Link className="font-medium underline" to={`/clients/${duplicateClient.id}`}>
+                            {duplicateClient.company || duplicateClient.id}
+                          </Link>
+                        </>
+                      )}
+                    </div>
+                  )}
                   <div>
                     <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Адрес</label>
                     <textarea

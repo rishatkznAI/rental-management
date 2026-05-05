@@ -1,6 +1,13 @@
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const {
+  assertClientInnListUnique,
+  assertClientInnWriteAllowed,
+  buildClientInnDuplicateReport,
+  getClientInnNormalized,
+  normalizeClientInnFields,
+} = require('./lib/client-inn');
 
 const DEFAULT_DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = process.env.DB_PATH
@@ -78,8 +85,16 @@ function ensureDb() {
       created_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS client_inn_index (
+      inn_normalized TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL UNIQUE,
+      company TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
   dbInstance = db;
+  syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }
 
@@ -107,15 +122,85 @@ function getData(name) {
   }
 }
 
+function replaceClientInnIndex(db, clients) {
+  const replace = db.prepare(`
+    INSERT INTO client_inn_index (inn_normalized, client_id, company)
+    VALUES (?, ?, ?)
+    ON CONFLICT(inn_normalized) DO UPDATE SET
+      client_id = excluded.client_id,
+      company = excluded.company,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  db.prepare('DELETE FROM client_inn_index').run();
+  for (const client of clients) {
+    const innNormalized = getClientInnNormalized(client);
+    if (!innNormalized) continue;
+    replace.run(innNormalized, String(client.id || ''), client.company || client.name || '');
+  }
+}
+
+function checkClientInnDuplicates(clients, { throwOnDuplicates = true } = {}) {
+  const duplicates = buildClientInnDuplicateReport(clients);
+  if (duplicates.length > 0) {
+    const message = `[db] client_inn_index не обновлён: найдены клиенты с одинаковым нормализованным ИНН: ${duplicates
+      .map(group => `${group.innNormalized}: ${group.clients.map(client => `${client.company || client.id || 'без названия'} (${client.id || 'без id'})`).join(', ')}`)
+      .join('; ')}`;
+    if (throwOnDuplicates) {
+      assertClientInnListUnique(clients);
+    }
+    console.warn(message);
+    return { ok: false, duplicates };
+  }
+  return { ok: true, duplicates: [] };
+}
+
+function syncClientInnIndex({ throwOnDuplicates = true } = {}) {
+  const db = ensureDb();
+  const clients = getData('clients');
+  if (!Array.isArray(clients)) return { ok: true, duplicates: [] };
+
+  const check = checkClientInnDuplicates(clients, { throwOnDuplicates });
+  if (!check.ok) return check;
+
+  const tx = db.transaction((list) => {
+    replaceClientInnIndex(db, list);
+  });
+  tx(clients);
+  return { ok: true, duplicates: [] };
+}
+
 function setData(name, value) {
   const db = ensureDb();
-  db.prepare(`
-    INSERT INTO app_data (name, json)
-    VALUES (?, ?)
-    ON CONFLICT(name) DO UPDATE SET
-      json = excluded.json,
-      updated_at = CURRENT_TIMESTAMP
-  `).run(name, JSON.stringify(value));
+  const previousValue = name === 'clients' ? getData('clients') : null;
+  const nextValue = name === 'clients' && Array.isArray(value)
+    ? value.map(normalizeClientInnFields)
+    : value;
+  if (name === 'clients') {
+    if (Array.isArray(previousValue)) {
+      assertClientInnWriteAllowed(previousValue, nextValue);
+    } else {
+      assertClientInnListUnique(nextValue);
+    }
+  }
+  const upsert = db.prepare(`
+      INSERT INTO app_data (name, json)
+      VALUES (?, ?)
+      ON CONFLICT(name) DO UPDATE SET
+        json = excluded.json,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+  const tx = db.transaction(() => {
+    upsert.run(name, JSON.stringify(nextValue));
+    if (name === 'clients') {
+      const duplicateCheck = checkClientInnDuplicates(nextValue, { throwOnDuplicates: false });
+      if (duplicateCheck.ok) {
+        replaceClientInnIndex(db, nextValue);
+      } else {
+        db.prepare('DELETE FROM client_inn_index').run();
+      }
+    }
+  });
+  tx();
 }
 
 function migrateJsonFilesToDb() {
@@ -215,6 +300,9 @@ function resetAppData(collections = JSON_COLLECTIONS) {
   const tx = db.transaction((collectionNames) => {
     for (const name of collectionNames) deleteData.run(name);
     db.prepare('DELETE FROM app_sessions').run();
+    if (collectionNames.includes('clients')) {
+      db.prepare('DELETE FROM client_inn_index').run();
+    }
   });
   tx(names);
 }
@@ -247,4 +335,5 @@ module.exports = {
   migrateJsonFilesToDb,
   resetAppData,
   saveSession,
+  syncClientInnIndex,
 };

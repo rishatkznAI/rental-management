@@ -1018,3 +1018,74 @@ test('/api/admin/system-data/import requires confirmation and preserves existing
     assert.doesNotMatch(JSON.stringify(imported.body), /incoming-password|existing-password/);
   });
 });
+
+test('/api/admin/system-data/import rejects duplicate client INNs before writing any collection', async () => {
+  const collections = {
+    equipment: [{ id: 'EQ-old', serialNumber: 'OLD' }],
+    clients: [{ id: 'C-old', company: 'ООО Старый', inn: '7700654321' }],
+    users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password' }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        equipment: [{ id: 'EQ-new', serialNumber: 'NEW' }],
+        clients: [
+          { id: 'C-1', company: 'ООО Альфа', inn: '1655 123456' },
+          { id: 'C-2', company: 'ООО Бета', inn: '1655-123456' },
+        ],
+      },
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.ok, false);
+    assert.equal(response.body.errorCode, 'SYSTEM_IMPORT_CLIENT_INN_DUPLICATES');
+    assert.equal(response.body.clientInnDuplicates.length, 1);
+    assert.equal(response.body.clientInnDuplicates[0].innNormalized, '1655123456');
+    assert.deepEqual(response.body.clientInnDuplicates[0].clients.map(client => client.id), ['C-1', 'C-2']);
+    assert.deepEqual(writes, []);
+    assert.equal(collections.equipment[0].id, 'EQ-old');
+    assert.doesNotMatch(JSON.stringify(response.body), /password|token|secret/i);
+  });
+});
+
+test('/api/admin/system-data/import accepts valid clients payload', async () => {
+  const collections = {
+    clients: [{ id: 'C-old', company: 'ООО Старый', inn: '7700654321' }],
+    users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password' }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        clients: [
+          { id: 'C-1', company: 'ООО Альфа', inn: '1655123456' },
+          { id: 'C-2', company: 'ООО Без ИНН', inn: '' },
+        ],
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.imported, { clients: 2 });
+    assert.deepEqual(writes.map(write => write.name), ['clients']);
+    assert.equal(collections.clients.length, 2);
+  });
+});

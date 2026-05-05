@@ -13,6 +13,12 @@ const {
   buildRequestDecisionNotificationStatus,
   displayValue,
 } = require('../lib/rental-change-requests');
+const {
+  assertClientInnListUnique,
+  assertClientInnUnique,
+  buildClientInnDuplicateReport,
+  normalizeClientInnFields,
+} = require('../lib/client-inn');
 
 function registerCrudRoutes(deps) {
   const {
@@ -119,6 +125,16 @@ function registerCrudRoutes(deps) {
       readData,
       writeData,
       logger: console,
+    });
+  }
+
+  function sendClientInnError(res, error) {
+    return res.status(error?.status || 400).json({
+      ok: false,
+      error: error?.message || 'Клиент с таким ИНН уже существует',
+      code: error?.code,
+      conflictClient: error?.conflictClient,
+      duplicates: error?.duplicates,
     });
   }
 
@@ -527,6 +543,25 @@ function registerCrudRoutes(deps) {
       return res.json(data);
     });
 
+    if (collection === 'clients') {
+      router.get('/clients/diagnostics/duplicate-inn', requireAuth, async (req, res) => {
+        const readAccess = await hasReadAccess(req, collection);
+        if (readAccess.denied) {
+          return res.status(readAccess.statusCode).json(readAccess.payload);
+        }
+        try {
+          accessControl.assertCanReadCollection(collection, req.user);
+        } catch (error) {
+          return sendAccessError(res, error);
+        }
+        const data = accessControl.filterCollectionByScope(collection, readData(collection) || [], req.user);
+        return res.json({
+          ok: true,
+          duplicates: buildClientInnDuplicateReport(data),
+        });
+      });
+    }
+
     router.get(`/${collection}/:id`, requireAuth, async (req, res) => {
       const readAccess = await hasReadAccess(req, collection);
       if (readAccess.denied) {
@@ -618,6 +653,10 @@ function registerCrudRoutes(deps) {
 
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
+        if (collection === 'clients') {
+          newItem = normalizeClientInnFields(newItem);
+          assertClientInnUnique(data, newItem);
+        }
         if (collection === 'users') {
           newItem = normalizeUserPasswordForWrite(newItem);
         }
@@ -685,6 +724,9 @@ function registerCrudRoutes(deps) {
         }
         return res.status(201).json(newItem);
       } catch (error) {
+        if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
+          return sendClientInnError(res, error);
+        }
         if (error?.status) return sendAccessError(res, error);
         return res.status(400).json({ ok: false, error: error.message });
       }
@@ -796,6 +838,10 @@ function registerCrudRoutes(deps) {
           });
         } else {
           let nextItem = withClientLink(collection, { ...data[idx], ...safePatch, id: data[idx].id });
+          if (collection === 'clients') {
+            nextItem = normalizeClientInnFields(nextItem);
+            assertClientInnUnique(data, nextItem, data[idx].id);
+          }
           if (collection === 'users') {
             if (
               safePatch.password ||
@@ -860,6 +906,9 @@ function registerCrudRoutes(deps) {
         }
         return res.json(data[idx]);
       } catch (error) {
+        if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
+          return sendClientInnError(res, error);
+        }
         return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
     });
@@ -1064,6 +1113,9 @@ function registerCrudRoutes(deps) {
         if (collection === 'payments') {
           for (const item of list) validatePaymentRecord(item);
         }
+        if (collection === 'clients') {
+          assertClientInnListUnique(list);
+        }
         if (collection === 'service_works') {
           for (const item of list) validateServiceWorkCatalogRecord(item);
         }
@@ -1074,7 +1126,10 @@ function registerCrudRoutes(deps) {
           for (const item of list) validateCrmDealRecord(item);
         }
       } catch (error) {
-        return res.status(400).json({ ok: false, error: error.message });
+        if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
+          return sendClientInnError(res, error);
+        }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
 
       if (collection === 'service_works') {
@@ -1170,7 +1225,10 @@ function registerCrudRoutes(deps) {
         }
       }
 
-      const normalizedList = list.map(item => withClientLink(collection, item));
+      const normalizedList = list.map(item => {
+        const linked = withClientLink(collection, item);
+        return collection === 'clients' ? normalizeClientInnFields(linked) : linked;
+      });
       writeData(collection, normalizedList);
       if (collection === 'clients') {
         normalizeStoredClientLinksAfterClientWrite();

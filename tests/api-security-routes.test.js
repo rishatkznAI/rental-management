@@ -379,6 +379,19 @@ function assertNoCommercialFields(value) {
   walk(value);
 }
 
+function clientPayload(overrides = {}) {
+  return {
+    company: 'ООО Новый клиент',
+    inn: '1655123456',
+    contact: 'Иван',
+    phone: '+79991234567',
+    email: 'client@example.test',
+    paymentTerms: 'Постоплата 14 дней',
+    totalRentals: 0,
+    ...overrides,
+  };
+}
+
 test('generic CRUD refuses to register without access-control', () => {
   assert.throws(() => registerCrudRoutes({
     collections: [],
@@ -389,6 +402,178 @@ test('generic CRUD refuses to register without access-control', () => {
     requireRead: () => (_req, _res, next) => next(),
     requireWrite: () => (_req, _res, next) => next(),
   }), /requires access-control/);
+});
+
+test('/api/clients creates clients with normalized INN and rejects duplicate INN', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const created = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Альфа',
+      inn: '1655 123456',
+    }));
+    assert.equal(created.status, 201);
+    assert.equal(created.body.innNormalized, '1655123456');
+
+    const duplicate = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Бета',
+      inn: '1655-123456',
+      email: 'beta@example.test',
+    }));
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.error, 'Клиент с таким ИНН уже существует');
+    assert.equal(duplicate.body.code, 'CLIENT_INN_DUPLICATE');
+    assert.equal(duplicate.body.conflictClient.id, created.body.id);
+  });
+
+  assert.equal(state.clients.length, 1);
+});
+
+test('/api/clients allows editing own INN and rejects changing to another client INN', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО Альфа', inn: '1655123456', email: 'alpha@example.test' }),
+    clientPayload({ id: 'C-2', company: 'ООО Бета', inn: '7700 654321', email: 'beta@example.test' }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const ownInn = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'admin-token', {
+      company: 'ООО Альфа плюс',
+      inn: '1655-123456',
+    });
+    assert.equal(ownInn.status, 200);
+    assert.equal(ownInn.body.innNormalized, '1655123456');
+
+    const duplicate = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'admin-token', {
+      inn: '7700654321',
+    });
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.error, 'Клиент с таким ИНН уже существует');
+    assert.equal(duplicate.body.conflictClient.id, 'C-2');
+  });
+});
+
+test('/api/clients allows clearing INN and then reusing it for another client', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО Альфа', inn: '1655123456', email: 'alpha@example.test' }),
+    clientPayload({ id: 'C-2', company: 'ООО Бета', inn: '7700654321', email: 'beta@example.test' }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const cleared = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'admin-token', { inn: '' });
+    assert.equal(cleared.status, 200);
+    assert.equal(cleared.body.innNormalized, undefined);
+
+    const reused = await request(baseUrl, 'PATCH', '/api/clients/C-2', 'admin-token', { inn: '1655-123456' });
+    assert.equal(reused.status, 200);
+    assert.equal(reused.body.innNormalized, '1655123456');
+  });
+});
+
+test('/api/clients accepts empty INN for multiple clients', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const first = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Без ИНН 1',
+      inn: '',
+      email: 'empty1@example.test',
+    }));
+    const second = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Без ИНН 2',
+      inn: null,
+      email: 'empty2@example.test',
+    }));
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+  });
+
+  assert.equal(state.clients.length, 2);
+});
+
+test('/api/clients delete removes client from uniqueness checks', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО Альфа', inn: '1655123456', email: 'alpha@example.test' }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'admin-token');
+    assert.equal(deleted.status, 200);
+
+    const created = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Новый владелец ИНН',
+      inn: '1655-123456',
+      email: 'reuse@example.test',
+    }));
+    assert.equal(created.status, 201);
+    assert.equal(created.body.innNormalized, '1655123456');
+  });
+
+  assert.equal(state.clients.length, 1);
+  assert.equal(state.clients[0].company, 'ООО Новый владелец ИНН');
+});
+
+test('/api/clients allows unrelated writes while legacy duplicate INNs remain but blocks adding to duplicate group', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО Старый дубль 1', inn: '1655 123456', email: 'dup1@example.test' }),
+    clientPayload({ id: 'C-2', company: 'ООО Старый дубль 2', inn: '1655123456', email: 'dup2@example.test' }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const unrelated = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Уникальный',
+      inn: '7700654321',
+      email: 'unique@example.test',
+    }));
+    assert.equal(unrelated.status, 201);
+
+    const duplicate = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Новый дубль',
+      inn: '1655-123456',
+      email: 'new-dup@example.test',
+    }));
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.code, 'CLIENT_INN_DUPLICATE');
+  });
+
+  assert.equal(state.clients.length, 3);
+});
+
+test('/api/clients duplicate INN diagnostics reports existing duplicate groups', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО Альфа', inn: '1655 123456', email: 'alpha@example.test' }),
+    clientPayload({ id: 'C-2', company: 'ООО Бета', inn: '1655123456', email: 'beta@example.test' }),
+    clientPayload({ id: 'C-3', company: 'ООО Без ИНН', inn: '', email: 'empty@example.test' }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'GET', '/api/clients/diagnostics/duplicate-inn', 'admin-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.duplicates.length, 1);
+    assert.equal(response.body.duplicates[0].innNormalized, '1655123456');
+    assert.deepEqual(response.body.duplicates[0].clients.map(client => client.id), ['C-1', 'C-2']);
+    assert.deepEqual(Object.keys(response.body.duplicates[0].clients[0]).sort(), ['company', 'id', 'inn', 'innNormalized']);
+  });
+});
+
+test('/api/clients duplicate INN diagnostics follows clients read permissions', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО Альфа', inn: '1655 123456', email: 'alpha@example.test' }),
+    clientPayload({ id: 'C-2', company: 'ООО Бета', inn: '1655123456', email: 'beta@example.test' }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const allowed = await request(baseUrl, 'GET', '/api/clients/diagnostics/duplicate-inn', 'manager-token');
+    assert.equal(allowed.status, 200);
+
+    const forbidden = await request(baseUrl, 'GET', '/api/clients/diagnostics/duplicate-inn', 'investor-token');
+    assert.equal(forbidden.status, 403);
+  });
 });
 
 test('/api/service returns 200 for service roles and 403 for forbidden roles', async () => {

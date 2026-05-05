@@ -53,6 +53,7 @@ import {
 } from '../lib/serviceWorkOrder';
 import { buildServiceQuickActions } from '../lib/quickActions.js';
 import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media';
+import { normalizeUserRole } from '../lib/userStorage';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -371,7 +372,11 @@ export default function ServiceDetail() {
   const { can } = usePermissions();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const isAdmin = (user?.normalizedRole || user?.role) === 'Администратор';
+  const isAdmin = [
+    user?.normalizedRole,
+    user?.role,
+    user?.rawRole,
+  ].some(role => normalizeUserRole(role) === 'Администратор');
   const canEdit = can('edit', 'service');
   const canDeleteService = isAdmin && can('delete', 'service');
   const canCreateDocuments = can('create', 'documents');

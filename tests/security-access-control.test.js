@@ -227,7 +227,8 @@ test('service child records require access to the parent ticket', () => {
   assert.equal(access.canAccessEntity('repair_work_items', { id: 'RW-1', repairId: 'S-own' }, mechanic), true);
   assert.equal(access.canAccessEntity('repair_work_items', { id: 'RW-2', repairId: 'S-other' }, mechanic), false);
   assert.equal(access.canAccessEntity('warranty_claims', { id: 'WC-1', serviceTicketId: 'S-other' }, mechanic), false);
-  assert.throws(() => access.assertCanCreateCollection('repair_work_items', mechanic, { repairId: 'S-own', workId: 'W-1' }), /только администратор/);
+  assert.doesNotThrow(() => access.assertCanCreateCollection('repair_work_items', mechanic, { repairId: 'S-own', workId: 'W-1' }));
   assert.doesNotThrow(() => access.assertCanCreateCollection('repair_work_items', mechanic, { repairId: 'S-revision', workId: 'W-1' }));
   assert.throws(() => access.assertCanCreateCollection('repair_work_items', mechanic, { repairId: 'S-other', workId: 'W-1' }), /только администратор/);
+  assert.throws(() => access.assertCanCreateCollection('spare_parts', mechanic, { name: 'Фильтр', unit: 'шт' }), /Forbidden/);
 });

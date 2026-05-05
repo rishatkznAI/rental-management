@@ -14,20 +14,49 @@ function sameText(left, right) {
   return Boolean(l && r && l === r);
 }
 
-function mechanicCanAddRepairItemDuringRevision(user, context = {}) {
+function compact(values) {
+  return values
+    .flat()
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+}
+
+function getMechanicIdsForUser(user, readData) {
+  if (typeof readData !== 'function') return [];
+  const mechanics = readData('mechanics') || [];
+  const keys = compact([user?.userId, user?.id, user?.userName, user?.name, user?.email]);
+  return compact([
+    ...mechanics
+      .filter(item => keys.some(key => (
+        sameText(key, item?.id) ||
+        sameText(key, item?.userId) ||
+        sameText(key, item?.name) ||
+        sameText(key, item?.email)
+      )))
+      .map(item => item.id),
+  ]);
+}
+
+function isEditableRepairItemTicket(ticket) {
+  const status = String(ticket?.status || '').trim();
+  return status !== 'closed' && status !== 'ready';
+}
+
+function mechanicCanAddRepairItemToTicket(user, context = {}) {
   if (!isMechanicRole(user?.userRole || user?.role || '')) return false;
   const ticket = context.ticket || (() => {
     const repairId = String(context.input?.repairId || context.input?.serviceId || '').trim();
     if (!repairId || typeof context.readData !== 'function') return null;
     return (context.readData('service') || []).find(item => String(item?.id || '') === repairId) || null;
   })();
-  if (!ticket || ticket.status !== 'needs_revision') return false;
+  if (!ticket || !isEditableRepairItemTicket(ticket)) return false;
   const userKeys = [
     user?.userId,
     user?.id,
     user?.userName,
     user?.name,
     user?.email,
+    ...getMechanicIdsForUser(user, context.readData),
   ];
   const ticketKeys = [
     ticket.assignedMechanicId,
@@ -41,8 +70,11 @@ function mechanicCanAddRepairItemDuringRevision(user, context = {}) {
 }
 
 function assertRepairItemsAdmin(user, context = {}) {
-  if (normalizeRole(user?.userRole || user?.role || '') === 'Администратор') return;
-  if (context.mode === 'create' && mechanicCanAddRepairItemDuringRevision(user, context)) return;
+  const role = normalizeRole(user?.userRole || user?.role || '');
+  if (role === 'Администратор') return;
+  if (context.mode === 'create') {
+    if (mechanicCanAddRepairItemToTicket(user, context)) return;
+  }
   const error = new Error(SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE);
   error.status = 403;
   throw error;
@@ -103,5 +135,5 @@ module.exports = {
   createServiceAuditLog,
   inferServiceAuditSource,
   isRepairItemCollection,
-  mechanicCanAddRepairItemDuringRevision,
+  mechanicCanAddRepairItemToTicket,
 };

@@ -924,7 +924,7 @@ function createBotOperations(deps) {
   }
 
   function addRepairWorkItemFromCatalog(ticket, work, quantity, authUser = null, options = {}) {
-    assertRepairItemsAdmin(authUser, { mode: 'create', ticket });
+    assertRepairItemsAdmin(authUser, { mode: 'create', ticket, readData });
     const safeQuantity = requirePositiveNumber(quantity, 'Количество работы');
     const normHoursSnapshot = requireNonNegativeNumber(work?.normHours ?? 0, 'Нормо-часы работы');
     const ratePerHourSnapshot = requireNonNegativeNumber(work?.ratePerHour ?? 0, 'Стоимость нормо-часа');
@@ -983,7 +983,7 @@ function createBotOperations(deps) {
   }
 
   function addRepairPartItemFromCatalog(ticket, part, quantity, priceSnapshot, authUser = null) {
-    assertRepairItemsAdmin(authUser, { mode: 'create', ticket });
+    assertRepairItemsAdmin(authUser, { mode: 'create', ticket, readData });
     const safeQuantity = requirePositiveNumber(quantity, 'Количество запчастей');
     const safePrice = requireNonNegativeNumber(priceSnapshot, 'Цена запчасти');
     const items = readData('repair_part_items') || [];

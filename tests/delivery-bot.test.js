@@ -1114,7 +1114,7 @@ test('mechanic work add rejects meter hours below equipment card value', async (
   assert.match(messages.at(-1).text, /Указанные моточасы меньше текущих/);
 });
 
-test('mechanic work add is blocked after meter hours validation', async () => {
+test('mechanic can add work to assigned service ticket after meter hours validation', async () => {
   const { state, messages, handlers } = setupMechanicRepairWithWorks([
     makeWork(1, { name: 'Диагностика гидравлики', normHours: 1.5 }),
   ], { hours: 500 });
@@ -1122,13 +1122,14 @@ test('mechanic work add is blocked after meter hours validation', async () => {
   await handlers.handleCallback({ user_id: 100 }, '100', 'work:choose:W-1', { callbackId: 'cb-1' });
   await handlers.handleCommand({ user_id: 100 }, '100', '1250.5');
 
-  assert.equal(state.repair_work_items.length, 0);
-  assert.equal(state.equipment[0].hours, 500);
-  assert.equal(state.bot_activity.length, 0);
-  assert.match(messages.at(-1).text, /Работы и запчасти может изменять только администратор/);
+  assert.equal(state.repair_work_items.length, 1);
+  assert.equal(state.repair_work_items[0].nameSnapshot, 'Диагностика гидравлики');
+  assert.equal(state.equipment[0].hours, 1250.5);
+  assert.equal(state.bot_activity.length, 1);
+  assert.match(messages.at(-1).text, /Работа сохранена/);
 });
 
-test('mechanic work add with unchanged meter hours is still blocked by admin rule', async () => {
+test('mechanic work add with unchanged meter hours saves assigned service ticket work', async () => {
   const { state, messages, handlers } = setupMechanicRepairWithWorks([
     makeWork(1, { name: 'Диагностика гидравлики' }),
   ], { hours: 500, history: [] });
@@ -1136,10 +1137,11 @@ test('mechanic work add with unchanged meter hours is still blocked by admin rul
   await handlers.handleCallback({ user_id: 100 }, '100', 'work:choose:W-1', { callbackId: 'cb-1' });
   await handlers.handleCommand({ user_id: 100 }, '100', '500');
 
-  assert.equal(state.repair_work_items.length, 0);
+  assert.equal(state.repair_work_items.length, 1);
+  assert.equal(state.repair_work_items[0].nameSnapshot, 'Диагностика гидравлики');
   assert.equal(state.equipment[0].hours, 500);
   assert.equal(state.equipment[0].history.length, 0);
-  assert.match(messages.at(-1).text, /Работы и запчасти может изменять только администратор/);
+  assert.match(messages.at(-1).text, /Работа сохранена/);
 });
 
 test('mechanic can add work after ticket is returned for revision', async () => {
@@ -1307,7 +1309,7 @@ test('mechanic parts pagination opens next and previous pages', async () => {
   assert.ok(texts.includes('Следующие 10'));
 });
 
-test('mechanic cannot add part by absolute number from a later page', async () => {
+test('mechanic can add part by absolute number from a later page', async () => {
   const { state, messages, handlers } = setupMechanicRepairWithParts(
     Array.from({ length: 12 }, (_, index) => makePart(index + 1)),
   );
@@ -1316,8 +1318,9 @@ test('mechanic cannot add part by absolute number from a later page', async () =
   await handlers.handleCallback({ user_id: 100 }, '100', 'part:page:1', { callbackId: 'cb-2' });
   await handlers.handleCommand({ user_id: 100 }, '100', '11 1');
 
-  assert.equal(state.repair_part_items.length, 0);
-  assert.match(messages.at(-1).text, /Работы и запчасти может изменять только администратор/);
+  assert.equal(state.repair_part_items.length, 1);
+  assert.equal(state.repair_part_items[0].nameSnapshot, 'Запчасть 11');
+  assert.match(messages.at(-1).text, /Добавлена запчасть/);
 });
 
 test('mechanic parts search finds item outside first page', async () => {
@@ -1382,7 +1385,7 @@ test('new spare part appears in bot without restart', async () => {
   assert.match(messages.at(-1).text, /Новый датчик наклона/);
 });
 
-test('mechanic cannot add selected spare part to service ticket', async () => {
+test('mechanic can add selected spare part to assigned service ticket by quantity button', async () => {
   const { state, messages, handlers } = setupMechanicRepairWithParts([
     makePart(1, { name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200 }),
   ]);
@@ -1391,8 +1394,28 @@ test('mechanic cannot add selected spare part to service ticket', async () => {
   await handlers.handleCallback({ user_id: 100 }, '100', 'part:choose:P-1', { callbackId: 'cb-1' });
   await handlers.handleCallback({ user_id: 100 }, '100', 'qty:part:2', { callbackId: 'cb-2' });
 
-  assert.equal(state.repair_part_items.length, 0);
-  assert.match(messages.at(-1).text, /Работы и запчасти может изменять только администратор/);
+  assert.equal(state.repair_part_items.length, 1);
+  assert.equal(state.repair_part_items[0].nameSnapshot, 'Фильтр масляный');
+  assert.equal(state.repair_part_items[0].quantity, 2);
+  assert.equal(state.repair_part_items[0].priceSnapshot, 1200);
+  assert.equal(state.service_audit_log.at(-1).action, 'part_added');
+  assert.match(messages.at(-1).text, /Добавлена запчасть/);
+});
+
+test('mechanic can add selected spare part with manual quantity and default price', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200 }),
+  ]);
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти фильтр');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:choose:P-1', { callbackId: 'cb-1' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'qty:part:manual', { callbackId: 'cb-2' });
+  await handlers.handleCommand({ user_id: 100 }, '100', '3');
+
+  assert.equal(state.repair_part_items.length, 1);
+  assert.equal(state.repair_part_items[0].quantity, 3);
+  assert.equal(state.repair_part_items[0].priceSnapshot, 1200);
+  assert.match(messages.at(-1).text, /Добавлена запчасть/);
 });
 
 test('mechanic can add selected spare part after ticket is returned for revision', async () => {
@@ -1409,6 +1432,80 @@ test('mechanic can add selected spare part after ticket is returned for revision
   assert.equal(state.repair_part_items.length, 1);
   assert.equal(state.repair_part_items[0].nameSnapshot, 'Фильтр масляный');
   assert.equal(state.service_audit_log.at(-1).action, 'part_added');
+  assert.match(messages.at(-1).text, /Добавлена запчасть/);
+});
+
+test('mechanic cannot add selected spare part to unassigned service ticket', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200 }),
+  ]);
+  state.service[0].assignedMechanicName = 'Другой механик';
+  state.service[0].assignedMechanicId = 'M-other';
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти фильтр');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:choose:P-1', { callbackId: 'cb-1' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'qty:part:2', { callbackId: 'cb-2' });
+
+  assert.equal(state.repair_part_items.length, 0);
+  assert.match(messages.at(-1).text, /Работы и запчасти может изменять только администратор/);
+});
+
+test('carrier cannot add selected spare part to service ticket', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200 }),
+  ]);
+  state.bot_users['100'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти фильтр');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:choose:P-1', { callbackId: 'cb-1' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'qty:part:2', { callbackId: 'cb-2' });
+
+  assert.equal(state.repair_part_items.length, 0);
+  assert.match(messages.at(-1).text, /режиме доставки/);
+});
+
+test('investor cannot add selected spare part to service ticket', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200 }),
+  ]);
+  state.bot_users['100'] = {
+    userId: 'U-investor',
+    userName: 'Инвестор',
+    userRole: 'Инвестор',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти фильтр');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:choose:P-1', { callbackId: 'cb-1' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'qty:part:2', { callbackId: 'cb-2' });
+
+  assert.equal(state.repair_part_items.length, 0);
+  assert.match(messages.at(-1).text, /Работы и запчасти может изменять только администратор/);
+});
+
+test('admin can add selected spare part to service ticket', async () => {
+  const { state, messages, handlers } = setupMechanicRepairWithParts([
+    makePart(1, { name: 'Фильтр масляный', article: 'F-100', defaultPrice: 1200 }),
+  ]);
+  state.bot_users['100'] = {
+    userId: 'U-admin',
+    userName: 'Админ',
+    userRole: 'Администратор',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/запчасти фильтр');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'part:choose:P-1', { callbackId: 'cb-1' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'qty:part:2', { callbackId: 'cb-2' });
+
+  assert.equal(state.repair_part_items.length, 1);
+  assert.equal(state.repair_part_items[0].nameSnapshot, 'Фильтр масляный');
   assert.match(messages.at(-1).text, /Добавлена запчасть/);
 });
 

@@ -225,7 +225,7 @@ test('repair item mutations are admin-only and write service audit entries', asy
   });
 });
 
-test('mechanic can read repair items but cannot mutate them', async () => {
+test('mechanic can create repair items for assigned ticket but cannot delete existing items', async () => {
   const { app, state } = createServiceApp({
     ...createState(),
     repair_work_items: [{ id: 'RW-1', repairId: 'S-1', workId: 'SW-1', quantity: 1 }],
@@ -235,14 +235,14 @@ test('mechanic can read repair items but cannot mutate them', async () => {
     assert.equal(list.status, 200);
 
     const create = await request(baseUrl, 'POST', '/api/repair_work_items', { repairId: 'S-1', workId: 'SW-1', quantity: 1 });
-    assert.equal(create.status, 403);
-    assert.equal(create.body.error, 'Недостаточно прав. Работы и запчасти может изменять только администратор');
+    assert.equal(create.status, 201);
+    assert.equal(state.service_audit_log.at(-1).action, 'work_added');
 
     const remove = await request(baseUrl, 'DELETE', '/api/repair_work_items/RW-1');
     assert.equal(remove.status, 403);
     assert.equal(remove.body.error, 'Недостаточно прав. Работы и запчасти может изменять только администратор');
-    assert.equal(state.repair_work_items.length, 1);
-    assert.equal(state.service_audit_log.length, 0);
+    assert.equal(state.repair_work_items.length, 2);
+    assert.equal(state.service_audit_log.length, 1);
   });
 });
 
@@ -378,7 +378,7 @@ test('revision resolve is limited to assigned mechanic or admin', async () => {
   });
 });
 
-test('assigned mechanic can add but not delete repair items only while ticket needs revision', async () => {
+test('assigned mechanic can add but not delete repair items while ticket needs revision', async () => {
   const state = {
     ...createState(),
     service: [{ id: 'S-1', assignedMechanicId: 'M-1', assignedMechanicName: 'Петров', status: 'needs_revision', equipmentId: 'EQ-1', reason: 'ТО', workLog: [] }],

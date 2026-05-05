@@ -271,7 +271,7 @@ function registerServiceRoutes(router, deps) {
       const quantity = parseRequiredPositiveNumber(req.body?.quantity, 'Количество работы');
       const ticket = findServiceTicketOr404(repairId, res);
       if (!ticket) return;
-      assertRepairItemsAdmin(req.user, { mode: 'create', ticket });
+      assertRepairItemsAdmin(req.user, { mode: 'create', ticket, readData });
       try {
         accessControl.assertCanUpdateEntity('service', ticket, req.user);
       } catch (error) {
@@ -391,7 +391,7 @@ function registerServiceRoutes(router, deps) {
       const quantity = parseRequiredPositiveNumber(req.body?.quantity, 'Количество запчастей');
       const ticket = findServiceTicketOr404(repairId, res);
       if (!ticket) return;
-      assertRepairItemsAdmin(req.user, { mode: 'create', ticket });
+      assertRepairItemsAdmin(req.user, { mode: 'create', ticket, readData });
       try {
         accessControl.assertCanUpdateEntity('service', ticket, req.user);
       } catch (error) {

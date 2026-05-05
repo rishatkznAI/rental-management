@@ -128,3 +128,32 @@ test('MAX helpers require admin context before writing repair items', () => {
   assert.equal(state.repair_part_items.length, 0);
   assert.equal(state.service_audit_log.length, 0);
 });
+
+test('MAX helpers allow mechanic bot append to open repair items without assignment', () => {
+  const { operations, state } = createOperations();
+  const mechanic = { userId: 'U-mechanic', userName: 'Механик', userRole: 'Механик' };
+
+  const workItem = operations.addRepairWorkItemFromCatalog(ticket, work, 1, mechanic, { source: 'bot' });
+  const partItem = operations.addRepairPartItemFromCatalog(ticket, part, 2, 500, mechanic, { source: 'bot' });
+
+  assert.equal(state.repair_work_items.length, 1);
+  assert.equal(state.repair_part_items.length, 1);
+  assert.equal(workItem.repairId, ticket.id);
+  assert.equal(partItem.repairId, ticket.id);
+});
+
+test('MAX helpers keep ready and closed repair items unavailable for mechanic bot append', () => {
+  const { operations, state } = createOperations();
+  const mechanic = { userId: 'U-mechanic', userName: 'Механик', userRole: 'Механик' };
+
+  assert.throws(
+    () => operations.addRepairWorkItemFromCatalog({ ...ticket, status: 'ready' }, work, 1, mechanic, { source: 'bot' }),
+    /только администратор/,
+  );
+  assert.throws(
+    () => operations.addRepairPartItemFromCatalog({ ...ticket, status: 'closed' }, part, 1, 100, mechanic, { source: 'bot' }),
+    /только администратор/,
+  );
+  assert.equal(state.repair_work_items.length, 0);
+  assert.equal(state.repair_part_items.length, 0);
+});

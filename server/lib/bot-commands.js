@@ -1022,12 +1022,8 @@ function createBotHandlers(deps) {
     }
     const role = normalizeRole(authUser?.userRole || authUser?.role || '');
     if (role === 'Администратор') return null;
-    if (isMechanicRole(role)) {
-      return canBotUserAccessServiceTicket(ticket, authUser)
-        ? null
-        : 'Вы можете добавлять работы и запчасти только в назначенные вам заявки.';
-    }
-    return 'Недостаточно прав. Добавлять работы и запчасти в сервисные заявки могут только администратор и назначенный механик.';
+    if (isMechanicRole(role)) return null;
+    return 'Недостаточно прав. Добавлять работы и запчасти через бот могут только сотрудники сервиса.';
   }
 
   function parsePositiveBotNumber(value) {
@@ -2019,7 +2015,7 @@ function createBotHandlers(deps) {
 
     let workItem;
     try {
-      workItem = addRepairWorkItemFromCatalog(ticket, work, quantity, authUser, { meterHours, equipment });
+      workItem = addRepairWorkItemFromCatalog(ticket, work, quantity, authUser, { meterHours, equipment, source: 'bot' });
     } catch (error) {
       if (error?.status === 403) {
         const fallback = getRepairItemBotPermissionMessage(authUser, ticket) || SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE;
@@ -2238,7 +2234,7 @@ function createBotHandlers(deps) {
       });
     }
     try {
-      addRepairPartItemFromCatalog(ticket, part, quantity, price, authUser);
+      addRepairPartItemFromCatalog(ticket, part, quantity, price, authUser, { source: 'bot' });
     } catch (error) {
       if (error?.status === 403) {
         const fallback = getRepairItemBotPermissionMessage(authUser, ticket) || SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE;

@@ -69,10 +69,22 @@ function mechanicCanAddRepairItemToTicket(user, context = {}) {
   return userKeys.some(left => ticketKeys.some(right => sameText(left, right)));
 }
 
+function mechanicCanAppendRepairItemFromBot(user, context = {}) {
+  if (context.source !== 'bot') return false;
+  if (!isMechanicRole(user?.userRole || user?.role || '')) return false;
+  const ticket = context.ticket || (() => {
+    const repairId = String(context.input?.repairId || context.input?.serviceId || '').trim();
+    if (!repairId || typeof context.readData !== 'function') return null;
+    return (context.readData('service') || []).find(item => String(item?.id || '') === repairId) || null;
+  })();
+  return Boolean(ticket && isEditableRepairItemTicket(ticket));
+}
+
 function assertRepairItemsAdmin(user, context = {}) {
   const role = normalizeRole(user?.userRole || user?.role || '');
   if (role === 'Администратор') return;
   if (context.mode === 'create') {
+    if (mechanicCanAppendRepairItemFromBot(user, context)) return;
     if (mechanicCanAddRepairItemToTicket(user, context)) return;
   }
   const error = new Error(SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE);
@@ -135,5 +147,6 @@ module.exports = {
   createServiceAuditLog,
   inferServiceAuditSource,
   isRepairItemCollection,
+  mechanicCanAppendRepairItemFromBot,
   mechanicCanAddRepairItemToTicket,
 };

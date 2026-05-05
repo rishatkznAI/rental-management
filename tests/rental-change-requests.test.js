@@ -830,6 +830,54 @@ test('approved rental date change applies even when it originally required confl
   });
 });
 
+test('admin can replace rental client and synchronize linked gantt rental', async () => {
+  const { app, state } = createApprovalApp();
+  state.rentals[0].clientId = 'C-old';
+  state.gantt_rentals[0].clientId = 'C-old';
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'admin-token', {
+      clientId: 'C-new',
+      client: 'Новый клиент',
+      rentalId: 'R-1',
+      __linkedGanttRentalId: 'GR-1',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.clientId, 'C-new');
+    assert.equal(update.body.client, 'Новый клиент');
+    assert.equal(state.rentals[0].clientId, 'C-new');
+    assert.equal(state.rentals[0].client, 'Новый клиент');
+    assert.equal(state.gantt_rentals[0].clientId, 'C-new');
+    assert.equal(state.gantt_rentals[0].client, 'Новый клиент');
+    assert.equal(state.gantt_rentals[0].clientShort, 'Новый клиент');
+  });
+});
+
+test('rental manager cannot replace rental client directly', async () => {
+  const { app, state } = createApprovalApp();
+  state.rentals[0].clientId = 'C-old';
+  state.gantt_rentals[0].clientId = 'C-old';
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'manager-token', {
+      clientId: 'C-new',
+      client: 'Новый клиент',
+      rentalId: 'R-1',
+      __linkedGanttRentalId: 'GR-1',
+      __changeReason: 'Коррекция контрагента',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.changeRequestSummary.pendingCount, 2);
+    assert.deepEqual(update.body.changeRequestSummary.appliedFields, []);
+    assert.equal(state.rentals[0].clientId, 'C-old');
+    assert.equal(state.rentals[0].client, 'ЭМ-СТРОЙ');
+    assert.equal(state.gantt_rentals[0].clientId, 'C-old');
+    assert.deepEqual(state.rental_change_requests.map(item => item.field).sort(), ['client', 'clientId']);
+  });
+});
+
 test('editing existing rental through gantt id creates approval without losing rental card', async () => {
   const { app, state } = createApprovalApp();
 

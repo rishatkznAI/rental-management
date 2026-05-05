@@ -13,7 +13,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { formatDate, formatDateTime, formatCurrency } from '../lib/utils';
-import { useClientById, useUpdateClient } from '../hooks/useClients';
+import { useClientById, useDeleteClient, useUpdateClient } from '../hooks/useClients';
 import { useGanttData } from '../hooks/useRentals';
 import { usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
@@ -114,6 +114,41 @@ function getDuplicateClient(error: unknown): { id?: string; company?: string } |
   return body.conflictClient || {};
 }
 
+type ClientDeleteBlockedRental = {
+  id?: string;
+  rentalId?: string;
+  equipmentId?: string;
+  equipmentInv?: string;
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+};
+
+type ClientDeleteHistoryLink = {
+  collection: string;
+  count: number;
+};
+
+function getClientDeleteConflict(error: unknown): { message: string; rentals: ClientDeleteBlockedRental[] } | null {
+  if (!(error instanceof ApiError)) return null;
+  const body = error.body as { error?: string; message?: string; rentals?: ClientDeleteBlockedRental[] } | undefined;
+  if (body?.error !== 'CLIENT_HAS_RENTALS') return null;
+  return {
+    message: body.message || 'Нельзя удалить клиента, потому что у него есть связанные аренды',
+    rentals: Array.isArray(body.rentals) ? body.rentals : [],
+  };
+}
+
+function getClientHistoryConflict(error: unknown): { message: string; links: ClientDeleteHistoryLink[] } | null {
+  if (!(error instanceof ApiError)) return null;
+  const body = error.body as { error?: string; message?: string; links?: ClientDeleteHistoryLink[] } | undefined;
+  if (body?.error !== 'CLIENT_HAS_HISTORY') return null;
+  return {
+    message: body.message || 'У клиента есть исторические связи. Переведите клиента в неактивный статус вместо удаления.',
+    links: Array.isArray(body.links) ? body.links : [],
+  };
+}
+
 function Divider() {
   return <hr className="border-gray-100 dark:border-gray-800" />;
 }
@@ -171,11 +206,13 @@ export default function ClientDetail() {
   const { can } = usePermissions();
   const { user } = useAuth();
   const canEdit = can('edit', 'clients');
+  const canDelete = user?.role === 'Администратор' && can('delete', 'clients');
   const canEditDebt = user?.role === 'Администратор';
   const canCreateRentals = can('create', 'rentals');
 
   const { data: fetchedClient } = useClientById(id ?? '');
   const updateClient = useUpdateClient();
+  const deleteClient = useDeleteClient();
 
   // Local optimistic state
   const [client, setClient] = useState<Client | null>(null);
@@ -186,6 +223,8 @@ export default function ClientDetail() {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Client>>({});
   const [duplicateClient, setDuplicateClient] = useState<{ id?: string; company?: string } | null>(null);
+  const [deleteBlockedRentals, setDeleteBlockedRentals] = useState<ClientDeleteBlockedRental[]>([]);
+  const [deleteHistoryLinks, setDeleteHistoryLinks] = useState<ClientDeleteHistoryLink[]>([]);
 
   // Related data via react-query
   const { data: ganttRentals = [] } = useGanttData();
@@ -364,6 +403,46 @@ export default function ClientDetail() {
     toast.success('Карта партнёра удалена из карточки клиента.');
   }
 
+  function handleDeleteClient() {
+    if (!client || !canDelete) return;
+    setDeleteHistoryLinks([]);
+    if (clientRentals.length > 0) {
+      setDeleteBlockedRentals(clientRentals.map(rental => ({
+        id: rental.id,
+        rentalId: rental.rentalId || rental.id,
+        equipmentId: rental.equipmentId,
+        equipmentInv: rental.equipmentInv,
+        startDate: rental.startDate,
+        endDate: rental.endDate,
+        status: rental.status,
+      })));
+      toast.error('Сначала замените клиента в связанных арендах.');
+      return;
+    }
+    if (!window.confirm(`Удалить клиента "${client.company}"? Действие нельзя отменить.`)) return;
+    deleteClient.mutate(client.id, {
+      onSuccess: () => {
+        toast.success('Клиент удалён.');
+        navigate('/clients');
+      },
+      onError: (error) => {
+        const conflict = getClientDeleteConflict(error);
+        if (conflict) {
+          setDeleteBlockedRentals(conflict.rentals);
+          toast.error(conflict.message);
+          return;
+        }
+        const historyConflict = getClientHistoryConflict(error);
+        if (historyConflict) {
+          setDeleteHistoryLinks(historyConflict.links);
+          toast.error(historyConflict.message);
+          return;
+        }
+        toast.error(error instanceof Error ? error.message : 'Не удалось удалить клиента.');
+      },
+    });
+  }
+
   // ── "not found" screen ────────────────────────────────────────────────────
 
   if (!client) {
@@ -417,6 +496,17 @@ export default function ClientDetail() {
                     Новая аренда
                   </Button>
                 </Link>
+              )}
+              {canDelete && (
+                <Button
+                  variant="secondary"
+                  onClick={handleDeleteClient}
+                  disabled={deleteClient.isPending}
+                  title={clientRentals.length > 0 ? 'Сначала замените клиента в связанных арендах' : undefined}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Удалить
+                </Button>
               )}
             </>
           ) : (
@@ -1149,6 +1239,63 @@ export default function ClientDetail() {
                 <p className="text-xs text-red-600 dark:text-red-300">
                   Задолженность {formatCurrency(displayedDebt)} превышает допустимый порог. Рекомендуется связаться с клиентом.
                 </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {deleteBlockedRentals.length > 0 && (
+            <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/20">
+              <CardContent className="space-y-3 pt-4">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">Удаление заблокировано</p>
+                </div>
+                <p className="text-xs text-amber-800 dark:text-amber-200">
+                  Сначала замените клиента в связанных арендах.
+                </p>
+                <div className="space-y-2">
+                  {deleteBlockedRentals.slice(0, 5).map(rental => {
+                    const rentalKey = rental.id || rental.rentalId || '';
+                    return (
+                      <Link
+                        key={`${rentalKey}-${rental.equipmentId || rental.equipmentInv || ''}`}
+                        to={rentalKey ? `/rentals/${rentalKey}` : '/rentals'}
+                        className="block rounded-md border border-amber-200 bg-white px-3 py-2 text-xs text-amber-900 hover:bg-amber-100 dark:border-amber-900 dark:bg-gray-900 dark:text-amber-100 dark:hover:bg-amber-950/40"
+                      >
+                        <span className="font-medium">{rental.rentalId || rental.id || 'Аренда'}</span>
+                        <span className="block text-amber-700 dark:text-amber-300">
+                          {rental.equipmentInv || rental.equipmentId || 'Техника не указана'} · {rentalStatusLabel(rental.status || '')}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                  {deleteBlockedRentals.length > 5 && (
+                    <Link to="/rentals" className="text-xs font-medium text-amber-800 hover:underline dark:text-amber-200">
+                      Показать все аренды
+                    </Link>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {deleteHistoryLinks.length > 0 && (
+            <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/20">
+              <CardContent className="space-y-3 pt-4">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">Есть история по клиенту</p>
+                </div>
+                <p className="text-xs text-amber-800 dark:text-amber-200">
+                  Физическое удаление заблокировано. Переведите клиента в неактивный статус.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {deleteHistoryLinks.map(link => (
+                    <Badge key={link.collection} variant="warning">
+                      {link.collection}: {link.count}
+                    </Badge>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           )}

@@ -128,6 +128,109 @@ function registerCrudRoutes(deps) {
     });
   }
 
+  function normalizeClientName(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function rentalBelongsToClient(rental, client) {
+    const clientId = String(client?.id || '').trim();
+    const rentalClientId = String(rental?.clientId || '').trim();
+    if (clientId && rentalClientId) return rentalClientId === clientId;
+    if (rentalClientId) return false;
+
+    const clientName = normalizeClientName(client?.company || client?.name);
+    const rentalClientName = normalizeClientName(rental?.client || rental?.clientName);
+    return Boolean(clientName && rentalClientName && clientName === rentalClientName);
+  }
+
+  function rentalDeleteBlockDto(rental, equipmentById) {
+    const equipmentId = rental?.equipmentId || '';
+    const equipment = equipmentId ? equipmentById.get(String(equipmentId)) : null;
+    const equipmentInv = rental?.equipmentInv
+      || rental?.inventoryNumber
+      || equipment?.inventoryNumber
+      || '';
+    return {
+      id: rental?.id,
+      rentalId: rental?.rentalId || rental?.sourceRentalId || rental?.originalRentalId || rental?.id,
+      equipmentId,
+      equipmentInv,
+      startDate: rental?.startDate,
+      endDate: rental?.endDate || rental?.plannedReturnDate,
+      status: rental?.status,
+    };
+  }
+
+  function findClientLinkedRentals(client) {
+    const equipmentById = new Map((readData('equipment') || [])
+      .filter(item => item?.id)
+      .map(item => [String(item.id), item]));
+    const seen = new Set();
+    return [...(readData('rentals') || []), ...(readData('gantt_rentals') || [])]
+      .filter(rental => rentalBelongsToClient(rental, client))
+      .map(rental => rentalDeleteBlockDto(rental, equipmentById))
+      .filter(rental => {
+        const key = `${rental.id || ''}:${rental.rentalId || ''}:${rental.equipmentId || ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function recordBelongsToClient(record, client, nameFields) {
+    const clientId = String(client?.id || '').trim();
+    const recordClientId = String(record?.clientId || '').trim();
+    if (clientId && recordClientId) return recordClientId === clientId;
+    if (recordClientId) return false;
+
+    const clientName = normalizeClientName(client?.company || client?.name);
+    if (!clientName) return false;
+    return nameFields.some(field => normalizeClientName(record?.[field]) === clientName);
+  }
+
+  function findClientHistoryLinks(client) {
+    const linkSpecs = [
+      { collection: 'documents', label: 'documents', nameFields: ['client', 'clientName'] },
+      { collection: 'payments', label: 'payments', nameFields: ['client', 'clientName'] },
+      { collection: 'deliveries', label: 'deliveries', nameFields: ['client', 'clientName'] },
+      { collection: 'service', label: 'service', nameFields: ['client', 'clientName'] },
+      { collection: 'warranty_claims', label: 'warranty_claims', nameFields: ['client', 'clientName'] },
+      { collection: 'crm_deals', label: 'crm_deals', nameFields: ['company', 'client', 'clientName'] },
+      { collection: 'debt_collection_plans', label: 'debt_collection_plans', nameFields: ['clientName', 'client'] },
+    ];
+
+    return linkSpecs
+      .map(spec => {
+        const items = readData(spec.collection) || [];
+        const matches = items.filter(item => recordBelongsToClient(item, client, spec.nameFields));
+        return matches.length > 0
+          ? { collection: spec.label, count: matches.length }
+          : null;
+      })
+      .filter(Boolean);
+  }
+
+  function canDeleteClients(req) {
+    const role = normalizeRole(req.user?.userRole);
+    return role === 'Администратор' || role === 'Офис-менеджер';
+  }
+
+  function sendClientHasRentalsError(res, rentals) {
+    return res.status(409).json({
+      error: 'CLIENT_HAS_RENTALS',
+      message: 'Нельзя удалить клиента, потому что у него есть связанные аренды',
+      rentals,
+    });
+  }
+
+  function sendClientHasHistoryError(res, links) {
+    return res.status(409).json({
+      error: 'CLIENT_HAS_HISTORY',
+      message: 'Нельзя удалить клиента, потому что у него есть исторические связи. Переведите клиента в архивный/неактивный статус вместо удаления.',
+      links,
+    });
+  }
+
   function sendClientInnError(res, error) {
     return res.status(error?.status || 400).json({
       ok: false,
@@ -948,11 +1051,24 @@ function registerCrudRoutes(deps) {
       } catch (error) {
         return sendAccessError(res, error);
       }
+      if (collection === 'clients' && !canDeleteClients(req)) {
+        return res.status(403).json({ ok: false, error: 'Удаление клиентов доступно только администратору или офис-менеджеру.' });
+      }
       const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'DELETE', data[idx]);
       if (knowledgeProgressForbiddenReason) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
       }
       const removedItem = data[idx];
+      if (collection === 'clients') {
+        const linkedRentals = findClientLinkedRentals(removedItem);
+        if (linkedRentals.length > 0) {
+          return sendClientHasRentalsError(res, linkedRentals);
+        }
+        const historyLinks = findClientHistoryLinks(removedItem);
+        if (historyLinks.length > 0) {
+          return sendClientHasHistoryError(res, historyLinks);
+        }
+      }
       if (collection === 'payments' && req.user?.userRole !== 'Администратор') {
         const request = createEntityChangeRequest(req, {
           entityType: 'payment',

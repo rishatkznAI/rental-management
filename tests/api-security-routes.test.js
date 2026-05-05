@@ -515,6 +515,236 @@ test('/api/clients delete removes client from uniqueness checks', async () => {
   assert.equal(state.clients[0].company, 'ООО Новый владелец ИНН');
 });
 
+test('/api/clients delete returns 404 for missing client', async () => {
+  const { app } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-missing', 'admin-token');
+    assert.equal(deleted.status, 404);
+    assert.equal(deleted.body.error, 'Not found');
+  });
+});
+
+test('/api/clients delete rejects clients linked to rentals by clientId', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО Альфа', inn: '1655123456', email: 'alpha@example.test' }),
+  ];
+  state.rentals = [
+    { id: 'R-1', rentalId: 'A-100', clientId: 'C-1', equipmentId: 'EQ-own', startDate: '2026-05-01', plannedReturnDate: '2026-05-10', status: 'active' },
+  ];
+  state.gantt_rentals = [];
+
+  await withServer(app, async (baseUrl) => {
+    const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'admin-token');
+    assert.equal(deleted.status, 409);
+    assert.equal(deleted.body.error, 'CLIENT_HAS_RENTALS');
+    assert.equal(deleted.body.message, 'Нельзя удалить клиента, потому что у него есть связанные аренды');
+    assert.deepEqual(deleted.body.rentals, [{
+      id: 'R-1',
+      rentalId: 'A-100',
+      equipmentId: 'EQ-own',
+      equipmentInv: '100',
+      startDate: '2026-05-01',
+      endDate: '2026-05-10',
+      status: 'active',
+    }]);
+  });
+
+  assert.equal(state.clients.length, 1);
+});
+
+test('/api/clients delete rejects legacy rentals linked by client name without clientId', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО Альфа', inn: '1655123456', email: 'alpha@example.test' }),
+  ];
+  state.rentals = [];
+  state.gantt_rentals = [
+    { id: 'GR-1', client: ' ООО Альфа ', equipmentInv: '700', startDate: '2026-05-02', endDate: '2026-05-12', status: 'confirmed' },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'admin-token');
+    assert.equal(deleted.status, 409);
+    assert.equal(deleted.body.error, 'CLIENT_HAS_RENTALS');
+    assert.equal(deleted.body.rentals[0].id, 'GR-1');
+    assert.equal(deleted.body.rentals[0].equipmentInv, '700');
+  });
+
+  assert.equal(state.clients.length, 1);
+});
+
+test('/api/clients delete rejects clients with historical non-rental links', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО История', inn: '1655123456', email: 'history@example.test' }),
+  ];
+  state.rentals = [];
+  state.gantt_rentals = [];
+  state.documents = [{ id: 'D-1', clientId: 'C-1', client: 'Старый снимок', rental: 'R-archived' }];
+  state.payments = [{ id: 'P-1', clientId: 'C-1', client: 'ООО История', amount: 1000 }];
+  state.deliveries = [{ id: 'DL-1', client: ' ООО История ' }];
+
+  await withServer(app, async (baseUrl) => {
+    const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'admin-token');
+    assert.equal(deleted.status, 409);
+    assert.equal(deleted.body.error, 'CLIENT_HAS_HISTORY');
+    assert.equal(deleted.body.links.find(item => item.collection === 'documents').count, 1);
+    assert.equal(deleted.body.links.find(item => item.collection === 'payments').count, 1);
+    assert.equal(deleted.body.links.find(item => item.collection === 'deliveries').count, 1);
+    assert.equal(JSON.stringify(deleted.body).includes('Старый снимок'), false);
+  });
+
+  assert.equal(state.clients.length, 1);
+});
+
+test('/api/clients delete is limited to admin or client-management role', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО Без истории', inn: '1655123456', email: 'alpha@example.test', manager: 'Руслан', managerId: 'U-manager' }),
+  ];
+  state.rentals = [];
+  state.gantt_rentals = [];
+
+  await withServer(app, async (baseUrl) => {
+    const managerDelete = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'manager-token');
+    assert.equal(managerDelete.status, 403);
+    assert.equal(managerDelete.body.error, 'Удаление клиентов доступно только администратору или офис-менеджеру.');
+
+    const officeDelete = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'office-token');
+    assert.equal(officeDelete.status, 200);
+  });
+
+  assert.equal(state.clients.length, 0);
+});
+
+test('/api/rentals lets admin replace rental client and then old client can be deleted', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-old', company: 'ООО Старый клиент', inn: '1655123456', email: 'old@example.test' }),
+    clientPayload({ id: 'C-new', company: 'ООО Новый клиент', inn: '7700654321', email: 'new@example.test' }),
+  ];
+  state.rentals = [
+    {
+      id: 'R-1',
+      clientId: 'C-old',
+      client: 'ООО Старый клиент',
+      contact: 'Иван',
+      startDate: '2026-05-01',
+      plannedReturnDate: '2026-05-10',
+      equipment: ['100'],
+      manager: 'Админ',
+      status: 'active',
+      price: 1000,
+      discount: 0,
+      history: [],
+    },
+  ];
+  state.gantt_rentals = [
+    {
+      id: 'GR-1',
+      rentalId: 'R-1',
+      clientId: 'C-old',
+      client: 'ООО Старый клиент',
+      startDate: '2026-05-01',
+      endDate: '2026-05-10',
+      equipmentId: 'EQ-own',
+      equipmentInv: '100',
+      status: 'active',
+      amount: 1000,
+      comments: [],
+    },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const blocked = await request(baseUrl, 'DELETE', '/api/clients/C-old', 'admin-token');
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.error, 'CLIENT_HAS_RENTALS');
+
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'admin-token', {
+      clientId: 'C-new',
+      client: 'ООО Новый клиент',
+      rentalId: 'R-1',
+      __linkedGanttRentalId: 'GR-1',
+    });
+    assert.equal(update.status, 200);
+    assert.equal(update.body.clientId, 'C-new');
+    assert.equal(update.body.client, 'ООО Новый клиент');
+    assert.equal(state.rentals[0].clientId, 'C-new');
+    assert.equal(state.rentals[0].client, 'ООО Новый клиент');
+    assert.equal(state.gantt_rentals[0].clientId, 'C-new');
+    assert.equal(state.gantt_rentals[0].client, 'ООО Новый клиент');
+    assert.equal(state.gantt_rentals[0].clientShort, 'ООО Новый клиент');
+
+    const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-old', 'admin-token');
+    assert.equal(deleted.status, 200);
+  });
+
+  assert.deepEqual(state.clients.map(client => client.id), ['C-new']);
+});
+
+test('/api/rentals sends manager client replacement to approval without mutating rental', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-old', company: 'ООО Свой', inn: '1655123456', email: 'old@example.test' }),
+    clientPayload({ id: 'C-new', company: 'ООО Новый клиент', inn: '7700654321', email: 'new@example.test' }),
+  ];
+  state.rentals = [
+    {
+      id: 'R-own',
+      clientId: 'C-old',
+      client: 'ООО Свой',
+      contact: 'Иван',
+      startDate: '2026-05-01',
+      plannedReturnDate: '2026-05-10',
+      equipment: ['100'],
+      manager: 'Руслан',
+      managerId: 'U-manager',
+      status: 'active',
+      price: 1000,
+      discount: 0,
+      history: [],
+    },
+  ];
+  state.gantt_rentals = [
+    {
+      id: 'GR-own',
+      rentalId: 'R-own',
+      clientId: 'C-old',
+      client: 'ООО Свой',
+      startDate: '2026-05-01',
+      endDate: '2026-05-10',
+      equipmentId: 'EQ-own',
+      equipmentInv: '100',
+      manager: 'Руслан',
+      managerId: 'U-manager',
+      status: 'active',
+      amount: 1000,
+      comments: [],
+    },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'manager-token', {
+      clientId: 'C-new',
+      client: 'ООО Новый клиент',
+      rentalId: 'R-own',
+      __linkedGanttRentalId: 'GR-own',
+      __changeReason: 'Нужно заменить клиента',
+    });
+    assert.equal(update.status, 200);
+    assert.equal(update.body.changeRequestSummary.pendingCount, 2);
+    assert.deepEqual(update.body.changeRequestSummary.appliedFields, []);
+  });
+
+  assert.equal(state.rentals[0].clientId, 'C-old');
+  assert.equal(state.rentals[0].client, 'ООО Свой');
+  assert.equal(state.gantt_rentals[0].clientId, 'C-old');
+  assert.equal(state.rental_change_requests.length, 2);
+  assert.deepEqual(state.rental_change_requests.map(item => item.field).sort(), ['client', 'clientId']);
+});
+
 test('/api/clients allows unrelated writes while legacy duplicate INNs remain but blocks adding to duplicate group', async () => {
   const { app, state } = createSecurityApp();
   state.clients = [

@@ -1010,6 +1010,85 @@ function createBotHandlers(deps) {
     return accessControl.canAccessEntity('service', ticket, authUser);
   }
 
+  function isClosedForRepairItemBotFlow(ticket) {
+    const status = String(ticket?.status || '').trim();
+    return status === 'closed' || status === 'ready';
+  }
+
+  function getRepairItemBotPermissionMessage(authUser, ticket) {
+    if (!ticket) return 'Сначала выберите сервисную заявку, к которой нужно добавить запчасть.';
+    if (isClosedForRepairItemBotFlow(ticket)) {
+      return 'Заявка уже закрыта. Добавление работ и запчастей недоступно.';
+    }
+    const role = normalizeRole(authUser?.userRole || authUser?.role || '');
+    if (role === 'Администратор') return null;
+    if (isMechanicRole(role)) {
+      return canBotUserAccessServiceTicket(ticket, authUser)
+        ? null
+        : 'Вы можете добавлять работы и запчасти только в назначенные вам заявки.';
+    }
+    return 'Недостаточно прав. Добавлять работы и запчасти в сервисные заявки могут только администратор и назначенный механик.';
+  }
+
+  function parsePositiveBotNumber(value) {
+    const normalized = String(value || '').trim().replace(',', '.');
+    if (!normalized || !/^\d+(?:\.\d+)?$/.test(normalized)) return null;
+    const number = Number(normalized);
+    return Number.isFinite(number) && number > 0 ? number : null;
+  }
+
+  function parseNonNegativeBotNumber(value) {
+    const normalized = String(value || '').trim().replace(',', '.');
+    if (!normalized || !/^\d+(?:\.\d+)?$/.test(normalized)) return null;
+    const number = Number(normalized);
+    return Number.isFinite(number) && number >= 0 ? number : null;
+  }
+
+  function normalizePartUnitToken(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[.,;:]+$/g, '');
+  }
+
+  function isPartUnitToken(token, part) {
+    const normalized = normalizePartUnitToken(token);
+    if (!normalized) return false;
+    const unit = normalizePartUnitToken(part?.unit);
+    if (unit && normalized === unit) return true;
+    const aliases = {
+      л: ['л', 'литр', 'литра', 'литров'],
+      литр: ['л', 'литр', 'литра', 'литров'],
+      кг: ['кг', 'килограмм', 'килограмма', 'килограммов'],
+      шт: ['шт', 'штука', 'штуки', 'штук'],
+      м: ['м', 'метр', 'метра', 'метров'],
+    };
+    return Boolean(unit && aliases[unit]?.includes(normalized));
+  }
+
+  function parsePartQuantityAndPrice({ selectedPartId, tokens, part }) {
+    const quantityToken = selectedPartId ? tokens[0] : tokens[1];
+    const quantity = parsePositiveBotNumber(quantityToken);
+    if (quantity == null) {
+      return { error: '❌ Количество запчасти должно быть числом больше 0.' };
+    }
+    const priceTokens = selectedPartId ? tokens.slice(1) : tokens.slice(2);
+    const defaultPrice = Number(part?.defaultPrice || 0);
+    if (priceTokens.length === 0) {
+      return { quantity, price: Number.isFinite(defaultPrice) ? defaultPrice : 0 };
+    }
+    if (priceTokens.length === 1 && isPartUnitToken(priceTokens[0], part)) {
+      return { quantity, price: Number.isFinite(defaultPrice) ? defaultPrice : 0 };
+    }
+    if (priceTokens.length === 1) {
+      const price = parseNonNegativeBotNumber(priceTokens[0]);
+      if (price != null) return { quantity, price };
+    }
+    return {
+      error: '❌ Введите количество числом. Если хотите указать цену, напишите: 1 3500.',
+    };
+  }
+
   function canBotUserAccessDelivery(delivery, phone, authUser) {
     if (!delivery || !authUser) return false;
     if (!isCarrierBotUser(authUser)) return false;
@@ -1926,11 +2005,26 @@ function createBotHandlers(deps) {
       });
     }
 
+    const permissionMessage = getRepairItemBotPermissionMessage(authUser, ticket);
+    if (permissionMessage) {
+      return reply(senderId, `⛔ ${permissionMessage}`, {
+        attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'work',
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      });
+    }
+
     let workItem;
     try {
       workItem = addRepairWorkItemFromCatalog(ticket, work, quantity, authUser, { meterHours, equipment });
     } catch (error) {
-      if (error?.status === 403) return reply(senderId, `⛔ ${SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE}.`);
+      if (error?.status === 403) {
+        const fallback = getRepairItemBotPermissionMessage(authUser, ticket) || SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE;
+        return reply(senderId, `⛔ ${fallback}.`);
+      }
       throw error;
     }
     const updated = appendServiceLog(
@@ -2090,15 +2184,12 @@ function createBotHandlers(deps) {
   }
 
   async function handleAddPartRequest(senderId, phone, authUser, ticket, selectionText, uiContext = {}) {
-    const [firstRaw, secondRaw, thirdRaw] = selectionText.trim().split(/\s+/);
+    const tokens = selectionText.trim().split(/\s+/).filter(Boolean);
+    const [firstRaw] = tokens;
     const session = getBotSession(phone);
     const selectedPartId = session.pendingPayload?.selectedPartId;
     if (!selectedPartId && firstRaw && Number.isNaN(Number(firstRaw))) {
       return handlePartSearchRequest(senderId, phone, ticket, selectionText.trim(), uiContext);
-    }
-    const quantity = Number(selectedPartId ? firstRaw : secondRaw);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      return reply(senderId, '❌ Количество запчасти должно быть числом больше 0.');
     }
     let part = null;
     if (selectedPartId) {
@@ -2130,15 +2221,29 @@ function createBotHandlers(deps) {
     if (!part) {
       return reply(senderId, '❌ Запчасть больше недоступна в справочнике. Выполните поиск заново.');
     }
-    const explicitPrice = selectedPartId ? secondRaw : thirdRaw;
-    const price = explicitPrice == null ? Number(part.defaultPrice || 0) : Number(explicitPrice);
-    if (!Number.isFinite(price) || price < 0) {
-      return reply(senderId, '❌ Цена должна быть числом не меньше 0.');
+    const parsed = parsePartQuantityAndPrice({ selectedPartId, tokens, part });
+    if (parsed.error) {
+      return reply(senderId, parsed.error);
+    }
+    const { quantity, price } = parsed;
+    const permissionMessage = getRepairItemBotPermissionMessage(authUser, ticket);
+    if (permissionMessage) {
+      return reply(senderId, `⛔ ${permissionMessage}`, {
+        attachments: currentRepairKeyboard(ticket.id),
+        mechanicStage: 'parts',
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+        cleanupPrevious: !uiContext.callbackContext,
+      });
     }
     try {
       addRepairPartItemFromCatalog(ticket, part, quantity, price, authUser);
     } catch (error) {
-      if (error?.status === 403) return reply(senderId, `⛔ ${SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE}.`);
+      if (error?.status === 403) {
+        const fallback = getRepairItemBotPermissionMessage(authUser, ticket) || SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE;
+        return reply(senderId, `⛔ ${fallback}.`);
+      }
       throw error;
     }
     const updated = appendServiceLog(ticket, `Добавлена запчасть через MAX: ${part.name} × ${quantity}`, authUser.userName, 'repair_result');
@@ -3363,7 +3468,7 @@ function createBotHandlers(deps) {
       }
       const ticket = getCurrentRepair(phone);
       if (!ticket) {
-        return reply(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID', {
+        return reply(senderId, 'ℹ️ Сначала выберите сервисную заявку, к которой нужно добавить работу.', {
           attachments: mechanicKeyboard(),
           mechanicStage: 'repairs',
         });
@@ -3383,7 +3488,7 @@ function createBotHandlers(deps) {
       const page = Number(normalized.slice('part:page:'.length));
       const ticket = getCurrentRepair(phone);
       if (!ticket) {
-        return reply(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID', {
+        return reply(senderId, 'ℹ️ Сначала выберите сервисную заявку, к которой нужно добавить запчасть.', {
           attachments: mechanicKeyboard(),
           mechanicStage: 'repairs',
         });
@@ -4003,23 +4108,23 @@ function createBotHandlers(deps) {
         });
       }
       if (session.pendingAction === 'work_search') {
-        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите сервисную заявку, к которой нужно добавить работу.');
         return handleWorkSearchRequest(senderId, phone, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'work_pick') {
-        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите сервисную заявку, к которой нужно добавить работу.');
         return handleAddWorkRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'work_hours') {
-        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите сервисную заявку, к которой нужно добавить работу.');
         return handleWorkMeterHoursRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'part_search') {
-        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите сервисную заявку, к которой нужно добавить запчасть.');
         return handlePartSearchRequest(senderId, phone, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'part_pick') {
-        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите заявку: /ремонт ID');
+        if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите сервисную заявку, к которой нужно добавить запчасть.');
         return handleAddPartRequest(senderId, phone, authUser, currentTicket, trimmed, uiContext);
       }
       if (session.pendingAction === 'summary') {

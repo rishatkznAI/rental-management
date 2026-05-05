@@ -20,42 +20,26 @@ import { paymentsService } from '../services/payments.service';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
-import { getEffectivePaidAmount, shouldCountPayment, shouldCountRental } from '../lib/finance';
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const MONTH_NAMES = [
-  'Январь','Февраль','Март','Апрель','Май','Июнь',
-  'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь',
-];
-
-const EQ_TYPE_LABELS: Record<string, string> = {
-  scissor: 'Ножничный',
-  articulated: 'Коленчатый',
-  telescopic: 'Телескопический',
-};
-
-const RENTAL_STATUS_LABELS: Record<string, string> = {
-  created: 'Бронь',
-  active: 'Активна',
-  returned: 'Возвращена',
-  closed: 'Закрыта',
-};
-
-const PAYMENT_STATUS_LABELS: Record<string, string> = {
-  paid: 'Оплачено',
-  partial: 'Частично',
-  unpaid: 'Не оплачено',
-};
+import {
+  buildManagerReportRows,
+  buildManagerReportSummary,
+  buildManagerReportXLS,
+  filterManagerReportRows,
+  formatManagerReportDate,
+} from '../lib/managerReport.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ReportRow {
+  rowId: string;
   rentalId: string;
   equipmentId: string;
   equipmentFilterKey: string;
   monthLabel: string;
   monthKey: string;
+  allocationStartDate: string;
+  allocationEndDate: string;
+  allocationDays: number;
   manager: string;
   client: string;
   equipmentInv: string;
@@ -108,222 +92,7 @@ const EMPTY_FILTERS: Filters = {
   equipmentType: 'all', equipmentInv: 'all',
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtDate(d: string): string {
-  if (!d) return '—';
-  try {
-    const dt = new Date(d);
-    if (isNaN(dt.getTime())) return d;
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()}`;
-  } catch { return d; }
-}
-
-function buildRows(
-  rentals: GanttRentalData[],
-  equipmentList: Equipment[],
-  payments: Payment[],
-): ReportRow[] {
-  const eqById = new Map<string, Equipment>();
-  const eqByUniqueInv = new Map<string, Equipment>();
-  const inventoryCounts = new Map<string, number>();
-  for (const eq of equipmentList) {
-    eqById.set(eq.id, eq);
-    inventoryCounts.set(eq.inventoryNumber, (inventoryCounts.get(eq.inventoryNumber) ?? 0) + 1);
-  }
-  for (const eq of equipmentList) {
-    if ((inventoryCounts.get(eq.inventoryNumber) ?? 0) === 1) {
-      eqByUniqueInv.set(eq.inventoryNumber, eq);
-    }
-  }
-
-  const paysByRental = new Map<string, Payment[]>();
-  for (const p of payments) {
-    if (!shouldCountPayment(p)) continue;
-    if (p.rentalId) {
-      const list = paysByRental.get(p.rentalId) ?? [];
-      list.push(p);
-      paysByRental.set(p.rentalId, list);
-    }
-  }
-
-  return rentals.filter(shouldCountRental).map(r => {
-    const eq = (r.equipmentId ? eqById.get(r.equipmentId) : undefined) ?? eqByUniqueInv.get(r.equipmentInv);
-    const d = new Date(r.startDate);
-    const valid = !isNaN(d.getTime());
-    const monthKey = valid
-      ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      : '9999-99';
-    const monthLabel = valid
-      ? `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`
-      : (r.startDate || '—');
-
-    const related = paysByRental.get(r.id) ?? [];
-    const paidAmount = related.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
-    let latestPaidDate = '';
-    for (const p of related) {
-      if (p.paidDate && p.paidDate > latestPaidDate) latestPaidDate = p.paidDate;
-    }
-
-    const debt = Math.max(0, (r.amount ?? 0) - paidAmount);
-
-    let paymentStatus: 'paid' | 'partial' | 'unpaid';
-    if (paidAmount >= (r.amount ?? 0))  paymentStatus = 'paid';
-    else if (paidAmount > 0)            paymentStatus = 'partial';
-    else                                paymentStatus = 'unpaid';
-
-    return {
-      rentalId:        r.id,
-      equipmentId:     eq?.id || r.equipmentId || '',
-      equipmentFilterKey: eq?.id || r.equipmentId || `inv:${r.equipmentInv || '—'}`,
-      monthLabel,
-      monthKey,
-      manager:         r.manager     || '—',
-      client:          r.client      || '—',
-      equipmentInv:    r.equipmentInv || '—',
-      equipmentType:   eq?.type      ?? '',
-      equipmentLabel:  eq ? (EQ_TYPE_LABELS[eq.type] ?? eq.type) : '—',
-      equipmentName:   eq ? `${eq.manufacturer} ${eq.model}` : (r.equipmentInv || '—'),
-      startDate:       r.startDate,
-      endDate:         r.endDate,
-      amount:          r.amount ?? 0,
-      paymentStatus,
-      paymentLabel:    PAYMENT_STATUS_LABELS[paymentStatus] ?? paymentStatus,
-      paidAmount,
-      debt,
-      paidDate:        latestPaidDate,
-      updSigned:       r.updSigned,
-      updDate:         r.updDate ?? '',
-      rentalStatus:    r.status,
-      rentalStatusLabel: RENTAL_STATUS_LABELS[r.status] ?? r.status,
-    };
-  });
-}
-
-function buildManagerSummary(rows: ReportRow[]): ManagerSummaryRow[] {
-  const map = new Map<string, ManagerSummaryRow & { _clients: Set<string> }>();
-  for (const row of rows) {
-    if (!map.has(row.manager)) {
-      map.set(row.manager, {
-        manager: row.manager, rentalsCount: 0, clientsCount: 0,
-        _clients: new Set(), totalAmount: 0, paidAmount: 0, debt: 0,
-        updSignedCount: 0, updNotSignedCount: 0,
-      });
-    }
-    const s = map.get(row.manager)!;
-    s.rentalsCount++;
-    s._clients.add(row.client);
-    s.totalAmount  += row.amount;
-    s.paidAmount   += row.paidAmount;
-    s.debt         += row.debt;
-    if (row.updSigned) s.updSignedCount++; else s.updNotSignedCount++;
-  }
-  return [...map.values()]
-    .map(s => ({ ...s, clientsCount: s._clients.size }))
-    .sort((a, b) => b.totalAmount - a.totalAmount);
-}
-
 // ── Excel (SpreadsheetML .xls) ────────────────────────────────────────────────
-
-function escXML(v: string | number | null | undefined): string {
-  return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function hCell(v: string): string {
-  return `<Cell ss:StyleID="hdr"><Data ss:Type="String">${escXML(v)}</Data></Cell>`;
-}
-function dCell(v: string | number | null | undefined, num = false): string {
-  return `<Cell><Data ss:Type="${num ? 'Number' : 'String'}">${escXML(v)}</Data></Cell>`;
-}
-
-function buildXLS(
-  summary: ManagerSummaryRow[],
-  detail: ReportRow[],
-  periodLabel: string,
-): string {
-  const today = fmtDate(new Date().toISOString());
-
-  const sumRows = summary.map(s => `<Row>
-      ${dCell(s.manager)}${dCell(s.rentalsCount,true)}${dCell(s.clientsCount,true)}
-      ${dCell(s.totalAmount,true)}${dCell(s.paidAmount,true)}${dCell(s.debt,true)}
-      ${dCell(s.updSignedCount,true)}${dCell(s.updNotSignedCount,true)}
-    </Row>`).join('\n');
-
-  const totRent   = summary.reduce((a, r) => a + r.rentalsCount, 0);
-  const totAmt    = summary.reduce((a, r) => a + r.totalAmount,  0);
-  const totPaid   = summary.reduce((a, r) => a + r.paidAmount,   0);
-  const totDebt   = summary.reduce((a, r) => a + r.debt,         0);
-  const totSigned = summary.reduce((a, r) => a + r.updSignedCount, 0);
-  const totUnsign = summary.reduce((a, r) => a + r.updNotSignedCount, 0);
-  const totRow = `<Row ss:StyleID="total">
-      ${dCell('ИТОГО')}${dCell(totRent,true)}${dCell('')}
-      ${dCell(totAmt,true)}${dCell(totPaid,true)}${dCell(totDebt,true)}
-      ${dCell(totSigned,true)}${dCell(totUnsign,true)}
-    </Row>`;
-
-  const detRows = detail.map(r => `<Row>
-      ${dCell(r.monthLabel)}${dCell(r.manager)}${dCell(r.client)}
-      ${dCell(r.equipmentInv)}${dCell(r.equipmentLabel)}${dCell(r.equipmentName)}
-      ${dCell(fmtDate(r.startDate))}${dCell(fmtDate(r.endDate))}
-      ${dCell(r.amount,true)}${dCell(r.paymentLabel)}
-      ${dCell(r.paidAmount,true)}${dCell(r.debt,true)}
-      ${dCell(r.paidDate ? fmtDate(r.paidDate) : '')}
-      ${dCell(r.updSigned ? 'Да' : 'Нет')}${dCell(r.updDate ? fmtDate(r.updDate) : '')}
-      ${dCell(r.rentalStatusLabel)}
-    </Row>`).join('\n');
-
-  const titleCell = (text: string, span: number) =>
-    `<Cell ss:MergeAcross="${span - 1}" ss:StyleID="title"><Data ss:Type="String">${escXML(text)}</Data></Cell>`;
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
-  xmlns:o="urn:schemas-microsoft-com:office:office"
-  xmlns:x="urn:schemas-microsoft-com:office:excel"
-  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-<Styles>
-  <Style ss:ID="hdr">
-    <Font ss:Bold="1" ss:Color="#FFFFFF"/>
-    <Interior ss:Color="#1E3A5F" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="total">
-    <Font ss:Bold="1"/>
-    <Interior ss:Color="#DCE6F1" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="title">
-    <Font ss:Bold="1" ss:Size="12"/>
-  </Style>
-</Styles>
-<Worksheet ss:Name="Сводно">
-  <Table>
-    <Row>${titleCell(`Отчёт по менеджерам · ${periodLabel} · Выгружен: ${today}`, 8)}</Row>
-    <Row/>
-    <Row>
-      ${hCell('Менеджер')}${hCell('Аренд')}${hCell('Клиентов')}
-      ${hCell('Сумма аренд, ₽')}${hCell('Оплачено, ₽')}${hCell('Дебиторка, ₽')}
-      ${hCell('УПД подписано')}${hCell('УПД не подписано')}
-    </Row>
-    ${sumRows}
-    ${totRow}
-  </Table>
-</Worksheet>
-<Worksheet ss:Name="Детализация">
-  <Table>
-    <Row>${titleCell(`Детализация аренд · ${periodLabel} · Выгружен: ${today}`, 16)}</Row>
-    <Row/>
-    <Row>
-      ${hCell('Месяц')}${hCell('Менеджер')}${hCell('Клиент')}
-      ${hCell('INV')}${hCell('Тип техники')}${hCell('Техника')}
-      ${hCell('Начало аренды')}${hCell('Окончание аренды')}
-      ${hCell('Сумма аренды, ₽')}${hCell('Статус оплаты')}
-      ${hCell('Оплачено, ₽')}${hCell('Дебиторка, ₽')}${hCell('Дата оплаты')}
-      ${hCell('УПД подписано')}${hCell('Дата УПД')}${hCell('Статус аренды')}
-    </Row>
-    ${detRows}
-  </Table>
-</Worksheet>
-</Workbook>`;
-}
 
 function downloadXLS(content: string, filename: string) {
   const blob = new Blob(['\ufeff', content], { type: 'application/vnd.ms-excel;charset=utf-8' });
@@ -556,6 +325,7 @@ function DetailTable({ rows }: { rows: ReportRow[] }) {
         <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           {grouped.map(([manager, mRows]) => {
             const isOpen = expanded.has(manager);
+            const rentalsCount = new Set(mRows.map(row => row.rentalId)).size;
             const totalAmt    = mRows.reduce((s, r) => s + r.amount, 0);
             const totalPaid   = mRows.reduce((s, r) => s + r.paidAmount, 0);
             const totalDebt   = mRows.reduce((s, r) => s + r.debt, 0);
@@ -576,7 +346,7 @@ function DetailTable({ rows }: { rows: ReportRow[] }) {
                     <Users className="h-4 w-4 text-[--color-primary] flex-shrink-0" />
                     <span className="font-semibold text-gray-900 dark:text-white text-sm">{manager}</span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
-                      {mRows.length} аренд · {formatCurrency(totalAmt)}
+                      {rentalsCount} аренд · {mRows.length} начислений · {formatCurrency(totalAmt)}
                     </span>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
@@ -615,14 +385,14 @@ function DetailTable({ rows }: { rows: ReportRow[] }) {
                       </thead>
                       <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
                         {mRows.map(row => (
-                          <tr key={row.rentalId}
+                          <tr key={row.rowId}
                             className="bg-white dark:bg-gray-800 hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors">
                             <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">{row.monthLabel}</td>
                             <td className="px-3 py-2 max-w-[180px] truncate text-gray-900 dark:text-white font-medium" title={row.client}>{row.client}</td>
                             <td className="px-3 py-2 font-mono text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">{row.equipmentInv}</td>
                             <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">{row.equipmentLabel}</td>
                             <td className="px-3 py-2 whitespace-nowrap text-gray-600 dark:text-gray-400 text-xs">
-                              {fmtDate(row.startDate)} — {fmtDate(row.endDate)}
+                              {formatManagerReportDate(row.startDate)} — {formatManagerReportDate(row.endDate)}
                             </td>
                             <td className="px-3 py-2 font-semibold tabular-nums whitespace-nowrap text-gray-900 dark:text-white">
                               {formatCurrency(row.amount)}
@@ -641,7 +411,7 @@ function DetailTable({ rows }: { rows: ReportRow[] }) {
                                 : <span className="text-gray-400">—</span>}
                             </td>
                             <td className="px-3 py-2 text-xs whitespace-nowrap text-gray-600 dark:text-gray-400">
-                              {row.paidDate ? fmtDate(row.paidDate) : '—'}
+                              {row.paidDate ? formatManagerReportDate(row.paidDate) : '—'}
                             </td>
                             <td className="px-3 py-2 whitespace-nowrap">
                               {row.updSigned
@@ -649,7 +419,7 @@ function DetailTable({ rows }: { rows: ReportRow[] }) {
                                 : <span className="text-amber-600 dark:text-amber-400 text-xs">✗ Нет</span>}
                             </td>
                             <td className="px-3 py-2 text-xs whitespace-nowrap text-gray-600 dark:text-gray-400">
-                              {row.updDate ? fmtDate(row.updDate) : '—'}
+                              {row.updDate ? formatManagerReportDate(row.updDate) : '—'}
                             </td>
                             <td className="px-3 py-2 whitespace-nowrap">
                               <Badge variant={rentalBadge(row.rentalStatus)} className="text-xs">
@@ -776,7 +546,7 @@ export default function ManagerReport() {
 
   // ── Build all rows from real data ──────────────────────────────────────────
   const allRows = useMemo(
-    () => buildRows(rentals, equipment, payments),
+    () => buildManagerReportRows(rentals, equipment, payments) as ReportRow[],
     [rentals, equipment, payments],
   );
 
@@ -830,31 +600,28 @@ export default function ManagerReport() {
 
   // ── Apply filters ──────────────────────────────────────────────────────────
   const filteredRows = useMemo(() => {
-    return allRows.filter(row => {
-      if (filters.dateFrom && row.startDate < filters.dateFrom) return false;
-      if (filters.dateTo   && row.startDate > filters.dateTo)   return false;
-      if (filters.manager !== 'all' && row.manager !== filters.manager) return false;
-      if (filters.client  !== 'all' && row.client  !== filters.client)  return false;
-      if (filters.equipmentType !== 'all' && row.equipmentType !== filters.equipmentType) return false;
-      if (filters.equipmentInv  !== 'all' && row.equipmentFilterKey !== filters.equipmentInv)  return false;
-      if (filters.paymentStatus !== 'all' && row.paymentStatus !== filters.paymentStatus)  return false;
-      if (filters.updStatus !== 'all') {
-        if (filters.updStatus === 'signed'   && !row.updSigned) return false;
-        if (filters.updStatus === 'unsigned' && row.updSigned)  return false;
-      }
-      if (filters.rentalStatus !== 'all' && row.rentalStatus !== filters.rentalStatus) return false;
-      return true;
-    });
-  }, [allRows, filters]);
+    const periodRows = buildManagerReportRows(rentals, equipment, payments, {
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+    }) as ReportRow[];
+    return filterManagerReportRows(periodRows, filters) as ReportRow[];
+  }, [rentals, equipment, payments, filters]);
 
-  const summary = useMemo(() => buildManagerSummary(filteredRows), [filteredRows]);
+  const summary = useMemo(
+    () => buildManagerReportSummary(filteredRows) as ManagerSummaryRow[],
+    [filteredRows],
+  );
+  const filteredRentalsCount = useMemo(
+    () => new Set(filteredRows.map(row => row.rentalId)).size,
+    [filteredRows],
+  );
 
   // ── Period label for XLS ───────────────────────────────────────────────────
   const periodLabel = useMemo(() => {
     if (filters.dateFrom && filters.dateTo)
-      return `${fmtDate(filters.dateFrom)} — ${fmtDate(filters.dateTo)}`;
-    if (filters.dateFrom) return `с ${fmtDate(filters.dateFrom)}`;
-    if (filters.dateTo)   return `по ${fmtDate(filters.dateTo)}`;
+      return `${formatManagerReportDate(filters.dateFrom)} — ${formatManagerReportDate(filters.dateTo)}`;
+    if (filters.dateFrom) return `с ${formatManagerReportDate(filters.dateFrom)}`;
+    if (filters.dateTo)   return `по ${formatManagerReportDate(filters.dateTo)}`;
     if (monthOptions.find(m => m.value === 'all')) return 'за всё время';
     return '';
   }, [filters, monthOptions]);
@@ -874,7 +641,7 @@ export default function ManagerReport() {
 
   // ── Export ─────────────────────────────────────────────────────────────────
   const handleExport = () => {
-    const content  = buildXLS(summary, filteredRows, periodLabel);
+    const content  = buildManagerReportXLS(summary, filteredRows, periodLabel);
     const dateTag  = new Date().toISOString().slice(0, 10);
     downloadXLS(content, `report-managers-${dateTag}.xls`);
   };
@@ -887,7 +654,7 @@ export default function ManagerReport() {
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">Отчёт по менеджерам</h2>
           <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
             Обновлено: {fmtTs(loadedAt)} ·{' '}
-            {filteredRows.length} аренд · {summary.length} менеджеров ·{' '}
+            {filteredRentalsCount} аренд · {filteredRows.length} начислений · {summary.length} менеджеров ·{' '}
             <span className="text-green-600 dark:text-green-400">реальные данные</span>
           </p>
         </div>

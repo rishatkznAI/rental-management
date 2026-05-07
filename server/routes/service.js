@@ -6,6 +6,11 @@ function registerServiceRoutes(router, deps) {
     inferServiceAuditSource,
   } = require('../lib/service-audit-log');
   const {
+    buildMechanicWorkloadReport,
+    calculateWorkAmount,
+    normalizePayType,
+  } = require('../lib/mechanic-workload');
+  const {
     readData,
     writeData,
     requireAuth,
@@ -76,6 +81,164 @@ function registerServiceRoutes(router, deps) {
       throw new Error(`${fieldLabel} должно быть числом не меньше 0`);
     }
     return numeric;
+  }
+
+  function canOverrideWorkAccrual(user) {
+    const role = currentRole(user);
+    return role === 'Администратор' || role === 'Офис-менеджер';
+  }
+
+  function canReadWorkAccrual(user) {
+    return canOverrideWorkAccrual(user);
+  }
+
+  function redactProductivityAccruals(productivity, user) {
+    if (canReadWorkAccrual(user)) return productivity;
+    return {
+      ...productivity,
+      kpi: {
+        ...productivity.kpi,
+        totalAmount: 0,
+      },
+      mechanics: productivity.mechanics.map(item => ({
+        ...item,
+        totalAmount: 0,
+        tickets: item.tickets.map(ticket => ({ ...ticket, amount: 0 })),
+      })),
+      details: productivity.details.map(item => ({
+        ...item,
+        rate: 0,
+        amount: 0,
+        fixedAmount: 0,
+      })),
+    };
+  }
+
+  function redactWorkAccrualForRead(item, user) {
+    if (canReadWorkAccrual(user)) return item;
+    const {
+      rate,
+      amount,
+      fixedAmount,
+      ratePerHourSnapshot,
+      fixedAmountSnapshot,
+      ...safeItem
+    } = item || {};
+    return safeItem;
+  }
+
+  function pickCatalogNumber(work, primary, legacy, fallback = 0) {
+    return safeNonNegativeNumber(work?.[primary] ?? work?.[legacy], fallback);
+  }
+
+  function buildWorkAccrualSnapshot(work, body, quantity, user) {
+    const payType = normalizePayType(body?.payType || work?.payType);
+    const canOverride = canOverrideWorkAccrual(user);
+    const baseNormHours = pickCatalogNumber(work, 'defaultNormHours', 'normHours', 0);
+    const baseRate = pickCatalogNumber(work, 'defaultMechanicRate', 'ratePerHour', 0);
+    const baseFixedAmount = safeNonNegativeNumber(work?.fixedAmount ?? work?.defaultMechanicRate ?? work?.ratePerHour, baseRate);
+    const normHours = canOverride
+      ? parseOptionalNonNegativeNumber(body?.normHours ?? body?.normHoursSnapshot, 'Нормо-часы работы', baseNormHours)
+      : baseNormHours;
+    const rate = canOverride
+      ? parseOptionalNonNegativeNumber(body?.rate ?? body?.ratePerHourSnapshot, 'Ставка механика', baseRate)
+      : baseRate;
+    const fixedAmount = canOverride
+      ? parseOptionalNonNegativeNumber(body?.fixedAmount ?? body?.fixedAmountSnapshot, 'Фиксированное начисление', baseFixedAmount)
+      : baseFixedAmount;
+    const calculatedAmount = calculateWorkAmount({ payType, normHours, rate, fixedAmount, quantity });
+    const amount = canOverride
+      ? parseOptionalNonNegativeNumber(body?.amount, 'Сумма начисления', calculatedAmount)
+      : calculatedAmount;
+    return { payType, normHours, rate, fixedAmount, amount };
+  }
+
+  function resolveWorkMechanic(ticket, body, req) {
+    const mechanics = readData('mechanics') || [];
+    const role = currentRole(req.user);
+    const requestedId = String(body?.mechanicId || '').trim();
+    if (canOverrideWorkAccrual(req.user) && requestedId) {
+      const requested = mechanics.find(item => item.id === requestedId);
+      return {
+        mechanicId: requestedId,
+        mechanicName: requested?.name || String(body?.mechanicNameSnapshot || body?.mechanicName || '').trim() || requestedId,
+      };
+    }
+    if (ticket?.assignedMechanicId) {
+      const assigned = mechanics.find(item => item.id === ticket.assignedMechanicId);
+      return {
+        mechanicId: ticket.assignedMechanicId,
+        mechanicName: assigned?.name || ticket.assignedMechanicName || ticket.assignedTo || '',
+      };
+    }
+    if (isMechanicRole(role)) {
+      const byName = mechanics.find(item => item.name && item.name === req.user?.userName);
+      if (byName) return { mechanicId: byName.id, mechanicName: byName.name };
+    }
+    return {
+      mechanicId: '',
+      mechanicName: String(body?.mechanicNameSnapshot || body?.mechanicName || '').trim(),
+    };
+  }
+
+  function resolveWorkEquipmentSnapshot(ticket) {
+    const equipment = readData('equipment') || [];
+    const eq = ticket?.equipmentId ? equipment.find(item => item.id === ticket.equipmentId) : null;
+    return {
+      equipmentId: ticket?.equipmentId || '',
+      equipmentInv: ticket?.inventoryNumber || eq?.inventoryNumber || '',
+      serialNumber: ticket?.serialNumber || eq?.serialNumber || '',
+      modelSnapshot: ticket?.equipment || [eq?.manufacturer, eq?.model].filter(Boolean).join(' ') || '',
+      equipmentType: ticket?.equipmentType || eq?.type || '',
+      equipmentSnapshot: ticket?.equipment || [eq?.manufacturer, eq?.model].filter(Boolean).join(' ') || undefined,
+    };
+  }
+
+  function normalizeWorkFactForRead(item, catalogById, ticketById, equipmentById, mechanicById) {
+    const ref = catalogById.get(item.workCatalogId || item.workId);
+    const ticket = ticketById.get(item.serviceTicketId || item.repairId);
+    const eq = equipmentById.get(item.equipmentId || ticket?.equipmentId);
+    const mechanic = mechanicById.get(item.mechanicId || ticket?.assignedMechanicId);
+    const normHours = item.normHoursSnapshot == null && item.normHours == null
+      ? safeNonNegativeNumber(ref?.defaultNormHours ?? ref?.normHours, 0)
+      : safeNonNegativeNumber(item.normHours ?? item.normHoursSnapshot, 0);
+    const ratePerHour = item.ratePerHourSnapshot == null && item.rate == null
+      ? safeNonNegativeNumber(ref?.defaultMechanicRate ?? ref?.ratePerHour, 0)
+      : safeNonNegativeNumber(item.rate ?? item.ratePerHourSnapshot, 0);
+    const quantity = safePositiveNumber(item.quantity, 1);
+    const payType = normalizePayType(item.payType || ref?.payType);
+    const fixedAmount = safeNonNegativeNumber(item.fixedAmount ?? item.fixedAmountSnapshot ?? ref?.fixedAmount, ratePerHour);
+    const amount = item.amount == null
+      ? calculateWorkAmount({ payType, normHours, rate: ratePerHour, fixedAmount, quantity })
+      : safeNonNegativeNumber(item.amount, 0);
+    const serviceTicketId = item.serviceTicketId || item.repairId || '';
+    const workCatalogId = item.workCatalogId || item.workId || '';
+    return {
+      ...item,
+      repairId: serviceTicketId,
+      serviceTicketId,
+      workId: workCatalogId,
+      workCatalogId,
+      normHoursSnapshot: normHours,
+      ratePerHourSnapshot: ratePerHour,
+      normHours,
+      rate: ratePerHour,
+      fixedAmount,
+      amount,
+      payType,
+      nameSnapshot: item.nameSnapshot || item.workNameSnapshot || ref?.name || 'Работа',
+      workNameSnapshot: item.workNameSnapshot || item.nameSnapshot || ref?.name || 'Работа',
+      categorySnapshot: item.categorySnapshot || ref?.category || undefined,
+      quantity,
+      mechanicId: item.mechanicId || ticket?.assignedMechanicId || '',
+      mechanicNameSnapshot: item.mechanicNameSnapshot || item.mechanicName || mechanic?.name || ticket?.assignedMechanicName || ticket?.assignedTo || '',
+      equipmentId: item.equipmentId || ticket?.equipmentId || '',
+      equipmentInv: item.equipmentInv || item.inventoryNumber || ticket?.inventoryNumber || eq?.inventoryNumber || '',
+      serialNumber: item.serialNumber || ticket?.serialNumber || eq?.serialNumber || '',
+      modelSnapshot: item.modelSnapshot || item.equipmentSnapshot || ticket?.equipment || [eq?.manufacturer, eq?.model].filter(Boolean).join(' ') || '',
+      status: item.status || 'completed',
+      source: item.source || (workCatalogId ? 'manual' : 'legacy'),
+    };
   }
 
   function currentRole(user) {
@@ -159,33 +322,25 @@ function registerServiceRoutes(router, deps) {
   router.get('/repair_work_items', requireAuth, requireRead('repair_work_items'), (req, res) => {
     const repairId = String(req.query.repair_id || '').trim();
     const list = readData('repair_work_items') || [];
-    const catalog = readData('service_works') || [];
+    const catalog = (readData('service_works') || []).map(normalizeServiceWorkRecord);
     const catalogById = new Map(catalog.map(item => [item.id, item]));
-    const sanitized = list.map(item => {
-      const ref = catalogById.get(item.workId);
-      const normHours = item.normHoursSnapshot == null
-        ? safeNonNegativeNumber(ref?.normHours, 0)
-        : safeNonNegativeNumber(item.normHoursSnapshot, 0);
-      const ratePerHour = item.ratePerHourSnapshot == null
-        ? safeNonNegativeNumber(ref?.ratePerHour, 0)
-        : safeNonNegativeNumber(item.ratePerHourSnapshot, 0);
-      return {
-        ...item,
-        normHoursSnapshot: normHours,
-        ratePerHourSnapshot: ratePerHour,
-        nameSnapshot: item.nameSnapshot || ref?.name || 'Работа',
-        quantity: safePositiveNumber(item.quantity, 1),
-      };
-    });
+    const ticketById = new Map((readData('service') || []).map(item => [item.id, item]));
+    const equipmentById = new Map((readData('equipment') || []).map(item => [item.id, item]));
+    const mechanicById = new Map((readData('mechanics') || []).map(item => [item.id, item]));
+    const sanitized = list.map(item => normalizeWorkFactForRead(item, catalogById, ticketById, equipmentById, mechanicById));
     const scoped = accessControl.filterCollectionByScope('repair_work_items', sanitized, req.user);
     if (repairId) {
       const rows = scoped.filter(item => item.repairId === repairId);
       if (rows.length === 0 && sanitized.some(item => item.repairId === repairId)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
-      return res.json(accessControl.sanitizeCollectionForRead('repair_work_items', rows, req.user));
+      return res.json(accessControl
+        .sanitizeCollectionForRead('repair_work_items', rows, req.user)
+        .map(item => redactWorkAccrualForRead(item, req.user)));
     }
-    res.json(accessControl.sanitizeCollectionForRead('repair_work_items', scoped, req.user));
+    res.json(accessControl
+      .sanitizeCollectionForRead('repair_work_items', scoped, req.user)
+      .map(item => redactWorkAccrualForRead(item, req.user)));
   });
 
   router.get('/service/:id/audit', requireAuth, requireRead('service'), (req, res) => {
@@ -283,16 +438,50 @@ function registerServiceRoutes(router, deps) {
         return res.status(404).json({ ok: false, error: 'Работа из справочника не найдена или отключена' });
       }
 
+      const normalizedWork = normalizeServiceWorkRecord(work);
+      const accrual = buildWorkAccrualSnapshot(normalizedWork, req.body, quantity, req.user);
+      const mechanicSnapshot = resolveWorkMechanic(ticket, req.body, req);
+      const equipmentSnapshot = resolveWorkEquipmentSnapshot(ticket);
+      const status = String(req.body?.status || 'completed').trim() || 'completed';
+      const allowedSources = new Set(['manual', 'bot', 'admin', 'import']);
+      const requestedSource = String(req.body?.source || '').trim();
+      const role = currentRole(req.user);
+      const source = allowedSources.has(requestedSource)
+        ? requestedSource
+        : (role === 'Администратор' ? 'admin' : 'manual');
+      const performedAt = String(req.body?.performedAt || req.body?.completedAt || nowIso()).trim();
       const list = readData('repair_work_items') || [];
       const item = {
         id: generateId(idPrefixes.repair_work_items),
         repairId,
+        serviceTicketId: repairId,
         workId,
+        workCatalogId: workId,
         quantity,
-        normHoursSnapshot: safeNonNegativeNumber(work.normHours, 0),
-        ratePerHourSnapshot: safeNonNegativeNumber(work.ratePerHour, 0),
-        nameSnapshot: String(work.name || '').trim(),
-        categorySnapshot: work.category ? String(work.category).trim() : undefined,
+        normHoursSnapshot: accrual.normHours,
+        ratePerHourSnapshot: accrual.rate,
+        fixedAmountSnapshot: accrual.fixedAmount,
+        nameSnapshot: String(normalizedWork.name || '').trim(),
+        workNameSnapshot: String(normalizedWork.name || '').trim(),
+        categorySnapshot: normalizedWork.category ? String(normalizedWork.category).trim() : undefined,
+        mechanicId: mechanicSnapshot.mechanicId || undefined,
+        mechanicNameSnapshot: mechanicSnapshot.mechanicName || undefined,
+        equipmentId: equipmentSnapshot.equipmentId || undefined,
+        equipmentInv: equipmentSnapshot.equipmentInv || undefined,
+        serialNumber: equipmentSnapshot.serialNumber || undefined,
+        modelSnapshot: equipmentSnapshot.modelSnapshot || undefined,
+        equipmentType: equipmentSnapshot.equipmentType || undefined,
+        equipmentSnapshot: equipmentSnapshot.equipmentSnapshot,
+        performedAt,
+        completedAt: status === 'completed' ? performedAt : undefined,
+        normHours: accrual.normHours,
+        rate: accrual.rate,
+        fixedAmount: accrual.fixedAmount,
+        amount: accrual.amount,
+        payType: accrual.payType,
+        status,
+        source,
+        comment: req.body?.comment ? String(req.body.comment).trim() : undefined,
         createdAt: nowIso(),
       };
       list.push(item);
@@ -311,7 +500,10 @@ function registerServiceRoutes(router, deps) {
         entityId: item.id,
         after: item,
       });
-      res.status(201).json(accessControl.sanitizeEntityForRead('repair_work_items', item, req.user));
+      res.status(201).json(redactWorkAccrualForRead(
+        accessControl.sanitizeEntityForRead('repair_work_items', item, req.user),
+        req.user,
+      ));
     } catch (error) {
       res.status(error?.status || 400).json({ ok: false, error: error.message });
     }
@@ -486,8 +678,22 @@ function registerServiceRoutes(router, deps) {
     const tickets = accessControl.filterCollectionByScope('service', readData('service') || [], req.user);
     const equipment = readData('equipment') || [];
     const workItems = accessControl.filterCollectionByScope('repair_work_items', readData('repair_work_items') || [], req.user);
+    const serviceWorks = (readData('service_works') || []).map(normalizeServiceWorkRecord);
     const partItems = accessControl.filterCollectionByScope('repair_part_items', readData('repair_part_items') || [], req.user);
     const fieldTrips = accessControl.filterCollectionByScope('service_field_trips', readData('service_field_trips') || [], req.user);
+    const productivity = redactProductivityAccruals(buildMechanicWorkloadReport({
+      tickets,
+      workItems,
+      mechanics,
+      equipment,
+      serviceWorks,
+    }, {
+      dateFrom: req.query.dateFrom,
+      dateTo: req.query.dateTo,
+      includeStatuses: req.query.status && req.query.status !== 'all'
+        ? [String(req.query.status)]
+        : ['completed'],
+    }), req.user);
 
     const ticketMap = new Map(tickets.map(item => [item.id, item]));
     const equipmentMap = new Map(equipment.map(item => [item.id, item]));
@@ -754,7 +960,7 @@ function registerServiceRoutes(router, deps) {
       .filter(item => item.repairsCount >= 2)
       .sort((a, b) => b.repairsCount - a.repairsCount || b.totalNormHours - a.totalNormHours || String(b.lastCreatedAt).localeCompare(String(a.lastCreatedAt)));
 
-    res.json({ summary, rows, fieldTrips: completedFieldTripRows, repeatFailures });
+    res.json({ summary, rows, fieldTrips: completedFieldTripRows, repeatFailures, productivity });
   });
 
   router.post('/admin/migrate-repair-facts', requireAuth, requireWrite('service_works'), (req, res) => {

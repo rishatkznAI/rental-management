@@ -456,7 +456,7 @@ const WRITE_PERMISSIONS = {
   shipping_photos:['Администратор', ...MECHANIC_ROLES, 'Менеджер по аренде'],
   owners:         ['Администратор'],
   mechanics:      ['Администратор'],
-  service_works:  ['Администратор'],
+  service_works:  ['Администратор', 'Офис-менеджер'],
   spare_parts:    ['Администратор'],
   service_route_norms: ['Администратор'],
   service_field_trips: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
@@ -882,13 +882,27 @@ function safeNonNegativeNumber(value, fallback = 0) {
 
 function normalizeServiceWorkRecord(record) {
   const timestamp = nowIso();
+  const defaultNormHours = safeNonNegativeNumber(record.defaultNormHours ?? record.normHours, 0);
+  const defaultMechanicRate = safeNonNegativeNumber(record.defaultMechanicRate ?? record.ratePerHour, 0);
+  const fixedAmount = safeNonNegativeNumber(record.fixedAmount ?? record.defaultMechanicRate ?? record.ratePerHour, defaultMechanicRate);
+  const payType = ['hourly_norm', 'fixed', 'no_pay'].includes(String(record.payType || '').trim())
+    ? String(record.payType).trim()
+    : 'hourly_norm';
+  const comment = record.comment ?? record.description;
   return {
     id: record.id || generateId(ID_PREFIXES.service_works),
     name: String(record.name || '').trim(),
     category: record.category ? String(record.category).trim() : undefined,
-    description: record.description ? String(record.description).trim() : undefined,
-    normHours: safeNonNegativeNumber(record.normHours, 0),
-    ratePerHour: safeNonNegativeNumber(record.ratePerHour, 0),
+    equipmentType: record.equipmentType ? String(record.equipmentType).trim() : 'универсально',
+    driveType: record.driveType ? String(record.driveType).trim() : 'универсально',
+    defaultNormHours,
+    defaultMechanicRate,
+    fixedAmount,
+    payType,
+    description: comment ? String(comment).trim() : undefined,
+    comment: comment ? String(comment).trim() : undefined,
+    normHours: defaultNormHours,
+    ratePerHour: defaultMechanicRate,
     isActive: record.isActive !== false,
     sortOrder: Number.isFinite(Number(record.sortOrder)) ? Number(record.sortOrder) : 0,
     createdAt: record.createdAt || timestamp,

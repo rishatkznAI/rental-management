@@ -203,6 +203,12 @@ test('repair item mutations are admin-only and write service audit entries', asy
   await withServer(app, async baseUrl => {
     const workCreate = await request(baseUrl, 'POST', '/api/repair_work_items', { repairId: 'S-1', workId: 'SW-1', quantity: 1 });
     assert.equal(workCreate.status, 201);
+    assert.equal(workCreate.body.serviceTicketId, 'S-1');
+    assert.equal(workCreate.body.workCatalogId, 'SW-1');
+    assert.equal(workCreate.body.mechanicId, 'M-1');
+    assert.equal(workCreate.body.equipmentId, 'EQ-1');
+    assert.equal(workCreate.body.status, 'completed');
+    assert.equal(workCreate.body.amount, 3750);
     assert.equal(state.service_audit_log.at(-1).action, 'work_added');
     assert.equal(state.service_audit_log.at(-1).snapshot.nameSnapshot, 'Диагностика');
 
@@ -236,6 +242,11 @@ test('mechanic can create repair items for assigned ticket but cannot delete exi
 
     const create = await request(baseUrl, 'POST', '/api/repair_work_items', { repairId: 'S-1', workId: 'SW-1', quantity: 1 });
     assert.equal(create.status, 201);
+    assert.equal(create.body.source, 'manual');
+    assert.equal(create.body.mechanicNameSnapshot, 'Петров');
+    assert.equal(create.body.amount, undefined);
+    assert.equal(create.body.rate, undefined);
+    assert.equal(create.body.ratePerHourSnapshot, undefined);
     assert.equal(state.service_audit_log.at(-1).action, 'work_added');
 
     const remove = await request(baseUrl, 'DELETE', '/api/repair_work_items/RW-1');

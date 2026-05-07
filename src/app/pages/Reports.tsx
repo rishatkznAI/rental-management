@@ -98,6 +98,8 @@ interface ServiceReportPreset {
     serviceEquipmentType: string;
     serviceWorkCategory: string;
     servicePartName: string;
+    serviceWorkStatus: string;
+    serviceWorkSource: string;
   };
 }
 
@@ -162,6 +164,8 @@ export default function Reports() {
   const [serviceEquipmentType, setServiceEquipmentType] = useState('all');
   const [serviceWorkCategory, setServiceWorkCategory] = useState('all');
   const [servicePartName, setServicePartName] = useState('all');
+  const [serviceWorkStatus, setServiceWorkStatus] = useState('all');
+  const [serviceWorkSource, setServiceWorkSource] = useState('all');
   const [servicePresetId, setServicePresetId] = useState('none');
   const [activeTab, setActiveTab] = useState('analytics');
   const [servicePresets, setServicePresets] = useState<ServiceReportPreset[]>([]);
@@ -205,7 +209,10 @@ export default function Reports() {
   }, []);
 
   const serviceMechanicOptions = useMemo(() => {
-    const names = Array.from(new Set((mechanicWorkload?.summary ?? []).map(item => item.mechanicName))).sort((a, b) => a.localeCompare(b, 'ru'));
+    const names = Array.from(new Set([
+      ...(mechanicWorkload?.summary ?? []).map(item => item.mechanicName),
+      ...(mechanicWorkload?.productivity?.mechanics ?? []).map(item => item.mechanicName),
+    ])).filter((value): value is string => Boolean(value)).sort((a, b) => a.localeCompare(b, 'ru'));
     return names;
   }, [mechanicWorkload]);
 
@@ -220,18 +227,34 @@ export default function Reports() {
   }, [mechanicWorkload]);
 
   const serviceEquipmentTypeOptions = useMemo(() => {
-    const types = Array.from(new Set((mechanicWorkload?.rows ?? []).map(item => item.equipmentTypeLabel || item.equipmentType).filter(Boolean)));
+    const types = Array.from(new Set([
+      ...(mechanicWorkload?.rows ?? []).map(item => item.equipmentTypeLabel || item.equipmentType),
+      ...(mechanicWorkload?.productivity?.details ?? []).map(item => item.equipmentType),
+    ].filter((value): value is string => Boolean(value))));
     return types.sort((a, b) => a.localeCompare(b, 'ru'));
   }, [mechanicWorkload]);
 
   const serviceWorkCategoryOptions = useMemo(() => {
-    const categories = Array.from(new Set((mechanicWorkload?.rows ?? []).map(item => item.workCategory).filter(Boolean)));
+    const categories = Array.from(new Set([
+      ...(mechanicWorkload?.rows ?? []).map(item => item.workCategory),
+      ...(mechanicWorkload?.productivity?.details ?? []).map(item => item.category),
+    ].filter((value): value is string => Boolean(value))));
     return categories.sort((a, b) => a.localeCompare(b, 'ru'));
   }, [mechanicWorkload]);
 
   const servicePartOptions = useMemo(() => {
     const names = Array.from(new Set((mechanicWorkload?.rows ?? []).flatMap(item => item.partNames).filter(Boolean)));
     return names.sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [mechanicWorkload]);
+
+  const serviceWorkStatusOptions = useMemo(() => {
+    const statuses = Array.from(new Set((mechanicWorkload?.productivity?.details ?? []).map(item => item.status).filter(Boolean)));
+    return statuses.sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [mechanicWorkload]);
+
+  const serviceWorkSourceOptions = useMemo(() => {
+    const sources = Array.from(new Set((mechanicWorkload?.productivity?.details ?? []).map(item => item.source).filter(Boolean)));
+    return sources.sort((a, b) => a.localeCompare(b, 'ru'));
   }, [mechanicWorkload]);
 
   const financeDebtRows = useMemo(
@@ -372,6 +395,83 @@ export default function Reports() {
       }))
       .sort((a, b) => b.totalClosedNormHours - a.totalClosedNormHours);
   }, [filteredFieldTrips, filteredMechanicRows]);
+
+  const filteredProductivityDetails = useMemo(() => {
+    const rows = mechanicWorkload?.productivity?.details ?? [];
+    return rows.filter(row => {
+      if (serviceMechanic !== 'all' && row.mechanicName !== serviceMechanic) return false;
+      if (serviceStatus !== 'all' && row.repairStatus !== serviceStatus) return false;
+      if (serviceEquipmentType !== 'all' && row.equipmentType !== serviceEquipmentType) return false;
+      if (serviceWorkCategory !== 'all' && row.category !== serviceWorkCategory) return false;
+      if (serviceWorkStatus !== 'all' && row.status !== serviceWorkStatus) return false;
+      if (serviceWorkSource !== 'all' && row.source !== serviceWorkSource) return false;
+      const created = row.date ? row.date.slice(0, 10) : '';
+      if (serviceDateFrom && created && created < serviceDateFrom) return false;
+      if (serviceDateTo && created && created > serviceDateTo) return false;
+      return true;
+    });
+  }, [mechanicWorkload, serviceDateFrom, serviceDateTo, serviceMechanic, serviceStatus, serviceEquipmentType, serviceWorkCategory, serviceWorkStatus, serviceWorkSource]);
+
+  const filteredProductivitySummary = useMemo(() => {
+    const map = new Map<string, {
+      mechanicId: string;
+      mechanicName: string;
+      works: number;
+      tickets: Set<string>;
+      normHours: number;
+      amount: number;
+      warnings: number;
+    }>();
+    for (const row of filteredProductivityDetails.filter(item => item.status === 'completed')) {
+      const key = row.mechanicId || row.mechanicName || 'unassigned';
+      if (!map.has(key)) {
+        map.set(key, {
+          mechanicId: row.mechanicId,
+          mechanicName: row.mechanicName || 'Не назначен',
+          works: 0,
+          tickets: new Set(),
+          normHours: 0,
+          amount: 0,
+          warnings: 0,
+        });
+      }
+      const item = map.get(key)!;
+      item.works += 1;
+      if (row.serviceTicketId) item.tickets.add(row.serviceTicketId);
+      item.normHours += row.normHours * row.quantity;
+      item.amount += row.amount;
+    }
+    const warningCounts = new Map<string, number>();
+    for (const warning of mechanicWorkload?.productivity?.warnings ?? []) {
+      warningCounts.set(warning.mechanicId || 'unassigned', (warningCounts.get(warning.mechanicId || 'unassigned') || 0) + 1);
+    }
+    return [...map.values()]
+      .map(item => ({
+        ...item,
+        ticketsCount: item.tickets.size,
+        normHours: Number(item.normHours.toFixed(2)),
+        amount: Number(item.amount.toFixed(2)),
+        averageNormHoursPerDay: Number((item.normHours / Math.max(1, filteredProductivityDetails.length > 0 ? new Set(filteredProductivityDetails.map(row => row.date)).size : 1)).toFixed(2)),
+        warnings: warningCounts.get(item.mechanicId || 'unassigned') || 0,
+      }))
+      .sort((a, b) => b.normHours - a.normHours || b.amount - a.amount);
+  }, [filteredProductivityDetails, mechanicWorkload]);
+
+  const productivityKpi = useMemo(() => {
+    const completed = filteredProductivityDetails.filter(item => item.status === 'completed');
+    const totalNormHours = completed.reduce((sum, item) => sum + item.normHours * item.quantity, 0);
+    const totalAmount = completed.reduce((sum, item) => sum + item.amount, 0);
+    const warnings = mechanicWorkload?.productivity?.warnings ?? [];
+    return {
+      completedWorks: completed.length,
+      totalNormHours: Number(totalNormHours.toFixed(2)),
+      totalAmount: Number(totalAmount.toFixed(2)),
+      averagePerMechanic: filteredProductivitySummary.length === 0 ? 0 : Number((totalNormHours / filteredProductivitySummary.length).toFixed(2)),
+      missingNormHours: warnings.filter(item => item.type === 'missing_norm_hours').length,
+      missingMechanic: warnings.filter(item => item.type === 'missing_mechanic').length,
+      closedTicketsWithUnfinishedWorks: warnings.filter(item => item.type === 'closed_ticket_unfinished_work').length,
+    };
+  }, [filteredProductivityDetails, filteredProductivitySummary, mechanicWorkload]);
 
   const equipmentServiceSummary = useMemo(() => {
     const map = new Map<string, {
@@ -732,11 +832,13 @@ export default function Reports() {
         serviceEquipmentType,
         serviceWorkCategory,
         servicePartName,
+        serviceWorkStatus,
+        serviceWorkSource,
       },
     };
     persistPresets([...servicePresets, preset]);
     setServicePresetId(preset.id);
-  }, [persistPresets, serviceDateFrom, serviceDateTo, serviceMechanic, serviceScenario, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName, servicePresets]);
+  }, [persistPresets, serviceDateFrom, serviceDateTo, serviceMechanic, serviceScenario, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName, serviceWorkStatus, serviceWorkSource, servicePresets]);
 
   const applyServicePreset = useCallback((presetId: string) => {
     setServicePresetId(presetId);
@@ -751,6 +853,8 @@ export default function Reports() {
     setServiceEquipmentType(preset.filters.serviceEquipmentType);
     setServiceWorkCategory(preset.filters.serviceWorkCategory);
     setServicePartName(preset.filters.servicePartName);
+    setServiceWorkStatus(preset.filters.serviceWorkStatus || 'all');
+    setServiceWorkSource(preset.filters.serviceWorkSource || 'all');
   }, [servicePresets]);
 
   const deleteCurrentServicePreset = useCallback(() => {
@@ -823,10 +927,49 @@ export default function Reports() {
         trip.distanceKm.toFixed(1),
         trip.tripStatus,
       ].map(escapeCsv).join(',')),
+      '',
+      ['Выработка механиков'].map(escapeCsv).join(','),
+      ['Механик', 'Работ', 'Заявок', 'Нормо-часы', 'Начислено', 'Средние н/ч в день', 'Предупреждения'].map(escapeCsv).join(','),
+      ...filteredProductivitySummary.map(row => [
+        row.mechanicName,
+        row.works,
+        row.ticketsCount,
+        row.normHours.toFixed(2),
+        row.amount.toFixed(2),
+        row.averageNormHoursPerDay.toFixed(2),
+        row.warnings,
+      ].map(escapeCsv).join(',')),
+      '',
+      ['Детализация начислений'].map(escapeCsv).join(','),
+      ['Дата', 'Заявка', 'Механик', 'Техника', 'Работа', 'Категория', 'Статус работы', 'Н/ч', 'Ставка', 'Сумма', 'Источник', 'Комментарий'].map(escapeCsv).join(','),
+      ...filteredProductivityDetails.map(row => [
+        row.date,
+        row.serviceTicketId,
+        row.mechanicName,
+        row.equipmentLabel,
+        row.workNameSnapshot,
+        row.category,
+        row.status,
+        (row.normHours * row.quantity).toFixed(2),
+        row.rate.toFixed(2),
+        row.amount.toFixed(2),
+        row.source,
+        row.comment,
+      ].map(escapeCsv).join(',')),
+      '',
+      ['Проблемы учёта'].map(escapeCsv).join(','),
+      ['Тип', 'Сообщение', 'Заявка', 'Работа', 'Механик'].map(escapeCsv).join(','),
+      ...(mechanicWorkload?.productivity?.warnings ?? []).map(row => [
+        row.type,
+        row.message,
+        row.serviceTicketId,
+        row.workId,
+        row.mechanicId,
+      ].map(escapeCsv).join(',')),
     ].join('\n');
 
     downloadFile(`\ufeff${lines}`, `service-report-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
-  }, [filteredFieldTrips, filteredMechanicRows]);
+  }, [filteredFieldTrips, filteredMechanicRows, filteredProductivityDetails, filteredProductivitySummary, mechanicWorkload]);
 
   const exportServiceXls = useCallback(() => {
     const summaryRowsXml = filteredMechanicSummary.map(item => `
@@ -1817,7 +1960,7 @@ export default function Reports() {
               <CardDescription>Ограничьте отчёт по периоду, механику, статусу заявки и типу техники</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-3 md:grid-cols-9">
+              <div className="grid gap-3 md:grid-cols-11">
                 <div>
                   <p className="mb-1 text-xs text-gray-500">Дата с</p>
                   <input
@@ -1914,6 +2057,32 @@ export default function Reports() {
                     ))}
                   </select>
                 </div>
+                <div>
+                  <p className="mb-1 text-xs text-gray-500">Статус работы</p>
+                  <select
+                    value={serviceWorkStatus}
+                    onChange={e => setServiceWorkStatus(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+                  >
+                    <option value="all">Все статусы</option>
+                    {serviceWorkStatusOptions.map(status => (
+                      <option key={status} value={status}>{status}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs text-gray-500">Источник</p>
+                  <select
+                    value={serviceWorkSource}
+                    onChange={e => setServiceWorkSource(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+                  >
+                    <option value="all">Все источники</option>
+                    {serviceWorkSourceOptions.map(source => (
+                      <option key={source} value={source}>{source}</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="flex items-end">
                   <div className="flex gap-2">
                     <select
@@ -1932,7 +2101,7 @@ export default function Reports() {
                     <Button variant="secondary" onClick={deleteCurrentServicePreset} disabled={servicePresetId === 'none'}>
                       Удалить пресет
                     </Button>
-                    <Button variant="secondary" onClick={exportServiceCsv} disabled={filteredMechanicRows.length === 0 && filteredFieldTrips.length === 0}>
+                    <Button variant="secondary" onClick={exportServiceCsv} disabled={filteredMechanicRows.length === 0 && filteredFieldTrips.length === 0 && filteredProductivityDetails.length === 0}>
                       <Download className="h-4 w-4" />
                       CSV
                     </Button>
@@ -1951,6 +2120,8 @@ export default function Reports() {
                         setServiceEquipmentType('all');
                         setServiceWorkCategory('all');
                         setServicePartName('all');
+                        setServiceWorkStatus('all');
+                        setServiceWorkSource('all');
                         setServicePresetId('none');
                       }}
                     >
@@ -2006,6 +2177,133 @@ export default function Reports() {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Выработка механиков</CardTitle>
+              <CardDescription>Фактически выполненные работы, нормо-часы, начисления и проблемы учёта</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-7">
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-xs text-gray-500">Выполнено работ</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{productivityKpi.completedWorks}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-xs text-gray-500">Нормо-часы</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{productivityKpi.totalNormHours.toFixed(1)}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-xs text-gray-500">Начислено</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{formatCurrency(productivityKpi.totalAmount)}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-xs text-gray-500">Средняя выработка</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{productivityKpi.averagePerMechanic.toFixed(1)}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-xs text-gray-500">Без н/ч</p>
+                  <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-300">{productivityKpi.missingNormHours}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-xs text-gray-500">Без механика</p>
+                  <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-300">{productivityKpi.missingMechanic}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-xs text-gray-500">Закрыто с хвостами</p>
+                  <p className="mt-1 text-2xl font-bold text-rose-600 dark:text-rose-300">{productivityKpi.closedTicketsWithUnfinishedWorks}</p>
+                </div>
+              </div>
+
+              {filteredProductivitySummary.length > 0 ? (
+                <div className="mt-4 overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                        <th className="px-3 py-2 font-medium">Механик</th>
+                        <th className="px-3 py-2 font-medium">Работы</th>
+                        <th className="px-3 py-2 font-medium">Заявки</th>
+                        <th className="px-3 py-2 font-medium">Н/ч</th>
+                        <th className="px-3 py-2 font-medium">Начислено</th>
+                        <th className="px-3 py-2 font-medium">Среднее/день</th>
+                        <th className="px-3 py-2 font-medium">Доля</th>
+                        <th className="px-3 py-2 font-medium">Предупреждения</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredProductivitySummary.map(row => (
+                        <tr key={row.mechanicId || row.mechanicName} className="border-b border-gray-100 dark:border-gray-800">
+                          <td className="px-3 py-2 font-medium">{row.mechanicName}</td>
+                          <td className="px-3 py-2">{row.works}</td>
+                          <td className="px-3 py-2">{row.ticketsCount}</td>
+                          <td className="px-3 py-2">{row.normHours.toFixed(1)}</td>
+                          <td className="px-3 py-2">{formatCurrency(row.amount)}</td>
+                          <td className="px-3 py-2">{row.averageNormHoursPerDay.toFixed(1)}</td>
+                          <td className="px-3 py-2">
+                            {productivityKpi.totalNormHours > 0 ? `${((row.normHours / productivityKpi.totalNormHours) * 100).toFixed(0)}%` : '—'}
+                          </td>
+                          <td className="px-3 py-2">{row.warnings}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyChart message="Нет выполненных работ для расчёта выработки по текущим фильтрам." />
+              )}
+
+              {filteredProductivityDetails.length > 0 && (
+                <div className="mt-6 overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                        <th className="px-3 py-2 font-medium">Дата</th>
+                        <th className="px-3 py-2 font-medium">Заявка</th>
+                        <th className="px-3 py-2 font-medium">Техника</th>
+                        <th className="px-3 py-2 font-medium">Работа</th>
+                        <th className="px-3 py-2 font-medium">Статус</th>
+                        <th className="px-3 py-2 font-medium">Н/ч</th>
+                        <th className="px-3 py-2 font-medium">Ставка</th>
+                        <th className="px-3 py-2 font-medium">Сумма</th>
+                        <th className="px-3 py-2 font-medium">Источник</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredProductivityDetails.slice(0, 80).map(row => (
+                        <tr key={`${row.id}-${row.status}-${row.date}`} className="border-b border-gray-100 dark:border-gray-800">
+                          <td className="px-3 py-2">{row.date || '—'}</td>
+                          <td className="px-3 py-2 font-mono text-xs">
+                            {row.serviceTicketId ? (
+                              <Link to={`/service/${row.serviceTicketId}`} className="text-[--color-primary] hover:underline">
+                                {row.serviceTicketId}
+                              </Link>
+                            ) : '—'}
+                          </td>
+                          <td className="px-3 py-2">
+                            {row.equipmentId ? (
+                              <Link to={`/equipment/${row.equipmentId}`} className="font-medium text-[--color-primary] hover:underline">
+                                {row.equipmentLabel}
+                              </Link>
+                            ) : row.equipmentLabel}
+                            <div className="text-xs text-gray-500 dark:text-gray-400">INV {row.equipmentInv || '—'} · SN {row.serialNumber || '—'}</div>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div>{row.workNameSnapshot}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">{row.category}</div>
+                          </td>
+                          <td className="px-3 py-2">{row.status}</td>
+                          <td className="px-3 py-2">{(row.normHours * row.quantity).toFixed(1)}</td>
+                          <td className="px-3 py-2">{formatCurrency(row.rate)}</td>
+                          <td className="px-3 py-2 font-semibold">{formatCurrency(row.amount)}</td>
+                          <td className="px-3 py-2">{row.source}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
             <Card>

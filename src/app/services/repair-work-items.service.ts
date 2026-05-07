@@ -5,7 +5,18 @@ export const repairWorkItemsService = {
   getByRepairId: (repairId: string): Promise<RepairWorkItem[]> =>
     api.get<RepairWorkItem[]>(`/api/repair_work_items?repair_id=${encodeURIComponent(repairId)}`),
 
-  add: (data: { repairId: string; workId: string; quantity: number }): Promise<RepairWorkItem> =>
+  add: (data: {
+    repairId: string;
+    workId: string;
+    quantity: number;
+    mechanicId?: string;
+    normHours?: number;
+    rate?: number;
+    amount?: number;
+    status?: RepairWorkItem['status'];
+    source?: RepairWorkItem['source'];
+    comment?: string;
+  }): Promise<RepairWorkItem> =>
     api.post<RepairWorkItem>('/api/repair_work_items', data),
 
   remove: (id: string): Promise<void> =>

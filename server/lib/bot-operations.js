@@ -1,4 +1,5 @@
 const { assertRepairItemsAdmin } = require('./service-audit-log');
+const { calculateWorkAmount, normalizePayType } = require('./mechanic-workload');
 
 function createBotOperations(deps) {
   const {
@@ -926,26 +927,56 @@ function createBotOperations(deps) {
   function addRepairWorkItemFromCatalog(ticket, work, quantity, authUser = null, options = {}) {
     assertRepairItemsAdmin(authUser, { mode: 'create', source: options.source, ticket, readData });
     const safeQuantity = requirePositiveNumber(quantity, 'Количество работы');
-    const normHoursSnapshot = requireNonNegativeNumber(work?.normHours ?? 0, 'Нормо-часы работы');
-    const ratePerHourSnapshot = requireNonNegativeNumber(work?.ratePerHour ?? 0, 'Стоимость нормо-часа');
+    const payType = normalizePayType(work?.payType);
+    const normHoursSnapshot = requireNonNegativeNumber(work?.defaultNormHours ?? work?.normHours ?? 0, 'Нормо-часы работы');
+    const ratePerHourSnapshot = requireNonNegativeNumber(work?.defaultMechanicRate ?? work?.ratePerHour ?? 0, 'Стоимость нормо-часа');
+    const fixedAmountSnapshot = requireNonNegativeNumber(work?.fixedAmount ?? work?.defaultMechanicRate ?? work?.ratePerHour ?? 0, 'Фиксированное начисление');
+    const amount = calculateWorkAmount({
+      payType,
+      normHours: normHoursSnapshot,
+      rate: ratePerHourSnapshot,
+      fixedAmount: fixedAmountSnapshot,
+      quantity: safeQuantity,
+    });
     const meterHours = Number(options.meterHours);
     const hasMeterHours = Number.isFinite(meterHours) && meterHours >= 0;
     const equipment = options.equipment || null;
+    const mechanic = getMechanicReferenceByUser ? getMechanicReferenceByUser(authUser) : null;
     const items = readData('repair_work_items') || [];
+    const performedAt = nowIso();
     const nextItem = {
       id: generateId(idPrefixes.repair_work_items),
       repairId: ticket.id,
+      serviceTicketId: ticket.id,
       workId: work.id,
+      workCatalogId: work.id,
       quantity: safeQuantity,
       normHoursSnapshot,
       ratePerHourSnapshot,
+      fixedAmountSnapshot,
       nameSnapshot: work.name,
+      workNameSnapshot: work.name,
       categorySnapshot: work.category,
-      createdAt: nowIso(),
+      mechanicId: mechanic?.id || ticket.assignedMechanicId,
+      mechanicNameSnapshot: mechanic?.name || ticket.assignedMechanicName || ticket.assignedTo,
+      performedAt,
+      completedAt: performedAt,
+      normHours: normHoursSnapshot,
+      rate: ratePerHourSnapshot,
+      fixedAmount: fixedAmountSnapshot,
+      amount,
+      payType,
+      status: 'completed',
+      source: 'bot',
+      createdAt: performedAt,
       createdByUserId: authUser?.userId,
       createdByUserName: authUser?.userName,
       ...(hasMeterHours ? { meterHours } : {}),
       ...(equipment?.id || ticket.equipmentId ? { equipmentId: equipment?.id || ticket.equipmentId } : {}),
+      ...(equipment?.inventoryNumber || ticket.inventoryNumber ? { equipmentInv: equipment?.inventoryNumber || ticket.inventoryNumber } : {}),
+      ...(equipment?.serialNumber || ticket.serialNumber ? { serialNumber: equipment?.serialNumber || ticket.serialNumber } : {}),
+      ...(equipment?.model || ticket.equipment ? { modelSnapshot: ticket.equipment || equipment?.model } : {}),
+      ...(equipment?.type || ticket.equipmentType ? { equipmentType: equipment?.type || ticket.equipmentType } : {}),
       ...(ticket.equipment ? { equipmentSnapshot: ticket.equipment } : {}),
     };
     items.push(nextItem);

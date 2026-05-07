@@ -494,6 +494,15 @@ function registerCrudRoutes(deps) {
   function validateServiceWorkCatalogRecord(record) {
     parseOptionalServiceNumber(record, 'normHours', 'Нормо-часы');
     parseOptionalServiceNumber(record, 'ratePerHour', 'Стоимость нормо-часа');
+    parseOptionalServiceNumber(record, 'defaultNormHours', 'Нормо-часы');
+    parseOptionalServiceNumber(record, 'defaultMechanicRate', 'Ставка механика');
+    parseOptionalServiceNumber(record, 'fixedAmount', 'Фиксированное начисление');
+    if (Object.prototype.hasOwnProperty.call(record || {}, 'payType')) {
+      const payType = String(record.payType || '').trim();
+      if (payType && !['hourly_norm', 'fixed', 'no_pay'].includes(payType)) {
+        throw new Error('Тип начисления должен быть hourly_norm, fixed или no_pay');
+      }
+    }
   }
 
   function validateSparePartCatalogRecord(record) {

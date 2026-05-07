@@ -35,12 +35,32 @@ function getRentalDateRange(collection, rental) {
 
 function hasDateOverlap(startDateA, endDateA, startDateB, endDateB) {
   if (!startDateA || !endDateA || !startDateB || !endDateB) return false;
-  const startA = new Date(startDateA).getTime();
-  const endA = new Date(endDateA).getTime();
-  const startB = new Date(startDateB).getTime();
-  const endB = new Date(endDateB).getTime();
-  if ([startA, endA, startB, endB].some(Number.isNaN)) return false;
+  const startA = parseRentalDateMs(startDateA);
+  const endA = parseRentalDateMs(endDateA);
+  const startB = parseRentalDateMs(startDateB);
+  const endB = parseRentalDateMs(endDateB);
+  if ([startA, endA, startB, endB].some(value => value === null)) return false;
   return startA <= endB && endA >= startB;
+}
+
+function parseRentalDateMs(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const dateKey = raw.slice(0, 10);
+  const match = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return date.getTime();
 }
 
 function parseOptionalNonNegativeNumber(value, fieldLabel) {
@@ -155,8 +175,15 @@ function validateRentalPayload(collection, payload, rentals = [], equipment = []
   if ((startDate && !endDate) || (!startDate && endDate)) {
     return { ok: false, status: 400, error: 'Для аренды нужно указать и дату начала, и дату окончания' };
   }
-  if (startDate && endDate && new Date(startDate).getTime() > new Date(endDate).getTime()) {
-    return { ok: false, status: 400, error: 'Дата окончания аренды не может быть раньше даты начала' };
+  if (startDate && endDate) {
+    const startDateMs = parseRentalDateMs(startDate);
+    const endDateMs = parseRentalDateMs(endDate);
+    if (startDateMs === null || endDateMs === null) {
+      return { ok: false, status: 400, error: 'Укажите корректные даты аренды в формате YYYY-MM-DD' };
+    }
+    if (startDateMs > endDateMs) {
+      return { ok: false, status: 400, error: 'Дата окончания аренды не может быть раньше даты начала' };
+    }
   }
 
   if (!options.skipConflictCheck) {
@@ -174,6 +201,7 @@ module.exports = {
   canEquipmentParticipateInRentals,
   getRentalDateRange,
   hasDateOverlap,
+  parseRentalDateMs,
   validateRentalNumericFields,
   isBlockingRental,
   rentalMatchesEquipment,

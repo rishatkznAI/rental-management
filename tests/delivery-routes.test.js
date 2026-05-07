@@ -387,6 +387,29 @@ test('creating a delivery rejects non-numeric delivery cost', async () => {
   });
 });
 
+test('creating a delivery rejects invalid transport date', async () => {
+  const { app, state } = createDeliveryApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      transportDate: 'not-a-date',
+      origin: 'Казань',
+      destination: 'Алабуга',
+      cargo: 'Подъёмник',
+      contactName: 'Иван',
+      contactPhone: '+7',
+      client: 'ИНЖИНИРИНГ',
+      manager: 'Администратор',
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Дата перевозки/);
+  });
+
+  assert.equal(state.deliveries.length, 1);
+});
+
 test('creating a delivery treats empty delivery cost as zero', async () => {
   const { app, state } = createDeliveryApp();
   state.deliveries = [];

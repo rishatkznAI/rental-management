@@ -152,6 +152,18 @@ test('validateRentalPayload rejects non-numeric rental amount', () => {
   assert.equal(validation.status, 400);
 });
 
+test('validateRentalPayload rejects Infinity rental amount', () => {
+  const validation = validateRentalPayload('gantt_rentals', {
+    equipmentId: 'eq-1',
+    startDate: '2026-04-10',
+    endDate: '2026-04-10',
+    amount: 'Infinity',
+  }, [], rentableEquipment);
+
+  assert.equal(validation.ok, false);
+  assert.equal(validation.status, 400);
+});
+
 test('validateRentalPayload rejects non-numeric rental rate', () => {
   const validation = validateRentalPayload('gantt_rentals', {
     equipmentId: 'eq-1',
@@ -185,4 +197,17 @@ test('validateRentalPayload rejects endDate before startDate', () => {
 
   assert.equal(validation.ok, false);
   assert.equal(validation.status, 400);
+});
+
+test('validateRentalPayload rejects invalid rental dates', () => {
+  const validation = validateRentalPayload('gantt_rentals', {
+    equipmentId: 'eq-1',
+    startDate: 'not-a-date',
+    endDate: '2026-04-10',
+    amount: 10000,
+  }, [], rentableEquipment);
+
+  assert.equal(validation.ok, false);
+  assert.equal(validation.status, 400);
+  assert.match(validation.error, /дат/);
 });

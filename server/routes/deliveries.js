@@ -64,6 +64,34 @@ function registerDeliveryRoutes(router, deps) {
     return numeric;
   }
 
+  function normalizeDeliveryDate(value, fieldName, { required = false, existing = null } = {}) {
+    if (value === undefined) {
+      return existing === undefined ? null : existing;
+    }
+    const raw = String(value || '').trim();
+    if (!raw) {
+      if (required) throw new Error(`Поле «${fieldName}» обязательно`);
+      return null;
+    }
+    const dateKey = raw.slice(0, 10);
+    const match = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      throw new Error(`Поле «${fieldName}» должно быть корректной датой в формате YYYY-MM-DD`);
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    ) {
+      throw new Error(`Поле «${fieldName}» должно быть корректной датой в формате YYYY-MM-DD`);
+    }
+    return dateKey;
+  }
+
   function normalizeCarrierRecord(record = {}) {
     return {
       id: String(record.id || ''),
@@ -119,8 +147,10 @@ function registerDeliveryRoutes(router, deps) {
     const status = ['new', 'sent', 'accepted', 'in_transit', 'completed', 'cancelled'].includes(body.status)
       ? body.status
       : (existing?.status || 'new');
-    const transportDate = String(body.transportDate || '').slice(0, 10);
-    const neededBy = body.neededBy ? String(body.neededBy).slice(0, 10) : (existing?.neededBy || null);
+    const transportDate = normalizeDeliveryDate(body.transportDate, 'Дата перевозки', { required: true });
+    const neededBy = body.neededBy === undefined
+      ? (existing?.neededBy || null)
+      : normalizeDeliveryDate(body.neededBy, 'Дедлайн');
 
     ensureNonEmpty(transportDate, 'Дата перевозки');
     ensureNonEmpty(body.origin, 'Откуда');

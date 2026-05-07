@@ -95,12 +95,34 @@ function formatDate(value) {
   return `${day}.${month}.${year}`;
 }
 
+function formatDateTime(value) {
+  const text = String(value || '').trim();
+  if (!text) return 'не указаны';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return formatDate(text);
+  const date = new Date(text);
+  if (Number.isFinite(date.getTime())) {
+    return new Intl.DateTimeFormat('ru-RU', {
+      timeZone: DEFAULT_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  }
+  return formatDate(text);
+}
+
 function roleIsAdmin(role) {
   return normalizeRole(role) === 'Администратор';
 }
 
 function roleIsManager(role) {
   return normalizeRole(role) === 'Менеджер по аренде';
+}
+
+function roleIsOfficeManager(role) {
+  return normalizeRole(role) === 'Офис-менеджер';
 }
 
 function roleIsServiceLead(role) {
@@ -137,6 +159,11 @@ function getDeliveryDate(delivery) {
 function deliveryTypeIsShipping(delivery) {
   const type = normalizeText(delivery?.type || delivery?.deliveryType || delivery?.operationType);
   return !type || type === 'shipping' || type === 'dispatch' || type === 'отгрузка';
+}
+
+function deliveryTypeIsReceiving(delivery) {
+  const type = normalizeText(delivery?.type || delivery?.deliveryType || delivery?.operationType);
+  return type === 'receiving' || type === 'return' || type === 'pickup' || type === 'приемка' || type === 'возврат';
 }
 
 function deliveryStatusLabel(status) {
@@ -339,6 +366,7 @@ function createBotNotificationService(deps = {}) {
       entity?.responsibleManager,
       entity?.createdBy,
       entity?.createdById,
+      entity?.createdByUserId,
     ]);
   }
 
@@ -402,6 +430,8 @@ function createBotNotificationService(deps = {}) {
           entity?.managerUserId,
           entity?.responsibleManagerId,
           entity?.responsibleUserId,
+          entity?.createdByUserId,
+          entity?.createdById,
         ])),
       value => value,
     );
@@ -436,6 +466,9 @@ function createBotNotificationService(deps = {}) {
   }
 
   function getRecipientsForEvent(event) {
+    if (event?.recipientPolicy === 'responsible_manager_with_fallback') {
+      return getManagerLifecycleRecipientsForEvent(event);
+    }
     const directRecipients = getDirectRecipientsForEvent(event);
     if (directRecipients.length) return directRecipients;
     return Object.entries(getBotUsers())
@@ -454,6 +487,60 @@ function createBotNotificationService(deps = {}) {
         };
       })
       .filter(Boolean);
+  }
+
+  function isSendableRecipient(recipient) {
+    return Boolean(recipient && isBotUserActive(recipient.phone, recipient.botUser) && resolveBotTarget(recipient.phone, recipient.botUser));
+  }
+
+  function recipientFromBotUser(phone, botUser) {
+    return {
+      phone,
+      botUser,
+      role: getBotUserRole(botUser),
+      recipientId: getRecipientId(phone, botUser),
+      userName: getBotUserName(botUser),
+    };
+  }
+
+  function recipientMatchesManagerIds(recipient, managerIds) {
+    if (!managerIds.length) return false;
+    const userRefs = compact([
+      recipient?.phone,
+      recipient?.botUser?.userId,
+      recipient?.botUser?.id,
+      recipient?.botUser?.systemUserId,
+    ]);
+    return managerIds.some(managerId => userRefs.some(userRef => sameText(managerId, userRef)));
+  }
+
+  function getManagerLifecycleRecipientsForEvent(event) {
+    const all = Object.entries(getBotUsers())
+      .map(([phone, botUser]) => recipientFromBotUser(phone, botUser))
+      .filter(recipient => !sameText(recipient.role, 'Перевозчик') && recipient.botUser?.role !== 'carrier');
+    const managerIds = getEventManagerUserIds(event);
+
+    const managers = uniqBy(
+      all.filter(recipient =>
+        roleIsManager(recipient.role) &&
+        (managerIds.length
+          ? recipientMatchesManagerIds(recipient, managerIds)
+          : eventMatchesManager(event, recipient.botUser)) &&
+        isSendableRecipient(recipient)),
+      recipient => recipient.recipientId,
+    );
+    if (managers.length) return managers;
+
+    const officeManagers = uniqBy(
+      all.filter(recipient => roleIsOfficeManager(recipient.role) && isSendableRecipient(recipient)),
+      recipient => recipient.recipientId,
+    );
+    if (officeManagers.length) return officeManagers;
+
+    return uniqBy(
+      all.filter(recipient => roleIsAdmin(recipient.role) && isSendableRecipient(recipient)),
+      recipient => recipient.recipientId,
+    );
   }
 
   function getDirectRecipientsForEvent(event) {
@@ -557,6 +644,13 @@ function createBotNotificationService(deps = {}) {
       });
       return { status: 'sent', eventKey, recipient };
     } catch (error) {
+      logger?.warn?.('[BOT] Не удалось отправить уведомление MAX', {
+        eventType: event.type,
+        rentalId: event?.metadata?.rentalId || event?.rental?.id || null,
+        deliveryId: event?.metadata?.deliveryId || event?.delivery?.id || null,
+        managerId: event?.metadata?.managerId || null,
+        reason: error?.message || String(error),
+      });
       patchNotificationEvent(record.id, {
         status: 'failed_send',
         reason: 'send_failed',
@@ -718,6 +812,119 @@ function createBotNotificationService(deps = {}) {
         status: delivery.status || null,
         manager: delivery.manager || rental?.manager || null,
         managerId: delivery.managerId || rental?.managerId || null,
+      },
+    };
+  }
+
+  function getRentalNumber(rental, delivery) {
+    return rental?.number || rental?.rentalNumber || rental?.id ||
+      delivery?.rentalNumber || delivery?.rentalId || delivery?.ganttRentalId || delivery?.classicRentalId || 'не указана';
+  }
+
+  function getDeliveryEventTimestamp(delivery) {
+    return delivery?.actualDeliveryAt ||
+      delivery?.actualReturnAt ||
+      delivery?.completedAt ||
+      delivery?.updatedAt ||
+      delivery?.transportDate ||
+      nowIso();
+  }
+
+  function getReturnIssueText(delivery) {
+    const comments = compact([
+      delivery?.damageComment,
+      delivery?.damagesSummary,
+      delivery?.damageSummary,
+      delivery?.resultComment,
+      delivery?.problemComment,
+      delivery?.issueComment,
+      delivery?.returnComment,
+    ]);
+    const carrierComments = Array.isArray(delivery?.carrierComments)
+      ? delivery.carrierComments.map(item => item?.text)
+      : [];
+    const flags = [
+      delivery?.hasDamage,
+      delivery?.hasDamages,
+      delivery?.damaged,
+      delivery?.hasProblem,
+      delivery?.problem,
+      delivery?.returnHasIssues,
+    ].some(Boolean);
+    const text = compact([...comments, carrierComments]).join('\n');
+    if (text) return text;
+    return flags ? 'Отмечена проблема при возврате, подробный комментарий не указан.' : '';
+  }
+
+  function buildManagerDeliveryLifecycleMessage(kind, delivery, rental = null, equipment = null) {
+    const client = findClientName(
+      delivery?.clientId || rental?.clientId,
+      delivery?.client || rental?.client || rental?.company || '',
+    );
+    const rentalNumber = getRentalNumber(rental, delivery);
+    const timestamp = formatDateTime(getDeliveryEventTimestamp(delivery));
+    const status = kind === 'manager_equipment_returned'
+      ? 'вернулась / ожидает приёмки'
+      : 'отгружена / доставлена клиенту';
+
+    if (kind === 'manager_equipment_returned') {
+      const issueText = getReturnIssueText(delivery);
+      return [
+        '↩️ Техника вернулась от клиента',
+        '',
+        `Клиент: ${client || 'не указан'}`,
+        `Техника: ${formatEquipment(delivery || rental || {}, equipment)}`,
+        `Аренда: №${rentalNumber}`,
+        `Адрес забора: ${delivery?.origin || delivery?.pickupAddress || delivery?.objectAddress || 'не указан'}`,
+        `Куда доставлена: ${delivery?.destination || delivery?.returnAddress || 'база'}`,
+        delivery?.carrierName ? `Перевозчик: ${delivery.carrierName}` : null,
+        `Дата/время возврата: ${timestamp}`,
+        `Статус: ${status}`,
+        '',
+        issueText
+          ? `⚠️ Есть замечания при возврате:\n${issueText}`
+          : '✅ Замечаний при возврате не указано',
+      ].filter(Boolean).join('\n');
+    }
+
+    return [
+      '🚚 Техника ушла клиенту',
+      '',
+      `Клиент: ${client || 'не указан'}`,
+      `Техника: ${formatEquipment(delivery || rental || {}, equipment)}`,
+      `Аренда: №${rentalNumber}`,
+      `Адрес: ${delivery?.destination || delivery?.deliveryToAddress || rental?.deliveryAddress || delivery?.objectAddress || 'не указан'}`,
+      delivery?.carrierName ? `Перевозчик: ${delivery.carrierName}` : null,
+      `Дата/время: ${timestamp}`,
+      `Статус: ${status}`,
+    ].filter(Boolean).join('\n');
+  }
+
+  function buildManagerDeliveryLifecycleEvent(kind, delivery) {
+    if (!delivery) return null;
+    if (kind === 'manager_equipment_dispatched' && !deliveryTypeIsShipping(delivery)) return null;
+    if (kind === 'manager_equipment_returned' && !deliveryTypeIsReceiving(delivery)) return null;
+    const deliveryId = String(delivery.id || '').trim();
+    if (!deliveryId) return null;
+    const rental = resolveDeliveryRental(delivery);
+    const equipment = findEquipmentForEntity(delivery) || (rental ? findEquipmentForEntity(rental) : null);
+    return {
+      type: kind,
+      entityType: 'delivery',
+      entityId: deliveryId,
+      keyBase: `${kind}:${deliveryId}`,
+      text: buildManagerDeliveryLifecycleMessage(kind, delivery, rental, equipment),
+      entity: delivery,
+      delivery,
+      rental,
+      equipment,
+      recipientPolicy: 'responsible_manager_with_fallback',
+      metadata: {
+        deliveryId,
+        rentalId: rental?.id || delivery?.rentalId || delivery?.ganttRentalId || delivery?.classicRentalId || null,
+        status: delivery.status || null,
+        manager: delivery.manager || rental?.manager || null,
+        managerId: delivery.managerId || rental?.managerId || delivery.createdByUserId || null,
       },
     };
   }
@@ -931,9 +1138,18 @@ function createBotNotificationService(deps = {}) {
   }
 
   async function notifyDeliveryStatusChanged(previousDelivery, nextDelivery) {
-    if (!nextDelivery || !deliveryTypeIsShipping(nextDelivery)) return null;
+    if (!nextDelivery) return null;
     if (String(previousDelivery?.status || '') === String(nextDelivery.status || '')) return null;
     const status = String(nextDelivery.status || '').trim();
+    if (status === 'completed' && deliveryTypeIsShipping(nextDelivery)) {
+      const event = buildManagerDeliveryLifecycleEvent('manager_equipment_dispatched', nextDelivery);
+      return event ? dispatchEvent(event) : null;
+    }
+    if (status === 'completed' && deliveryTypeIsReceiving(nextDelivery)) {
+      const event = buildManagerDeliveryLifecycleEvent('manager_equipment_returned', nextDelivery);
+      return event ? dispatchEvent(event) : null;
+    }
+    if (!deliveryTypeIsShipping(nextDelivery)) return null;
     if (!DELIVERY_STATUS_EVENTS.has(status)) return null;
     const event = buildDispatchEvent('dispatch_status_changed', nextDelivery, status);
     return event ? dispatchEvent(event) : null;

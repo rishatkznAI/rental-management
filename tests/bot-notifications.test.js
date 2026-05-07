@@ -195,6 +195,265 @@ test('dispatch status change is deduplicated per status and recipient', async ()
   assert.equal(state.bot_notifications.filter(item => item.eventType === 'dispatch_status_changed').length, 2);
 });
 
+test('completed shipping delivery notifies responsible manager that equipment left client-bound', async () => {
+  const { state, messages, service } = createMemoryNotifications({
+    rentals: [{
+      id: 'R-dispatch',
+      number: '42',
+      client: 'ООО Высота',
+      equipmentId: 'EQ-1',
+      managerId: 'U-manager-1',
+      manager: 'Иванов Иван',
+    }],
+  });
+  const previous = {
+    id: 'DL-dispatch',
+    type: 'shipping',
+    status: 'in_transit',
+    transportDate: '2026-04-30',
+    client: 'ООО Высота',
+    destination: 'Казань, объект 7',
+    rentalId: 'R-dispatch',
+    equipmentId: 'EQ-1',
+    managerId: 'U-manager-1',
+    manager: 'Иванов Иван',
+    carrierName: 'Быстрая доставка',
+  };
+  const next = { ...previous, status: 'completed', completedAt: '2026-04-30T10:15:00.000Z' };
+
+  await service.notifyDeliveryStatusChanged(previous, next);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].target.user_id, 100);
+  assert.match(messages[0].text, /Техника ушла клиенту/);
+  assert.match(messages[0].text, /ООО Высота/);
+  assert.match(messages[0].text, /Mantall XE80N/);
+  assert.match(messages[0].text, /Аренда: №42/);
+  assert.match(messages[0].text, /Казань, объект 7/);
+  assert.match(messages[0].text, /Быстрая доставка/);
+  assert.equal(state.bot_notifications.filter(item => item.eventType === 'manager_equipment_dispatched' && item.status === 'sent').length, 1);
+});
+
+test('completed receiving delivery notifies manager that equipment returned with damage comment', async () => {
+  const { state, messages, service } = createMemoryNotifications({
+    rentals: [{
+      id: 'R-return',
+      number: '43',
+      client: 'ООО Возврат',
+      equipmentId: 'EQ-2',
+      managerId: 'U-manager-1',
+      manager: 'Иванов Иван',
+    }],
+  });
+  const previous = {
+    id: 'DL-return',
+    type: 'receiving',
+    status: 'in_transit',
+    transportDate: '2026-04-30',
+    client: 'ООО Возврат',
+    origin: 'Объект клиента',
+    destination: 'База Скайтех',
+    rentalId: 'R-return',
+    equipmentId: 'EQ-2',
+    managerId: 'U-manager-1',
+    manager: 'Иванов Иван',
+    carrierName: 'Быстрая доставка',
+    damageComment: 'Погнута корзина',
+  };
+  const next = { ...previous, status: 'completed', completedAt: '2026-04-30T11:20:00.000Z' };
+
+  await service.notifyDeliveryStatusChanged(previous, next);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].target.user_id, 100);
+  assert.match(messages[0].text, /Техника вернулась от клиента/);
+  assert.match(messages[0].text, /ООО Возврат/);
+  assert.match(messages[0].text, /Адрес забора: Объект клиента/);
+  assert.match(messages[0].text, /Куда доставлена: База Скайтех/);
+  assert.match(messages[0].text, /Есть замечания при возврате/);
+  assert.match(messages[0].text, /Погнута корзина/);
+  assert.equal(state.bot_notifications.filter(item => item.eventType === 'manager_equipment_returned' && item.status === 'sent').length, 1);
+});
+
+test('completed receiving delivery says no return issues when comments are absent', async () => {
+  const { messages, service } = createMemoryNotifications({
+    rentals: [{
+      id: 'R-return-clean',
+      client: 'ООО Чисто',
+      equipmentId: 'EQ-1',
+      managerId: 'U-manager-1',
+      manager: 'Иванов Иван',
+    }],
+  });
+  const previous = {
+    id: 'DL-return-clean',
+    type: 'receiving',
+    status: 'in_transit',
+    transportDate: '2026-04-30',
+    client: 'ООО Чисто',
+    rentalId: 'R-return-clean',
+    equipmentId: 'EQ-1',
+    managerId: 'U-manager-1',
+    manager: 'Иванов Иван',
+  };
+
+  await service.notifyDeliveryStatusChanged(previous, { ...previous, status: 'completed' });
+
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].text, /Замечаний при возврате не указано/);
+});
+
+test('completed delivery notification is not duplicated on repeated completed patch', async () => {
+  const { state, messages, service } = createMemoryNotifications();
+  const previous = {
+    id: 'DL-no-duplicate',
+    type: 'shipping',
+    status: 'in_transit',
+    transportDate: '2026-04-30',
+    client: 'ООО Один статус',
+    cargo: 'Mantall XE100C',
+    managerId: 'U-manager-1',
+    manager: 'Иванов Иван',
+  };
+  const next = { ...previous, status: 'completed' };
+
+  await service.notifyDeliveryStatusChanged(previous, next);
+  await service.notifyDeliveryStatusChanged(previous, next);
+  await service.notifyDeliveryStatusChanged(next, next);
+
+  assert.equal(messages.length, 1);
+  assert.equal(state.bot_notifications.filter(item => item.eventKey === 'manager_equipment_dispatched:DL-no-duplicate:U-manager-1' && item.status === 'sent').length, 1);
+});
+
+test('manager lifecycle notification falls back to office manager then administrator', async () => {
+  const officeState = createMemoryNotifications({
+    users: [
+      { id: 'U-office', name: 'Офис', role: 'Офис-менеджер', status: 'Активен' },
+      { id: 'U-admin', name: 'Администратор', role: 'Администратор', status: 'Активен' },
+    ],
+    bot_users: {
+      '200': {
+        userId: 'U-office',
+        userName: 'Офис',
+        userRole: 'Офис-менеджер',
+        isActive: true,
+        replyTarget: { user_id: 200, chat_id: null },
+      },
+      '201': {
+        userId: 'U-admin',
+        userName: 'Администратор',
+        userRole: 'Администратор',
+        isActive: true,
+        replyTarget: { user_id: 201, chat_id: null },
+      },
+    },
+  });
+  const previous = { id: 'DL-office-fallback', type: 'shipping', status: 'in_transit', client: 'ООО Без менеджера' };
+
+  await officeState.service.notifyDeliveryStatusChanged(previous, { ...previous, status: 'completed' });
+
+  assert.equal(officeState.messages.length, 1);
+  assert.equal(officeState.messages[0].target.user_id, 200);
+
+  const adminState = createMemoryNotifications({
+    users: [
+      { id: 'U-office', name: 'Офис', role: 'Офис-менеджер', status: 'Неактивен' },
+      { id: 'U-admin', name: 'Администратор', role: 'Администратор', status: 'Активен' },
+    ],
+    bot_users: {
+      '200': {
+        userId: 'U-office',
+        userName: 'Офис',
+        userRole: 'Офис-менеджер',
+        isActive: true,
+        replyTarget: { user_id: 200, chat_id: null },
+      },
+      '201': {
+        userId: 'U-admin',
+        userName: 'Администратор',
+        userRole: 'Администратор',
+        isActive: true,
+        replyTarget: { user_id: 201, chat_id: null },
+      },
+    },
+  });
+
+  await adminState.service.notifyDeliveryStatusChanged(previous, { ...previous, id: 'DL-admin-fallback', status: 'completed' });
+
+  assert.equal(adminState.messages.length, 1);
+  assert.equal(adminState.messages[0].target.user_id, 201);
+});
+
+test('manager lifecycle notification does not use manager name when managerId points elsewhere', async () => {
+  const { messages, service } = createMemoryNotifications({
+    users: [
+      { id: 'U-manager-1', name: 'Иванов Иван', role: 'Менеджер по аренде', status: 'Активен' },
+      { id: 'U-manager-missing', name: 'Иванов Иван', role: 'Менеджер по аренде', status: 'Активен' },
+      { id: 'U-office', name: 'Офис', role: 'Офис-менеджер', status: 'Активен' },
+    ],
+    bot_users: {
+      '100': {
+        userId: 'U-manager-1',
+        userName: 'Иванов Иван',
+        userRole: 'Менеджер по аренде',
+        isActive: true,
+        replyTarget: { user_id: 100, chat_id: null },
+      },
+      '200': {
+        userId: 'U-office',
+        userName: 'Офис',
+        userRole: 'Офис-менеджер',
+        isActive: true,
+        replyTarget: { user_id: 200, chat_id: null },
+      },
+    },
+  });
+  const previous = {
+    id: 'DL-id-first',
+    type: 'shipping',
+    status: 'in_transit',
+    client: 'ООО ID First',
+    managerId: 'U-manager-missing',
+    manager: 'Иванов Иван',
+  };
+
+  await service.notifyDeliveryStatusChanged(previous, { ...previous, status: 'completed' });
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].target.user_id, 200);
+});
+
+test('carrier and disconnected manager do not receive manager lifecycle notification', async () => {
+  const { state, messages, service } = createMemoryNotifications({
+    bot_users: {
+      '103': {
+        userId: 'U-carrier',
+        userName: 'Перевозчик',
+        userRole: 'Перевозчик',
+        role: 'carrier',
+        botMode: 'delivery',
+        isActive: true,
+        carrierId: 'carrier-1',
+        replyTarget: { user_id: 103, chat_id: null },
+      },
+    },
+  });
+  const previous = {
+    id: 'DL-no-connected-manager',
+    type: 'shipping',
+    status: 'in_transit',
+    client: 'ООО Без чата',
+    managerId: 'U-manager-1',
+    manager: 'Иванов Иван',
+  };
+
+  await service.notifyDeliveryStatusChanged(previous, { ...previous, status: 'completed' });
+
+  assert.equal(messages.length, 0);
+  assert.equal(state.bot_notifications.some(item => item.status === 'skipped_no_bot_user'), true);
+  assert.equal(state.bot_notifications.some(item => item.userRole === 'Перевозчик'), false);
+});
+
 test('inactive bot user is recorded as skipped and receives no notification', async () => {
   const { state, messages, service } = createMemoryNotifications({
     bot_users: {

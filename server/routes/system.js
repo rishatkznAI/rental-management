@@ -7,6 +7,7 @@ const {
   analyzeRentalEquipmentDiagnostics,
   planRentalEquipmentBackfill,
 } = require('../lib/rental-equipment-diagnostics');
+const { buildRentalLinkDiagnostics } = require('../lib/rental-link-diagnostics');
 const dns = require('dns');
 const fs = require('fs');
 const http = require('http');
@@ -954,17 +955,12 @@ function registerSystemRoutes(app, deps) {
   });
 
   app.get('/api/admin/rental-link-diagnostics', requireAuth, requireAdmin, (req, res) => {
-    if (typeof analyzeGanttRentalLinks !== 'function') {
-      return res.status(500).json({ ok: false, error: 'Rental link diagnostics unavailable' });
-    }
-    const diagnostics = analyzeGanttRentalLinks({
+    const diagnostics = buildRentalLinkDiagnostics({
       rentals: readData('rentals') || [],
       ganttRentals: readData('gantt_rentals') || [],
       equipment: readData('equipment') || [],
-      targetId: req.query.id || '',
-      limit: req.query.limit || 100,
     });
-    return res.json({ ok: true, diagnostics });
+    return res.json(diagnostics);
   });
 
   app.get('/api/admin/rental-equipment-diagnostics', requireAuth, requireAdmin, (_req, res) => {

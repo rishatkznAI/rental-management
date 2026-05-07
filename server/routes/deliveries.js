@@ -4,6 +4,10 @@ const {
   isCarrierBotUser,
   resolveDeliveryCarrierId,
 } = require('../lib/carrier-delivery-dto');
+const {
+  getClientObjectById,
+  normalizeClientRelationLinks,
+} = require('../lib/client-relations');
 
 function registerDeliveryRoutes(router, deps) {
   const {
@@ -146,6 +150,12 @@ function registerDeliveryRoutes(router, deps) {
       comment: String(body.comment || '').trim(),
       client: String(body.client || '').trim(),
       clientId: body.clientId ? String(body.clientId) : (existing?.clientId || null),
+      objectId: body.objectId ? String(body.objectId) : (existing?.objectId || null),
+      contractId: body.contractId ? String(body.contractId) : (existing?.contractId || null),
+      objectName: body.objectName ? String(body.objectName).trim() : (existing?.objectName || null),
+      objectAddress: body.objectAddress ? String(body.objectAddress).trim() : (existing?.objectAddress || null),
+      objectContactName: body.objectContactName ? String(body.objectContactName).trim() : (existing?.objectContactName || null),
+      objectContactPhone: body.objectContactPhone ? String(body.objectContactPhone).trim() : (existing?.objectContactPhone || null),
       manager: String(body.manager || existing?.manager || author).trim(),
       carrierId: body.carrierId ? String(body.carrierId) : (body.carrierKey ? String(body.carrierKey) : (existing?.carrierId || null)),
       carrierKey: body.carrierKey ? String(body.carrierKey) : (body.carrierId ? String(body.carrierId) : (existing?.carrierKey || null)),
@@ -203,6 +213,12 @@ function registerDeliveryRoutes(router, deps) {
       'comment',
       'client',
       'clientId',
+      'objectId',
+      'contractId',
+      'objectName',
+      'objectAddress',
+      'objectContactName',
+      'objectContactPhone',
       'carrierId',
       'carrierKey',
       'rentalId',
@@ -248,6 +264,35 @@ function registerDeliveryRoutes(router, deps) {
     return { classicRental, ganttRental };
   }
 
+  function getClientObject(objectId) {
+    return getClientObjectById(readData, objectId);
+  }
+
+  function withDeliveryObjectSnapshot(delivery) {
+    const object = getClientObject(delivery?.objectId);
+    if (!object) return delivery;
+    return {
+      ...delivery,
+      objectName: delivery.objectName || object.name || null,
+      objectAddress: delivery.objectAddress || object.address || null,
+      objectContactName: delivery.objectContactName || object.contactName || null,
+      objectContactPhone: delivery.objectContactPhone || object.contactPhone || null,
+      destination: delivery.destination || object.address || '',
+      contactName: delivery.contactName || object.contactName || '',
+      contactPhone: delivery.contactPhone || object.contactPhone || '',
+    };
+  }
+
+  function normalizeDeliveryRelationLinks(delivery, existing = null) {
+    const clientId = delivery?.clientId || existing?.clientId;
+    if (!clientId && !delivery?.objectId && !delivery?.contractId) return delivery;
+    return normalizeClientRelationLinks(delivery, clientId, {
+      readData,
+      requireActiveObject: !existing || String(delivery?.objectId || '') !== String(existing?.objectId || ''),
+      allowArchivedObjectId: existing?.objectId,
+    });
+  }
+
   function normalizeDeliveryRentalLinks(delivery) {
     const { classicRental, ganttRental } = findLinkedRentalContext(delivery);
     if (!classicRental && !ganttRental) return delivery;
@@ -265,18 +310,20 @@ function registerDeliveryRoutes(router, deps) {
       || equipmentInv
       || null;
 
-    return {
+    return withDeliveryObjectSnapshot({
       ...delivery,
       rentalId: classicRental?.id || delivery.rentalId || null,
       classicRentalId: classicRental?.id || delivery.classicRentalId || null,
       ganttRentalId: ganttRental?.id || delivery.ganttRentalId || null,
       clientId: source?.clientId || delivery.clientId || null,
       client: source?.client || delivery.client,
+      objectId: source?.objectId || delivery.objectId || null,
+      contractId: source?.contractId || delivery.contractId || null,
       manager: source?.manager || delivery.manager,
       equipmentId: source?.equipmentId || delivery.equipmentId || null,
       equipmentInv: equipmentInv || delivery.equipmentInv || null,
       equipmentLabel,
-    };
+    });
   }
 
   function enrichDeliveryBodyFromRentalContext(body, existing = null) {
@@ -309,6 +356,8 @@ function registerDeliveryRoutes(router, deps) {
       ganttRentalId: ganttRental?.id || body?.ganttRentalId,
       clientId: source?.clientId || body?.clientId,
       client: source?.client || body?.client,
+      objectId: source?.objectId || body?.objectId,
+      contractId: source?.contractId || body?.contractId,
       manager: source?.manager || body?.manager,
       equipmentId: source?.equipmentId || body?.equipmentId,
       equipmentInv: equipmentInv || body?.equipmentInv,
@@ -762,6 +811,7 @@ function registerDeliveryRoutes(router, deps) {
       const safeBody = sanitizeDeliveryBody(req.body, null, req);
       let delivery = normalizeDeliveryPayload(enrichDeliveryBodyFromRentalContext(safeBody), null, author, buildDeliveryCreator(req));
       delivery = normalizeDeliveryRentalLinks(delivery);
+      delivery = withDeliveryObjectSnapshot(normalizeDeliveryRelationLinks(delivery));
       const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {
@@ -829,6 +879,7 @@ function registerDeliveryRoutes(router, deps) {
         buildDeliveryCreator(req),
       );
       delivery = normalizeDeliveryRentalLinks(delivery);
+      delivery = withDeliveryObjectSnapshot(normalizeDeliveryRelationLinks(delivery, current));
       const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {

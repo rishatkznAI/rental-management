@@ -78,6 +78,8 @@ function createReturnState() {
       {
         id: 'R-2',
         clientId: 'C-2',
+        objectId: 'CO-2',
+        contractId: 'CC-2',
         client: 'ООО Повреждение',
         contact: 'Пётр',
         startDate: '2026-04-20',
@@ -141,6 +143,8 @@ function createReturnState() {
         id: 'GR-2',
         rentalId: 'R-2',
         clientId: 'C-2',
+        objectId: 'CO-2',
+        contractId: 'CC-2',
         client: 'ООО Повреждение',
         equipmentId: 'EQ-2',
         equipmentInv: 'INV-2',
@@ -171,6 +175,8 @@ function createReturnState() {
     service: [
       { id: 'S-open', equipmentId: 'EQ-4', inventoryNumber: 'INV-4', status: 'in_progress', reason: 'Активный ремонт' },
     ],
+    client_objects: [{ id: 'CO-2', clientId: 'C-2', name: 'Объект повреждения', address: 'Казань', status: 'active' }],
+    client_contracts: [{ id: 'CC-2', clientId: 'C-2', objectId: 'CO-2', number: 'Д-2', status: 'active' }],
     documents: [{ id: 'D-1', rentalId: 'R-1', rental: 'R-1', number: 'DOC-1' }],
     payments: [{ id: 'P-1', rentalId: 'R-1', amount: 10000, status: 'paid' }],
   };
@@ -278,6 +284,8 @@ test('return with damage creates service ticket and keeps equipment in service',
     assert.equal(ticket.status, 'new');
     assert.match(ticket.description, /Погнута корзина/);
     assert.equal(ticket.rentalId, 'R-2');
+    assert.equal(ticket.objectId, 'CO-2');
+    assert.equal(ticket.contractId, 'CC-2');
   });
 });
 

@@ -1305,6 +1305,11 @@ export default function ServiceDetail() {
                 {ticket.closedAt && <Field label="Фактическое закрытие" value={formatServiceDate(ticket.closedAt)} />}
                 <Field label="Источник" value={ticket.source ? SOURCE_LABELS[ticket.source] : undefined} />
                 <Field label="Кто создал" value={ticket.createdByUserName ?? ticket.createdBy} />
+                <Field label="Клиент" value={ticket.client} />
+                <Field label="Объект" value={ticket.objectName || ticket.objectId} />
+                <Field label="Адрес объекта" value={ticket.objectAddress} />
+                <Field label="Контакт объекта" value={[ticket.objectContactName, ticket.objectContactPhone].filter(Boolean).join(' · ')} />
+                <Field label="Договор" value={ticket.contractNumber || ticket.contractId} />
                 <Field label="Контактное лицо" value={ticket.reporterContact} />
                 <Field label="Заказ-наряд" value={relatedWorkOrder?.number} />
               </div>

@@ -5,6 +5,8 @@ export interface RentalDebtRow {
   rentalId: string;
   clientId?: string;
   client: string;
+  objectId?: string;
+  contractId?: string;
   equipmentInv: string;
   manager: string;
   startDate: string;
@@ -184,6 +186,8 @@ export function buildRentalDebtRows(
         rentalId: rental.id,
         clientId: stableClientId(rental) || undefined,
         client: getClientName(rental),
+        objectId: rental.objectId || undefined,
+        contractId: rental.contractId || undefined,
         equipmentInv: rental.equipmentInv,
         manager: rental.manager,
         startDate: rental.startDate,

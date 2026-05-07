@@ -341,6 +341,8 @@ export type RentalStatus = 'new' | 'confirmed' | 'delivery' | 'active' | 'return
 export interface Rental {
   id: string;
   clientId?: string;
+  objectId?: string;
+  contractId?: string;
   client: string;
   contact: string;
   startDate: string;
@@ -630,6 +632,16 @@ export interface ServiceTicket {
   assignedMechanicId?: string;
   assignedMechanicName?: string;
   createdBy?: string;
+  clientId?: string;
+  client?: string;
+  rentalId?: string;
+  objectId?: string;
+  contractId?: string;
+  objectName?: string;
+  objectAddress?: string;
+  objectContactName?: string;
+  objectContactPhone?: string;
+  contractNumber?: string;
   createdByUserId?: string;
   createdByUserName?: string;
   reporterContact?: string;
@@ -762,6 +774,34 @@ export interface Client {
   history?: AuditEntry[];
 }
 
+export interface ClientObject {
+  id: string;
+  clientId: string;
+  name: string;
+  address: string;
+  contactName?: string;
+  contactPhone?: string;
+  contractId?: string;
+  contractNumber?: string;
+  notes?: string;
+  status: 'active' | 'archived';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ClientContract {
+  id: string;
+  clientId: string;
+  objectId?: string;
+  number: string;
+  date?: string;
+  title?: string;
+  status: 'active' | 'archived';
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export type DocumentType = 'contract' | 'act' | 'invoice' | 'work_order';
 export type DocumentStatus = 'draft' | 'signed' | 'sent';
 export type DocumentContractKind = 'rental' | 'supply';
@@ -772,6 +812,8 @@ export interface Document {
   contractKind?: DocumentContractKind;
   number: string;
   clientId?: string;
+  objectId?: string;
+  contractId?: string;
   client: string;
   date: string;
   amount?: number;
@@ -813,6 +855,8 @@ export interface Payment {
   invoiceNumber: string;
   rentalId?: string;       // link to GanttRental id
   clientId?: string;
+  objectId?: string;
+  contractId?: string;
   client: string;
   amount: number;          // total amount due
   paidAmount?: number;     // amount actually paid (for partial)
@@ -1170,6 +1214,12 @@ export interface Delivery {
   comment?: string;
   client: string;
   clientId?: string | null;
+  objectId?: string | null;
+  contractId?: string | null;
+  objectName?: string | null;
+  objectAddress?: string | null;
+  objectContactName?: string | null;
+  objectContactPhone?: string | null;
   manager: string;
   carrierId?: string | null;
   carrierKey?: string | null;

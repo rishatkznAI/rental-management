@@ -13,6 +13,7 @@ const {
   stripRentalPatchMeta,
   syncGanttRentalFields,
 } = require('../lib/rental-change-requests');
+const { normalizeClientRelationLinks } = require('../lib/client-relations');
 const { rentalMatchesEquipment } = require('../lib/rental-validation');
 const { LEGACY_AUDIT_COLLECTION, redactAuditValue } = require('../lib/security-audit');
 
@@ -244,6 +245,16 @@ function registerRentalRoutes(deps) {
       return normalizeRecordClientLink(item, readData('clients') || [], {
         context: context || `${collection}:${item?.id || 'new'}`,
         logger: console,
+      });
+    }
+
+    function normalizeRentalRelationLinks(item, existing = null) {
+      const clientId = item?.clientId || existing?.clientId;
+      if (!clientId && !item?.objectId && !item?.contractId) return item;
+      return normalizeClientRelationLinks(item, clientId, {
+        readData,
+        requireActiveObject: !existing || String(item?.objectId || '') !== String(existing?.objectId || ''),
+        allowArchivedObjectId: existing?.objectId,
       });
     }
 
@@ -573,6 +584,8 @@ function registerRentalRoutes(deps) {
         rentalId: rental?.id,
         clientId: rental?.clientId,
         client: rental?.client,
+        objectId: rental?.objectId,
+        contractId: rental?.contractId,
       };
     }
 
@@ -584,6 +597,8 @@ function registerRentalRoutes(deps) {
       const restored = withClientLink({
         id: generateUniqueRentalId(existingRentals),
         clientId: ganttRental.clientId || oldValues.clientId || '',
+        objectId: ganttRental.objectId || oldValues.objectId || undefined,
+        contractId: ganttRental.contractId || oldValues.contractId || undefined,
         client: ganttRental.client || oldValues.client || '',
         contact: ganttRental.contact || '',
         startDate: oldValues.startDate || ganttRental.startDate || '',
@@ -621,6 +636,8 @@ function registerRentalRoutes(deps) {
         sourceRentalId: classicRental.id,
         originalRentalId: classicRental.id,
         clientId: classicRental.clientId || '',
+        objectId: classicRental.objectId || undefined,
+        contractId: classicRental.contractId || undefined,
         client: classicRental.client || classicRental.clientName || '',
         clientShort: String(classicRental.client || classicRental.clientName || '').substring(0, 20),
         startDate: classicRental.startDate || '',
@@ -957,6 +974,11 @@ function registerRentalRoutes(deps) {
         }
         newItem = linked.item;
       }
+      try {
+        newItem = normalizeRentalRelationLinks(newItem);
+      } catch (error) {
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
       const validation = validateRentalPayload(collection, newItem, data, equipment, '', {
         skipConflictCheck: collection === 'gantt_rentals' && Boolean(newItem.rentalId),
       });
@@ -1119,7 +1141,16 @@ function registerRentalRoutes(deps) {
           });
         }
 
-        const immediateValidation = validateImmediateRentalPatch(previousRental, immediatePatch, data, approvalChanges, meta, req.user.userName);
+        let normalizedImmediatePatch = immediatePatch;
+        try {
+          if (Object.keys(immediatePatch || {}).length > 0) {
+            const normalizedItem = normalizeRentalRelationLinks({ ...previousRental, ...immediatePatch, id: previousRental.id }, previousRental);
+            normalizedImmediatePatch = Object.fromEntries(Object.keys(immediatePatch).map(field => [field, normalizedItem[field]]));
+          }
+        } catch (error) {
+          return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        }
+        const immediateValidation = validateImmediateRentalPatch(previousRental, normalizedImmediatePatch, data, approvalChanges, meta, req.user.userName);
         if (!immediateValidation.ok) {
           return res.status(immediateValidation.status).json({ ok: false, error: immediateValidation.error });
         }
@@ -1184,6 +1215,11 @@ function registerRentalRoutes(deps) {
         }
         nextItem = linked.item;
         nextItem = normalizeGanttRentalStatus(nextItem);
+      }
+      try {
+        nextItem = normalizeRentalRelationLinks(nextItem, data[idx]);
+      } catch (error) {
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
       const validation = validateRentalPayload(collection, nextItem, data, readData('equipment') || [], data[idx].id);
       if (!validation.ok) {
@@ -1627,6 +1663,12 @@ function registerRentalRoutes(deps) {
           nextList.push(linked.item);
         }
         nextList = normalizeGanttRentalList(nextList);
+      }
+      try {
+        const existingById = new Map((readData(collection) || []).map(item => [String(item?.id || ''), item]));
+        nextList = nextList.map(item => normalizeRentalRelationLinks(item, existingById.get(String(item?.id || '')) || null));
+      } catch (error) {
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
 
       writeData(collection, nextList);

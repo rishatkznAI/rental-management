@@ -19,7 +19,7 @@ function createSystemApp(overrides = {}) {
   registerSystemRoutes(app, {
     readData: overrides.readData || (() => []),
     writeData: overrides.writeData || (() => {}),
-    getSnapshot: () => ({}),
+    getSnapshot: overrides.getSnapshot || (() => ({})),
     saveSnapshot: () => {},
     botToken: 'token-present',
     getBotUsers: () => ({}),
@@ -1167,7 +1167,7 @@ test('/api/admin/system-data/import accepts valid clients payload', async () => 
       collections: {
         clients: [
           { id: 'C-1', company: 'ООО Альфа', inn: '1655123456' },
-          { id: 'C-2', company: 'ООО Без ИНН', inn: '' },
+          { id: 'C-2', company: 'ИП Валидный', inn: '123456789012' },
         ],
       },
     });
@@ -1177,4 +1177,78 @@ test('/api/admin/system-data/import accepts valid clients payload', async () => 
     assert.deepEqual(writes.map(write => write.name), ['clients']);
     assert.equal(collections.clients.length, 2);
   });
+});
+
+test('/api/admin/system-data/import rejects missing and invalid client INN', async () => {
+  const collections = {
+    clients: [],
+    users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password' }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const missing = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', {
+      collections: { clients: [{ id: 'C-missing', company: 'Без ИНН' }] },
+    });
+    assert.equal(missing.status, 400);
+    assert.match(JSON.stringify(missing.body.errors), /Укажите корректный ИНН/);
+
+    const invalid = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: { clients: [{ id: 'C-invalid', company: 'Короткий', inn: '12345' }] },
+    });
+    assert.equal(invalid.status, 400);
+    assert.match(JSON.stringify(invalid.body.errors), /Укажите корректный ИНН/);
+    assert.deepEqual(writes, []);
+  });
+});
+
+test('/api/sync rejects missing and duplicate normalized client INN', async () => {
+  const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
+  process.env.ENABLE_LEGACY_SYNC = '1';
+  const collections = {
+    clients: [{ id: 'C-existing', company: 'ООО Старый', inn: '1655123456' }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    getSnapshot: () => ({ clients: collections.clients }),
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const missing = await postJson(baseUrl, '/api/sync', {
+        clients: [
+          { id: 'C-existing', company: 'ООО Старый', inn: '1655123456' },
+          { id: 'C-new', company: 'Без ИНН' },
+        ],
+      });
+      assert.equal(missing.status, 400);
+      assert.match(missing.body.error, /Укажите корректный ИНН/);
+
+      const duplicate = await postJson(baseUrl, '/api/sync', {
+        clients: [
+          { id: 'C-existing', company: 'ООО Старый', inn: '1655123456' },
+          { id: 'C-duplicate', company: 'Дубль', inn: '1655-123456' },
+        ],
+      });
+      assert.equal(duplicate.status, 409);
+      assert.match(duplicate.body.error, /Клиент с таким ИНН уже существует/);
+      assert.deepEqual(writes, []);
+    });
+  } finally {
+    if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
+    else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
+  }
 });

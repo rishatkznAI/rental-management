@@ -2,7 +2,11 @@ const { isMechanicRole } = require('../lib/role-groups');
 const { redactAuditValue } = require('../lib/security-audit');
 const { cleanupBackupArchive, createFullBackupArchive } = require('../lib/full-backup');
 const { DEFAULT_ALLOWED_DOMAINS, DEFAULT_MAX_BYTES, archiveExternalPhotos } = require('../lib/external-photo-archive');
-const { buildClientInnDuplicateReport } = require('../lib/client-inn');
+const {
+  assertClientInnWriteAllowed,
+  buildClientInnDuplicateReport,
+  normalizeClientInnFields,
+} = require('../lib/client-inn');
 const {
   analyzeRentalEquipmentDiagnostics,
   planRentalEquipmentBackfill,
@@ -256,7 +260,14 @@ function analyzeSystemDataImport(payload, readData) {
     });
     if (duplicateIds.size > 0) duplicates[collection] = Array.from(duplicateIds);
     if (collection === 'clients') {
-      clientInnDuplicates.push(...buildClientInnDuplicateReport(sanitized));
+      const normalizedClients = sanitized.map(normalizeClientInnFields);
+      sanitizedCollections[collection] = normalizedClients;
+      clientInnDuplicates.push(...buildClientInnDuplicateReport(normalizedClients));
+      try {
+        assertClientInnWriteAllowed(readData('clients') || [], normalizedClients);
+      } catch (error) {
+        invalidCollections.push(`clients:${error.message}`);
+      }
     }
 
     const existingById = new Map((readData(collection) || [])
@@ -271,7 +282,9 @@ function analyzeSystemDataImport(payload, readData) {
 
   const blockingErrors = [
     ...unknownCollections.map(name => `Неизвестная коллекция: ${name}`),
-    ...invalidCollections.map(name => `Коллекция ${name} должна быть массивом`),
+    ...invalidCollections.map(name => name.startsWith('clients:')
+      ? name.slice('clients:'.length)
+      : `Коллекция ${name} должна быть массивом`),
     ...Object.entries(duplicates).map(([name, ids]) => `Дубликаты id в ${name}: ${ids.join(', ')}`),
     ...(clientInnDuplicates.length > 0 ? ['SYSTEM_IMPORT_CLIENT_INN_DUPLICATES: импорт содержит клиентов с одинаковым ИНН'] : []),
   ];
@@ -496,13 +509,17 @@ function registerSystemRoutes(app, deps) {
       } = req.body;
       const prev = getSnapshot();
       const now = Date.now();
+      const normalizedClients = Array.isArray(clients) ? clients.map(normalizeClientInnFields) : clients;
+      if (Array.isArray(normalizedClients)) {
+        assertClientInnWriteAllowed(prev.clients || [], normalizedClients);
+      }
 
       if (equipment) writeData('equipment', equipment);
       if (rentals) writeData('rentals', rentals);
       if (gantt_rentals) writeData('gantt_rentals', gantt_rentals);
       if (service) writeData('service', service);
       if (warranty_claims) writeData('warranty_claims', warranty_claims);
-      if (clients) writeData('clients', clients);
+      if (clients) writeData('clients', normalizedClients);
       if (payments) writeData('payments', payments);
       if (company_expenses) writeData('company_expenses', company_expenses);
       if (users) writeData('users', users);
@@ -578,7 +595,7 @@ function registerSystemRoutes(app, deps) {
       });
     } catch (err) {
       console.error('[SYNC] Ошибка:', err.message);
-      res.status(500).json({ ok: false, error: err.message });
+      res.status(err?.status || 500).json({ ok: false, error: err.message });
     }
   });
 

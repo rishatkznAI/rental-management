@@ -7,6 +7,7 @@ import { useEquipmentList } from '../hooks/useEquipment';
 import { usePaymentsList } from '../hooks/usePayments';
 import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
 import { RENTAL_KEYS, useGanttData, useRentalAuditHistory, useRentalsList } from '../hooks/useRentals';
+import { useClientContractsList, useClientObjectsList } from '../hooks/useClientRelations';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
@@ -61,6 +62,8 @@ const statusLabels: Record<RentalStatus, string> = {
 
 type RentalFormState = {
   clientId: string;
+  objectId: string;
+  contractId: string;
   client: string;
   contact: string;
   manager: string;
@@ -95,6 +98,8 @@ function getGanttRentalSourceId(ganttRental: GanttRentalData): string {
 
 function buildInitialFormState(rental: {
   clientId?: string;
+  objectId?: string;
+  contractId?: string;
   client: string;
   contact: string;
   manager: string;
@@ -110,6 +115,8 @@ function buildInitialFormState(rental: {
 }): RentalFormState {
   return {
     clientId: rental.clientId || '',
+    objectId: rental.objectId || '',
+    contractId: rental.contractId || '',
     client: rental.client,
     contact: rental.contact,
     manager: rental.manager,
@@ -164,6 +171,8 @@ export default function RentalDetail() {
   const { data: serviceTickets = [] } = useServiceTicketsList();
   const { data: payments = [] } = usePaymentsList();
   const { data: clients = [] } = useClientsList();
+  const { data: clientObjects = [] } = useClientObjectsList();
+  const { data: clientContracts = [] } = useClientContractsList();
   const { data: documents = [] } = useDocumentsList();
   const { data: changeRequests = [] } = useRentalChangeRequestsList();
   const { data: auditHistory, isLoading: auditHistoryLoading, isError: auditHistoryError } = useRentalAuditHistory(id || '');
@@ -295,6 +304,19 @@ export default function RentalDetail() {
 
   const selectedClient = clients.find(c => c.id === ((isEditing ? formState?.clientId : rental?.clientId) || ''))
     ?? clients.find(c => c.company === ((isEditing ? formState?.client : rental?.client) || ''));
+  const currentObjectId = (isEditing ? formState?.objectId : rental?.objectId) || '';
+  const currentContractId = (isEditing ? formState?.contractId : rental?.contractId) || '';
+  const activeClientObjects = clientObjects.filter(object => object.clientId === selectedClient?.id && object.status !== 'archived');
+  const selectedRentalObject = clientObjects.find(object => object.id === currentObjectId);
+  const objectOptions = selectedRentalObject && !activeClientObjects.some(object => object.id === selectedRentalObject.id)
+    ? [selectedRentalObject, ...activeClientObjects]
+    : activeClientObjects;
+  const contractOptions = clientContracts.filter(contract =>
+    contract.clientId === selectedClient?.id &&
+    contract.status !== 'archived' &&
+    (!currentObjectId || !contract.objectId || contract.objectId === currentObjectId)
+  );
+  const selectedRentalContract = clientContracts.find(contract => contract.id === currentContractId);
   const primaryEquipmentId = resolvedRentalEquipment[0]?.id || '';
   const quickActions = useMemo(
     () => buildRentalQuickActions({
@@ -575,6 +597,8 @@ export default function RentalDetail() {
     try {
       const rentalPatch = {
         clientId: formState.clientId,
+        objectId: formState.objectId || undefined,
+        contractId: formState.contractId || undefined,
         client: formState.client.trim(),
         contact: formState.contact.trim(),
         startDate: formState.startDate,
@@ -984,6 +1008,8 @@ export default function RentalDetail() {
                         const nextClient = clients.find(clientItem => clientItem.id === value);
                         updateField('clientId', value);
                         updateField('client', nextClient?.company ?? '');
+                        updateField('objectId', '');
+                        updateField('contractId', '');
                       }}
                     >
                       <SelectTrigger className="mt-1">
@@ -1008,6 +1034,61 @@ export default function RentalDetail() {
                   )}
                 </div>
               </div>
+              {(selectedClient || currentObjectId || currentContractId) && (
+                <div className="grid grid-cols-1 gap-4 border-t border-gray-200 pt-3 dark:border-gray-700 md:grid-cols-2">
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Объект</p>
+                    {isEditing ? (
+                      <Select
+                        value={formState.objectId || 'none'}
+                        onValueChange={(value) => {
+                          updateField('objectId', value === 'none' ? '' : value);
+                          updateField('contractId', '');
+                        }}
+                      >
+                        <SelectTrigger className="mt-1">
+                          <SelectValue placeholder="Без объекта" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Без объекта</SelectItem>
+                          {objectOptions.map(object => (
+                            <SelectItem key={object.id} value={object.id}>
+                              {object.name} · {object.address}{object.status === 'archived' ? ' · архив' : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="mt-0.5 font-medium text-gray-900 dark:text-white">
+                        {selectedRentalObject ? `${selectedRentalObject.name} · ${selectedRentalObject.address}` : 'Без объекта'}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Договор</p>
+                    {isEditing ? (
+                      <Select
+                        value={formState.contractId || 'none'}
+                        onValueChange={(value) => updateField('contractId', value === 'none' ? '' : value)}
+                      >
+                        <SelectTrigger className="mt-1">
+                          <SelectValue placeholder="Без договора" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Без договора</SelectItem>
+                          {contractOptions.map(contract => (
+                            <SelectItem key={contract.id} value={contract.id}>{contract.number}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="mt-0.5 font-medium text-gray-900 dark:text-white">
+                        {selectedRentalContract?.number || rental.contractId || 'Без договора'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
               {selectedClient && (
                 <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-3 dark:border-gray-700">
                   <div>

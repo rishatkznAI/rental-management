@@ -5,7 +5,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { EquipmentCombobox } from '../ui/EquipmentCombobox';
+import { useClientsList } from '../../hooks/useClients';
+import { useClientContractsList, useClientObjectsList } from '../../hooks/useClientRelations';
 import { SERVICE_TICKET_KEYS, useCreateServiceTicket } from '../../hooks/useServiceTickets';
 import { EQUIPMENT_KEYS, useEquipmentList } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
@@ -35,6 +38,9 @@ export function ServiceTicketForm({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const createTicket = useCreateServiceTicket();
+  const { data: clients = [] } = useClientsList();
+  const { data: clientObjects = [] } = useClientObjectsList();
+  const { data: clientContracts = [] } = useClientContractsList();
   const { data: equipmentList = [] } = useEquipmentList();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -47,12 +53,23 @@ export function ServiceTicketForm({
     location: '',
     priority: 'medium',
     reporterContact: '',
+    clientId: '',
+    client: '',
+    objectId: '',
+    contractId: '',
     reason: '',
     description: '',
     notes: '',
   });
 
   const selectedEquipment = equipmentList.find(e => e.id === formData.equipmentId);
+  const selectedClient = clients.find(item => item.id === formData.clientId);
+  const selectedClientObjects = clientObjects.filter(item => item.clientId === formData.clientId && item.status !== 'archived');
+  const selectedClientContracts = clientContracts.filter(item =>
+    item.clientId === formData.clientId &&
+    item.status !== 'archived' &&
+    (!formData.objectId || !item.objectId || item.objectId === formData.objectId)
+  );
   const isRepairScenario = formData.serviceKind === 'repair';
   const scenarioLabel = getServiceScenarioLabel(formData.serviceKind);
 
@@ -201,6 +218,10 @@ export function ServiceTicketForm({
       createdByUserId: user?.id,
       createdByUserName: authorName,
       reporterContact: formData.reporterContact || undefined,
+      clientId: formData.clientId || undefined,
+      client: selectedClient?.company || formData.client || undefined,
+      objectId: formData.objectId || undefined,
+      contractId: formData.contractId || undefined,
       source: 'manual',
       status: 'new',
       result: undefined,
@@ -338,6 +359,77 @@ export function ServiceTicketForm({
               onChange={(e) => setFormData({ ...formData, location: e.target.value })}
               required
             />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Клиент и объект</CardTitle>
+          <CardDescription>Привязка нужна, если техника находится на объекте клиента</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Клиент</label>
+            <Select
+              value={formData.clientId || 'none'}
+              onValueChange={(value) => {
+                const nextClient = clients.find(item => item.id === value);
+                setFormData(prev => ({
+                  ...prev,
+                  clientId: value === 'none' ? '' : value,
+                  client: nextClient?.company || '',
+                  objectId: '',
+                  contractId: '',
+                }));
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Без клиента" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Без клиента</SelectItem>
+                {clients.map(client => (
+                  <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Объект</label>
+            <Select
+              value={formData.objectId || 'none'}
+              disabled={!formData.clientId || selectedClientObjects.length === 0}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, objectId: value === 'none' ? '' : value, contractId: '' }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={formData.clientId ? 'Без объекта' : 'Сначала выберите клиента'} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Без объекта</SelectItem>
+                {selectedClientObjects.map(object => (
+                  <SelectItem key={object.id} value={object.id}>{object.name} · {object.address}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Договор</label>
+            <Select
+              value={formData.contractId || 'none'}
+              disabled={!formData.clientId}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, contractId: value === 'none' ? '' : value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Без договора" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Без договора</SelectItem>
+                {selectedClientContracts.map(contract => (
+                  <SelectItem key={contract.id} value={contract.id}>{contract.number}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>

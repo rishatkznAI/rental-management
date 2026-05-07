@@ -45,3 +45,39 @@ test('service DTO skips non-object rows and assigns safe ids to partial rows', (
   assert.equal(list[0].priority, 'medium');
   assert.equal(list[0].description, 'legacy text');
 });
+
+test('mechanic service DTO keeps object context without financial fields', () => {
+  const ticket = normalizeServiceTicketRecord({
+    id: 'S-1',
+    equipmentId: 'EQ-1',
+    equipment: 'Подъемник',
+    reason: 'Осмотр',
+    description: 'Осмотр',
+    priority: 'medium',
+    status: 'new',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    objectId: 'CO-1',
+    objectName: 'ТЦ Север',
+    objectAddress: 'Казань, Северная 1',
+    objectContactName: 'Ильдар',
+    objectContactPhone: '+7',
+    contractId: 'CC-1',
+    contractNumber: 'Д-1',
+    debt: 100000,
+    receivables: [{ id: 'R-1' }],
+    paymentTerms: '100% предоплата',
+    contractAmount: 500000,
+  });
+
+  assert.equal(ticket.objectId, 'CO-1');
+  assert.equal(ticket.objectName, 'ТЦ Север');
+  assert.equal(ticket.objectAddress, 'Казань, Северная 1');
+  assert.equal(ticket.objectContactName, 'Ильдар');
+  assert.equal(ticket.objectContactPhone, '+7');
+  assert.equal(ticket.contractNumber, 'Д-1');
+  assert.equal('debt' in ticket, false);
+  assert.equal('receivables' in ticket, false);
+  assert.equal('paymentTerms' in ticket, false);
+  assert.equal('contractAmount' in ticket, false);
+});

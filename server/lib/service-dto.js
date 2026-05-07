@@ -82,6 +82,16 @@ function objectValue(value, fallback) {
 
 function normalizeServiceTicketRecord(item, index = 0) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const {
+    debt: _debt,
+    receivables: _receivables,
+    payments: _payments,
+    paymentTerms: _paymentTerms,
+    contractAmount: _contractAmount,
+    contractSum: _contractSum,
+    clientDebt: _clientDebt,
+    ...safeItem
+  } = item;
 
   const id = stringValue(item.id) || `legacy-service-${index + 1}`;
   const serviceKind = normalizeServiceKind(item);
@@ -99,7 +109,7 @@ function normalizeServiceTicketRecord(item, index = 0) {
   const mechanicId = stringValue(item.mechanicId || item.assignedMechanicId || item.assignedUserId);
 
   return {
-    ...item,
+    ...safeItem,
     id,
     equipmentId,
     equipment,
@@ -118,7 +128,15 @@ function normalizeServiceTicketRecord(item, index = 0) {
     assignedMechanicName: stringValue(item.assignedMechanicName || item.mechanicName),
     assignedTo: stringValue(item.assignedTo || item.responsibleName),
     clientId: stringValue(item.clientId || item.client_id),
+    client: stringValue(item.client || item.clientName),
     rentalId: stringValue(item.rentalId || item.rental_id),
+    objectId: stringValue(item.objectId || item.clientObjectId || item.siteId),
+    contractId: stringValue(item.contractId || item.clientContractId),
+    objectName: stringValue(item.objectName),
+    objectAddress: stringValue(item.objectAddress),
+    objectContactName: stringValue(item.objectContactName),
+    objectContactPhone: stringValue(item.objectContactPhone),
+    contractNumber: stringValue(item.contractNumber),
     createdAt,
     updatedAt,
     workLog: arrayValue(item.workLog),

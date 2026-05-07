@@ -54,6 +54,10 @@ function createDeliveryApp(deliveryOverrides = {}) {
       phone: '+7 900 123-45-67',
       email: 'admin@example.test',
     }],
+    clients: [
+      { id: 'C-1', company: 'ИНЖИНИРИНГ' },
+      { id: 'C-2', company: 'ДРУГОЙ' },
+    ],
     deliveries: [makeDelivery(deliveryOverrides)],
     delivery_carriers: [{
       id: 'carrier-1',
@@ -74,6 +78,8 @@ function createDeliveryApp(deliveryOverrides = {}) {
       },
     },
     equipment: [],
+    client_objects: [],
+    client_contracts: [],
     gantt_rentals: [],
     rentals: [],
   };
@@ -173,6 +179,114 @@ test('updating a delivery with a carrier sends the previously unsent request to 
     assert.match(messages[0].text, /^Появилась новая заявка на отгрузку/);
     assert.match(messages[0].text, /Комментарий менеджера: Забрать у охраны пропуск и комплект документов\./);
     assert.equal(state.deliveries[0].botSendError, null);
+  });
+});
+
+test('creating a delivery from rental copies object and contract context without financial fields', async () => {
+  const { app, state, messages } = createDeliveryApp();
+  state.deliveries = [];
+  state.rentals = [{
+    id: 'R-1',
+    clientId: 'C-1',
+    client: 'ИНЖИНИРИНГ',
+    objectId: 'CO-1',
+    contractId: 'CC-1',
+    equipmentId: 'EQ-1',
+    equipment: ['083'],
+    startDate: '2026-04-29',
+    plannedReturnDate: '2026-05-10',
+    manager: 'Администратор',
+  }];
+  state.client_objects = [{
+    id: 'CO-1',
+    clientId: 'C-1',
+    name: 'ТЦ Север',
+    address: 'Казань, Северная 1',
+    contactName: 'Ильдар',
+    contactPhone: '+7 900 111-22-33',
+  }];
+  state.client_contracts = [{ id: 'CC-1', clientId: 'C-1', objectId: 'CO-1', number: 'Д-1', status: 'active' }];
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      rentalId: 'R-1',
+      transportDate: '2026-04-29',
+      origin: 'Новая база',
+      destination: 'Казань, Северная 1',
+      cargo: 'LGMG AS1413',
+      contactName: 'Ильдар',
+      contactPhone: '+7 900 111-22-33',
+      client: 'ИНЖИНИРИНГ',
+      manager: 'Администратор',
+      carrierKey: 'carrier-1',
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.objectId, 'CO-1');
+    assert.equal(response.body.contractId, 'CC-1');
+    assert.equal(response.body.objectName, 'ТЦ Север');
+    assert.equal(response.body.objectAddress, 'Казань, Северная 1');
+    assert.equal(messages.length, 1);
+    assert.match(messages[0].text, /Объект: ТЦ Север/);
+    assert.match(messages[0].text, /Адрес объекта: Казань, Северная 1/);
+    assert.doesNotMatch(messages[0].text, /cost|amount|debt|финанс/i);
+  });
+});
+
+test('delivery rejects foreign object and contract links before object snapshot', async () => {
+  const { app, state } = createDeliveryApp();
+  state.deliveries = [];
+  state.client_objects = [
+    { id: 'CO-1', clientId: 'C-1', name: 'Свой', address: 'Казань', contactName: 'Ильдар', contactPhone: '+7', status: 'active' },
+    { id: 'CO-2', clientId: 'C-2', name: 'Чужой', address: 'Москва', contactName: 'Петр', contactPhone: '+7', status: 'active' },
+  ];
+  state.client_contracts = [
+    { id: 'CC-1', clientId: 'C-1', objectId: 'CO-1', number: 'Д-1', status: 'active' },
+    { id: 'CC-2', clientId: 'C-2', objectId: 'CO-2', number: 'Д-2', status: 'active' },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const foreignObject = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      clientId: 'C-1',
+      objectId: 'CO-2',
+      transportDate: '2026-04-29',
+      origin: 'Новая база',
+      destination: 'Ручной адрес',
+      cargo: 'LGMG',
+    });
+    assert.equal(foreignObject.status, 400);
+    assert.equal(state.deliveries.length, 0);
+
+    const foreignContract = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      clientId: 'C-1',
+      contractId: 'CC-2',
+      transportDate: '2026-04-29',
+      origin: 'Новая база',
+      destination: 'Ручной адрес',
+      cargo: 'LGMG',
+    });
+    assert.equal(foreignContract.status, 400);
+
+    const valid = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      clientId: 'C-1',
+      client: 'ИНЖИНИРИНГ',
+      objectId: 'CO-1',
+      contractId: 'CC-1',
+      transportDate: '2026-04-29',
+      origin: 'Новая база',
+      destination: 'Ручной адрес',
+      cargo: 'LGMG',
+      contactName: 'Ильдар',
+      contactPhone: '+7',
+      carrierKey: 'carrier-1',
+    });
+    assert.equal(valid.status, 201);
+    assert.equal(valid.body.objectAddress, 'Казань');
+    assert.equal(valid.body.destination, 'Ручной адрес');
   });
 });
 

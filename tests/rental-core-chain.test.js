@@ -21,6 +21,14 @@ function createState() {
       { id: 'C-1', company: 'ООО Ромашка', manager: 'Админ' },
       { id: 'C-2', company: 'ООО Ромашка Плюс', manager: 'Админ' },
     ],
+    client_objects: [
+      { id: 'CO-1', clientId: 'C-1', name: 'Склад', address: 'Казань', status: 'active' },
+      { id: 'CO-2', clientId: 'C-2', name: 'Чужой', address: 'Москва', status: 'active' },
+    ],
+    client_contracts: [
+      { id: 'CC-1', clientId: 'C-1', objectId: 'CO-1', number: 'Д-1', status: 'active' },
+      { id: 'CC-2', clientId: 'C-2', objectId: 'CO-2', number: 'Д-2', status: 'active' },
+    ],
     equipment: [
       {
         id: 'EQ-1',
@@ -155,6 +163,68 @@ test('creating a client rental creates a linked planner row with stable ids', as
     assert.equal(state.gantt_rentals[0].clientId, 'C-1');
     assert.equal(state.gantt_rentals[0].equipmentId, 'EQ-1');
     assert.equal(state.gantt_rentals[0].endDate, '2026-05-20');
+  });
+});
+
+test('creating and patching rental preserves object and contract in linked planner row', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      objectId: 'CO-1',
+      contractId: 'CC-1',
+    }));
+
+    assert.equal(created.status, 201);
+    const createdGantt = state.gantt_rentals.find(item => item.rentalId === created.body.id);
+    assert.equal(created.body.objectId, 'CO-1');
+    assert.equal(created.body.contractId, 'CC-1');
+    assert.equal(createdGantt.objectId, 'CO-1');
+    assert.equal(createdGantt.contractId, 'CC-1');
+
+    const patchedDatesOnly = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      plannedReturnDate: '2026-05-24',
+    });
+    assert.equal(patchedDatesOnly.status, 200);
+    const keptGantt = state.gantt_rentals.find(item => item.rentalId === created.body.id);
+    assert.equal(patchedDatesOnly.body.objectId, 'CO-1');
+    assert.equal(patchedDatesOnly.body.contractId, 'CC-1');
+    assert.equal(keptGantt.objectId, 'CO-1');
+    assert.equal(keptGantt.contractId, 'CC-1');
+
+    state.client_objects.push({ id: 'CO-3', clientId: 'C-1', name: 'Цех', address: 'Казань 2', status: 'active' });
+    state.client_contracts.push({ id: 'CC-3', clientId: 'C-1', objectId: 'CO-3', number: 'Д-3', status: 'active' });
+    const patchedLinks = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      objectId: 'CO-3',
+      contractId: 'CC-3',
+    });
+    assert.equal(patchedLinks.status, 200);
+    const updatedGantt = state.gantt_rentals.find(item => item.rentalId === created.body.id);
+    assert.equal(patchedLinks.body.objectId, 'CO-3');
+    assert.equal(patchedLinks.body.contractId, 'CC-3');
+    assert.equal(updatedGantt.objectId, 'CO-3');
+    assert.equal(updatedGantt.contractId, 'CC-3');
+  });
+});
+
+test('rental create and patch reject foreign object and contract links', async () => {
+  const { app } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const foreignObject = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({ objectId: 'CO-2' }));
+    assert.equal(foreignObject.status, 400);
+
+    const foreignContract = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({ contractId: 'CC-2' }));
+    assert.equal(foreignContract.status, 400);
+
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({ objectId: 'CO-1', contractId: 'CC-1' }));
+    assert.equal(created.status, 201);
+
+    const patchForeignObject = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, { objectId: 'CO-2' });
+    assert.equal(patchForeignObject.status, 400);
+
+    const patchForeignContract = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, { contractId: 'CC-2' });
+    assert.equal(patchForeignContract.status, 400);
   });
 });
 

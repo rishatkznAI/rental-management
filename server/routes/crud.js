@@ -15,10 +15,17 @@ const {
 } = require('../lib/rental-change-requests');
 const {
   assertClientInnListUnique,
+  assertClientInnValid,
   assertClientInnUnique,
   buildClientInnDuplicateReport,
   normalizeClientInnFields,
 } = require('../lib/client-inn');
+const {
+  enrichRecordFromRentalLinks,
+  normalizeClientRelationLinks,
+  normalizeClientContractRecord,
+  normalizeClientObjectRecord,
+} = require('../lib/client-relations');
 
 function registerCrudRoutes(deps) {
   const {
@@ -117,6 +124,31 @@ function registerCrudRoutes(deps) {
       relatedRentalsById: relatedRentalsById(),
       logger: console,
     });
+  }
+
+  function normalizeClientDomainRecord(collection, item, existing = null) {
+    if (collection === 'clients') {
+      const normalized = normalizeClientInnFields(item);
+      assertClientInnValid(normalized);
+      return normalized;
+    }
+    if (collection === 'client_objects') {
+      return normalizeClientObjectRecord(item, existing, { readData, nowIso });
+    }
+    if (collection === 'client_contracts') {
+      return normalizeClientContractRecord(item, existing, { readData, nowIso });
+    }
+    if (collection === 'payments' || collection === 'documents' || collection === 'service') {
+      const enriched = enrichRecordFromRentalLinks(item, readData);
+      return normalizeClientRelationLinks(enriched, enriched.clientId, {
+        readData,
+        requireActiveObject: !existing,
+        allowArchivedObjectId: existing?.objectId,
+        includeObjectSnapshot: collection === 'service',
+        includeContractSnapshot: collection === 'service',
+      });
+    }
+    return item;
   }
 
   function normalizeStoredClientLinksAfterClientWrite() {
@@ -765,8 +797,8 @@ function registerCrudRoutes(deps) {
 
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
+        newItem = normalizeClientDomainRecord(collection, newItem);
         if (collection === 'clients') {
-          newItem = normalizeClientInnFields(newItem);
           assertClientInnUnique(data, newItem);
         }
         if (collection === 'users') {
@@ -950,8 +982,8 @@ function registerCrudRoutes(deps) {
           });
         } else {
           let nextItem = withClientLink(collection, { ...data[idx], ...safePatch, id: data[idx].id });
+          nextItem = normalizeClientDomainRecord(collection, nextItem, data[idx]);
           if (collection === 'clients') {
-            nextItem = normalizeClientInnFields(nextItem);
             assertClientInnUnique(data, nextItem, data[idx].id);
           }
           if (collection === 'users') {
@@ -1239,7 +1271,11 @@ function registerCrudRoutes(deps) {
           for (const item of list) validatePaymentRecord(item);
         }
         if (collection === 'clients') {
+          for (const item of list) assertClientInnValid(item);
           assertClientInnListUnique(list);
+        }
+        if (collection === 'client_objects' || collection === 'client_contracts') {
+          for (const item of list) normalizeClientDomainRecord(collection, item);
         }
         if (collection === 'service_works') {
           for (const item of list) validateServiceWorkCatalogRecord(item);
@@ -1352,7 +1388,7 @@ function registerCrudRoutes(deps) {
 
       const normalizedList = list.map(item => {
         const linked = withClientLink(collection, item);
-        return collection === 'clients' ? normalizeClientInnFields(linked) : linked;
+        return normalizeClientDomainRecord(collection, linked);
       });
       writeData(collection, normalizedList);
       if (collection === 'clients') {

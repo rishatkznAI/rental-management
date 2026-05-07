@@ -276,6 +276,8 @@ function mergeGanttRentalContext(primary, fallback) {
     clientId: primary.clientId || fallback.clientId,
     client: primary.client || fallback.client,
     clientShort: primary.clientShort || fallback.clientShort,
+    objectId: primary.objectId || fallback.objectId,
+    contractId: primary.contractId || fallback.contractId,
     equipmentId: primary.equipmentId || (primaryHasEquipmentRef ? '' : fallback.equipmentId),
     equipmentInv: primary.equipmentInv || (primaryHasEquipmentRef ? '' : fallback.equipmentInv),
     inventoryNumber: primary.inventoryNumber || (primaryHasEquipmentRef ? '' : fallback.inventoryNumber),
@@ -1450,6 +1452,8 @@ function ensureGanttRentalLink(ganttRental, rental, equipmentList = []) {
     next.managerInitials = managerInitials(rental.manager);
   }
   if (rental.managerId !== undefined) next.managerId = rental.managerId || '';
+  if (rental.objectId !== undefined) next.objectId = rental.objectId || undefined;
+  if (rental.contractId !== undefined) next.contractId = rental.contractId || undefined;
   if (rental.status !== undefined) next.status = rentalStatusToGanttStatus(rental.status);
   if (rental.price !== undefined) next.amount = Number(rental.price) || 0;
   if (rental.paymentStatus !== undefined) next.paymentStatus = rental.paymentStatus || next.paymentStatus;

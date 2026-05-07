@@ -773,6 +773,9 @@ function canMutateEntity(collection, entity, user, readData) {
     if (isRentalManager(user) || isSalesManager(user)) return canAccessEntity(collection, entity, user, readData);
     return false;
   }
+  if (collection === 'planner_items') {
+    return isOfficeManager(user);
+  }
   return canAccessEntity(collection, entity, user, readData);
 }
 

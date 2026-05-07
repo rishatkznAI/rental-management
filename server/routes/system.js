@@ -3,6 +3,10 @@ const { redactAuditValue } = require('../lib/security-audit');
 const { cleanupBackupArchive, createFullBackupArchive } = require('../lib/full-backup');
 const { DEFAULT_ALLOWED_DOMAINS, DEFAULT_MAX_BYTES, archiveExternalPhotos } = require('../lib/external-photo-archive');
 const { buildClientInnDuplicateReport } = require('../lib/client-inn');
+const {
+  analyzeRentalEquipmentDiagnostics,
+  planRentalEquipmentBackfill,
+} = require('../lib/rental-equipment-diagnostics');
 const dns = require('dns');
 const fs = require('fs');
 const http = require('http');
@@ -961,6 +965,67 @@ function registerSystemRoutes(app, deps) {
       limit: req.query.limit || 100,
     });
     return res.json({ ok: true, diagnostics });
+  });
+
+  app.get('/api/admin/rental-equipment-diagnostics', requireAuth, requireAdmin, (_req, res) => {
+    const diagnostics = analyzeRentalEquipmentDiagnostics({
+      equipment: readData('equipment') || [],
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+    });
+    return res.json({
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      ...diagnostics,
+    });
+  });
+
+  app.post('/api/admin/rental-equipment-diagnostics/backfill', requireAuth, requireAdmin, (req, res) => {
+    const dryRun = req.body?.confirm !== true || req.body?.dryRun === true;
+    const before = analyzeRentalEquipmentDiagnostics({
+      equipment: readData('equipment') || [],
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+    });
+    const plan = planRentalEquipmentBackfill({
+      equipment: readData('equipment') || [],
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      maxChanges: Math.min(500, Math.max(1, Number(req.body?.limit || 200) || 200)),
+    });
+
+    if (!dryRun) {
+      writeData('rentals', plan.nextRentals);
+      writeData('gantt_rentals', plan.nextGanttRentals);
+    }
+
+    const after = dryRun
+      ? before
+      : analyzeRentalEquipmentDiagnostics({
+        equipment: readData('equipment') || [],
+        rentals: readData('rentals') || [],
+        ganttRentals: readData('gantt_rentals') || [],
+      });
+
+    auditLog?.(req, {
+      action: 'rental_equipment.backfill',
+      entityType: 'rental_equipment',
+      after: {
+        dryRun,
+        rentalsUpdated: plan.summary.rentalsUpdated,
+        ganttUpdated: plan.summary.ganttUpdated,
+        skipped: plan.summary.skipped,
+      },
+    });
+
+    const { nextRentals, nextGanttRentals, ...publicPlan } = plan;
+    return res.json({
+      ok: true,
+      dryRun,
+      before,
+      backfill: publicPlan,
+      after,
+    });
   });
 
   app.post('/api/admin/rental-link-diagnostics/backfill', requireAuth, requireAdmin, (req, res) => {

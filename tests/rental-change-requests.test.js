@@ -1878,6 +1878,7 @@ test('rentals patch returns clear error when legacy gantt has no rental match', 
   delete gantt.rentalId;
   delete gantt.sourceRentalId;
   delete gantt.originalRentalId;
+  gantt.equipmentId = 'NO-SUCH-EQ';
   gantt.equipmentInv = 'NO-SUCH-INV';
 
   await withServer(app, async (baseUrl) => {
@@ -1946,6 +1947,41 @@ test('ensureGanttRentalLink clears stale equipmentId when rental only has invent
   assert.equal(linked.equipmentInv, '083');
   assert.equal(linked.inventoryNumber, '083');
   assert.deepEqual(linked.equipment, ['083']);
+});
+
+test('ensureGanttRentalLink repairs legacy equipment fields from canonical rental equipmentId', () => {
+  const linked = ensureGanttRentalLink(
+    {
+      id: 'GR-stale-equipment',
+      rentalId: 'R-1',
+      equipmentId: 'EQ-X',
+      equipmentInv: 'INV-X',
+      inventoryNumber: 'INV-X',
+      equipment: ['INV-X'],
+    },
+    {
+      id: 'R-1',
+      client: 'ЭМ-СТРОЙ',
+      clientId: 'C-1',
+      startDate: '2026-04-10',
+      plannedReturnDate: '2026-04-20',
+      equipmentId: 'EQ-Y',
+      equipmentInv: 'INV-X',
+      inventoryNumber: 'INV-X',
+      serialNumber: 'SN-X',
+      equipment: ['INV-X'],
+    },
+    [
+      { id: 'EQ-X', inventoryNumber: 'INV-X', serialNumber: 'SN-X' },
+      { id: 'EQ-Y', inventoryNumber: 'INV-Y', serialNumber: 'SN-Y' },
+    ],
+  );
+
+  assert.equal(linked.equipmentId, 'EQ-Y');
+  assert.equal(linked.equipmentInv, 'INV-Y');
+  assert.equal(linked.inventoryNumber, 'INV-Y');
+  assert.equal(linked.serialNumber, 'SN-Y');
+  assert.deepEqual(linked.equipment, ['INV-Y']);
 });
 
 test('rentals patch repairs wrong legacy gantt equipment from matched rental', async () => {

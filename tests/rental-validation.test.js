@@ -80,6 +80,41 @@ test('findConflictingRental ignores duplicate inventory without equipmentId', ()
   assert.equal(conflict, null);
 });
 
+test('findConflictingRental does not let stale legacy inventory override canonical equipmentId', () => {
+  const equipment = [
+    { id: 'eq-1', inventoryNumber: 'INV-1', serialNumber: 'SN-1' },
+    { id: 'eq-2', inventoryNumber: 'INV-2', serialNumber: 'SN-2' },
+  ];
+  const rentals = [
+    {
+      id: 'gr-1',
+      equipmentId: 'eq-1',
+      equipmentInv: 'INV-1',
+      startDate: '2026-04-10',
+      endDate: '2026-04-20',
+      status: 'active',
+    },
+  ];
+
+  const conflict = findConflictingRental(
+    'gantt_rentals',
+    {
+      id: 'gr-2',
+      equipmentId: 'eq-2',
+      equipmentInv: 'INV-1',
+      inventoryNumber: 'INV-1',
+      equipment: ['INV-1'],
+      startDate: '2026-04-15',
+      endDate: '2026-04-25',
+      status: 'active',
+    },
+    rentals,
+    equipment,
+  );
+
+  assert.equal(conflict, null);
+});
+
 test('formatConflictError returns readable period and client', () => {
   const message = formatConflictError(
     {

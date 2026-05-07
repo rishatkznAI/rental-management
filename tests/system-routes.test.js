@@ -199,6 +199,95 @@ test('/api/admin/production-diagnostics is admin-only', async () => {
   });
 });
 
+test('/api/admin/rental-equipment-diagnostics returns structured admin diagnostics', async () => {
+  const collections = {
+    equipment: [
+      { id: 'EQ-1', inventoryNumber: 'INV-1', serialNumber: 'SN-1' },
+      { id: 'EQ-2', inventoryNumber: 'INV-2', serialNumber: 'SN-2' },
+    ],
+    rentals: [
+      { id: 'R-1', equipmentId: 'EQ-2', equipmentInv: 'INV-1', equipment: ['INV-1'] },
+      { id: 'R-2', equipmentInv: 'INV-1', equipment: ['INV-1'] },
+    ],
+    gantt_rentals: [
+      { id: 'GR-1', rentalId: 'R-1', equipmentId: 'EQ-1', equipmentInv: 'INV-1' },
+      { id: 'GR-2', rentalId: 'R-missing', equipmentId: 'EQ-1', equipmentInv: 'INV-1' },
+    ],
+  };
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/rental-equipment-diagnostics');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.summary.rentalsTotal, 2);
+    assert.equal(response.body.summary.rentalsWithoutEquipmentId, 1);
+    assert.equal(response.body.summary.ganttMissingRental, 1);
+    assert.equal(response.body.summary.ganttEquipmentMismatches, 1);
+    assert.equal(response.body.issues.rentalsWithoutEquipmentId[0].id, 'R-2');
+    assert.equal(response.body.issues.ganttEquipmentMismatches[0].id, 'GR-1');
+    assert.deepEqual(Object.keys(response.body.issues).sort(), [
+      'duplicateEquipmentIdentifiers',
+      'ganttEquipmentMismatches',
+      'ganttMissingRental',
+      'ganttWithoutRentalId',
+      'legacyConflicts',
+      'rentalsWithMissingEquipment',
+      'rentalsWithoutEquipmentId',
+    ].sort());
+  });
+});
+
+test('/api/admin/rental-equipment-diagnostics is admin-only', async () => {
+  const { app } = createSystemApp({
+    requireAdmin: (_req, res) => res.status(403).json({ ok: false, error: 'Forbidden' }),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/rental-equipment-diagnostics');
+    assert.equal(response.status, 403);
+  });
+});
+
+test('/api/admin/rental-equipment-diagnostics/backfill dry-run does not write and confirm applies repairs', async () => {
+  const collections = {
+    equipment: [
+      { id: 'EQ-1', inventoryNumber: 'INV-1', serialNumber: 'SN-1' },
+      { id: 'EQ-2', inventoryNumber: 'INV-2', serialNumber: 'SN-2' },
+    ],
+    rentals: [
+      { id: 'R-1', equipmentId: 'EQ-2', equipmentInv: 'INV-1', equipment: ['INV-1'] },
+      { id: 'R-2', equipmentInv: 'INV-1', equipment: ['INV-1'] },
+    ],
+    gantt_rentals: [
+      { id: 'GR-1', rentalId: 'R-1', equipmentId: 'EQ-1', equipmentInv: 'INV-1', equipment: ['INV-1'] },
+    ],
+  };
+  const { app, auditEntries } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => { collections[name] = value; },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const dryRun = await postJson(baseUrl, '/api/admin/rental-equipment-diagnostics/backfill', {});
+    assert.equal(dryRun.status, 200);
+    assert.equal(dryRun.body.dryRun, true);
+    assert.equal(dryRun.body.backfill.summary.rentalsUpdated, 2);
+    assert.equal(collections.rentals.find(item => item.id === 'R-2').equipmentId, undefined);
+
+    const applied = await postJson(baseUrl, '/api/admin/rental-equipment-diagnostics/backfill', { confirm: true });
+    assert.equal(applied.status, 200);
+    assert.equal(applied.body.dryRun, false);
+    assert.equal(collections.rentals.find(item => item.id === 'R-2').equipmentId, 'EQ-1');
+    assert.equal(collections.rentals.find(item => item.id === 'R-1').equipmentInv, 'INV-2');
+    assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-1').equipmentId, 'EQ-2');
+    assert.equal(applied.body.after.summary.rentalsWithoutEquipmentId, 0);
+    assert.equal(auditEntries.some(entry => entry.action === 'rental_equipment.backfill'), true);
+  });
+});
+
 test('/api/admin/audit-logs returns filtered safe entries for admins only', async () => {
   const collections = {
     audit_logs: [

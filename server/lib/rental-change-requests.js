@@ -1,4 +1,5 @@
 const { createRentalHistoryEntry } = require('./audit-history');
+const { resolveRentalEquipment } = require('./equipment-matching');
 
 const RENTAL_CHANGE_REQUEST_STATUS = {
   PENDING: 'pending',
@@ -326,21 +327,20 @@ function buildEquipmentAliases(record, equipmentList = []) {
   const explicitEquipmentId = normalizeRentalIdentifier(record?.equipmentId);
   const explicitInventory = normalizeRentalIdentifier(record?.equipmentInv || record?.inventoryNumber);
   const explicitSerial = normalizeRentalIdentifier(record?.serialNumber);
-  const equipmentByExplicitId = explicitEquipmentId ? indexes.byId.get(explicitEquipmentId) : null;
-  const explicitIdConflictsWithInventory = Boolean(
-    equipmentByExplicitId &&
-    explicitInventory &&
-    normalizeRentalIdentifier(equipmentByExplicitId.inventoryNumber || equipmentByExplicitId.equipmentInv || equipmentByExplicitId.inv) !== explicitInventory,
-  );
 
-  if (explicitEquipmentId && !explicitIdConflictsWithInventory) aliases.ids.add(explicitEquipmentId);
+  if (explicitEquipmentId) {
+    aliases.ids.add(explicitEquipmentId);
+    if (indexes.byId.has(explicitEquipmentId)) {
+      addEquipmentAliases(aliases, indexes.byId.get(explicitEquipmentId));
+      return aliases;
+    }
+  }
   if (explicitInventory) aliases.inventoryNumbers.add(explicitInventory);
   if (explicitSerial) aliases.serialNumbers.add(explicitSerial);
 
   const refs = uniqueIdentifiers(equipmentReferenceValues(record).flatMap(equipmentReferenceTokens));
 
   for (const ref of refs) {
-    if (explicitIdConflictsWithInventory && ref === explicitEquipmentId) continue;
     aliases.raw.add(ref);
     if (indexes.byId.has(ref)) {
       addEquipmentAliases(aliases, indexes.byId.get(ref));
@@ -357,7 +357,7 @@ function buildEquipmentAliases(record, equipmentList = []) {
     }
   }
 
-  if (explicitEquipmentId && !explicitIdConflictsWithInventory && indexes.byId.has(explicitEquipmentId)) {
+  if (explicitEquipmentId && indexes.byId.has(explicitEquipmentId)) {
     addEquipmentAliases(aliases, indexes.byId.get(explicitEquipmentId));
   }
   if (explicitInventory && (indexes.inventoryCounts.get(explicitInventory) || 0) === 1) {
@@ -1393,28 +1393,7 @@ function buildRentalChangeRequest({
 }
 
 function findCanonicalEquipmentForRental(rental, equipmentList = []) {
-  if (!rental) return null;
-  const equipmentById = normalizeRentalIdentifier(rental.equipmentId);
-  if (equipmentById) {
-    const match = (equipmentList || []).find(item => normalizeRentalIdentifier(item?.id) === equipmentById);
-    if (match) return match;
-  }
-
-  const refs = uniqueIdentifiers([
-    rental.equipmentInv,
-    rental.inventoryNumber,
-    rental.serialNumber,
-    ...(Array.isArray(rental.equipment) ? rental.equipment : []),
-  ]);
-  for (const ref of refs) {
-    const byInventory = (equipmentList || []).filter(item => normalizeRentalIdentifier(item?.inventoryNumber || item?.equipmentInv || item?.inv) === ref);
-    if (byInventory.length === 1) return byInventory[0];
-    const bySerial = (equipmentList || []).filter(item => normalizeRentalIdentifier(item?.serialNumber) === ref);
-    if (bySerial.length === 1) return bySerial[0];
-    const byId = (equipmentList || []).find(item => normalizeRentalIdentifier(item?.id) === ref);
-    if (byId) return byId;
-  }
-  return null;
+  return resolveRentalEquipment(rental, equipmentList).equipment || null;
 }
 
 function canonicalGanttEquipmentFields(rental, equipmentList = []) {
@@ -1428,19 +1407,20 @@ function canonicalGanttEquipmentFields(rental, equipmentList = []) {
     rentalEquipment.length > 0
   );
   const equipmentInv = normalizeRentalIdentifier(
+    matchedEquipment?.inventoryNumber ||
+    matchedEquipment?.equipmentInv ||
     rental?.equipmentInv ||
     rental?.inventoryNumber ||
-    matchedEquipment?.inventoryNumber ||
     rentalEquipment[0],
   );
   const equipmentId = normalizeRentalIdentifier(rental?.equipmentId || matchedEquipment?.id);
-  const serialNumber = normalizeRentalIdentifier(rental?.serialNumber || matchedEquipment?.serialNumber);
+  const serialNumber = normalizeRentalIdentifier(matchedEquipment?.serialNumber || rental?.serialNumber);
   return {
     equipmentId,
     equipmentInv,
     inventoryNumber: equipmentInv,
     serialNumber,
-    equipment: rentalEquipment.length > 0 ? rentalEquipment : (equipmentInv ? [equipmentInv] : []),
+    equipment: equipmentInv ? [equipmentInv] : rentalEquipment,
     hasRentalEquipmentReference,
   };
 }

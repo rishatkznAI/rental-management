@@ -1,6 +1,7 @@
 const {
   findEquipmentForRentalPayload,
   isUniqueInventoryNumber,
+  rentalMatchesEquipment,
 } = require('./equipment-matching');
 
 function normalizeEquipmentRecord(equipment) {
@@ -93,26 +94,6 @@ function validateRentalNumericFields(payload) {
 
 function isBlockingRental(rental) {
   return rental?.status !== 'returned' && rental?.status !== 'closed';
-}
-
-function rentalMatchesEquipment(rental, equipment, equipmentList) {
-  if (!rental || !equipment) return false;
-  if (rental.equipmentId) return rental.equipmentId === equipment.id;
-  if (rental.serialNumber && equipment.serialNumber) {
-    return rental.serialNumber === equipment.serialNumber;
-  }
-
-  const inventoryNumber =
-    rental.equipmentInv
-    || rental.inventoryNumber
-    || (Array.isArray(rental.equipment) ? rental.equipment[0] : null);
-
-  return Boolean(
-    inventoryNumber &&
-    equipment.inventoryNumber &&
-    isUniqueInventoryNumber(inventoryNumber, equipmentList) &&
-    inventoryNumber === equipment.inventoryNumber
-  );
 }
 
 function findConflictingRental(collection, payload, rentals, equipmentList, excludeRentalId = '') {

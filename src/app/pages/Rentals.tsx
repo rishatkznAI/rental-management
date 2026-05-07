@@ -41,6 +41,7 @@ import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
 import { canEquipmentParticipateInRentals, compareEquipmentByPriority } from '../lib/equipmentClassification';
+import { resolveRentalEquipment } from '../lib/rentalEquipment';
 import { buildClientReceivables, buildRentalDebtRows, getEffectivePaidAmount, mergeClientsWithFinancials } from '../lib/finance';
 import {
   appendRentalHistory,
@@ -135,6 +136,11 @@ function equipmentAliasSet(record: EquipmentAliasRecord, equipmentList: Equipmen
     add(equipment.inventoryNumber);
     add(equipment.serialNumber);
   };
+  const canonical = resolveRentalEquipment(record, equipmentList);
+  if (record.equipmentId && canonical.equipment) {
+    addEquipment(canonical.equipment);
+    return aliases;
+  }
   const addReference = (value: unknown) => {
     const normalized = normalizeMatchRef(value);
     if (!normalized) return;
@@ -271,38 +277,19 @@ type RentalEquipmentFields = Rental & {
   endDate?: string;
 };
 
-function findEquipmentForRentalRecord(rental: RentalEquipmentFields, equipmentList: Equipment[]): Equipment | null {
-  if (rental.equipmentId) {
-    return equipmentList.find(item => item.id === rental.equipmentId) || null;
-  }
-  const refs = [
-    rental.equipmentInv,
-    rental.inventoryNumber,
-    rental.serialNumber,
-    ...(Array.isArray(rental.equipment) ? rental.equipment : []),
-  ].map(normalizeMatchRef).filter(Boolean);
-  for (const ref of refs) {
-    const byInventory = equipmentList.filter(item => normalizeMatchRef(item.inventoryNumber) === ref);
-    if (byInventory.length === 1) return byInventory[0];
-    const bySerial = equipmentList.filter(item => normalizeMatchRef(item.serialNumber) === ref);
-    if (bySerial.length === 1) return bySerial[0];
-    const byId = equipmentList.find(item => normalizeMatchRef(item.id) === ref);
-    if (byId) return byId;
-  }
-  return null;
-}
-
 function canonicalizeGanttRentalFromClassic(
   ganttRental: GanttRentalData,
   rental: Rental,
   equipmentList: Equipment[],
 ): GanttRentalData {
   const rentalWithEquipment = rental as RentalEquipmentFields;
-  const matchedEquipment = findEquipmentForRentalRecord(rentalWithEquipment, equipmentList);
+  const resolvedEquipment = resolveRentalEquipment(rentalWithEquipment, equipmentList);
+  const matchedEquipment = resolvedEquipment.equipment;
   const equipmentInv = normalizeMatchRef(
+    matchedEquipment?.inventoryNumber ||
+    (matchedEquipment as (Equipment & { equipmentInv?: string }) | null)?.equipmentInv ||
     rentalWithEquipment.equipmentInv ||
     rentalWithEquipment.inventoryNumber ||
-    matchedEquipment?.inventoryNumber ||
     rental.equipment?.[0] ||
     ''
   );
@@ -1256,14 +1243,13 @@ export default function Rentals() {
   }, [ambiguousInventoryNumbers, canonicalEquipmentIdByInventory, equipmentList, serviceTickets, today]);
 
   const matchesEquipmentRow = useCallback((rental: GanttRentalData, equipment: Equipment) => {
-    if (rental.equipmentId) {
-      return rental.equipmentId === equipment.id;
-    }
+    const resolved = resolveRentalEquipment(rental, equipmentList);
+    if (resolved.equipmentId) return resolved.equipmentId === equipment.id;
     if (ambiguousInventoryNumbers.has(rental.equipmentInv)) {
       return canonicalEquipmentIdByInventory.get(rental.equipmentInv) === equipment.id;
     }
     return rental.equipmentInv === equipment.inventoryNumber;
-  }, [ambiguousInventoryNumbers, canonicalEquipmentIdByInventory]);
+  }, [ambiguousInventoryNumbers, canonicalEquipmentIdByInventory, equipmentList]);
 
   const ambiguousLegacyRentals = useMemo(
     () => ganttRentals.filter(r => !r.equipmentId && ambiguousInventoryNumbers.has(r.equipmentInv)),

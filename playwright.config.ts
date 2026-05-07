@@ -40,6 +40,10 @@ export default defineConfig({
       url: 'http://127.0.0.1:3000/health',
       reuseExistingServer: false,
       timeout: 120_000,
+      env: {
+        ADMIN_RESET_EMAIL: process.env.E2E_ADMIN_EMAIL || 'smoke-admin@yandex.ru',
+        ADMIN_RESET_PASSWORD: process.env.E2E_ADMIN_PASSWORD || '123123',
+      },
     },
   ],
   projects: [

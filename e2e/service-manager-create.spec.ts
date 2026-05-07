@@ -23,7 +23,6 @@ test('rental manager can create a service ticket from the service form', async (
   await expect(page.getByRole('heading', { name: 'Новая заявка в сервис' })).toBeVisible();
   await selectEquipment(page, equipment.serialNumber || equipment.inventoryNumber);
   await page.getByPlaceholder('Например: объект клиента, склад, адрес площадки').fill('E2E объект менеджера');
-  await page.locator('select').nth(1).selectOption('medium');
   await page.getByPlaceholder('Например: Не реагирует на команды, не поднимается, ошибка на дисплее').fill(reason);
   await page.getByPlaceholder('Опишите неисправность или проблему, с которой обратились в сервис.').fill(description);
   await page.getByRole('button', { name: 'Создать заявку' }).click();

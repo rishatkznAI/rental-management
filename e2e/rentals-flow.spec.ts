@@ -65,8 +65,10 @@ test('admin can open rental extension modal without changing data', async ({ pag
     return createRentalPair(api, {
       client: client.company,
       equipment,
-      startDate: '2026-06-01',
+      startDate: '2026-05-01',
       endDate: '2026-06-10',
+      status: 'active',
+      ganttStatus: 'active',
     });
   });
 

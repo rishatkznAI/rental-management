@@ -18,8 +18,10 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
     const pair = await createRentalPair(api, {
       client: client.company,
       equipment,
-      startDate: '2026-05-10',
+      startDate: '2026-05-01',
       endDate: '2026-05-15',
+      status: 'active',
+      ganttStatus: 'active',
     });
     await createDocument(api, {
       type: 'contract',
@@ -160,7 +162,6 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
   await navigateInApp(page, '/service/new');
   await selectEquipment(page, seed.equipment.serialNumber || seed.equipment.inventoryNumber);
   await page.getByPlaceholder('Например: объект клиента, склад, адрес площадки').fill('E2E quick action object');
-  await page.locator('select').nth(1).selectOption('medium');
   await page.getByPlaceholder('Например: Не реагирует на команды, не поднимается, ошибка на дисплее').fill(serviceReason);
   await page.getByPlaceholder('Опишите неисправность или проблему, с которой обратились в сервис.').fill('E2E quick action description');
   await page.getByRole('button', { name: 'Создать заявку' }).click();

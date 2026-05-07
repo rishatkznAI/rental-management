@@ -7,8 +7,8 @@ type Credentials = {
 };
 
 export const ADMIN_CREDENTIALS: Credentials = {
-  email: 'admin@rental.local',
-  password: 'admin123',
+  email: 'smoke-admin@yandex.ru',
+  password: '123123',
 };
 
 export const RENTAL_MANAGER_CREDENTIALS: Credentials = {
@@ -48,6 +48,13 @@ async function expectAuthenticatedShell(page: Page) {
 }
 
 export async function loginAsRentalManager(page: Page) {
+  const { ensureUser, withAdminApi } = await import('./api');
+  await withAdminApi((api) => ensureUser(api, {
+    name: 'mp2',
+    email: RENTAL_MANAGER_CREDENTIALS.email,
+    role: 'Менеджер по аренде',
+    password: RENTAL_MANAGER_CREDENTIALS.password,
+  }));
   await login(page, RENTAL_MANAGER_CREDENTIALS);
   await expectAuthenticatedShell(page);
 }

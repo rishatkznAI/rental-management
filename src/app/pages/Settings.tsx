@@ -123,6 +123,13 @@ import type { GanttRentalData } from '../mock-data';
 
 type BadgeVariant = 'danger' | 'warning' | 'info' | 'success' | 'secondary';
 
+const EMPTY_SYSTEM_USERS: SystemUser[] = [];
+const EMPTY_OWNERS: Owner[] = [];
+const EMPTY_APP_SETTINGS: AppSetting[] = [];
+const EMPTY_MECHANICS: Mechanic[] = [];
+const EMPTY_DELIVERY_CARRIERS: DeliveryCarrier[] = [];
+const EMPTY_DELIVERY_CARRIER_CONNECTIONS: DeliveryCarrierConnection[] = [];
+
 function roleBadgeVariant(role: UserRole): BadgeVariant {
   if (role === 'Администратор') return 'danger';
   if (role === 'Менеджер по продажам') return 'success';
@@ -150,15 +157,15 @@ export default function Settings() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = React.useState('users');
   const [users, setUsersState] = React.useState<SystemUser[]>([]);
-  const { data: usersData = [] } = useQuery<SystemUser[]>({
+  const { data: usersData = EMPTY_SYSTEM_USERS } = useQuery<SystemUser[]>({
     queryKey: ['users'],
     queryFn: usersService.getAll,
   });
-  const { data: ownersData = [] } = useQuery<Owner[]>({
+  const { data: ownersData = EMPTY_OWNERS } = useQuery<Owner[]>({
     queryKey: ['owners'],
     queryFn: ownersService.getAll,
   });
-  const { data: appSettings = [] } = useQuery<AppSetting[]>({
+  const { data: appSettings = EMPTY_APP_SETTINGS } = useQuery<AppSetting[]>({
     queryKey: ['app-settings'],
     queryFn: appSettingsService.getAll,
   });
@@ -4141,7 +4148,7 @@ function DataResetSection() {
 
 function OwnersReferenceList() {
   const queryClient = useQueryClient();
-  const { data: ownersData = [] } = useQuery<Owner[]>({
+  const { data: ownersData = EMPTY_OWNERS } = useQuery<Owner[]>({
     queryKey: ['owners'],
     queryFn: ownersService.getAll,
   });
@@ -4288,7 +4295,7 @@ function statusVariant(status: ReferenceStatus): 'success' | 'secondary' {
 
 function MechanicsReferenceList() {
   const queryClient = useQueryClient();
-  const { data: mechanicsData = [] } = useQuery<Mechanic[]>({
+  const { data: mechanicsData = EMPTY_MECHANICS } = useQuery<Mechanic[]>({
     queryKey: ['mechanics'],
     queryFn: mechanicsService.getAll,
   });
@@ -4359,15 +4366,15 @@ function MechanicsReferenceList() {
 
 function DeliveryCarriersReferenceList() {
   const queryClient = useQueryClient();
-  const { data: carriersData = [] } = useQuery<DeliveryCarrier[]>({
+  const { data: carriersData = EMPTY_DELIVERY_CARRIERS } = useQuery<DeliveryCarrier[]>({
     queryKey: ['deliveryCarriers'],
     queryFn: deliveryCarriersService.getAll,
   });
-  const { data: users = [] } = useQuery<SystemUser[]>({
+  const { data: users = EMPTY_SYSTEM_USERS } = useQuery<SystemUser[]>({
     queryKey: ['users'],
     queryFn: usersService.getAll,
   });
-  const { data: connections = [] } = useQuery<DeliveryCarrierConnection[]>({
+  const { data: connections = EMPTY_DELIVERY_CARRIER_CONNECTIONS } = useQuery<DeliveryCarrierConnection[]>({
     queryKey: ['deliveryCarrierConnections'],
     queryFn: deliveryCarriersService.getConnections,
   });

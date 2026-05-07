@@ -99,7 +99,7 @@ async function createAuthedContext(email: string, password: string): Promise<API
 }
 
 export async function withAdminApi<T>(fn: (api: APIRequestContext) => Promise<T>) {
-  const api = await createAuthedContext('admin@rental.local', 'admin123');
+  const api = await createAuthedContext('smoke-admin@yandex.ru', '123123');
   try {
     return await fn(api);
   } finally {
@@ -252,10 +252,14 @@ export async function createRentalPair(
     endDate: string;
     amount?: number;
     manager?: string;
+    status?: string;
+    ganttStatus?: string;
   },
 ): Promise<{ rental: RentalRecord; ganttId: string }> {
   const amount = options.amount ?? 10000;
   const manager = options.manager ?? 'E2E';
+  const status = options.status ?? 'new';
+  const ganttStatus = options.ganttStatus ?? status;
   const rentalRes = await api.post('/api/rentals', {
     data: {
       client: options.client,
@@ -268,7 +272,7 @@ export async function createRentalPair(
       discount: 0,
       deliveryAddress: 'Kazan',
       manager,
-      status: 'new',
+      status,
       comments: 'Created by Playwright',
     },
   });
@@ -286,7 +290,7 @@ export async function createRentalPair(
       endDate: options.endDate,
       manager,
       managerInitials: 'E2E',
-      status: 'created',
+      status: ganttStatus,
       paymentStatus: 'unpaid',
       updSigned: false,
       amount,

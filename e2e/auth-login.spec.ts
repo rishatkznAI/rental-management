@@ -18,7 +18,7 @@ test('login page uses login field without email format validation', async ({ pag
 });
 
 test('admin can sign in with login before @', async ({ page }) => {
-  await login(page, { ...ADMIN_CREDENTIALS, login: 'admin' });
+  await login(page, { ...ADMIN_CREDENTIALS, login: 'smoke-admin' });
 
   await expect(page).toHaveURL(/#\/$/);
   await expect(page.getByRole('heading', { name: 'Дашборд' })).toBeVisible();

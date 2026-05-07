@@ -64,8 +64,7 @@ test('admin sees full backup block and download calls backup endpoint', async ({
   await expect.poll(() => backupRequested).toBe(true);
   await expect.poll(() => historyRequests).toBeGreaterThan(1);
 
-  await page.reload();
-  await loginAsAdmin(page);
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await navigateInApp(page, '/admin');
   await page.getByRole('tab', { name: 'Данные системы' }).click();
   await expect(page.getByTestId('backup-history')).toContainText('skytech-backup-test.zip');

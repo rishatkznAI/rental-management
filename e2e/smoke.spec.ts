@@ -75,11 +75,11 @@ test.describe('production smoke', () => {
   });
 
   test('admin can create client, equipment, rental and service ticket', async ({ page }) => {
-    const suffix = `smoke-${Date.now()}`;
-    const company = `Smoke Client ${suffix}`;
-    const serialNumber = `SMOKE-SN-${suffix}`;
+    const suffix = String(Date.now());
+    const company = `SMOKE-UI-Клиент-${suffix}`;
+    const serialNumber = `SMOKE-UI-SN-${suffix}`;
     const inventoryNumber = `SMK-${String(Date.now()).slice(-8)}`;
-    const serviceReason = `Smoke service reason ${suffix}`;
+    const serviceReason = `SMOKE-UI-service-${suffix}`;
 
     await loginAsAdmin(page);
 
@@ -87,8 +87,8 @@ test.describe('production smoke', () => {
     await expect(page.getByRole('heading', { name: 'Новый клиент' })).toBeVisible();
     await page.getByPlaceholder('ООО «Компания»').fill(company);
     await page.getByPlaceholder('1234567890').fill(String(Date.now()).slice(-10));
-    await page.getByPlaceholder('info@company.ru').fill(`smoke-client-${suffix}@example.local`);
-    await page.getByPlaceholder('Иванов Иван Иванович').fill('Smoke Contact');
+    await page.getByPlaceholder('info@company.ru').fill(`smoke-ui-client-${suffix}@example.local`);
+    await page.getByPlaceholder('Иванов Иван Иванович').fill('SMOKE UI Contact');
     await page.getByPlaceholder('+7 (999) 123-45-67').fill('+79990000001');
     await page.getByRole('button', { name: 'Создать клиента' }).click();
     await expect(page).toHaveURL(/#\/clients\/.+/);
@@ -133,10 +133,9 @@ test.describe('production smoke', () => {
     await navigateInApp(page, '/service/new');
     await expect(page.getByRole('heading', { name: 'Новая заявка в сервис' })).toBeVisible();
     await selectEquipment(page, serialNumber);
-    await page.getByPlaceholder('Например: объект клиента, склад, адрес площадки').fill('Smoke объект');
-    await page.locator('select').nth(1).selectOption('medium');
+    await page.getByPlaceholder('Например: объект клиента, склад, адрес площадки').fill('SMOKE-UI объект');
     await page.getByPlaceholder('Например: Не реагирует на команды, не поднимается, ошибка на дисплее').fill(serviceReason);
-    await page.getByPlaceholder('Опишите неисправность или проблему, с которой обратились в сервис.').fill(`Smoke description ${suffix}`);
+    await page.getByPlaceholder('Опишите неисправность или проблему, с которой обратились в сервис.').fill(`SMOKE-UI description ${suffix}`);
     await page.getByRole('button', { name: 'Создать заявку' }).click();
     await expect(page).toHaveURL(/#\/service\/.+/);
     await expect(page.getByText(serviceReason)).toBeVisible();
@@ -146,7 +145,13 @@ test.describe('production smoke', () => {
   });
 
   test('rental manager cannot see or open admin panel', async ({ page }) => {
-    await login(page, { email: 'mp2@mantall.ru', password: '1234' });
+    const manager = await withAdminApi((api) => ensureUser(api, {
+      name: 'mp2',
+      email: 'mp2@mantall.ru',
+      role: 'Менеджер по аренде',
+      password: '1234',
+    }));
+    await login(page, manager);
 
     await expect(sidebar(page).getByRole('button', { name: /^Панель администратора/ })).toBeHidden();
     await navigateInApp(page, '/admin');

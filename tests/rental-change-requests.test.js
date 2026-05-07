@@ -901,31 +901,40 @@ function setupClientAWithTwoRentals(state, options = {}) {
   state.rental_change_requests = [];
 }
 
-test('approved rental date change applies even when it originally required conflict approval', async () => {
+test('approved conflicting rental extension is rechecked and rejected while conflict remains', async () => {
   const { app, state } = createApprovalApp();
+  state.rentals.find(item => item.id === 'R-1').startDate = '2026-06-10';
+  state.rentals.find(item => item.id === 'R-1').plannedReturnDate = '2026-06-20';
+  state.rentals.find(item => item.id === 'R-2').startDate = '2026-06-23';
+  state.rentals.find(item => item.id === 'R-2').plannedReturnDate = '2026-06-25';
+  state.gantt_rentals.find(item => item.id === 'GR-1').startDate = '2026-06-10';
+  state.gantt_rentals.find(item => item.id === 'GR-1').endDate = '2026-06-20';
+  state.gantt_rentals.find(item => item.id === 'GR-2').startDate = '2026-06-23';
+  state.gantt_rentals.find(item => item.id === 'GR-2').endDate = '2026-06-25';
 
   await withServer(app, async (baseUrl) => {
-    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'manager-token', {
-      plannedReturnDate: '2026-04-24',
-      __linkedGanttRentalId: 'GR-1',
-      __changeReason: 'Клиент просит продлить аренду',
+    const update = await request(baseUrl, 'POST', '/api/rentals/R-1/extend', 'manager-token', {
+      newEndDate: '2026-06-24',
+      reason: 'Клиент просит продлить аренду',
+      confirmedByClient: true,
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.changeRequestSummary.pendingCount, 1);
-    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-04-20');
+    assert.equal(update.status, 202);
+    assert.equal(update.body.approval.created, true);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-20');
     assert.equal(state.rental_change_requests.length, 1);
 
     const changeRequest = state.rental_change_requests[0];
     assert.equal(changeRequest.field, 'plannedReturnDate');
-    assert.equal(changeRequest.newValue, '2026-04-24');
+    assert.equal(changeRequest.newValue, '2026-06-24');
 
     const approved = await request(baseUrl, 'POST', `/api/rental_change_requests/${changeRequest.id}/approve`, 'admin-token', {});
 
-    assert.equal(approved.status, 200);
-    assert.equal(approved.body.status, 'approved');
-    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-04-24');
-    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, '2026-04-24');
+    assert.equal(approved.status, 409);
+    assert.match(approved.body.error, /конфликт|занята|пересекается/i);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-20');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, '2026-06-20');
+    assert.equal(state.rental_change_requests[0].status, 'pending');
   });
 });
 
@@ -1577,19 +1586,22 @@ test('conflict-free extension applies immediately and does not create approval',
   const ganttRental = state.gantt_rentals.find(item => item.id === 'GR-2');
   rental.startDate = '2026-05-23';
   rental.plannedReturnDate = '2026-05-25';
+  rental.price = 3000;
+  rental.rate = '1000';
   ganttRental.startDate = '2026-05-23';
   ganttRental.endDate = '2026-05-25';
+  ganttRental.amount = 3000;
 
   await withServer(app, async (baseUrl) => {
-    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-2', 'manager-token', {
-      plannedReturnDate: '2026-05-30',
-      __linkedGanttRentalId: 'GR-2',
-      __changeReason: 'Клиент продлил аренду',
+    const update = await request(baseUrl, 'POST', '/api/rentals/R-2/extend', 'manager-token', {
+      newEndDate: '2026-05-30',
+      reason: 'Клиент продлил аренду',
+      confirmedByClient: true,
     });
 
     assert.equal(update.status, 200);
-    assert.equal(update.body.plannedReturnDate, '2026-05-30');
-    assert.equal(update.body.changeRequestSummary.pendingCount, 0);
+    assert.equal(update.body.rental.plannedReturnDate, '2026-05-30');
+    assert.equal(update.body.approval.created, false);
     assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').endDate, '2026-05-30');
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').equipmentId, 'EQ-1');

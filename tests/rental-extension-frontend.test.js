@@ -6,6 +6,7 @@ import {
   formatExtensionDate,
   getRentalExtensionValidation,
 } from '../src/app/lib/rentalExtension.js';
+import { buildRentalQuickActions } from '../src/app/lib/quickActions.js';
 
 test('rental extension helper formats dates and disables invalid form', () => {
   const rental = {
@@ -22,7 +23,10 @@ test('rental extension helper formats dates and disables invalid form', () => {
   assert.equal(initial.newPlannedReturnDate, '2026-06-10');
   assert.match(getRentalExtensionValidation({ rental, form: initial, today: '2026-05-02', hasEquipment: true }), /позже/);
 
-  const valid = { newPlannedReturnDate: '2026-06-12', reason: 'Клиент продлевает работы', comment: '' };
+  const unconfirmed = { newPlannedReturnDate: '2026-06-12', reason: 'Клиент продлевает работы', comment: '', confirmedByClient: false };
+  assert.match(getRentalExtensionValidation({ rental, form: unconfirmed, today: '2026-05-02', hasEquipment: true }), /согласовал/);
+
+  const valid = { ...unconfirmed, confirmedByClient: true };
   assert.equal(getRentalExtensionValidation({ rental, form: valid, today: '2026-05-02', hasEquipment: true }), '');
 
   const noEquipment = getRentalExtensionValidation({ rental, form: valid, today: '2026-05-02', hasEquipment: false });
@@ -46,4 +50,16 @@ test('rental extension helper displays conflict without unsafe text', () => {
   assert.equal(JSON.stringify(display).includes('NaN'), false);
   assert.equal(JSON.stringify(display).includes('undefined'), false);
   assert.equal(JSON.stringify(display).includes('null'), false);
+});
+
+test('rental extension quick action is hidden for closed rentals', () => {
+  const can = (action, collection) => action === 'edit' && collection === 'rentals';
+  assert.equal(
+    buildRentalQuickActions({ rental: { id: 'R-1', status: 'active' }, can }).some(action => action.id === 'rental-extend'),
+    true,
+  );
+  assert.equal(
+    buildRentalQuickActions({ rental: { id: 'R-2', status: 'closed' }, can }).some(action => action.id === 'rental-extend'),
+    false,
+  );
 });

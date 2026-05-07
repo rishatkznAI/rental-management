@@ -516,6 +516,108 @@ function registerRentalRoutes(deps) {
       };
     }
 
+    function getRentalDays(startDate, endDate) {
+      const start = parseDateKey(startDate);
+      const end = parseDateKey(endDate);
+      if (!start || !end || end < start) return 0;
+      return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+    }
+
+    function isRentalDateExtensionPatch(collection, previous, patch) {
+      if (!patch || typeof patch !== 'object') return false;
+      const currentEnd = normalizeDateKey(previous?.plannedReturnDate || previous?.endDate);
+      const requestedEnd = collection === 'gantt_rentals'
+        ? normalizeDateKey(patch.endDate ?? patch.plannedReturnDate)
+        : normalizeDateKey(patch.plannedReturnDate ?? patch.endDate);
+      if (!currentEnd || !requestedEnd) return false;
+      const comparison = compareDateKeys(requestedEnd, currentEnd);
+      return comparison !== null && comparison > 0;
+    }
+
+    function parseMoneyValue(value) {
+      if (value === undefined || value === null || value === '') return null;
+      if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
+      const text = String(value).replace(/\s+/g, '').replace(',', '.');
+      const match = text.match(/\d+(?:\.\d+)?/);
+      if (!match) return null;
+      const numeric = Number(match[0]);
+      return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+    }
+
+    function inferDailyRateForExtension(rental, currentEnd) {
+      const explicitDaily = parseMoneyValue(rental?.dailyRate);
+      if (explicitDaily !== null) return { dailyRate: explicitDaily, source: 'dailyRate' };
+
+      const monthlyRate = parseMoneyValue(rental?.monthlyRate);
+      if (monthlyRate !== null) return { dailyRate: Math.round((monthlyRate / 30) * 100) / 100, source: 'monthlyRate' };
+
+      const rateText = String(rental?.rate || '').toLowerCase();
+      const rateValue = parseMoneyValue(rental?.rate);
+      if (rateValue !== null) {
+        if (/мес|month/.test(rateText)) return { dailyRate: Math.round((rateValue / 30) * 100) / 100, source: 'rate_month' };
+        return { dailyRate: rateValue, source: 'rate_day' };
+      }
+
+      const currentDays = getRentalDays(rental?.startDate, currentEnd);
+      const currentAmount = parseMoneyValue(rental?.price ?? rental?.amount);
+      if (currentDays > 0 && currentAmount !== null) {
+        return { dailyRate: Math.round((currentAmount / currentDays) * 100) / 100, source: 'current_amount' };
+      }
+      return { dailyRate: 0, source: 'unknown' };
+    }
+
+    function shouldCountExtensionPayment(payment) {
+      const status = String(payment?.status || '').trim().toLowerCase();
+      return !['cancelled', 'canceled', 'void', 'error', 'failed', 'closed', 'deleted', 'reversed'].includes(status);
+    }
+
+    function getEffectiveExtensionPaidAmount(payment) {
+      if (!shouldCountExtensionPayment(payment)) return 0;
+      if (Number.isFinite(Number(payment?.paidAmount))) return Math.max(0, Number(payment.paidAmount));
+      return payment?.status === 'paid' ? Math.max(0, Number(payment?.amount) || 0) : 0;
+    }
+
+    function calculateExtensionFinancials({ rental, currentEnd, newEndDate, payments, ganttRental }) {
+      const extensionDays = getRentalDays(addDaysKey(currentEnd, 1), newEndDate);
+      const { dailyRate, source } = inferDailyRateForExtension(rental, currentEnd);
+      const additionalAmount = Math.round(Math.max(0, dailyRate) * extensionDays);
+      const currentPrice = Math.max(0, Number(rental?.price ?? rental?.amount ?? ganttRental?.amount) || 0);
+      const nextPrice = currentPrice + additionalAmount;
+      const linkedIds = new Set([
+        rental?.id,
+        rental?.rentalId,
+        ganttRental?.id,
+        ganttRental?.rentalId,
+      ].map(value => String(value || '').trim()).filter(Boolean));
+      const paidAmount = (payments || [])
+        .filter(payment => linkedIds.has(String(payment?.rentalId || '').trim()))
+        .reduce((sum, payment) => sum + getEffectiveExtensionPaidAmount(payment), 0);
+      const nextPaymentStatus = paidAmount >= nextPrice
+        ? 'paid'
+        : paidAmount > 0
+          ? 'partial'
+          : 'unpaid';
+      return {
+        extensionDays,
+        dailyRate,
+        rateSource: source,
+        additionalAmount,
+        previousAmount: currentPrice,
+        nextAmount: nextPrice,
+        paidAmount,
+        outstanding: Math.max(0, nextPrice - paidAmount),
+        nextPaymentStatus,
+      };
+    }
+
+    function addDaysKey(dateKey, days) {
+      const match = String(dateKey || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) return '';
+      const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+      date.setUTCDate(date.getUTCDate() + days);
+      return date.toISOString().slice(0, 10);
+    }
+
     function isReturnedClassicRental(rental) {
       return Boolean(rental?.actualReturnDate) || rental?.status === 'closed' || rental?.status === 'returned';
     }
@@ -1119,6 +1221,12 @@ function registerRentalRoutes(deps) {
       } catch (error) {
         return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
       }
+      if (isRentalDateExtensionPatch(collection, data[idx], patch)) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Продление аренды выполняется через отдельную операцию /extend с расчётом суммы и подтверждением клиента.',
+        });
+      }
 
       if (collection === 'rentals' && req.user?.userRole !== 'Администратор') {
         const previousRental = data[idx];
@@ -1267,10 +1375,12 @@ function registerRentalRoutes(deps) {
         const rentals = readData(collection) || [];
         const ganttRentals = readData('gantt_rentals') || [];
         const equipmentList = readData('equipment') || [];
+        const payments = readData('payments') || [];
         const routeId = String(req.params.id || '');
-        const newPlannedReturnDate = normalizeDateKey(req.body?.newPlannedReturnDate);
+        const newPlannedReturnDate = normalizeDateKey(req.body?.newEndDate || req.body?.newPlannedReturnDate);
         const reason = String(req.body?.reason || '').trim();
         const comment = String(req.body?.comment || '').trim();
+        const confirmedByClient = req.body?.confirmedByClient === true;
         const { classicRental, ganttRental, resolution: routeResolution } = findClassicRentalForRoute(routeId, rentals, ganttRentals);
 
         if (!classicRental && !ganttRental) {
@@ -1288,6 +1398,7 @@ function registerRentalRoutes(deps) {
 
         const currentEnd = normalizeDateKey(classicRental?.plannedReturnDate || ganttRental?.endDate || ganttRental?.plannedReturnDate);
         if (!reason) return res.status(400).json({ ok: false, error: 'Укажите причину продления.' });
+        if (!confirmedByClient) return res.status(400).json({ ok: false, error: 'Подтвердите, что клиент согласовал продление.' });
         if (!newPlannedReturnDate || !parseDateKey(newPlannedReturnDate)) {
           return res.status(400).json({ ok: false, error: 'Укажите новую дату окончания аренды.' });
         }
@@ -1305,6 +1416,20 @@ function registerRentalRoutes(deps) {
         }
         if (!hasRentalEquipment(classicRental || ganttRental)) {
           return res.status(409).json({ ok: false, error: 'Нельзя продлить аренду без техники.' });
+        }
+        const financials = calculateExtensionFinancials({
+          rental: classicRental || ganttRental,
+          currentEnd,
+          newEndDate: newPlannedReturnDate,
+          payments,
+          ganttRental,
+        });
+        if (financials.additionalAmount <= 0) {
+          return res.status(400).json({
+            ok: false,
+            error: 'Не удалось рассчитать положительную доплату за продление. Укажите ставку аренды или сумму аренды перед продлением.',
+            financialImpact: financials,
+          });
         }
 
         const conflict = findExtensionConflict({
@@ -1344,6 +1469,7 @@ function registerRentalRoutes(deps) {
             rental: classicRental || null,
             ganttRental: ganttRental || null,
             conflict: conflictDto(conflict),
+            financialImpact: financials,
             approval: {
               created: createdRequests.length > 0,
               requestIds: createdRequests.map(item => item.id),
@@ -1356,8 +1482,29 @@ function registerRentalRoutes(deps) {
         const ganttIdx = ganttRental ? ganttRentals.findIndex(item => item.id === ganttRental.id) : -1;
         const nextClassic = classicRental
           ? appendRentalHistory(
-              { ...classicRental, plannedReturnDate: newPlannedReturnDate },
-              [buildExtensionHistoryEntry(currentEnd, newPlannedReturnDate, reason, comment, author)],
+              {
+                ...classicRental,
+                plannedReturnDate: newPlannedReturnDate,
+                price: financials.nextAmount,
+                amount: financials.nextAmount,
+                paymentStatus: financials.nextPaymentStatus,
+                extensionFinancials: {
+                  ...(classicRental.extensionFinancials || {}),
+                  last: financials,
+                },
+              },
+              [buildExtensionHistoryEntry(
+                currentEnd,
+                newPlannedReturnDate,
+                reason,
+                [
+                  comment,
+                  `дней: ${financials.extensionDays}`,
+                  `сумма: ${financials.previousAmount} → ${financials.nextAmount}`,
+                  `дополнительно: ${financials.additionalAmount}`,
+                ].filter(Boolean).join('; '),
+                author,
+              )],
             )
           : null;
         const nextGantt = ganttRental
@@ -1365,6 +1512,8 @@ function registerRentalRoutes(deps) {
               ...ganttRental,
               endDate: newPlannedReturnDate,
               plannedReturnDate: newPlannedReturnDate,
+              amount: financials.nextAmount,
+              paymentStatus: financials.nextPaymentStatus,
             }, author), nextClassic || classicRental, equipmentList)
           : null;
 
@@ -1391,6 +1540,8 @@ function registerRentalRoutes(deps) {
           newPlannedReturnDate,
           reason,
           comment,
+          confirmedByClient,
+          financialImpact: financials,
           rentalId: nextClassic?.id || classicRental?.id || '',
           ganttRentalId: nextGantt?.id || ganttRental?.id || '',
           equipmentId: nextClassic?.equipmentId || nextGantt?.equipmentId || '',
@@ -1431,6 +1582,7 @@ function registerRentalRoutes(deps) {
           rental: nextClassic,
           ganttRental: nextGantt,
           conflict: null,
+          financialImpact: financials,
           approval: { created: false, requestIds: [] },
         });
       });

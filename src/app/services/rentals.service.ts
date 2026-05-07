@@ -18,6 +18,17 @@ export type RentalExtensionResponse = {
   rental?: Rental;
   ganttRental?: GanttRentalData;
   conflict?: RentalExtensionConflict | null;
+  financialImpact?: {
+    extensionDays: number;
+    dailyRate: number;
+    rateSource: string;
+    additionalAmount: number;
+    previousAmount: number;
+    nextAmount: number;
+    paidAmount: number;
+    outstanding: number;
+    nextPaymentStatus: string;
+  };
   approval?: {
     created: boolean;
     requestIds: string[];
@@ -73,7 +84,7 @@ export const rentalsService = {
 
   extend: (
     id: string,
-    data: { newPlannedReturnDate: string; reason: string; comment?: string },
+    data: { newEndDate?: string; newPlannedReturnDate?: string; reason: string; comment?: string; confirmedByClient: boolean },
   ): Promise<RentalExtensionResponse> => api.post(`/api/rentals/${id}/extend`, data),
 
   delete: (id: string): Promise<void> =>

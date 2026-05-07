@@ -56,7 +56,7 @@ import {
   startOfDay, startOfMonth, startOfQuarter, startOfWeek, startOfYear
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { calculateRentalAmount, cn, getRentalDays } from '../lib/utils';
+import { cn, getRentalDays } from '../lib/utils';
 
 // ========== Constants & Types ==========
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
@@ -1566,79 +1566,6 @@ export default function Rentals() {
     }
   }, [canCreatePayments, ganttRentals, historyAuthor, payments, selectedRental]);
 
-  // Extend rental: update endDate, update equipment returnDate
-  const handleExtend = useCallback(async (rental: GanttRentalData, newEndDate: string) => {
-    if (!canEditRentals || !canEditRentalDates) return;
-    if (!isAdminRole) {
-      await requestClassicRentalChange(
-        rental,
-        { plannedReturnDate: newEndDate },
-        `Изменение даты возврата из планировщика: ${rental.endDate} → ${newEndDate}`,
-      );
-      return;
-    }
-    const previousDays = getRentalDays(rental.startDate, rental.endDate);
-    const nextDays = getRentalDays(rental.startDate, newEndDate);
-    const inferredDailyRate = previousDays > 0 ? (rental.amount || 0) / previousDays : 0;
-    const nextAmount = inferredDailyRate > 0
-      ? Math.round(calculateRentalAmount(inferredDailyRate, rental.startDate, newEndDate))
-      : rental.amount || 0;
-    const rentalPayments = payments.filter(payment => payment.rentalId === rental.id);
-    const paidAmount = rentalPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
-    const nextPaymentStatus: GanttRentalData['paymentStatus'] =
-      paidAmount >= nextAmount
-        ? 'paid'
-        : paidAmount > 0
-          ? 'partial'
-          : 'unpaid';
-
-    const updatedRentals = ganttRentals.map(r =>
-      r.id === rental.id
-        ? appendRentalHistory(
-            {
-              ...r,
-              endDate: newEndDate,
-              amount: nextAmount,
-              paymentStatus: nextPaymentStatus,
-            },
-            createRentalHistoryEntry(
-              historyAuthor,
-              `Продлена аренда: ${r.endDate} → ${newEndDate}${nextAmount !== (r.amount || 0) ? ` · сумма ${formatCurrency(r.amount || 0)} → ${formatCurrency(nextAmount)}` : ''}${nextPaymentStatus !== r.paymentStatus ? ` · статус оплаты: ${nextPaymentStatus === 'paid' ? 'Оплачено' : nextPaymentStatus === 'partial' ? 'Частично' : 'Не оплачено'}` : ''}`,
-            ),
-          )
-        : r
-    );
-    void persistGanttRentals(updatedRentals);
-
-    // Update returnDate on equipment
-    const updatedEq = equipmentList.map(e =>
-      matchesEquipmentRow(rental, e)
-        ? appendEquipmentHistoryEntry(
-            { ...e, returnDate: newEndDate },
-            `Изменена дата возврата по аренде: ${rental.endDate} → ${newEndDate}`,
-          )
-        : e
-    );
-    void persistEquipment(updatedEq);
-
-    // Refresh drawer
-    if (selectedRental?.id === rental.id) {
-      setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
-    }
-  }, [
-    appendEquipmentHistoryEntry,
-    canEditRentals,
-    canEditRentalDates,
-    ganttRentals,
-    equipmentList,
-    historyAuthor,
-    isAdminRole,
-    matchesEquipmentRow,
-    payments,
-    requestClassicRentalChange,
-    selectedRental,
-  ]);
-
   // Update UPD signed status + optional date
   const handleUpdChange = useCallback((rental: GanttRentalData, updSigned: boolean, updDate?: string) => {
     if (!canEditRentals) return;
@@ -2810,7 +2737,6 @@ export default function Rentals() {
           canCreatePayments={canCreatePayments}
           onClose={() => setSelectedRental(null)}
           onAddPayment={handleAddPayment}
-          onExtend={handleExtend}
           onEarlyReturn={handleEarlyReturn}
           onUpdChange={handleUpdChange}
           onUpdateMaintenanceFilters={handleUpdateMaintenanceFilters}

@@ -47,7 +47,7 @@ import {
   formatExtensionDate,
   getRentalExtensionValidation,
 } from '../lib/rentalExtension.js';
-import { formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
+import { calculateRentalAmount, formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
 import type { DocumentType, Equipment, PaymentStatus, Rental, RentalStatus } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
@@ -145,6 +145,23 @@ function nextDocumentNumber(type: DocumentType, rentalId: string, existingCount:
   return `INV-${rentalId}-${suffix}`;
 }
 
+function parseMoneyValue(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
+  const match = String(value).replace(/\s+/g, '').replace(',', '.').match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const numeric = Number(match[0]);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+}
+
+function addDaysKey(dateKey: string, days: number): string {
+  const match = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '';
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function documentBelongsToRental(doc: { rental?: string; rentalId?: string }, rentalId?: string) {
   if (!rentalId) return false;
   return doc.rentalId === rentalId || doc.rental === rentalId;
@@ -200,6 +217,7 @@ export default function RentalDetail() {
     newPlannedReturnDate: '',
     reason: '',
     comment: '',
+    confirmedByClient: false,
   });
   const [extensionConflict, setExtensionConflict] = useState<ReturnType<typeof buildExtensionConflictDisplay> | null>(null);
   const [isExtending, setIsExtending] = useState(false);
@@ -446,6 +464,38 @@ export default function RentalDetail() {
   const nextDiscount = Number.isFinite(discountValue) ? discountValue : (rental?.discount || 0);
   const remainingBalance = (rental?.price || 0) - (rental?.discount || 0) - paidAmount;
   const nextRemainingBalance = nextTotal - nextDiscount - paidAmount;
+  const clientDebt = Math.max(remainingBalance, selectedClient?.debt || 0);
+  const extensionPreview = useMemo(() => {
+    if (!rental || !extensionForm.newPlannedReturnDate) {
+      return { extensionDays: 0, dailyRate: 0, additionalAmount: 0, nextAmount: rental?.price || 0, rateLabel: '—' };
+    }
+    const extensionStart = addDaysKey(rental.plannedReturnDate, 1);
+    const extensionDays = getRentalDays(extensionStart, extensionForm.newPlannedReturnDate);
+    const rentalWithRates = rental as Rental & { dailyRate?: number | string; monthlyRate?: number | string; amount?: number };
+    const explicitDaily = parseMoneyValue(rentalWithRates.dailyRate);
+    const monthlyRate = parseMoneyValue(rentalWithRates.monthlyRate);
+    const parsedRate = parseMoneyValue(rental.rate);
+    const rateText = String(rental.rate || '').toLowerCase();
+    const currentDays = getRentalDays(rental.startDate, rental.plannedReturnDate);
+    const inferredDaily = currentDays > 0 ? (rental.price || rentalWithRates.amount || 0) / currentDays : 0;
+    const dailyRate = explicitDaily
+      ?? (monthlyRate !== null ? monthlyRate / 30 : null)
+      ?? (parsedRate !== null ? (/мес|month/.test(rateText) ? parsedRate / 30 : parsedRate) : null)
+      ?? inferredDaily;
+    const additionalAmount = Math.round(calculateRentalAmount(dailyRate || 0, extensionStart, extensionForm.newPlannedReturnDate));
+    const nextAmount = (rental.price || rentalWithRates.amount || 0) + additionalAmount;
+    return {
+      extensionDays,
+      dailyRate,
+      additionalAmount,
+      nextAmount,
+      rateLabel: explicitDaily !== null
+        ? `${formatCurrency(explicitDaily)} / день`
+        : monthlyRate !== null
+          ? `${formatCurrency(monthlyRate)} / месяц`
+          : rental.rate || (dailyRate ? `${formatCurrency(Math.round(dailyRate))} / день` : '—'),
+    };
+  }, [extensionForm.newPlannedReturnDate, rental]);
 
   const financeTimeline = useMemo(() => {
     if (!linkedGanttRental) return [];
@@ -517,6 +567,10 @@ export default function RentalDetail() {
     form: extensionForm,
     hasEquipment: hasRentalEquipmentForExtension,
   });
+  const extensionFinancialValidation = !extensionValidation && extensionPreview.additionalAmount <= 0
+    ? 'Не удалось рассчитать положительную доплату за продление. Проверьте ставку или сумму аренды.'
+    : '';
+  const extensionBlockingValidation = extensionValidation || extensionFinancialValidation;
   const extensionPreviewConflict = useMemo(() => {
     if (!rental || !extensionForm.newPlannedReturnDate) return null;
     const currentEnd = new Date(`${rental.plannedReturnDate}T00:00:00`).getTime();
@@ -576,6 +630,10 @@ export default function RentalDetail() {
     }
     if (new Date(formState.startDate).getTime() > new Date(formState.plannedReturnDate).getTime()) {
       setSaveError('Дата окончания не может быть раньше даты начала.');
+      return;
+    }
+    if (formState.plannedReturnDate > rental.plannedReturnDate) {
+      setSaveError('Продление срока выполняется через действие «Продлить аренду» с расчётом суммы и подтверждением клиента.');
       return;
     }
     if (!Number.isFinite(priceValue) || priceValue < 0) {
@@ -799,16 +857,18 @@ export default function RentalDetail() {
   };
 
   const handleExtendRental = async () => {
-    if (!rental || extensionValidation) return;
+    if (!rental || extensionBlockingValidation) return;
     setIsExtending(true);
     setSaveError('');
     setSaveInfo('');
     setExtensionConflict(null);
     try {
       const result = await rentalsService.extend(rental.id, {
+        newEndDate: extensionForm.newPlannedReturnDate,
         newPlannedReturnDate: extensionForm.newPlannedReturnDate,
         reason: extensionForm.reason.trim(),
         comment: extensionForm.comment.trim(),
+        confirmedByClient: extensionForm.confirmedByClient,
       });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
@@ -1786,6 +1846,68 @@ export default function RentalDetail() {
               </div>
             </div>
 
+            <div className="grid gap-3 rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Клиент</p>
+                  <p className="font-medium text-gray-900 dark:text-white">{rental.client}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Менеджер</p>
+                  <p className="font-medium text-gray-900 dark:text-white">{rental.manager || '—'}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Техника</p>
+                {resolvedRentalEquipment.length > 0 ? (
+                  <div className="mt-1 space-y-1">
+                    {resolvedRentalEquipment.map(item => (
+                      <p key={item.id} className="font-medium text-gray-900 dark:text-white">
+                        {[item.manufacturer, item.model].filter(Boolean).join(' ') || item.id}
+                        {item.inventoryNumber ? ` · INV ${item.inventoryNumber}` : ''}
+                        {item.serialNumber ? ` · SN ${item.serialNumber}` : ''}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="font-medium text-gray-900 dark:text-white">{rental.equipment?.join(', ') || '—'}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid gap-2 rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700 sm:grid-cols-2">
+              <div className="flex justify-between gap-3">
+                <span className="text-gray-500 dark:text-gray-400">Дней продления</span>
+                <span className="font-medium text-gray-900 dark:text-white">{extensionPreview.extensionDays}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-gray-500 dark:text-gray-400">Ставка</span>
+                <span className="font-medium text-gray-900 dark:text-white">{extensionPreview.rateLabel}</span>
+              </div>
+              {canViewFinance && (
+                <>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-gray-500 dark:text-gray-400">Текущая сумма</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(rental.price || 0)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-gray-500 dark:text-gray-400">Доплата за продление</span>
+                    <span className="font-medium text-orange-600">{formatCurrency(extensionPreview.additionalAmount)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-gray-500 dark:text-gray-400">Новая сумма</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(extensionPreview.nextAmount)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-gray-500 dark:text-gray-400">Оплачено / долг</span>
+                    <span className="font-medium text-gray-900 dark:text-white">
+                      {formatCurrency(paidAmount)} / {formatCurrency(Math.max(extensionPreview.nextAmount - paidAmount, 0))}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+
             <div>
               <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Причина продления</p>
               <Select
@@ -1811,13 +1933,27 @@ export default function RentalDetail() {
               />
             </div>
 
-            {remainingBalance > 0 && (
+            {clientDebt > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
                 {canViewFinance
-                  ? `У клиента есть долг по этой аренде: ${formatCurrency(Math.max(remainingBalance, 0))}.`
+                  ? `У клиента есть дебиторка: ${formatCurrency(clientDebt)}.`
                   : 'У клиента есть финансовые ограничения, подробности скрыты правами доступа.'}
               </div>
             )}
+
+            <label className="flex gap-3 rounded-lg border border-gray-200 p-3 text-sm text-gray-700 dark:border-gray-700 dark:text-gray-200">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4"
+                checked={extensionForm.confirmedByClient}
+                onChange={(event) => setExtensionForm(prev => ({ ...prev, confirmedByClient: event.target.checked }))}
+              />
+              <span>Клиент согласовал продление и финансовые условия.</span>
+            </label>
+
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200">
+              Продление изменит срок аренды, сумму аренды, планировщик и историю сделки. Проверьте, что клиент согласовал продление.
+            </div>
 
             {unsignedDocs.length > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
@@ -1825,9 +1961,9 @@ export default function RentalDetail() {
               </div>
             )}
 
-            {extensionValidation ? (
+            {extensionBlockingValidation ? (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-                {extensionValidation}
+                {extensionBlockingValidation}
               </div>
             ) : (extensionConflict || extensionPreviewConflict) ? (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
@@ -1853,7 +1989,7 @@ export default function RentalDetail() {
           </div>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setExtensionDialogOpen(false)}>Отмена</Button>
-            <Button onClick={() => void handleExtendRental()} disabled={isExtending || Boolean(extensionValidation)}>
+            <Button onClick={() => void handleExtendRental()} disabled={isExtending || Boolean(extensionBlockingValidation)}>
               {isExtending ? 'Проверка...' : 'Продлить'}
             </Button>
           </DialogFooter>

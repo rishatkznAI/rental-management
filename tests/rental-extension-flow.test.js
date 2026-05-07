@@ -198,14 +198,78 @@ test('rental extension without conflict applies and synchronizes classic and gan
       newPlannedReturnDate: '2026-06-14',
       reason: 'Клиент продлевает работы',
       comment: 'Без изменения документов',
+      confirmedByClient: true,
       token: 'must-not-leak',
     });
 
     assert.equal(response.status, 200);
     assert.equal(response.body.applied, true);
     assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-14');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').price, 14000);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').amount, 14000);
+    assert.equal(response.body.financialImpact.additionalAmount, 4000);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, '2026-06-14');
     assert.equal(state.rental_change_requests.length, 0);
+  });
+});
+
+test('rental extension rejects zero financial delta when rate cannot be determined', async () => {
+  const { app, state } = createApp();
+  state.rentals = state.rentals.filter(item => item.id !== 'R-conflict');
+  state.gantt_rentals = state.gantt_rentals.filter(item => item.id !== 'GR-conflict');
+  const rental = state.rentals.find(item => item.id === 'R-1');
+  rental.rate = '';
+  rental.price = 0;
+  const gantt = state.gantt_rentals.find(item => item.id === 'GR-1');
+  delete gantt.amount;
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'admin-token', {
+      newPlannedReturnDate: '2026-06-14',
+      reason: 'Клиент продлевает работы',
+      confirmedByClient: true,
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /доплату/);
+    assert.equal(response.body.financialImpact.additionalAmount, 0);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-10');
+  });
+});
+
+test('repeated rental extension appends history and keeps a single linked planner row', async () => {
+  const { app, state } = createApp();
+  state.rentals = state.rentals.filter(item => item.id !== 'R-conflict');
+  state.gantt_rentals = state.gantt_rentals.filter(item => item.id !== 'GR-conflict');
+
+  await withServer(app, async (baseUrl) => {
+    const first = await request(baseUrl, 'admin-token', {
+      newPlannedReturnDate: '2026-06-14',
+      reason: 'Клиент продлевает работы',
+      comment: 'Первое продление',
+      confirmedByClient: true,
+    });
+    const second = await request(baseUrl, 'admin-token', {
+      newPlannedReturnDate: '2026-06-16',
+      reason: 'Задержка на объекте',
+      comment: 'Второе продление',
+      confirmedByClient: true,
+    });
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    const rental = state.rentals.find(item => item.id === 'R-1');
+    assert.equal(rental.plannedReturnDate, '2026-06-16');
+    assert.equal(rental.price, 16000);
+    assert.equal(rental.history.length, 2);
+    assert.match(rental.history[0].text, /Первое продление/);
+    assert.match(rental.history[1].text, /Второе продление/);
+    assert.equal(rental.extensionFinancials.last.additionalAmount, 2000);
+    const linkedRows = state.gantt_rentals.filter(item => item.rentalId === 'R-1');
+    assert.equal(linkedRows.length, 1);
+    assert.equal(linkedRows[0].id, 'GR-1');
+    assert.equal(linkedRows[0].endDate, '2026-06-16');
+    assert.equal(linkedRows[0].amount, 16000);
   });
 });
 
@@ -218,6 +282,7 @@ test('rental extension safely updates classic rental when linked gantt is missin
     const response = await request(baseUrl, 'admin-token', {
       newPlannedReturnDate: '2026-06-14',
       reason: 'Клиент продлевает работы',
+      confirmedByClient: true,
     });
 
     assert.equal(response.status, 200);
@@ -232,18 +297,56 @@ test('rental extension rejects past date and closed rental', async () => {
   const { app } = createApp();
 
   await withServer(app, async (baseUrl) => {
+    const unconfirmed = await request(baseUrl, 'admin-token', {
+      newEndDate: '2026-06-14',
+      reason: 'Клиент продлевает работы',
+      confirmedByClient: false,
+    });
+    assert.equal(unconfirmed.status, 400);
+    assert.match(unconfirmed.body.error, /согласовал/);
+
     const past = await request(baseUrl, 'admin-token', {
       newPlannedReturnDate: '2026-04-01',
       reason: 'Клиент продлевает работы',
+      confirmedByClient: true,
     });
     assert.equal(past.status, 400);
 
     const closed = await fetch(`${baseUrl}/api/rentals/R-closed/extend`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer admin-token' },
-      body: JSON.stringify({ newPlannedReturnDate: '2026-06-12', reason: 'Клиент продлевает работы' }),
+      body: JSON.stringify({ newPlannedReturnDate: '2026-06-12', reason: 'Клиент продлевает работы', confirmedByClient: true }),
     });
     assert.equal(closed.status, 409);
+  });
+});
+
+test('rental date extension is rejected through generic patch endpoints', async () => {
+  const { app, state } = createApp();
+  state.rentals = state.rentals.filter(item => item.id !== 'R-conflict');
+  state.gantt_rentals = state.gantt_rentals.filter(item => item.id !== 'GR-conflict');
+
+  await withServer(app, async (baseUrl) => {
+    const classicPatch = await fetch(`${baseUrl}/api/rentals/R-1`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer admin-token' },
+      body: JSON.stringify({ plannedReturnDate: '2026-06-14' }),
+    });
+    assert.equal(classicPatch.status, 400);
+    const classicBody = await classicPatch.json();
+    assert.match(classicBody.error, /\/extend/);
+
+    const ganttPatch = await fetch(`${baseUrl}/api/gantt_rentals/GR-1`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer admin-token' },
+      body: JSON.stringify({ endDate: '2026-06-14' }),
+    });
+    assert.equal(ganttPatch.status, 400);
+    const ganttBody = await ganttPatch.json();
+    assert.match(ganttBody.error, /\/extend/);
+
+    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-10');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, '2026-06-10');
   });
 });
 
@@ -255,12 +358,14 @@ test('rental extension detects future equipment conflict and creates approval re
       newPlannedReturnDate: '2026-06-14',
       reason: 'Задержка на объекте',
       comment: 'Проверить бронь',
+      confirmedByClient: true,
     });
 
     assert.equal(response.status, 202);
     assert.equal(response.body.applied, false);
     assert.equal(response.body.conflict.rentalId, 'R-conflict');
     assert.equal(response.body.conflict.client, 'ООО Будущая бронь');
+    assert.equal(response.body.financialImpact.additionalAmount, 4000);
     assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-10');
     assert.equal(state.rental_change_requests.length, 1);
     assert.equal(state.rental_change_requests[0].field, 'plannedReturnDate');
@@ -276,6 +381,7 @@ test('rental extension requires write access and writes safe audit events', asyn
     const forbidden = await request(baseUrl, 'investor-token', {
       newPlannedReturnDate: '2026-06-14',
       reason: 'Клиент продлевает работы',
+      confirmedByClient: true,
     });
     assert.equal(forbidden.status, 403);
 
@@ -283,6 +389,7 @@ test('rental extension requires write access and writes safe audit events', asyn
       newPlannedReturnDate: '2026-06-14',
       reason: 'Клиент продлевает работы',
       comment: 'secret should stay ordinary text',
+      confirmedByClient: true,
       password: 'hidden',
       apiKey: 'hidden',
     });

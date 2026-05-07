@@ -183,7 +183,7 @@ test('creating and patching rental preserves object and contract in linked plann
     assert.equal(createdGantt.contractId, 'CC-1');
 
     const patchedDatesOnly = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
-      plannedReturnDate: '2026-05-24',
+      plannedReturnDate: '2026-05-18',
     });
     assert.equal(patchedDatesOnly.status, 200);
     const keptGantt = state.gantt_rentals.find(item => item.rentalId === created.body.id);
@@ -251,7 +251,7 @@ test('editing rental dates and equipment updates linked planner row', async () =
   await withServer(app, async baseUrl => {
     const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
     const patched = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
-      plannedReturnDate: '2026-05-25',
+      plannedReturnDate: '2026-05-18',
       equipmentId: 'EQ-2',
       equipmentInv: 'INV-2',
       equipment: ['INV-2'],
@@ -259,7 +259,7 @@ test('editing rental dates and equipment updates linked planner row', async () =
 
     assert.equal(patched.status, 200);
     const linkedGantt = state.gantt_rentals.find(item => item.rentalId === created.body.id);
-    assert.equal(linkedGantt.endDate, '2026-05-25');
+    assert.equal(linkedGantt.endDate, '2026-05-18');
     assert.equal(linkedGantt.equipmentId, 'EQ-2');
     assert.equal(linkedGantt.equipmentInv, 'INV-2');
   });

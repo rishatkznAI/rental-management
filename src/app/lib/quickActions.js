@@ -131,8 +131,10 @@ export function buildRentalQuickActions({ rental, can, clientId, equipmentId } =
   const rentalId = safeText(rental?.id);
   const context = { rentalId, clientId, equipmentId };
   const actions = [];
+  const status = safeText(rental?.status).toLowerCase();
+  const canExtendRental = ['active', 'confirmed', 'delivery', 'return_planned'].includes(status);
 
-  if (canDo(can, 'edit', 'rentals')) actions.push({ id: 'rental-extend', label: 'Продлить аренду', kind: 'primary' });
+  if (canDo(can, 'edit', 'rentals') && canExtendRental) actions.push({ id: 'rental-extend', label: 'Продлить аренду', kind: 'primary' });
   if (canDo(can, 'view', 'documents') && canAny(can, MANAGE_ACTIONS, 'documents')) actions.push({ id: 'rental-create-document', label: 'Создать документ', to: withQuery('/documents', { ...context, action: 'create' }) });
   if (canDo(can, 'view', 'deliveries') && canAny(can, MANAGE_ACTIONS, 'deliveries')) actions.push({ id: 'rental-create-delivery', label: 'Создать доставку', to: withQuery('/deliveries', context) });
   if (canDo(can, 'create', 'service')) actions.push({ id: 'rental-create-service', label: 'Создать сервисную заявку', to: withQuery('/service/new', context) });

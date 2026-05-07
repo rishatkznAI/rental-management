@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   X, Calendar, CreditCard, FileText, User, MessageSquare,
   ArrowRight, RotateCcw, CirclePause as PauseCircle,
@@ -39,7 +40,6 @@ interface RentalDrawerProps {
   onUpdate: (rental: GanttRentalData, data: Partial<GanttRentalData>) => void;
   onAddComment: (rental: GanttRentalData, text: string) => void;
   onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string) => void;
-  onExtend: (rental: GanttRentalData, newEndDate: string) => void;
   onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
   onUpdChange: (rental: GanttRentalData, updSigned: boolean, updDate?: string) => void;
   onUpdateMaintenanceFilters: (
@@ -79,7 +79,7 @@ export function RentalDrawer({
   clients = [], clientReceivables = [], managers = [],
   canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
-  onRestore, onUpdate, onAddComment, onAddPayment, onExtend, onEarlyReturn, onUpdChange, onUpdateMaintenanceFilters,
+  onRestore, onUpdate, onAddComment, onAddPayment, onEarlyReturn, onUpdChange, onUpdateMaintenanceFilters,
 }: RentalDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -103,11 +103,8 @@ export function RentalDrawer({
   const [payComment, setPayComment] = useState('');
   const [payError, setPayError] = useState('');
 
-  // Extend rental state
+  // Extension is opened from the canonical rental card to avoid silent date-only changes.
   const [showExtend, setShowExtend] = useState(false);
-  const [extendDate, setExtendDate] = useState('');
-  const [extendError, setExtendError] = useState('');
-  const [extendConfirm, setExtendConfirm] = useState(false);
 
   // Early return state
   const [showEarlyReturn, setShowEarlyReturn] = useState(false);
@@ -124,6 +121,14 @@ export function RentalDrawer({
   const [hydraulicFilter, setHydraulicFilter] = useState('');
 
   if (!rental) return null;
+
+  const rentalDetailId = String(
+    rental.rentalId ||
+    rental.sourceRentalId ||
+    rental.originalRentalId ||
+    rental.id ||
+    ''
+  ).trim();
 
   useEffect(() => {
     if (!rental) return;
@@ -186,41 +191,6 @@ export function RentalDrawer({
     setShowAddPayment(false);
   };
 
-  // Handle extend submit
-  const handleExtendSubmit = () => {
-    if (!canEditRentals) return;
-    if (!extendDate) {
-      setExtendError('Укажите новую дату возврата');
-      return;
-    }
-    if (extendDate <= rental.endDate) {
-      setExtendError('Новая дата должна быть позже текущей даты возврата');
-      return;
-    }
-    // Check conflicts: other rentals for the same equipment that overlap [rental.endDate, newEndDate]
-    const conflict = findConflictingRental(
-      { id: rental.equipmentId || rental.equipmentInv, inventoryNumber: rental.equipmentInv },
-      rental.endDate,
-      extendDate,
-      allRentals,
-      rental.id,
-    );
-    if (conflict && !dateConflictsRequireApproval) {
-      setExtendError(`Конфликт: техника занята до ${formatDate(conflict.endDate)} (${conflict.client})`);
-      return;
-    }
-    setExtendError('');
-    setExtendConfirm(true);
-  };
-
-  const handleExtendConfirm = () => {
-    if (!canEditRentals) return;
-    onExtend(rental, extendDate);
-    setShowExtend(false);
-    setExtendDate('');
-    setExtendConfirm(false);
-  };
-
   // Handle early return submit
   const handleEarlyReturnSubmit = () => {
     if (!canEditRentals) return;
@@ -247,6 +217,10 @@ export function RentalDrawer({
     }
     if (editEndDate < editStartDate) {
       setEditError('Дата окончания не может быть раньше даты начала');
+      return;
+    }
+    if (editEndDate > rental.endDate) {
+      setEditError('Продление срока выполняется через карточку аренды с расчётом суммы и подтверждением клиента.');
       return;
     }
     const amount = Number(editAmount);
@@ -746,7 +720,7 @@ export function RentalDrawer({
             )}
           </section>
 
-          {/* Extend Rental — only for active/created */}
+          {/* Extend Rental — only through the canonical rental card operation */}
           {canEditRentalDates && (rental.status === 'active' || rental.status === 'created') && (
             <section>
               <button
@@ -765,32 +739,20 @@ export function RentalDrawer({
                   <div className="mb-2 text-xs text-amber-700 dark:text-amber-400">
                     Текущая дата возврата: <strong>{formatDate(rental.endDate)}</strong>
                   </div>
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1">
-                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Новая дата возврата *</label>
-                      <input
-                        type="date"
-                        value={extendDate}
-                        min={rental.endDate}
-                        onChange={e => { setExtendDate(e.target.value); setExtendError(''); setExtendConfirm(false); }}
-                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                      />
-                    </div>
-                    {!extendConfirm ? (
-                      <Button size="sm" onClick={handleExtendSubmit}>Продлить</Button>
+                  <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                    Продление выполняется в карточке аренды: там проверяются конфликты техники, сумма продления, долг клиента и согласование с клиентом.
+                  </p>
+                  <div className="mt-3 flex justify-end">
+                    {rentalDetailId ? (
+                      <Button size="sm" asChild>
+                        <Link to={`/rentals/${encodeURIComponent(rentalDetailId)}`}>
+                          Открыть карточку
+                        </Link>
+                      </Button>
                     ) : (
-                      <div className="flex gap-1">
-                        <Button size="sm" onClick={handleExtendConfirm}>Подтвердить</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setExtendConfirm(false)}>Отмена</Button>
-                      </div>
+                      <Button size="sm" disabled>Карточка недоступна</Button>
                     )}
                   </div>
-                  {extendError && <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{extendError}</p>}
-                  {extendConfirm && !extendError && (
-                    <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
-                      Продлить аренду до {formatDate(extendDate)}?
-                    </p>
-                  )}
                 </div>
               )}
             </section>

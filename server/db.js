@@ -25,6 +25,8 @@ const JSON_COLLECTIONS = [
   'service',
   'warranty_claims',
   'clients',
+  'client_objects',
+  'client_contracts',
   'knowledge_base_modules',
   'knowledge_base_progress',
   'app_settings',

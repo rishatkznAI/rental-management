@@ -30,7 +30,7 @@ export default function Clients() {
   const filteredClients = computedClients.filter(client => {
     const matchesSearch = search === '' ||
       client.company.toLowerCase().includes(search.toLowerCase()) ||
-      client.inn.includes(search) ||
+      String(client.inn || '').includes(search) ||
       client.contact.toLowerCase().includes(search.toLowerCase());
 
     return matchesSearch;
@@ -97,7 +97,9 @@ export default function Clients() {
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-gray-900 dark:text-white text-sm truncate">{client.company}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">{client.inn}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">
+                  {client.inn || 'Нет ИНН'}
+                </p>
               </div>
               {client.debt > 0 && (
                 <Badge variant="error" className="shrink-0 text-xs">{formatCurrency(client.debt)}</Badge>
@@ -139,7 +141,11 @@ export default function Clients() {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <p className="text-sm font-mono">{client.inn}</p>
+                  {client.inn ? (
+                    <p className="text-sm font-mono">{client.inn}</p>
+                  ) : (
+                    <Badge variant="warning">Нет ИНН</Badge>
+                  )}
                 </TableCell>
                 <TableCell>
                   <p className="text-sm">{client.contact}</p>

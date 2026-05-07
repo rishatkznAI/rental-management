@@ -19,6 +19,7 @@ import { usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
+import { useClientContractsList, useClientObjectsList, useCreateClientContract, useCreateClientObject, useUpdateClientObject } from '../hooks/useClientRelations';
 import type { Client, ClientStatus } from '../types';
 import { ApiError } from '../lib/api';
 import { usePermissions } from '../lib/permissions';
@@ -188,6 +189,16 @@ const PAYMENT_TERMS_OPTIONS = [
   { value: 'Предоплата 50%', label: 'Предоплата 50%' },
   { value: 'Без предоплаты', label: 'Без предоплаты' },
 ];
+const INN_ERROR = 'Укажите корректный ИНН: 10 цифр для юрлица или 12 цифр для ИП';
+
+function normalizeInn(value?: string | null) {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function isValidInn(value?: string | null) {
+  const normalized = normalizeInn(value);
+  return normalized.length === 10 || normalized.length === 12;
+}
 
 const RENTAL_STATUS_LABELS: Record<string, { label: string; variant: BadgeVariant }> = {
   new: { label: 'Новая', variant: 'default' },
@@ -223,13 +234,23 @@ export default function ClientDetail() {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Client>>({});
   const [duplicateClient, setDuplicateClient] = useState<{ id?: string; company?: string } | null>(null);
+  const [innError, setInnError] = useState('');
   const [deleteBlockedRentals, setDeleteBlockedRentals] = useState<ClientDeleteBlockedRental[]>([]);
   const [deleteHistoryLinks, setDeleteHistoryLinks] = useState<ClientDeleteHistoryLink[]>([]);
+  const [objectForm, setObjectForm] = useState({ name: '', address: '', contactName: '', contactPhone: '', notes: '' });
+  const [editingObjectId, setEditingObjectId] = useState('');
+  const [editObjectForm, setEditObjectForm] = useState({ name: '', address: '', contactName: '', contactPhone: '', notes: '' });
+  const [contractForm, setContractForm] = useState({ number: '', date: '', title: '', objectId: '', notes: '' });
 
   // Related data via react-query
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
   const { data: serviceTickets = [] } = useServiceTicketsList();
+  const { data: clientObjectsAll = [] } = useClientObjectsList();
+  const { data: clientContractsAll = [] } = useClientContractsList();
+  const createClientObject = useCreateClientObject();
+  const updateClientObject = useUpdateClientObject();
+  const createClientContract = useCreateClientContract();
   const { data: debtPlanResponse } = useDebtCollectionPlans();
   const debtCollectionPlans = debtPlanResponse?.plans ?? [];
   const clientNameKey = normalizeClientName(client?.company);
@@ -239,6 +260,15 @@ export default function ClientDetail() {
   const activeRentals = clientRentals.filter(r => r.status === 'active' || r.status === 'created');
 
   const { data: allDocs = [] } = useDocumentsList();
+  const clientObjects = useMemo(
+    () => clientObjectsAll.filter(item => client && item.clientId === client.id),
+    [client, clientObjectsAll],
+  );
+  const clientContracts = useMemo(
+    () => clientContractsAll.filter(item => client && item.clientId === client.id),
+    [client, clientContractsAll],
+  );
+  const activeClientObjects = clientObjects.filter(item => item.status !== 'archived');
 
   const clientFinancial = React.useMemo(() => {
     if (!client) return null;
@@ -248,6 +278,28 @@ export default function ClientDetail() {
     () => buildRentalDebtRows(ganttRentals, payments),
     [ganttRentals, payments],
   );
+  const debtByObject = useMemo(() => {
+    if (!client) return [];
+    const objectsById = new Map(clientObjects.map(object => [object.id, object]));
+    const groups = new Map<string, { objectId?: string; objectName: string; debt: number; rentals: number }>();
+    rentalDebtRows
+      .filter(row => row.clientId === client.id)
+      .forEach(row => {
+        const objectId = String((row as { objectId?: string }).objectId || '');
+        const object = objectId ? objectsById.get(objectId) : null;
+        const key = objectId || 'none';
+        const current = groups.get(key) || {
+          objectId: objectId || undefined,
+          objectName: object?.name || 'Без объекта',
+          debt: 0,
+          rentals: 0,
+        };
+        current.debt += row.outstanding || 0;
+        current.rentals += 1;
+        groups.set(key, current);
+      });
+    return [...groups.values()].sort((a, b) => b.debt - a.debt);
+  }, [client, clientObjects, rentalDebtRows]);
   const client360 = useMemo(
     () => buildClient360Summary({
       client,
@@ -303,11 +355,17 @@ export default function ClientDetail() {
     const nextClient = {
       ...client,
       ...editData,
+      inn: normalizeInn(editData.inn ?? client.inn),
       creditLimit: Math.max(0, Number(editData.creditLimit ?? client.creditLimit) || 0),
       debt: canEditDebt
         ? Math.max(0, Number(editData.debt ?? client.debt) || 0)
         : client.debt,
     };
+    if (!isValidInn(nextClient.inn)) {
+      setInnError(INN_ERROR);
+      return;
+    }
+    setInnError('');
     const historyEntries = buildFieldDiffHistory(
       client,
       nextClient,
@@ -331,6 +389,7 @@ export default function ClientDetail() {
     const updatedClient = appendAuditHistory(nextClient, ...historyEntries);
     setClient(updatedClient);
     setDuplicateClient(null);
+    setInnError('');
     updateClient.mutate({ id: updatedClient.id, data: updatedClient }, {
       onSuccess: (savedClient) => {
         setClient(savedClient);
@@ -440,6 +499,72 @@ export default function ClientDetail() {
         }
         toast.error(error instanceof Error ? error.message : 'Не удалось удалить клиента.');
       },
+    });
+  }
+
+  function handleCreateObject() {
+    if (!client || !canEdit) return;
+    createClientObject.mutate({
+      clientId: client.id,
+      name: objectForm.name,
+      address: objectForm.address,
+      contactName: objectForm.contactName || undefined,
+      contactPhone: objectForm.contactPhone || undefined,
+      notes: objectForm.notes || undefined,
+      status: 'active',
+    }, {
+      onSuccess: () => {
+        setObjectForm({ name: '', address: '', contactName: '', contactPhone: '', notes: '' });
+        toast.success('Объект клиента добавлен.');
+      },
+      onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось сохранить объект.'),
+    });
+  }
+
+  function handleArchiveObject(objectId: string) {
+    updateClientObject.mutate({ id: objectId, data: { status: 'archived' } }, {
+      onSuccess: () => toast.success('Объект архивирован.'),
+      onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось архивировать объект.'),
+    });
+  }
+
+  function startEditObject(object: { id: string; name: string; address: string; contactName?: string; contactPhone?: string; notes?: string }) {
+    setEditingObjectId(object.id);
+    setEditObjectForm({
+      name: object.name || '',
+      address: object.address || '',
+      contactName: object.contactName || '',
+      contactPhone: object.contactPhone || '',
+      notes: object.notes || '',
+    });
+  }
+
+  function handleSaveObject(objectId: string) {
+    updateClientObject.mutate({ id: objectId, data: editObjectForm }, {
+      onSuccess: () => {
+        setEditingObjectId('');
+        toast.success('Объект обновлён.');
+      },
+      onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось обновить объект.'),
+    });
+  }
+
+  function handleCreateContract() {
+    if (!client || !canEdit) return;
+    createClientContract.mutate({
+      clientId: client.id,
+      objectId: contractForm.objectId || undefined,
+      number: contractForm.number,
+      date: contractForm.date || undefined,
+      title: contractForm.title || undefined,
+      notes: contractForm.notes || undefined,
+      status: 'active',
+    }, {
+      onSuccess: () => {
+        setContractForm({ number: '', date: '', title: '', objectId: '', notes: '' });
+        toast.success('Договор клиента добавлен.');
+      },
+      onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось сохранить договор.'),
     });
   }
 
@@ -563,6 +688,154 @@ export default function ClientDetail() {
         </CardContent>
       </Card>
 
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MapPin className="h-4 w-4" />
+              Объекты
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {clientObjects.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Объекты клиента пока не заведены.</p>
+            ) : (
+              <div className="space-y-2">
+                {clientObjects.map(object => {
+                  const contract = object.contractId ? clientContracts.find(item => item.id === object.contractId) : null;
+                  const isObjectEditing = editingObjectId === object.id;
+                  return (
+                    <div key={object.id} className="rounded-md border border-gray-200 p-3 text-sm dark:border-gray-800">
+                      {isObjectEditing ? (
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <Input label="Название объекта" value={editObjectForm.name} onChange={e => setEditObjectForm({ ...editObjectForm, name: e.target.value })} />
+                          <Input label="Адрес объекта" value={editObjectForm.address} onChange={e => setEditObjectForm({ ...editObjectForm, address: e.target.value })} />
+                          <Input label="Контакт" value={editObjectForm.contactName} onChange={e => setEditObjectForm({ ...editObjectForm, contactName: e.target.value })} />
+                          <Input label="Телефон" value={editObjectForm.contactPhone} onChange={e => setEditObjectForm({ ...editObjectForm, contactPhone: e.target.value })} />
+                          <div className="flex gap-2 md:col-span-2">
+                            <Button size="sm" onClick={() => handleSaveObject(object.id)} disabled={!editObjectForm.name.trim() || !editObjectForm.address.trim()}>
+                              <Save className="h-4 w-4" />
+                              Сохранить
+                            </Button>
+                            <Button size="sm" variant="secondary" onClick={() => setEditingObjectId('')}>
+                              <X className="h-4 w-4" />
+                              Отмена
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-gray-900 dark:text-white">{object.name}</p>
+                              <p className="text-gray-500 dark:text-gray-400">{object.address}</p>
+                              <p className="mt-1 text-xs text-gray-500">
+                                {[object.contactName, object.contactPhone].filter(Boolean).join(' · ') || 'Контакт не указан'}
+                              </p>
+                              <p className="mt-1 text-xs text-gray-500">
+                                Договор: {contract?.number || object.contractNumber || 'не привязан'}
+                              </p>
+                            </div>
+                            <Badge variant={object.status === 'archived' ? 'default' : 'success'}>
+                              {object.status === 'archived' ? 'Архив' : 'Активен'}
+                            </Badge>
+                          </div>
+                          {canEdit && object.status !== 'archived' && (
+                            <div className="mt-3 flex gap-2">
+                              <Button variant="secondary" size="sm" onClick={() => startEditObject(object)}>
+                                <Edit className="h-4 w-4" />
+                                Изменить
+                              </Button>
+                              <Button variant="secondary" size="sm" onClick={() => handleArchiveObject(object.id)}>
+                                Архивировать
+                              </Button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {canEdit && (
+              <div className="grid gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-2">
+                <Input label="Название объекта" value={objectForm.name} onChange={e => setObjectForm({ ...objectForm, name: e.target.value })} />
+                <Input label="Адрес объекта" value={objectForm.address} onChange={e => setObjectForm({ ...objectForm, address: e.target.value })} />
+                <Input label="Контакт" value={objectForm.contactName} onChange={e => setObjectForm({ ...objectForm, contactName: e.target.value })} />
+                <Input label="Телефон" value={objectForm.contactPhone} onChange={e => setObjectForm({ ...objectForm, contactPhone: e.target.value })} />
+                <div className="md:col-span-2">
+                  <Button onClick={handleCreateObject} disabled={createClientObject.isPending || !objectForm.name.trim() || !objectForm.address.trim()}>
+                    <Plus className="h-4 w-4" />
+                    Добавить объект
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FileText className="h-4 w-4" />
+              Договоры
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {clientContracts.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Договоры клиента пока не заведены.</p>
+            ) : (
+              <div className="space-y-2">
+                {clientContracts.map(contract => {
+                  const object = contract.objectId ? clientObjects.find(item => item.id === contract.objectId) : null;
+                  return (
+                    <div key={contract.id} className="rounded-md border border-gray-200 p-3 text-sm dark:border-gray-800">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-gray-900 dark:text-white">{contract.number}</p>
+                          <p className="text-gray-500 dark:text-gray-400">{contract.title || 'Договор'}</p>
+                          <p className="mt-1 text-xs text-gray-500">Объект: {object?.name || 'только клиент'}</p>
+                        </div>
+                        <Badge variant={contract.status === 'archived' ? 'default' : 'success'}>
+                          {contract.status === 'archived' ? 'Архив' : 'Активен'}
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {canEdit && (
+              <div className="grid gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-2">
+                <Input label="Номер договора" value={contractForm.number} onChange={e => setContractForm({ ...contractForm, number: e.target.value })} />
+                <Input label="Дата" type="date" value={contractForm.date} onChange={e => setContractForm({ ...contractForm, date: e.target.value })} />
+                <Input label="Название" value={contractForm.title} onChange={e => setContractForm({ ...contractForm, title: e.target.value })} />
+                <div>
+                  <label className="mb-1 block text-xs uppercase tracking-wide text-gray-500">Объект</label>
+                  <select
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                    value={contractForm.objectId}
+                    onChange={e => setContractForm({ ...contractForm, objectId: e.target.value })}
+                  >
+                    <option value="">Только клиент</option>
+                    {activeClientObjects.map(object => (
+                      <option key={object.id} value={object.id}>{object.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <Button onClick={handleCreateContract} disabled={createClientContract.isPending || !contractForm.number.trim()}>
+                    <Plus className="h-4 w-4" />
+                    Добавить договор
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className={client360.debt.riskLevel === 'high' ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20' : undefined}>
           <CardHeader>
@@ -597,6 +870,17 @@ export default function ClientDetail() {
                 Возраст долга: {client360.debt.maxAgeDays} дн.
               </Badge>
             </div>
+            {canViewFinance && debtByObject.length > 0 && (
+              <div className="space-y-2 border-t border-gray-100 pt-3 text-sm dark:border-gray-800">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Долг по объектам</p>
+                {debtByObject.map(row => (
+                  <div key={row.objectId || 'none'} className="flex items-center justify-between gap-3">
+                    <span className="text-gray-600 dark:text-gray-300">{row.objectName}</span>
+                    <span className="font-semibold text-gray-900 dark:text-white">{formatCurrency(row.debt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -670,6 +954,11 @@ export default function ClientDetail() {
                           </Link>
                         </>
                       )}
+                    </div>
+                  )}
+                  {innError && (
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                      {innError}
                     </div>
                   )}
                   <div>

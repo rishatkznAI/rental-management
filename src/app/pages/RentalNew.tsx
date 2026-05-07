@@ -13,6 +13,7 @@ import {
 } from '../components/ui/select';
 import { ArrowLeft } from 'lucide-react';
 import { useClientsList } from '../hooks/useClients';
+import { useClientContractsList, useClientObjectsList } from '../hooks/useClientRelations';
 import { useEquipmentList, useUpdateEquipment } from '../hooks/useEquipment';
 import { useGanttData } from '../hooks/useRentals';
 import { usePaymentsList } from '../hooks/usePayments';
@@ -37,6 +38,8 @@ export default function RentalNew() {
   const qc = useQueryClient();
   const updateEquipment = useUpdateEquipment();
   const { data: clients = [] } = useClientsList();
+  const { data: clientObjects = [] } = useClientObjectsList();
+  const { data: clientContracts = [] } = useClientContractsList();
   const { data: rawEq = [] } = useEquipmentList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
@@ -68,6 +71,8 @@ export default function RentalNew() {
 
   const [client, setClient] = useState('');
   const [clientId, setClientId] = useState('');
+  const [objectId, setObjectId] = useState('');
+  const [contractId, setContractId] = useState('');
   const [equipmentId, setEquipmentId] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(nextWeek);
@@ -110,6 +115,27 @@ export default function RentalNew() {
 
   const selectedClient = clients.find(item => item.id === clientId) ?? clients.find(item => item.company === client);
   const selectedClientName = selectedClient?.company ?? client;
+  const selectedClientObjects = useMemo(
+    () => clientObjects.filter(item => item.clientId === selectedClient?.id && item.status !== 'archived'),
+    [clientObjects, selectedClient?.id],
+  );
+  const selectedClientContracts = useMemo(
+    () => clientContracts.filter(item =>
+      item.clientId === selectedClient?.id &&
+      item.status !== 'archived' &&
+      (!objectId || !item.objectId || item.objectId === objectId)
+    ),
+    [clientContracts, objectId, selectedClient?.id],
+  );
+  useEffect(() => {
+    setObjectId('');
+    setContractId('');
+  }, [clientId]);
+  useEffect(() => {
+    if (selectedClientObjects.length === 1 && !objectId) {
+      setObjectId(selectedClientObjects[0].id);
+    }
+  }, [objectId, selectedClientObjects]);
   const rentalDebtRows = useMemo(() => buildRentalDebtRows(ganttRents, payments), [ganttRents, payments]);
   const receivables = useMemo(() => buildClientReceivables(clients, rentalDebtRows), [clients, rentalDebtRows]);
   const selectedClientReceivable = receivables.find(item => item.clientId === selectedClient?.id);
@@ -127,6 +153,8 @@ export default function RentalNew() {
     const savedClassicRental = await rentalsService.create({
       client: selectedClient.company,
       clientId: selectedClient.id,
+      objectId: objectId || undefined,
+      contractId: contractId || undefined,
       contact: '',
       startDate,
       plannedReturnDate: endDate,
@@ -144,6 +172,8 @@ export default function RentalNew() {
     await rentalsService.createGanttEntry({
       rentalId: savedClassicRental.id,
       clientId: selectedClient.id,
+      objectId: objectId || undefined,
+      contractId: contractId || undefined,
       client: selectedClient.company,
       clientShort: selectedClient.company.substring(0, 20),
       equipmentId: selectedEquipment.id,
@@ -288,6 +318,51 @@ export default function RentalNew() {
                     {(selectedClientReceivable?.overdueRentals || 0) > 0 && ` · просроченных: ${selectedClientReceivable?.overdueRentals}`}
                   </p>
                 )}
+              </div>
+            )}
+
+            {selectedClient && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Объект клиента</label>
+                  {selectedClientObjects.length === 0 ? (
+                    <p className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700">
+                      У клиента нет активных объектов. Можно сохранить аренду без объекта.
+                    </p>
+                  ) : (
+                    <Select
+                      value={objectId || 'none'}
+                      onValueChange={(value) => {
+                        setObjectId(value === 'none' ? '' : value);
+                        setContractId('');
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Выберите объект" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Без объекта</SelectItem>
+                        {selectedClientObjects.map(object => (
+                          <SelectItem key={object.id} value={object.id}>{object.name} · {object.address}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Договор</label>
+                  <Select value={contractId || 'none'} onValueChange={(value) => setContractId(value === 'none' ? '' : value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите договор" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Без договора</SelectItem>
+                      {selectedClientContracts.map(contract => (
+                        <SelectItem key={contract.id} value={contract.id}>{contract.number}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
 

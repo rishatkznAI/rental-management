@@ -204,6 +204,10 @@ function toCarrierDeliveryDto(delivery, options = {}) {
     equipment: formatEquipmentForCarrier(delivery, equipment),
     origin: delivery?.origin || '',
     destination: delivery?.destination || '',
+    objectName: delivery?.objectName || '',
+    objectAddress: delivery?.objectAddress || '',
+    objectContactName: delivery?.objectContactName || '',
+    objectContactPhone: delivery?.objectContactPhone || '',
     contactName: delivery?.contactName || '',
     contactPhone: delivery?.contactPhone || '',
     requestContact: requestContact
@@ -231,6 +235,11 @@ function formatCarrierDeliveryMessage(delivery, options = {}) {
     `Техника: ${dto.equipment}`,
     `Откуда: ${dto.origin || 'не указано'}`,
     `Куда: ${dto.destination || 'не указано'}`,
+    dto.objectName ? `Объект: ${dto.objectName}` : null,
+    dto.objectAddress ? `Адрес объекта: ${dto.objectAddress}` : null,
+    dto.objectContactName || dto.objectContactPhone
+      ? `Контакт на объекте: ${[dto.objectContactName, dto.objectContactPhone].filter(Boolean).join(' · ')}`
+      : null,
     `Контакт: ${[dto.contactName, dto.contactPhone].filter(Boolean).join(' · ') || 'не указан'}`,
     formatRequestContactBlock(dto.requestContact),
     dto.driverComment ? `Комментарий менеджера: ${dto.driverComment}` : null,

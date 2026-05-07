@@ -84,6 +84,8 @@ export interface GanttRentalData {
   sourceRentalId?: string;
   originalRentalId?: string;
   clientId?: string;
+  objectId?: string;
+  contractId?: string;
   client: string;
   clientShort: string;
   equipmentId?: string;

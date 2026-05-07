@@ -453,7 +453,7 @@ test('/api/clients allows editing own INN and rejects changing to another client
   });
 });
 
-test('/api/clients allows clearing INN and then reusing it for another client', async () => {
+test('/api/clients rejects clearing INN on save', async () => {
   const { app, state } = createSecurityApp();
   state.clients = [
     clientPayload({ id: 'C-1', company: 'ООО Альфа', inn: '1655123456', email: 'alpha@example.test' }),
@@ -462,16 +462,16 @@ test('/api/clients allows clearing INN and then reusing it for another client', 
 
   await withServer(app, async (baseUrl) => {
     const cleared = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'admin-token', { inn: '' });
-    assert.equal(cleared.status, 200);
-    assert.equal(cleared.body.innNormalized, undefined);
+    assert.equal(cleared.status, 400);
+    assert.match(cleared.body.error, /Укажите корректный ИНН/);
 
     const reused = await request(baseUrl, 'PATCH', '/api/clients/C-2', 'admin-token', { inn: '1655-123456' });
-    assert.equal(reused.status, 200);
-    assert.equal(reused.body.innNormalized, '1655123456');
+    assert.equal(reused.status, 409);
+    assert.equal(reused.body.error, 'Клиент с таким ИНН уже существует');
   });
 });
 
-test('/api/clients accepts empty INN for multiple clients', async () => {
+test('/api/clients rejects empty INN for new clients', async () => {
   const { app, state } = createSecurityApp();
 
   await withServer(app, async (baseUrl) => {
@@ -485,11 +485,13 @@ test('/api/clients accepts empty INN for multiple clients', async () => {
       inn: null,
       email: 'empty2@example.test',
     }));
-    assert.equal(first.status, 201);
-    assert.equal(second.status, 201);
+    assert.equal(first.status, 400);
+    assert.match(first.body.error, /Укажите корректный ИНН/);
+    assert.equal(second.status, 400);
+    assert.match(second.body.error, /Укажите корректный ИНН/);
   });
 
-  assert.equal(state.clients.length, 2);
+  assert.equal(state.clients.length, 0);
 });
 
 test('/api/clients delete removes client from uniqueness checks', async () => {

@@ -69,6 +69,8 @@ const NON_ADMIN_BULK_ALLOWED_COLLECTIONS = new Set([
 const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'app_settings',
   'clients',
+  'client_objects',
+  'client_contracts',
   'company_expenses',
   'crm_deals',
   'delivery_carriers',
@@ -119,10 +121,14 @@ const SERVICE_MECHANIC_UPDATE_FIELDS = new Set([
 
 const NON_ADMIN_UPDATE_FIELDS = {
   clients: new Set(['company', 'inn', 'email', 'address', 'contact', 'phone', 'paymentTerms', 'notes']),
-  documents: new Set(['type', 'number', 'client', 'clientId', 'rental', 'rentalId', 'date', 'fileName', 'fileUrl', 'comment', 'attachments']),
+  client_objects: new Set(['clientId', 'name', 'address', 'contactName', 'contactPhone', 'contractId', 'contractNumber', 'notes', 'status']),
+  client_contracts: new Set(['clientId', 'objectId', 'number', 'date', 'title', 'status', 'notes']),
+  documents: new Set(['type', 'number', 'client', 'clientId', 'objectId', 'contractId', 'rental', 'rentalId', 'date', 'fileName', 'fileUrl', 'comment', 'attachments']),
   debt_collection_plans: new Set([
     'clientId',
     'clientName',
+    'objectId',
+    'contractId',
     'responsibleUserId',
     'responsibleName',
     'status',
@@ -200,6 +206,8 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'rentalId',
     'client',
     'clientId',
+    'objectId',
+    'contractId',
     'invoiceNumber',
     'amount',
     'paidAmount',
@@ -254,7 +262,7 @@ const NON_ADMIN_CREATE_FIELDS = {
     'photos',
     'attachments',
   ]),
-  documents: new Set(['type', 'number', 'client', 'clientId', 'rental', 'rentalId', 'date', 'fileName', 'fileUrl', 'comment', 'attachments']),
+  documents: new Set(['type', 'number', 'client', 'clientId', 'objectId', 'contractId', 'rental', 'rentalId', 'date', 'fileName', 'fileUrl', 'comment', 'attachments']),
   debt_collection_plans: new Set([
     'clientId',
     'clientName',
@@ -279,6 +287,8 @@ const RENTAL_MANAGER_APPROVAL_FIELDS = new Set([
   'amount',
   'client',
   'clientId',
+  'objectId',
+  'contractId',
   'equipment',
   'equipmentId',
   'equipmentInv',
@@ -288,6 +298,8 @@ const RENTAL_MANAGER_APPROVAL_FIELDS = new Set([
   'paymentStatus',
   'discount',
   'debt',
+  'objectId',
+  'contractId',
   'approvedBy',
 ]);
 
@@ -640,6 +652,8 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user) || getOwnerKeys(user).some(key => sameText(key, entity.id) || sameText(key, entity.name));
       return false;
     case 'clients':
+    case 'client_objects':
+    case 'client_contracts':
     case 'documents':
     case 'payments':
     case 'debt_collection_plans':
@@ -742,6 +756,9 @@ function canMutateEntity(collection, entity, user, readData) {
     return false;
   }
   if (collection === 'payments') {
+    return isOfficeManager(user);
+  }
+  if (collection === 'client_objects' || collection === 'client_contracts') {
     return isOfficeManager(user);
   }
   if (collection === 'debt_collection_plans') {

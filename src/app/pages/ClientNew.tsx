@@ -26,6 +26,16 @@ const PAYMENT_TERMS_OPTIONS = [
   { value: 'Предоплата 50%',     label: 'Предоплата 50%' },
   { value: 'Без предоплаты',     label: 'Без предоплаты' },
 ];
+const INN_ERROR = 'Укажите корректный ИНН: 10 цифр для юрлица или 12 цифр для ИП';
+
+function normalizeInn(value: string) {
+  return value.replace(/\D+/g, '');
+}
+
+function isValidInn(value: string) {
+  const normalized = normalizeInn(value);
+  return normalized.length === 10 || normalized.length === 12;
+}
 
 function getDuplicateClient(error: unknown): { id?: string; company?: string } | null {
   if (!(error instanceof ApiError)) return null;
@@ -73,6 +83,7 @@ export default function ClientNew() {
   const createClient = useCreateClient();
   const [managers, setManagers] = React.useState<{ id: string; name: string; role: string; status: string }[]>([]);
   const [duplicateClient, setDuplicateClient] = useState<{ id?: string; company?: string } | null>(null);
+  const [innError, setInnError] = useState('');
   const isAdmin = user?.role === 'Администратор';
 
   useEffect(() => {
@@ -104,9 +115,15 @@ export default function ClientNew() {
     e.preventDefault();
     const now = new Date().toISOString();
     setDuplicateClient(null);
+    const normalizedInn = normalizeInn(formData.inn);
+    if (!isValidInn(formData.inn)) {
+      setInnError(INN_ERROR);
+      return;
+    }
+    setInnError('');
     createClient.mutate({
       company:      formData.companyName,
-      inn:          formData.inn,
+      inn:          normalizedInn,
       contact:      formData.contactName,
       phone:        formData.phone,
       email:        formData.email,
@@ -181,6 +198,9 @@ export default function ClientNew() {
                   onChange={e => setFormData({ ...formData, inn: e.target.value })}
                   required
                 />
+                {innError && (
+                  <p className="text-sm text-red-600 dark:text-red-400">{innError}</p>
+                )}
                 {duplicateClient && (
                   <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
                     Клиент с таким ИНН уже существует

@@ -2,6 +2,9 @@ const {
   getStableClientId,
   normalizeText,
 } = require('./client-links');
+const {
+  buildClientObjectDebtBreakdown,
+} = require('./client-relations');
 
 function toNumber(value) {
   const numeric = Number(value);
@@ -124,6 +127,8 @@ function buildRentalDebtRows(rentals, payments) {
         rentalId: rental.id,
         clientId: getStableClientId(rental) || '',
         client: getClientName(rental),
+        objectId: rental.objectId || '',
+        contractId: rental.contractId || '',
         equipmentId: rental.equipmentId || '',
         equipmentInv: rental.equipmentInv || '',
         manager: rental.manager || '',
@@ -355,13 +360,14 @@ function buildClientDebtAgingRows(clients, rentalDebtRows, today = new Date().to
   );
 }
 
-function buildFinanceReport({ clients, rentals, payments }, today = new Date().toISOString().slice(0, 10)) {
+function buildFinanceReport({ clients, rentals, payments, clientObjects }, today = new Date().toISOString().slice(0, 10)) {
   const debtRows = buildRentalDebtRows(rentals, payments);
   const clientReceivables = buildClientReceivables(clients, debtRows, today);
   const clientSnapshots = buildClientFinancialSnapshots(clients, rentals, payments, today);
   const managerReceivables = buildManagerReceivables(debtRows, today, clients);
   const overdueBuckets = buildOverdueBuckets(debtRows, today);
   const clientDebtAgingRows = buildClientDebtAgingRows(clients, debtRows, today);
+  const clientObjectDebtRows = buildClientObjectDebtBreakdown(clients, debtRows, clientObjects);
 
   return {
     debtRows,
@@ -370,6 +376,7 @@ function buildFinanceReport({ clients, rentals, payments }, today = new Date().t
     managerReceivables,
     overdueBuckets,
     clientDebtAgingRows,
+    clientObjectDebtRows,
     totals: {
       debt: clientSnapshots.reduce((sum, item) => sum + item.currentDebt, 0),
       overdueClients: clientSnapshots.filter(item => item.overdueRentals > 0).length,
@@ -391,5 +398,6 @@ module.exports = {
   buildManagerReceivables,
   buildOverdueBuckets,
   buildClientDebtAgingRows,
+  buildClientObjectDebtBreakdown,
   buildFinanceReport,
 };

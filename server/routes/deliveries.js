@@ -153,6 +153,7 @@ function registerDeliveryRoutes(router, deps) {
       carrierPhone: body.carrierPhone ? String(body.carrierPhone) : (existing?.carrierPhone || null),
       carrierChatId: body.carrierChatId ?? existing?.carrierChatId ?? null,
       carrierUserId: body.carrierUserId ?? existing?.carrierUserId ?? null,
+      rentalId: body.rentalId ? String(body.rentalId) : (existing?.rentalId || null),
       ganttRentalId: body.ganttRentalId ? String(body.ganttRentalId) : (existing?.ganttRentalId || null),
       classicRentalId: body.classicRentalId ? String(body.classicRentalId) : (existing?.classicRentalId || null),
       equipmentId: body.equipmentId ? String(body.equipmentId) : (existing?.equipmentId || null),
@@ -204,6 +205,7 @@ function registerDeliveryRoutes(router, deps) {
       'clientId',
       'carrierId',
       'carrierKey',
+      'rentalId',
       'ganttRentalId',
       'classicRentalId',
       'equipmentId',
@@ -216,6 +218,102 @@ function registerDeliveryRoutes(router, deps) {
     }, {});
     safe.manager = existing?.manager || req.user?.userName || 'Система';
     return safe;
+  }
+
+  function findLinkedRentalContext(delivery) {
+    const classicRentals = readData('rentals') || [];
+    const ganttRentals = readData('gantt_rentals') || [];
+    const rentalId = String(delivery?.rentalId || delivery?.classicRentalId || '').trim();
+    const ganttRentalId = String(delivery?.ganttRentalId || '').trim();
+
+    let classicRental = rentalId
+      ? classicRentals.find(item => String(item?.id || '') === rentalId) || null
+      : null;
+    let ganttRental = ganttRentalId
+      ? ganttRentals.find(item => String(item?.id || '') === ganttRentalId) || null
+      : null;
+
+    if (!classicRental && ganttRental) {
+      const linkedClassicId = String(ganttRental.rentalId || ganttRental.sourceRentalId || ganttRental.originalRentalId || '').trim();
+      classicRental = linkedClassicId
+        ? classicRentals.find(item => String(item?.id || '') === linkedClassicId) || null
+        : null;
+    }
+    if (!ganttRental && classicRental) {
+      ganttRental = ganttRentals.find(item =>
+        [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => String(id || '') === String(classicRental.id || ''))
+      ) || null;
+    }
+
+    return { classicRental, ganttRental };
+  }
+
+  function normalizeDeliveryRentalLinks(delivery) {
+    const { classicRental, ganttRental } = findLinkedRentalContext(delivery);
+    if (!classicRental && !ganttRental) return delivery;
+    const source = classicRental || ganttRental;
+    const equipment = source?.equipmentId
+      ? (readData('equipment') || []).find(item => String(item?.id || '') === String(source.equipmentId || '')) || null
+      : null;
+    const equipmentInv = source?.equipmentInv
+      || source?.inventoryNumber
+      || equipment?.inventoryNumber
+      || (Array.isArray(source?.equipment) ? source.equipment[0] : '')
+      || '';
+    const equipmentLabel = delivery.equipmentLabel
+      || [equipment?.manufacturer, equipment?.model].filter(Boolean).join(' ').trim()
+      || equipmentInv
+      || null;
+
+    return {
+      ...delivery,
+      rentalId: classicRental?.id || delivery.rentalId || null,
+      classicRentalId: classicRental?.id || delivery.classicRentalId || null,
+      ganttRentalId: ganttRental?.id || delivery.ganttRentalId || null,
+      clientId: source?.clientId || delivery.clientId || null,
+      client: source?.client || delivery.client,
+      manager: source?.manager || delivery.manager,
+      equipmentId: source?.equipmentId || delivery.equipmentId || null,
+      equipmentInv: equipmentInv || delivery.equipmentInv || null,
+      equipmentLabel,
+    };
+  }
+
+  function enrichDeliveryBodyFromRentalContext(body, existing = null) {
+    const candidate = {
+      ...(existing || {}),
+      ...(body || {}),
+      rentalId: body?.rentalId || existing?.rentalId || body?.classicRentalId || existing?.classicRentalId,
+      classicRentalId: body?.classicRentalId || existing?.classicRentalId || body?.rentalId || existing?.rentalId,
+    };
+    const { classicRental, ganttRental } = findLinkedRentalContext(candidate);
+    if (!classicRental && !ganttRental) return body;
+    const source = classicRental || ganttRental;
+    const equipment = source?.equipmentId
+      ? (readData('equipment') || []).find(item => String(item?.id || '') === String(source.equipmentId || '')) || null
+      : null;
+    const equipmentInv = source?.equipmentInv
+      || source?.inventoryNumber
+      || equipment?.inventoryNumber
+      || (Array.isArray(source?.equipment) ? source.equipment[0] : '')
+      || '';
+    const equipmentLabel = body?.equipmentLabel
+      || [equipment?.manufacturer, equipment?.model].filter(Boolean).join(' ').trim()
+      || equipmentInv
+      || undefined;
+
+    return {
+      ...(body || {}),
+      rentalId: classicRental?.id || body?.rentalId,
+      classicRentalId: classicRental?.id || body?.classicRentalId,
+      ganttRentalId: ganttRental?.id || body?.ganttRentalId,
+      clientId: source?.clientId || body?.clientId,
+      client: source?.client || body?.client,
+      manager: source?.manager || body?.manager,
+      equipmentId: source?.equipmentId || body?.equipmentId,
+      equipmentInv: equipmentInv || body?.equipmentInv,
+      equipmentLabel,
+    };
   }
 
   function button(text, payload) {
@@ -321,7 +419,8 @@ function registerDeliveryRoutes(router, deps) {
     });
 
     const nextClassic = classicRentals.map((rental) => {
-      if (!delivery.classicRentalId || rental.id !== delivery.classicRentalId) return rental;
+      const deliveryClassicRentalId = delivery.classicRentalId || delivery.rentalId;
+      if (!deliveryClassicRentalId || rental.id !== deliveryClassicRentalId) return rental;
 
       if (delivery.type === 'shipping') {
         if (rental.startDate === delivery.transportDate && rental.deliveryAddress === delivery.destination) return rental;
@@ -660,7 +759,9 @@ function registerDeliveryRoutes(router, deps) {
   router.post('/deliveries', requireAuth, requireWrite('deliveries'), async (req, res) => {
     try {
       const author = req.user.userName;
-      let delivery = normalizeDeliveryPayload(sanitizeDeliveryBody(req.body, null, req), null, author, buildDeliveryCreator(req));
+      const safeBody = sanitizeDeliveryBody(req.body, null, req);
+      let delivery = normalizeDeliveryPayload(enrichDeliveryBodyFromRentalContext(safeBody), null, author, buildDeliveryCreator(req));
+      delivery = normalizeDeliveryRentalLinks(delivery);
       const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {
@@ -721,7 +822,13 @@ function registerDeliveryRoutes(router, deps) {
       }
       const author = req.user.userName;
       const safeBody = sanitizeDeliveryBody(req.body, current, req);
-      let delivery = normalizeDeliveryPayload({ ...current, ...safeBody }, current, author, buildDeliveryCreator(req));
+      let delivery = normalizeDeliveryPayload(
+        enrichDeliveryBodyFromRentalContext({ ...current, ...safeBody }, current),
+        current,
+        author,
+        buildDeliveryCreator(req),
+      );
+      delivery = normalizeDeliveryRentalLinks(delivery);
       const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {

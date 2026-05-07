@@ -613,6 +613,51 @@ function registerRentalRoutes(deps) {
       return restored;
     }
 
+    function buildLinkedGanttRentalFromClassic(classicRental) {
+      if (collection !== 'rentals' || !classicRental?.id) return null;
+      const base = {
+        id: generateId(idPrefixes.gantt_rentals || 'GR'),
+        rentalId: classicRental.id,
+        sourceRentalId: classicRental.id,
+        originalRentalId: classicRental.id,
+        clientId: classicRental.clientId || '',
+        client: classicRental.client || classicRental.clientName || '',
+        clientShort: String(classicRental.client || classicRental.clientName || '').substring(0, 20),
+        startDate: classicRental.startDate || '',
+        endDate: classicRental.plannedReturnDate || classicRental.endDate || '',
+        manager: classicRental.manager || '',
+        managerId: classicRental.managerId || '',
+        status: classicRental.status || 'created',
+        paymentStatus: classicRental.paymentStatus || '',
+        amount: Number(classicRental.price ?? classicRental.amount) || 0,
+        comments: [],
+      };
+      return normalizeGanttRentalStatus(ensureGanttRentalLink(base, classicRental, readData('equipment') || []));
+    }
+
+    function createLinkedGanttRentalIfMissing(classicRental, author) {
+      if (collection !== 'rentals' || !classicRental?.id) return null;
+      const ganttRentals = readData('gantt_rentals') || [];
+      const existing = ganttRentals.find(item =>
+        [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => String(id || '') === String(classicRental.id || ''))
+      );
+      if (existing) return existing;
+
+      const linkedGanttRental = mergeRentalHistory(null, buildLinkedGanttRentalFromClassic(classicRental), author);
+      const validation = validateRentalPayload(
+        'gantt_rentals',
+        linkedGanttRental,
+        ganttRentals,
+        readData('equipment') || [],
+        '',
+      );
+      if (!validation.ok) {
+        throw Object.assign(new Error(validation.error), { status: validation.status });
+      }
+      writeData('gantt_rentals', [...ganttRentals, linkedGanttRental]);
+      return linkedGanttRental;
+    }
+
     function restoreOrphanGanttRentalIfSafe(req, data, rawMeta, fallbackGanttRental, resolution) {
       if (collection !== 'rentals') return null;
       if (resolution?.status !== 404) return null;
@@ -923,6 +968,14 @@ function registerRentalRoutes(deps) {
         newItem = normalizeGanttRentalStatus(newItem);
         newItem = mergeRentalHistory(null, newItem, req.user.userName);
       }
+      let linkedGanttRental = null;
+      try {
+        if (collection === 'rentals') {
+          linkedGanttRental = createLinkedGanttRentalIfMissing(newItem, req.user.userName);
+        }
+      } catch (error) {
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
       data.push(newItem);
       writeData(collection, data);
       auditLog?.(req, {
@@ -931,6 +984,14 @@ function registerRentalRoutes(deps) {
         entityId: newItem.id,
         after: newItem,
       });
+      if (linkedGanttRental) {
+        auditLog?.(req, {
+          action: 'gantt_rentals.create',
+          entityType: 'gantt_rentals',
+          entityId: linkedGanttRental.id,
+          after: linkedGanttRental,
+        });
+      }
       return res.status(201).json(newItem);
     });
 
@@ -1006,9 +1067,12 @@ function registerRentalRoutes(deps) {
             },
           });
         }
-        repairGanttRentalLinkIfResolved(resolution.linkedGanttRental, resolution);
+        const resolvedLinkedGanttRental = resolution.linkedGanttRental ||
+          findLinkedGanttRental(resolution.rental, linkedGanttRentalId) ||
+          null;
+        repairGanttRentalLinkIfResolved(resolvedLinkedGanttRental, resolution);
         idx = resolution.rentalIndex;
-        const linkedGanttRental = resolution.linkedGanttRental || null;
+        const linkedGanttRental = resolvedLinkedGanttRental;
         const linkedGanttMatchesRental = [
           linkedGanttRental?.rentalId,
           linkedGanttRental?.sourceRentalId,
@@ -1017,7 +1081,7 @@ function registerRentalRoutes(deps) {
         meta = {
           ...rawMeta,
           sourceRentalId: safeSourceRentalId || resolution.sourceRentalId || '',
-          linkedGanttRentalId: rawMeta.linkedGanttRentalId || rawMeta.ganttRentalId || resolution.linkedGanttRentalId || '',
+          linkedGanttRentalId: rawMeta.linkedGanttRentalId || rawMeta.ganttRentalId || linkedGanttRental?.id || resolution.linkedGanttRentalId || '',
           canonicalRentalIdVerified: Boolean(
             safeRentalId ||
             safeSourceRentalId ||

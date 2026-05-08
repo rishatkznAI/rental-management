@@ -16,6 +16,22 @@ function warrantyPermissionBlock() {
   return match.groups.body;
 }
 
+function rentalManagerPermissionBlock() {
+  const match = permissionsSource.match(/'Менеджер по аренде':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
+  assert.ok(match?.groups?.body, 'rental manager permission block must exist');
+  return match.groups.body;
+}
+
+test('frontend rental manager permissions match backend write limits', () => {
+  const block = rentalManagerPermissionBlock();
+
+  assert.match(block, /clients:\s+VIEW_CREATE/, 'rental manager can create clients through the UI');
+  assert.match(block, /payments:\s+VIEW/, 'rental manager must not see payment mutation controls');
+  assert.doesNotMatch(block, /payments:\s+\['view', 'create', 'edit'\]/);
+  assert.doesNotMatch(block, /\bfinance:\s+/);
+  assert.doesNotMatch(block, /\badmin_panel:\s+/);
+});
+
 test('frontend warranty mechanic menu grants only working sections', () => {
   const block = warrantyPermissionBlock();
 

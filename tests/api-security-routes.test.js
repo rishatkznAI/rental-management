@@ -37,6 +37,8 @@ const READ_PERMISSIONS = {
   service_works: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   spare_parts: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   warranty_claims: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  service_vehicles: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
+  vehicle_trips: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   users: ['Администратор'],
 };
 
@@ -55,6 +57,8 @@ const WRITE_PERMISSIONS = {
   service_works: ['Администратор'],
   spare_parts: ['Администратор'],
   warranty_claims: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  service_vehicles: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  vehicle_trips: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
   users: ['Администратор'],
 };
 
@@ -98,6 +102,8 @@ function createState() {
     repair_work_items: [{ id: 'RW-1', repairId: 'S-other', workId: 'SW-1', quantity: 1, ratePerHourSnapshot: 2500, normHoursSnapshot: 1 }],
     repair_part_items: [{ id: 'RP-1', repairId: 'S-other', partId: 'SP-1', quantity: 1, priceSnapshot: 5000 }],
     service_audit_log: [],
+    service_vehicles: [{ id: 'SV-1', make: 'Lada', model: 'Largus', plateNumber: 'A001AA', status: 'active' }],
+    vehicle_trips: [{ id: 'VT-1', vehicleId: 'SV-1', driver: 'Петров', route: 'Склад — объект', date: '2026-05-01' }],
     payments: [{ id: 'P-1', rentalId: 'R-own', amount: 1000, status: 'new' }],
     crm_deals: [{
       id: 'CRM-own',
@@ -259,6 +265,8 @@ function createSecurityApp(state = createState()) {
       'client_contracts',
       'documents',
       'crm_deals',
+      'service_vehicles',
+      'vehicle_trips',
       'unknown_collection',
     ],
     idPrefixes: {
@@ -276,6 +284,8 @@ function createSecurityApp(state = createState()) {
       client_contracts: 'CC',
       documents: 'D',
       crm_deals: 'CRM',
+      service_vehicles: 'SV',
+      vehicle_trips: 'VT',
     },
     readData,
     writeData,
@@ -913,6 +923,9 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal((await request(baseUrl, 'PATCH', '/api/rentals/R-other', 'manager-token', { comments: 'bypass' })).status, 403);
     assert.equal((await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'manager-token', { managerId: 'U-other', comments: 'ok' })).status, 200);
     assert.equal(state.rentals.find(item => item.id === 'R-own').managerId, 'U-manager');
+    assert.equal((await request(baseUrl, 'GET', '/api/service_vehicles/SV-1', 'manager-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/vehicle_trips', 'manager-token')).status, 200);
+    assert.equal((await request(baseUrl, 'PATCH', '/api/service_vehicles/SV-1', 'manager-token', { status: 'repair' })).status, 403);
     assert.equal((await request(baseUrl, 'PATCH', '/api/payments/P-1', 'manager-token', { amount: 1, status: 'paid' })).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/service/S-other', 'mechanic-token')).status, 403);
     assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-own', 'mechanic-token', {

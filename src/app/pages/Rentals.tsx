@@ -27,7 +27,7 @@ import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser } from '..
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
-import type { Equipment, EquipmentType, EquipmentStatus, Payment, Rental, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
+import type { Client, Equipment, EquipmentType, EquipmentStatus, Payment, Rental, RentalChangeRequest, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
@@ -605,6 +605,15 @@ function computeEffectiveStatus(
 }
 
 const OPEN_SERVICE_STATUSES: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'needs_revision'];
+const EMPTY_GANTT_RENTALS: GanttRentalData[] = [];
+const EMPTY_RENTALS: Rental[] = [];
+const EMPTY_EQUIPMENT: Equipment[] = [];
+const EMPTY_PAYMENTS: Payment[] = [];
+const EMPTY_SHIPPING_PHOTOS: ShippingPhoto[] = [];
+const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
+const EMPTY_STAFF_OPTIONS: StaffOption[] = [];
+const EMPTY_CLIENTS: Client[] = [];
+const EMPTY_RENTAL_CHANGE_REQUESTS: RentalChangeRequest[] = [];
 
 function hasOpenServiceTicketForEquipment(serviceTickets: ServiceTicket[], equipment: Equipment) {
   const inventoryIsUnique = serviceTickets.filter(ticket => ticket.inventoryNumber === equipment.inventoryNumber).length <= 1;
@@ -636,35 +645,35 @@ export default function Rentals() {
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
 
-  const { data: ganttData = [] } = useQuery({
+  const { data: ganttData = EMPTY_GANTT_RENTALS } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
   });
-  const { data: classicRentalData = [] } = useQuery({
+  const { data: classicRentalData = EMPTY_RENTALS } = useQuery({
     queryKey: RENTAL_KEYS.all,
     queryFn: rentalsService.getAll,
   });
-  const { data: equipmentData = [] } = useQuery({
+  const { data: equipmentData = EMPTY_EQUIPMENT } = useQuery({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
   });
-  const { data: paymentData = [] } = useQuery({
+  const { data: paymentData = EMPTY_PAYMENTS } = useQuery({
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
   });
-  const { data: shippingPhotos = [] } = useQuery<ShippingPhoto[]>({
+  const { data: shippingPhotos = EMPTY_SHIPPING_PHOTOS } = useQuery<ShippingPhoto[]>({
     queryKey: ['shippingPhotos', 'all'],
     queryFn: equipmentService.getAllShippingPhotos,
   });
-  const { data: serviceTickets = [] } = useQuery<ServiceTicket[]>({
+  const { data: serviceTickets = EMPTY_SERVICE_TICKETS } = useQuery<ServiceTicket[]>({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
   });
-  const { data: usersData = [] } = useQuery<StaffOption[]>({
+  const { data: usersData = EMPTY_STAFF_OPTIONS } = useQuery<StaffOption[]>({
     queryKey: ['staff', 'manager-options'],
     queryFn: staffService.getManagerOptions,
   });
-  const { data: clientsData = [] } = useQuery({
+  const { data: clientsData = EMPTY_CLIENTS } = useQuery({
     queryKey: ['clients'],
     queryFn: clientsService.getAll,
   });
@@ -678,7 +687,7 @@ export default function Rentals() {
     name: user?.name,
   });
   const {
-    data: rentalChangeRequests = [],
+    data: rentalChangeRequests = EMPTY_RENTAL_CHANGE_REQUESTS,
     isLoading: isRentalApprovalsLoading,
     error: rentalApprovalsError,
   } = useRentalChangeRequestsList(!isInvestorRole);
@@ -2906,7 +2915,7 @@ export default function Rentals() {
           onConfirm={async (data) => {
           if (!canEditRentals) return;
           const ganttRentalId = data.ganttRentalId || data.rentalId;
-          const rental = ganttRentals.find(r => r.id === ganttRentalId);
+          const rental = ganttRentals.find(r => r.id === ganttRentalId) ?? data.rental;
           if (!rental) {
             showToast('Не найдена аренда для возврата. Обновите планировщик и повторите действие.', 'error');
             return;
@@ -2929,16 +2938,16 @@ export default function Rentals() {
               result: data.result,
               hasDamage: data.result === 'service',
             });
-            await Promise.all([
+            showToast(`Возврат оформлен: ${rental.equipmentInv ?? ganttRentalId}`);
+            setShowReturnModal(false);
+            setReturnRental(null);
+            void Promise.all([
               queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
               queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
               queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
               queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
               queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
-            ]);
-            showToast(`Возврат оформлен: ${rental.equipmentInv ?? ganttRentalId}`);
-            setShowReturnModal(false);
-            setReturnRental(null);
+            ]).catch(() => undefined);
           } catch (error) {
             showToast(error instanceof Error ? error.message : 'Не удалось оформить возврат', 'error');
           }

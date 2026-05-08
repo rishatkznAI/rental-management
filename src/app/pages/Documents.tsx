@@ -53,6 +53,7 @@ import { mechanicsService } from '../services/mechanics.service';
 import { mechanicDocumentsService } from '../services/mechanic-documents.service';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
+import { normalizeUserRole } from '../lib/userStorage';
 import type {
   Client,
   Document as Doc,
@@ -300,6 +301,11 @@ export default function Documents() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const canManageDocuments = can('create', 'documents') || can('edit', 'documents');
+  const normalizedRole = normalizeUserRole(user?.role || user?.normalizedRole || user?.rawRole);
+  const canReadMechanics =
+    normalizedRole === 'Администратор' ||
+    normalizedRole === 'Офис-менеджер' ||
+    normalizedRole.includes('Механик');
   const { data: documentList = [] } = useDocumentsList();
   const { data: clients = [] } = useClientsList();
   const { data: rentals = [] } = useRentalsList();
@@ -310,6 +316,7 @@ export default function Documents() {
   const { data: mechanics = EMPTY_MECHANICS } = useQuery<Mechanic[]>({
     queryKey: ['mechanics'],
     queryFn: mechanicsService.getAll,
+    enabled: canReadMechanics,
   });
   const { data: mechanicDocsData = EMPTY_MECHANIC_DOCUMENTS } = useQuery<MechanicDocument[]>({
     queryKey: ['mechanic-documents'],

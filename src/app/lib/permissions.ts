@@ -91,9 +91,9 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     planner:          VIEW,
     service:          VIEW_CREATE,
     service_vehicles: VIEW,        // видит машины, но не редактирует
-    clients:          VIEW,
+    clients:          VIEW_CREATE,
     documents:        VIEW_CREATE,
-    payments:         ['view', 'create', 'edit'],
+    payments:         VIEW,
     approvals:        VIEW,
     profile_settings: ['view', 'edit'],
   },

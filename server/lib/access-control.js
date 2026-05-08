@@ -738,8 +738,9 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isMechanic(user)) return isMechanicLinkedEntity(entity, user, readData);
       return false;
     case 'service_vehicles':
-      return isOfficeManager(user) || isMechanic(user);
+      return isOfficeManager(user) || isRentalManager(user) || isMechanic(user);
     case 'vehicle_trips':
+      if (isRentalManager(user)) return true;
       if (isOfficeManager(user)) return true;
       if (isMechanic(user)) return isMechanicLinkedEntity(entity, user, readData);
       return false;
@@ -792,6 +793,9 @@ function canMutateEntity(collection, entity, user, readData) {
   }
   if (collection === 'planner_items') {
     return isOfficeManager(user);
+  }
+  if (collection === 'service_vehicles' || collection === 'vehicle_trips') {
+    if (isRentalManager(user)) return false;
   }
   return canAccessEntity(collection, entity, user, readData);
 }

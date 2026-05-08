@@ -508,8 +508,8 @@ const READ_PERMISSIONS = {
   service_work_catalog: ['Администратор'],
   spare_parts_catalog: ['Администратор'],
   planner_items:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
-  service_vehicles: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
-  vehicle_trips:    ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  service_vehicles: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
+  vehicle_trips:    ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   reports: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
 };
 

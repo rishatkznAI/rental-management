@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate, useNavigation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { LayoutDashboard, Truck, FileText, Wrench, Users, Menu } from 'lucide-react';
@@ -30,8 +30,8 @@ export function Layout() {
   const firstAllowedPath = defaultPath();
   const hasAccessibleSection = firstAllowedPath !== '/login';
   const visibleBottomNav = BOTTOM_NAV.filter(item => canView(pathToSection(item.href) || 'dashboard'));
-  const section = pathToSection(location.pathname);
-  const requiredAction = pathToRequiredAction(location.pathname);
+  const section = useMemo(() => pathToSection(location.pathname), [location.pathname]);
+  const requiredAction = useMemo(() => pathToRequiredAction(location.pathname), [location.pathname]);
   const shouldRedirectBySection = Boolean(section && !canView(section));
   const shouldRedirectByAction = Boolean(
     requiredAction && !can(requiredAction.action, requiredAction.section),

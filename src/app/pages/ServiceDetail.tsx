@@ -408,6 +408,7 @@ export default function ServiceDetail() {
   const { data: mechanics = [] } = useQuery<Mechanic[]>({
     queryKey: ['mechanics'],
     queryFn: mechanicsService.getAll,
+    enabled: canEdit,
   });
   const { data: serviceVehiclesList = [] } = useQuery({
     queryKey: ['service_vehicles'],
@@ -416,20 +417,22 @@ export default function ServiceDetail() {
   const { data: workCatalog = [] } = useQuery<ServiceWork[]>({
     queryKey: ['serviceWorks', 'active'],
     queryFn: serviceWorksService.getActive,
+    enabled: canEdit,
   });
   const { data: sparePartsCatalog = [] } = useQuery<SparePart[]>({
     queryKey: ['spareParts', 'active'],
     queryFn: sparePartsService.getActive,
+    enabled: canEdit,
   });
   const { data: repairWorkItems = [] } = useQuery<RepairWorkItem[]>({
     queryKey: ['repairWorkItems', id],
     queryFn: () => repairWorkItemsService.getByRepairId(id ?? ''),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && canEdit,
   });
   const { data: repairPartItems = [] } = useQuery<RepairPartItem[]>({
     queryKey: ['repairPartItems', id],
     queryFn: () => repairPartItemsService.getByRepairId(id ?? ''),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && canEdit,
   });
   const { data: serviceAuditLog = [] } = useQuery<ServiceAuditLogEntry[]>({
     queryKey: ['serviceAuditLog', id],

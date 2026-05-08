@@ -28,6 +28,19 @@ test('rental manager can read and mutate only own rentals', () => {
   assert.equal(access.canMutateEntity('rentals', state.rentals[1], user), false);
 });
 
+test('rental manager can view service vehicles but cannot mutate them', () => {
+  const state = {
+    service_vehicles: [{ id: 'SV-1', plateNumber: 'A001AA' }],
+    vehicle_trips: [{ id: 'VT-1', vehicleId: 'SV-1', route: 'Склад — объект' }],
+  };
+  const access = createAccess(state);
+  const user = { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' };
+
+  assert.deepEqual(access.filterCollectionByScope('service_vehicles', state.service_vehicles, user).map(item => item.id), ['SV-1']);
+  assert.deepEqual(access.filterCollectionByScope('vehicle_trips', state.vehicle_trips, user).map(item => item.id), ['VT-1']);
+  assert.equal(access.canMutateEntity('service_vehicles', state.service_vehicles[0], user), false);
+});
+
 test('manager mass assignment cannot override manager/status/payment fields', () => {
   const access = createAccess({});
   const user = { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' };

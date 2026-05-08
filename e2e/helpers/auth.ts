@@ -32,6 +32,7 @@ export async function navigateInApp(page: Page, route: string) {
   const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
   await page.evaluate((nextRoute) => {
     window.location.hash = nextRoute;
+    window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
   }, normalizedRoute);
 }
 

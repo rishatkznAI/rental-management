@@ -114,7 +114,7 @@ interface ReturnModalProps {
   /** Список всех аренд из React-состояния родителя (единый источник истины). */
   ganttRentals?: GanttRentalData[];
   onClose: () => void;
-  onConfirm: (data: { rentalId: string; ganttRentalId: string; returnDate: string; result: string }) => void;
+  onConfirm: (data: { rentalId: string; ganttRentalId: string; rental: GanttRentalData; returnDate: string; result: string }) => void;
 }
 
 export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRentalsProp, onClose, onConfirm }: ReturnModalProps) {
@@ -261,6 +261,7 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
                 onConfirm({
                   rentalId: getGanttRentalSourceId(rental),
                   ganttRentalId: rental.id,
+                  rental,
                   returnDate,
                   result,
                 });
@@ -424,33 +425,35 @@ export function NewRentalModal({
   const { data: clientsData = [] } = useQuery({
     queryKey: ['clients'],
     queryFn: clientsService.getAll,
-    enabled: !clientsProp,
+    enabled: open && !clientsProp,
   });
   const { data: usersData = [] } = useQuery<StaffOption[]>({
     queryKey: ['staff', 'manager-options'],
     queryFn: staffService.getManagerOptions,
-    enabled: !managersProp,
+    enabled: open && !managersProp,
   });
   const { data: paymentsData = [] } = useQuery({
     queryKey: ['payments'],
     queryFn: paymentsService.getAll,
+    enabled: open,
   });
   const { data: fetchedGanttRentals = [] } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
-    enabled: !ganttRentalsProp,
+    enabled: open && !ganttRentalsProp,
   });
   const { data: fetchedEquipment = [] } = useQuery({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
-    enabled: !equipmentListProp,
+    enabled: open && !equipmentListProp,
   });
 
   React.useEffect(() => {
+    if (!open) return;
     if (!preselectedEquipmentId) return;
     const selected = (equipmentListProp ?? fetchedEquipment).find(item => item.id === preselectedEquipmentId);
     if (selected) setEquipmentId(selected.id);
-  }, [preselectedEquipmentId, equipmentListProp, fetchedEquipment]);
+  }, [open, preselectedEquipmentId, equipmentListProp, fetchedEquipment]);
 
   // ─── Данные из справочников ────────────────────────────────────────────────
   const allClients = useMemo(() => clientsProp ?? clientsData, [clientsData, clientsProp]);
@@ -532,6 +535,7 @@ export function NewRentalModal({
 
   // Перепроверяем конфликт при смене дат
   React.useEffect(() => {
+    if (!open) return;
     if (!selectedEquipment) { setConflictWarn(false); return; }
     setConflictWarn(
       isEquipmentBusy(
@@ -542,7 +546,7 @@ export function NewRentalModal({
         uniqueInventoryNumbers.has(selectedEquipment.inventoryNumber),
       ),
     );
-  }, [startDate, endDate, selectedEquipment, existingRentals, uniqueInventoryNumbers]);
+  }, [open, startDate, endDate, selectedEquipment, existingRentals, uniqueInventoryNumbers]);
 
   // Находим конкретную аренду, вызывающую конфликт (для отображения деталей)
   const conflictingRental = useMemo(() => {

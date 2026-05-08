@@ -126,6 +126,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const qc = useQueryClient();
+  const canViewReports = can('view', 'reports');
 
   // All data via react-query (auto-refetches on window focus by default)
   const { data: equipment = [] }  = useEquipmentList();
@@ -145,6 +146,7 @@ export default function Dashboard() {
   const { data: mechanicWorkload } = useQuery<MechanicsWorkloadReport>({
     queryKey: ['reports', 'mechanicsWorkload'],
     queryFn: reportsService.getMechanicsWorkload,
+    enabled: canViewReports,
   });
 
   // For modal props that expect Equipment[]

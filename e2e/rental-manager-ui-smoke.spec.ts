@@ -2,6 +2,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { login, navigateInApp } from './helpers/auth';
 import { withAdminApi } from './helpers/api';
 
+test.use({ trace: 'off', screenshot: 'off', video: 'off' });
+
 type UiIssue = {
   type: string;
   action: string;
@@ -10,21 +12,35 @@ type UiIssue = {
   status?: number;
 };
 
+type SmokeUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+};
+
 type SeedData = {
+  user: SmokeUser;
   client: { id: string; company: string; contact: string };
+  uiClientName: string;
+  object: { id: string; name: string };
+  contract: { id: string; number: string };
   equipment: { id: string; inventoryNumber: string; serialNumber: string; manufacturer: string; model: string };
-  rentalEquipment: { id: string; inventoryNumber: string; serialNumber: string };
   serviceEquipment: { id: string; inventoryNumber: string; serialNumber: string };
   rental: { id: string };
   serviceTicket: { id: string; reason: string };
+  serviceVehicle: { id: string; plateNumber: string };
+  payment: { id: string; invoiceNumber: string };
+  document: { id: string; number: string };
 };
 
-const OFFICE_CREDENTIALS = {
-  email: 'smoke-office@yandex.ru',
+const RENTAL_CREDENTIALS = {
+  email: 'smoke-rental@yandex.ru',
   password: '123123',
 };
 
-const OFFICE_SECTIONS: Array<{ name: RegExp; label: string; route: string }> = [
+const RENTAL_MANAGER_SECTIONS: Array<{ name: RegExp; label: string; route: string }> = [
   { name: /^Дашборд/, label: 'Дашборд', route: '/' },
   { name: /^Центр задач/, label: 'Центр задач', route: '/tasks' },
   { name: /^Техника/, label: 'Техника', route: '/equipment' },
@@ -140,7 +156,11 @@ async function exerciseFilters(page: Page, label: string) {
   await expectHealthyScreen(page, `${label} filters`);
   const dialog = page.getByRole('dialog').first();
   if (await dialog.isVisible().catch(() => false)) {
-    const done = dialog.getByRole('button', { name: /Готово|Закрыть|Отмена/ }).last();
+    const reset = dialog.getByRole('button', { name: /Сбросить/ }).first();
+    if ((await reset.count()) > 0 && await reset.isVisible()) {
+      await reset.click({ timeout: 5_000 });
+    }
+    const done = dialog.getByRole('button', { name: /Готово|Применить|Закрыть|Отмена/ }).last();
     if ((await done.count()) > 0 && await done.isVisible()) {
       await done.click({ timeout: 5_000 });
     } else {
@@ -156,59 +176,85 @@ async function postJson<T>(api: APIRequestContext, path: string, data: unknown):
   return (await response.json()) as T;
 }
 
-async function ensureSmokeOfficeUser(api: APIRequestContext) {
+async function ensureSmokeRentalUser(api: APIRequestContext): Promise<SmokeUser> {
   const usersResponse = await api.get('/api/users');
   expect(usersResponse.ok()).toBeTruthy();
-  const users = await usersResponse.json() as Array<{ email?: string; role?: string; status?: string }>;
-  const existing = users.find(user => String(user.email || '').toLowerCase() === OFFICE_CREDENTIALS.email);
+  const users = await usersResponse.json() as SmokeUser[];
+  const existing = users.find(user => String(user.email || '').toLowerCase() === RENTAL_CREDENTIALS.email);
   if (existing) {
-    expect(existing.role, 'existing smoke-office user must keep office role').toMatch(/Офис-менеджер|office/i);
-    expect(existing.status, 'existing smoke-office user must be active').toBe('Активен');
-    return;
+    expect(existing.role, 'existing smoke-rental user must keep rental manager role').toMatch(/Менеджер по аренде|rental/i);
+    expect(existing.status, 'existing smoke-rental user must be active').toBe('Активен');
+    return existing;
   }
 
   const create = await api.post('/api/users', {
     data: {
-      name: 'SMOKE-OFFICE-User',
-      email: OFFICE_CREDENTIALS.email,
-      role: 'Офис-менеджер',
+      name: 'SMOKE-RENTAL-User',
+      email: RENTAL_CREDENTIALS.email,
+      role: 'Менеджер по аренде',
       status: 'Активен',
-      password: OFFICE_CREDENTIALS.password,
+      password: RENTAL_CREDENTIALS.password,
     },
   });
-  expect(create.ok(), `create smoke-office user: ${create.status()} ${await create.text()}`).toBeTruthy();
+  expect(create.ok(), `create smoke-rental user: ${create.status()} ${await create.text()}`).toBeTruthy();
+  return (await create.json()) as SmokeUser;
 }
 
-async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Promise<SeedData> {
-  const prefix = `SMOKE-OFFICE-${suffix}`;
+async function seedSmokeRentalData(api: APIRequestContext, suffix: string): Promise<SeedData> {
+  const user = await ensureSmokeRentalUser(api);
+  const prefix = `SMOKE-RENTAL-${suffix}`;
+  const managerName = user.name || 'SMOKE-RENTAL-User';
+
   const client = await postJson<{ id: string; company: string; contact: string }>(api, '/api/clients', {
     company: `${prefix}-Client`,
     inn: `${Date.now()}`.slice(-10),
     contact: `${prefix}-Contact`,
-    phone: '+79990000002',
-    email: `smoke-office-client-${suffix}@example.local`,
+    phone: '+79990000012',
+    email: `smoke-rental-client-${suffix}@example.local`,
     address: `${prefix}-Address`,
-    paymentTerms: 'Постоплата 14 дней',
+    paymentTerms: 'Постоплата 7 дней',
     creditLimit: 0,
     debt: 0,
     totalRentals: 0,
     status: 'active',
+    manager: managerName,
+    managerId: user.id,
     createdAt: new Date().toISOString(),
     createdBy: 'Playwright',
     notes: prefix,
     history: [],
   });
 
+  const object = await postJson<{ id: string; name: string }>(api, '/api/client_objects', {
+    clientId: client.id,
+    name: `${prefix}-Object`,
+    address: `${prefix}-Object address`,
+    contactName: client.contact,
+    contactPhone: '+79990000012',
+    status: 'active',
+    notes: prefix,
+  });
+
+  const contract = await postJson<{ id: string; number: string }>(api, '/api/client_contracts', {
+    clientId: client.id,
+    objectId: object.id,
+    number: `${prefix}-Contract`,
+    title: `${prefix}-Contract title`,
+    date: '2026-06-01',
+    status: 'active',
+    notes: prefix,
+  });
+
   async function createEquipment(kind: string) {
     return postJson<{ id: string; inventoryNumber: string; serialNumber: string; manufacturer: string; model: string }>(api, '/api/equipment', {
-      inventoryNumber: `SO-${kind}-${suffix}`.slice(0, 18),
-      manufacturer: 'SMOKE-OFFICE',
+      inventoryNumber: `SR-${kind}-${suffix}`.slice(0, 18),
+      manufacturer: 'SMOKE-RENTAL',
       model: `Lift-${kind}`,
       type: 'scissor',
       drive: 'electric',
       serialNumber: `${prefix}-SN-${kind}`,
       year: 2026,
-      hours: 12,
+      hours: 10,
       liftHeight: 8,
       workingHeight: 10,
       location: `${prefix}-Yard`,
@@ -218,28 +264,30 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
       priority: 'medium',
       activeInFleet: true,
       plannedMonthlyRevenue: 0,
-      nextMaintenance: '2026-06-01',
+      nextMaintenance: '2026-06-15',
       history: [],
     });
   }
 
   const equipment = await createEquipment('CARD');
-  const rentalEquipment = await createEquipment('RENT');
   const serviceEquipment = await createEquipment('SERV');
 
   const rental = await postJson<{ id: string }>(api, '/api/rentals', {
     client: client.company,
     clientId: client.id,
+    objectId: object.id,
+    contractId: contract.id,
     contact: client.contact,
-    startDate: '2026-06-01',
-    plannedReturnDate: '2026-06-05',
+    startDate: '2026-06-10',
+    plannedReturnDate: '2026-06-14',
     equipment: [equipment.inventoryNumber],
     equipmentId: equipment.id,
-    rate: '3000 ₽/день',
-    price: 12000,
+    rate: '3500 ₽/день',
+    price: 14000,
     discount: 0,
-    deliveryAddress: `${prefix}-Object`,
-    manager: 'SMOKE-OFFICE-Manager',
+    deliveryAddress: `${prefix}-Object address`,
+    manager: managerName,
+    managerId: user.id,
     status: 'new',
     comments: prefix,
   });
@@ -248,42 +296,50 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     rentalId: rental.id,
     client: client.company,
     clientId: client.id,
+    objectId: object.id,
+    contractId: contract.id,
     clientShort: client.company.slice(0, 20),
     equipmentId: equipment.id,
     equipmentInv: equipment.inventoryNumber,
-    startDate: '2026-06-01',
-    endDate: '2026-06-05',
-    manager: 'SMOKE-OFFICE-Manager',
-    managerInitials: 'SO',
+    startDate: '2026-06-10',
+    endDate: '2026-06-14',
+    manager: managerName,
+    managerId: user.id,
+    managerInitials: 'SR',
     status: 'created',
     paymentStatus: 'unpaid',
     updSigned: false,
-    amount: 12000,
+    amount: 14000,
     comments: [],
   });
 
-  await postJson(api, '/api/documents', {
+  const document = await postJson<{ id: string; number: string }>(api, '/api/documents', {
     type: 'contract',
     number: `${prefix}-DOC`,
     clientId: client.id,
     client: client.company,
+    objectId: object.id,
+    contractId: contract.id,
     rentalId: rental.id,
     rental: rental.id,
     equipmentId: equipment.id,
     equipmentInv: equipment.inventoryNumber,
     status: 'draft',
-    date: '2026-05-08',
-    manager: 'SMOKE-OFFICE-Manager',
+    date: '2026-06-01',
+    manager: managerName,
+    managerId: user.id,
   });
 
-  await postJson(api, '/api/payments', {
+  const payment = await postJson<{ id: string; invoiceNumber: string }>(api, '/api/payments', {
     invoiceNumber: `${prefix}-PAY`,
     clientId: client.id,
     client: client.company,
+    objectId: object.id,
+    contractId: contract.id,
     rentalId: rental.id,
-    amount: 12000,
+    amount: 14000,
     paidAmount: 0,
-    dueDate: '2026-06-01',
+    dueDate: '2026-06-10',
     status: 'pending',
     comment: prefix,
   });
@@ -291,18 +347,19 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
   await postJson(api, '/api/deliveries', {
     type: 'shipping',
     status: 'new',
-    transportDate: '2026-06-01',
-    neededBy: '2026-06-01',
+    transportDate: '2026-06-10',
+    neededBy: '2026-06-10',
     origin: `${prefix}-Yard`,
-    destination: `${prefix}-Object`,
+    destination: `${prefix}-Object address`,
     cargo: `${equipment.manufacturer} ${equipment.model} · INV ${equipment.inventoryNumber}`,
     contactName: client.contact,
-    contactPhone: '+79990000002',
+    contactPhone: '+79990000012',
     cost: 0,
     comment: prefix,
     client: client.company,
     clientId: client.id,
-    manager: 'SMOKE-OFFICE-Manager',
+    manager: managerName,
+    managerId: user.id,
     ganttRentalId: gantt.id,
     classicRentalId: rental.id,
     equipmentId: equipment.id,
@@ -317,7 +374,7 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     serialNumber: equipment.serialNumber,
     clientId: client.id,
     client: client.company,
-    location: `${prefix}-Object`,
+    location: `${prefix}-Object address`,
     reason: `${prefix}-Service`,
     description: `${prefix}-Service description`,
     priority: 'low',
@@ -325,7 +382,28 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     createdAt: new Date().toISOString(),
   });
 
-  return { client, equipment, rentalEquipment, serviceEquipment, rental, serviceTicket };
+  const serviceVehicle = await postJson<{ id: string; plateNumber: string }>(api, '/api/service-vehicles', {
+    make: 'SMOKE-RENTAL',
+    model: 'Service Van',
+    plateNumber: `SR${suffix.slice(-3)}77`,
+    vin: `${prefix}-VIN`,
+    year: 2026,
+    vehicleType: 'van',
+    color: 'white',
+    currentMileage: 100,
+    mileageUpdatedAt: '2026-06-01',
+    responsiblePerson: managerName,
+    conditionNote: prefix,
+    status: 'active',
+    osagoExpiresAt: '2026-12-31',
+    insuranceExpiresAt: '2026-12-31',
+    nextServiceAt: '2026-08-01',
+    serviceNote: prefix,
+  });
+
+  const uiClientName = `${prefix}-UI-Client`;
+
+  return { user, client, uiClientName, object, contract, equipment, serviceEquipment, rental, serviceTicket, serviceVehicle, payment, document };
 }
 
 async function selectEquipment(page: Page, query: string) {
@@ -335,17 +413,14 @@ async function selectEquipment(page: Page, query: string) {
   await page.locator('li[data-eq-item]').first().click();
 }
 
-test('smoke-office can use permitted office UI without admin access or runtime errors', async ({ page, request }) => {
-  test.setTimeout(240_000);
+test('smoke-rental can use rental manager UI without admin access or runtime errors', async ({ page, request }) => {
+  test.setTimeout(270_000);
   const issues: UiIssue[] = [];
   let action = 'setup';
   installUiGuards(page, issues, () => action);
 
   const suffix = String(Date.now()).slice(-8);
-  const seed = await withAdminApi(async (api) => {
-    await ensureSmokeOfficeUser(api);
-    return seedSmokeOfficeData(api, suffix);
-  });
+  const seed = await withAdminApi(async (api) => seedSmokeRentalData(api, suffix));
 
   action = 'preflight';
   const health = await request.get('http://127.0.0.1:3000/health');
@@ -353,28 +428,51 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   const anonymousMe = await request.get('http://127.0.0.1:3000/api/auth/me');
   expect(anonymousMe.status()).toBe(401);
 
-  action = 'login smoke-office';
-  await login(page, OFFICE_CREDENTIALS);
+  action = 'login smoke-rental';
+  await login(page, RENTAL_CREDENTIALS);
   await expect(page.locator('aside').getByRole('button', { name: /^Дашборд/ })).toBeVisible();
   await expect(page).not.toHaveURL(/#\/admin/);
 
-  const token = await page.evaluate(() => window.localStorage.getItem('app_auth_token'));
+  let token = await page.evaluate(() => window.localStorage.getItem('app_auth_token'));
   expect(token).toBeTruthy();
-  const authHeaders = { Authorization: `Bearer ${token}` };
+  let authHeaders = { Authorization: `Bearer ${token}` };
   const me = await request.get('http://127.0.0.1:3000/api/auth/me', { headers: authHeaders });
   expect(me.ok()).toBeTruthy();
   const meJson = await me.json();
-  expect(meJson.user.userRole).toBe('Офис-менеджер');
+  expect(meJson.user.userRole).toBe('Менеджер по аренде');
+  expect(meJson.user.permissions.readableCollections).toEqual(expect.arrayContaining([
+    'clients',
+    'client_objects',
+    'client_contracts',
+    'rentals',
+    'gantt_rentals',
+    'deliveries',
+    'documents',
+    'payments',
+    'service',
+  ]));
+  expect(meJson.user.permissions.writableCollections).not.toContain('users');
+  expect(meJson.user.permissions.writableCollections).not.toContain('app_settings');
+  expect(meJson.user.permissions.writableCollections).not.toContain('payments');
+
+  action = 'logout and re-login';
+  await page.getByRole('button', { name: 'Выйти' }).click();
+  await expect(page).toHaveURL(/#\/login$/);
+  await login(page, RENTAL_CREDENTIALS);
+  await expect(page.locator('aside').getByRole('button', { name: /^Дашборд/ })).toBeVisible();
+  token = await page.evaluate(() => window.localStorage.getItem('app_auth_token'));
+  expect(token).toBeTruthy();
+  authHeaders = { Authorization: `Bearer ${token}` };
 
   const sidebar = page.locator('aside');
-  for (const section of OFFICE_SECTIONS) {
+  for (const section of RENTAL_MANAGER_SECTIONS) {
     await expect(sidebar.getByRole('button', { name: section.name }), `${section.label} should be visible`).toBeVisible();
   }
   for (const forbidden of FORBIDDEN_NAV_ITEMS) {
     await expect(sidebar.getByRole('button', { name: forbidden })).toBeHidden();
   }
 
-  for (const section of OFFICE_SECTIONS) {
+  for (const section of RENTAL_MANAGER_SECTIONS) {
     action = `section ${section.label}`;
     await openSectionFromSidebar(page, section);
     await exerciseVisibleTabs(page, section.label);
@@ -384,53 +482,32 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   action = 'client creation';
   await navigateInApp(page, '/clients/new');
   await expect(page.getByRole('heading', { name: 'Новый клиент' })).toBeVisible();
-  const uiClientName = `SMOKE-OFFICE-${suffix}-UI-Client`;
-  await page.getByPlaceholder('ООО «Компания»').fill(uiClientName);
+  await page.getByPlaceholder('ООО «Компания»').fill(seed.uiClientName);
   await page.getByPlaceholder('1234567890').fill(`${Date.now()}`.slice(-10));
-  await page.getByPlaceholder('info@company.ru').fill(`smoke-office-ui-${suffix}@example.local`);
-  await page.getByPlaceholder('Иванов Иван Иванович').fill('SMOKE-OFFICE Contact');
-  await page.getByPlaceholder('+7 (999) 123-45-67').fill('+79990000003');
+  await page.getByPlaceholder('info@company.ru').fill(`smoke-rental-ui-${suffix}@example.local`);
+  await page.getByPlaceholder('Иванов Иван Иванович').fill('SMOKE-RENTAL Contact');
+  await page.getByPlaceholder('+7 (999) 123-45-67').fill('+79990000013');
   await page.getByRole('button', { name: 'Создать клиента' }).click();
   await expect(page).toHaveURL(/#\/clients\/.+/);
-  await expect(page.getByRole('heading', { name: uiClientName })).toBeVisible();
+  await expect(page.getByRole('heading', { name: seed.uiClientName })).toBeVisible();
   await expectHealthyScreen(page, action);
 
-  action = 'rental creation';
+  action = 'rental creation remains forbidden';
   await navigateInApp(page, `/rentals/new?clientId=${seed.client.id}`);
-  await expect(page.getByRole('heading', { name: 'Новая аренда' })).toBeVisible();
-  await selectEquipment(page, seed.rentalEquipment.serialNumber);
-  await page.locator('input[type="number"]').first().fill('2500');
-  await page.getByRole('button', { name: 'Создать договор' }).click();
   await expect(page).toHaveURL(/#\/rentals$/);
+  await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
   await expectHealthyScreen(page, action);
 
   action = 'service ticket creation';
   await navigateInApp(page, '/service/new');
   await expect(page.getByRole('heading', { name: 'Новая заявка в сервис' })).toBeVisible();
   await selectEquipment(page, seed.serviceEquipment.serialNumber);
-  await page.getByPlaceholder('Например: объект клиента, склад, адрес площадки').fill(`SMOKE-OFFICE-${suffix}-Service location`);
-  await page.getByPlaceholder('Например: Не реагирует на команды, не поднимается, ошибка на дисплее').fill(`SMOKE-OFFICE-${suffix}-Service reason`);
-  await page.getByPlaceholder('Опишите неисправность или проблему, с которой обратились в сервис.').fill(`SMOKE-OFFICE-${suffix}-Service description`);
+  await page.getByPlaceholder('Например: объект клиента, склад, адрес площадки').fill(`SMOKE-RENTAL-${suffix}-Service location`);
+  await page.getByPlaceholder('Например: Не реагирует на команды, не поднимается, ошибка на дисплее').fill(`SMOKE-RENTAL-${suffix}-Service reason`);
+  await page.getByPlaceholder('Опишите неисправность или проблему, с которой обратились в сервис.').fill(`SMOKE-RENTAL-${suffix}-Service description`);
   await page.getByRole('button', { name: 'Создать заявку' }).click();
   await expect(page).toHaveURL(/#\/service\/.+/);
   await expectHealthyScreen(page, action);
-
-  action = 'documents create modal';
-  await page.locator('aside').getByRole('button', { name: /^Документы/ }).click();
-  await expect(page).toHaveURL(/#\/documents$/);
-  await expect(page.getByRole('heading', { name: 'Документы' })).toBeVisible();
-  await expectHealthyScreen(page, action);
-  await page.getByRole('button', { name: /Договор аренды/ }).click();
-  await expect(page.getByRole('dialog', { name: /Договор аренды/ })).toBeVisible();
-  await closeDialogIfOpen(page);
-
-  action = 'payments create modal';
-  await navigateInApp(page, '/payments');
-  await expect(page).toHaveURL(/#\/payments$/);
-  await expectHealthyScreen(page, action);
-  await page.getByRole('button', { name: /Добавить платёж/ }).first().click();
-  await expect(page.getByRole('heading', { name: 'Добавить платёж' })).toBeVisible();
-  await page.getByRole('button', { name: 'Отмена' }).click();
 
   action = 'delivery create sheet';
   await navigateInApp(page, '/deliveries');
@@ -438,48 +515,106 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   await expectHealthyScreen(page, action);
   await page.getByRole('button', { name: /Новая доставка/ }).click();
   await expect(page.getByRole('dialog', { name: /Новая доставка/ })).toBeVisible();
+  await expect(page.getByText(/Счёт получен|Ждём счёт/)).toHaveCount(0);
   await closeDialogIfOpen(page);
+
+  action = 'documents create modal';
+  await navigateInApp(page, '/documents');
+  await expect(page).toHaveURL(/#\/documents$/);
+  await expectHealthyScreen(page, action);
+  await expect(page.getByText(seed.document.number)).toBeVisible();
+  await page.getByRole('button', { name: /Договор аренды/ }).click();
+  await expect(page.getByRole('dialog', { name: /Договор аренды/ })).toBeVisible();
+  await closeDialogIfOpen(page);
+
+  action = 'payments read-only';
+  await navigateInApp(page, '/payments');
+  await expect(page).toHaveURL(/#\/payments$/);
+  await expectHealthyScreen(page, action);
+  await expect(page.getByText(seed.payment.invoiceNumber)).toBeVisible();
+  await expect(page.getByRole('button', { name: /Добавить платёж/ })).toBeHidden();
 
   for (const detail of [
     { label: 'equipment detail', path: `/equipment/${seed.equipment.id}`, text: /Техника 360°/ },
     { label: 'client detail', path: `/clients/${seed.client.id}`, text: seed.client.company },
     { label: 'rental detail', path: `/rentals/${seed.rental.id}`, text: seed.rental.id },
     { label: 'service detail', path: `/service/${seed.serviceTicket.id}`, text: seed.serviceTicket.reason },
+    { label: 'service vehicle detail', path: `/service-vehicles/${seed.serviceVehicle.id}`, text: seed.serviceVehicle.plateNumber },
   ]) {
     action = detail.label;
     await navigateInApp(page, detail.path);
     await expect(page).toHaveURL(new RegExp(`#${detail.path.replace('/', '\\/')}`));
     await expect(page.getByText(detail.text).first()).toBeVisible();
+    await exerciseVisibleTabs(page, detail.label);
     await expectHealthyScreen(page, detail.label);
   }
 
-  action = 'forbidden admin route';
-  await navigateInApp(page, '/admin');
-  await expect(page).not.toHaveURL(/#\/admin$/);
+  action = 'client links read';
+  await navigateInApp(page, `/clients/${seed.client.id}`);
+  await expect(page.locator('main')).toContainText(seed.object.name);
+  await expect(page.locator('main')).toContainText(seed.contract.number);
+  await expect(page.locator('main')).toContainText(seed.rental.id);
+  await expectHealthyScreen(page, action);
+
+  action = 'forbidden direct routes';
+  for (const route of ['/finance', '/bots', '/reports', '/admin']) {
+    await navigateInApp(page, route);
+    await expect(page).not.toHaveURL(new RegExp(`#${route}$`));
+    await expectHealthyScreen(page, `forbidden route ${route}`);
+  }
   await expect(sidebar.getByRole('button', { name: /^Панель администратора/ })).toBeHidden();
 
   action = 'rbac api checks';
-  for (const path of ['/api/equipment', '/api/clients', '/api/rentals', '/api/gantt_rentals', '/api/deliveries', '/api/service', '/api/documents', '/api/payments']) {
+  for (const path of [
+    '/api/equipment',
+    '/api/clients',
+    '/api/client_objects',
+    '/api/client_contracts',
+    '/api/rentals',
+    '/api/gantt_rentals',
+    '/api/deliveries',
+    '/api/service',
+    '/api/documents',
+    '/api/payments',
+    '/api/staff/manager-options',
+    '/api/service_vehicles',
+    '/api/vehicle-trips',
+  ]) {
     const response = await request.get(`http://127.0.0.1:3000${path}`, { headers: authHeaders });
-    expect(response.ok(), `${path} should be readable for office manager`).toBeTruthy();
+    expect(response.ok(), `${path} should be readable for rental manager`).toBeTruthy();
   }
+
   const staffOptions = await request.get('http://127.0.0.1:3000/api/staff/manager-options', { headers: authHeaders });
-  expect(staffOptions.ok()).toBeTruthy();
-  expect(JSON.stringify(await staffOptions.json())).not.toMatch(/password|token/i);
+  expect(JSON.stringify(await staffOptions.json())).not.toMatch(/password|token|smoke-rental@yandex\.ru/i);
 
   const usersList = await request.get('http://127.0.0.1:3000/api/users', { headers: authHeaders });
   expect(usersList.ok()).toBeTruthy();
-  expect(JSON.stringify(await usersList.json())).not.toMatch(/password|token/i);
+  expect(JSON.stringify(await usersList.json())).not.toMatch(/password|token|smoke-rental@yandex\.ru/i);
   const userPatch = await request.patch('http://127.0.0.1:3000/api/users/U-reset-admin', {
     headers: authHeaders,
     data: { role: 'Администратор' },
   });
-  expect(userPatch.status(), '/api/users write must stay forbidden for office manager').toBe(403);
+  expect(userPatch.status(), '/api/users write must stay forbidden for rental manager').toBe(403);
 
-  for (const path of ['/api/app_settings', '/api/status']) {
+  for (const path of ['/api/app_settings', '/api/admin/audit-logs', '/api/admin/system-data/export']) {
     const response = await request.get(`http://127.0.0.1:3000${path}`, { headers: authHeaders });
-    expect(response.status(), `${path} must stay forbidden for office manager`).toBe(403);
+    expect([401, 403].includes(response.status()), `${path} must stay forbidden for rental manager`).toBeTruthy();
   }
+
+  const paymentCreate = await request.post('http://127.0.0.1:3000/api/payments', {
+    headers: authHeaders,
+    data: {
+      invoiceNumber: `SMOKE-RENTAL-${suffix}-FORBIDDEN-PAY`,
+      clientId: seed.client.id,
+      client: seed.client.company,
+      rentalId: seed.rental.id,
+      amount: 1,
+      paidAmount: 0,
+      dueDate: '2026-06-10',
+      status: 'pending',
+    },
+  });
+  expect(paymentCreate.status(), 'payment creation must stay forbidden for rental manager').toBe(403);
 
   expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);
 });

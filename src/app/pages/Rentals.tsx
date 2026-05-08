@@ -640,6 +640,8 @@ export default function Rentals() {
   const canCreatePayments = can('create', 'payments');
   const canViewClients = can('view', 'clients');
   const canViewPayments = can('view', 'payments') || can('view', 'finance');
+  const canViewService = can('view', 'service');
+  const canViewApprovals = can('view', 'approvals');
   const canEditRentalDates = canEditRentals;
   const canRestoreRentals = isAdminRole;
   const normalizedRole = normalizeUserRole(user?.role);
@@ -677,6 +679,7 @@ export default function Rentals() {
   const { data: serviceTickets = EMPTY_SERVICE_TICKETS } = useQuery<ServiceTicket[]>({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
+    enabled: canViewService,
   });
   const { data: usersData = EMPTY_STAFF_OPTIONS } = useQuery<StaffOption[]>({
     queryKey: ['staff', 'manager-options'],
@@ -701,7 +704,7 @@ export default function Rentals() {
     data: rentalChangeRequests = EMPTY_RENTAL_CHANGE_REQUESTS,
     isLoading: isRentalApprovalsLoading,
     error: rentalApprovalsError,
-  } = useRentalChangeRequestsList(!isInvestorRole);
+  } = useRentalChangeRequestsList(canViewApprovals);
   const investorEquipmentIds = useMemo(() => {
     if (!isInvestorRole || !investorBinding) return null;
     return new Set(
@@ -2041,7 +2044,7 @@ export default function Rentals() {
                   Новая аренда
                 </Button>
               )}
-              {!isInvestorRole && (
+              {canViewApprovals && (
                 <>
                   <Button
                     size="sm"

@@ -11,6 +11,7 @@ const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
 const { normalizeRole } = require('../server/lib/role-groups.js');
 const { registerAuthRoutes } = require('../server/routes/auth.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
+const { registerRentalChangeRequestRoutes } = require('../server/routes/rental-change-requests.js');
 const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { registerBotRoutes } = require('../server/routes/bot.js');
 const { registerStaffRoutes } = require('../server/routes/staff.js');
@@ -29,6 +30,7 @@ const READ_PERMISSIONS = {
   equipment: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   gantt_rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
+  rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   deliveries: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Перевозчик'],
   payments: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   crm_deals: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
@@ -106,6 +108,7 @@ function createState() {
     service_vehicles: [{ id: 'SV-1', make: 'Lada', model: 'Largus', plateNumber: 'A001AA', status: 'active' }],
     vehicle_trips: [{ id: 'VT-1', vehicleId: 'SV-1', driver: 'Петров', route: 'Склад — объект', date: '2026-05-01' }],
     payments: [{ id: 'P-1', rentalId: 'R-own', amount: 1000, status: 'new' }],
+    rental_change_requests: [],
     crm_deals: [{
       id: 'CRM-own',
       title: 'Продажа подъёмника',
@@ -248,6 +251,15 @@ function createSecurityApp(state = createState()) {
     accessControl,
     auditLog: (_req, entry) => auditEntries.push(entry),
     serviceAuditLog,
+  }));
+  apiRouter.use(registerRentalChangeRequestRoutes({
+    readData,
+    writeData,
+    requireAuth,
+    requireRead,
+    validateRentalPayload: () => ({ ok: true }),
+    generateId: prefix => `${prefix}-new`,
+    idPrefixes: { rental_change_requests: 'RCR' },
   }));
   apiRouter.use(registerCrudRoutes({
     collections: [
@@ -1006,8 +1018,38 @@ test('real Express API routes deny direct object-level bypasses', async () => {
       assert.equal(response.status, 200, path);
       assertNoCommercialFields(response.body);
     }
+    const investorMe = await request(baseUrl, 'GET', '/api/auth/me', 'investor-token');
+    assert.equal(investorMe.status, 200);
+    assert.equal(investorMe.body.user.userRole, 'Инвестор');
+    assert.equal(investorMe.body.user.ownerId, 'OW-1');
+    assert.ok(investorMe.body.user.permissions.readableCollections.includes('equipment'));
+    assert.ok(investorMe.body.user.permissions.readableCollections.includes('rentals'));
+    assert.ok(investorMe.body.user.permissions.readableCollections.includes('gantt_rentals'));
+    assert.equal(investorMe.body.user.permissions.readableCollections.includes('clients'), false);
+    assert.equal(investorMe.body.user.permissions.readableCollections.includes('payments'), false);
+    assert.equal(investorMe.body.user.permissions.readableCollections.includes('documents'), false);
+    assert.equal(investorMe.body.user.permissions.readableCollections.includes('service'), false);
+    const investorEquipment = await request(baseUrl, 'GET', '/api/equipment', 'investor-token');
+    assert.equal(investorEquipment.status, 200);
+    assert.deepEqual(investorEquipment.body.map(item => item.id), ['EQ-own']);
+    assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-own', 'investor-token')).status, 200);
+    const investorRentals = await request(baseUrl, 'GET', '/api/rentals', 'investor-token');
+    assert.equal(investorRentals.status, 200);
+    assert.deepEqual(investorRentals.body.map(item => item.id), ['R-own']);
+    assert.equal((await request(baseUrl, 'GET', '/api/rentals/R-own', 'investor-token')).status, 200);
+    const investorGanttRentals = await request(baseUrl, 'GET', '/api/gantt_rentals', 'investor-token');
+    assert.equal(investorGanttRentals.status, 200);
+    assert.deepEqual(investorGanttRentals.body.map(item => item.id), ['GR-own']);
+    assert.equal((await request(baseUrl, 'GET', '/api/rental_change_requests', 'manager-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/equipment/EQ-other', 'investor-token')).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/rentals/R-other', 'investor-token')).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/gantt_rentals/GR-other', 'investor-token')).status, 403);
+    for (const path of ['/api/clients', '/api/payments', '/api/documents', '/api/users', '/api/service', '/api/app_settings', '/api/rental_change_requests']) {
+      const response = await request(baseUrl, 'GET', path, 'investor-token');
+      assert.equal(response.status, 403, path);
+    }
+    assert.equal((await request(baseUrl, 'PATCH', '/api/equipment/EQ-own', 'investor-token', { notes: 'bypass' })).status, 403);
+    assert.equal((await request(baseUrl, 'POST', '/api/payments', 'investor-token', { rentalId: 'R-own', amount: 1 })).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/app_settings', 'manager-token')).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/unknown_collection/X-1', 'admin-token')).status, 403);
     assert.equal((await request(baseUrl, 'PUT', '/api/payments', 'manager-token', [{ id: 'P-1', amount: 1 }])).status, 403);

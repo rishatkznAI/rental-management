@@ -67,20 +67,39 @@ test('manager mass assignment cannot override manager/status/payment fields', ()
 test('investor sees only own equipment and linked rentals', () => {
   const state = {
     equipment: [
-      { id: 'EQ-1', inventoryNumber: '100', ownerId: 'OW-1' },
-      { id: 'EQ-2', inventoryNumber: '200', ownerId: 'OW-2' },
+      { id: 'EQ-1', inventoryNumber: '100', ownerId: 'OW-1', ownerName: 'SMOKE-INVESTOR-Owner' },
+      { id: 'EQ-2', inventoryNumber: '200', ownerId: 'OW-2', ownerName: 'Other Owner' },
     ],
     gantt_rentals: [
       { id: 'GR-1', equipmentId: 'EQ-1' },
       { id: 'GR-2', equipmentId: 'EQ-2' },
     ],
-    rentals: [],
+    rentals: [
+      { id: 'R-1', equipmentId: 'EQ-1', clientId: 'C-1' },
+      { id: 'R-legacy', equipment: ['100'], clientId: 'C-1' },
+      { id: 'R-2', equipmentId: 'EQ-2', clientId: 'C-2' },
+    ],
+    clients: [{ id: 'C-1', company: 'ООО Свой' }],
+    documents: [{ id: 'D-1', rentalId: 'R-1', clientId: 'C-1' }],
+    owners: [{ id: 'OW-1', name: 'SMOKE-INVESTOR-Owner' }, { id: 'OW-2', name: 'Other Owner' }],
+    payments: [{ id: 'P-1', rentalId: 'R-1', clientId: 'C-1' }],
+    service: [{ id: 'S-1', equipmentId: 'EQ-1' }],
   };
   const access = createAccess(state);
-  const investor = { userId: 'U-investor', userName: 'Инвестор', userRole: 'Инвестор', ownerId: 'OW-1' };
+  const investor = { userId: 'U-investor', userName: 'Инвестор', userRole: 'Инвестор', ownerId: 'OW-1', ownerName: 'SMOKE-INVESTOR-Owner' };
 
   assert.deepEqual(access.filterCollectionByScope('equipment', state.equipment, investor).map(item => item.id), ['EQ-1']);
+  assert.deepEqual(access.filterCollectionByScope('rentals', state.rentals, investor).map(item => item.id), ['R-1', 'R-legacy']);
   assert.deepEqual(access.filterCollectionByScope('gantt_rentals', state.gantt_rentals, investor).map(item => item.id), ['GR-1']);
+  assert.deepEqual(access.filterCollectionByScope('owners', state.owners, investor).map(item => item.id), ['OW-1']);
+  assert.deepEqual(access.filterCollectionByScope('clients', state.clients, investor), []);
+  assert.deepEqual(access.filterCollectionByScope('documents', state.documents, investor), []);
+  assert.deepEqual(access.filterCollectionByScope('payments', state.payments, investor), []);
+  assert.deepEqual(access.filterCollectionByScope('service', state.service, investor), []);
+  assert.equal(access.canAccessEntity('equipment', state.equipment[1], investor), false);
+  assert.equal(access.canAccessEntity('rentals', state.rentals[2], investor), false);
+  assert.equal(access.canMutateEntity('equipment', state.equipment[0], investor), false);
+  assert.equal(access.canMutateEntity('rentals', state.rentals[0], investor), false);
 });
 
 test('mechanic sees and mutates only assigned service tickets', () => {

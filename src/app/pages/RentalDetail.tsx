@@ -48,7 +48,7 @@ import {
   getRentalExtensionValidation,
 } from '../lib/rentalExtension.js';
 import { calculateRentalAmount, formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
-import type { DocumentType, Equipment, PaymentStatus, Rental, RentalStatus } from '../types';
+import type { Client, ClientContract, ClientObject, Document, DocumentType, Equipment, Payment, PaymentStatus, Rental, RentalStatus, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
 const statusLabels: Record<RentalStatus, string> = {
@@ -77,6 +77,16 @@ type RentalFormState = {
   deliveryAddress: string;
   comments: string;
 };
+
+const EMPTY_RENTALS: Rental[] = [];
+const EMPTY_GANTT_RENTALS: GanttRentalData[] = [];
+const EMPTY_EQUIPMENT: Equipment[] = [];
+const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
+const EMPTY_PAYMENTS: Payment[] = [];
+const EMPTY_CLIENTS: Client[] = [];
+const EMPTY_CLIENT_OBJECTS: ClientObject[] = [];
+const EMPTY_CLIENT_CONTRACTS: ClientContract[] = [];
+const EMPTY_DOCUMENTS: Document[] = [];
 
 type RentalSaveResponse = Rental & {
   changeRequestSummary?: {
@@ -182,27 +192,31 @@ export default function RentalDetail() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { can } = usePermissions();
-  const { data: rentals = [] } = useRentalsList();
-  const { data: ganttRentals = [] } = useGanttData();
-  const { data: equipment = [] } = useEquipmentList();
-  const { data: serviceTickets = [] } = useServiceTicketsList();
-  const { data: payments = [] } = usePaymentsList();
-  const { data: clients = [] } = useClientsList();
-  const { data: clientObjects = [] } = useClientObjectsList();
-  const { data: clientContracts = [] } = useClientContractsList();
-  const { data: documents = [] } = useDocumentsList();
-  const { data: changeRequests = [] } = useRentalChangeRequestsList();
-  const { data: auditHistory, isLoading: auditHistoryLoading, isError: auditHistoryError } = useRentalAuditHistory(id || '');
-
-  const rental = rentals.find(r => r.id === id);
   const canEditRentals = can('edit', 'rentals');
   const canEditRentalDates = canEditRentals;
   const canViewFinance = can('view', 'finance');
+  const canViewPayments = can('view', 'payments') || canViewFinance;
   const canViewDocuments = can('view', 'documents');
+  const canViewClients = can('view', 'clients');
+  const canViewService = can('view', 'service');
+  const canViewApprovals = can('view', 'approvals');
   const isAdmin = user?.role === 'Администратор';
   const canCreateDocuments = can('create', 'documents');
   const canCreatePayments = can('create', 'payments');
   const canRestoreRentals = user?.role === 'Администратор';
+  const { data: rentals = EMPTY_RENTALS } = useRentalsList();
+  const { data: ganttRentals = EMPTY_GANTT_RENTALS } = useGanttData();
+  const { data: equipment = EMPTY_EQUIPMENT } = useEquipmentList();
+  const { data: serviceTickets = EMPTY_SERVICE_TICKETS } = useServiceTicketsList({ enabled: canViewService });
+  const { data: payments = EMPTY_PAYMENTS } = usePaymentsList({ enabled: canViewPayments });
+  const { data: clients = EMPTY_CLIENTS } = useClientsList({ enabled: canViewClients });
+  const { data: clientObjects = EMPTY_CLIENT_OBJECTS } = useClientObjectsList({ enabled: canViewClients });
+  const { data: clientContracts = EMPTY_CLIENT_CONTRACTS } = useClientContractsList({ enabled: canViewClients });
+  const { data: documents = EMPTY_DOCUMENTS } = useDocumentsList({ enabled: canViewDocuments });
+  const { data: changeRequests = [] } = useRentalChangeRequestsList(canViewApprovals);
+
+  const rental = rentals.find(r => r.id === id);
+  const { data: auditHistory, isLoading: auditHistoryLoading, isError: auditHistoryError } = useRentalAuditHistory(id || '', { enabled: !!rental });
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');

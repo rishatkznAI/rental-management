@@ -30,11 +30,11 @@ export function useRentalById(id: string) {
   });
 }
 
-export function useRentalAuditHistory(id: string) {
+export function useRentalAuditHistory(id: string, options: QueryOptions = {}) {
   return useQuery({
     queryKey: RENTAL_KEYS.audit(id),
     queryFn: () => rentalsService.getAuditHistory(id),
-    enabled: !!id,
+    enabled: !!id && (options.enabled ?? true),
   });
 }
 

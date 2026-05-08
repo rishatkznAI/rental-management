@@ -1192,6 +1192,7 @@ apiRouter.use(registerRentalChangeRequestRoutes({
   readData,
   writeData,
   requireAuth,
+  requireRead,
   validateRentalPayload,
   generateId,
   idPrefixes: ID_PREFIXES,

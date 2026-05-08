@@ -10,6 +10,7 @@ const rentalApprovalHistorySheetSource = readFileSync(new URL('../src/app/compon
 const equipmentPageSource = readFileSync(new URL('../src/app/pages/Equipment.tsx', import.meta.url), 'utf8');
 const equipmentDetailSource = readFileSync(new URL('../src/app/pages/EquipmentDetail.tsx', import.meta.url), 'utf8');
 const rentalsPageSource = readFileSync(new URL('../src/app/pages/Rentals.tsx', import.meta.url), 'utf8');
+const rentalDetailSource = readFileSync(new URL('../src/app/pages/RentalDetail.tsx', import.meta.url), 'utf8');
 const servicePageSource = readFileSync(new URL('../src/app/pages/Service.tsx', import.meta.url), 'utf8');
 const deliveriesPageSource = readFileSync(new URL('../src/app/pages/Deliveries.tsx', import.meta.url), 'utf8');
 const equipmentHookSource = readFileSync(new URL('../src/app/hooks/useEquipment.ts', import.meta.url), 'utf8');
@@ -33,6 +34,12 @@ function rentalManagerPermissionBlock() {
 function carrierPermissionBlock() {
   const match = permissionsSource.match(/'Перевозчик':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
   assert.ok(match?.groups?.body, 'carrier permission block must exist');
+  return match.groups.body;
+}
+
+function investorPermissionBlock() {
+  const match = permissionsSource.match(/'Инвестор':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
+  assert.ok(match?.groups?.body, 'investor permission block must exist');
   return match.groups.body;
 }
 
@@ -70,6 +77,18 @@ test('frontend carrier permissions expose only deliveries and profile shell', ()
 
   for (const section of ['dashboard', 'equipment', 'rentals', 'service', 'clients', 'documents', 'payments', 'finance', 'reports', 'admin_panel']) {
     assert.doesNotMatch(block, new RegExp(`\\b${section}:\\s+`), `${section} must not be granted to carrier`);
+  }
+});
+
+test('frontend investor permissions expose only own equipment, rentals and profile shell', () => {
+  const block = investorPermissionBlock();
+
+  assert.match(block, /equipment:\s+VIEW/);
+  assert.match(block, /rentals:\s+VIEW/);
+  assert.match(block, /profile_settings:\s+\['view', 'edit'\]/);
+
+  for (const section of ['dashboard', 'service', 'clients', 'documents', 'payments', 'finance', 'reports', 'admin_panel', 'deliveries']) {
+    assert.doesNotMatch(block, new RegExp(`\\b${section}:\\s+`), `${section} must not be granted to investor`);
   }
 });
 
@@ -122,11 +141,42 @@ test('frontend warranty pages do not prefetch forbidden operational collections'
   assert.match(rentalsPageSource, /enabled: canViewPayments/);
   assert.match(rentalsPageSource, /enabled: canViewStaffOptions/);
   assert.match(rentalsPageSource, /enabled: canViewClients/);
+  assert.match(rentalsPageSource, /const canViewService = can\('view', 'service'\)/);
+  assert.match(rentalsPageSource, /enabled: canViewService/);
+  assert.match(rentalsPageSource, /const canViewApprovals = can\('view', 'approvals'\)/);
+  assert.match(rentalsPageSource, /useRentalChangeRequestsList\(canViewApprovals\)/);
 
   assert.match(equipmentDetailSource, /const canViewShippingPhotos = \['Администратор', 'Офис-менеджер', 'Менеджер по аренде'\]\.includes\(normalizedRole\)[\s\S]*isMechanicRole\(normalizedRole\)/);
   assert.match(equipmentDetailSource, /enabled: !!id && canViewShippingPhotos/);
 
   assert.match(rentalApprovalHistorySheetSource, /useClientsList\(\{ enabled: open \}\)/);
+});
+
+test('frontend investor rental surfaces avoid forbidden background reads', () => {
+  assert.match(notificationCenterSource, /const canViewApprovals = canView\('approvals'\)/);
+  assert.match(notificationCenterSource, /enabled: canViewApprovals/);
+
+  assert.match(rentalsPageSource, /const canViewClients = can\('view', 'clients'\)/);
+  assert.match(rentalsPageSource, /const canViewPayments = can\('view', 'payments'\) \|\| can\('view', 'finance'\)/);
+  assert.match(rentalsPageSource, /const canViewService = can\('view', 'service'\)/);
+  assert.match(rentalsPageSource, /const canViewApprovals = can\('view', 'approvals'\)/);
+  assert.match(rentalsPageSource, /enabled: canViewClients/);
+  assert.match(rentalsPageSource, /enabled: canViewPayments/);
+  assert.match(rentalsPageSource, /enabled: canViewService/);
+  assert.match(rentalsPageSource, /useRentalChangeRequestsList\(canViewApprovals\)/);
+
+  assert.match(rentalDetailSource, /const canViewClients = can\('view', 'clients'\)/);
+  assert.match(rentalDetailSource, /const canViewPayments = can\('view', 'payments'\) \|\| canViewFinance/);
+  assert.match(rentalDetailSource, /const canViewService = can\('view', 'service'\)/);
+  assert.match(rentalDetailSource, /const canViewApprovals = can\('view', 'approvals'\)/);
+  assert.match(rentalDetailSource, /useServiceTicketsList\(\{ enabled: canViewService \}\)/);
+  assert.match(rentalDetailSource, /usePaymentsList\(\{ enabled: canViewPayments \}\)/);
+  assert.match(rentalDetailSource, /useClientsList\(\{ enabled: canViewClients \}\)/);
+  assert.match(rentalDetailSource, /useClientObjectsList\(\{ enabled: canViewClients \}\)/);
+  assert.match(rentalDetailSource, /useClientContractsList\(\{ enabled: canViewClients \}\)/);
+  assert.match(rentalDetailSource, /useDocumentsList\(\{ enabled: canViewDocuments \}\)/);
+  assert.match(rentalDetailSource, /useRentalChangeRequestsList\(canViewApprovals\)/);
+  assert.match(rentalDetailSource, /useRentalAuditHistory\(id \|\| '', \{ enabled: !!rental \}\)/);
 });
 
 test('carrier deliveries page does not prefetch forbidden context or show finance controls', () => {

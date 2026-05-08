@@ -68,6 +68,7 @@ export function NotificationCenter() {
   const canViewService = canView('service');
   const canViewEquipment = canView('equipment');
   const canViewPayments = canView('payments') || canView('finance');
+  const canViewApprovals = canView('approvals');
   const normalizedRole = normalizeUserRole(user?.role);
   const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
     || isMechanicRole(normalizedRole);
@@ -79,7 +80,7 @@ export function NotificationCenter() {
       { queryKey: ['notif-equipment'], queryFn: equipmentService.getAll, enabled: canViewEquipment },
       { queryKey: ['notif-payments'], queryFn: paymentsService.getAll, enabled: canViewPayments },
       { queryKey: ['notif-shipping-photos'], queryFn: equipmentService.getAllShippingPhotos, enabled: canViewShippingPhotos },
-      { queryKey: ['notif-rental-change-requests'], queryFn: rentalChangeRequestsService.getAll, enabled: canViewRentals },
+      { queryKey: ['notif-rental-change-requests'], queryFn: rentalChangeRequestsService.getAll, enabled: canViewApprovals },
     ],
   });
 

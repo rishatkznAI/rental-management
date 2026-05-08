@@ -15,6 +15,7 @@ function registerRentalChangeRequestRoutes(deps) {
     readData,
     writeData,
     requireAuth,
+    requireRead = () => (_req, _res, next) => next(),
     validateRentalPayload,
     generateId,
     idPrefixes,
@@ -229,11 +230,11 @@ function registerRentalChangeRequestRoutes(deps) {
     return applyRentalRequest(request, adminName);
   }
 
-  router.get(`/${collection}`, requireAuth, (req, res) => {
+  router.get(`/${collection}`, requireAuth, requireRead(collection), (req, res) => {
     return res.json(visibleRequests(req));
   });
 
-  router.get(`/${collection}/:id`, requireAuth, (req, res) => {
+  router.get(`/${collection}/:id`, requireAuth, requireRead(collection), (req, res) => {
     const request = visibleRequests(req).find(item => item.id === req.params.id);
     if (!request) return res.status(404).json({ ok: false, error: 'Not found' });
     return res.json(request);

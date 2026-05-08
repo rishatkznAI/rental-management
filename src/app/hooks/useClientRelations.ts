@@ -11,10 +11,15 @@ export const CLIENT_CONTRACT_KEYS = {
   all: ['client_contracts'] as const,
 };
 
-export function useClientObjectsList() {
+type QueryOptions = {
+  enabled?: boolean;
+};
+
+export function useClientObjectsList(options: QueryOptions = {}) {
   return useQuery({
     queryKey: CLIENT_OBJECT_KEYS.all,
     queryFn: clientObjectsService.getAll,
+    enabled: options.enabled ?? true,
   });
 }
 
@@ -35,10 +40,11 @@ export function useUpdateClientObject() {
   });
 }
 
-export function useClientContractsList() {
+export function useClientContractsList(options: QueryOptions = {}) {
   return useQuery({
     queryKey: CLIENT_CONTRACT_KEYS.all,
     queryFn: clientContractsService.getAll,
+    enabled: options.enabled ?? true,
   });
 }
 

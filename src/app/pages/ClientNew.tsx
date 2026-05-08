@@ -13,11 +13,12 @@ import {
 } from '../components/ui/select';
 import { ArrowLeft, Info } from 'lucide-react';
 import { useCreateClient } from '../hooks/useClients';
-import { ApiError, api } from '../lib/api';
+import { ApiError } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { createAuditEntry } from '../lib/entity-history';
 import type { Client } from '../types';
 import { filterRentalManagerUsers } from '../lib/userStorage';
+import { staffService } from '../services/staff.service';
 
 const PAYMENT_TERMS_OPTIONS = [
   { value: 'Постоплата 14 дней', label: 'Постоплата 14 дней' },
@@ -92,7 +93,7 @@ export default function ClientNew() {
 
   // Загружаем активных менеджеров из API
   useEffect(() => {
-    api.get<{ id: string; name: string; role: string; status: string }[]>('/api/users')
+    staffService.getManagerOptions()
       .then(users => setManagers(filterRentalManagerUsers(users)))
       .catch(() => {});
   }, []);
@@ -368,7 +369,7 @@ export default function ClientNew() {
               </Select>
               {managers.length === 0 && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
-                  Нет активных сотрудников — добавьте менеджеров в разделе «Настройки → Пользователи».
+                  Нет активных менеджеров аренды для назначения клиента.
                 </p>
               )}
             </FieldWrapper>

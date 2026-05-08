@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { appSettingsService } from '../services/app-settings.service';
+import { usePermissions } from './permissions';
 import type { AppSetting, Equipment, EquipmentType } from '../types';
 
 export const EQUIPMENT_TYPE_CATALOG_SETTING_KEY = 'equipment_type_catalog';
@@ -108,9 +109,12 @@ export function mergeEquipmentTypesWithExistingEquipment(
 }
 
 export function useEquipmentTypeCatalog() {
+  const { canView } = usePermissions();
+  const canReadAppSettings = canView('admin_panel');
   const { data: appSettings = [] } = useQuery<AppSetting[]>({
     queryKey: ['app-settings'],
     queryFn: appSettingsService.getAll,
+    enabled: canReadAppSettings,
   });
 
   return useMemo(() => resolveEquipmentTypeCatalog(appSettings), [appSettings]);

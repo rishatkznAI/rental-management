@@ -4,13 +4,13 @@ import { X, RotateCcw, CirclePause as PauseCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import type { GanttRentalData } from '../../mock-data';
-import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
+import { filterRentalManagerUsers } from '../../lib/userStorage';
 import type { Client, Equipment } from '../../types';
 import { equipmentService } from '../../services/equipment.service';
 import { clientsService } from '../../services/clients.service';
 import { paymentsService } from '../../services/payments.service';
 import { rentalsService } from '../../services/rentals.service';
-import { usersService } from '../../services/users.service';
+import { staffService, type StaffOption } from '../../services/staff.service';
 import { EQUIPMENT_KEYS } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
 import { canEquipmentParticipateInRentals } from '../../lib/equipmentClassification';
@@ -377,7 +377,7 @@ interface NewRentalModalProps {
   /** Текущий список техники из React-состояния родителя. */
   equipmentList?: Equipment[];
   clients?: Client[];
-  managers?: SystemUser[];
+  managers?: StaffOption[];
   onClose: () => void;
   onConfirm: (data: {
     clientId: string;
@@ -426,9 +426,9 @@ export function NewRentalModal({
     queryFn: clientsService.getAll,
     enabled: !clientsProp,
   });
-  const { data: usersData = [] } = useQuery<SystemUser[]>({
-    queryKey: ['users'],
-    queryFn: usersService.getAll,
+  const { data: usersData = [] } = useQuery<StaffOption[]>({
+    queryKey: ['staff', 'manager-options'],
+    queryFn: staffService.getManagerOptions,
     enabled: !managersProp,
   });
   const { data: paymentsData = [] } = useQuery({

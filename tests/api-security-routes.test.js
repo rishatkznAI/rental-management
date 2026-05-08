@@ -13,6 +13,7 @@ const { registerAuthRoutes } = require('../server/routes/auth.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
 const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { registerBotRoutes } = require('../server/routes/bot.js');
+const { registerStaffRoutes } = require('../server/routes/staff.js');
 
 const WARRANTY_MECHANIC_ROLE = 'Механик по гарантии';
 const WARRANTY_MECHANIC_ROLE_ALIASES = ['warranty_mechanic', 'mechanic_warranty', 'warrantyMechanic', 'mechanicWarranty', 'warranty-mechanic', 'mechanic-warranty', 'механик по гарантии'];
@@ -22,6 +23,8 @@ const MECHANIC_ROLES = ['Механик', 'Младший стационарны
 const READ_PERMISSIONS = {
   app_settings: ['Администратор'],
   clients: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  client_objects: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  client_contracts: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   documents: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   equipment: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
@@ -40,6 +43,8 @@ const READ_PERMISSIONS = {
 const WRITE_PERMISSIONS = {
   app_settings: ['Администратор'],
   clients: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  client_objects: ['Администратор', 'Офис-менеджер'],
+  client_contracts: ['Администратор', 'Офис-менеджер'],
   documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   equipment: ['Администратор', 'Офис-менеджер'],
   payments: ['Администратор', 'Офис-менеджер'],
@@ -108,6 +113,8 @@ function createState() {
       probability: 25,
     }],
     clients: [],
+    client_objects: [],
+    client_contracts: [],
     documents: [],
     app_settings: [{ id: 'AS-1', key: 'secret', value: { enabled: true } }],
     unknown_collection: [{ id: 'X-1', value: 'hidden' }],
@@ -216,6 +223,10 @@ function createSecurityApp(state = createState()) {
   });
 
   const apiRouter = express.Router();
+  apiRouter.use(registerStaffRoutes({
+    readData,
+    requireAuth,
+  }));
   apiRouter.use(registerRentalRoutes({
     readData,
     writeData,
@@ -244,6 +255,8 @@ function createSecurityApp(state = createState()) {
       'service_works',
       'spare_parts',
       'clients',
+      'client_objects',
+      'client_contracts',
       'documents',
       'crm_deals',
       'unknown_collection',
@@ -259,6 +272,8 @@ function createSecurityApp(state = createState()) {
       service_works: 'SW',
       spare_parts: 'SP',
       clients: 'C',
+      client_objects: 'CO',
+      client_contracts: 'CC',
       documents: 'D',
       crm_deals: 'CRM',
     },
@@ -1084,6 +1099,30 @@ test('non-admin roles cannot change users', async () => {
       });
       assert.equal(response.status, 403, token);
     }
+  });
+});
+
+test('office manager gets safe staff options without user-management access', async () => {
+  const { app } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const users = await request(baseUrl, 'GET', '/api/users', 'office-token');
+    assert.equal(users.status, 200);
+    assert.equal(JSON.stringify(users.body).includes('password'), false);
+    assert.equal((await request(baseUrl, 'GET', '/api/users/U-sales', 'office-token')).status, 403);
+    assert.equal((await request(baseUrl, 'PATCH', '/api/users/U-sales', 'office-token', { role: 'Администратор' })).status, 403);
+
+    const options = await request(baseUrl, 'GET', '/api/staff/manager-options', 'office-token');
+    assert.equal(options.status, 200);
+    assert.deepEqual(
+      options.body.map(item => item.id).sort(),
+      ['U-manager', 'U-manager-alias', 'U-office', 'U-office-alias', 'U-sales'].sort(),
+    );
+    assert.equal(JSON.stringify(options.body).includes('password'), false);
+    assert.equal(JSON.stringify(options.body).includes('admin@example.test'), false);
+
+    assert.equal((await request(baseUrl, 'GET', '/api/client_objects', 'office-token')).status, 200);
+    assert.equal((await request(baseUrl, 'GET', '/api/client_contracts', 'office-token')).status, 200);
   });
 });
 

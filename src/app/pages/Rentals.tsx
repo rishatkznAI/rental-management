@@ -23,7 +23,7 @@ import {
   mockDowntimes,
   mockServicePeriods,
 } from '../mock-data';
-import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, type SystemUser } from '../lib/userStorage';
+import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
@@ -33,7 +33,7 @@ import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
 import { clientsService } from '../services/clients.service';
-import { usersService } from '../services/users.service';
+import { staffService, type StaffOption } from '../services/staff.service';
 import { ApiError } from '../lib/api';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
@@ -660,9 +660,9 @@ export default function Rentals() {
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
   });
-  const { data: usersData = [] } = useQuery<SystemUser[]>({
-    queryKey: ['users'],
-    queryFn: usersService.getAll,
+  const { data: usersData = [] } = useQuery<StaffOption[]>({
+    queryKey: ['staff', 'manager-options'],
+    queryFn: staffService.getManagerOptions,
   });
   const { data: clientsData = [] } = useQuery({
     queryKey: ['clients'],

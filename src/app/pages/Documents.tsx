@@ -82,6 +82,9 @@ type ContractFormState = {
   comment: string;
 };
 
+const EMPTY_MECHANICS: Mechanic[] = [];
+const EMPTY_MECHANIC_DOCUMENTS: MechanicDocument[] = [];
+
 function escapeHtml(value: string | number | null | undefined) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -304,11 +307,11 @@ export default function Documents() {
   const { data: equipment = [] } = useEquipmentList();
   const createDocument = useCreateDocument();
   const updateDocument = useUpdateDocument();
-  const { data: mechanics = [] } = useQuery<Mechanic[]>({
+  const { data: mechanics = EMPTY_MECHANICS } = useQuery<Mechanic[]>({
     queryKey: ['mechanics'],
     queryFn: mechanicsService.getAll,
   });
-  const { data: mechanicDocsData = [] } = useQuery<MechanicDocument[]>({
+  const { data: mechanicDocsData = EMPTY_MECHANIC_DOCUMENTS } = useQuery<MechanicDocument[]>({
     queryKey: ['mechanic-documents'],
     queryFn: mechanicDocumentsService.getAll,
   });

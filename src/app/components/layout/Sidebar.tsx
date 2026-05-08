@@ -204,9 +204,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     enabled: hasSearchInput && canView('finance'),
     staleTime: 1000 * 60 * 2,
   });
+  const canReadAppSettings = canView('admin_panel');
   const { data: appSettings = [] } = useQuery({
     queryKey: ['app-settings'],
     queryFn: appSettingsService.getAll,
+    enabled: canReadAppSettings,
     staleTime: 1000 * 60 * 5,
   });
   const debouncedSearch = useDebouncedValue(search, 180);

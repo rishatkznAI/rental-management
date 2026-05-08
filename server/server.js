@@ -111,6 +111,7 @@ const { registerPlannerRoutes } = require('./routes/planner');
 const { registerRentalChangeRequestRoutes } = require('./routes/rental-change-requests');
 const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
+const { registerStaffRoutes } = require('./routes/staff');
 const { registerSystemRoutes } = require('./routes/system');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
 const { normalizeServiceTicketList } = require('./lib/service-dto');
@@ -434,6 +435,8 @@ const WARRANTY_MECHANIC_ROLES = [WARRANTY_MECHANIC_ROLE, ...WARRANTY_MECHANIC_RO
 
 const WRITE_PERMISSIONS = {
   equipment:      ['Администратор', 'Офис-менеджер'],
+  client_objects: ['Администратор', 'Офис-менеджер'],
+  client_contracts: ['Администратор', 'Офис-менеджер'],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   rental_change_requests: ['Администратор'],
@@ -471,6 +474,8 @@ const WRITE_PERMISSIONS = {
 
 const READ_PERMISSIONS = {
   equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  client_objects: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  client_contracts: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
@@ -1276,6 +1281,11 @@ const {
   resolveServiceTicketRevision,
   getOpenTicketByEquipment,
 } = serviceCore;
+
+apiRouter.use(registerStaffRoutes({
+  readData,
+  requireAuth,
+}));
 
 apiRouter.use(registerCrudRoutes({
   collections: COLLECTIONS,

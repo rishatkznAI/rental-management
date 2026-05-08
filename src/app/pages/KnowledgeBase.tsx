@@ -41,7 +41,7 @@ import {
   useUpdateKnowledgeBaseProgress,
 } from '../hooks/useKnowledgeBase';
 import { cn } from '../lib/utils';
-import { usersService } from '../services/users.service';
+import { staffService } from '../services/staff.service';
 import type {
   KnowledgeBaseAudience,
   KnowledgeBaseModule,
@@ -367,7 +367,7 @@ export default function KnowledgeBase() {
   const { data: progress = [] } = useKnowledgeBaseProgressList();
   const { data: users = [] } = useQuery<TrainingUser[]>({
     queryKey: ['knowledge-base-users'],
-    queryFn: () => usersService.getAll() as unknown as Promise<TrainingUser[]>,
+    queryFn: staffService.getManagerOptions,
     staleTime: 1000 * 60 * 5,
   });
   const createProgress = useCreateKnowledgeBaseProgress();

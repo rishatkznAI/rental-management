@@ -38,7 +38,7 @@ import {
 } from '../components/ui/select';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
-import { usersService } from '../services/users.service';
+import { staffService } from '../services/staff.service';
 import { useClientsList } from '../hooks/useClients';
 import {
   useCreateCrmDeal,
@@ -300,7 +300,7 @@ export default function CRM() {
   const { data: clients = [] } = useClientsList();
   const { data: managers = [] } = useQuery<ManagerOption[]>({
     queryKey: ['crm-managers'],
-    queryFn: usersService.getAll,
+    queryFn: staffService.getManagerOptions,
     staleTime: 1000 * 60 * 5,
   });
   const createDeal = useCreateCrmDeal();

@@ -134,6 +134,31 @@ test('warranty mechanic can view fleet and rentals and work with service and war
   assert.equal(access.canMutateEntity('service', state.service[1], warrantyMechanic), true);
   assert.equal(access.canMutateEntity('warranty_claims', state.warranty_claims[1], warrantyMechanic), true);
   assert.doesNotThrow(() => access.assertCanCreateCollection('warranty_claims', warrantyMechanic, { serviceTicketId: 'S-2' }));
+  const safeWarrantyCreate = access.sanitizeCreateInput('warranty_claims', {
+    serviceTicketId: 'S-2',
+    equipmentId: 'EQ-1',
+    equipmentLabel: 'Lift EQ-1',
+    factoryName: 'Factory',
+    failureDescription: 'Hydraulic leak',
+    requestedResolution: 'Warranty parts',
+    factoryResponse: 'Accepted',
+    decision: 'Approve',
+    priority: 'high',
+    role: 'Администратор',
+    amount: 100000,
+    paymentStatus: 'paid',
+  }, warrantyMechanic);
+  assert.equal(safeWarrantyCreate.serviceTicketId, 'S-2');
+  assert.equal(safeWarrantyCreate.equipmentLabel, 'Lift EQ-1');
+  assert.equal(safeWarrantyCreate.factoryName, 'Factory');
+  assert.equal(safeWarrantyCreate.failureDescription, 'Hydraulic leak');
+  assert.equal(safeWarrantyCreate.requestedResolution, 'Warranty parts');
+  assert.equal(safeWarrantyCreate.factoryResponse, 'Accepted');
+  assert.equal(safeWarrantyCreate.decision, 'Approve');
+  assert.equal(safeWarrantyCreate.priority, 'high');
+  assert.equal(safeWarrantyCreate.role, undefined);
+  assert.equal(safeWarrantyCreate.amount, undefined);
+  assert.equal(safeWarrantyCreate.paymentStatus, undefined);
   assert.equal(access.canAccessEntity('payments', { id: 'P-1', rentalId: 'R-1' }, warrantyMechanic), false);
   assert.deepEqual(access.filterCollectionByScope('payments', [{ id: 'P-1', rentalId: 'R-1' }], warrantyMechanic), []);
   assert.throws(() => access.assertCanReadCollection('reports', warrantyMechanic), /Forbidden/);

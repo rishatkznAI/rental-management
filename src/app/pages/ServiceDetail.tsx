@@ -152,7 +152,7 @@ function partItemsToResult(items: RepairPartItem[]): ServicePartUsage[] {
     name: item.nameSnapshot,
     sku: item.articleSnapshot,
     qty: item.quantity,
-    cost: item.priceSnapshot,
+    cost: Number.isFinite(Number(item.priceSnapshot)) ? Number(item.priceSnapshot) : 0,
   }));
 }
 
@@ -400,6 +400,7 @@ export default function ServiceDetail() {
   const canEditEquipment = can('edit', 'equipment');
   const canViewDocuments = can('view', 'documents');
   const canViewRentals = can('view', 'rentals');
+  const canViewServiceVehicles = can('view', 'service_vehicles');
   const canCreateDocuments = can('create', 'documents');
 
   const { data: fetchedTicket } = useServiceTicketById(id ?? '');
@@ -416,6 +417,7 @@ export default function ServiceDetail() {
   const { data: serviceVehiclesList = [] } = useQuery({
     queryKey: ['service_vehicles'],
     queryFn:  serviceVehiclesService.getAll,
+    enabled: canViewServiceVehicles,
   });
   const { data: workCatalog = [] } = useQuery<ServiceWork[]>({
     queryKey: ['serviceWorks', 'active'],

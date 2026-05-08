@@ -29,7 +29,7 @@ import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
-import { isMechanicRole } from '../lib/userStorage';
+import { isMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
@@ -635,6 +635,9 @@ export default function EquipmentDetail() {
   const canViewFinance = can('view', 'finance');
   const canCreateService = can('create', 'service');
   const canManageAcceptance = canEditEquipment || canCreateService || isMechanicRole(user?.role);
+  const normalizedRole = normalizeUserRole(user?.role);
+  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
+    || isMechanicRole(normalizedRole);
   const { id } = useParams();
   const equipmentTypeCatalog = useEquipmentTypeCatalog();
 
@@ -675,7 +678,7 @@ export default function EquipmentDetail() {
   const { data: shippingPhotoData = EMPTY_SHIPPING_PHOTOS } = useQuery({
     queryKey: ['shippingPhotos', id],
     queryFn: () => equipmentService.getShippingPhotos(String(id ?? '')),
-    enabled: !!id,
+    enabled: !!id && canViewShippingPhotos,
   });
 
   useEffect(() => {

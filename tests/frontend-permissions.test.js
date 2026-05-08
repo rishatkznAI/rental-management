@@ -5,8 +5,13 @@ import { readFileSync } from 'node:fs';
 const permissionsSource = readFileSync(new URL('../src/app/lib/permissions.ts', import.meta.url), 'utf8');
 const userStorageSource = readFileSync(new URL('../src/app/lib/userStorage.ts', import.meta.url), 'utf8');
 const sidebarSource = readFileSync(new URL('../src/app/components/layout/Sidebar.tsx', import.meta.url), 'utf8');
+const notificationCenterSource = readFileSync(new URL('../src/app/components/layout/NotificationCenter.tsx', import.meta.url), 'utf8');
+const rentalApprovalHistorySheetSource = readFileSync(new URL('../src/app/components/gantt/RentalApprovalHistorySheet.tsx', import.meta.url), 'utf8');
 const equipmentPageSource = readFileSync(new URL('../src/app/pages/Equipment.tsx', import.meta.url), 'utf8');
+const equipmentDetailSource = readFileSync(new URL('../src/app/pages/EquipmentDetail.tsx', import.meta.url), 'utf8');
+const rentalsPageSource = readFileSync(new URL('../src/app/pages/Rentals.tsx', import.meta.url), 'utf8');
 const servicePageSource = readFileSync(new URL('../src/app/pages/Service.tsx', import.meta.url), 'utf8');
+const serviceDetailSource = readFileSync(new URL('../src/app/pages/ServiceDetail.tsx', import.meta.url), 'utf8');
 const apiSource = readFileSync(new URL('../src/app/lib/api.ts', import.meta.url), 'utf8');
 const salesPageSource = readFileSync(new URL('../src/app/pages/Sales.tsx', import.meta.url), 'utf8');
 
@@ -73,6 +78,29 @@ test('frontend does not mask equipment and service API failures as empty warrant
   assert.match(salesPageSource, /const equipmentQuery = useEquipmentList\(\)/);
   assert.match(salesPageSource, /equipmentQuery\.data \?\? \[\]/);
   assert.match(salesPageSource, /GET \/api\/equipment/);
+});
+
+test('frontend warranty service detail avoids forbidden service vehicle fetches and redacted part-price crashes', () => {
+  assert.match(serviceDetailSource, /const canViewServiceVehicles = can\('view', 'service_vehicles'\)/);
+  assert.match(serviceDetailSource, /enabled: canViewServiceVehicles/);
+  assert.match(serviceDetailSource, /Number\.isFinite\(Number\(item\.priceSnapshot\)\)/);
+});
+
+test('frontend warranty pages do not prefetch forbidden operational collections', () => {
+  assert.match(notificationCenterSource, /const canViewShippingPhotos = \['Администратор', 'Офис-менеджер', 'Менеджер по аренде'\]\.includes\(normalizedRole\)[\s\S]*isMechanicRole\(normalizedRole\)/);
+  assert.match(notificationCenterSource, /enabled: canViewShippingPhotos/);
+
+  assert.match(rentalsPageSource, /const canViewClients = can\('view', 'clients'\)/);
+  assert.match(rentalsPageSource, /const canViewPayments = can\('view', 'payments'\) \|\| can\('view', 'finance'\)/);
+  assert.match(rentalsPageSource, /const canViewStaffOptions = \['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'\]\.includes\(normalizedRole\)/);
+  assert.match(rentalsPageSource, /enabled: canViewPayments/);
+  assert.match(rentalsPageSource, /enabled: canViewStaffOptions/);
+  assert.match(rentalsPageSource, /enabled: canViewClients/);
+
+  assert.match(equipmentDetailSource, /const canViewShippingPhotos = \['Администратор', 'Офис-менеджер', 'Менеджер по аренде'\]\.includes\(normalizedRole\)[\s\S]*isMechanicRole\(normalizedRole\)/);
+  assert.match(equipmentDetailSource, /enabled: !!id && canViewShippingPhotos/);
+
+  assert.match(rentalApprovalHistorySheetSource, /useClientsList\(\{ enabled: open \}\)/);
 });
 
 test('frontend verifies session before clearing auth after data endpoint 401', () => {

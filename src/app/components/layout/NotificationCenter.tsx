@@ -11,6 +11,7 @@ import { buildAppNotifications, type AppNotification, type NotificationPriority 
 import { cn, formatDate } from '../../lib/utils';
 import { usePermissions } from '../../lib/permissions';
 import { useAuth } from '../../contexts/AuthContext';
+import { isMechanicRole, normalizeUserRole } from '../../lib/userStorage';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '../ui/sheet';
 
 const READ_KEY = 'app_notification_reads_v1';
@@ -67,6 +68,9 @@ export function NotificationCenter() {
   const canViewService = canView('service');
   const canViewEquipment = canView('equipment');
   const canViewPayments = canView('payments') || canView('finance');
+  const normalizedRole = normalizeUserRole(user?.role);
+  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
+    || isMechanicRole(normalizedRole);
 
   const results = useQueries({
     queries: [
@@ -74,7 +78,7 @@ export function NotificationCenter() {
       { queryKey: ['notif-service'], queryFn: serviceTicketsService.getAll, enabled: canViewService },
       { queryKey: ['notif-equipment'], queryFn: equipmentService.getAll, enabled: canViewEquipment },
       { queryKey: ['notif-payments'], queryFn: paymentsService.getAll, enabled: canViewPayments },
-      { queryKey: ['notif-shipping-photos'], queryFn: equipmentService.getAllShippingPhotos, enabled: canViewEquipment },
+      { queryKey: ['notif-shipping-photos'], queryFn: equipmentService.getAllShippingPhotos, enabled: canViewShippingPhotos },
       { queryKey: ['notif-rental-change-requests'], queryFn: rentalChangeRequestsService.getAll, enabled: canViewRentals },
     ],
   });

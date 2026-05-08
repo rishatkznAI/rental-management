@@ -165,9 +165,9 @@ export function RentalApprovalHistorySheet({
   error,
 }: RentalApprovalHistorySheetProps) {
   const { user } = useAuth();
-  const { data: equipmentList = [] } = useEquipmentList();
-  const { data: rentals = [] } = useRentalsList();
-  const { data: clients = [] } = useClientsList();
+  const { data: equipmentList = [] } = useEquipmentList({ enabled: open });
+  const { data: rentals = [] } = useRentalsList({ enabled: open });
+  const { data: clients = [] } = useClientsList({ enabled: open });
   const approveMutation = useApproveRentalChangeRequest();
   const rejectMutation = useRejectRentalChangeRequest();
   const [rejecting, setRejecting] = React.useState<RentalChangeRequest | null>(null);

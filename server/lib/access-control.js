@@ -119,6 +119,34 @@ const SERVICE_MECHANIC_UPDATE_FIELDS = new Set([
   'works',
 ]);
 
+const WARRANTY_CLAIM_MUTATION_FIELDS = new Set([
+  'serviceTicketId',
+  'equipmentId',
+  'equipmentLabel',
+  'inventoryNumber',
+  'serialNumber',
+  'manufacturer',
+  'factoryName',
+  'factoryContact',
+  'factoryCaseNumber',
+  'failureDescription',
+  'requestedResolution',
+  'status',
+  'priority',
+  'responseDueDate',
+  'sentAt',
+  'factoryResponse',
+  'decision',
+  'closedAt',
+  'createdByUserId',
+  'createdByUserName',
+  'history',
+  'comment',
+  'comments',
+  'attachments',
+  'resolution',
+]);
+
 const NON_ADMIN_UPDATE_FIELDS = {
   clients: new Set(['company', 'inn', 'email', 'address', 'contact', 'phone', 'paymentTerms', 'notes']),
   client_objects: new Set(['clientId', 'name', 'address', 'contactName', 'contactPhone', 'contractId', 'contractNumber', 'notes', 'status']),
@@ -182,7 +210,7 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'quiz',
   ]),
   shipping_photos: new Set(['rentalId', 'deliveryId', 'type', 'photo', 'photos', 'comment', 'createdAt']),
-  warranty_claims: new Set(['status', 'comment', 'comments', 'attachments', 'resolution']),
+  warranty_claims: WARRANTY_CLAIM_MUTATION_FIELDS,
   crm_deals: new Set([
     'title',
     'client',

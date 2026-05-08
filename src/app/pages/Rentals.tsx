@@ -23,7 +23,7 @@ import {
   mockDowntimes,
   mockServicePeriods,
 } from '../mock-data';
-import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser } from '../lib/userStorage';
+import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, isMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
@@ -638,8 +638,14 @@ export default function Rentals() {
   const canEditRentals = can('edit', 'rentals');
   const canDeleteRentals = can('delete', 'rentals');
   const canCreatePayments = can('create', 'payments');
+  const canViewClients = can('view', 'clients');
+  const canViewPayments = can('view', 'payments') || can('view', 'finance');
   const canEditRentalDates = canEditRentals;
   const canRestoreRentals = isAdminRole;
+  const normalizedRole = normalizeUserRole(user?.role);
+  const canViewStaffOptions = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'].includes(normalizedRole);
+  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
+    || isMechanicRole(normalizedRole);
   const today = useMemo(() => startOfDay(new Date()), []);
   const todayStr = format(today, 'yyyy-MM-dd');
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>([]);
@@ -661,10 +667,12 @@ export default function Rentals() {
   const { data: paymentData = EMPTY_PAYMENTS } = useQuery({
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
+    enabled: canViewPayments,
   });
   const { data: shippingPhotos = EMPTY_SHIPPING_PHOTOS } = useQuery<ShippingPhoto[]>({
     queryKey: ['shippingPhotos', 'all'],
     queryFn: equipmentService.getAllShippingPhotos,
+    enabled: canViewShippingPhotos,
   });
   const { data: serviceTickets = EMPTY_SERVICE_TICKETS } = useQuery<ServiceTicket[]>({
     queryKey: SERVICE_TICKET_KEYS.all,
@@ -673,10 +681,12 @@ export default function Rentals() {
   const { data: usersData = EMPTY_STAFF_OPTIONS } = useQuery<StaffOption[]>({
     queryKey: ['staff', 'manager-options'],
     queryFn: staffService.getManagerOptions,
+    enabled: canViewStaffOptions,
   });
   const { data: clientsData = EMPTY_CLIENTS } = useQuery({
     queryKey: ['clients'],
     queryFn: clientsService.getAll,
+    enabled: canViewClients,
   });
 
   const investorBinding = useMemo(() => getInvestorBinding(user), [user]);

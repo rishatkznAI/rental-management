@@ -34,14 +34,16 @@ type SeedData = {
   ticket: { id: string; reason: string };
   vehicle: { id: string; plateNumber: string };
   trip: { id: string; route: string };
+  fieldTrip: { id: string; routeTo: string };
 };
 
-const MECHANIC_CREDENTIALS = {
+const FIELD_ROLE = 'Выездной механик';
+const FIELD_CREDENTIALS = {
   email: 'smoke-service@yandex.ru',
   password: '123123',
 };
 
-const MECHANIC_SECTIONS: Array<{ name: RegExp; label: string; route: string }> = [
+const FIELD_SECTIONS: Array<{ name: RegExp; label: string; route: string }> = [
   { name: /^Центр задач/, label: 'Центр задач', route: '/tasks' },
   { name: /^Техника/, label: 'Техника', route: '/equipment' },
   { name: /^GSM/, label: 'GSM', route: '/gsm' },
@@ -183,61 +185,68 @@ async function postJson<T>(api: APIRequestContext, path: string, data: unknown):
   return (await response.json()) as T;
 }
 
-async function ensureSmokeMechanicUser(api: APIRequestContext): Promise<SmokeUser> {
+async function ensureFieldMechanicSmokeUser(api: APIRequestContext): Promise<SmokeUser> {
   const usersResponse = await api.get('/api/users');
   expect(usersResponse.ok()).toBeTruthy();
   const users = await usersResponse.json() as SmokeUser[];
-  const existing = users.find(user => String(user.email || '').toLowerCase() === MECHANIC_CREDENTIALS.email);
+  const existing = users.find(user => String(user.email || '').toLowerCase() === FIELD_CREDENTIALS.email);
   if (existing) {
-    expect(existing.role, 'existing smoke-service user must keep mechanic role').toMatch(/Механик|mechanic/i);
-    expect(existing.status, 'existing smoke-service user must be active').toBe('Активен');
-    return existing;
+    const patch = await api.patch(`/api/users/${existing.id}`, {
+      data: {
+        name: existing.name || 'SMOKE-FIELD-MECH-User',
+        role: FIELD_ROLE,
+        status: 'Активен',
+        password: FIELD_CREDENTIALS.password,
+      },
+    });
+    expect(patch.ok(), `set smoke-service field mechanic role: ${patch.status()} ${await patch.text()}`).toBeTruthy();
+    return (await patch.json()) as SmokeUser;
   }
 
   const create = await api.post('/api/users', {
     data: {
-      name: 'SMOKE-SERVICE-User',
-      email: MECHANIC_CREDENTIALS.email,
-      role: 'Механик',
+      name: 'SMOKE-FIELD-MECH-User',
+      email: FIELD_CREDENTIALS.email,
+      role: FIELD_ROLE,
       status: 'Активен',
-      password: MECHANIC_CREDENTIALS.password,
+      password: FIELD_CREDENTIALS.password,
     },
   });
   expect(create.ok(), `create smoke-service user: ${create.status()} ${await create.text()}`).toBeTruthy();
   return (await create.json()) as SmokeUser;
 }
 
-async function ensureSmokeMechanic(api: APIRequestContext, user: SmokeUser, prefix: string): Promise<Mechanic> {
+async function ensureFieldMechanic(api: APIRequestContext, user: SmokeUser, prefix: string): Promise<Mechanic> {
   const mechanicsResponse = await api.get('/api/mechanics');
   expect(mechanicsResponse.ok()).toBeTruthy();
   const mechanics = await mechanicsResponse.json() as Mechanic[];
   const existing = mechanics.find(item =>
     item.userId === user.id ||
-    String(item.email || '').toLowerCase() === MECHANIC_CREDENTIALS.email ||
+    String(item.email || '').toLowerCase() === FIELD_CREDENTIALS.email ||
     item.name === user.name
   );
   if (existing) return existing;
 
   return postJson<Mechanic>(api, '/api/mechanics', {
     name: user.name || `${prefix}-Mechanic`,
-    email: MECHANIC_CREDENTIALS.email,
+    email: FIELD_CREDENTIALS.email,
     phone: '+79990000021',
     userId: user.id,
-    specialization: 'SMOKE-SERVICE',
+    specialization: 'field',
     status: 'active',
     notes: prefix,
   });
 }
 
-async function seedSmokeMechanicData(api: APIRequestContext, suffix: string): Promise<SeedData> {
-  const user = await ensureSmokeMechanicUser(api);
-  const prefix = `SMOKE-SERVICE-${suffix}`;
-  const mechanic = await ensureSmokeMechanic(api, user, prefix);
+async function seedFieldMechanicData(api: APIRequestContext, suffix: string): Promise<SeedData> {
+  const user = await ensureFieldMechanicSmokeUser(api);
+  const prefix = `SMOKE-FIELD-MECH-${suffix}`;
+  const mechanic = await ensureFieldMechanic(api, user, prefix);
 
   const equipment = await postJson<{ id: string; inventoryNumber: string; serialNumber: string; manufacturer: string; model: string }>(api, '/api/equipment', {
-    inventoryNumber: `SS-${suffix}`.slice(0, 18),
-    manufacturer: 'SMOKE-SERVICE',
-    model: 'Service Lift',
+    inventoryNumber: `SFM-${suffix}`.slice(0, 18),
+    manufacturer: 'SMOKE-FIELD-MECH',
+    model: 'Field Service Lift',
     type: 'scissor',
     drive: 'electric',
     serialNumber: `${prefix}-SN`,
@@ -257,9 +266,9 @@ async function seedSmokeMechanicData(api: APIRequestContext, suffix: string): Pr
   });
 
   const vehicle = await postJson<{ id: string; plateNumber: string }>(api, '/api/service-vehicles', {
-    make: 'SMOKE-SERVICE',
-    model: 'Mechanic Van',
-    plateNumber: `SS${suffix.slice(-3)}77`,
+    make: 'SMOKE-FIELD-MECH',
+    model: 'Field Van',
+    plateNumber: `FM${suffix.slice(-3)}77`,
     vin: `${prefix}-VIN`,
     year: 2026,
     vehicleType: 'van',
@@ -280,9 +289,9 @@ async function seedSmokeMechanicData(api: APIRequestContext, suffix: string): Pr
     equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
     inventoryNumber: equipment.inventoryNumber,
     serialNumber: equipment.serialNumber,
-    location: `${prefix}-Service location`,
+    location: `${prefix}-Field location`,
     reason: `${prefix}-Ticket`,
-    description: `${prefix}-Repair smoke description`,
+    description: `${prefix}-Field mechanic smoke description`,
     priority: 'medium',
     status: 'new',
     assignedMechanicId: mechanic.id,
@@ -298,25 +307,38 @@ async function seedSmokeMechanicData(api: APIRequestContext, suffix: string): Pr
     vehicleId: vehicle.id,
     date: '2026-06-01',
     driver: mechanic.name,
-    route: `${prefix}-Yard - ${prefix}-Service location`,
-    purpose: `${prefix}-Service visit`,
+    route: `${prefix}-Yard - ${prefix}-Field location`,
+    purpose: `${prefix}-Field service visit`,
     startMileage: 100,
     endMileage: 108,
     serviceTicketId: ticket.id,
     comment: prefix,
   });
 
-  return { user, mechanic, equipment, ticket, vehicle, trip };
+  const fieldTrip = await postJson<{ id: string; routeTo: string }>(api, '/api/service_field_trips', {
+    serviceTicketId: ticket.id,
+    mechanicId: mechanic.id,
+    mechanicName: mechanic.name,
+    serviceVehicleId: vehicle.id,
+    status: 'planned',
+    routeFrom: `${prefix}-Yard`,
+    routeTo: `${prefix}-Field location`,
+    distanceKm: 8,
+    closedNormHours: 1,
+    comment: prefix,
+  });
+
+  return { user, mechanic, equipment, ticket, vehicle, trip, fieldTrip };
 }
 
-test('smoke-service can use mechanic UI without admin or commercial access', async ({ page, request }) => {
+test('smoke-service can use field mechanic UI without admin or commercial access', async ({ page, request }) => {
   test.setTimeout(270_000);
   const issues: UiIssue[] = [];
   let action = 'setup';
   installUiGuards(page, issues, () => action);
 
   const suffix = String(Date.now()).slice(-8);
-  const seed = await withAdminApi(async (api) => seedSmokeMechanicData(api, suffix));
+  const seed = await withAdminApi(async (api) => seedFieldMechanicData(api, suffix));
 
   action = 'preflight';
   const health = await request.get('http://127.0.0.1:3000/health');
@@ -324,8 +346,8 @@ test('smoke-service can use mechanic UI without admin or commercial access', asy
   const anonymousMe = await request.get('http://127.0.0.1:3000/api/auth/me');
   expect(anonymousMe.status()).toBe(401);
 
-  action = 'login smoke-service';
-  await login(page, MECHANIC_CREDENTIALS);
+  action = 'login smoke-service field mechanic';
+  await login(page, FIELD_CREDENTIALS);
   await expect(page.locator('aside').getByRole('button', { name: /^Сервис/ })).toBeVisible();
   await expect(page).not.toHaveURL(/#\/admin/);
 
@@ -335,7 +357,7 @@ test('smoke-service can use mechanic UI without admin or commercial access', asy
   const me = await request.get('http://127.0.0.1:3000/api/auth/me', { headers: authHeaders });
   expect(me.ok()).toBeTruthy();
   const meJson = await me.json();
-  expect(meJson.user.userRole).toMatch(/Механик|mechanic/i);
+  expect([meJson.user.rawRole, meJson.user.normalizedRole, meJson.user.userRole]).toContain(FIELD_ROLE);
   expect(meJson.user.permissions.readableCollections).toEqual(expect.arrayContaining([
     'equipment',
     'service',
@@ -344,6 +366,7 @@ test('smoke-service can use mechanic UI without admin or commercial access', asy
     'spare_parts',
     'repair_work_items',
     'repair_part_items',
+    'service_field_trips',
     'planner_items',
     'service_vehicles',
     'vehicle_trips',
@@ -355,21 +378,21 @@ test('smoke-service can use mechanic UI without admin or commercial access', asy
   action = 'logout and re-login';
   await page.getByRole('button', { name: 'Выйти' }).click();
   await expect(page).toHaveURL(/#\/login$/);
-  await login(page, MECHANIC_CREDENTIALS);
+  await login(page, FIELD_CREDENTIALS);
   await expect(page.locator('aside').getByRole('button', { name: /^Сервис/ })).toBeVisible();
   token = await page.evaluate(() => window.localStorage.getItem('app_auth_token'));
   expect(token).toBeTruthy();
   authHeaders = { Authorization: `Bearer ${token}` };
 
   const sidebar = page.locator('aside');
-  for (const section of MECHANIC_SECTIONS) {
+  for (const section of FIELD_SECTIONS) {
     await expect(sidebar.getByRole('button', { name: section.name }), `${section.label} should be visible`).toBeVisible();
   }
   for (const forbidden of FORBIDDEN_NAV_ITEMS) {
     await expect(sidebar.getByRole('button', { name: forbidden })).toBeHidden();
   }
 
-  for (const section of MECHANIC_SECTIONS) {
+  for (const section of FIELD_SECTIONS) {
     action = `section ${section.label}`;
     await openSectionFromSidebar(page, section);
     await exerciseVisibleTabs(page, section.label);
@@ -394,14 +417,14 @@ test('smoke-service can use mechanic UI without admin or commercial access', asy
   }
   const summary = page.getByPlaceholder('Краткий итог работ, что было сделано...');
   if (await summary.isVisible().catch(() => false)) {
-    await summary.fill(`SMOKE-SERVICE-${suffix}-repair summary`);
+    await summary.fill(`SMOKE-FIELD-MECH-${suffix}-repair summary`);
     await page.getByRole('button', { name: 'Сохранить' }).first().click();
   }
   const mechanicComment = page.getByPlaceholder('Добавить комментарий...');
   if (await mechanicComment.isVisible().catch(() => false)) {
-    await mechanicComment.fill(`SMOKE-SERVICE-${suffix}-comment`);
+    await mechanicComment.fill(`SMOKE-FIELD-MECH-${suffix}-comment`);
     await page.getByRole('button', { name: 'Добавить' }).last().click();
-    await expect(page.getByText(`SMOKE-SERVICE-${suffix}-comment`)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(`SMOKE-FIELD-MECH-${suffix}-comment`)).toBeVisible({ timeout: 10_000 });
   }
   await expect(page.getByRole('button', { name: /Удалить заявку/ })).toBeHidden();
   await expectHealthyScreen(page, action);
@@ -445,10 +468,24 @@ test('smoke-service can use mechanic UI without admin or commercial access', asy
     '/api/service_vehicles',
     `/api/service_vehicles/${seed.vehicle.id}`,
     `/api/vehicle-trips?vehicleId=${seed.vehicle.id}`,
+    '/api/service_field_trips',
+    `/api/service_field_trips/${seed.fieldTrip.id}`,
   ]) {
     const response = await request.get(`http://127.0.0.1:3000${path}`, { headers: authHeaders });
-    expect(response.ok(), `${path} should be readable for mechanic`).toBeTruthy();
+    expect(response.ok(), `${path} should be readable for field mechanic`).toBeTruthy();
   }
+
+  const fieldTripPatch = await request.patch(`http://127.0.0.1:3000/api/service_field_trips/${seed.fieldTrip.id}`, {
+    headers: authHeaders,
+    data: {
+      status: 'completed',
+      routeTo: `${seed.fieldTrip.routeTo}-done`,
+      distanceKm: 9,
+      closedNormHours: 1.25,
+      comment: `${seed.ticket.reason}-field-trip`,
+    },
+  });
+  expect(fieldTripPatch.ok(), 'field mechanic should update linked field trip fields').toBeTruthy();
 
   const serviceList = await request.get('http://127.0.0.1:3000/api/service', { headers: authHeaders });
   const serviceListJson = await serviceList.json();
@@ -458,20 +495,20 @@ test('smoke-service can use mechanic UI without admin or commercial access', asy
     headers: authHeaders,
     data: {
       status: 'in_progress',
-      clientId: 'SMOKE-SERVICE-FORBIDDEN-CLIENT',
-      rentalId: 'SMOKE-SERVICE-FORBIDDEN-RENTAL',
-      assignedMechanicId: 'SMOKE-SERVICE-FORBIDDEN-MECHANIC',
-      assignedUserId: 'SMOKE-SERVICE-FORBIDDEN-USER',
-      result: `SMOKE-SERVICE-${suffix}-api-result`,
+      clientId: 'SMOKE-FIELD-MECH-FORBIDDEN-CLIENT',
+      rentalId: 'SMOKE-FIELD-MECH-FORBIDDEN-RENTAL',
+      assignedMechanicId: 'SMOKE-FIELD-MECH-FORBIDDEN-MECHANIC',
+      assignedUserId: 'SMOKE-FIELD-MECH-FORBIDDEN-USER',
+      result: `SMOKE-FIELD-MECH-${suffix}-api-result`,
     },
   });
-  expect(patchCriticalFields.ok(), 'mechanic should be able to update allowed service fields').toBeTruthy();
+  expect(patchCriticalFields.ok(), 'field mechanic should update allowed service fields').toBeTruthy();
   const patchedTicket = await request.get(`http://127.0.0.1:3000/api/service/${seed.ticket.id}`, { headers: authHeaders });
   const patchedTicketJson = await patchedTicket.json();
   expect(patchedTicketJson.assignedMechanicId).toBe(seed.mechanic.id);
-  expect(patchedTicketJson.assignedUserId).not.toBe('SMOKE-SERVICE-FORBIDDEN-USER');
-  expect(patchedTicketJson.clientId).not.toBe('SMOKE-SERVICE-FORBIDDEN-CLIENT');
-  expect(patchedTicketJson.rentalId).not.toBe('SMOKE-SERVICE-FORBIDDEN-RENTAL');
+  expect(patchedTicketJson.assignedUserId).not.toBe('SMOKE-FIELD-MECH-FORBIDDEN-USER');
+  expect(patchedTicketJson.clientId).not.toBe('SMOKE-FIELD-MECH-FORBIDDEN-CLIENT');
+  expect(patchedTicketJson.rentalId).not.toBe('SMOKE-FIELD-MECH-FORBIDDEN-RENTAL');
 
   for (const path of [
     '/api/users',
@@ -487,37 +524,37 @@ test('smoke-service can use mechanic UI without admin or commercial access', asy
     '/api/admin/system-data/export',
   ]) {
     const response = await request.get(`http://127.0.0.1:3000${path}`, { headers: authHeaders });
-    expect([401, 403].includes(response.status()), `${path} must stay forbidden for mechanic`).toBeTruthy();
+    expect([401, 403].includes(response.status()), `${path} must stay forbidden for field mechanic`).toBeTruthy();
   }
 
   const userPatch = await request.patch('http://127.0.0.1:3000/api/users/U-reset-admin', {
     headers: authHeaders,
     data: { role: 'Администратор' },
   });
-  expect(userPatch.status(), '/api/users write must stay forbidden for mechanic').toBe(403);
+  expect(userPatch.status(), '/api/users write must stay forbidden for field mechanic').toBe(403);
 
   const paymentCreate = await request.post('http://127.0.0.1:3000/api/payments', {
     headers: authHeaders,
     data: {
-      invoiceNumber: `SMOKE-SERVICE-${suffix}-FORBIDDEN-PAY`,
+      invoiceNumber: `SMOKE-FIELD-MECH-${suffix}-FORBIDDEN-PAY`,
       amount: 1,
       paidAmount: 0,
       dueDate: '2026-06-10',
       status: 'pending',
     },
   });
-  expect(paymentCreate.status(), 'payment creation must stay forbidden for mechanic').toBe(403);
+  expect(paymentCreate.status(), 'payment creation must stay forbidden for field mechanic').toBe(403);
 
   const documentCreate = await request.post('http://127.0.0.1:3000/api/documents', {
     headers: authHeaders,
     data: {
       type: 'act',
-      number: `SMOKE-SERVICE-${suffix}-FORBIDDEN-DOC`,
+      number: `SMOKE-FIELD-MECH-${suffix}-FORBIDDEN-DOC`,
       status: 'draft',
       date: '2026-06-01',
     },
   });
-  expect(documentCreate.status(), 'document creation must stay forbidden for mechanic').toBe(403);
+  expect(documentCreate.status(), 'document creation must stay forbidden for field mechanic').toBe(403);
 
   expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);
 });

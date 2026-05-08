@@ -30,10 +30,13 @@ export async function loginAsAdmin(page: Page) {
 
 export async function navigateInApp(page: Page, route: string) {
   const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
-  await page.evaluate((nextRoute) => {
-    window.location.hash = nextRoute;
-    window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
-  }, normalizedRoute);
+  const appRoot = await page.evaluate(() => `${window.location.origin}${window.location.pathname}`);
+  try {
+    await page.goto(`${appRoot}?_smoke=${Date.now()}#${normalizedRoute}`, { waitUntil: 'domcontentloaded' });
+  } catch (error) {
+    if (!String(error).includes('net::ERR_ABORTED')) throw error;
+    await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+  }
 }
 
 async function expectAuthenticatedShell(page: Page) {

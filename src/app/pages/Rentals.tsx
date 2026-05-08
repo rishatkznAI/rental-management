@@ -611,6 +611,7 @@ const EMPTY_EQUIPMENT: Equipment[] = [];
 const EMPTY_PAYMENTS: Payment[] = [];
 const EMPTY_SHIPPING_PHOTOS: ShippingPhoto[] = [];
 const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
+const EMPTY_SERVICE_PERIODS: ServicePeriod[] = [];
 const EMPTY_STAFF_OPTIONS: StaffOption[] = [];
 const EMPTY_CLIENTS: Client[] = [];
 const EMPTY_RENTAL_CHANGE_REQUESTS: RentalChangeRequest[] = [];
@@ -984,6 +985,11 @@ export default function Rentals() {
   const [compactView, setCompactView] = useState<CompactView>('cards');
   const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
   const [movementFilter, setMovementFilter] = useState<'all' | 'shipping' | 'receiving'>('all');
+  const [isDesktopViewport, setIsDesktopViewport] = useState(() => (
+    typeof window !== 'undefined'
+      ? window.matchMedia('(min-width: 1024px)').matches
+      : true
+  ));
 
   const appendEquipmentHistoryEntry = useCallback(
     (equipment: Equipment, text: string) =>
@@ -1025,6 +1031,16 @@ export default function Rentals() {
 
   // Refs
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const desktopQuery = window.matchMedia('(min-width: 1024px)');
+    const syncDesktopViewport = () => setIsDesktopViewport(desktopQuery.matches);
+    syncDesktopViewport();
+    desktopQuery.addEventListener('change', syncDesktopViewport);
+    return () => desktopQuery.removeEventListener('change', syncDesktopViewport);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1316,16 +1332,85 @@ export default function Rentals() {
       .filter(group => group.items.length > 0);
   }, [filteredEquipment]);
 
+  const filteredRentalsByEquipmentId = useMemo(() => {
+    const map = new Map<string, GanttRentalData[]>();
+    filteredRentals.forEach(rental => {
+      if (!rental.equipmentId) return;
+      const bucket = map.get(rental.equipmentId) ?? [];
+      bucket.push(rental);
+      map.set(rental.equipmentId, bucket);
+    });
+    return map;
+  }, [filteredRentals]);
+
+  const filteredRentalsByInventory = useMemo(() => {
+    const map = new Map<string, GanttRentalData[]>();
+    filteredRentals.forEach(rental => {
+      if (!rental.equipmentInv || (rental.equipmentId && !ambiguousInventoryNumbers.has(rental.equipmentInv))) return;
+      const bucket = map.get(rental.equipmentInv) ?? [];
+      bucket.push(rental);
+      map.set(rental.equipmentInv, bucket);
+    });
+    return map;
+  }, [ambiguousInventoryNumbers, filteredRentals]);
+
+  const getFilteredRentalsForEquipment = useCallback((equipment: Equipment) => {
+    const byId = filteredRentalsByEquipmentId.get(equipment.id) ?? EMPTY_GANTT_RENTALS;
+    const byInventory = ambiguousInventoryNumbers.has(equipment.inventoryNumber)
+      ? (canonicalEquipmentIdByInventory.get(equipment.inventoryNumber) === equipment.id
+          ? filteredRentalsByInventory.get(equipment.inventoryNumber) ?? EMPTY_GANTT_RENTALS
+          : EMPTY_GANTT_RENTALS)
+      : filteredRentalsByInventory.get(equipment.inventoryNumber) ?? EMPTY_GANTT_RENTALS;
+    return byInventory.length > 0 ? [...byId, ...byInventory] : byId;
+  }, [ambiguousInventoryNumbers, canonicalEquipmentIdByInventory, filteredRentalsByEquipmentId, filteredRentalsByInventory]);
+
+  const servicePeriodsByEquipmentId = useMemo(() => {
+    const map = new Map<string, ServicePeriod[]>();
+    servicePeriods.forEach(period => {
+      if (!period.equipmentId) return;
+      const bucket = map.get(period.equipmentId) ?? [];
+      bucket.push(period);
+      map.set(period.equipmentId, bucket);
+    });
+    return map;
+  }, [servicePeriods]);
+
+  const servicePeriodsByInventory = useMemo(() => {
+    const map = new Map<string, ServicePeriod[]>();
+    servicePeriods.forEach(period => {
+      if (!period.equipmentInv || period.equipmentId || ambiguousInventoryNumbers.has(period.equipmentInv)) return;
+      const bucket = map.get(period.equipmentInv) ?? [];
+      bucket.push(period);
+      map.set(period.equipmentInv, bucket);
+    });
+    return map;
+  }, [ambiguousInventoryNumbers, servicePeriods]);
+
+  const getServicePeriodsForEquipment = useCallback((equipment: Equipment) => [
+    ...(servicePeriodsByEquipmentId.get(equipment.id) ?? EMPTY_SERVICE_PERIODS),
+    ...(servicePeriodsByInventory.get(equipment.inventoryNumber) ?? EMPTY_SERVICE_PERIODS),
+  ], [servicePeriodsByEquipmentId, servicePeriodsByInventory]);
+
+  const downtimesByInventory = useMemo(() => {
+    const map = new Map<string, typeof mockDowntimes>();
+    mockDowntimes.forEach(item => {
+      const bucket = map.get(item.equipmentInv) ?? [];
+      bucket.push(item);
+      map.set(item.equipmentInv, bucket);
+    });
+    return map;
+  }, []);
+
   // Conflict detection for all equipment
   const conflictSets = useMemo(() => {
       const map = new Map<string, Set<string>>();
       filteredEquipment.forEach(eq => {
       map.set(eq.id, detectConflicts(
-        filteredRentals.filter(r => matchesEquipmentRow(r, eq)),
+        getFilteredRentalsForEquipment(eq),
       ));
       });
       return map;
-  }, [filteredEquipment, filteredRentals, matchesEquipmentRow]);
+  }, [filteredEquipment, getFilteredRentalsForEquipment]);
 
   // Stats
   const totalEquipment = equipmentList.length;
@@ -1339,7 +1424,7 @@ export default function Rentals() {
     let overdue = 0;
 
     filteredEquipment.forEach(equipment => {
-      const rentalsForEquipment = filteredRentals.filter(rental => matchesEquipmentRow(rental, equipment));
+      const rentalsForEquipment = getFilteredRentalsForEquipment(equipment);
       const effectiveStatus = computeEffectiveStatus(equipment, rentalsForEquipment, today, { start: viewStart, end: viewEnd });
       if (effectiveStatus === 'available') available += 1;
       if (effectiveStatus === 'rented' || effectiveStatus === 'reserved') rented += 1;
@@ -1350,7 +1435,7 @@ export default function Rentals() {
     });
 
     return { available, rented, inService, overdue };
-  }, [filteredEquipment, filteredRentals, matchesEquipmentRow, today, viewEnd, viewStart]);
+  }, [filteredEquipment, getFilteredRentalsForEquipment, today, viewEnd, viewStart]);
 
   // ===== Handlers =====
   const navigateTime = useCallback((direction: 'prev' | 'next' | 'today') => {
@@ -1496,16 +1581,13 @@ export default function Rentals() {
   );
 
   const mobileEquipmentCards = useMemo(() => {
+    if (isDesktopViewport) return [];
+
     return filteredEquipment.map(equipment => {
-      const rentalsForEquipment = filteredRentals
-        .filter(rental => matchesEquipmentRow(rental, equipment))
+      const rentalsForEquipment = [...getFilteredRentalsForEquipment(equipment)]
         .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-      const downtimesForEquipment = mockDowntimes.filter(item => item.equipmentInv === equipment.inventoryNumber);
-      const serviceForEquipment = servicePeriods.filter(item =>
-        item.equipmentId
-          ? item.equipmentId === equipment.id
-          : item.equipmentInv === equipment.inventoryNumber && !ambiguousInventoryNumbers.has(equipment.inventoryNumber),
-      );
+      const downtimesForEquipment = downtimesByInventory.get(equipment.inventoryNumber) ?? [];
+      const serviceForEquipment = getServicePeriodsForEquipment(equipment);
       const activeRental = rentalsForEquipment.find(rental => rental.status === 'active');
       const reservedRental = rentalsForEquipment.find(rental => rental.status === 'created');
       const primaryRental = activeRental ?? reservedRental ?? rentalsForEquipment[0] ?? null;
@@ -1522,7 +1604,7 @@ export default function Rentals() {
         conflictCount: conflictSets.get(equipment.id)?.size ?? 0,
       };
     });
-  }, [ambiguousInventoryNumbers, conflictSets, filteredEquipment, filteredRentals, matchesEquipmentRow, servicePeriods, today, viewEnd, viewStart]);
+  }, [conflictSets, downtimesByInventory, filteredEquipment, getFilteredRentalsForEquipment, getServicePeriodsForEquipment, isDesktopViewport, today, viewEnd, viewStart]);
 
   // ===== New handlers for RentalDrawer =====
 
@@ -2344,6 +2426,7 @@ export default function Rentals() {
       )}
 
       {/* ===== Mobile Compact View ===== */}
+      {!isDesktopViewport && (
       <div className={`flex-1 overflow-auto lg:hidden ${compactView === 'cards' ? 'block sm:block' : 'block sm:hidden'}`}>
         {filteredEquipment.length === 0 ? (
           equipmentList.length === 0 ? (
@@ -2532,6 +2615,7 @@ export default function Rentals() {
           </div>
         )}
       </div>
+      )}
 
       {/* ===== Gantt Grid ===== */}
       <div
@@ -2673,13 +2757,9 @@ export default function Rentals() {
                     key={eq.id}
                     rowIndex={idx}
                     equipment={eq}
-                    rentals={filteredRentals.filter(r => matchesEquipmentRow(r, eq))}
-                    downtimes={mockDowntimes.filter(d => d.equipmentInv === eq.inventoryNumber)}
-                    servicePeriods={servicePeriods.filter(s =>
-                      s.equipmentId
-                        ? s.equipmentId === eq.id
-                        : s.equipmentInv === eq.inventoryNumber && !ambiguousInventoryNumbers.has(eq.inventoryNumber)
-                    )}
+                    rentals={getFilteredRentalsForEquipment(eq)}
+                    downtimes={downtimesByInventory.get(eq.inventoryNumber) ?? []}
+                    servicePeriods={getServicePeriodsForEquipment(eq)}
                     conflictIds={conflictSets.get(eq.id) || new Set()}
                     viewStart={viewStart}
                     totalDays={totalDays}

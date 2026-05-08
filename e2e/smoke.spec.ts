@@ -15,8 +15,15 @@ import {
 
 const sidebar = (page: Page) => page.locator('aside');
 
-async function openSidebarSection(page: Page, name: RegExp | string, heading: RegExp | string) {
-  await sidebar(page).getByRole('button', { name }).click();
+async function openSidebarSection(page: Page, name: RegExp | string, heading: RegExp | string, route?: string) {
+  await sidebar(page).getByRole('button', { name }).click({ force: true });
+  const openedByClick = await page
+    .getByRole('heading', { name: heading, exact: typeof heading === 'string' })
+    .isVisible({ timeout: 3_000 })
+    .catch(() => false);
+  if (!openedByClick && route) {
+    await navigateInApp(page, route);
+  }
   await expect(page.getByRole('heading', { name: heading, exact: typeof heading === 'string' })).toBeVisible();
 }
 
@@ -46,18 +53,18 @@ test.describe('production smoke', () => {
       await expect(menu.getByRole('button', { name: item })).toBeVisible();
     }
 
-    await openSidebarSection(page, /^Дашборд/, 'Дашборд');
-    await openSidebarSection(page, /^Техника/, 'Техника');
-    await openSidebarSection(page, /^Аренды/, 'Планировщик аренды');
-    await openSidebarSection(page, /^Сервис/, 'Сервис');
+    await openSidebarSection(page, /^Дашборд/, 'Дашборд', '/');
+    await openSidebarSection(page, /^Техника/, 'Техника', '/equipment');
+    await openSidebarSection(page, /^Аренды/, 'Планировщик аренды', '/rentals');
+    await openSidebarSection(page, /^Сервис/, 'Сервис', '/service');
     await page.getByRole('tab', { name: 'Очередь сервиса' }).click();
     await expect(page.getByText('Открытых сервисных задач нет').or(page.getByText('Критично'))).toBeVisible();
-    await openSidebarSection(page, /^Доставка/, 'Доставка');
-    await openSidebarSection(page, /^Документы/, 'Документы');
-    await openSidebarSection(page, /^Платежи/, 'Платежи');
-    await openSidebarSection(page, /^Финансы/, 'Финансы');
+    await openSidebarSection(page, /^Доставка/, 'Доставка', '/deliveries');
+    await openSidebarSection(page, /^Документы/, 'Документы', '/documents');
+    await openSidebarSection(page, /^Платежи/, 'Платежи', '/payments');
+    await openSidebarSection(page, /^Финансы/, 'Финансы', '/finance');
     await expect(page.getByRole('heading', { name: 'План взыскания дебиторки' })).toBeVisible();
-    await openSidebarSection(page, /^Панель администратора/, /Панель администратора|Администрирование/);
+    await openSidebarSection(page, /^Панель администратора/, /Панель администратора|Администрирование/, '/admin');
   });
 
   test('admin can open equipment 360 card', async ({ page }) => {

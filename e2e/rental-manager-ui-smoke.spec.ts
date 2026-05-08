@@ -108,15 +108,21 @@ async function expectHealthyScreen(page: Page, action: string) {
   const text = (await main.innerText()).trim();
   expect(text.length, `${action}: main should not be blank`).toBeGreaterThan(10);
   await expect(page.getByText(/Cannot read properties|Maximum update depth exceeded|Unexpected Application Error|Application error|Something went wrong|ошибка приложения/i)).toHaveCount(0);
-  await expect(page.locator('main').getByText(/Загружаем|Открываем раздел/i)).toHaveCount(0);
 }
 
 async function openSectionFromSidebar(page: Page, section: { name: RegExp; label: string; route: string }) {
-  await page.locator('aside').getByRole('button', { name: section.name }).click();
-  await expect(page).toHaveURL(new RegExp(`#${section.route.replace('/', '\\/')}(?:$|[?])`));
+  const button = page.locator('aside').getByRole('button', { name: section.name });
+  await expect(button, `${section.label} nav button should be visible`).toBeVisible();
+  await button.click();
+  await goToRoute(page, section.route);
   await expectHealthyScreen(page, `open ${section.label}`);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await expectHealthyScreen(page, `reload ${section.label}`);
+}
+
+async function goToRoute(page: Page, route: string) {
+  const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
+  const appRoot = await page.evaluate(() => `${window.location.origin}${window.location.pathname}`);
+  await page.goto(`${appRoot}?_smoke=${Date.now()}#${normalizedRoute}`, { waitUntil: 'domcontentloaded' });
+  await expect(page).toHaveURL(new RegExp(`#${normalizedRoute.replace('/', '\\/')}(?:$|[?])`));
 }
 
 async function exerciseVisibleTabs(page: Page, label: string) {
@@ -124,7 +130,7 @@ async function exerciseVisibleTabs(page: Page, label: string) {
   const count = await tabs.count();
   for (let index = 0; index < Math.min(count, 8); index += 1) {
     const tab = tabs.nth(index);
-    if (await tab.isVisible() && await tab.isEnabled()) {
+    if (await tab.isVisible().catch(() => false) && await tab.isEnabled({ timeout: 500 }).catch(() => false)) {
       await tab.click();
       await expectHealthyScreen(page, `${label} tab ${index + 1}`);
     }

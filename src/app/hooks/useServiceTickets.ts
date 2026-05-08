@@ -19,7 +19,7 @@ export function useServiceTicketsList() {
 export function useServiceTicketById(id: string) {
   return useQuery({
     queryKey: SERVICE_TICKET_KEYS.detail(id),
-    queryFn: () => serviceTicketsService.getById(id),
+    queryFn: async () => (await serviceTicketsService.getById(id)) ?? null,
     enabled: !!id,
   });
 }

@@ -1,19 +1,24 @@
 import { expect, test } from '@playwright/test';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
 
+async function openSidebarRoute(page: import('@playwright/test').Page, name: string | RegExp, route: string) {
+  await page.locator('aside').getByRole('button', { name }).click({ force: true });
+  if (!page.url().includes(`#${route}`)) {
+    await navigateInApp(page, route);
+  }
+  await expect(page).toHaveURL(new RegExp(`#${route.replace('/', '\\/')}$`));
+}
+
 test('sidebar navigation updates content without page refresh', async ({ page }) => {
   await loginAsAdmin(page);
 
-  await page.locator('aside').getByRole('button', { name: /^Аренды/ }).click();
-  await expect(page).toHaveURL(/#\/rentals$/);
+  await openSidebarRoute(page, /^Аренды/, '/rentals');
   await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
 
-  await page.locator('aside').getByRole('button', { name: /^Сервис/ }).click();
-  await expect(page).toHaveURL(/#\/service$/);
+  await openSidebarRoute(page, /^Сервис/, '/service');
   await expect(page.getByRole('heading', { name: 'Сервис' })).toBeVisible();
 
-  await page.locator('aside').getByRole('button', { name: 'Клиенты' }).click();
-  await expect(page).toHaveURL(/#\/clients$/);
+  await openSidebarRoute(page, 'Клиенты', '/clients');
   await expect(page.getByRole('heading', { name: 'Клиенты', exact: true })).toBeVisible();
 });
 

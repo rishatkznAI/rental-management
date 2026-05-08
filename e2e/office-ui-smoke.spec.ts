@@ -2,6 +2,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { login, navigateInApp } from './helpers/auth';
 import { withAdminApi } from './helpers/api';
 
+test.use({ trace: 'off', screenshot: 'off', video: 'off' });
+
 type UiIssue = {
   type: string;
   action: string;
@@ -426,7 +428,7 @@ test('smoke-office can use permitted office UI without admin access or runtime e
 
   action = 'documents create modal';
   await goToRoute(page, '/documents');
-  await expect(page.getByRole('heading', { name: 'Документы' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Документы', exact: true })).toBeVisible();
   await expectHealthyScreen(page, action);
   await page.getByRole('button', { name: /Договор аренды/ }).click();
   await expect(page.getByRole('dialog', { name: /Договор аренды/ })).toBeVisible();

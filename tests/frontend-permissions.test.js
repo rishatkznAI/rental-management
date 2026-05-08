@@ -11,6 +11,9 @@ const equipmentPageSource = readFileSync(new URL('../src/app/pages/Equipment.tsx
 const equipmentDetailSource = readFileSync(new URL('../src/app/pages/EquipmentDetail.tsx', import.meta.url), 'utf8');
 const rentalsPageSource = readFileSync(new URL('../src/app/pages/Rentals.tsx', import.meta.url), 'utf8');
 const servicePageSource = readFileSync(new URL('../src/app/pages/Service.tsx', import.meta.url), 'utf8');
+const deliveriesPageSource = readFileSync(new URL('../src/app/pages/Deliveries.tsx', import.meta.url), 'utf8');
+const equipmentHookSource = readFileSync(new URL('../src/app/hooks/useEquipment.ts', import.meta.url), 'utf8');
+const serviceTicketsHookSource = readFileSync(new URL('../src/app/hooks/useServiceTickets.ts', import.meta.url), 'utf8');
 const serviceDetailSource = readFileSync(new URL('../src/app/pages/ServiceDetail.tsx', import.meta.url), 'utf8');
 const apiSource = readFileSync(new URL('../src/app/lib/api.ts', import.meta.url), 'utf8');
 const salesPageSource = readFileSync(new URL('../src/app/pages/Sales.tsx', import.meta.url), 'utf8');
@@ -24,6 +27,12 @@ function warrantyPermissionBlock() {
 function rentalManagerPermissionBlock() {
   const match = permissionsSource.match(/'Менеджер по аренде':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
   assert.ok(match?.groups?.body, 'rental manager permission block must exist');
+  return match.groups.body;
+}
+
+function carrierPermissionBlock() {
+  const match = permissionsSource.match(/'Перевозчик':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
+  assert.ok(match?.groups?.body, 'carrier permission block must exist');
   return match.groups.body;
 }
 
@@ -51,6 +60,17 @@ test('frontend warranty mechanic menu grants only working sections', () => {
   assert.match(sidebarSource, /section:\s*'equipment'/);
   assert.match(sidebarSource, /section:\s*'service'/);
   assert.match(sidebarSource, /section:\s*'sales'/);
+});
+
+test('frontend carrier permissions expose only deliveries and profile shell', () => {
+  const block = carrierPermissionBlock();
+
+  assert.match(block, /deliveries:\s+VIEW/);
+  assert.match(block, /profile_settings:\s+\['view', 'edit'\]/);
+
+  for (const section of ['dashboard', 'equipment', 'rentals', 'service', 'clients', 'documents', 'payments', 'finance', 'reports', 'admin_panel']) {
+    assert.doesNotMatch(block, new RegExp(`\\b${section}:\\s+`), `${section} must not be granted to carrier`);
+  }
 });
 
 test('frontend normalizes warranty mechanic role aliases', () => {
@@ -87,6 +107,12 @@ test('frontend warranty service detail avoids forbidden service vehicle fetches 
 });
 
 test('frontend warranty pages do not prefetch forbidden operational collections', () => {
+  assert.match(equipmentHookSource, /enabled: options\.enabled \?\? true/);
+  assert.match(serviceTicketsHookSource, /enabled: options\.enabled \?\? true/);
+  assert.match(sidebarSource, /useEquipmentList\(\{ enabled: canSearchEquipment \}\)/);
+  assert.match(sidebarSource, /useServiceTicketsList\(\{ enabled: canSearchService \}\)/);
+  assert.match(sidebarSource, /queryKey: \['deliveries', 'global-search', user\?\.id \|\| 'anonymous', user\?\.role \|\| 'anonymous'\]/);
+
   assert.match(notificationCenterSource, /const canViewShippingPhotos = \['Администратор', 'Офис-менеджер', 'Менеджер по аренде'\]\.includes\(normalizedRole\)[\s\S]*isMechanicRole\(normalizedRole\)/);
   assert.match(notificationCenterSource, /enabled: canViewShippingPhotos/);
 
@@ -101,6 +127,16 @@ test('frontend warranty pages do not prefetch forbidden operational collections'
   assert.match(equipmentDetailSource, /enabled: !!id && canViewShippingPhotos/);
 
   assert.match(rentalApprovalHistorySheetSource, /useClientsList\(\{ enabled: open \}\)/);
+});
+
+test('carrier deliveries page does not prefetch forbidden context or show finance controls', () => {
+  assert.match(deliveriesPageSource, /const isCarrierView = normalizedRole === 'Перевозчик'/);
+  assert.match(deliveriesPageSource, /const deliveryListQueryKey = useMemo/);
+  assert.match(deliveriesPageSource, /queryKey: deliveryListQueryKey/);
+  assert.match(deliveriesPageSource, /enabled: canManageDeliveries/);
+  assert.match(deliveriesPageSource, /Мои активные доставки/);
+  assert.match(deliveriesPageSource, /!isCarrierView && <th className="pb-3 font-medium">Финконтроль<\/th>/);
+  assert.match(deliveriesPageSource, /!isCarrierView && \(\s*<div className="mt-2 font-medium text-gray-900 dark:text-white">\{formatCurrency\(delivery\.cost\)\}<\/div>/);
 });
 
 test('frontend verifies session before clearing auth after data endpoint 401', () => {

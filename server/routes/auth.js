@@ -78,6 +78,7 @@ function registerAuthRoutes(app, deps) {
       profilePhoto: user.profilePhoto || undefined,
       ownerId: user.ownerId || undefined,
       ownerName: user.ownerName || undefined,
+      ...(user.carrierId ? { carrierId: user.carrierId } : {}),
     };
   }
 
@@ -168,6 +169,7 @@ function registerAuthRoutes(app, deps) {
           profilePhoto: user.profilePhoto || undefined,
           ownerId: user.ownerId || undefined,
           ownerName: user.ownerName || undefined,
+          ...(user.carrierId ? { carrierId: user.carrierId } : {}),
         },
       });
     } catch (err) {

@@ -479,7 +479,7 @@ const READ_PERMISSIONS = {
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
-  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Перевозчик'],
   delivery_carriers: ['Администратор'],
   service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   warranty_claims: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
@@ -557,6 +557,7 @@ function requireAuth(req, res, next) {
     profilePhoto: currentUser.profilePhoto || null,
     ownerId: currentUser.ownerId || null,
     ownerName: currentUser.ownerName || null,
+    carrierId: currentUser.carrierId || null,
     tokenVersion: Number(currentUser.tokenVersion) || 0,
     passwordChangedAt: currentUser.passwordChangedAt || null,
   };

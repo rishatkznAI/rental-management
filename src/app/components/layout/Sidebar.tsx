@@ -171,13 +171,15 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
   const { can, canView } = usePermissions();
+  const canSearchEquipment = canView('equipment');
   const canSearchClients = canView('clients');
   const canSearchRentals = canView('rentals');
-  const { data: equipment = [] } = useEquipmentList();
+  const canSearchService = canView('service');
+  const { data: equipment = [] } = useEquipmentList({ enabled: canSearchEquipment });
   const { data: clients = [] } = useClientsList({ enabled: canSearchClients });
   const { data: rentals = [] } = useRentalsList({ enabled: canSearchRentals });
   const { data: ganttRentals = [] } = useGanttData({ enabled: canSearchRentals });
-  const { data: serviceTickets = [] } = useServiceTicketsList();
+  const { data: serviceTickets = [] } = useServiceTicketsList({ enabled: canSearchService });
   const [search, setSearch] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -195,7 +197,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     staleTime: 1000 * 60 * 2,
   });
   const { data: deliveries = [] } = useQuery({
-    queryKey: ['deliveries', 'global-search'],
+    queryKey: ['deliveries', 'global-search', user?.id || 'anonymous', user?.role || 'anonymous'],
     queryFn: deliveriesService.getAll,
     enabled: hasSearchInput && canView('deliveries'),
     staleTime: 1000 * 60 * 2,

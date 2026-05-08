@@ -2,12 +2,15 @@ const express = require('express');
 const {
   formatCarrierDeliveryMessage,
   isCarrierBotUser,
+  isClosedDelivery,
   resolveDeliveryCarrierId,
+  toCarrierDeliveryDto,
 } = require('../lib/carrier-delivery-dto');
 const {
   getClientObjectById,
   normalizeClientRelationLinks,
 } = require('../lib/client-relations');
+const { normalizeRole } = require('../lib/role-groups');
 
 function registerDeliveryRoutes(router, deps) {
   const {
@@ -105,6 +108,60 @@ function registerDeliveryRoutes(router, deps) {
       systemUserId: record.systemUserId ? String(record.systemUserId).trim() : null,
       maxCarrierKey: record.maxCarrierKey ? String(record.maxCarrierKey) : null,
     };
+  }
+
+  function isCarrierRequest(req) {
+    return normalizeRole(req.user?.userRole || req.user?.role) === 'Перевозчик';
+  }
+
+  function findEquipmentForDelivery(delivery) {
+    const equipment = readData('equipment') || [];
+    const refs = [
+      delivery?.equipmentId,
+      delivery?.equipmentInv,
+      delivery?.inventoryNumber,
+      delivery?.serialNumber,
+    ].map(value => String(value || '').trim()).filter(Boolean);
+    if (refs.length === 0) return null;
+    return equipment.find(item => refs.some(ref =>
+      ref === String(item?.id || '').trim()
+      || ref === String(item?.inventoryNumber || '').trim()
+      || ref === String(item?.serialNumber || '').trim()
+    )) || null;
+  }
+
+  function carrierDeliveryResponse(delivery) {
+    const dto = toCarrierDeliveryDto(delivery, {
+      equipment: findEquipmentForDelivery(delivery),
+    });
+    const requestContact = dto.requestContact || null;
+    return {
+      id: delivery?.id || dto.number,
+      type: dto.type,
+      status: dto.status,
+      transportDate: dto.transportDate,
+      pickupTime: dto.pickupTime,
+      neededBy: dto.neededBy,
+      origin: dto.origin,
+      destination: dto.destination,
+      cargo: dto.equipment,
+      contactName: dto.objectContactName || dto.contactName || '',
+      contactPhone: dto.objectContactPhone || dto.contactPhone || '',
+      comment: dto.driverComment,
+      objectName: dto.objectName || '',
+      objectAddress: dto.objectAddress || '',
+      objectContactName: dto.objectContactName || '',
+      objectContactPhone: dto.objectContactPhone || '',
+      manager: requestContact?.name || '',
+      equipmentLabel: dto.equipment,
+      createdAt: delivery?.createdAt || '',
+      updatedAt: delivery?.updatedAt || '',
+      createdBy: '',
+    };
+  }
+
+  function deliveryResponse(delivery, req) {
+    return isCarrierRequest(req) ? carrierDeliveryResponse(delivery) : delivery;
   }
 
   function appendGanttHistoryEntry(rental, text, author) {
@@ -799,6 +856,9 @@ function registerDeliveryRoutes(router, deps) {
   }
 
   router.get('/delivery-carriers', requireAuth, requireRead('deliveries'), (req, res) => {
+    if (isCarrierRequest(req)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
     res.json(listCarrierDirectory());
   });
 
@@ -809,6 +869,9 @@ function registerDeliveryRoutes(router, deps) {
   router.get('/deliveries', requireAuth, requireRead('deliveries'), (req, res) => {
     let deliveries = readData('deliveries') || [];
     deliveries = accessControl.filterCollectionByScope('deliveries', deliveries, req.user);
+    if (isCarrierRequest(req)) {
+      deliveries = deliveries.filter(item => !isClosedDelivery(item));
+    }
     if (req.query.status) {
       deliveries = deliveries.filter((item) => item.status === req.query.status);
     }
@@ -820,7 +883,7 @@ function registerDeliveryRoutes(router, deps) {
       if (byDate !== 0) return byDate;
       return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
     });
-    res.json(deliveries);
+    res.json(deliveries.map(item => deliveryResponse(item, req)));
   });
 
   router.get('/deliveries/:id', requireAuth, requireRead('deliveries'), (req, res) => {
@@ -832,7 +895,10 @@ function registerDeliveryRoutes(router, deps) {
     if (!accessControl.canAccessEntity('deliveries', found, req.user)) {
       return res.status(403).json({ ok: false, error: 'Forbidden' });
     }
-    return res.json(found);
+    if (isCarrierRequest(req) && isClosedDelivery(found)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    return res.json(deliveryResponse(found, req));
   });
 
   router.post('/deliveries', requireAuth, requireWrite('deliveries'), async (req, res) => {

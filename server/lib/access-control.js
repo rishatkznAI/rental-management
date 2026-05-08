@@ -359,6 +359,8 @@ const WARRANTY_MECHANIC_REDACTED_FIELDS = new Set([
   'totalAmount',
 ]);
 
+const CLOSED_DELIVERY_STATUSES = new Set(['completed', 'cancelled']);
+
 function normalizeText(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -644,6 +646,7 @@ function matchesScopedRental(entity, user, readData) {
 }
 
 function isCarrierDelivery(delivery, user) {
+  if (CLOSED_DELIVERY_STATUSES.has(String(delivery?.status || '').trim().toLowerCase())) return false;
   const carrierKeys = compact([
     user?.carrierId,
   ]);

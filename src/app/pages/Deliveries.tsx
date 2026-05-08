@@ -33,6 +33,7 @@ import type {
 import type { GanttRentalData } from '../mock-data';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
+import { normalizeUserRole } from '../lib/userStorage';
 
 const DELIVERY_KEYS = {
   all: ['deliveries'] as const,
@@ -438,31 +439,43 @@ export default function Deliveries() {
   const canCreate = can('create', 'deliveries');
   const canEdit = can('edit', 'deliveries');
   const canDelete = can('delete', 'deliveries');
+  const normalizedRole = normalizeUserRole(user?.role);
+  const isCarrierView = normalizedRole === 'Перевозчик';
+  const canManageDeliveries = canCreate || canEdit || canDelete;
   const canFinancialControl = user?.role === 'Офис-менеджер' || user?.role === 'Администратор';
+  const deliveryListQueryKey = useMemo(
+    () => [...DELIVERY_KEYS.all, normalizedRole, user?.id || 'anonymous'] as const,
+    [normalizedRole, user?.id],
+  );
 
   const { data: deliveries = [], isLoading, refetch } = useQuery({
-    queryKey: DELIVERY_KEYS.all,
+    queryKey: deliveryListQueryKey,
     queryFn: deliveriesService.getAll,
   });
   const { data: carriers = [] } = useQuery({
     queryKey: DELIVERY_KEYS.carriers,
     queryFn: deliveriesService.getCarriers,
+    enabled: canManageDeliveries,
   });
   const { data: ganttRentals = [] } = useQuery({
     queryKey: ['gantt-rentals-deliveries'],
     queryFn: rentalsService.getGanttData,
+    enabled: canManageDeliveries,
   });
   const { data: classicRentals = [] } = useQuery({
     queryKey: ['classic-rentals-deliveries'],
     queryFn: rentalsService.getAll,
+    enabled: canManageDeliveries,
   });
   const { data: equipment = [] } = useQuery({
     queryKey: ['equipment-deliveries'],
     queryFn: equipmentService.getAll,
+    enabled: canManageDeliveries,
   });
   const { data: clients = [] } = useQuery({
     queryKey: ['clients-deliveries'],
     queryFn: clientsService.getAll,
+    enabled: canManageDeliveries,
   });
 
   const [search, setSearch] = useState('');
@@ -547,6 +560,16 @@ export default function Deliveries() {
     unpaidByClient: deliveries.filter((item) => item.status === 'completed' && !item.clientPaymentVerified).length,
     sentToCarrier: deliveries.filter((item) => Boolean(item.botSentAt)).length,
   }), [deliveries]);
+  const kpiCards = isCarrierView
+    ? [
+        { label: 'Мои активные доставки', value: kpis.total, tone: 'text-slate-100', bg: 'from-slate-900 to-slate-800' },
+      ]
+    : [
+        { label: 'Всего заявок', value: kpis.total, tone: 'text-slate-100', bg: 'from-slate-900 to-slate-800' },
+        { label: 'Отправлено перевозчику', value: kpis.sentToCarrier, tone: 'text-blue-100', bg: 'from-blue-900 to-blue-800' },
+        { label: 'Без счёта перевозчика', value: kpis.needInvoice, tone: 'text-amber-100', bg: 'from-amber-900 to-amber-800' },
+        { label: 'Клиент не подтвердил оплату', value: kpis.unpaidByClient, tone: 'text-red-100', bg: 'from-red-900 to-red-800' },
+      ];
 
   function openCreateDialog() {
     setEditingDelivery(null);
@@ -690,12 +713,7 @@ export default function Deliveries() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        {[
-          { label: 'Всего заявок', value: kpis.total, tone: 'text-slate-100', bg: 'from-slate-900 to-slate-800' },
-          { label: 'Отправлено перевозчику', value: kpis.sentToCarrier, tone: 'text-blue-100', bg: 'from-blue-900 to-blue-800' },
-          { label: 'Без счёта перевозчика', value: kpis.needInvoice, tone: 'text-amber-100', bg: 'from-amber-900 to-amber-800' },
-          { label: 'Клиент не подтвердил оплату', value: kpis.unpaidByClient, tone: 'text-red-100', bg: 'from-red-900 to-red-800' },
-        ].map((card) => (
+        {kpiCards.map((card) => (
           <div key={card.label} className={`rounded-2xl bg-gradient-to-br ${card.bg} p-4 shadow-lg`}>
             <div className="text-xs uppercase tracking-[0.24em] text-white/60">{card.label}</div>
             <div className={`mt-3 text-3xl font-semibold ${card.tone}`}>{card.value}</div>
@@ -709,7 +727,7 @@ export default function Deliveries() {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <Input
               className="pl-9"
-              placeholder="Клиент, груз, перевозчик, маршрут…"
+              placeholder={isCarrierView ? 'Груз, маршрут, контакт…' : 'Клиент, груз, перевозчик, маршрут…'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -735,16 +753,18 @@ export default function Deliveries() {
               </option>
             ))}
           </select>
-          <select
-            value={managerFilter}
-            onChange={(e) => setManagerFilter(e.target.value)}
-            className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-          >
-            <option value="">Все менеджеры</option>
-            {managerOptions.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
+          {!isCarrierView && (
+            <select
+              value={managerFilter}
+              onChange={(e) => setManagerFilter(e.target.value)}
+              className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+            >
+              <option value="">Все менеджеры</option>
+              {managerOptions.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="mt-4 overflow-x-auto">
@@ -757,7 +777,9 @@ export default function Deliveries() {
             <div className="flex h-40 flex-col items-center justify-center text-gray-500 dark:text-gray-400">
               <Truck className="mb-3 h-10 w-10 opacity-40" />
               <p className="text-base font-medium">Доставок пока нет</p>
-              <p className="mt-1 text-sm">Создай первую заявку на перевозку и она сразу уйдёт перевозчику в MAX.</p>
+              <p className="mt-1 text-sm">
+                {isCarrierView ? 'Активных заявок для вашей компании сейчас нет.' : 'Создай первую заявку на перевозку и она сразу уйдёт перевозчику в MAX.'}
+              </p>
             </div>
           ) : (
             <table className="w-full min-w-[1200px] text-sm">
@@ -765,12 +787,12 @@ export default function Deliveries() {
                 <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-[0.14em] text-gray-500 dark:border-gray-700 dark:text-gray-400">
                   <th className="pb-3 font-medium">Операция</th>
                   <th className="pb-3 font-medium">Дата</th>
-                  <th className="pb-3 font-medium">Клиент</th>
+                  {!isCarrierView && <th className="pb-3 font-medium">Клиент</th>}
                   <th className="pb-3 font-medium">Что везём</th>
                   <th className="pb-3 font-medium">Маршрут</th>
-                  <th className="pb-3 font-medium">Перевозчик</th>
+                  {!isCarrierView && <th className="pb-3 font-medium">Перевозчик</th>}
                   <th className="pb-3 font-medium">Статус</th>
-                  <th className="pb-3 font-medium">Финконтроль</th>
+                  {!isCarrierView && <th className="pb-3 font-medium">Финконтроль</th>}
                   <th className="pb-3 font-medium">Действия</th>
                 </tr>
               </thead>
@@ -797,10 +819,12 @@ export default function Deliveries() {
                         Нужно к {formatDate(delivery.neededBy || delivery.transportDate)}
                       </div>
                     </td>
-                    <td className="py-3 pr-4">
-                      <div className="font-medium text-gray-900 dark:text-white">{delivery.client}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{delivery.manager}</div>
-                    </td>
+                    {!isCarrierView && (
+                      <td className="py-3 pr-4">
+                        <div className="font-medium text-gray-900 dark:text-white">{delivery.client}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">{delivery.manager}</div>
+                      </td>
+                    )}
                     <td className="py-3 pr-4">
                       <div className="font-medium text-gray-900 dark:text-white">{delivery.cargo}</div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -817,48 +841,54 @@ export default function Deliveries() {
                         {delivery.contactName} · {delivery.contactPhone}
                       </div>
                     </td>
-                    <td className="py-3 pr-4">
-                      <div className="font-medium text-gray-900 dark:text-white">{delivery.carrierName || 'Не выбран'}</div>
-                      {(linkedCarrier?.company || linkedCarrier?.inn) && (
+                    {!isCarrierView && (
+                      <td className="py-3 pr-4">
+                        <div className="font-medium text-gray-900 dark:text-white">{delivery.carrierName || 'Не выбран'}</div>
+                        {(linkedCarrier?.company || linkedCarrier?.inn) && (
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {linkedCarrier?.company || 'Без компании'}
+                            {linkedCarrier?.inn
+                              ? ` · ИНН ${linkedCarrier.inn}`
+                              : ''}
+                          </div>
+                        )}
                         <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {linkedCarrier?.company || 'Без компании'}
-                          {linkedCarrier?.inn
-                            ? ` · ИНН ${linkedCarrier.inn}`
-                            : ''}
+                          {delivery.botSentAt
+                            ? `MAX: отправлено ${formatDate(delivery.botSentAt.slice(0, 10))}`
+                            : (delivery.botSendError || 'В MAX ещё не отправлено')}
                         </div>
-                      )}
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {delivery.botSentAt
-                          ? `MAX: отправлено ${formatDate(delivery.botSentAt.slice(0, 10))}`
-                          : (delivery.botSendError || 'В MAX ещё не отправлено')}
-                      </div>
-                    </td>
+                      </td>
+                    )}
                     <td className="py-3 pr-4">
                       <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_CLASSES[delivery.status]}`}>
                         {STATUS_LABELS[delivery.status]}
                       </span>
-                      <div className="mt-2 font-medium text-gray-900 dark:text-white">{formatCurrency(delivery.cost)}</div>
+                      {!isCarrierView && (
+                        <div className="mt-2 font-medium text-gray-900 dark:text-white">{formatCurrency(delivery.cost)}</div>
+                      )}
                     </td>
-                    <td className="py-3 pr-4">
-                      <div className="space-y-2">
-                        <div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
-                          delivery.carrierInvoiceReceived
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                            : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-                        }`}>
-                          <CircleDollarSign className="h-3.5 w-3.5" />
-                          {delivery.carrierInvoiceReceived ? 'Счёт получен' : 'Ждём счёт'}
+                    {!isCarrierView && (
+                      <td className="py-3 pr-4">
+                        <div className="space-y-2">
+                          <div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                            delivery.carrierInvoiceReceived
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                          }`}>
+                            <CircleDollarSign className="h-3.5 w-3.5" />
+                            {delivery.carrierInvoiceReceived ? 'Счёт получен' : 'Ждём счёт'}
+                          </div>
+                          <div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                            delivery.clientPaymentVerified
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                              : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                          }`}>
+                            <CircleCheck className="h-3.5 w-3.5" />
+                            {delivery.clientPaymentVerified ? 'Клиент оплатил' : 'Оплата не подтверждена'}
+                          </div>
                         </div>
-                        <div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
-                          delivery.clientPaymentVerified
-                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-                            : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                        }`}>
-                          <CircleCheck className="h-3.5 w-3.5" />
-                          {delivery.clientPaymentVerified ? 'Клиент оплатил' : 'Оплата не подтверждена'}
-                        </div>
-                      </div>
-                    </td>
+                      </td>
+                    )}
                     <td className="py-3">
                       <div className="flex flex-col gap-2">
                         {canEdit && (

@@ -9,10 +9,11 @@ export const EQUIPMENT_KEYS = {
   photos: (id: string) => ['equipment', id, 'photos'] as const,
 };
 
-export function useEquipmentList() {
+export function useEquipmentList(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2, // 2 минуты
   });
 }

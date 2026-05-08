@@ -53,6 +53,16 @@ function createDeliveryApp(deliveryOverrides = {}) {
       status: 'Активен',
       phone: '+7 900 123-45-67',
       email: 'admin@example.test',
+    }, {
+      id: 'U-carrier',
+      name: 'ИП Сабитов Алмаз',
+      role: 'Перевозчик',
+      status: 'Активен',
+      phone: '+7 900 000-00-00',
+      email: 'carrier@example.test',
+      carrierId: 'carrier-1',
+      botOnly: false,
+      allowFrontendLogin: true,
     }],
     clients: [
       { id: 'C-1', company: 'ИНЖИНИРИНГ' },
@@ -95,22 +105,45 @@ function createDeliveryApp(deliveryOverrides = {}) {
 
   function requireAuth(req, res, next) {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    if (token !== 'admin-token') return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    const sessionUserId = token === 'admin-token'
+      ? 'U-admin'
+      : (token === 'carrier-token' ? 'U-carrier' : null);
+    if (!sessionUserId) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    const user = state.users.find(item => item.id === sessionUserId);
+    if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     req.user = {
-      userId: 'U-admin',
-      userName: 'Администратор',
-      userRole: 'Администратор',
-      email: 'admin@example.test',
+      userId: user.id,
+      userName: user.name,
+      userRole: user.role,
+      email: user.email,
+      carrierId: user.carrierId || null,
     };
     return next();
+  }
+  function requireRead(collection) {
+    return (req, res, next) => {
+      const allowed = {
+        deliveries: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Перевозчик'],
+        delivery_carriers: ['Администратор'],
+      }[collection] || ['Администратор'];
+      return allowed.includes(req.user?.userRole) ? next() : res.status(403).json({ ok: false, error: 'Forbidden' });
+    };
+  }
+  function requireWrite(collection) {
+    return (req, res, next) => {
+      const allowed = {
+        deliveries: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+      }[collection] || ['Администратор'];
+      return allowed.includes(req.user?.userRole) ? next() : res.status(403).json({ ok: false, error: 'Forbidden' });
+    };
   }
 
   registerDeliveryRoutes(apiRouter, {
     readData,
     writeData,
     requireAuth,
-    requireRead: () => (_req, _res, next) => next(),
-    requireWrite: () => (_req, _res, next) => next(),
+    requireRead,
+    requireWrite,
     sendMessage: async (target, text, options = {}) => {
       messages.push({ target, text, options });
       return { message: { message_id: `msg-${messages.length}` } };
@@ -142,11 +175,11 @@ async function withServer(app, fn) {
   }
 }
 
-async function request(baseUrl, method, path, body) {
+async function request(baseUrl, method, path, body, token = 'admin-token') {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
-      authorization: 'Bearer admin-token',
+      authorization: `Bearer ${token}`,
       'content-type': 'application/json',
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -157,6 +190,68 @@ async function request(baseUrl, method, path, body) {
     body: text ? JSON.parse(text) : null,
   };
 }
+
+test('frontend-enabled carrier reads only own active deliveries as sanitized operational data', async () => {
+  const { app, state } = createDeliveryApp({
+    id: 'DL-own',
+    status: 'sent',
+    carrierId: 'carrier-1',
+    carrierKey: 'carrier-1',
+    client: 'ООО Секретный клиент',
+    clientId: 'C-1',
+    rentalId: 'R-1',
+    ganttRentalId: 'GR-1',
+    classicRentalId: 'R-1',
+    cost: 18000,
+    carrierInvoiceReceived: true,
+    clientPaymentVerified: true,
+    botSentAt: '2026-04-28T09:00:00.000Z',
+    botSendError: null,
+    manager: 'Офис',
+    responsibleManagerName: 'Офис',
+    responsibleManagerPhone: '+7 900 111-22-33',
+  });
+  state.deliveries.push(
+    makeDelivery({ id: 'DL-other', status: 'sent', carrierId: 'carrier-2', carrierKey: 'carrier-2' }),
+    makeDelivery({ id: 'DL-closed', status: 'completed', carrierId: 'carrier-1', carrierKey: 'carrier-1' }),
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const list = await request(baseUrl, 'GET', '/api/deliveries', undefined, 'carrier-token');
+
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.map(item => item.id), ['DL-own']);
+    assert.equal(list.body[0].origin, 'Новая база');
+    assert.equal(list.body[0].destination, 'Аксубаево');
+    assert.equal(list.body[0].cargo, 'LGMG AS1413 L13000065');
+    for (const forbiddenField of [
+      'cost',
+      'client',
+      'clientId',
+      'rentalId',
+      'ganttRentalId',
+      'classicRentalId',
+      'carrierId',
+      'carrierKey',
+      'carrierInvoiceReceived',
+      'clientPaymentVerified',
+      'botSentAt',
+      'botSendError',
+    ]) {
+      assert.equal(Object.hasOwn(list.body[0], forbiddenField), false, `${forbiddenField} must not be exposed`);
+    }
+
+    const ownDetail = await request(baseUrl, 'GET', '/api/deliveries/DL-own', undefined, 'carrier-token');
+    assert.equal(ownDetail.status, 200);
+    assert.equal(Object.hasOwn(ownDetail.body, 'clientId'), false);
+    assert.equal(Object.hasOwn(ownDetail.body, 'cost'), false);
+
+    assert.equal((await request(baseUrl, 'GET', '/api/deliveries/DL-other', undefined, 'carrier-token')).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/deliveries/DL-closed', undefined, 'carrier-token')).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/delivery-carriers', undefined, 'carrier-token')).status, 403);
+    assert.equal((await request(baseUrl, 'PATCH', '/api/deliveries/DL-own', { status: 'in_transit' }, 'carrier-token')).status, 403);
+  });
+});
 
 test('updating a delivery with a carrier sends the previously unsent request to MAX', async () => {
   const { app, state, messages } = createDeliveryApp({

@@ -170,10 +170,17 @@ test('carrier delivery scope is tied to carrierId', () => {
   const access = createAccess({});
   const carrier = { userId: 'carrier-1', userName: 'Быстрая доставка', userRole: 'Перевозчик', carrierId: 'carrier-1', phone: '100' };
 
-  assert.equal(access.isCarrierDelivery({ id: 'DL-1', carrierId: 'carrier-1' }, carrier), true);
+  assert.equal(access.isCarrierDelivery({ id: 'DL-1', status: 'sent', carrierId: 'carrier-1' }, carrier), true);
   assert.equal(access.isCarrierDelivery({ id: 'DL-legacy', carrierKey: 'carrier-1' }, carrier), true);
   assert.equal(access.isCarrierDelivery({ id: 'DL-2', carrierKey: 'carrier-2', carrierUserId: '200' }, carrier), false);
   assert.equal(access.isCarrierDelivery({ id: 'DL-max-only', carrierUserId: '100' }, carrier), false);
+  assert.equal(access.isCarrierDelivery({ id: 'DL-completed', status: 'completed', carrierId: 'carrier-1' }, carrier), false);
+  assert.deepEqual(access.filterCollectionByScope('deliveries', [
+    { id: 'DL-1', status: 'sent', carrierId: 'carrier-1' },
+    { id: 'DL-completed', status: 'completed', carrierId: 'carrier-1' },
+    { id: 'DL-other', status: 'sent', carrierId: 'carrier-2' },
+  ], carrier).map(item => item.id), ['DL-1']);
+  assert.equal(access.canMutateEntity('deliveries', { id: 'DL-1', status: 'sent', carrierId: 'carrier-1' }, carrier), false);
 });
 
 test('non-admin cannot read app_settings or use generic payments mutation', () => {

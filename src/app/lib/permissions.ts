@@ -8,6 +8,7 @@
  *  Офис-менеджер   — полный операционный доступ + свой дашборд (без Отчётов и Настроек)
  *  Механик          — только Техника (просмотр) + Сервис (полный CRUD)
  *  Механик по гарантии — Сервис/Рекламации + просмотр Техники и Продаж
+ *  Перевозчик       — только свои активные доставки, если backend явно разрешил frontend-вход
  */
 
 import { useCallback, useMemo } from 'react';
@@ -127,6 +128,10 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     clients:          VIEW_CREATE,
     documents:        VIEW,
     payments:         VIEW,
+    profile_settings: ['view', 'edit'],
+  },
+  'Перевозчик': {
+    deliveries:       VIEW,
     profile_settings: ['view', 'edit'],
   },
   [WARRANTY_MECHANIC_ROLE]: {

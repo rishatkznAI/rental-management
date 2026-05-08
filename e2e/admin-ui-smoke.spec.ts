@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { loginAsAdmin } from './helpers/auth';
 
+test.use({ trace: 'off', screenshot: 'off', video: 'off' });
+
 type UiIssue = {
   type: string;
   action: string;

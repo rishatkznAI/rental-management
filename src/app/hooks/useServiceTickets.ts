@@ -8,10 +8,11 @@ export const SERVICE_TICKET_KEYS = {
   byEquipment: (equipmentId: string) => ['serviceTickets', 'equipment', equipmentId] as const,
 };
 
-export function useServiceTicketsList() {
+export function useServiceTicketsList(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2,
   });
 }

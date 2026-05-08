@@ -1124,6 +1124,8 @@ test('office manager gets safe staff options without user-management access', as
     assert.equal(JSON.stringify(users.body).includes('password'), false);
     assert.equal((await request(baseUrl, 'GET', '/api/users/U-sales', 'office-token')).status, 403);
     assert.equal((await request(baseUrl, 'PATCH', '/api/users/U-sales', 'office-token', { role: 'Администратор' })).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/users', 'mechanic-token')).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/users', 'warranty-token')).status, 403);
 
     const options = await request(baseUrl, 'GET', '/api/staff/manager-options', 'office-token');
     assert.equal(options.status, 200);

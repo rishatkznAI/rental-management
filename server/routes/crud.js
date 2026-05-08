@@ -273,8 +273,25 @@ function registerCrudRoutes(deps) {
     });
   }
 
+  function canReadPublicUsers(req) {
+    return new Set([
+      'Администратор',
+      'Офис-менеджер',
+      'Менеджер по аренде',
+      'Менеджер по продажам',
+    ]).has(normalizeRole(req.user?.userRole));
+  }
+
   function hasReadAccess(req, collection) {
-    if (collection === 'users') return true;
+    if (collection === 'users') {
+      return canReadPublicUsers(req)
+        ? true
+        : {
+            denied: true,
+            statusCode: 403,
+            payload: { ok: false, error: 'Forbidden' },
+          };
+    }
     if (typeof requireRead !== 'function') {
       return Promise.resolve({
         denied: true,

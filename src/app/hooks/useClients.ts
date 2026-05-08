@@ -7,10 +7,15 @@ export const CLIENT_KEYS = {
   detail: (id: string) => ['clients', id] as const,
 };
 
-export function useClientsList() {
+type QueryOptions = {
+  enabled?: boolean;
+};
+
+export function useClientsList(options: QueryOptions = {}) {
   return useQuery({
     queryKey: CLIENT_KEYS.all,
     queryFn: clientsService.getAll,
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 5,
   });
 }

@@ -397,10 +397,13 @@ export default function ServiceDetail() {
   ].map(role => normalizeUserRole(role)).find(Boolean) || '';
   const canEdit = can('edit', 'service');
   const canDeleteService = isAdmin && can('delete', 'service');
+  const canEditEquipment = can('edit', 'equipment');
+  const canViewDocuments = can('view', 'documents');
+  const canViewRentals = can('view', 'rentals');
   const canCreateDocuments = can('create', 'documents');
 
   const { data: fetchedTicket } = useServiceTicketById(id ?? '');
-  const { data: documents = [] } = useDocumentsList();
+  const { data: documents = [] } = useDocumentsList({ enabled: canViewDocuments });
   const { data: equipmentList = [] } = useQuery<Equipment[]>({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
@@ -577,13 +580,13 @@ export default function ServiceDetail() {
     };
     persist(updated);
 
-    if (!ticket.equipmentId && !ticket.inventoryNumber) return;
+    if ((!ticket.equipmentId && !ticket.inventoryNumber) || !canEditEquipment) return;
 
     try {
       const [allTickets, allEquipment, allGanttRentals] = await Promise.all([
         serviceTicketsService.getAll?.() ?? Promise.resolve([]),
         equipmentService.getAll(),
-        rentalsService.getGanttData(),
+        canViewRentals ? rentalsService.getGanttData() : Promise.resolve([]),
       ]);
 
       const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'needs_revision'];
@@ -771,11 +774,11 @@ export default function ServiceDetail() {
     try {
       await serviceTicketsService.delete(deletedTicket.id);
 
-      if (deletedTicket.equipmentId || deletedTicket.inventoryNumber || deletedTicket.serialNumber) {
+      if (canEditEquipment && (deletedTicket.equipmentId || deletedTicket.inventoryNumber || deletedTicket.serialNumber)) {
         const [allTickets, allEquipment, allGanttRentals] = await Promise.all([
           serviceTicketsService.getAll(),
           equipmentService.getAll(),
-          rentalsService.getGanttData(),
+          canViewRentals ? rentalsService.getGanttData() : Promise.resolve([]),
         ]);
 
         const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'needs_revision'];
@@ -839,7 +842,7 @@ export default function ServiceDetail() {
       setDeleteError('Не удалось удалить сервисную заявку. Попробуйте ещё раз.');
       setConfirmDelete(false);
     }
-  }, [canDeleteService, navigate, queryClient, ticket]);
+  }, [canDeleteService, canEditEquipment, canViewRentals, navigate, queryClient, ticket]);
 
   const addWorkPerformed = async () => {
     if (!ticket || !canAddRepairItems || !selectedWorkId) return;

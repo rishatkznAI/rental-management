@@ -8,10 +8,15 @@ export const DOCUMENT_KEYS = {
   byRental: (rentalId: string) => ['documents', 'rental', rentalId] as const,
 };
 
-export function useDocumentsList() {
+type QueryOptions = {
+  enabled?: boolean;
+};
+
+export function useDocumentsList(options: QueryOptions = {}) {
   return useQuery({
     queryKey: DOCUMENT_KEYS.all,
     queryFn: documentsService.getAll,
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 5,
   });
 }

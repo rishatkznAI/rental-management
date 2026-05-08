@@ -171,10 +171,12 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
   const { can, canView } = usePermissions();
+  const canSearchClients = canView('clients');
+  const canSearchRentals = canView('rentals');
   const { data: equipment = [] } = useEquipmentList();
-  const { data: clients = [] } = useClientsList();
-  const { data: rentals = [] } = useRentalsList();
-  const { data: ganttRentals = [] } = useGanttData();
+  const { data: clients = [] } = useClientsList({ enabled: canSearchClients });
+  const { data: rentals = [] } = useRentalsList({ enabled: canSearchRentals });
+  const { data: ganttRentals = [] } = useGanttData({ enabled: canSearchRentals });
   const { data: serviceTickets = [] } = useServiceTicketsList();
   const [search, setSearch] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);

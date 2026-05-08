@@ -39,6 +39,7 @@ import { useEquipmentList } from '../hooks/useEquipment';
 import { useClientsList } from '../hooks/useClients';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useAuth } from '../contexts/AuthContext';
+import { usePermissions } from '../lib/permissions';
 import { equipmentService } from '../services/equipment.service';
 import { gsmGatewayService } from '../services/gsm-gateway.service';
 import {
@@ -567,11 +568,12 @@ function filterRoutePoints(points: GsmRoutePoint[], period: RoutePeriod) {
 
 export default function Gsm() {
   const { user } = useAuth();
+  const { canView } = usePermissions();
   const queryClient = useQueryClient();
   const { data: equipment = [] } = useEquipmentList();
-  const { data: rentals = [] } = useRentalsList();
-  const { data: ganttRentals = [] } = useGanttData();
-  const { data: clients = [] } = useClientsList();
+  const { data: rentals = [] } = useRentalsList({ enabled: canView('rentals') });
+  const { data: ganttRentals = [] } = useGanttData({ enabled: canView('rentals') });
+  const { data: clients = [] } = useClientsList({ enabled: canView('clients') });
   const { data: shippingPhotos = [] } = useQuery<ShippingPhoto[]>({
     queryKey: ['shippingPhotos', 'all'],
     queryFn: equipmentService.getAllShippingPhotos,

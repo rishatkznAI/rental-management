@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import {
 } from '../mock-data';
-import type { PhotoReference, ShippingPhoto, ServiceTicket, Payment, EquipmentStatus, EquipmentOperationPhotoCategory, ShippingEventType } from '../types';
+import type { PhotoReference, ShippingPhoto, ServiceTicket, Payment, EquipmentStatus, EquipmentOperationPhotoCategory, ShippingEventType, Document, Client } from '../types';
 import { formatDate, formatDateTime, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
 import { cn } from '../lib/utils';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -471,6 +471,14 @@ type ShippingComparisonPair = {
   receiving: ShippingPhoto;
 };
 
+const EMPTY_EQUIPMENT: Equipment[] = [];
+const EMPTY_GANTT_RENTALS: GanttRentalData[] = [];
+const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
+const EMPTY_PAYMENTS: Payment[] = [];
+const EMPTY_DOCUMENTS: Document[] = [];
+const EMPTY_CLIENTS: Client[] = [];
+const EMPTY_SHIPPING_PHOTOS: ShippingPhoto[] = [];
+
 function getShippingPhotoGroups(event: ShippingPhoto): ShippingPhotoGroup[] {
   if (event.photoCategories && Object.keys(event.photoCategories).length > 0) {
     return Object.entries(PHOTO_CATEGORY_LABELS)
@@ -635,36 +643,36 @@ export default function EquipmentDetail() {
   const [allServiceTickets, setAllServiceTickets] = useState<ServiceTicket[]>([]);
   const [allPayments, setAllPayments] = useState<Payment[]>([]);
 
-  const { data: equipmentData = [] } = useQuery({
+  const { data: equipmentData = EMPTY_EQUIPMENT } = useQuery({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
   });
-  const { data: ganttData = [] } = useQuery({
+  const { data: ganttData = EMPTY_GANTT_RENTALS } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
     enabled: canViewRentals,
   });
-  const { data: serviceData = [] } = useQuery({
+  const { data: serviceData = EMPTY_SERVICE_TICKETS } = useQuery({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
     enabled: canViewService,
   });
-  const { data: paymentData = [] } = useQuery({
+  const { data: paymentData = EMPTY_PAYMENTS } = useQuery({
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
     enabled: canViewFinance,
   });
-  const { data: documentData = [] } = useQuery({
+  const { data: documentData = EMPTY_DOCUMENTS } = useQuery({
     queryKey: ['documents'],
     queryFn: documentsService.getAll,
     enabled: canViewDocuments,
   });
-  const { data: clientData = [] } = useQuery({
+  const { data: clientData = EMPTY_CLIENTS } = useQuery({
     queryKey: ['clients'],
     queryFn: clientsService.getAll,
     enabled: canViewClients,
   });
-  const { data: shippingPhotoData = [] } = useQuery({
+  const { data: shippingPhotoData = EMPTY_SHIPPING_PHOTOS } = useQuery({
     queryKey: ['shippingPhotos', id],
     queryFn: () => equipmentService.getShippingPhotos(String(id ?? '')),
     enabled: !!id,

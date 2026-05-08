@@ -9,10 +9,15 @@ export const RENTAL_KEYS = {
   gantt: ['rentals', 'gantt'] as const,
 };
 
-export function useRentalsList() {
+type QueryOptions = {
+  enabled?: boolean;
+};
+
+export function useRentalsList(options: QueryOptions = {}) {
   return useQuery({
     queryKey: RENTAL_KEYS.all,
     queryFn: rentalsService.getAll,
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2,
   });
 }
@@ -33,10 +38,11 @@ export function useRentalAuditHistory(id: string) {
   });
 }
 
-export function useGanttData() {
+export function useGanttData(options: QueryOptions = {}) {
   return useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
+    enabled: options.enabled ?? true,
   });
 }
 

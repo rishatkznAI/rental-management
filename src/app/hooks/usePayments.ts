@@ -8,10 +8,15 @@ export const PAYMENT_KEYS = {
   detail: (id: string) => ['payments', id] as const,
 };
 
-export function usePaymentsList() {
+type QueryOptions = {
+  enabled?: boolean;
+};
+
+export function usePaymentsList(options: QueryOptions = {}) {
   return useQuery({
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2,
   });
 }

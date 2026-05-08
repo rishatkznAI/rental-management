@@ -250,9 +250,9 @@ function apiErrorMessage(error: unknown, fallback: string) {
 
 export default function Equipment() {
   const { user } = useAuth();
-  const { can } = usePermissions();
+  const { can, canView } = usePermissions();
   const equipmentQuery = useEquipmentList();
-  const ganttQuery = useGanttData();
+  const ganttQuery = useGanttData({ enabled: canView('rentals') });
   const equipmentList = equipmentQuery.data ?? [];
   const ganttRentals = ganttQuery.data ?? [];
   const equipmentTypeCatalog = useEquipmentTypeCatalog();

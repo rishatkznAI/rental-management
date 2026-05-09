@@ -134,8 +134,8 @@ export default function Login() {
           </div>
         </section>
 
-        <section className="flex w-full items-center justify-center border-t border-[#161616] bg-[#0e0e0e] px-6 py-10 sm:px-8 lg:border-l lg:border-t-0 lg:px-12 lg:py-12 xl:px-20">
-          <div className="w-full max-w-[420px]">
+        <section className="flex w-full items-center justify-center border-t border-[#161616] bg-[#0e0e0e] px-6 py-10 sm:px-8 lg:justify-start lg:border-l lg:border-t-0 lg:px-0 lg:py-12">
+          <div className="w-full max-w-[420px] lg:ml-[72px]">
             <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[#555]">Авторизация</p>
             <h2 className="text-[22px] font-medium leading-7 tracking-normal text-[#f0f0f0]">Добро пожаловать</h2>
             <p className="mt-1 mb-8 text-[13px] leading-5 text-[#666]">Войдите, чтобы продолжить работу</p>

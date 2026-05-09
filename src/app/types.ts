@@ -1054,6 +1054,150 @@ export interface DebtCollectionPlan {
   updatedBy?: string;
 }
 
+export type ReceivableCollectionStatus =
+  | 'new'
+  | 'in_work'
+  | 'promised'
+  | 'payment_plan'
+  | 'overdue_promise'
+  | 'escalated'
+  | 'closed'
+  | 'disputed';
+
+export type ReceivableActionType =
+  | 'call'
+  | 'message'
+  | 'email'
+  | 'meeting'
+  | 'legal_notice'
+  | 'payment_promise'
+  | 'payment_plan'
+  | 'escalation'
+  | 'comment';
+
+export type ReceivableActionStatus = 'planned' | 'done' | 'missed' | 'cancelled';
+export type ReceivablePaymentPlanStatus = 'planned' | 'paid' | 'missed' | 'cancelled';
+
+export interface ReceivableCollectionAction {
+  id: string;
+  clientId?: string;
+  rentalId?: string;
+  paymentId?: string;
+  managerId?: string;
+  responsibleUserId?: string;
+  actionType: ReceivableActionType;
+  status: ReceivableActionStatus;
+  actionDate: string;
+  nextActionDate?: string;
+  promisedPaymentDate?: string;
+  promisedAmount?: number;
+  comment?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export interface ReceivablePaymentPlanItem {
+  id: string;
+  clientId?: string;
+  rentalId?: string;
+  paymentDate: string;
+  amount: number;
+  status: ReceivablePaymentPlanStatus;
+  comment?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export interface ReceivableRentalBreakdown {
+  rentalId: string;
+  equipmentInv: string;
+  startDate: string;
+  endDate: string;
+  dueDate: string;
+  amount: number;
+  paidAmount: number;
+  outstanding: number;
+  overdueDays: number;
+  status: string;
+}
+
+export interface ReceivablePaymentBreakdown {
+  id: string;
+  rentalId?: string;
+  invoiceNumber?: string;
+  amount: number;
+  paidAmount: number;
+  dueDate?: string;
+  paidDate?: string;
+  status?: string;
+  comment?: string;
+}
+
+export interface ReceivableDocumentRef {
+  id?: string;
+  type?: string;
+  number?: string;
+  date?: string;
+  amount?: number;
+  status?: string;
+  rentalId?: string;
+  rental?: string;
+}
+
+export interface ReceivableRow {
+  clientId?: string;
+  client: string;
+  inn?: string;
+  contacts?: {
+    contact?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+  };
+  manager: string;
+  totalDebt: number;
+  overdueDebt: number;
+  oldestOverdueDays: number;
+  rentals: ReceivableRentalBreakdown[];
+  payments: ReceivablePaymentBreakdown[];
+  documents: ReceivableDocumentRef[];
+  actions: ReceivableCollectionAction[];
+  paymentPlans: ReceivablePaymentPlanItem[];
+  lastContactDate?: string;
+  nextActionDate?: string;
+  nextActionType?: ReceivableActionType | '';
+  collectionStatus: ReceivableCollectionStatus;
+  promisedPaymentDate?: string;
+  promisedAmount?: number;
+  comment?: string;
+  hasPaymentPlan?: boolean;
+  noNextAction?: boolean;
+  missedActions?: number;
+  missedPlanPayments?: number;
+}
+
+export interface ReceivablesSummary {
+  totalDebt: number;
+  overdueDebt: number;
+  age0_7: number;
+  age8_30: number;
+  age31_60: number;
+  age60Plus: number;
+  clientsWithDebt: number;
+  withoutNextAction: number;
+  promisedAmount: number;
+  paymentPlanAmount: number;
+}
+
+export interface ReceivablesResponse {
+  rows: ReceivableRow[];
+  summary: ReceivablesSummary;
+}
+
 export interface ManagerBreakdownPayment {
   id: string;
   invoiceNumber: string;

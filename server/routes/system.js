@@ -136,6 +136,8 @@ const SYSTEM_DATA_COLLECTIONS = [
   'documents',
   'payments',
   'debt_collection_plans',
+  'debt_collection_actions',
+  'receivable_payment_plans',
   'deliveries',
   'users',
   'owners',

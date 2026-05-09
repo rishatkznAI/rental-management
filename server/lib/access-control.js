@@ -77,6 +77,8 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'deliveries',
   'documents',
   'debt_collection_plans',
+  'debt_collection_actions',
+  'receivable_payment_plans',
   'equipment',
   'gantt_rentals',
   'gsm_commands',
@@ -169,6 +171,28 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'nextActionType',
     'comment',
     'result',
+  ]),
+  debt_collection_actions: new Set([
+    'clientId',
+    'rentalId',
+    'paymentId',
+    'managerId',
+    'responsibleUserId',
+    'actionType',
+    'status',
+    'actionDate',
+    'nextActionDate',
+    'promisedPaymentDate',
+    'promisedAmount',
+    'comment',
+  ]),
+  receivable_payment_plans: new Set([
+    'clientId',
+    'rentalId',
+    'paymentDate',
+    'amount',
+    'status',
+    'comment',
   ]),
   company_expenses: new Set([
     'name',
@@ -367,6 +391,28 @@ const NON_ADMIN_CREATE_FIELDS = {
     'nextActionType',
     'comment',
     'result',
+  ]),
+  debt_collection_actions: new Set([
+    'clientId',
+    'rentalId',
+    'paymentId',
+    'managerId',
+    'responsibleUserId',
+    'actionType',
+    'status',
+    'actionDate',
+    'nextActionDate',
+    'promisedPaymentDate',
+    'promisedAmount',
+    'comment',
+  ]),
+  receivable_payment_plans: new Set([
+    'clientId',
+    'rentalId',
+    'paymentDate',
+    'amount',
+    'status',
+    'comment',
   ]),
 };
 
@@ -751,6 +797,8 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'documents':
     case 'payments':
     case 'debt_collection_plans':
+    case 'debt_collection_actions':
+    case 'receivable_payment_plans':
     case 'leasing_contracts':
     case 'leasing_payment_schedule':
       if (isOfficeManager(user)) return true;
@@ -863,6 +911,9 @@ function canMutateEntity(collection, entity, user, readData) {
     return isOfficeManager(user);
   }
   if (collection === 'debt_collection_plans') {
+    return isOfficeManager(user);
+  }
+  if (collection === 'debt_collection_actions' || collection === 'receivable_payment_plans') {
     return isOfficeManager(user);
   }
   if (collection === 'leasing_contracts' || collection === 'leasing_payment_schedule') {
@@ -1048,6 +1099,9 @@ function assertCanCreateCollection(collection, user, input = {}, readData) {
   }
   if (collection === 'debt_collection_plans' && !(isAdmin(user) || isOfficeManager(user))) {
     throw forbidden('Планы взыскания можно создавать только администратору или офис-менеджеру.');
+  }
+  if ((collection === 'debt_collection_actions' || collection === 'receivable_payment_plans') && !(isAdmin(user) || isOfficeManager(user))) {
+    throw forbidden('Дебиторка доступна для изменения только администратору или офис-менеджеру.');
   }
   if (collection === 'company_expenses' && !(isAdmin(user) || isOfficeManager(user))) {
     throw forbidden('Расходы доступны только администратору или офис-менеджеру.');

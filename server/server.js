@@ -66,6 +66,11 @@ const {
   buildFinanceReport,
 } = require('./lib/finance-core');
 const {
+  buildReceivables,
+  normalizeAction,
+  normalizePaymentPlan,
+} = require('./lib/receivables-core');
+const {
   normalizeLeasingContract,
   normalizeLeasingPaymentScheduleRow,
   decorateLeasingContract,
@@ -460,6 +465,8 @@ const WRITE_PERMISSIONS = {
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   payments:       ['Администратор', 'Офис-менеджер'],
   debt_collection_plans: ['Администратор', 'Офис-менеджер'],
+  debt_collection_actions: ['Администратор', 'Офис-менеджер'],
+  receivable_payment_plans: ['Администратор', 'Офис-менеджер'],
   company_expenses: ['Администратор', 'Офис-менеджер'],
   leasing_contracts: ['Администратор', 'Офис-менеджер'],
   leasing_payment_schedule: ['Администратор', 'Офис-менеджер'],
@@ -502,6 +509,8 @@ const READ_PERMISSIONS = {
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   payments:       ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   debt_collection_plans: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  debt_collection_actions: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  receivable_payment_plans: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   company_expenses: ['Администратор', 'Офис-менеджер'],
   leasing_contracts: ['Администратор', 'Офис-менеджер'],
   leasing_payment_schedule: ['Администратор', 'Офис-менеджер'],
@@ -871,6 +880,8 @@ const ID_PREFIXES = {
   mechanic_documents: 'MD',
   payments:       'P',
   debt_collection_plans: 'DCP',
+  debt_collection_actions: 'DCA',
+  receivable_payment_plans: 'RPP',
   company_expenses: 'CE',
   leasing_contracts: 'LC',
   leasing_payment_schedule: 'LPS',
@@ -1143,6 +1154,8 @@ const COLLECTIONS = [
   'mechanic_documents',
   'payments',
   'debt_collection_plans',
+  'debt_collection_actions',
+  'receivable_payment_plans',
   'company_expenses',
   'crm_deals',
   'delivery_carriers',
@@ -1224,6 +1237,15 @@ registerFinanceRoutes(apiRouter, {
   buildManagerReceivables,
   buildOverdueBuckets,
   buildFinanceReport,
+  buildReceivables,
+  normalizeAction,
+  normalizePaymentPlan,
+  writeData,
+  requireWrite,
+  generateId,
+  idPrefixes: ID_PREFIXES,
+  nowIso,
+  auditLog,
 });
 
 apiRouter.use(registerDebtCollectionPlanRoutes({

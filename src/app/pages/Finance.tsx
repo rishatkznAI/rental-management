@@ -2,7 +2,6 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle,
   Archive,
   CalendarDays,
   CheckCircle2,
@@ -38,6 +37,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Textarea } from '../components/ui/textarea';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { LeasingPanel } from '../components/finance/LeasingPanel';
+import { ReceivablesPanel } from '../components/finance/ReceivablesPanel';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import {
@@ -49,37 +49,12 @@ import {
   type AdminListOption,
 } from '../lib/adminConfig';
 import { formatCurrency, formatDate } from '../lib/utils';
-import {
-  buildClientDebtAgingRows,
-  buildClientFinancialSnapshots,
-  buildManagerReceivables,
-  buildOverdueBuckets,
-  buildRentalDebtRows,
-} from '../lib/finance';
-import { clientsService } from '../services/clients.service';
 import { COMPANY_EXPENSE_KEYS, companyExpensesService } from '../services/company-expenses.service';
 import { LEASING_KEYS, leasingService } from '../services/leasing.service';
-import { paymentsService } from '../services/payments.service';
-import { rentalsService } from '../services/rentals.service';
-import {
-  useCreateDebtCollectionPlan,
-  useDebtCollectionPlans,
-  useUpdateDebtCollectionPlan,
-} from '../hooks/useDebtCollectionPlans';
-import {
-  DEBT_COLLECTION_ACTION_LABELS,
-  DEBT_COLLECTION_PRIORITY_LABELS,
-  DEBT_COLLECTION_STATUS_LABELS,
-  buildDebtCollectionRows,
-} from '../lib/debtCollectionPlans.js';
 import type {
   CompanyExpense,
   CompanyExpenseFrequency,
   CompanyExpenseStatus,
-  DebtCollectionNextActionType,
-  DebtCollectionPlan,
-  DebtCollectionPlanPriority,
-  DebtCollectionPlanStatus,
 } from '../types';
 
 const FREQUENCY_LABELS: Record<CompanyExpenseFrequency, string> = {
@@ -108,20 +83,6 @@ type ExpenseFormState = {
   customFields: Record<string, string>;
 };
 
-type DebtCollectionFormState = {
-  clientId: string;
-  clientName: string;
-  responsibleName: string;
-  status: DebtCollectionPlanStatus;
-  priority: DebtCollectionPlanPriority;
-  lastContactDate: string;
-  promisedPaymentDate: string;
-  nextActionDate: string;
-  nextActionType: DebtCollectionNextActionType;
-  comment: string;
-  result: string;
-};
-
 function createEmptyForm(defaults?: Partial<Pick<ExpenseFormState, 'category' | 'frequency' | 'status'>>): ExpenseFormState {
   return {
     name: '',
@@ -136,38 +97,6 @@ function createEmptyForm(defaults?: Partial<Pick<ExpenseFormState, 'category' | 
     comment: '',
     customFields: {},
   };
-}
-
-function createDebtCollectionForm(defaults?: Partial<DebtCollectionFormState>): DebtCollectionFormState {
-  return {
-    clientId: defaults?.clientId || '',
-    clientName: defaults?.clientName || '',
-    responsibleName: defaults?.responsibleName || '',
-    status: defaults?.status || 'new',
-    priority: defaults?.priority || 'medium',
-    lastContactDate: defaults?.lastContactDate || '',
-    promisedPaymentDate: defaults?.promisedPaymentDate || '',
-    nextActionDate: defaults?.nextActionDate || '',
-    nextActionType: defaults?.nextActionType || 'call',
-    comment: defaults?.comment || '',
-    result: defaults?.result || '',
-  };
-}
-
-function debtCollectionFormFromPlan(plan: DebtCollectionPlan): DebtCollectionFormState {
-  return createDebtCollectionForm({
-    clientId: plan.clientId || '',
-    clientName: plan.clientName || '',
-    responsibleName: plan.responsibleName || '',
-    status: plan.status,
-    priority: plan.priority,
-    lastContactDate: plan.lastContactDate || '',
-    promisedPaymentDate: plan.promisedPaymentDate || '',
-    nextActionDate: plan.nextActionDate || '',
-    nextActionType: plan.nextActionType,
-    comment: plan.comment || '',
-    result: plan.result || '',
-  });
 }
 
 function parseDateOnly(value?: string): Date | null {
@@ -268,29 +197,10 @@ export default function Finance() {
   const [editingExpense, setEditingExpense] = React.useState<CompanyExpense | null>(null);
   const [form, setForm] = React.useState<ExpenseFormState>(() => createEmptyForm());
   const [formError, setFormError] = React.useState('');
-  const [debtPlanDialogOpen, setDebtPlanDialogOpen] = React.useState(false);
-  const [editingDebtPlan, setEditingDebtPlan] = React.useState<DebtCollectionPlan | null>(null);
-  const [debtPlanForm, setDebtPlanForm] = React.useState<DebtCollectionFormState>(() => createDebtCollectionForm());
-  const [debtPlanError, setDebtPlanError] = React.useState('');
 
   const { data: expenses = [], isLoading } = useQuery({
     queryKey: COMPANY_EXPENSE_KEYS.all,
     queryFn: companyExpensesService.getAll,
-    staleTime: 1000 * 60 * 2,
-  });
-  const { data: clients = [] } = useQuery({
-    queryKey: ['clients'],
-    queryFn: clientsService.getAll,
-    staleTime: 1000 * 60 * 2,
-  });
-  const { data: ganttRentals = [] } = useQuery({
-    queryKey: ['gantt_rentals'],
-    queryFn: rentalsService.getGanttData,
-    staleTime: 1000 * 60 * 2,
-  });
-  const { data: payments = [] } = useQuery({
-    queryKey: ['payments'],
-    queryFn: paymentsService.getAll,
     staleTime: 1000 * 60 * 2,
   });
   const { data: leasingSummary } = useQuery({
@@ -298,10 +208,6 @@ export default function Finance() {
     queryFn: leasingService.getSummary,
     staleTime: 1000 * 60 * 2,
   });
-  const { data: debtPlanResponse } = useDebtCollectionPlans();
-  const debtCollectionPlans = debtPlanResponse?.plans ?? [];
-  const createDebtPlan = useCreateDebtCollectionPlan();
-  const updateDebtPlan = useUpdateDebtCollectionPlan();
 
   const createExpense = useMutation({
     mutationFn: (data: Omit<CompanyExpense, 'id'>) => companyExpensesService.create(data),
@@ -414,23 +320,6 @@ export default function Finance() {
   const upcomingExpenses = activeExpenses.filter(isUpcoming).sort(sortExpenses);
   const pausedCount = expenses.filter(item => item.status === 'paused').length;
   const archivedCount = expenses.filter(item => item.status === 'archived').length;
-  const rentalDebtRows = React.useMemo(() => buildRentalDebtRows(ganttRentals, payments), [ganttRentals, payments]);
-  const clientDebtRows = React.useMemo(
-    () => buildClientDebtAgingRows(clients, rentalDebtRows),
-    [clients, rentalDebtRows],
-  );
-  const clientSnapshots = React.useMemo(
-    () => buildClientFinancialSnapshots(clients, ganttRentals, payments),
-    [clients, ganttRentals, payments],
-  );
-  const managerReceivables = React.useMemo(
-    () => buildManagerReceivables(rentalDebtRows, undefined, clients),
-    [clients, rentalDebtRows],
-  );
-  const debtBuckets = React.useMemo(() => buildOverdueBuckets(rentalDebtRows), [rentalDebtRows]);
-  const totalDebt = clientSnapshots.reduce((sum, item) => sum + item.currentDebt, 0);
-  const overdueDebt = managerReceivables.reduce((sum, item) => sum + item.overdueDebt, 0);
-  const overdueClients = clientSnapshots.filter(item => item.overdueRentals > 0).length;
   const activeFilterCount = [
     search.trim() !== '',
     statusFilter !== 'current',
@@ -438,14 +327,6 @@ export default function Finance() {
     frequencyFilter !== 'all',
   ].filter(Boolean).length;
   const canManageFinance = can('create', 'finance') || can('edit', 'finance');
-  const debtCollectionRows = React.useMemo(
-    () => buildDebtCollectionRows({
-      clientDebtRows,
-      plans: debtCollectionPlans,
-      today: new Date().toISOString().slice(0, 10),
-    }),
-    [clientDebtRows, debtCollectionPlans],
-  );
   const isSaving = createExpense.isPending || updateExpense.isPending;
 
   if (!can('view', 'finance')) {
@@ -479,52 +360,6 @@ export default function Finance() {
     setForm(createEmptyForm({ category: defaultCategory, frequency: defaultFrequency, status: defaultStatus }));
     setFormError('');
     setDialogOpen(true);
-  };
-
-  const openDebtPlanDialog = (row: ReturnType<typeof buildDebtCollectionRows>[number]) => {
-    if (!canManageFinance) return;
-    setEditingDebtPlan(row.plan || null);
-    setDebtPlanForm(row.plan ? debtCollectionFormFromPlan(row.plan) : createDebtCollectionForm({
-      clientId: row.clientId || '',
-      clientName: row.client || '',
-      responsibleName: row.manager || user?.name || '',
-      priority: row.maxOverdueDays > 60 ? 'critical' : row.maxOverdueDays >= 30 ? 'high' : 'medium',
-      nextActionDate: new Date().toISOString().slice(0, 10),
-      comment: row.needsPlan ? 'Долг 30+ дней, требуется план взыскания.' : '',
-    }));
-    setDebtPlanError('');
-    setDebtPlanDialogOpen(true);
-  };
-
-  const setDebtPlanField = <K extends keyof DebtCollectionFormState>(key: K, value: DebtCollectionFormState[K]) => {
-    setDebtPlanForm(current => ({ ...current, [key]: value }));
-    setDebtPlanError('');
-  };
-
-  const saveDebtPlan = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!debtPlanForm.clientId && !debtPlanForm.clientName.trim()) {
-      setDebtPlanError('Укажите клиента.');
-      return;
-    }
-    const payload = {
-      ...debtPlanForm,
-      clientName: debtPlanForm.clientName.trim(),
-      responsibleName: debtPlanForm.responsibleName.trim() || undefined,
-      comment: debtPlanForm.comment.trim() || undefined,
-      result: debtPlanForm.result.trim() || undefined,
-    };
-    try {
-      if (editingDebtPlan) {
-        await updateDebtPlan.mutateAsync({ id: editingDebtPlan.id, data: payload });
-      } else {
-        await createDebtPlan.mutateAsync(payload);
-      }
-      setDebtPlanDialogOpen(false);
-      setEditingDebtPlan(null);
-    } catch (error) {
-      setDebtPlanError(error instanceof Error ? error.message : 'Не удалось сохранить план взыскания.');
-    }
   };
 
   const openEditDialog = (expense: CompanyExpense) => {
@@ -628,211 +463,11 @@ export default function Finance() {
       <Tabs defaultValue="overview" className="gap-4">
         <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
           <TabsTrigger value="overview">Обзор</TabsTrigger>
+          <TabsTrigger value="receivables">Дебиторка</TabsTrigger>
           <TabsTrigger value="leasing">Лизинг</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <CardTitle>План взыскания дебиторки</CardTitle>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Контроль ответственных, обещанных оплат и следующих действий по просроченным клиентам.
-              </p>
-            </div>
-            <Badge variant={debtCollectionRows.some(row => row.isActionOverdue || row.needsPlan) ? 'danger' : 'default'}>
-              {debtCollectionRows.length} клиентов
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {debtCollectionRows.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
-              Планов взыскания пока нет, а просроченная дебиторка не найдена.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Клиент</TableHead>
-                    <TableHead>Долг</TableHead>
-                    <TableHead>Просрочка</TableHead>
-                    <TableHead>Ответственный</TableHead>
-                    <TableHead>Статус</TableHead>
-                    <TableHead>Следующее действие</TableHead>
-                    <TableHead>Комментарий</TableHead>
-                    <TableHead className="w-[150px]">Действия</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {debtCollectionRows.slice(0, 12).map(row => (
-                    <TableRow key={row.clientId || row.client} className={row.isActionOverdue ? 'bg-red-50/70 dark:bg-red-950/20' : row.needsPlan ? 'bg-amber-50/70 dark:bg-amber-950/20' : undefined}>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
-                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{row.manager}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-semibold">{formatCurrency(row.debt)}</TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <Badge variant={row.maxOverdueDays >= 30 ? 'warning' : 'default'}>{row.ageBucketLabel}</Badge>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{row.overdueRentals} просроченных аренд</p>
-                        </div>
-                      </TableCell>
-                      <TableCell>{row.responsible}</TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <Badge variant={row.hasPlan ? (row.plan?.status === 'closed' ? 'success' : 'info') : 'warning'}>{row.collectionStatus}</Badge>
-                          {row.needsPlan && <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Нужен план 30+ дней</p>}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <p className="text-sm text-gray-900 dark:text-white">{row.nextAction}</p>
-                          <p className={`mt-1 text-xs ${row.isActionOverdue ? 'font-medium text-red-600 dark:text-red-300' : 'text-gray-500 dark:text-gray-400'}`}>
-                            {row.nextActionDate ? formatDate(row.nextActionDate) : 'Дата не назначена'}
-                          </p>
-                          {row.promisedPaymentDate && <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-300">Обещал: {formatDate(row.promisedPaymentDate)}</p>}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <p className="max-w-[260px] truncate text-sm text-gray-600 dark:text-gray-300">{row.comment || '—'}</p>
-                      </TableCell>
-                      <TableCell>
-                        {canManageFinance ? (
-                          <Button size="sm" variant="secondary" onClick={() => openDebtPlanDialog(row)}>
-                            {row.hasPlan ? 'Обновить' : 'Создать план'}
-                          </Button>
-                        ) : (
-                          <span className="text-sm text-gray-400 dark:text-gray-500">Только просмотр</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Дебиторка клиентов</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
-                <ReceiptText className="h-5 w-5 text-red-600 dark:text-red-400" />
-              </div>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{formatCurrency(totalDebt)}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Просроченный долг</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
-                <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-              </div>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{formatCurrency(overdueDebt)}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Клиенты с просрочкой</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
-                <WalletCards className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{overdueClients}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Неоплаченные аренды</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
-                <Archive className="h-5 w-5 text-gray-600 dark:text-gray-300" />
-              </div>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{rentalDebtRows.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Дебиторка по клиентам</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {clientDebtRows.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">Нет долгов по арендам.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Клиент</TableHead>
-                      <TableHead>Менеджер</TableHead>
-                      <TableHead>Возраст</TableHead>
-                      <TableHead>Активная аренда</TableHead>
-                      <TableHead className="text-right">Долг</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {clientDebtRows.slice(0, 10).map(item => (
-                      <TableRow key={`${item.clientId || item.client}-${item.manager}-${item.ageBucket}-${item.hasActiveRental}`}>
-                        <TableCell className="font-medium">{item.client}</TableCell>
-                        <TableCell>{item.manager}</TableCell>
-                        <TableCell>
-                          <Badge variant={item.overdueRentals > 0 ? 'warning' : 'default'}>{item.ageBucketLabel}</Badge>
-                        </TableCell>
-                        <TableCell>{item.hasActiveRental ? 'Да' : 'Нет'}</TableCell>
-                        <TableCell className="text-right font-semibold">{formatCurrency(item.debt)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Возраст долга</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {debtBuckets.map(item => (
-                <div key={item.key} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-900/40">
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{item.label}</p>
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Аренд: {item.rentals}</p>
-                  </div>
-                  <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(item.debt)}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
@@ -1055,6 +690,10 @@ export default function Finance() {
         <TabsContent value="leasing">
           <LeasingPanel canManageFinance={canManageFinance} canDeleteFinance={can('delete', 'finance')} />
         </TabsContent>
+
+        <TabsContent value="receivables">
+          <ReceivablesPanel canManageFinance={canManageFinance} />
+        </TabsContent>
       </Tabs>
 
       <FilterDialog
@@ -1099,93 +738,6 @@ export default function Finance() {
           </FilterField>
         </div>
       </FilterDialog>
-
-      <Dialog open={debtPlanDialogOpen} onOpenChange={setDebtPlanDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>{editingDebtPlan ? 'Обновить план взыскания' : 'Создать план взыскания'}</DialogTitle>
-            <DialogDescription>
-              Зафиксируйте ответственного, обещанную оплату и следующее действие. План не меняет платежи и аренды.
-            </DialogDescription>
-          </DialogHeader>
-          <form className="space-y-4" onSubmit={saveDebtPlan}>
-            {debtPlanError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-                {debtPlanError}
-              </div>
-            )}
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <FieldLabel>Клиент</FieldLabel>
-                <Input value={debtPlanForm.clientName} onChange={(event) => setDebtPlanField('clientName', event.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Ответственный</FieldLabel>
-                <Input value={debtPlanForm.responsibleName} onChange={(event) => setDebtPlanField('responsibleName', event.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Статус взыскания</FieldLabel>
-                <Select value={debtPlanForm.status} onValueChange={(value) => setDebtPlanField('status', value as DebtCollectionPlanStatus)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(DEBT_COLLECTION_STATUS_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <FieldLabel>Приоритет</FieldLabel>
-                <Select value={debtPlanForm.priority} onValueChange={(value) => setDebtPlanField('priority', value as DebtCollectionPlanPriority)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(DEBT_COLLECTION_PRIORITY_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <FieldLabel>Последний контакт</FieldLabel>
-                <Input type="date" value={debtPlanForm.lastContactDate} onChange={(event) => setDebtPlanField('lastContactDate', event.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Обещанная дата оплаты</FieldLabel>
-                <Input type="date" value={debtPlanForm.promisedPaymentDate} onChange={(event) => setDebtPlanField('promisedPaymentDate', event.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Следующее действие</FieldLabel>
-                <Select value={debtPlanForm.nextActionType} onValueChange={(value) => setDebtPlanField('nextActionType', value as DebtCollectionNextActionType)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(DEBT_COLLECTION_ACTION_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <FieldLabel>Дата следующего действия</FieldLabel>
-                <Input type="date" value={debtPlanForm.nextActionDate} onChange={(event) => setDebtPlanField('nextActionDate', event.target.value)} />
-              </div>
-              <div className="md:col-span-2">
-                <FieldLabel>Комментарий</FieldLabel>
-                <Textarea value={debtPlanForm.comment} onChange={(event) => setDebtPlanField('comment', event.target.value)} rows={3} />
-              </div>
-              <div className="md:col-span-2">
-                <FieldLabel>Результат</FieldLabel>
-                <Textarea value={debtPlanForm.result} onChange={(event) => setDebtPlanField('result', event.target.value)} rows={2} />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="secondary" onClick={() => setDebtPlanDialogOpen(false)}>Отмена</Button>
-              <Button type="submit" disabled={createDebtPlan.isPending || updateDebtPlan.isPending}>
-                {editingDebtPlan ? 'Сохранить' : 'Создать план'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">

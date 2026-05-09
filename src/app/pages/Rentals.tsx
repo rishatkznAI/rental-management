@@ -3507,7 +3507,6 @@ function EquipmentRow({
     || equipment.inventoryNumber
     || equipment.serialNumber
     || 'Модель не указана';
-  const hasEquipmentMeta = Boolean(equipment.inventoryNumber || equipment.serialNumber);
 
   return (
     <div
@@ -3520,35 +3519,7 @@ function EquipmentRow({
         style={{ width: LEFT_PANEL_WIDTH }}
       >
         <div className="min-w-0 flex-1">
-          <div className="min-w-0">
-            <span
-              className={`block truncate font-semibold leading-tight text-gray-900 dark:text-white ${isCompact ? 'text-[12px]' : 'text-[13px]'}`}
-              title={equipmentModelLabel}
-            >
-              {equipmentModelLabel}
-            </span>
-          </div>
-          <div className={`mt-0.5 flex min-w-0 items-center text-gray-500 dark:text-gray-400 ${isCompact ? 'gap-1 text-[9px]' : 'gap-1.5 text-[10px]'}`}>
-            {equipment.inventoryNumber && (
-              <span
-                className="shrink-0 font-mono"
-                title={`Инвентарный номер: ${equipment.inventoryNumber}`}
-              >
-                Инв. {equipment.inventoryNumber}
-              </span>
-            )}
-            {equipment.inventoryNumber && equipment.serialNumber && (
-              <span className="shrink-0 text-gray-300 dark:text-gray-600">·</span>
-            )}
-            {equipment.serialNumber && (
-              <span
-                className="min-w-0 flex-1 truncate font-mono uppercase tracking-[0.04em] text-gray-600 dark:text-gray-300"
-                title={`Серийный номер: ${equipment.serialNumber}`}
-              >
-                SN {equipment.serialNumber}
-              </span>
-            )}
-            {hasEquipmentMeta && <span className="shrink-0 text-gray-300 dark:text-gray-600">·</span>}
+          <div className={`flex min-w-0 items-center ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
             <span
               className="inline-flex shrink-0 items-center justify-center"
               title={eqStatus.label}
@@ -3559,6 +3530,30 @@ function EquipmentRow({
                 strokeWidth={2.4}
               />
             </span>
+            <span
+              className={`block min-w-0 truncate font-semibold leading-tight text-gray-900 dark:text-white ${isCompact ? 'text-[12px]' : 'text-[13px]'}`}
+              title={equipmentModelLabel}
+            >
+              {equipmentModelLabel}
+            </span>
+          </div>
+          <div className={`mt-0.5 text-gray-500 dark:text-gray-400 ${isCompact ? 'text-[9px]' : 'text-[10px]'}`}>
+            {equipment.inventoryNumber && (
+              <span
+                className="block font-mono leading-tight"
+                title={`Инвентарный номер: ${equipment.inventoryNumber}`}
+              >
+                Инв. {equipment.inventoryNumber}
+              </span>
+            )}
+            {equipment.serialNumber && (
+              <span
+                className="mt-0.5 block break-words font-mono uppercase leading-tight tracking-[0.04em] text-gray-600 dark:text-gray-300"
+                title={`Серийный номер: ${equipment.serialNumber}`}
+              >
+                SN {equipment.serialNumber}
+              </span>
+            )}
           </div>
         </div>
         {/* Quick actions */}

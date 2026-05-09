@@ -69,6 +69,7 @@ const {
   buildReceivables,
   normalizeAction,
   normalizePaymentPlan,
+  validateStageTransition,
 } = require('./lib/receivables-core');
 const {
   normalizeLeasingContract,
@@ -1247,6 +1248,7 @@ registerFinanceRoutes(apiRouter, {
   buildReceivables,
   normalizeAction,
   normalizePaymentPlan,
+  validateStageTransition,
   writeData,
   requireWrite,
   generateId,

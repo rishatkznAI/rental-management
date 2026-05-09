@@ -27,6 +27,10 @@ export const financeService = {
     data: Partial<ReceivableCollectionAction>,
   ): Promise<ReceivableCollectionAction> =>
     api.patch<ReceivableCollectionAction>(`/api/finance/receivables/actions/${id}`, data),
+  createReceivableWorkflowAction: (
+    data: Partial<ReceivableCollectionAction> & Pick<ReceivableCollectionAction, 'clientId' | 'actionType'>,
+  ): Promise<{ action: ReceivableCollectionAction; document?: unknown }> =>
+    api.post<{ action: ReceivableCollectionAction; document?: unknown }>('/api/finance/receivables/workflow-actions', data),
   createReceivablePaymentPlan: (
     data: Omit<ReceivablePaymentPlanItem, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<ReceivablePaymentPlanItem> =>

@@ -22,6 +22,7 @@ import { formatCurrency, formatDate } from '../../lib/utils';
 import type {
   ReceivableActionType,
   ReceivableCollectionAction,
+  ReceivableCollectionStage,
   ReceivableCollectionStatus,
   ReceivablePaymentPlanItem,
   ReceivableRow,
@@ -49,8 +50,62 @@ const ACTION_LABELS: Record<ReceivableActionType, string> = {
   payment_promise: 'Обещание оплаты',
   payment_plan: 'План погашения',
   escalation: 'Эскалация',
+  generate_notification: 'Сформировать уведомление',
+  send_notification: 'Уведомление отправлено',
+  generate_pretrial_claim: 'Сформировать претензию',
+  send_pretrial_claim: 'Претензия отправлена',
+  court_preparing: 'Подготовка в суд',
+  schedule_court: 'Суд назначен',
+  court_stage_update: 'Этап суда',
+  court_decision: 'Решение суда',
+  receive_writ: 'Исполнительный лист',
+  send_to_enforcement: 'Передано на исполнение',
+  enforcement_update: 'Исполнительное производство',
+  debt_recovered: 'Взыскано',
+  write_off: 'Списано',
   comment: 'Комментарий',
 };
+
+const STAGE_LABELS: Record<ReceivableCollectionStage, string> = {
+  new_debt: 'Долг выявлен',
+  notification_draft: 'Уведомление сформировано',
+  notification_sent: 'Уведомление отправлено',
+  notification_waiting: 'Ожидание оплаты',
+  pretrial_claim_draft: 'Претензия сформирована',
+  pretrial_claim_sent: 'Претензия отправлена',
+  pretrial_waiting: 'Ожидание по претензии',
+  court_preparing: 'Подготовка в суд',
+  court_scheduled: 'Суд назначен',
+  court_stage_1: 'Суд — этап 1',
+  court_stage_2: 'Суд — этап 2',
+  court_stage_3: 'Суд — этап 3',
+  court_decision_received: 'Решение получено',
+  writ_received: 'Исполнительный лист',
+  enforcement_sent: 'Передано на исполнение',
+  enforcement_in_progress: 'Исполнительное производство',
+  recovered: 'Взыскано',
+  closed: 'Закрыто',
+  written_off: 'Списано',
+  disputed: 'Спор',
+};
+
+const STAGE_FLOW: ReceivableCollectionStage[] = [
+  'new_debt',
+  'notification_draft',
+  'notification_waiting',
+  'pretrial_claim_draft',
+  'pretrial_waiting',
+  'court_preparing',
+  'court_scheduled',
+  'court_stage_1',
+  'court_stage_2',
+  'court_stage_3',
+  'court_decision_received',
+  'writ_received',
+  'enforcement_sent',
+  'enforcement_in_progress',
+  'recovered',
+];
 
 type SortKey = 'debt' | 'overdue' | 'nextAction' | 'lastContact';
 type AgeFilter = 'all' | '0_7' | '8_30' | '31_60' | '60_plus';
@@ -72,6 +127,33 @@ type PaymentPlanFormState = {
   comment: string;
 };
 
+type WorkflowFormState = {
+  actionType: ReceivableActionType;
+  toStage: ReceivableCollectionStage;
+  actionDate: string;
+  dueDate: string;
+  sendMethod: 'email' | 'messenger' | 'paper' | 'courier' | 'other';
+  sentTo: string;
+  courtName: string;
+  caseNumber: string;
+  claimAmount: string;
+  courtDate: string;
+  nextCourtDate: string;
+  decisionDate: string;
+  decisionAmount: string;
+  decisionStatus: 'won' | 'partially_won' | 'lost' | 'postponed' | 'settlement' | 'unknown';
+  writNumber: string;
+  writDate: string;
+  writAmount: string;
+  bailiffDepartment: string;
+  enforcementNumber: string;
+  enforcementStatus: string;
+  recoveredAmount: string;
+  remainingAmount: string;
+  nextControlDate: string;
+  comment: string;
+};
+
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -86,6 +168,53 @@ function emptyActionForm(type: ReceivableActionType): ActionFormState {
     promisedAmount: '',
     comment: '',
   };
+}
+
+function defaultWorkflowForm(actionType: ReceivableActionType, toStage: ReceivableCollectionStage): WorkflowFormState {
+  return {
+    actionType,
+    toStage,
+    actionDate: todayKey(),
+    dueDate: '',
+    sendMethod: 'email',
+    sentTo: '',
+    courtName: '',
+    caseNumber: '',
+    claimAmount: '',
+    courtDate: '',
+    nextCourtDate: '',
+    decisionDate: '',
+    decisionAmount: '',
+    decisionStatus: 'unknown',
+    writNumber: '',
+    writDate: '',
+    writAmount: '',
+    bailiffDepartment: '',
+    enforcementNumber: '',
+    enforcementStatus: '',
+    recoveredAmount: '',
+    remainingAmount: '',
+    nextControlDate: '',
+    comment: '',
+  };
+}
+
+function nextWorkflowActions(stage: ReceivableCollectionStage = 'new_debt') {
+  if (stage === 'new_debt') return [{ type: 'generate_notification' as const, stage: 'notification_draft' as const }];
+  if (stage === 'notification_draft') return [{ type: 'send_notification' as const, stage: 'notification_waiting' as const }];
+  if (stage === 'notification_sent' || stage === 'notification_waiting') return [{ type: 'generate_pretrial_claim' as const, stage: 'pretrial_claim_draft' as const }];
+  if (stage === 'pretrial_claim_draft') return [{ type: 'send_pretrial_claim' as const, stage: 'pretrial_waiting' as const }];
+  if (stage === 'pretrial_claim_sent' || stage === 'pretrial_waiting') return [{ type: 'court_preparing' as const, stage: 'court_preparing' as const }];
+  if (stage === 'court_preparing') return [{ type: 'schedule_court' as const, stage: 'court_scheduled' as const }];
+  if (stage === 'court_scheduled') return [{ type: 'court_stage_update' as const, stage: 'court_stage_1' as const }, { type: 'court_decision' as const, stage: 'court_decision_received' as const }];
+  if (stage === 'court_stage_1') return [{ type: 'court_stage_update' as const, stage: 'court_stage_2' as const }, { type: 'court_decision' as const, stage: 'court_decision_received' as const }];
+  if (stage === 'court_stage_2') return [{ type: 'court_stage_update' as const, stage: 'court_stage_3' as const }, { type: 'court_decision' as const, stage: 'court_decision_received' as const }];
+  if (stage === 'court_stage_3') return [{ type: 'court_decision' as const, stage: 'court_decision_received' as const }];
+  if (stage === 'court_decision_received') return [{ type: 'receive_writ' as const, stage: 'writ_received' as const }];
+  if (stage === 'writ_received') return [{ type: 'send_to_enforcement' as const, stage: 'enforcement_sent' as const }];
+  if (stage === 'enforcement_sent') return [{ type: 'enforcement_update' as const, stage: 'enforcement_in_progress' as const }];
+  if (stage === 'enforcement_in_progress') return [{ type: 'debt_recovered' as const, stage: 'recovered' as const }, { type: 'write_off' as const, stage: 'written_off' as const }];
+  return [];
 }
 
 function statusVariant(status: ReceivableCollectionStatus) {
@@ -127,7 +256,9 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
   const [selectedRow, setSelectedRow] = React.useState<ReceivableRow | null>(null);
   const [actionRow, setActionRow] = React.useState<ReceivableRow | null>(null);
   const [planRow, setPlanRow] = React.useState<ReceivableRow | null>(null);
+  const [workflowRow, setWorkflowRow] = React.useState<ReceivableRow | null>(null);
   const [actionForm, setActionForm] = React.useState<ActionFormState>(() => emptyActionForm('call'));
+  const [workflowForm, setWorkflowForm] = React.useState<WorkflowFormState>(() => defaultWorkflowForm('generate_notification', 'notification_draft'));
   const [planForm, setPlanForm] = React.useState<PaymentPlanFormState>({
     paymentDate: todayKey(),
     amount: '',
@@ -138,11 +269,21 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
   const [manager, setManager] = React.useState('all');
   const [age, setAge] = React.useState<AgeFilter>('all');
   const [status, setStatus] = React.useState<'all' | ReceivableCollectionStatus>('all');
+  const [stage, setStage] = React.useState<'all' | ReceivableCollectionStage>('all');
   const [onlyOverdue, setOnlyOverdue] = React.useState(true);
   const [onlyNoNext, setOnlyNoNext] = React.useState(false);
   const [onlyPromised, setOnlyPromised] = React.useState(false);
   const [onlyBrokenPromise, setOnlyBrokenPromise] = React.useState(false);
   const [onlyPlan, setOnlyPlan] = React.useState(false);
+  const [onlyNoNotification, setOnlyNoNotification] = React.useState(false);
+  const [onlyNotificationOverdue, setOnlyNotificationOverdue] = React.useState(false);
+  const [onlyPretrialOverdue, setOnlyPretrialOverdue] = React.useState(false);
+  const [onlyCourtScheduled, setOnlyCourtScheduled] = React.useState(false);
+  const [onlyWrit, setOnlyWrit] = React.useState(false);
+  const [onlyEnforcement, setOnlyEnforcement] = React.useState(false);
+  const [onlyRecovered, setOnlyRecovered] = React.useState(false);
+  const [onlyWrittenOff, setOnlyWrittenOff] = React.useState(false);
+  const [onlyOverdueNextAction, setOnlyOverdueNextAction] = React.useState(false);
   const [sort, setSort] = React.useState<SortKey>('debt');
 
   const receivables = useQuery({
@@ -175,29 +316,54 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
     },
   });
 
+  const createWorkflowAction = useMutation({
+    mutationFn: (payload: Partial<ReceivableCollectionAction> & Pick<ReceivableCollectionAction, 'clientId' | 'actionType'>) =>
+      financeService.createReceivableWorkflowAction(payload),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      setWorkflowRow(null);
+      setSelectedRow(null);
+    },
+  });
+
   const filteredRows = React.useMemo(() => {
     const textQuery = query.trim().toLowerCase();
     return rows
       .filter(row => !textQuery || `${row.client} ${row.inn || ''} ${row.manager}`.toLowerCase().includes(textQuery))
       .filter(row => manager === 'all' || row.manager === manager)
       .filter(row => status === 'all' || row.collectionStatus === status)
+      .filter(row => stage === 'all' || row.collectionStage === stage)
       .filter(row => ageMatches(row, age))
       .filter(row => !onlyOverdue || row.overdueDebt > 0)
       .filter(row => !onlyNoNext || row.noNextAction)
       .filter(row => !onlyPromised || row.collectionStatus === 'promised' || Boolean(row.promisedPaymentDate))
       .filter(row => !onlyBrokenPromise || row.collectionStatus === 'overdue_promise')
       .filter(row => !onlyPlan || row.hasPaymentPlan)
+      .filter(row => !onlyNoNotification || row.collectionStage === 'new_debt')
+      .filter(row => !onlyNotificationOverdue || row.notificationOverdue)
+      .filter(row => !onlyPretrialOverdue || row.pretrialOverdue)
+      .filter(row => !onlyCourtScheduled || ['court_scheduled', 'court_stage_1', 'court_stage_2', 'court_stage_3'].includes(row.collectionStage || ''))
+      .filter(row => !onlyWrit || row.collectionStage === 'writ_received')
+      .filter(row => !onlyEnforcement || ['enforcement_sent', 'enforcement_in_progress'].includes(row.collectionStage || ''))
+      .filter(row => !onlyRecovered || row.collectionStage === 'recovered')
+      .filter(row => !onlyWrittenOff || row.collectionStage === 'written_off')
+      .filter(row => !onlyOverdueNextAction || Boolean(row.nextActionDate && row.nextActionDate < todayKey()))
       .sort((left, right) => {
         if (sort === 'overdue') return right.oldestOverdueDays - left.oldestOverdueDays;
         if (sort === 'nextAction') return compareDate(left.nextActionDate, right.nextActionDate);
         if (sort === 'lastContact') return compareDate(right.lastContactDate, left.lastContactDate);
         return right.totalDebt - left.totalDebt;
       });
-  }, [age, manager, onlyBrokenPromise, onlyNoNext, onlyOverdue, onlyPlan, onlyPromised, query, rows, sort, status]);
+  }, [age, manager, onlyBrokenPromise, onlyCourtScheduled, onlyEnforcement, onlyNoNext, onlyNoNotification, onlyNotificationOverdue, onlyOverdue, onlyOverdueNextAction, onlyPlan, onlyPromised, onlyPretrialOverdue, onlyRecovered, onlyWrit, onlyWrittenOff, query, rows, sort, stage, status]);
 
   const openAction = (row: ReceivableRow, type: ReceivableActionType) => {
     setActionRow(row);
     setActionForm(emptyActionForm(type));
+  };
+
+  const openWorkflow = (row: ReceivableRow, type: ReceivableActionType, nextStage: ReceivableCollectionStage) => {
+    setWorkflowRow(row);
+    setWorkflowForm(defaultWorkflowForm(type, nextStage));
   };
 
   const submitAction = async (event: React.FormEvent) => {
@@ -230,6 +396,45 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
     });
   };
 
+  const submitWorkflow = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!workflowRow?.clientId) return;
+    const numeric = (value: string) => {
+      const amount = Number(value);
+      return Number.isFinite(amount) && amount > 0 ? amount : undefined;
+    };
+    await createWorkflowAction.mutateAsync({
+      clientId: workflowRow.clientId,
+      actionType: workflowForm.actionType,
+      fromStage: workflowRow.collectionStage || 'new_debt',
+      toStage: workflowForm.toStage,
+      status: 'done',
+      actionDate: workflowForm.actionDate,
+      dueDate: workflowForm.dueDate || undefined,
+      nextActionDate: workflowForm.nextControlDate || workflowForm.nextCourtDate || undefined,
+      sendMethod: workflowForm.sendMethod,
+      sentTo: workflowForm.sentTo || undefined,
+      courtName: workflowForm.courtName || undefined,
+      caseNumber: workflowForm.caseNumber || undefined,
+      claimAmount: numeric(workflowForm.claimAmount),
+      courtDate: workflowForm.courtDate || undefined,
+      nextCourtDate: workflowForm.nextCourtDate || undefined,
+      decisionDate: workflowForm.decisionDate || undefined,
+      decisionAmount: numeric(workflowForm.decisionAmount),
+      decisionStatus: workflowForm.decisionStatus,
+      writNumber: workflowForm.writNumber || undefined,
+      writDate: workflowForm.writDate || undefined,
+      writAmount: numeric(workflowForm.writAmount),
+      bailiffDepartment: workflowForm.bailiffDepartment || undefined,
+      enforcementNumber: workflowForm.enforcementNumber || undefined,
+      enforcementStatus: workflowForm.enforcementStatus || undefined,
+      recoveredAmount: numeric(workflowForm.recoveredAmount),
+      remainingAmount: numeric(workflowForm.remainingAmount),
+      nextControlDate: workflowForm.nextControlDate || undefined,
+      comment: workflowForm.comment || undefined,
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -243,6 +448,11 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
         <KpiCard title="Без следующего действия" value={summary?.withoutNextAction || 0} />
         <KpiCard title="Обещано оплатить" value={formatCurrency(summary?.promisedAmount || 0)} />
         <KpiCard title="На плане погашения" value={formatCurrency(summary?.paymentPlanAmount || 0)} />
+        <KpiCard title="Без уведомления" value={summary?.withoutNotification || 0} />
+        <KpiCard title="Уведомление просрочено" value={summary?.notificationOverdue || 0} />
+        <KpiCard title="Претензия просрочена" value={summary?.pretrialOverdue || 0} />
+        <KpiCard title="Суд 7 дней" value={summary?.courtNext7Days || 0} />
+        <KpiCard title="Лист без исполнения" value={summary?.writNotEnforced || 0} />
       </div>
 
       <Card>
@@ -295,6 +505,22 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                 {Object.entries(STATUS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
               </SelectContent>
             </Select>
+            <Select value={stage} onValueChange={(value) => setStage(value as typeof stage)}>
+              <SelectTrigger className="h-8 w-64"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все этапы взыскания</SelectItem>
+                {Object.entries(STAGE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyNoNotification} onChange={e => setOnlyNoNotification(e.target.checked)} /> Без уведомления</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyNotificationOverdue} onChange={e => setOnlyNotificationOverdue(e.target.checked)} /> Уведомление без оплаты</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyPretrialOverdue} onChange={e => setOnlyPretrialOverdue(e.target.checked)} /> Претензия без оплаты</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyCourtScheduled} onChange={e => setOnlyCourtScheduled(e.target.checked)} /> Суд назначен</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyWrit} onChange={e => setOnlyWrit(e.target.checked)} /> Исполнительный лист</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyEnforcement} onChange={e => setOnlyEnforcement(e.target.checked)} /> Приставы</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyRecovered} onChange={e => setOnlyRecovered(e.target.checked)} /> Взыскано</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyWrittenOff} onChange={e => setOnlyWrittenOff(e.target.checked)} /> Списано</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyOverdueNextAction} onChange={e => setOnlyOverdueNextAction(e.target.checked)} /> Просрочено действие</label>
           </div>
         </CardHeader>
         <CardContent>
@@ -310,6 +536,11 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                   <TableHead>Контакт</TableHead>
                   <TableHead>Следующее действие</TableHead>
                   <TableHead>Статус</TableHead>
+                  <TableHead>Этап взыскания</TableHead>
+                  <TableHead>Уведомление</TableHead>
+                  <TableHead>Претензия</TableHead>
+                  <TableHead>Суд</TableHead>
+                  <TableHead>Исп. лист</TableHead>
                   <TableHead>Обещание</TableHead>
                   <TableHead className="min-w-[220px]">Действия</TableHead>
                 </TableRow>
@@ -341,6 +572,30 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                     </TableCell>
                     <TableCell><Badge variant={statusVariant(row.collectionStatus)}>{STATUS_LABELS[row.collectionStatus]}</Badge></TableCell>
                     <TableCell>
+                      <div className="min-w-44">
+                        <Badge variant={row.collectionStage === 'written_off' ? 'danger' : row.collectionStage === 'recovered' ? 'success' : 'info'}>
+                          {STAGE_LABELS[row.collectionStage || 'new_debt']}
+                        </Badge>
+                        <div className="mt-1 text-xs text-gray-500">{row.lastWorkflowActionDate ? formatDate(row.lastWorkflowActionDate) : 'без действий'}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div>{row.notificationSentDate ? formatDate(row.notificationSentDate) : '—'}</div>
+                      {row.notificationDueDate ? <div className="text-xs text-gray-500">до {formatDate(row.notificationDueDate)}</div> : null}
+                    </TableCell>
+                    <TableCell>
+                      <div>{row.pretrialClaimSentDate ? formatDate(row.pretrialClaimSentDate) : '—'}</div>
+                      {row.pretrialClaimDueDate ? <div className="text-xs text-gray-500">до {formatDate(row.pretrialClaimDueDate)}</div> : null}
+                    </TableCell>
+                    <TableCell>
+                      <div>{row.courtDate ? formatDate(row.courtDate) : row.nextCourtDate ? formatDate(row.nextCourtDate) : '—'}</div>
+                      {row.caseNumber ? <div className="text-xs text-gray-500">№ {row.caseNumber}</div> : null}
+                    </TableCell>
+                    <TableCell>
+                      <div>{row.writNumber || '—'}</div>
+                      {row.writDate ? <div className="text-xs text-gray-500">{formatDate(row.writDate)}</div> : null}
+                    </TableCell>
+                    <TableCell>
                       {row.promisedPaymentDate ? (
                         <div>
                           <div>{formatDate(row.promisedPaymentDate)}</div>
@@ -357,6 +612,17 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                           <Button size="icon" variant="outline" title="Создать план погашения" onClick={() => setPlanRow(row)}><CalendarClock className="h-4 w-4" /></Button>
                           <Button size="icon" variant="outline" title="Передать на эскалацию" onClick={() => openAction(row, 'escalation')}><Scale className="h-4 w-4" /></Button>
                           <Button size="icon" variant="outline" title="Добавить комментарий" onClick={() => openAction(row, 'comment')}><FileText className="h-4 w-4" /></Button>
+                          {nextWorkflowActions(row.collectionStage || 'new_debt').slice(0, 2).map(item => (
+                            <Button
+                              key={`${item.type}:${item.stage}`}
+                              size="sm"
+                              variant="secondary"
+                              title={ACTION_LABELS[item.type]}
+                              onClick={() => openWorkflow(row, item.type, item.stage)}
+                            >
+                              {ACTION_LABELS[item.type]}
+                            </Button>
+                          ))}
                         </div>
                       ) : '—'}
                     </TableCell>
@@ -388,6 +654,50 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                 <KpiCard title="Просрочено" value={formatCurrency(selectedRow.overdueDebt)} />
                 <KpiCard title="Старшая просрочка" value={`${selectedRow.oldestOverdueDays} дн.`} />
               </div>
+              <DetailSection title="Процесс взыскания">
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Текущий этап</p>
+                      <p className="text-base font-semibold text-gray-900 dark:text-white">{STAGE_LABELS[selectedRow.collectionStage || 'new_debt']}</p>
+                    </div>
+                    {canManageFinance ? (
+                      <div className="flex flex-wrap gap-2">
+                        {nextWorkflowActions(selectedRow.collectionStage || 'new_debt').map(item => (
+                          <Button key={`${item.type}:${item.stage}`} size="sm" onClick={() => openWorkflow(selectedRow, item.type, item.stage)}>
+                            {ACTION_LABELS[item.type]}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="rounded-md bg-gray-50 p-2 text-sm dark:bg-gray-900/40">Уведомление: {selectedRow.notificationSentDate ? formatDate(selectedRow.notificationSentDate) : 'не отправлено'}</div>
+                    <div className="rounded-md bg-gray-50 p-2 text-sm dark:bg-gray-900/40">Претензия: {selectedRow.pretrialClaimSentDate ? formatDate(selectedRow.pretrialClaimSentDate) : 'не отправлена'}</div>
+                    <div className="rounded-md bg-gray-50 p-2 text-sm dark:bg-gray-900/40">Суд: {selectedRow.caseNumber || selectedRow.courtDate ? [selectedRow.caseNumber, selectedRow.courtDate && formatDate(selectedRow.courtDate)].filter(Boolean).join(' · ') : 'нет'}</div>
+                    <div className="rounded-md bg-gray-50 p-2 text-sm dark:bg-gray-900/40">Исполнительный лист: {selectedRow.writNumber || 'нет'}</div>
+                    <div className="rounded-md bg-gray-50 p-2 text-sm dark:bg-gray-900/40">Исполнение: {selectedRow.enforcementNumber || selectedRow.enforcementStatus || 'нет'}</div>
+                    <div className="rounded-md bg-gray-50 p-2 text-sm dark:bg-gray-900/40">Взыскано: {formatCurrency(selectedRow.recoveredAmount || 0)}</div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {STAGE_FLOW.map(stageKey => (
+                      <span
+                        key={stageKey}
+                        className={`rounded-full px-2 py-1 text-xs ${
+                          stageKey === (selectedRow.collectionStage || 'new_debt')
+                            ? 'bg-lime-200 text-slate-950'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                        }`}
+                      >
+                        {STAGE_LABELS[stageKey]}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+                    Шаблоны уведомления и претензии создаются как рабочие документы и требуют проверки ответственным/юристом перед отправкой.
+                  </p>
+                </div>
+              </DetailSection>
               <DetailSection title="Аренды">
                 {selectedRow.rentals.map(item => (
                   <div key={item.rentalId} className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
@@ -433,6 +743,97 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
           )}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={Boolean(workflowRow)} onOpenChange={(open) => !open && setWorkflowRow(null)}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{workflowRow ? `${ACTION_LABELS[workflowForm.actionType]}: ${workflowRow.client}` : 'Этап взыскания'}</DialogTitle>
+          </DialogHeader>
+          <form className="space-y-3" onSubmit={submitWorkflow}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+                <div className="text-xs text-gray-500">С этапа</div>
+                <div className="font-medium">{workflowRow ? STAGE_LABELS[workflowRow.collectionStage || 'new_debt'] : '—'}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+                <div className="text-xs text-gray-500">На этап</div>
+                <div className="font-medium">{STAGE_LABELS[workflowForm.toStage]}</div>
+              </div>
+              <Input type="date" value={workflowForm.actionDate} onChange={e => setWorkflowForm(current => ({ ...current, actionDate: e.target.value }))} />
+              <Input type="date" value={workflowForm.dueDate} onChange={e => setWorkflowForm(current => ({ ...current, dueDate: e.target.value }))} placeholder="Срок оплаты/ответа" />
+            </div>
+
+            {['send_notification', 'send_pretrial_claim'].includes(workflowForm.actionType) ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Select value={workflowForm.sendMethod} onValueChange={(value) => setWorkflowForm(current => ({ ...current, sendMethod: value as WorkflowFormState['sendMethod'] }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="email">Email</SelectItem>
+                    <SelectItem value="messenger">Мессенджер</SelectItem>
+                    <SelectItem value="paper">Бумага</SelectItem>
+                    <SelectItem value="courier">Курьер</SelectItem>
+                    <SelectItem value="other">Другое</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input placeholder="Кому отправлено" value={workflowForm.sentTo} onChange={e => setWorkflowForm(current => ({ ...current, sentTo: e.target.value }))} />
+              </div>
+            ) : null}
+
+            {['court_preparing', 'schedule_court', 'court_stage_update', 'court_decision'].includes(workflowForm.actionType) ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input placeholder="Суд" value={workflowForm.courtName} onChange={e => setWorkflowForm(current => ({ ...current, courtName: e.target.value }))} />
+                <Input placeholder="Номер дела" value={workflowForm.caseNumber} onChange={e => setWorkflowForm(current => ({ ...current, caseNumber: e.target.value }))} />
+                <Input type="number" min="0" placeholder="Сумма иска" value={workflowForm.claimAmount} onChange={e => setWorkflowForm(current => ({ ...current, claimAmount: e.target.value }))} />
+                <Input type="date" value={workflowForm.courtDate} onChange={e => setWorkflowForm(current => ({ ...current, courtDate: e.target.value }))} />
+                <Input type="date" value={workflowForm.nextCourtDate} onChange={e => setWorkflowForm(current => ({ ...current, nextCourtDate: e.target.value }))} />
+              </div>
+            ) : null}
+
+            {workflowForm.actionType === 'court_decision' ? (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Input type="date" value={workflowForm.decisionDate} onChange={e => setWorkflowForm(current => ({ ...current, decisionDate: e.target.value }))} />
+                <Input type="number" min="0" placeholder="Сумма решения" value={workflowForm.decisionAmount} onChange={e => setWorkflowForm(current => ({ ...current, decisionAmount: e.target.value }))} />
+                <Select value={workflowForm.decisionStatus} onValueChange={(value) => setWorkflowForm(current => ({ ...current, decisionStatus: value as WorkflowFormState['decisionStatus'] }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="won">Выиграно</SelectItem>
+                    <SelectItem value="partially_won">Частично</SelectItem>
+                    <SelectItem value="lost">Проиграно</SelectItem>
+                    <SelectItem value="postponed">Отложено</SelectItem>
+                    <SelectItem value="settlement">Мировое</SelectItem>
+                    <SelectItem value="unknown">Не указано</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+
+            {workflowForm.actionType === 'receive_writ' ? (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Input placeholder="Номер листа" value={workflowForm.writNumber} onChange={e => setWorkflowForm(current => ({ ...current, writNumber: e.target.value }))} />
+                <Input type="date" value={workflowForm.writDate} onChange={e => setWorkflowForm(current => ({ ...current, writDate: e.target.value }))} />
+                <Input type="number" min="0" placeholder="Сумма листа" value={workflowForm.writAmount} onChange={e => setWorkflowForm(current => ({ ...current, writAmount: e.target.value }))} />
+              </div>
+            ) : null}
+
+            {['send_to_enforcement', 'enforcement_update', 'debt_recovered', 'write_off'].includes(workflowForm.actionType) ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input placeholder="Отдел приставов / исполнитель" value={workflowForm.bailiffDepartment} onChange={e => setWorkflowForm(current => ({ ...current, bailiffDepartment: e.target.value }))} />
+                <Input placeholder="Номер производства" value={workflowForm.enforcementNumber} onChange={e => setWorkflowForm(current => ({ ...current, enforcementNumber: e.target.value }))} />
+                <Input placeholder="Статус исполнения" value={workflowForm.enforcementStatus} onChange={e => setWorkflowForm(current => ({ ...current, enforcementStatus: e.target.value }))} />
+                <Input type="date" value={workflowForm.nextControlDate} onChange={e => setWorkflowForm(current => ({ ...current, nextControlDate: e.target.value }))} />
+                <Input type="number" min="0" placeholder="Взыскано" value={workflowForm.recoveredAmount} onChange={e => setWorkflowForm(current => ({ ...current, recoveredAmount: e.target.value }))} />
+                <Input type="number" min="0" placeholder="Остаток" value={workflowForm.remainingAmount} onChange={e => setWorkflowForm(current => ({ ...current, remainingAmount: e.target.value }))} />
+              </div>
+            ) : null}
+
+            <Textarea rows={3} placeholder="Комментарий" value={workflowForm.comment} onChange={e => setWorkflowForm(current => ({ ...current, comment: e.target.value }))} />
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setWorkflowRow(null)}>Отмена</Button>
+              <Button type="submit" disabled={createWorkflowAction.isPending}>{createWorkflowAction.isPending ? 'Сохраняем...' : 'Сохранить этап'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(actionRow)} onOpenChange={(open) => !open && setActionRow(null)}>
         <DialogContent className="sm:max-w-xl">

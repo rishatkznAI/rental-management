@@ -14,6 +14,19 @@ const ACTION_TYPES = new Set([
   'payment_promise',
   'payment_plan',
   'escalation',
+  'generate_notification',
+  'send_notification',
+  'generate_pretrial_claim',
+  'send_pretrial_claim',
+  'court_preparing',
+  'schedule_court',
+  'court_stage_update',
+  'court_decision',
+  'receive_writ',
+  'send_to_enforcement',
+  'enforcement_update',
+  'debt_recovered',
+  'write_off',
   'comment',
 ]);
 
@@ -29,6 +42,69 @@ const COLLECTION_STATUSES = new Set([
   'closed',
   'disputed',
 ]);
+
+const COLLECTION_STAGES = new Set([
+  'new_debt',
+  'notification_draft',
+  'notification_sent',
+  'notification_waiting',
+  'pretrial_claim_draft',
+  'pretrial_claim_sent',
+  'pretrial_waiting',
+  'court_preparing',
+  'court_scheduled',
+  'court_stage_1',
+  'court_stage_2',
+  'court_stage_3',
+  'court_decision_received',
+  'writ_received',
+  'enforcement_sent',
+  'enforcement_in_progress',
+  'recovered',
+  'closed',
+  'written_off',
+  'disputed',
+]);
+
+const STAGE_TRANSITIONS = {
+  new_debt: ['notification_draft', 'disputed', 'closed', 'written_off'],
+  notification_draft: ['notification_sent', 'notification_waiting', 'disputed', 'closed', 'written_off'],
+  notification_sent: ['notification_waiting', 'pretrial_claim_draft', 'disputed', 'closed', 'written_off'],
+  notification_waiting: ['pretrial_claim_draft', 'disputed', 'closed', 'written_off'],
+  pretrial_claim_draft: ['pretrial_claim_sent', 'pretrial_waiting', 'disputed', 'closed', 'written_off'],
+  pretrial_claim_sent: ['pretrial_waiting', 'court_preparing', 'disputed', 'closed', 'written_off'],
+  pretrial_waiting: ['court_preparing', 'disputed', 'closed', 'written_off'],
+  court_preparing: ['court_scheduled', 'disputed', 'closed', 'written_off'],
+  court_scheduled: ['court_stage_1', 'court_decision_received', 'disputed', 'closed', 'written_off'],
+  court_stage_1: ['court_stage_2', 'court_decision_received', 'disputed', 'closed', 'written_off'],
+  court_stage_2: ['court_stage_3', 'court_decision_received', 'disputed', 'closed', 'written_off'],
+  court_stage_3: ['court_decision_received', 'disputed', 'closed', 'written_off'],
+  court_decision_received: ['writ_received', 'recovered', 'closed', 'written_off', 'disputed'],
+  writ_received: ['enforcement_sent', 'recovered', 'closed', 'written_off'],
+  enforcement_sent: ['enforcement_in_progress', 'recovered', 'closed', 'written_off'],
+  enforcement_in_progress: ['recovered', 'written_off', 'closed'],
+  recovered: ['closed'],
+  closed: [],
+  written_off: [],
+  disputed: ['notification_draft', 'pretrial_claim_draft', 'court_preparing', 'closed', 'written_off'],
+};
+
+const ACTION_STAGE_DEFAULTS = {
+  generate_notification: 'notification_draft',
+  send_notification: 'notification_waiting',
+  generate_pretrial_claim: 'pretrial_claim_draft',
+  send_pretrial_claim: 'pretrial_waiting',
+  court_preparing: 'court_preparing',
+  schedule_court: 'court_scheduled',
+  court_stage_update: 'court_stage_1',
+  court_decision: 'court_decision_received',
+  receive_writ: 'writ_received',
+  send_to_enforcement: 'enforcement_sent',
+  enforcement_update: 'enforcement_in_progress',
+  debt_recovered: 'recovered',
+  write_off: 'written_off',
+  escalation: 'court_preparing',
+};
 
 function toNumber(value) {
   const numeric = Number(value);
@@ -66,6 +142,60 @@ function sortByDateDesc(left, right) {
   return String(right?.actionDate || right?.createdAt || '').localeCompare(String(left?.actionDate || left?.createdAt || ''));
 }
 
+function normalizeStage(value, fallback = '') {
+  const stage = text(value || fallback);
+  return COLLECTION_STAGES.has(stage) ? stage : '';
+}
+
+function getDefaultStageForAction(actionType, input = {}) {
+  if (actionType === 'court_stage_update') {
+    const explicit = normalizeStage(input.toStage);
+    if (['court_stage_1', 'court_stage_2', 'court_stage_3'].includes(explicit)) return explicit;
+    return 'court_stage_1';
+  }
+  return ACTION_STAGE_DEFAULTS[actionType] || '';
+}
+
+function validateStageTransition(fromStage, toStage, { override = false, comment = '', userRole = '' } = {}) {
+  const from = normalizeStage(fromStage, 'new_debt') || 'new_debt';
+  const to = normalizeStage(toStage);
+  if (!to) {
+    const error = new Error('Некорректный этап взыскания.');
+    error.status = 400;
+    throw error;
+  }
+  if (from === to) return true;
+  const allowed = STAGE_TRANSITIONS[from] || [];
+  if (allowed.includes(to)) return true;
+  if (override && userRole === 'Администратор' && text(comment)) return true;
+  const error = new Error('Недопустимый переход этапа взыскания.');
+  error.status = 409;
+  throw error;
+}
+
+function validateWorkflowActionFields(action) {
+  if (action.toStage === 'court_scheduled' && !action.courtDate && !action.nextCourtDate) {
+    const error = new Error('Для назначения суда укажите дату заседания.');
+    error.status = 400;
+    throw error;
+  }
+  if (['court_stage_1', 'court_stage_2', 'court_stage_3'].includes(action.toStage) && !action.courtDate && !action.nextCourtDate) {
+    const error = new Error('Для этапа суда укажите дату заседания.');
+    error.status = 400;
+    throw error;
+  }
+  if (action.toStage === 'court_decision_received' && (!action.decisionDate || !action.decisionStatus)) {
+    const error = new Error('Для решения суда укажите дату и результат.');
+    error.status = 400;
+    throw error;
+  }
+  if (action.toStage === 'writ_received' && (!action.writNumber || !action.writDate)) {
+    const error = new Error('Для исполнительного листа укажите номер и дату.');
+    error.status = 400;
+    throw error;
+  }
+}
+
 function normalizeAction(input = {}, previous = null, context = {}) {
   const now = context.nowIso ? context.nowIso() : new Date().toISOString();
   const actionType = text(input.actionType ?? previous?.actionType ?? 'comment');
@@ -81,26 +211,59 @@ function normalizeAction(input = {}, previous = null, context = {}) {
     throw error;
   }
   const promisedAmount = toNumber(input.promisedAmount ?? previous?.promisedAmount);
-  return {
+  const toStage = normalizeStage(input.toStage ?? previous?.toStage) || getDefaultStageForAction(actionType, input);
+  const fromStage = normalizeStage(input.fromStage ?? previous?.fromStage);
+  const action = {
     ...(previous || {}),
     id: previous?.id || text(input.id) || context.generateId(context.idPrefix || 'DCA'),
     clientId: text(input.clientId ?? previous?.clientId) || undefined,
     rentalId: text(input.rentalId ?? previous?.rentalId) || undefined,
     paymentId: text(input.paymentId ?? previous?.paymentId) || undefined,
+    documentId: text(input.documentId ?? previous?.documentId) || undefined,
     managerId: text(input.managerId ?? input.responsibleUserId ?? previous?.managerId ?? previous?.responsibleUserId) || undefined,
     responsibleUserId: text(input.responsibleUserId ?? input.managerId ?? previous?.responsibleUserId ?? previous?.managerId) || undefined,
     actionType,
     status,
+    fromStage: fromStage || undefined,
+    toStage: toStage || undefined,
     actionDate: dateOnly(input.actionDate ?? previous?.actionDate) || now.slice(0, 10),
+    dueDate: dateOnly(input.dueDate ?? previous?.dueDate) || undefined,
     nextActionDate: dateOnly(input.nextActionDate ?? previous?.nextActionDate) || undefined,
     promisedPaymentDate: dateOnly(input.promisedPaymentDate ?? previous?.promisedPaymentDate) || undefined,
     promisedAmount: promisedAmount > 0 ? promisedAmount : undefined,
+    sendMethod: text(input.sendMethod ?? previous?.sendMethod) || undefined,
+    sentTo: text(input.sentTo ?? previous?.sentTo) || undefined,
+    attachmentUrl: text(input.attachmentUrl ?? previous?.attachmentUrl) || undefined,
+    fileUrl: text(input.fileUrl ?? previous?.fileUrl) || undefined,
+    courtName: text(input.courtName ?? previous?.courtName) || undefined,
+    caseNumber: text(input.caseNumber ?? previous?.caseNumber) || undefined,
+    claimAmount: toNumber(input.claimAmount ?? previous?.claimAmount) || undefined,
+    courtDate: dateOnly(input.courtDate ?? previous?.courtDate) || undefined,
+    nextCourtDate: dateOnly(input.nextCourtDate ?? previous?.nextCourtDate) || undefined,
+    courtStageComment: text(input.courtStageComment ?? previous?.courtStageComment) || undefined,
+    decisionDate: dateOnly(input.decisionDate ?? previous?.decisionDate) || undefined,
+    decisionAmount: toNumber(input.decisionAmount ?? previous?.decisionAmount) || undefined,
+    decisionStatus: text(input.decisionStatus ?? previous?.decisionStatus) || undefined,
+    writNumber: text(input.writNumber ?? previous?.writNumber) || undefined,
+    writDate: dateOnly(input.writDate ?? previous?.writDate) || undefined,
+    writAmount: toNumber(input.writAmount ?? previous?.writAmount) || undefined,
+    receivedBy: text(input.receivedBy ?? previous?.receivedBy) || undefined,
+    enforcementSentDate: dateOnly(input.enforcementSentDate ?? previous?.enforcementSentDate) || undefined,
+    bailiffDepartment: text(input.bailiffDepartment ?? previous?.bailiffDepartment) || undefined,
+    enforcementNumber: text(input.enforcementNumber ?? previous?.enforcementNumber) || undefined,
+    enforcementStatus: text(input.enforcementStatus ?? previous?.enforcementStatus) || undefined,
+    recoveredAmount: toNumber(input.recoveredAmount ?? previous?.recoveredAmount) || undefined,
+    remainingAmount: toNumber(input.remainingAmount ?? previous?.remainingAmount) || undefined,
+    nextControlDate: dateOnly(input.nextControlDate ?? previous?.nextControlDate) || undefined,
+    override: Boolean(input.override ?? previous?.override) || undefined,
     comment: text(input.comment ?? previous?.comment) || undefined,
     createdBy: previous?.createdBy || context.userName || undefined,
     createdAt: previous?.createdAt || now,
     updatedAt: now,
     updatedBy: context.userName || undefined,
   };
+  validateWorkflowActionFields(action);
+  return action;
 }
 
 function normalizePaymentPlan(input = {}, previous = null, context = {}) {
@@ -136,6 +299,50 @@ function normalizePaymentPlan(input = {}, previous = null, context = {}) {
     createdAt: previous?.createdAt || now,
     updatedAt: now,
     updatedBy: context.userName || undefined,
+  };
+}
+
+function findLatestAction(actions, predicate) {
+  return (actions || []).find(predicate) || null;
+}
+
+function deriveWorkflow(row, today) {
+  const actions = row.actions || [];
+  const workflowActions = actions.filter(action => normalizeStage(action.toStage));
+  const latestWorkflow = workflowActions[0] || null;
+  const latestByStage = stage => findLatestAction(actions, action => action.toStage === stage);
+  const latestByType = type => findLatestAction(actions, action => action.actionType === type);
+  const stage = normalizeStage(latestWorkflow?.toStage) || (row.overdueDebt > 0 ? 'new_debt' : 'closed');
+  const notification = latestByType('send_notification') || latestByStage('notification_sent') || latestByStage('notification_waiting');
+  const pretrial = latestByType('send_pretrial_claim') || latestByStage('pretrial_claim_sent') || latestByStage('pretrial_waiting');
+  const court = latestByType('schedule_court') || latestByStage('court_scheduled') || latestByStage('court_stage_1') || latestByStage('court_stage_2') || latestByStage('court_stage_3');
+  const decision = latestByType('court_decision') || latestByStage('court_decision_received');
+  const writ = latestByType('receive_writ') || latestByStage('writ_received');
+  const enforcement = latestByType('send_to_enforcement') || latestByStage('enforcement_sent') || latestByStage('enforcement_in_progress');
+  const recovery = latestByType('debt_recovered') || latestByStage('recovered');
+  const nextControlDate = dateOnly(enforcement?.nextControlDate || latestWorkflow?.nextControlDate);
+
+  return {
+    collectionStage: stage,
+    lastWorkflowActionDate: dateOnly(latestWorkflow?.actionDate),
+    notificationSentDate: dateOnly(notification?.actionDate),
+    notificationDueDate: dateOnly(notification?.dueDate),
+    pretrialClaimSentDate: dateOnly(pretrial?.actionDate),
+    pretrialClaimDueDate: dateOnly(pretrial?.dueDate),
+    courtDate: dateOnly(court?.courtDate),
+    nextCourtDate: dateOnly(court?.nextCourtDate),
+    caseNumber: court?.caseNumber || decision?.caseNumber || '',
+    decisionDate: dateOnly(decision?.decisionDate),
+    decisionStatus: decision?.decisionStatus || '',
+    writNumber: writ?.writNumber || '',
+    writDate: dateOnly(writ?.writDate),
+    enforcementNumber: enforcement?.enforcementNumber || '',
+    enforcementStatus: enforcement?.enforcementStatus || '',
+    recoveredAmount: toNumber(recovery?.recoveredAmount),
+    remainingAmount: toNumber(recovery?.remainingAmount || enforcement?.remainingAmount),
+    nextControlDate,
+    notificationOverdue: Boolean(notification?.dueDate && dateOnly(notification.dueDate) < today && row.totalDebt > 0 && !['pretrial_claim_draft', 'pretrial_claim_sent', 'pretrial_waiting', 'court_preparing', 'court_scheduled', 'court_stage_1', 'court_stage_2', 'court_stage_3', 'court_decision_received', 'writ_received', 'enforcement_sent', 'enforcement_in_progress', 'recovered', 'closed', 'written_off'].includes(stage)),
+    pretrialOverdue: Boolean(pretrial?.dueDate && dateOnly(pretrial.dueDate) < today && row.totalDebt > 0 && !['court_preparing', 'court_scheduled', 'court_stage_1', 'court_stage_2', 'court_stage_3', 'court_decision_received', 'writ_received', 'enforcement_sent', 'enforcement_in_progress', 'recovered', 'closed', 'written_off'].includes(stage)),
   };
 }
 
@@ -240,7 +447,10 @@ function buildReceivables(input = {}, todayInput) {
 
   for (const [key, row] of grouped.entries()) {
     row.documents = documentsByClientKey.get(key) || [];
-    row.actions = (actionsByClientKey.get(key) || []).slice().sort(sortByDateDesc);
+    row.actions = (actionsByClientKey.get(key) || [])
+      .map((action, index) => ({ action, index }))
+      .sort((left, right) => sortByDateDesc(left.action, right.action) || right.index - left.index)
+      .map(item => item.action);
     row.paymentPlans = (plansByClientKey.get(key) || []).slice().sort((a, b) => String(a.paymentDate || '').localeCompare(String(b.paymentDate || '')));
 
     const openActions = row.actions.filter(action => !['done', 'cancelled'].includes(text(action.status)));
@@ -277,6 +487,7 @@ function buildReceivables(input = {}, todayInput) {
     row.noNextAction = row.overdueDebt > 0 && !row.nextActionDate && collectionStatus !== 'closed';
     row.missedActions = missedActions.length;
     row.missedPlanPayments = missedPlanRows.length;
+    Object.assign(row, deriveWorkflow(row, today));
   }
 
   const rows = Array.from(grouped.values())
@@ -286,11 +497,11 @@ function buildReceivables(input = {}, todayInput) {
   return {
     rows,
     debtRows,
-    summary: buildReceivablesSummary(rows),
+    summary: buildReceivablesSummary(rows, today),
   };
 }
 
-function buildReceivablesSummary(rows) {
+function buildReceivablesSummary(rows, todayInput) {
   const summary = {
     totalDebt: 0,
     overdueDebt: 0,
@@ -302,13 +513,31 @@ function buildReceivablesSummary(rows) {
     withoutNextAction: 0,
     promisedAmount: 0,
     paymentPlanAmount: 0,
+    withoutNotification: 0,
+    notificationOverdue: 0,
+    pretrialOverdue: 0,
+    courtNext7Days: 0,
+    overdueNextAction: 0,
+    writNotEnforced: 0,
+    enforcementStale: 0,
   };
+  const today = nowDate(todayInput);
+  const inSevenDays = new Date(`${today}T00:00:00`);
+  inSevenDays.setDate(inSevenDays.getDate() + 7);
+  const sevenKey = inSevenDays.toISOString().slice(0, 10);
   for (const row of rows || []) {
     summary.totalDebt += toNumber(row.totalDebt);
     summary.overdueDebt += toNumber(row.overdueDebt);
     summary.clientsWithDebt += row.totalDebt > 0 ? 1 : 0;
     summary.withoutNextAction += row.noNextAction ? 1 : 0;
     summary.promisedAmount += toNumber(row.promisedAmount);
+    summary.withoutNotification += row.overdueDebt > 0 && row.collectionStage === 'new_debt' ? 1 : 0;
+    summary.notificationOverdue += row.notificationOverdue ? 1 : 0;
+    summary.pretrialOverdue += row.pretrialOverdue ? 1 : 0;
+    summary.overdueNextAction += row.nextActionDate && dateOnly(row.nextActionDate) < today ? 1 : 0;
+    summary.courtNext7Days += row.courtDate && row.courtDate >= today && row.courtDate <= sevenKey ? 1 : 0;
+    summary.writNotEnforced += row.collectionStage === 'writ_received' ? 1 : 0;
+    summary.enforcementStale += row.collectionStage === 'enforcement_in_progress' && (!row.nextControlDate || dateOnly(row.nextControlDate) < today) ? 1 : 0;
     summary.paymentPlanAmount += (row.paymentPlans || [])
       .filter(plan => plan.status === 'planned')
       .reduce((sum, plan) => sum + toNumber(plan.amount), 0);
@@ -330,8 +559,12 @@ module.exports = {
   ACTION_STATUSES,
   PLAN_STATUSES,
   COLLECTION_STATUSES,
+  COLLECTION_STAGES,
+  STAGE_TRANSITIONS,
+  ACTION_STAGE_DEFAULTS,
   normalizeAction,
   normalizePaymentPlan,
+  validateStageTransition,
   buildReceivables,
   buildReceivablesSummary,
 };

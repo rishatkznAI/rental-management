@@ -75,7 +75,20 @@ import type { GanttRentalData } from '../mock-data';
 
 type DocumentsView = 'general' | 'control' | 'mechanics';
 
-const VALID_DOCUMENT_TYPES = new Set<DocumentType>(['contract', 'act', 'upd', 'invoice', 'service_act', 'work_order', 'other']);
+const VALID_DOCUMENT_TYPES = new Set<DocumentType>([
+  'contract',
+  'act',
+  'upd',
+  'invoice',
+  'service_act',
+  'work_order',
+  'debt_notification',
+  'pretrial_claim',
+  'court_document',
+  'court_decision',
+  'enforcement_writ',
+  'other',
+]);
 const VALID_DOCUMENT_STATUSES = new Set<DocumentStatus>(['draft', 'signed', 'sent']);
 
 type ContractFormState = {
@@ -154,6 +167,11 @@ export function getDocumentTypeLabel(doc: Partial<Doc> | null | undefined): stri
     invoice: 'Счёт',
     service_act: 'Сервисный акт',
     work_order: 'Заказ-наряд',
+    debt_notification: 'Уведомление о задолженности',
+    pretrial_claim: 'Досудебная претензия',
+    court_document: 'Судебный документ',
+    court_decision: 'Решение суда',
+    enforcement_writ: 'Исполнительный лист',
     other: 'Прочее',
   };
   const type = doc?.type;

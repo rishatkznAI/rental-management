@@ -1,4 +1,9 @@
 const express = require('express');
+const {
+  prepareDocumentCreate,
+  readNumberingSettings,
+  writeNumberingSettings,
+} = require('../lib/documents-core');
 
 function registerFinanceRoutes(router, deps) {
   const {
@@ -17,6 +22,7 @@ function registerFinanceRoutes(router, deps) {
     buildReceivables,
     normalizeAction,
     normalizePaymentPlan,
+    validateStageTransition,
     writeData,
     requireWrite,
     generateId,
@@ -74,6 +80,98 @@ function registerFinanceRoutes(router, deps) {
       before: previous || null,
       after: next || null,
     });
+  }
+
+  function isAdmin(user) {
+    return user?.userRole === 'Администратор';
+  }
+
+  function daysFromNow(days) {
+    const date = new Date(nowIso());
+    date.setDate(date.getDate() + days);
+    return date.toISOString().slice(0, 10);
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
+  }
+
+  function documentSettings() {
+    return readNumberingSettings(collectionList('app_settings'));
+  }
+
+  function saveDocumentSettings(settings) {
+    writeData('app_settings', writeNumberingSettings(collectionList('app_settings'), settings, nowIso));
+  }
+
+  function findReceivableRow(req, clientId) {
+    const fakeReq = { ...req, query: { ...(req.query || {}) } };
+    const result = receivablesResponse(fakeReq);
+    const id = String(clientId || '').trim();
+    const row = result.rows.find(item => String(item.clientId || '') === id);
+    if (!row) {
+      const error = new Error('Дебиторка клиента не найдена');
+      error.status = 404;
+      throw error;
+    }
+    return row;
+  }
+
+  function buildDebtDocumentHtml(kind, row, payload) {
+    const title = kind === 'pretrial_claim' ? 'Досудебная претензия' : 'Уведомление о задолженности';
+    const voluntaryDue = payload.dueDate || daysFromNow(kind === 'pretrial_claim' ? 10 : 5);
+    return `<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8" /><title>${escapeHtml(title)}</title></head>
+<body style="font-family: Arial, sans-serif; margin: 32px; color: #111827;">
+  <h1>${escapeHtml(title)}</h1>
+  <p><strong>Клиент:</strong> ${escapeHtml(row.client)} ${row.inn ? `(ИНН ${escapeHtml(row.inn)})` : ''}</p>
+  <p><strong>Сумма задолженности:</strong> ${escapeHtml(row.totalDebt.toLocaleString('ru-RU'))} руб.</p>
+  <p><strong>Просрочено:</strong> ${escapeHtml(row.overdueDebt.toLocaleString('ru-RU'))} руб., старшая просрочка ${escapeHtml(row.oldestOverdueDays)} дн.</p>
+  <p><strong>Связанные аренды:</strong> ${escapeHtml((row.rentals || []).map(item => item.rentalId).join(', ') || 'не указаны')}</p>
+  <p><strong>Связанные документы:</strong> ${escapeHtml((row.documents || []).map(item => [item.type, item.number].filter(Boolean).join(' ')).filter(Boolean).join(', ') || 'не указаны')}</p>
+  <p>Просим погасить задолженность до ${escapeHtml(voluntaryDue)}. Текст является рабочим шаблоном и требует проверки ответственным/юристом перед отправкой.</p>
+  ${payload.comment ? `<p><strong>Комментарий:</strong> ${escapeHtml(payload.comment)}</p>` : ''}
+</body>
+</html>`;
+  }
+
+  function createReceivableDocument(req, row, actionId, documentType, payload = {}) {
+    const documents = collectionList('documents');
+    const firstRental = row.rentals?.[0] || {};
+    const prepared = prepareDocumentCreate({
+      type: documentType,
+      documentType,
+      number: '',
+      documentNumber: '',
+      clientId: row.clientId,
+      client: row.client,
+      rentalId: payload.rentalId || firstRental.rentalId || undefined,
+      rental: payload.rentalId || firstRental.rentalId || undefined,
+      date: payload.actionDate || nowIso().slice(0, 10),
+      documentDate: payload.actionDate || nowIso().slice(0, 10),
+      amount: row.totalDebt,
+      status: 'draft',
+      manager: row.manager,
+      receivableActionId: actionId,
+      comment: payload.comment || '',
+      contentHtml: buildDebtDocumentHtml(documentType, row, payload),
+    }, {
+      documents,
+      settings: documentSettings(),
+      nowIso,
+      generateId,
+      idPrefix: idPrefixes.documents || 'D',
+      user: req.user,
+    });
+    writeData('documents', [...documents, prepared.document]);
+    saveDocumentSettings(prepared.settings);
+    audit(req, 'documents.create', 'documents', null, prepared.document);
+    return prepared.document;
   }
 
   function receivablesResponse(req) {
@@ -262,6 +360,50 @@ function registerFinanceRoutes(router, deps) {
     const row = result.rows.find(item => String(item.clientId || '') === clientId);
     if (!row) return res.status(404).json({ ok: false, error: 'Дебиторка клиента не найдена' });
     return res.json(row);
+  });
+
+  router.post('/finance/receivables/workflow-actions', requireAuth, requireWrite('debt_collection_actions'), (req, res) => {
+    try {
+      accessControl.assertCanCreateCollection('debt_collection_actions', req.user, req.body);
+      const row = findReceivableRow(req, req.body.clientId);
+      const actions = collectionList('debt_collection_actions');
+      const actionId = String(req.body.id || '').trim() || generateId(idPrefixes.debt_collection_actions || 'DCA');
+      const next = normalizeAction({
+        ...req.body,
+        id: actionId,
+        fromStage: req.body.fromStage || row.collectionStage || 'new_debt',
+        dueDate: req.body.dueDate || (
+          req.body.actionType === 'send_notification' ? daysFromNow(5)
+            : req.body.actionType === 'send_pretrial_claim' ? daysFromNow(10)
+              : undefined
+        ),
+        status: req.body.status || 'done',
+      }, null, {
+        generateId,
+        idPrefix: idPrefixes.debt_collection_actions || 'DCA',
+        nowIso,
+        userName: userName(req.user),
+      });
+      validateStageTransition(row.collectionStage || 'new_debt', next.toStage || row.collectionStage || 'new_debt', {
+        override: Boolean(req.body.override),
+        comment: next.comment,
+        userRole: req.user?.userRole,
+      });
+      let document = null;
+      if (req.body.actionType === 'generate_notification') {
+        document = createReceivableDocument(req, row, actionId, 'debt_notification', req.body);
+      }
+      if (req.body.actionType === 'generate_pretrial_claim') {
+        document = createReceivableDocument(req, row, actionId, 'pretrial_claim', req.body);
+      }
+      if (document?.id) next.documentId = document.id;
+      actions.push(next);
+      writeData('debt_collection_actions', actions);
+      audit(req, 'debt_collection_actions.workflow', 'debt_collection_actions', null, next);
+      return res.status(201).json({ action: next, document });
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось выполнить этап взыскания' });
+    }
   });
 
   router.post('/finance/receivables/actions', requireAuth, requireWrite('debt_collection_actions'), (req, res) => {

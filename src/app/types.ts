@@ -864,7 +864,19 @@ export interface ClientContract {
   updatedAt?: string;
 }
 
-export type DocumentType = 'contract' | 'act' | 'upd' | 'invoice' | 'service_act' | 'work_order' | 'other';
+export type DocumentType =
+  | 'contract'
+  | 'act'
+  | 'upd'
+  | 'invoice'
+  | 'service_act'
+  | 'work_order'
+  | 'debt_notification'
+  | 'pretrial_claim'
+  | 'court_document'
+  | 'court_decision'
+  | 'enforcement_writ'
+  | 'other';
 export type DocumentStatus = 'draft' | 'signed' | 'sent';
 export type DocumentContractKind = 'rental' | 'supply';
 
@@ -1114,6 +1126,28 @@ export type ReceivableCollectionStatus =
   | 'closed'
   | 'disputed';
 
+export type ReceivableCollectionStage =
+  | 'new_debt'
+  | 'notification_draft'
+  | 'notification_sent'
+  | 'notification_waiting'
+  | 'pretrial_claim_draft'
+  | 'pretrial_claim_sent'
+  | 'pretrial_waiting'
+  | 'court_preparing'
+  | 'court_scheduled'
+  | 'court_stage_1'
+  | 'court_stage_2'
+  | 'court_stage_3'
+  | 'court_decision_received'
+  | 'writ_received'
+  | 'enforcement_sent'
+  | 'enforcement_in_progress'
+  | 'recovered'
+  | 'closed'
+  | 'written_off'
+  | 'disputed';
+
 export type ReceivableActionType =
   | 'call'
   | 'message'
@@ -1123,6 +1157,19 @@ export type ReceivableActionType =
   | 'payment_promise'
   | 'payment_plan'
   | 'escalation'
+  | 'generate_notification'
+  | 'send_notification'
+  | 'generate_pretrial_claim'
+  | 'send_pretrial_claim'
+  | 'court_preparing'
+  | 'schedule_court'
+  | 'court_stage_update'
+  | 'court_decision'
+  | 'receive_writ'
+  | 'send_to_enforcement'
+  | 'enforcement_update'
+  | 'debt_recovered'
+  | 'write_off'
   | 'comment';
 
 export type ReceivableActionStatus = 'planned' | 'done' | 'missed' | 'cancelled';
@@ -1133,14 +1180,43 @@ export interface ReceivableCollectionAction {
   clientId?: string;
   rentalId?: string;
   paymentId?: string;
+  documentId?: string;
   managerId?: string;
   responsibleUserId?: string;
   actionType: ReceivableActionType;
   status: ReceivableActionStatus;
+  fromStage?: ReceivableCollectionStage;
+  toStage?: ReceivableCollectionStage;
   actionDate: string;
+  dueDate?: string;
   nextActionDate?: string;
   promisedPaymentDate?: string;
   promisedAmount?: number;
+  sendMethod?: 'email' | 'messenger' | 'paper' | 'courier' | 'other';
+  sentTo?: string;
+  attachmentUrl?: string;
+  fileUrl?: string;
+  courtName?: string;
+  caseNumber?: string;
+  claimAmount?: number;
+  courtDate?: string;
+  nextCourtDate?: string;
+  courtStageComment?: string;
+  decisionDate?: string;
+  decisionAmount?: number;
+  decisionStatus?: 'won' | 'partially_won' | 'lost' | 'postponed' | 'settlement' | 'unknown';
+  writNumber?: string;
+  writDate?: string;
+  writAmount?: number;
+  receivedBy?: string;
+  enforcementSentDate?: string;
+  bailiffDepartment?: string;
+  enforcementNumber?: string;
+  enforcementStatus?: string;
+  recoveredAmount?: number;
+  remainingAmount?: number;
+  nextControlDate?: string;
+  override?: boolean;
   comment?: string;
   createdBy?: string;
   createdAt: string;
@@ -1221,6 +1297,20 @@ export interface ReceivableRow {
   nextActionDate?: string;
   nextActionType?: ReceivableActionType | '';
   collectionStatus: ReceivableCollectionStatus;
+  collectionStage?: ReceivableCollectionStage;
+  lastWorkflowActionDate?: string;
+  notificationSentDate?: string;
+  notificationDueDate?: string;
+  pretrialClaimSentDate?: string;
+  pretrialClaimDueDate?: string;
+  courtDate?: string;
+  nextCourtDate?: string;
+  caseNumber?: string;
+  writNumber?: string;
+  writDate?: string;
+  enforcementNumber?: string;
+  recoveredAmount?: number;
+  remainingAmount?: number;
   promisedPaymentDate?: string;
   promisedAmount?: number;
   comment?: string;
@@ -1241,6 +1331,13 @@ export interface ReceivablesSummary {
   withoutNextAction: number;
   promisedAmount: number;
   paymentPlanAmount: number;
+  withoutNotification?: number;
+  notificationOverdue?: number;
+  pretrialOverdue?: number;
+  courtNext7Days?: number;
+  overdueNextAction?: number;
+  writNotEnforced?: number;
+  enforcementStale?: number;
 }
 
 export interface ReceivablesResponse {

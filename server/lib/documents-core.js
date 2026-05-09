@@ -5,6 +5,11 @@ const DOCUMENT_TYPE_CONFIG = {
   invoice: { label: 'Счёт', prefix: 'INVOICE' },
   service_act: { label: 'Сервисный акт', prefix: 'SERVICE' },
   work_order: { label: 'Заказ-наряд', prefix: 'WO' },
+  debt_notification: { label: 'Уведомление о задолженности', prefix: 'DEBTNOTICE' },
+  pretrial_claim: { label: 'Досудебная претензия', prefix: 'CLAIM' },
+  court_document: { label: 'Судебный документ', prefix: 'COURT' },
+  court_decision: { label: 'Решение суда', prefix: 'DECISION' },
+  enforcement_writ: { label: 'Исполнительный лист', prefix: 'WRIT' },
   other: { label: 'Прочее', prefix: 'DOC' },
 };
 

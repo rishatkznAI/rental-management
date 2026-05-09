@@ -12,7 +12,8 @@ import { usePermissions } from '../lib/permissions';
 import { EQUIPMENT_SALE_PDI_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
 import { isSaleModeEquipment, saleStatusKind, saleStatusLabel } from '../lib/equipmentSaleMode.js';
 import { formatCurrency } from '../lib/utils';
-import type { EquipmentSalePdiStatus } from '../types';
+import { deriveSignalState } from '../lib/gsm';
+import type { Equipment, EquipmentSalePdiStatus } from '../types';
 
 function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
   const variants: Record<EquipmentSalePdiStatus, 'default' | 'warning' | 'success' | 'error'> = {
@@ -37,6 +38,46 @@ function apiErrorMessage(error: unknown, fallback: string) {
   const status = typeof error === 'object' && error && 'status' in error ? `HTTP ${(error as { status?: number }).status}` : '';
   const message = error instanceof Error ? error.message : fallback;
   return [status, message].filter(Boolean).join(': ');
+}
+
+function formatSaleDate(value?: string | null) {
+  const parsed = new Date(String(value || ''));
+  if (!value || Number.isNaN(parsed.getTime())) return 'Не указано';
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(parsed);
+}
+
+function isPastDate(value?: string | null) {
+  const parsed = new Date(String(value || ''));
+  return Boolean(value && !Number.isNaN(parsed.getTime()) && parsed < new Date());
+}
+
+function getGsmSaleValue(equipment: Partial<Equipment>) {
+  const hasGsmData = Boolean(
+    equipment.gsmImei
+    || equipment.gsmDeviceId
+    || equipment.gsmTrackerId
+    || equipment.gsmStatus
+    || equipment.gsmSignalStatus
+    || equipment.gsmLastSeenAt
+    || equipment.gsmLastSignalAt
+  );
+  if (!hasGsmData) return 'Не указано';
+
+  const signalState = deriveSignalState(equipment as Equipment, equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || null);
+  const statusLabel = signalState === 'online'
+    ? 'Онлайн'
+    : signalState === 'location_only'
+    ? 'Только координаты'
+    : signalState === 'offline'
+    ? 'Офлайн'
+    : 'Неизвестно';
+  const identifier = equipment.gsmImei || equipment.gsmDeviceId || equipment.gsmTrackerId;
+
+  return [identifier ? `IMEI/ID ${identifier}` : '', statusLabel].filter(Boolean).join(' · ');
 }
 
 export default function Sales() {
@@ -249,6 +290,33 @@ export default function Sales() {
               SN: {equipment.serialNumber || 'не указан'}
             </p>
             <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Локация: {equipment.location}</p>
+            <div className="mt-3 rounded-lg border border-gray-200/70 p-3 text-xs dark:border-gray-700">
+              <p className="font-semibold text-gray-700 dark:text-gray-200">Идентификация и обслуживание</p>
+              <div className="mt-2 grid gap-2">
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500 dark:text-gray-400">Инв. №</span>
+                  <span className="text-right font-medium text-gray-900 dark:text-white">{equipment.inventoryNumber || 'Не указано'}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500 dark:text-gray-400">GSM</span>
+                  <span className="text-right font-medium text-gray-900 dark:text-white">{getGsmSaleValue(equipment)}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'ТО', value: equipment.nextMaintenance },
+                    { label: 'ЧТО', value: equipment.maintenanceCHTO },
+                    { label: 'ПТО', value: equipment.maintenancePTO },
+                  ].map(item => (
+                    <div key={item.label}>
+                      <p className="text-gray-500 dark:text-gray-400">{item.label}</p>
+                      <p className={`mt-1 font-medium ${isPastDate(item.value) ? 'text-amber-600 dark:text-amber-300' : 'text-gray-900 dark:text-white'}`}>
+                        {formatSaleDate(item.value)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
             <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-amber-50/80 p-3 text-xs dark:bg-amber-950/20">
               <div>
                 <p className="text-gray-500 dark:text-gray-400">Цена 1</p>
@@ -289,6 +357,15 @@ export default function Sales() {
                     {equipment.manufacturer} {equipment.model}
                   </Link>
                   <p className="text-xs text-gray-500 dark:text-gray-400">SN: {equipment.serialNumber || 'не указан'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Инв. №: {equipment.inventoryNumber || 'Не указано'}</p>
+                  <p className="max-w-[260px] truncate text-xs text-gray-500 dark:text-gray-400">GSM: {getGsmSaleValue(equipment)}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    ТО: <span className={isPastDate(equipment.nextMaintenance) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.nextMaintenance)}</span>
+                    {' · '}
+                    ЧТО: <span className={isPastDate(equipment.maintenanceCHTO) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.maintenanceCHTO)}</span>
+                    {' · '}
+                    ПТО: <span className={isPastDate(equipment.maintenancePTO) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.maintenancePTO)}</span>
+                  </p>
                 </TableCell>
                 <TableCell><Badge variant={saleStatusKind(equipment) === 'sold' ? 'success' : saleStatusKind(equipment) === 'removed' ? 'default' : 'warning'}>{saleStatusLabel(equipment)}</Badge></TableCell>
                 <TableCell>{getSalePdiBadge(equipment.salePdiStatus)}</TableCell>

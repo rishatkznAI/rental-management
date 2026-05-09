@@ -172,6 +172,28 @@ test('sale mode keeps sale prices in sale 360 and not in basic characteristics',
   assert.doesNotMatch(basicSection, /<InfoField label="Цена 3"/);
 });
 
+test('sale mode shows identification service gsm and revenue context', () => {
+  const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+  const salesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
+
+  assert.match(detailSource, /Идентификация и обслуживание/);
+  assert.match(detailSource, /<CompactMetric label="Инв\. №"/);
+  assert.match(detailSource, /<CompactMetric label="GSM" value=\{getGsmDisplayValue\(equipment\)\}/);
+  assert.match(detailSource, /<CompactMetric label="ТО"/);
+  assert.match(detailSource, /<CompactMetric label="ЧТО"/);
+  assert.match(detailSource, /<CompactMetric label="ПТО"/);
+  assert.match(detailSource, /<CompactMetric\s+label="Доход"/);
+  assert.match(detailSource, /formatCurrency\(equipment360\.finance\.revenue\)/);
+  assert.match(detailSource, /rentals: canViewRentals \? allGanttRentals : \[\]/);
+  assert.match(detailSource, /payments: canViewFinance \? allPayments : \[\]/);
+
+  assert.match(salesSource, /Инв\. №: \{equipment\.inventoryNumber \|\| 'Не указано'\}/);
+  assert.match(salesSource, /GSM: \{getGsmSaleValue\(equipment\)\}/);
+  assert.match(salesSource, /ТО:/);
+  assert.match(salesSource, /ЧТО:/);
+  assert.match(salesSource, /ПТО:/);
+});
+
 test('PDI form contains presale fields and no service scenario selector', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/components/sales/PdiForm.tsx'), 'utf8');
 

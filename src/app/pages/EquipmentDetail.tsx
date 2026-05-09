@@ -50,6 +50,7 @@ import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
 import { buildSaleStatusPatch, isSaleModeEquipment, saleDocumentsReadiness, saleStatusLabel } from '../lib/equipmentSaleMode.js';
 import { getEffectivePaidAmount } from '../lib/finance';
+import { deriveSignalState } from '../lib/gsm';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -132,6 +133,47 @@ const HANDOFF_REQUIRED_PHOTO_CATEGORIES: EquipmentOperationPhotoCategory[] = [
 
 const textEncoder = new TextEncoder();
 const API_BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
+
+function hasGsmData(equipment: Equipment) {
+  return Boolean(
+    equipment.gsmImei
+    || equipment.gsmDeviceId
+    || equipment.gsmTrackerId
+    || equipment.gsmStatus
+    || equipment.gsmSignalStatus
+    || equipment.gsmLastSeenAt
+    || equipment.gsmLastSignalAt
+  );
+}
+
+function getGsmDisplayValue(equipment: Equipment) {
+  if (!hasGsmData(equipment)) return 'Не указано';
+
+  const signalState = deriveSignalState(equipment, equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || null);
+  const statusLabel = signalState === 'online'
+    ? 'Онлайн'
+    : signalState === 'location_only'
+    ? 'Только координаты'
+    : signalState === 'offline'
+    ? 'Офлайн'
+    : 'Неизвестно';
+  const identifier = equipment.gsmImei || equipment.gsmDeviceId || equipment.gsmTrackerId;
+
+  return [identifier ? `IMEI/ID ${identifier}` : '', statusLabel].filter(Boolean).join(' · ');
+}
+
+function getMaintenanceTone(value?: string | null): 'default' | 'warning' {
+  if (!value) return 'default';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'default';
+  return parsed < new Date() ? 'warning' : 'default';
+}
+
+function formatMaintenanceDate(value?: string | null) {
+  if (!value) return 'Не указано';
+  const formatted = formatDate(value);
+  return formatted === '—' ? 'Не указано' : formatted;
+}
 
 function sanitizeZipSegment(value: string) {
   return value
@@ -1389,10 +1431,10 @@ export default function EquipmentDetail() {
   const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const equipment360 = buildEquipment360Summary({
     equipment,
-    rentals: saleMode ? [] : (canViewRentals ? allGanttRentals : []),
+    rentals: canViewRentals ? allGanttRentals : [],
     serviceTickets: saleMode ? [] : (canViewService ? allServiceTickets : []),
     documents: canViewDocuments ? documentData : [],
-    payments: saleMode ? [] : (canViewFinance ? allPayments : []),
+    payments: canViewFinance ? allPayments : [],
     clients: saleMode ? [] : (canViewClients ? clientData : []),
     inventoryIsUnique: (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1,
     utilizationPercent: saleMode ? null : utilizationMonth,
@@ -1712,6 +1754,22 @@ export default function EquipmentDetail() {
                   </div>
                 </div>
               )}
+
+              <div className="rounded-xl border border-border bg-card/70 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-foreground">Идентификация и обслуживание</h3>
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  <CompactMetric label="Инв. №" value={equipment.inventoryNumber || 'Не указано'} />
+                  <CompactMetric label="GSM" value={getGsmDisplayValue(equipment)} />
+                  <CompactMetric label="ТО" value={formatMaintenanceDate(equipment.nextMaintenance)} tone={getMaintenanceTone(equipment.nextMaintenance)} />
+                  <CompactMetric label="ЧТО" value={formatMaintenanceDate(equipment.maintenanceCHTO)} tone={getMaintenanceTone(equipment.maintenanceCHTO)} />
+                  <CompactMetric label="ПТО" value={formatMaintenanceDate(equipment.maintenancePTO)} tone={getMaintenanceTone(equipment.maintenancePTO)} />
+                  <CompactMetric
+                    label="Доход"
+                    value={canViewFinance && canViewRentals ? formatCurrency(equipment360.finance.revenue) : 'Скрыто правами'}
+                    tone={canViewFinance && canViewRentals && equipment360.finance.revenue > 0 ? 'success' : 'default'}
+                  />
+                </div>
+              </div>
 
               <div className="grid gap-4 xl:grid-cols-3">
                 <div className="rounded-xl border border-border bg-card/70 p-4">

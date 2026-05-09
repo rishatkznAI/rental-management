@@ -2,6 +2,9 @@ import { api } from '../lib/api';
 import type { AppSetting } from '../types';
 
 export const appSettingsService = {
+  getPublic: (): Promise<AppSetting[]> =>
+    api.get<AppSetting[]>('/api/public-settings'),
+
   getAll: (): Promise<AppSetting[]> =>
     api.get<AppSetting[]>('/api/app_settings')
       .catch((error: { status?: number }) => {

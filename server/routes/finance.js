@@ -24,6 +24,8 @@ function registerFinanceRoutes(router, deps) {
     const rentals = readData('gantt_rentals') || [];
     const payments = readData('payments') || [];
     const clientObjects = readData('client_objects') || [];
+    const leasingContracts = readData('leasing_contracts') || [];
+    const leasingPaymentSchedule = readData('leasing_payment_schedule') || [];
     // IMPORTANT: finance reports must use backend-scoped collections. Frontend visibility
     // controls are not a data protection boundary.
     return {
@@ -31,6 +33,8 @@ function registerFinanceRoutes(router, deps) {
       rentals: accessControl.filterCollectionByScope('gantt_rentals', rentals, user),
       payments: accessControl.filterCollectionByScope('payments', payments, user),
       clientObjects: accessControl.filterCollectionByScope('client_objects', clientObjects, user),
+      leasingContracts: accessControl.filterCollectionByScope('leasing_contracts', leasingContracts, user),
+      leasingPaymentSchedule: accessControl.filterCollectionByScope('leasing_payment_schedule', leasingPaymentSchedule, user),
     };
   }
 
@@ -193,9 +197,9 @@ function registerFinanceRoutes(router, deps) {
   });
 
   router.get('/finance/report', requireAuth, requireRead('payments'), (req, res) => {
-    const { clients, rentals, payments, clientObjects } = getFinanceCollections(req.user);
+    const { clients, rentals, payments, clientObjects, leasingContracts, leasingPaymentSchedule } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    res.json(buildFinanceReport({ clients, rentals, payments, clientObjects }, today));
+    res.json(buildFinanceReport({ clients, rentals, payments, clientObjects, leasingContracts, leasingPaymentSchedule }, today));
   });
 }
 

@@ -5,6 +5,9 @@ const {
 const {
   buildClientObjectDebtBreakdown,
 } = require('./client-relations');
+const {
+  buildLeasingSummary,
+} = require('./leasing-core');
 
 function toNumber(value) {
   const numeric = Number(value);
@@ -360,7 +363,7 @@ function buildClientDebtAgingRows(clients, rentalDebtRows, today = new Date().to
   );
 }
 
-function buildFinanceReport({ clients, rentals, payments, clientObjects }, today = new Date().toISOString().slice(0, 10)) {
+function buildFinanceReport({ clients, rentals, payments, clientObjects, leasingContracts, leasingPaymentSchedule }, today = new Date().toISOString().slice(0, 10)) {
   const debtRows = buildRentalDebtRows(rentals, payments);
   const clientReceivables = buildClientReceivables(clients, debtRows, today);
   const clientSnapshots = buildClientFinancialSnapshots(clients, rentals, payments, today);
@@ -368,6 +371,7 @@ function buildFinanceReport({ clients, rentals, payments, clientObjects }, today
   const overdueBuckets = buildOverdueBuckets(debtRows, today);
   const clientDebtAgingRows = buildClientDebtAgingRows(clients, debtRows, today);
   const clientObjectDebtRows = buildClientObjectDebtBreakdown(clients, debtRows, clientObjects);
+  const leasing = buildLeasingSummary(leasingContracts || [], leasingPaymentSchedule || [], today);
 
   return {
     debtRows,
@@ -377,12 +381,17 @@ function buildFinanceReport({ clients, rentals, payments, clientObjects }, today
     overdueBuckets,
     clientDebtAgingRows,
     clientObjectDebtRows,
+    leasing,
     totals: {
       debt: clientSnapshots.reduce((sum, item) => sum + item.currentDebt, 0),
       overdueClients: clientSnapshots.filter(item => item.overdueRentals > 0).length,
       exceededClients: clientSnapshots.filter(item => item.exceededLimit).length,
       unpaidRentals: debtRows.length,
       overdueDebt: managerReceivables.reduce((sum, item) => sum + item.overdueDebt, 0),
+      leasingCurrentMonth: leasing.currentMonthAmount,
+      leasingNextMonth: leasing.nextMonthAmount,
+      leasingRemaining: leasing.remainingAmount,
+      leasingOverdue: leasing.overdueAmount,
     },
   };
 }

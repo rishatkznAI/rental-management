@@ -66,6 +66,12 @@ const {
   buildFinanceReport,
 } = require('./lib/finance-core');
 const {
+  normalizeLeasingContract,
+  normalizeLeasingPaymentScheduleRow,
+  decorateLeasingContract,
+  buildLeasingSummary,
+} = require('./lib/leasing-core');
+const {
   normalizeClientLinks,
   normalizeRecordClientLink,
 } = require('./lib/client-links');
@@ -107,6 +113,7 @@ const { registerDebtCollectionPlanRoutes } = require('./routes/debt-collection-p
 const { registerDeliveryRoutes } = require('./routes/deliveries');
 const { registerFinanceRoutes } = require('./routes/finance');
 const { registerGsmRoutes } = require('./routes/gsm');
+const { registerLeasingRoutes } = require('./routes/leasing');
 const { registerPlannerRoutes } = require('./routes/planner');
 const { registerRentalChangeRequestRoutes } = require('./routes/rental-change-requests');
 const { registerRentalRoutes } = require('./routes/rentals');
@@ -453,7 +460,9 @@ const WRITE_PERMISSIONS = {
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   payments:       ['Администратор', 'Офис-менеджер'],
   debt_collection_plans: ['Администратор', 'Офис-менеджер'],
-  company_expenses: ['Администратор'],
+  company_expenses: ['Администратор', 'Офис-менеджер'],
+  leasing_contracts: ['Администратор', 'Офис-менеджер'],
+  leasing_payment_schedule: ['Администратор', 'Офис-менеджер'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
   shipping_photos:['Администратор', ...MECHANIC_ROLES, 'Менеджер по аренде'],
@@ -493,7 +502,9 @@ const READ_PERMISSIONS = {
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   payments:       ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   debt_collection_plans: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
-  company_expenses: ['Администратор'],
+  company_expenses: ['Администратор', 'Офис-менеджер'],
+  leasing_contracts: ['Администратор', 'Офис-менеджер'],
+  leasing_payment_schedule: ['Администратор', 'Офис-менеджер'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
   shipping_photos:['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
@@ -861,6 +872,8 @@ const ID_PREFIXES = {
   payments:       'P',
   debt_collection_plans: 'DCP',
   company_expenses: 'CE',
+  leasing_contracts: 'LC',
+  leasing_payment_schedule: 'LPS',
   crm_deals:      'CRM',
   deliveries:     'DL',
   delivery_carriers: 'DC',
@@ -1316,6 +1329,21 @@ apiRouter.use(registerCrudRoutes({
   normalizeRecordClientLink,
   normalizeClientLinks,
 }));
+
+registerLeasingRoutes(apiRouter, {
+  readData,
+  writeData,
+  requireAuth,
+  requireRead,
+  accessControl,
+  generateId,
+  idPrefixes: ID_PREFIXES,
+  nowIso,
+  normalizeLeasingContract,
+  normalizeLeasingPaymentScheduleRow,
+  decorateLeasingContract,
+  buildLeasingSummary,
+});
 
 function requireNonEmptyString(value, fieldName) {
   if (!String(value || '').trim()) {

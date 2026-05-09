@@ -83,6 +83,8 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'gsm_packets',
   'knowledge_base_modules',
   'knowledge_base_progress',
+  'leasing_contracts',
+  'leasing_payment_schedule',
   'mechanic_documents',
   'mechanics',
   'owners',
@@ -167,6 +169,19 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'nextActionType',
     'comment',
     'result',
+  ]),
+  company_expenses: new Set([
+    'name',
+    'category',
+    'amount',
+    'frequency',
+    'paymentDay',
+    'nextPaymentDate',
+    'counterparty',
+    'account',
+    'status',
+    'comment',
+    'customFields',
   ]),
   equipment: new Set([
     'manufacturer',
@@ -255,6 +270,39 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'method',
     'comment',
     'attachments',
+  ]),
+  leasing_contracts: new Set([
+    'contractNumber',
+    'leasingCompany',
+    'equipmentId',
+    'equipmentName',
+    'startDate',
+    'endDate',
+    'termMonths',
+    'monthlyPayment',
+    'paymentDay',
+    'status',
+    'initialPayment',
+    'buyoutPayment',
+    'totalAmount',
+    'paidAmount',
+    'remainingAmount',
+    'interestRate',
+    'comment',
+    'responsibleUserId',
+    'paymentSource',
+    'nextPaymentDate',
+    'lastPaymentDate',
+    'schedule',
+  ]),
+  leasing_payment_schedule: new Set([
+    'leasingContractId',
+    'dueDate',
+    'amount',
+    'status',
+    'paidDate',
+    'paidAmount',
+    'comment',
   ]),
   service_field_trips: new Set(['status', 'routeFrom', 'routeTo', 'distanceKm', 'closedNormHours', 'comment', 'completedAt']),
   repair_work_items: new Set(['repairId', 'workId', 'quantity']),
@@ -703,6 +751,8 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'documents':
     case 'payments':
     case 'debt_collection_plans':
+    case 'leasing_contracts':
+    case 'leasing_payment_schedule':
       if (isOfficeManager(user)) return true;
       if (isRentalManager(user) || isSalesManager(user)) return matchesScopedRental(entity, user, readData) || matchesUserManager(entity, user);
       return false;
@@ -775,9 +825,10 @@ function canAccessEntity(collection, entity, user, readData) {
       return isOfficeManager(user) || isMechanic(user) || isWarrantyMechanic(user);
     case 'service_work_catalog':
     case 'spare_parts_catalog':
-    case 'company_expenses':
     case 'delivery_carriers':
       return false;
+    case 'company_expenses':
+      return isOfficeManager(user);
     case 'planner_items':
       if (isOfficeManager(user)) return true;
       if (isRentalManager(user) || isSalesManager(user)) return matchesScopedRental(entity, user, readData) || matchesUserManager(entity, user);
@@ -805,10 +856,16 @@ function canMutateEntity(collection, entity, user, readData) {
   if (collection === 'payments') {
     return isOfficeManager(user);
   }
+  if (collection === 'company_expenses') {
+    return isOfficeManager(user);
+  }
   if (collection === 'client_objects' || collection === 'client_contracts') {
     return isOfficeManager(user);
   }
   if (collection === 'debt_collection_plans') {
+    return isOfficeManager(user);
+  }
+  if (collection === 'leasing_contracts' || collection === 'leasing_payment_schedule') {
     return isOfficeManager(user);
   }
   if (collection === 'equipment') {
@@ -991,6 +1048,12 @@ function assertCanCreateCollection(collection, user, input = {}, readData) {
   }
   if (collection === 'debt_collection_plans' && !(isAdmin(user) || isOfficeManager(user))) {
     throw forbidden('Планы взыскания можно создавать только администратору или офис-менеджеру.');
+  }
+  if (collection === 'company_expenses' && !(isAdmin(user) || isOfficeManager(user))) {
+    throw forbidden('Расходы доступны только администратору или офис-менеджеру.');
+  }
+  if ((collection === 'leasing_contracts' || collection === 'leasing_payment_schedule') && !(isAdmin(user) || isOfficeManager(user))) {
+    throw forbidden('Лизинг доступен только администратору или офис-менеджеру.');
   }
   if (collection === 'app_settings' && !isAdmin(user)) {
     throw forbidden();

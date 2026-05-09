@@ -521,7 +521,7 @@ export function getAdminForm(appSettings: AppSetting[], formId: string): AdminFo
 export function useAdminSettings() {
   const { data: appSettings = [], ...query } = useQuery<AppSetting[]>({
     queryKey: ['app-settings'],
-    queryFn: appSettingsService.getAll,
+    queryFn: appSettingsService.getPublic,
     staleTime: 1000 * 60 * 5,
   });
 

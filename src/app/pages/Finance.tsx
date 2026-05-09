@@ -34,8 +34,10 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Textarea } from '../components/ui/textarea';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
+import { LeasingPanel } from '../components/finance/LeasingPanel';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import {
@@ -56,6 +58,7 @@ import {
 } from '../lib/finance';
 import { clientsService } from '../services/clients.service';
 import { COMPANY_EXPENSE_KEYS, companyExpensesService } from '../services/company-expenses.service';
+import { LEASING_KEYS, leasingService } from '../services/leasing.service';
 import { paymentsService } from '../services/payments.service';
 import { rentalsService } from '../services/rentals.service';
 import {
@@ -290,6 +293,11 @@ export default function Finance() {
     queryFn: paymentsService.getAll,
     staleTime: 1000 * 60 * 2,
   });
+  const { data: leasingSummary } = useQuery({
+    queryKey: LEASING_KEYS.summary,
+    queryFn: leasingService.getSummary,
+    staleTime: 1000 * 60 * 2,
+  });
   const { data: debtPlanResponse } = useDebtCollectionPlans();
   const debtCollectionPlans = debtPlanResponse?.plans ?? [];
   const createDebtPlan = useCreateDebtCollectionPlan();
@@ -400,7 +408,9 @@ export default function Finance() {
   );
 
   const activeExpenses = expenses.filter(item => item.status === 'active');
-  const monthlyLoad = Math.round(activeExpenses.reduce((sum, item) => sum + monthlyEquivalent(item), 0));
+  const expenseMonthlyLoad = Math.round(activeExpenses.reduce((sum, item) => sum + monthlyEquivalent(item), 0));
+  const leasingMonthlyLoad = Math.round(leasingSummary?.currentMonthAmount || 0);
+  const monthlyLoad = expenseMonthlyLoad + leasingMonthlyLoad;
   const upcomingExpenses = activeExpenses.filter(isUpcoming).sort(sortExpenses);
   const pausedCount = expenses.filter(item => item.status === 'paused').length;
   const archivedCount = expenses.filter(item => item.status === 'archived').length;
@@ -615,6 +625,13 @@ export default function Finance() {
         )}
       </div>
 
+      <Tabs defaultValue="overview" className="gap-4">
+        <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
+          <TabsTrigger value="overview">Обзор</TabsTrigger>
+          <TabsTrigger value="leasing">Лизинг</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-4">
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -624,7 +641,7 @@ export default function Finance() {
                 Контроль ответственных, обещанных оплат и следующих действий по просроченным клиентам.
               </p>
             </div>
-            <Badge variant={debtCollectionRows.some(row => row.isActionOverdue || row.needsPlan) ? 'destructive' : 'default'}>
+            <Badge variant={debtCollectionRows.some(row => row.isActionOverdue || row.needsPlan) ? 'danger' : 'default'}>
               {debtCollectionRows.length} клиентов
             </Badge>
           </div>
@@ -828,6 +845,11 @@ export default function Finance() {
               </div>
               <p className="text-2xl font-semibold text-gray-900 dark:text-white">{formatCurrency(monthlyLoad)}</p>
             </div>
+            {leasingMonthlyLoad > 0 && (
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Включая лизинг: {formatCurrency(leasingMonthlyLoad)}
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -1028,6 +1050,12 @@ export default function Finance() {
           )}
         </div>
       </div>
+        </TabsContent>
+
+        <TabsContent value="leasing">
+          <LeasingPanel canManageFinance={canManageFinance} canDeleteFinance={can('delete', 'finance')} />
+        </TabsContent>
+      </Tabs>
 
       <FilterDialog
         open={showFilters}

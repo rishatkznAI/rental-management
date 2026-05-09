@@ -41,11 +41,11 @@ const OFFICE_SECTIONS: Array<{ name: RegExp; label: string; route: string }> = [
   { name: /^Клиенты/, label: 'Клиенты', route: '/clients' },
   { name: /^Документы/, label: 'Документы', route: '/documents' },
   { name: /^Платежи/, label: 'Платежи', route: '/payments' },
+  { name: /^Финансы/, label: 'Финансы', route: '/finance' },
   { name: /^Личные настройки/, label: 'Личные настройки', route: '/settings' },
 ];
 
 const FORBIDDEN_NAV_ITEMS = [
-  /^Финансы/,
   /^Бот/,
   /^Отчёты/,
   /^Панель администратора/,
@@ -342,6 +342,14 @@ async function selectEquipment(page: Page, query: string) {
   await page.locator('li[data-eq-item]').first().click();
 }
 
+async function ensureRentalClientSelected(page: Page, clientName: string) {
+  if (await page.getByText('Выберите клиента').isVisible().catch(() => false)) {
+    await page.getByText('Выберите клиента').click();
+    await page.getByRole('option', { name: clientName }).click();
+  }
+  await expect(page.locator('form')).toContainText(clientName);
+}
+
 test('smoke-office can use permitted office UI without admin access or runtime errors', async ({ page, request }) => {
   test.setTimeout(240_000);
   const issues: UiIssue[] = [];
@@ -405,6 +413,7 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   action = 'rental creation';
   await navigateInApp(page, `/rentals/new?clientId=${seed.client.id}`);
   await expect(page.getByRole('heading', { name: 'Новая аренда' })).toBeVisible();
+  await ensureRentalClientSelected(page, seed.client.company);
   await page.locator('input[type="date"]').nth(0).fill('2026-12-10');
   await page.locator('input[type="date"]').nth(1).fill('2026-12-17');
   await selectEquipment(page, seed.rentalEquipment.serialNumber);

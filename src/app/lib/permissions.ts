@@ -116,6 +116,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     clients:          ALL,
     documents:        ALL,
     payments:         ALL,
+    finance:          VIEW_CREATE_EDIT,
     approvals:        VIEW,
     profile_settings: ['view', 'edit'],
   },

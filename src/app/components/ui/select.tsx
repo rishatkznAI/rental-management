@@ -114,7 +114,7 @@ function SelectContent({
   if (presence && !presence.shouldRender) return null;
 
   return (
-    <SelectPrimitive.Portal forceMount={Boolean(presence)}>
+    <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         data-slot="select-content"
         data-state={presence?.dataState}

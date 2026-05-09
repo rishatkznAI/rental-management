@@ -950,6 +950,67 @@ export interface CompanyExpense {
   updatedBy?: string;
 }
 
+export type LeasingContractStatus = 'active' | 'closed' | 'paused' | 'overdue' | 'archived';
+export type LeasingPaymentStatus = 'planned' | 'paid' | 'overdue' | 'skipped';
+
+export interface LeasingPaymentScheduleItem {
+  id: string;
+  leasingContractId: string;
+  dueDate: string;
+  amount: number;
+  status: LeasingPaymentStatus;
+  paidDate?: string;
+  paidAmount?: number;
+  comment?: string;
+  outstanding?: number;
+  daysUntilDue?: number;
+  overdueDays?: number;
+}
+
+export interface LeasingContract {
+  id: string;
+  contractNumber: string;
+  leasingCompany: string;
+  equipmentId?: string;
+  equipmentName?: string;
+  startDate: string;
+  endDate: string;
+  termMonths: number;
+  monthlyPayment: number;
+  paymentDay: number;
+  status: LeasingContractStatus;
+  initialPayment?: number;
+  buyoutPayment?: number;
+  totalAmount?: number;
+  paidAmount?: number;
+  remainingAmount?: number;
+  interestRate?: number;
+  comment?: string;
+  responsibleUserId?: string;
+  paymentSource?: string;
+  nextPaymentDate?: string;
+  lastPaymentDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  schedule?: LeasingPaymentScheduleItem[];
+  nextPayment?: LeasingPaymentScheduleItem | null;
+  remainingPayments?: number;
+  overduePayments?: number;
+  overdueAmount?: number;
+}
+
+export interface LeasingSummary {
+  contracts: LeasingContract[];
+  activeContracts: number;
+  pausedContracts?: number;
+  currentMonthAmount: number;
+  nextMonthAmount: number;
+  overdueAmount: number;
+  overdueContracts: number;
+  remainingAmount: number;
+  averageMonthlyLoad: number;
+}
+
 export type DebtCollectionPlanStatus =
   | 'new'
   | 'contacted'

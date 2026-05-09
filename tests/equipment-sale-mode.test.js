@@ -2,7 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildSaleStatusPatch, isSaleModeEquipment, saleStatusKind, saleStatusLabel } from '../src/app/lib/equipmentSaleMode.js';
+import {
+  buildSaleStatusPatch,
+  getSaleOperationHistory,
+  isSaleModeEquipment,
+  saleConditionKind,
+  saleConditionLabel,
+  saleStatusKind,
+  saleStatusLabel,
+} from '../src/app/lib/equipmentSaleMode.js';
 import { buildEquipmentQuickActions } from '../src/app/lib/quickActions.js';
 
 const allowAll = () => true;
@@ -82,6 +90,57 @@ test('sale status patches keep returned sold equipment out of rental fleet', () 
   assert.equal(removed.isForSale, false);
   assert.equal(removed.activeInFleet, false);
   assert.equal(removed.status, 'inactive');
+});
+
+test('sale condition auto-detects new equipment when no operation history exists', () => {
+  const equipment = {
+    id: 'EQ-new',
+    isForSale: true,
+    manufacturer: 'JLG',
+    model: '1932R',
+    serialNumber: 'SN-new',
+    hours: 0,
+  };
+
+  assert.equal(saleConditionKind(equipment, { rentals: [], serviceTickets: [], rentalRevenue: 0 }), 'new');
+  assert.equal(saleConditionLabel(equipment, { rentals: [], serviceTickets: [], rentalRevenue: 0 }), 'Новая');
+  assert.equal(getSaleOperationHistory(equipment, { rentals: [], serviceTickets: [], rentalRevenue: 0 }).hasAny, false);
+});
+
+test('sale condition auto-detects used equipment from rental service and revenue history', () => {
+  const equipment = {
+    id: 'EQ-used',
+    isForSale: true,
+    maintenanceCHTO: '2026-01-10',
+    maintenancePTO: '2026-02-10',
+    gsmImei: '866123456789012',
+    hours: 340,
+  };
+  const context = {
+    rentals: [{ id: 'R-1', equipmentId: 'EQ-used', amount: 120000 }],
+    serviceTickets: [{ id: 'S-1', equipmentId: 'EQ-used', reason: 'ТО' }],
+    rentalRevenue: 120000,
+  };
+  const history = getSaleOperationHistory(equipment, context);
+
+  assert.equal(saleConditionKind(equipment, context), 'used');
+  assert.equal(saleConditionLabel(equipment, context), 'Б/у из арендного парка');
+  assert.equal(history.hasRentalHistory, true);
+  assert.equal(history.hasServiceHistory, true);
+  assert.equal(history.hasMaintenance, true);
+  assert.equal(history.hasGsm, true);
+  assert.equal(history.hasRevenue, true);
+});
+
+test('explicit sale condition has priority over auto-detection', () => {
+  const context = {
+    rentals: [{ id: 'R-1', equipmentId: 'EQ-manual' }],
+    serviceTickets: [{ id: 'S-1', equipmentId: 'EQ-manual', reason: 'ТО' }],
+    rentalRevenue: 150000,
+  };
+
+  assert.equal(saleConditionKind({ id: 'EQ-manual', saleCondition: 'new', hours: 700 }, context), 'new');
+  assert.equal(saleConditionKind({ id: 'EQ-manual', saleType: 'used' }, { rentals: [], serviceTickets: [], rentalRevenue: 0 }), 'used');
 });
 
 test('sale deal quick action renders only with a safe configured route', () => {
@@ -193,27 +252,49 @@ test('sale mode keeps sale prices in sale 360 and not in basic characteristics',
   assert.doesNotMatch(basicSection, /<InfoField label="Цена 3"/);
 });
 
-test('sale mode shows identification service gsm and revenue context', () => {
+test('sale mode separates new sale cards from used operation history', () => {
   const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
   const salesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
 
-  assert.match(detailSource, /Техническая информация для продажи/);
-  assert.match(detailSource, /Справочно из карточки техники/);
+  assert.match(detailSource, /Идентификация продажи/);
+  assert.match(detailSource, /История эксплуатации перед продажей/);
+  assert.match(detailSource, /Эксплуатационные данные заполнены вручную/);
+  assert.match(detailSource, /showSaleOperationHistory/);
+  assert.match(detailSource, /saleCondition === 'used'/);
   assert.match(detailSource, /<CompactMetric label="Инв\. №"/);
-  assert.match(detailSource, /<CompactMetric label="GSM" value=\{getGsmDisplayValue\(equipment\)\}/);
+  assert.match(detailSource, /<CompactMetric label="Тип" value=\{saleConditionLabel\(equipment, saleConditionContext\)\}/);
   assert.match(detailSource, /<CompactMetric label="ТО"/);
   assert.match(detailSource, /<CompactMetric label="ЧТО"/);
   assert.match(detailSource, /<CompactMetric label="ПТО"/);
-  assert.match(detailSource, /<CompactMetric\s+label="Доход"/);
+  assert.match(detailSource, /<CompactMetric label="GSM \/ IMEI \/ статус трекера" value=\{getGsmDisplayValue\(equipment\)\}/);
+  assert.match(detailSource, /label="Доход от аренды"/);
   assert.match(detailSource, /formatCurrency\(equipment360\.finance\.revenue\)/);
+  assert.match(detailSource, /\{canViewFinance && canViewRentals && \(/);
   assert.match(detailSource, /rentals: canViewRentals \? allGanttRentals : \[\]/);
   assert.match(detailSource, /payments: canViewFinance \? allPayments : \[\]/);
 
+  assert.match(salesSource, /saleConditionKind\(equipment\)/);
+  assert.match(salesSource, /saleConditionLabel\(equipment\)/);
+  assert.match(salesSource, /showOperationHistory/);
+  assert.match(salesSource, /История эксплуатации перед продажей/);
   assert.match(salesSource, /Инв\. №: \{equipment\.inventoryNumber \|\| 'Не указано'\}/);
   assert.match(salesSource, /GSM: \{getGsmSaleValue\(equipment\)\}/);
   assert.match(salesSource, /ТО:/);
   assert.match(salesSource, /ЧТО:/);
   assert.match(salesSource, /ПТО:/);
+});
+
+test('equipment forms expose sale condition only inside sale settings', () => {
+  const newSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentNew.tsx'), 'utf8');
+  const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+
+  assert.match(newSource, /saleCondition: 'new'/);
+  assert.match(newSource, /saleCondition:\s+form\.isForSale === 'yes' \? form\.saleCondition as 'new' \| 'used' : undefined/);
+  assert.match(newSource, /label="Тип продажной техники"/);
+  assert.match(newSource, /Б\/у из арендного парка/);
+  assert.match(detailSource, /label="Тип продажной техники"/);
+  assert.match(detailSource, /value=\{form\.saleCondition \|\| 'new'\}/);
+  assert.match(detailSource, /onValueChange=\{setStr\('saleCondition'\)\}/);
 });
 
 test('PDI form contains presale fields and no service scenario selector', () => {

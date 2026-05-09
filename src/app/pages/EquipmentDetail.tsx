@@ -48,7 +48,15 @@ import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
-import { buildSaleStatusPatch, isSaleModeEquipment, saleDocumentsReadiness, saleStatusLabel } from '../lib/equipmentSaleMode.js';
+import {
+  buildSaleStatusPatch,
+  getSaleOperationHistory,
+  isSaleModeEquipment,
+  saleConditionKind,
+  saleConditionLabel,
+  saleDocumentsReadiness,
+  saleStatusLabel,
+} from '../lib/equipmentSaleMode.js';
 import { getEffectivePaidAmount } from '../lib/finance';
 import { deriveSignalState } from '../lib/gsm';
 
@@ -1443,6 +1451,15 @@ export default function EquipmentDetail() {
   });
   const saleDocuments = equipment360.documents.latest;
   const saleDocsReadiness = saleDocumentsReadiness(saleDocuments);
+  const saleConditionContext = {
+    rentals: ganttRentals,
+    serviceTickets: serviceHistory,
+    rentalRevenue: Math.max(totalRevenue, equipment360.finance.revenue || 0),
+  };
+  const saleCondition = saleConditionKind(equipment, saleConditionContext);
+  const saleOperationHistory = getSaleOperationHistory(equipment, saleConditionContext);
+  const showSaleOperationHistory = saleCondition === 'used' || saleOperationHistory.hasAny;
+  const lastSaleRental = equipment360.rentals.latest[0] || ganttRentals[0];
   const salePdiTickets = serviceHistory.filter(ticket => {
     const haystack = `${ticket.serviceKind || ''} ${ticket.reason || ''} ${ticket.description || ''}`.toLowerCase();
     return haystack.includes('pdi') || haystack.includes('предпрод');
@@ -1501,6 +1518,11 @@ export default function EquipmentDetail() {
               {saleMode && (
                 <Badge className="border-0 bg-orange-500/12 text-orange-300">
                   {saleStatusLabel(equipment)}
+                </Badge>
+              )}
+              {saleMode && (
+                <Badge className={`border-0 ${saleCondition === 'used' ? 'bg-amber-500/12 text-amber-300' : 'bg-emerald-500/12 text-emerald-300'}`}>
+                  {saleConditionLabel(equipment, saleConditionContext)}
                 </Badge>
               )}
             </div>
@@ -1595,7 +1617,7 @@ export default function EquipmentDetail() {
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {saleMode
-                  ? 'Режим продажи без арендной логики'
+                  ? saleConditionLabel(equipment, saleConditionContext)
                   : (daysUntilMaintenance > 0 ? `через ${daysUntilMaintenance} дн.` : 'просрочено')}
               </p>
             </div>
@@ -1758,21 +1780,46 @@ export default function EquipmentDetail() {
               )}
 
               <div className="rounded-xl border border-border bg-card/70 p-4">
-                <h3 className="text-sm font-semibold text-foreground">Техническая информация для продажи</h3>
-                <p className="mb-3 mt-1 text-xs text-muted-foreground">Справочно из карточки техники: ТО, ЧТО, ПТО и GSM показаны как история и состояние подготовки, а не как активные задачи арендного парка.</p>
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <h3 className="text-sm font-semibold text-foreground">Идентификация продажи</h3>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <CompactMetric label="Модель" value={`${equipment.manufacturer} ${equipment.model}`.trim()} />
+                  <CompactMetric label="Серийный номер" value={equipment.serialNumber || 'Не указан'} />
                   <CompactMetric label="Инв. №" value={equipment.inventoryNumber || 'Не указано'} />
-                  <CompactMetric label="GSM" value={getGsmDisplayValue(equipment)} />
-                  <CompactMetric label="ТО" value={formatMaintenanceDate(equipment.nextMaintenance)} tone={getMaintenanceTone(equipment.nextMaintenance)} />
-                  <CompactMetric label="ЧТО" value={formatMaintenanceDate(equipment.maintenanceCHTO)} tone={getMaintenanceTone(equipment.maintenanceCHTO)} />
-                  <CompactMetric label="ПТО" value={formatMaintenanceDate(equipment.maintenancePTO)} tone={getMaintenanceTone(equipment.maintenancePTO)} />
-                  <CompactMetric
-                    label="Доход"
-                    value={canViewFinance && canViewRentals ? formatCurrency(equipment360.finance.revenue) : 'Скрыто правами'}
-                    tone={canViewFinance && canViewRentals && equipment360.finance.revenue > 0 ? 'success' : 'default'}
-                  />
+                  <CompactMetric label="Тип" value={saleConditionLabel(equipment, saleConditionContext)} tone={saleCondition === 'used' ? 'warning' : 'success'} />
                 </div>
               </div>
+
+              {showSaleOperationHistory && (
+                <div className="rounded-xl border border-border bg-card/70 p-4">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {saleCondition === 'used' ? 'История эксплуатации перед продажей' : 'Эксплуатационные данные заполнены вручную'}
+                  </h3>
+                  <p className="mb-3 mt-1 text-xs text-muted-foreground">
+                    {saleCondition === 'used'
+                      ? 'ТО, ЧТО, ПТО, GSM и аренды показаны как история до продажи.'
+                      : 'Эти данные не считаются основным блоком новой техники и показываются только потому, что заполнены в карточке.'}
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    <CompactMetric label="ТО" value={formatMaintenanceDate(equipment.nextMaintenance)} tone={getMaintenanceTone(equipment.nextMaintenance)} />
+                    <CompactMetric label="ЧТО" value={formatMaintenanceDate(equipment.maintenanceCHTO)} tone={getMaintenanceTone(equipment.maintenanceCHTO)} />
+                    <CompactMetric label="ПТО" value={formatMaintenanceDate(equipment.maintenancePTO)} tone={getMaintenanceTone(equipment.maintenancePTO)} />
+                    <CompactMetric label="GSM / IMEI / статус трекера" value={getGsmDisplayValue(equipment)} />
+                    {canViewFinance && canViewRentals && (
+                      <CompactMetric
+                        label="Доход от аренды"
+                        value={formatCurrency(equipment360.finance.revenue)}
+                        tone={equipment360.finance.revenue > 0 ? 'success' : 'default'}
+                      />
+                    )}
+                    {canViewRentals && lastSaleRental && (
+                      <CompactMetric
+                        label="Последняя аренда"
+                        value={`${lastSaleRental.client || 'Клиент не указан'} · ${formatDate(lastSaleRental.startDate)} — ${formatDate(lastSaleRental.endDate)}`}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="grid gap-4 xl:grid-cols-3">
                 <div className="rounded-xl border border-border bg-card/70 p-4">
@@ -4298,6 +4345,17 @@ function EditEquipmentModal({
 
                 {form.isForSale && (
                   <>
+                    <FormField label="Тип продажной техники" hint="Ручной выбор важнее автоопределения по арендам и сервисной истории">
+                      <FieldSelect
+                        value={form.saleCondition || 'new'}
+                        onValueChange={setStr('saleCondition')}
+                        options={[
+                          { value: 'new', label: 'Новая' },
+                          { value: 'used', label: 'Б/у из арендного парка' },
+                        ]}
+                      />
+                    </FormField>
+
                     <FormField label="Статус PDI" hint="Готовность техники к продаже и передаче клиенту">
                       <FieldSelect
                         value={form.salePdiStatus || 'not_started'}

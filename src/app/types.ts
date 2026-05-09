@@ -87,6 +87,8 @@ export interface Equipment {
   subleasePrice?: number;
   plannedMonthlyRevenue: number;
   isForSale?: boolean;
+  saleCondition?: 'new' | 'used';
+  saleType?: 'new' | 'used';
   salePdiStatus?: EquipmentSalePdiStatus;
   salePrice1?: number;
   salePrice2?: number;

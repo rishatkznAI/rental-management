@@ -189,6 +189,7 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'maintenanceCHTO',
     'maintenancePTO',
     'notes',
+    'saleCondition',
     'photos',
     'gsmImei',
     'gsmDeviceId',

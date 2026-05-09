@@ -180,6 +180,7 @@ export default function EquipmentNew() {
     priority: 'medium',
     activeInFleet: 'yes',
     isForSale: isSaleMode ? 'yes' : 'no',
+    saleCondition: 'new',
     salePdiStatus: 'not_started',
     salePrice1: '',
     salePrice2: '',
@@ -205,6 +206,7 @@ export default function EquipmentNew() {
       isForSale: 'yes',
       inventoryNumber: '',
       activeInFleet: 'no',
+      saleCondition: 'new',
     }));
   }, [isSaleMode]);
 
@@ -236,6 +238,7 @@ export default function EquipmentNew() {
       priority:              form.priority as 'low' | 'medium' | 'high' | 'critical',
       activeInFleet:         form.activeInFleet === 'yes',
       isForSale:             form.isForSale === 'yes',
+      saleCondition:         form.isForSale === 'yes' ? form.saleCondition as 'new' | 'used' : undefined,
       salePdiStatus:         form.isForSale === 'yes' ? form.salePdiStatus as 'not_started' | 'in_progress' | 'issues' | 'ready' : undefined,
       salePrice1:            form.isForSale === 'yes' && form.salePrice1 ? Number(form.salePrice1) : undefined,
       salePrice2:            form.isForSale === 'yes' && form.salePrice2 ? Number(form.salePrice2) : undefined,
@@ -558,6 +561,17 @@ export default function EquipmentNew() {
 
                 {form.isForSale === 'yes' && (
                   <>
+                    <SelectField
+                      label="Тип продажной техники"
+                      value={form.saleCondition}
+                      onValueChange={v => update('saleCondition', v)}
+                      options={[
+                        { value: 'new', label: 'Новая' },
+                        { value: 'used', label: 'Б/у из арендного парка' },
+                      ]}
+                      hint="Новая техника не смешивается с техникой, которая раньше работала в аренде."
+                    />
+
                     <SelectField
                       label="Статус PDI"
                       value={form.salePdiStatus}

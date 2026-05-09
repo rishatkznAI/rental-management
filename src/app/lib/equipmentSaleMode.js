@@ -44,6 +44,33 @@ export const SALE_STATUS_LABELS = {
   removed: 'Снята с продажи',
 };
 
+export const SALE_CONDITION_LABELS = {
+  new: 'Новая',
+  used: 'Б/у из арендного парка',
+};
+
+function normalizeSaleCondition(value) {
+  const normalized = lower(value);
+  if (!normalized) return '';
+  if (['new', 'новая', 'новое', 'новый', 'new_equipment', 'factory_new'].includes(normalized)) return 'new';
+  if ([
+    'used',
+    'preowned',
+    'pre-owned',
+    'rental_fleet',
+    'fleet',
+    'from_rental',
+    'ex_rental',
+    'б/у',
+    'бу',
+    'б у',
+    'б/у из арендного парка',
+    'из арендного парка',
+    'арендный парк',
+  ].includes(normalized)) return 'used';
+  return '';
+}
+
 export function saleStatusKind(equipment = {}) {
   const rawStatus = lower(equipment.saleStatus || equipment.salesStatus || equipment.status || equipment.category);
   if (equipment.category === 'sold' || rawStatus === 'sold' || rawStatus === 'продана' || rawStatus === 'продано') return 'sold';
@@ -75,6 +102,60 @@ export function saleStatusLabel(equipment = {}) {
   const rawStatus = text(equipment.saleStatus || equipment.salesStatus);
   if (rawStatus) return rawStatus;
   return 'Продажный статус не указан';
+}
+
+function hasNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function hasItems(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+export function getSaleOperationHistory(equipment = {}, context = {}) {
+  const rentals = context.rentals || context.ganttRentals || [];
+  const serviceTickets = context.serviceTickets || context.serviceHistory || [];
+  const rentalRevenue = Number(context.rentalRevenue ?? context.revenue ?? equipment.rentalRevenue ?? equipment.totalRentalRevenue ?? 0) || 0;
+  const hasMaintenance = Boolean(text(equipment.maintenanceCHTO) || text(equipment.maintenancePTO));
+  const hasGsm = Boolean(
+    text(equipment.gsmImei)
+    || text(equipment.gsmDeviceId)
+    || text(equipment.gsmTrackerId)
+    || text(equipment.gsmStatus)
+    || text(equipment.gsmSignalStatus)
+    || text(equipment.gsmLastSeenAt)
+    || text(equipment.gsmLastSignalAt)
+  );
+  const hasServiceHistory = hasItems(serviceTickets);
+  const hasRentalHistory = hasItems(rentals) || hasNumber(context.rentalCount) || hasNumber(equipment.rentalCount);
+  const hasRevenue = rentalRevenue > 0;
+  const hasUsage = hasNumber(equipment.hours) || Boolean(text(equipment.currentClient) || text(equipment.returnDate));
+
+  return {
+    hasAny: hasMaintenance || hasGsm || hasServiceHistory || hasRentalHistory || hasRevenue,
+    hasMaintenance,
+    hasGsm,
+    hasServiceHistory,
+    hasRentalHistory,
+    hasRevenue,
+    hasUsage,
+    rentalRevenue,
+  };
+}
+
+export function saleConditionKind(equipment = {}, context = {}) {
+  const explicit = normalizeSaleCondition(equipment.saleCondition || equipment.saleType || equipment.conditionForSale);
+  if (explicit) return explicit;
+
+  const history = getSaleOperationHistory(equipment, context);
+  if (history.hasRentalHistory || history.hasRevenue || history.hasServiceHistory || history.hasMaintenance || history.hasUsage) {
+    return 'used';
+  }
+  return 'new';
+}
+
+export function saleConditionLabel(equipment = {}, context = {}) {
+  return SALE_CONDITION_LABELS[saleConditionKind(equipment, context)];
 }
 
 export function buildSaleStatusPatch(equipment = {}, nextStatus) {

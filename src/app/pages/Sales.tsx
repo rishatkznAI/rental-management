@@ -10,7 +10,7 @@ import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter
 import { useEquipmentList } from '../hooks/useEquipment';
 import { usePermissions } from '../lib/permissions';
 import { EQUIPMENT_SALE_PDI_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
-import { isSaleModeEquipment, saleStatusKind, saleStatusLabel } from '../lib/equipmentSaleMode.js';
+import { getSaleOperationHistory, isSaleModeEquipment, saleConditionKind, saleConditionLabel, saleStatusKind, saleStatusLabel } from '../lib/equipmentSaleMode.js';
 import { formatCurrency } from '../lib/utils';
 import { deriveSignalState } from '../lib/gsm';
 import type { Equipment, EquipmentSalePdiStatus } from '../types';
@@ -274,7 +274,11 @@ export default function Sales() {
             <Tag className="mx-auto h-8 w-8 text-gray-400 dark:text-gray-500" />
             <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">Под выбранные фильтры техника на продажу не найдена.</p>
           </div>
-        ) : filteredEquipment.map((equipment) => (
+        ) : filteredEquipment.map((equipment) => {
+          const conditionKind = saleConditionKind(equipment);
+          const operationHistory = getSaleOperationHistory(equipment);
+          const showOperationHistory = conditionKind === 'used' || operationHistory.hasAny;
+          return (
           <Link
             key={equipment.id}
             to={`/sales/equipment/${equipment.id}`}
@@ -282,6 +286,7 @@ export default function Sales() {
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-amber-700 dark:text-amber-300">{equipment.manufacturer} {equipment.model}</span>
+              <Badge variant={conditionKind === 'used' ? 'warning' : 'default'}>{saleConditionLabel(equipment)}</Badge>
               <Badge variant={saleStatusKind(equipment) === 'sold' ? 'success' : saleStatusKind(equipment) === 'removed' ? 'default' : 'warning'}>{saleStatusLabel(equipment)}</Badge>
               {getSalePdiBadge(equipment.salePdiStatus)}
               {getSaleReadinessBadge(equipment.salePdiStatus)}
@@ -291,32 +296,43 @@ export default function Sales() {
             </p>
             <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Локация: {equipment.location}</p>
             <div className="mt-3 rounded-lg border border-gray-200/70 p-3 text-xs dark:border-gray-700">
-              <p className="font-semibold text-gray-700 dark:text-gray-200">Идентификация и обслуживание</p>
+              <p className="font-semibold text-gray-700 dark:text-gray-200">Идентификация</p>
               <div className="mt-2 grid gap-2">
                 <div className="flex justify-between gap-3">
                   <span className="text-gray-500 dark:text-gray-400">Инв. №</span>
                   <span className="text-right font-medium text-gray-900 dark:text-white">{equipment.inventoryNumber || 'Не указано'}</span>
                 </div>
-                <div className="flex justify-between gap-3">
-                  <span className="text-gray-500 dark:text-gray-400">GSM</span>
-                  <span className="text-right font-medium text-gray-900 dark:text-white">{getGsmSaleValue(equipment)}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { label: 'ТО', value: equipment.nextMaintenance },
-                    { label: 'ЧТО', value: equipment.maintenanceCHTO },
-                    { label: 'ПТО', value: equipment.maintenancePTO },
-                  ].map(item => (
-                    <div key={item.label}>
-                      <p className="text-gray-500 dark:text-gray-400">{item.label}</p>
-                      <p className={`mt-1 font-medium ${isPastDate(item.value) ? 'text-amber-600 dark:text-amber-300' : 'text-gray-900 dark:text-white'}`}>
-                        {formatSaleDate(item.value)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
+            {showOperationHistory && (
+              <div className="mt-3 rounded-lg border border-gray-200/70 p-3 text-xs dark:border-gray-700">
+                <p className="font-semibold text-gray-700 dark:text-gray-200">
+                  {conditionKind === 'used' ? 'История эксплуатации перед продажей' : 'Эксплуатационные данные заполнены вручную'}
+                </p>
+                <div className="mt-2 grid gap-2">
+                  {operationHistory.hasGsm && (
+                    <div className="flex justify-between gap-3">
+                      <span className="text-gray-500 dark:text-gray-400">GSM</span>
+                      <span className="text-right font-medium text-gray-900 dark:text-white">{getGsmSaleValue(equipment)}</span>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { label: 'ТО', value: equipment.nextMaintenance },
+                      { label: 'ЧТО', value: equipment.maintenanceCHTO },
+                      { label: 'ПТО', value: equipment.maintenancePTO },
+                    ].map(item => (
+                      <div key={item.label}>
+                        <p className="text-gray-500 dark:text-gray-400">{item.label}</p>
+                        <p className={`mt-1 font-medium ${isPastDate(item.value) ? 'text-amber-600 dark:text-amber-300' : 'text-gray-900 dark:text-white'}`}>
+                          {formatSaleDate(item.value)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-amber-50/80 p-3 text-xs dark:bg-amber-950/20">
               <div>
                 <p className="text-gray-500 dark:text-gray-400">Цена 1</p>
@@ -332,7 +348,8 @@ export default function Sales() {
               </div>
             </div>
           </Link>
-        ))}
+        );
+        })}
       </div>
 
       <div className="hidden overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 sm:block">
@@ -350,22 +367,31 @@ export default function Sales() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredEquipment.map((equipment) => (
+            {filteredEquipment.map((equipment) => {
+              const conditionKind = saleConditionKind(equipment);
+              const operationHistory = getSaleOperationHistory(equipment);
+              const showOperationHistory = conditionKind === 'used' || operationHistory.hasAny;
+              return (
               <TableRow key={equipment.id}>
                 <TableCell>
                   <Link to={`/sales/equipment/${equipment.id}`} className="font-medium text-amber-700 hover:underline dark:text-amber-300">
                     {equipment.manufacturer} {equipment.model}
                   </Link>
+                  <p className="mt-1"><Badge variant={conditionKind === 'used' ? 'warning' : 'default'}>{saleConditionLabel(equipment)}</Badge></p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">SN: {equipment.serialNumber || 'не указан'}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Инв. №: {equipment.inventoryNumber || 'Не указано'}</p>
-                  <p className="max-w-[260px] truncate text-xs text-gray-500 dark:text-gray-400">GSM: {getGsmSaleValue(equipment)}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    ТО: <span className={isPastDate(equipment.nextMaintenance) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.nextMaintenance)}</span>
-                    {' · '}
-                    ЧТО: <span className={isPastDate(equipment.maintenanceCHTO) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.maintenanceCHTO)}</span>
-                    {' · '}
-                    ПТО: <span className={isPastDate(equipment.maintenancePTO) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.maintenancePTO)}</span>
-                  </p>
+                  {showOperationHistory && (
+                    <>
+                      {operationHistory.hasGsm && <p className="max-w-[260px] truncate text-xs text-gray-500 dark:text-gray-400">GSM: {getGsmSaleValue(equipment)}</p>}
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        ТО: <span className={isPastDate(equipment.nextMaintenance) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.nextMaintenance)}</span>
+                        {' · '}
+                        ЧТО: <span className={isPastDate(equipment.maintenanceCHTO) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.maintenanceCHTO)}</span>
+                        {' · '}
+                        ПТО: <span className={isPastDate(equipment.maintenancePTO) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.maintenancePTO)}</span>
+                      </p>
+                    </>
+                  )}
                 </TableCell>
                 <TableCell><Badge variant={saleStatusKind(equipment) === 'sold' ? 'success' : saleStatusKind(equipment) === 'removed' ? 'default' : 'warning'}>{saleStatusLabel(equipment)}</Badge></TableCell>
                 <TableCell>{getSalePdiBadge(equipment.salePdiStatus)}</TableCell>
@@ -375,7 +401,8 @@ export default function Sales() {
                 <TableCell className="font-medium text-gray-700 dark:text-gray-200">{formatCurrency(equipment.salePrice2 ?? 0)}</TableCell>
                 <TableCell className="font-medium text-gray-700 dark:text-gray-200">{formatCurrency(equipment.salePrice3 ?? 0)}</TableCell>
               </TableRow>
-            ))}
+            );
+            })}
           </TableBody>
         </Table>
 

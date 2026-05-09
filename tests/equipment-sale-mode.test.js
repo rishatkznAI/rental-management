@@ -25,17 +25,46 @@ test('sale quick actions hide rental and fleet service actions', () => {
   const labels = actions.map(action => action.label);
 
   assert.ok(ids.includes('equipment-sale-pdi'));
-  assert.ok(ids.includes('equipment-sale-documents'));
   assert.ok(ids.includes('equipment-sale-photo'));
-  assert.ok(ids.includes('equipment-sale-deal'));
   assert.ok(ids.includes('equipment-sale-reserve'));
   assert.ok(ids.includes('equipment-sale-remove'));
   assert.ok(ids.includes('equipment-sale-sold'));
 
+  assert.ok(!ids.includes('equipment-sale-documents'));
+  assert.ok(!ids.includes('equipment-sale-deal'));
   assert.ok(!labels.includes('Создать аренду'));
   assert.ok(!labels.includes('История аренд'));
   assert.ok(!labels.includes('Очередь сервиса'));
   assert.ok(!labels.includes('Создать сервисную заявку'));
+  assert.ok(!labels.includes('Документы техники'));
+});
+
+test('sale deal quick action renders only with a safe configured route', () => {
+  const withoutRoute = buildEquipmentQuickActions({
+    equipment: { id: 'EQ-sale', inventoryNumber: 'INV-sale', status: 'available', saleMode: true },
+    can: allowAll,
+  });
+  assert.equal(withoutRoute.some(action => action.id === 'equipment-sale-deal'), false);
+
+  const withRoute = buildEquipmentQuickActions({
+    equipment: { id: 'EQ-sale', inventoryNumber: 'INV-sale', status: 'available', saleMode: true },
+    can: allowAll,
+    crmDealsRoute: '/crm',
+  });
+  const dealAction = withRoute.find(action => action.id === 'equipment-sale-deal');
+  assert.equal(dealAction?.label, 'Создать сделку');
+  assert.match(dealAction?.to || '', /^\/crm\?/);
+  assert.doesNotMatch(dealAction?.to || '', /undefined|null/);
+});
+
+test('sale deal quick action is hidden without CRM permission', () => {
+  const actions = buildEquipmentQuickActions({
+    equipment: { id: 'EQ-sale', inventoryNumber: 'INV-sale', status: 'available', saleMode: true },
+    can: (action, section) => section !== 'crm',
+    crmDealsRoute: '/crm',
+  });
+
+  assert.equal(actions.some(action => action.id === 'equipment-sale-deal'), false);
 });
 
 test('normal equipment keeps rental quick actions', () => {

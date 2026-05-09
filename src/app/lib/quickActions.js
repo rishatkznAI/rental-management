@@ -82,7 +82,7 @@ export function buildClientQuickActions({ client, can, role } = {}) {
   return actions;
 }
 
-export function buildEquipmentQuickActions({ equipment, can, currentRental } = {}) {
+export function buildEquipmentQuickActions({ equipment, can, currentRental, crmDealsRoute } = {}) {
   const equipmentId = safeText(equipment?.id);
   const equipmentInv = safeText(equipment?.inventoryNumber);
   const context = { equipmentId, equipmentInv };
@@ -90,6 +90,7 @@ export function buildEquipmentQuickActions({ equipment, can, currentRental } = {
   const status = safeText(equipment?.status);
   const rentalBlocked = status === 'in_service' || status === 'inactive';
   const saleMode = equipment?.saleMode === true;
+  const safeCrmDealsRoute = safeText(crmDealsRoute);
 
   if (saleMode) {
     if (canDo(can, 'create', 'service')) {
@@ -99,12 +100,9 @@ export function buildEquipmentQuickActions({ equipment, can, currentRental } = {
         kind: 'primary',
       });
     }
-    if (canDo(can, 'view', 'documents')) {
-      actions.push({ id: 'equipment-sale-documents', label: 'Документы техники', to: withQuery('/documents', context) });
-    }
     actions.push({ id: 'equipment-sale-photo', label: 'Добавить фото' });
-    if (canDo(can, 'view', 'crm')) {
-      actions.push({ id: 'equipment-sale-deal', label: 'Открыть сделки', to: withQuery('/crm', context) });
+    if (safeCrmDealsRoute && canDo(can, 'view', 'crm')) {
+      actions.push({ id: 'equipment-sale-deal', label: 'Создать сделку', to: withQuery(safeCrmDealsRoute, context) });
     }
     if (canDo(can, 'edit', 'equipment')) {
       actions.push({ id: 'equipment-sale-reserve', label: 'Поставить в резерв' });

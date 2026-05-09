@@ -641,7 +641,6 @@ export default function EquipmentDetail() {
   const canViewDocuments = can('view', 'documents');
   const canViewClients = can('view', 'clients');
   const canViewFinance = can('view', 'finance');
-  const canViewCrm = can('view', 'crm');
   const canCreateService = can('create', 'service');
   const canManageAcceptance = canEditEquipment || canCreateService || isMechanicRole(user?.role);
   const normalizedRole = normalizeUserRole(user?.role);
@@ -1493,22 +1492,6 @@ export default function EquipmentDetail() {
                 </Button>
               </Link>
             )}
-            {saleMode && canViewDocuments && (
-              <Link to="/documents">
-                <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
-                  <FileText className="h-3.5 w-3.5" />
-                  Документы
-                </Button>
-              </Link>
-            )}
-            {saleMode && canViewCrm && (
-              <Link to="/crm">
-                <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
-                  <User className="h-3.5 w-3.5" />
-                  Сделки
-                </Button>
-              </Link>
-            )}
           </div>
         </div>
       </div>
@@ -1652,14 +1635,9 @@ export default function EquipmentDetail() {
                   <Button size="sm" variant="secondary"><Wrench className="h-4 w-4" /> Сервис</Button>
                 </Link>
               )}
-              {canViewDocuments && (
+              {!saleMode && canViewDocuments && (
                 <Link to="/documents">
                   <Button size="sm" variant="secondary"><FileText className="h-4 w-4" /> Документы</Button>
-                </Link>
-              )}
-              {saleMode && canViewCrm && (
-                <Link to="/crm">
-                  <Button size="sm" variant="secondary"><User className="h-4 w-4" /> Сделки</Button>
                 </Link>
               )}
               {!saleMode && canViewClients && equipment360.occupancy.currentRental?.clientId && (
@@ -1714,7 +1692,6 @@ export default function EquipmentDetail() {
                           onClick={onClick}
                         >
                           {action.id === 'equipment-sale-pdi' && <Wrench className="h-4 w-4" />}
-                          {action.id === 'equipment-sale-documents' && <FileText className="h-4 w-4" />}
                           {action.id === 'equipment-sale-photo' && <Camera className="h-4 w-4" />}
                           {action.id === 'equipment-sale-deal' && <User className="h-4 w-4" />}
                           {action.label}
@@ -1783,11 +1760,7 @@ export default function EquipmentDetail() {
                 />
                 <div className="rounded-xl border border-border bg-card/70 p-4">
                   <h3 className="mb-3 text-sm font-semibold text-foreground">Связанные сделки / клиенты</h3>
-                  {canViewCrm ? (
-                    <LinkedRow title="CRM сделки" meta="Открыть воронку продаж" href="/crm" canOpen={canViewCrm} />
-                  ) : (
-                    <p className="text-sm text-muted-foreground">CRM недоступна для этой роли.</p>
-                  )}
+                  <p className="text-sm text-muted-foreground">Связанные сделки не отображаются: рабочий маршрут CRM для карточки техники пока не подключён.</p>
                 </div>
                 <div className="rounded-xl border border-border bg-card/70 p-4">
                   <h3 className="mb-3 text-sm font-semibold text-foreground">Комментарии и история</h3>

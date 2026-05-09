@@ -153,6 +153,27 @@ test('sales page keeps sold equipment discoverable through sales status filter',
   assert.match(source, /saleStatusLabel\(equipment\)/);
 });
 
+test('sales equipment opens through sales route instead of common equipment route', () => {
+  const salesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
+  const routesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/routes.ts'), 'utf8');
+  const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+
+  assert.match(routesSource, /path: 'sales\/equipment\/:id'/);
+  assert.match(salesSource, /to=\{`\/sales\/equipment\/\$\{equipment\.id\}`\}/);
+  assert.doesNotMatch(salesSource, /to=\{`\/equipment\/\$\{equipment\.id\}\?context=sales`\}/);
+  assert.match(detailSource, /location\.pathname\.startsWith\('\/sales\/'\)[\s\S]*\? 'sales'/);
+  assert.match(detailSource, /routeContext === 'sales' \? '\/sales' : '\/equipment'/);
+});
+
+test('active section separates sales equipment detail from common equipment detail', () => {
+  const permissionsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/permissions.ts'), 'utf8');
+  const sidebarSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/layout/Sidebar.tsx'), 'utf8');
+
+  assert.equal(pathToSectionForTest('/sales/equipment/EQ-1', permissionsSource), 'sales');
+  assert.equal(pathToSectionForTest('/equipment/EQ-1', permissionsSource), 'equipment');
+  assert.match(sidebarSource, /location\.pathname\.startsWith\(item\.href \+ '\/'\)/);
+});
+
 test('sale mode keeps sale prices in sale 360 and not in basic characteristics', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
   const basicStart = source.indexOf('<CardTitle>Основные характеристики</CardTitle>');
@@ -176,7 +197,8 @@ test('sale mode shows identification service gsm and revenue context', () => {
   const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
   const salesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
 
-  assert.match(detailSource, /Идентификация и обслуживание/);
+  assert.match(detailSource, /Техническая информация для продажи/);
+  assert.match(detailSource, /Справочно из карточки техники/);
   assert.match(detailSource, /<CompactMetric label="Инв\. №"/);
   assert.match(detailSource, /<CompactMetric label="GSM" value=\{getGsmDisplayValue\(equipment\)\}/);
   assert.match(detailSource, /<CompactMetric label="ТО"/);
@@ -250,3 +272,17 @@ test('sale status label uses existing sale and sold fields', () => {
   assert.equal(saleStatusLabel({ saleStatus: 'В сделке' }), 'В сделке');
   assert.equal(saleStatusLabel({ category: 'sold', saleStatus: 'ignored' }), 'Продана');
 });
+
+function pathToSectionForTest(pathname, source) {
+  const orderedChecks = [
+    ['/tasks', 'tasks_center'],
+    ['/equipment', 'equipment'],
+    ['/gsm', 'gsm'],
+    ['/knowledge-base', 'knowledge_base'],
+    ['/sales', 'sales'],
+  ];
+  assert.match(source, /if \(pathname\.startsWith\('\/sales'\)\)\s+return 'sales';/);
+  assert.match(source, /if \(pathname\.startsWith\('\/equipment'\)\)\s+return 'equipment';/);
+  if (pathname === '/') return 'dashboard';
+  return orderedChecks.find(([prefix]) => pathname.startsWith(prefix))?.[1] || null;
+}

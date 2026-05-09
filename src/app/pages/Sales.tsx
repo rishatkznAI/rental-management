@@ -277,7 +277,7 @@ export default function Sales() {
         ) : filteredEquipment.map((equipment) => (
           <Link
             key={equipment.id}
-            to={`/equipment/${equipment.id}?context=sales`}
+            to={`/sales/equipment/${equipment.id}`}
             className="block rounded-xl border border-amber-200/70 bg-white p-4 dark:border-amber-900/50 dark:bg-gray-800"
           >
             <div className="flex flex-wrap items-center gap-2">
@@ -353,7 +353,7 @@ export default function Sales() {
             {filteredEquipment.map((equipment) => (
               <TableRow key={equipment.id}>
                 <TableCell>
-                  <Link to={`/equipment/${equipment.id}?context=sales`} className="font-medium text-amber-700 hover:underline dark:text-amber-300">
+                  <Link to={`/sales/equipment/${equipment.id}`} className="font-medium text-amber-700 hover:underline dark:text-amber-300">
                     {equipment.manufacturer} {equipment.model}
                   </Link>
                   <p className="text-xs text-gray-500 dark:text-gray-400">SN: {equipment.serialNumber || 'не указан'}</p>

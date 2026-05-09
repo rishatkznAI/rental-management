@@ -692,7 +692,9 @@ export default function EquipmentDetail() {
     || isMechanicRole(normalizedRole);
   const { id } = useParams();
   const location = useLocation();
-  const routeContext = new URLSearchParams(location.search).get('context') || '';
+  const routeContext = location.pathname.startsWith('/sales/')
+    ? 'sales'
+    : new URLSearchParams(location.search).get('context') || '';
   const equipmentTypeCatalog = useEquipmentTypeCatalog();
 
   const [allEquipment, setAllEquipment] = useState<Equipment[]>([]);
@@ -1362,9 +1364,9 @@ export default function EquipmentDetail() {
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
             Запись с ID <span className="font-mono">{id}</span> не существует или была удалена
           </p>
-          <Link to="/equipment" className="mt-6 inline-flex items-center gap-2 text-[--color-primary] hover:underline">
+          <Link to={routeContext === 'sales' ? '/sales' : '/equipment'} className="mt-6 inline-flex items-center gap-2 text-[--color-primary] hover:underline">
             <ArrowLeft className="h-4 w-4" />
-            Вернуться к списку
+            {routeContext === 'sales' ? 'Вернуться в продажи' : 'Вернуться к списку'}
           </Link>
         </div>
       </div>
@@ -1664,7 +1666,7 @@ export default function EquipmentDetail() {
               <CardTitle>{saleMode ? 'Продажа 360°' : 'Техника 360°'}</CardTitle>
               <CardDescription>
                 {saleMode
-                  ? 'Продажная карточка, PDI, документы, фото, сделки и история предпродажной подготовки'
+                  ? 'Карточка продажной техники: PDI, документы, фото, сделки и история предпродажной подготовки'
                   : 'Сводка по занятости, сервису, документам и рискам без изменения данных'}
               </CardDescription>
             </div>
@@ -1756,7 +1758,8 @@ export default function EquipmentDetail() {
               )}
 
               <div className="rounded-xl border border-border bg-card/70 p-4">
-                <h3 className="mb-3 text-sm font-semibold text-foreground">Идентификация и обслуживание</h3>
+                <h3 className="text-sm font-semibold text-foreground">Техническая информация для продажи</h3>
+                <p className="mb-3 mt-1 text-xs text-muted-foreground">Справочно из карточки техники: ТО, ЧТО, ПТО и GSM показаны как история и состояние подготовки, а не как активные задачи арендного парка.</p>
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                   <CompactMetric label="Инв. №" value={equipment.inventoryNumber || 'Не указано'} />
                   <CompactMetric label="GSM" value={getGsmDisplayValue(equipment)} />

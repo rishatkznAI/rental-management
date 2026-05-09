@@ -49,26 +49,43 @@ export const SALE_CONDITION_LABELS = {
   used: 'Б/у из арендного парка',
 };
 
-function normalizeSaleCondition(value) {
+export function normalizeSaleCondition(value) {
   const normalized = lower(value);
   if (!normalized) return '';
-  if (['new', 'новая', 'новое', 'новый', 'new_equipment', 'factory_new'].includes(normalized)) return 'new';
+  if (typeof value === 'boolean') return value ? 'new' : 'used';
+  if (['new', 'новая', 'новое', 'новый', 'new_equipment', 'factory_new', 'factory-new', 'unused'].includes(normalized)) return 'new';
   if ([
     'used',
     'preowned',
     'pre-owned',
+    'second_hand',
+    'second-hand',
     'rental_fleet',
     'fleet',
     'from_rental',
     'ex_rental',
     'б/у',
     'бу',
+    'б\\у',
     'б у',
     'б/у из арендного парка',
     'из арендного парка',
     'арендный парк',
+    'подержанная',
+    'подержанный',
   ].includes(normalized)) return 'used';
   return '';
+}
+
+export function normalizeEquipmentSaleCondition(equipment = {}) {
+  return normalizeSaleCondition(
+    equipment.saleCondition
+    || equipment.saleType
+    || equipment.conditionForSale
+    || equipment.condition
+    || (typeof equipment.saleMode === 'boolean' ? undefined : equipment.saleMode)
+    || (Object.prototype.hasOwnProperty.call(equipment, 'isNew') ? equipment.isNew : undefined),
+  ) || undefined;
 }
 
 export function saleStatusKind(equipment = {}) {

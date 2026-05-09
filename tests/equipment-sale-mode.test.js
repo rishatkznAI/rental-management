@@ -6,6 +6,7 @@ import {
   buildSaleStatusPatch,
   getSaleOperationHistory,
   isSaleModeEquipment,
+  normalizeEquipmentSaleCondition,
   saleConditionKind,
   saleConditionLabel,
   saleStatusKind,
@@ -141,6 +142,36 @@ test('explicit sale condition has priority over auto-detection', () => {
 
   assert.equal(saleConditionKind({ id: 'EQ-manual', saleCondition: 'new', hours: 700 }, context), 'new');
   assert.equal(saleConditionKind({ id: 'EQ-manual', saleType: 'used' }, { rentals: [], serviceTickets: [], rentalRevenue: 0 }), 'used');
+});
+
+test('sale condition normalizer preserves explicit new and used values from update payloads', () => {
+  assert.equal(normalizeEquipmentSaleCondition({ saleCondition: 'new' }), 'new');
+  assert.equal(normalizeEquipmentSaleCondition({ saleCondition: 'used' }), 'used');
+  assert.equal(normalizeEquipmentSaleCondition({ condition: 'новая' }), 'new');
+  assert.equal(normalizeEquipmentSaleCondition({ saleType: 'б/у' }), 'used');
+  assert.equal(normalizeEquipmentSaleCondition({ isNew: true }), 'new');
+  assert.equal(normalizeEquipmentSaleCondition({ isNew: false }), 'used');
+  assert.equal(normalizeEquipmentSaleCondition({ saleMode: true }), undefined);
+  assert.equal(normalizeEquipmentSaleCondition({ saleMode: 'used' }), 'used');
+});
+
+test('equipment update uses patch normalizer so sale condition changes do not reset sale fields', () => {
+  const classificationSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/equipmentClassification.ts'), 'utf8');
+  const serviceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/equipment.service.ts'), 'utf8');
+
+  assert.match(classificationSource, /export function normalizeEquipmentPatch/);
+  assert.match(classificationSource, /normalizeEquipmentSaleCondition\(equipment\)/);
+  assert.match(classificationSource, /\.\.\.\(saleCondition \? \{ saleCondition \} : \{\}\)/);
+  const patchStart = classificationSource.indexOf('export function normalizeEquipmentPatch');
+  const patchEnd = classificationSource.indexOf('export function canEquipmentParticipateInRentals');
+  assert.ok(patchStart > -1);
+  assert.ok(patchEnd > patchStart);
+  assert.doesNotMatch(
+    classificationSource.slice(patchStart, patchEnd),
+    /isForSale:\s+equipment\.isForSale \?\? false|salePdiStatus:\s+equipment\.salePdiStatus \?\? 'not_started'/,
+  );
+  assert.match(serviceSource, /normalizeEquipmentPatch/);
+  assert.match(serviceSource, /api\.patch<Equipment>\(`\/api\/equipment\/\$\{id\}`, normalizeEquipmentPatch\(data\)\)/);
 });
 
 test('sale deal quick action renders only with a safe configured route', () => {
@@ -295,6 +326,7 @@ test('equipment forms expose sale condition only inside sale settings', () => {
   assert.match(detailSource, /label="Тип продажной техники"/);
   assert.match(detailSource, /value=\{form\.saleCondition \|\| 'new'\}/);
   assert.match(detailSource, /onValueChange=\{setStr\('saleCondition'\)\}/);
+  assert.match(detailSource, /saleCondition: 'тип продажной техники'/);
 });
 
 test('PDI form contains presale fields and no service scenario selector', () => {

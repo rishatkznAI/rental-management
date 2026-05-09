@@ -1,5 +1,5 @@
 import { api } from '../lib/api';
-import { normalizeEquipment, normalizeEquipmentList } from '../lib/equipmentClassification';
+import { normalizeEquipment, normalizeEquipmentList, normalizeEquipmentPatch } from '../lib/equipmentClassification';
 import type { Equipment, RepairRecord, ShippingPhoto } from '../types';
 
 export const equipmentService = {
@@ -24,7 +24,7 @@ export const equipmentService = {
     api.post<Equipment>('/api/equipment', normalizeEquipment(data)).then(normalizeEquipment),
 
   update: (id: string, data: Partial<Equipment>): Promise<Equipment> =>
-    api.patch<Equipment>(`/api/equipment/${id}`, normalizeEquipment(data)).then(normalizeEquipment),
+    api.patch<Equipment>(`/api/equipment/${id}`, normalizeEquipmentPatch(data)).then(normalizeEquipment),
 
   delete: (id: string): Promise<void> =>
     api.del(`/api/equipment/${id}`),

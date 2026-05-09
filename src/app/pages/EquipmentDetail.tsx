@@ -3695,6 +3695,7 @@ export default function EquipmentDetail() {
               priority: 'приоритет',
               activeInFleet: 'активный парк',
               isForSale: 'на продаже',
+              saleCondition: 'тип продажной техники',
               salePdiStatus: 'статус PDI',
               salePrice1: 'цена 1',
               salePrice2: 'цена 2',

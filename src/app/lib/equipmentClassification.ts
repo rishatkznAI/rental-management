@@ -1,5 +1,6 @@
-import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentSalePdiStatus } from '../types';
+import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentSaleCondition, EquipmentSalePdiStatus } from '../types';
 import { DEFAULT_EQUIPMENT_TYPE_CATALOG, findEquipmentTypeLabel } from './equipmentTypes';
+import { normalizeEquipmentSaleCondition } from './equipmentSaleMode.js';
 
 export const EQUIPMENT_CATEGORY_LABELS: Record<EquipmentCategory, string> = {
   own: 'Собственная',
@@ -35,18 +36,28 @@ export const EQUIPMENT_SALE_PDI_LABELS: Record<EquipmentSalePdiStatus, string> =
 };
 
 export function normalizeEquipment<T extends Partial<Equipment>>(equipment: T): T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority' | 'isForSale' | 'salePdiStatus'> {
+  const saleCondition = normalizeEquipmentSaleCondition(equipment) as EquipmentSaleCondition | undefined;
   return {
     ...equipment,
     category: equipment.category ?? 'own',
     activeInFleet: equipment.activeInFleet ?? true,
     priority: equipment.priority ?? 'medium',
     isForSale: equipment.isForSale ?? false,
+    ...(saleCondition ? { saleCondition } : {}),
     salePdiStatus: equipment.salePdiStatus ?? 'not_started',
   };
 }
 
 export function normalizeEquipmentList<T extends Partial<Equipment>>(list: T[]): Array<T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority' | 'isForSale' | 'salePdiStatus'>> {
   return list.map(normalizeEquipment);
+}
+
+export function normalizeEquipmentPatch<T extends Partial<Equipment>>(equipment: T): T {
+  const saleCondition = normalizeEquipmentSaleCondition(equipment) as EquipmentSaleCondition | undefined;
+  return {
+    ...equipment,
+    ...(saleCondition ? { saleCondition } : {}),
+  };
 }
 
 export function canEquipmentParticipateInRentals(equipment: Partial<Equipment>): boolean {

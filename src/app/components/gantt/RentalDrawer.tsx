@@ -84,6 +84,7 @@ export function RentalDrawer({
 }: RentalDrawerProps) {
   const presence = useAnimatedPresence(Boolean(rentalProp), animationDurations.relaxed);
   const [retainedRental, setRetainedRental] = useState<GanttRentalData | null>(rentalProp);
+  const [retainedEquipment, setRetainedEquipment] = useState<Equipment | undefined>(equipment);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [editClientId, setEditClientId] = useState('');
@@ -128,6 +129,10 @@ export function RentalDrawer({
   }, [rentalProp]);
 
   useEffect(() => {
+    if (equipment) setRetainedEquipment(equipment);
+  }, [equipment]);
+
+  useEffect(() => {
     if (!rentalProp) return undefined;
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -136,8 +141,37 @@ export function RentalDrawer({
     return () => window.removeEventListener('keydown', handleEscape);
   }, [onClose, rentalProp]);
 
-  const rental = rentalProp ?? retainedRental;
-  if (!presence.shouldRender || !rental) return null;
+  const displayRental = rentalProp ?? retainedRental;
+  const displayEquipment = equipment ?? retainedEquipment;
+
+  useEffect(() => {
+    if (!displayRental) return;
+    setShowEdit(false);
+    setEditClientId(displayRental.clientId || '');
+    setEditClient(displayRental.client);
+    setEditManager(displayRental.manager);
+    setEditStartDate(displayRental.startDate);
+    setEditEndDate(displayRental.endDate);
+    setEditAmount(String(displayRental.amount || 0));
+    setEditExpectedPaymentDate(displayRental.expectedPaymentDate || '');
+    setEditError('');
+    setShowCommentForm(false);
+    setCommentText('');
+    setCommentError('');
+    setManagerEditMode(false);
+    setShowMaintenanceDialog(false);
+  }, [displayRental]);
+
+  useEffect(() => {
+    setEngineFilter(displayEquipment?.maintenanceEngineFilter || '');
+    setFuelFilter(displayEquipment?.maintenanceFuelFilter || '');
+    setHydraulicFilter(displayEquipment?.maintenanceHydraulicFilter || '');
+  }, [displayEquipment]);
+
+  if (!presence.shouldRender || !displayRental) return null;
+
+  const rental = displayRental;
+  const currentEquipment = displayEquipment;
 
   const rentalDetailId = String(
     rental.rentalId ||
@@ -146,30 +180,6 @@ export function RentalDrawer({
     rental.id ||
     ''
   ).trim();
-
-  useEffect(() => {
-    if (!rental) return;
-    setShowEdit(false);
-    setEditClientId(rental.clientId || '');
-    setEditClient(rental.client);
-    setEditManager(rental.manager);
-    setEditStartDate(rental.startDate);
-    setEditEndDate(rental.endDate);
-    setEditAmount(String(rental.amount || 0));
-    setEditExpectedPaymentDate(rental.expectedPaymentDate || '');
-    setEditError('');
-    setShowCommentForm(false);
-    setCommentText('');
-    setCommentError('');
-    setManagerEditMode(false);
-    setShowMaintenanceDialog(false);
-  }, [rental]);
-
-  useEffect(() => {
-    setEngineFilter(equipment?.maintenanceEngineFilter || '');
-    setFuelFilter(equipment?.maintenanceFuelFilter || '');
-    setHydraulicFilter(equipment?.maintenanceHydraulicFilter || '');
-  }, [equipment]);
 
   const activeManagers = filterRentalManagerUsers(managers);
 
@@ -307,8 +317,8 @@ export function RentalDrawer({
   };
 
   const handleMaintenanceSave = () => {
-    if (!equipment) return;
-    onUpdateMaintenanceFilters(equipment, {
+    if (!currentEquipment) return;
+    onUpdateMaintenanceFilters(currentEquipment, {
       maintenanceEngineFilter: engineFilter.trim() || undefined,
       maintenanceFuelFilter: fuelFilter.trim() || undefined,
       maintenanceHydraulicFilter: hydraulicFilter.trim() || undefined,
@@ -317,9 +327,9 @@ export function RentalDrawer({
   };
 
   const maintenanceRows = [
-    { label: 'Фильтр двигателя', value: equipment?.maintenanceEngineFilter },
-    { label: 'Топливная система', value: equipment?.maintenanceFuelFilter },
-    { label: 'Гидравлический фильтр', value: equipment?.maintenanceHydraulicFilter },
+    { label: 'Фильтр двигателя', value: currentEquipment?.maintenanceEngineFilter },
+    { label: 'Топливная система', value: currentEquipment?.maintenanceFuelFilter },
+    { label: 'Гидравлический фильтр', value: currentEquipment?.maintenanceHydraulicFilter },
   ];
   const hasMaintenanceFilters = maintenanceRows.some(row => !!row.value?.trim());
 
@@ -355,8 +365,8 @@ export function RentalDrawer({
               <span className="font-mono">{rental.id}</span>
               <span>·</span>
               <span>
-                {rental.equipmentInv} {equipment?.model}
-                {equipment?.serialNumber ? ` · SN ${equipment.serialNumber}` : ''}
+                {rental.equipmentInv} {currentEquipment?.model}
+                {currentEquipment?.serialNumber ? ` · SN ${currentEquipment.serialNumber}` : ''}
               </span>
             </div>
           </div>
@@ -525,13 +535,13 @@ export function RentalDrawer({
                 size="sm"
                 variant="outline"
                 onClick={() => setShowMaintenanceDialog(true)}
-                disabled={!equipment}
+                disabled={!currentEquipment}
               >
                 ТО
               </Button>
             </div>
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
-              {!equipment ? (
+              {!currentEquipment ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Техника для этой аренды не найдена.
                 </p>
@@ -1134,8 +1144,8 @@ export function RentalDrawer({
           <DialogHeader>
             <DialogTitle>ТО и фильтры</DialogTitle>
             <DialogDescription>
-              {equipment
-                ? `${equipment.manufacturer} ${equipment.model} · INV ${equipment.inventoryNumber}`
+              {currentEquipment
+                ? `${currentEquipment.manufacturer} ${currentEquipment.model} · INV ${currentEquipment.inventoryNumber}`
                 : 'Заполните расходники для техники в аренде.'}
             </DialogDescription>
           </DialogHeader>
@@ -1181,7 +1191,7 @@ export function RentalDrawer({
             <Button variant="ghost" onClick={() => setShowMaintenanceDialog(false)}>
               Отмена
             </Button>
-            <Button onClick={handleMaintenanceSave} disabled={!equipment}>
+            <Button onClick={handleMaintenanceSave} disabled={!currentEquipment}>
               Сохранить
             </Button>
           </DialogFooter>

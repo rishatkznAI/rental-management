@@ -144,6 +144,13 @@ test.describe('production smoke', () => {
     const rental = await withAdminApi((api) => findRentalByClient(api, company));
     expect(rental.id).toBeTruthy();
 
+    await expect(page.getByRole('button', { name: new RegExp(company) }).first()).toBeVisible();
+    await page.getByRole('button', { name: new RegExp(company) }).first().click();
+    await expect(page.getByRole('heading', { name: company })).toBeVisible();
+    await expect(page.getByText(inventoryNumber).first()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading', { name: company })).toBeHidden();
+
     await navigateInApp(page, `/rentals/${rental.id}`);
     await expect(page.getByRole('heading', { name: rental.id })).toBeVisible();
     await expect(page.getByText(company).first()).toBeVisible();

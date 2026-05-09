@@ -88,11 +88,11 @@ export default function Login() {
   };
 
   return (
-    <main className="min-h-screen bg-[#0f0f0f] p-3 text-[#f0f0f0] sm:p-5 lg:p-8">
+    <main className="min-h-screen w-screen overflow-x-hidden bg-[#0e0e0e] text-[#f0f0f0]">
       <h1 className="sr-only">Страница авторизации Скайтех</h1>
 
-      <div className="mx-auto flex min-h-[calc(100vh-1.5rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[#1c1c1c] bg-[#0e0e0e] shadow-2xl shadow-black/35 sm:min-h-[calc(100vh-2.5rem)] lg:min-h-[calc(100vh-4rem)] lg:flex-row">
-        <section className="relative flex min-h-[220px] flex-col justify-between overflow-hidden bg-[#0b1120] px-6 py-6 sm:px-8 lg:min-h-[520px] lg:flex-1 lg:px-12 lg:py-10">
+      <div className="flex min-h-screen w-full flex-col bg-[#0e0e0e] lg:flex-row">
+        <section className="relative flex min-h-[220px] overflow-hidden bg-[#0b1120] px-6 py-6 sm:px-8 lg:min-h-screen lg:flex-1 lg:px-12 lg:py-10">
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(200,241,53,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(200,241,53,0.03)_1px,transparent_1px)] bg-[size:40px_40px]"
@@ -102,37 +102,39 @@ export default function Login() {
             className="pointer-events-none absolute -bottom-24 -left-20 h-[400px] w-[400px] rounded-full bg-[radial-gradient(circle,rgba(200,241,53,0.07)_0%,transparent_70%)]"
           />
 
-          <div className="relative z-10 flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[#c8f135] text-[#0b1120] shadow-lg shadow-[#c8f135]/10">
-              <TowerControl className="h-[18px] w-[18px]" aria-hidden="true" strokeWidth={2.2} />
-            </div>
-            <div>
-              <div className="text-[15px] font-medium leading-5 text-[#f0f0f0]">Скайтех</div>
-              <div className="text-[11px] leading-4 text-[#5e7534]">Система управления арендой</div>
-            </div>
-          </div>
-
-          <div className="relative z-10 my-8 max-w-[360px] lg:my-0 lg:flex lg:flex-1 lg:items-center">
-            <div>
-              <div className="mb-5 flex items-center gap-3">
-                <div className="h-0.5 w-7 rounded-full bg-[#c8f135]" />
-                <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-[#c8f135]">Цитата дня</p>
+          <div className="relative z-10 flex w-full max-w-[560px] flex-col justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[#c8f135] text-[#0b1120] shadow-lg shadow-[#c8f135]/10">
+                <TowerControl className="h-[18px] w-[18px]" aria-hidden="true" strokeWidth={2.2} />
               </div>
-              <blockquote className="text-[21px] font-medium leading-[1.42] tracking-normal text-[#f0f0f0] sm:text-[23px]">
-                {LOGIN_QUOTE.text}
-              </blockquote>
-              <p className="mt-4 text-[11px] font-medium uppercase tracking-[0.1em] text-[#5e7534]">
-                {LOGIN_QUOTE.author}
-              </p>
+              <div>
+                <div className="text-[15px] font-medium leading-5 text-[#f0f0f0]">Скайтех</div>
+                <div className="text-[11px] leading-4 text-[#5e7534]">Система управления арендой</div>
+              </div>
             </div>
-          </div>
 
-          <p className="relative z-10 text-[10px] tracking-[0.03em] text-[#405524]">
-            © 2026 Скайтех. Все права защищены.
-          </p>
+            <div className="my-8 max-w-[360px] lg:my-0 lg:flex lg:flex-1 lg:items-center">
+              <div>
+                <div className="mb-5 flex items-center gap-3">
+                  <div className="h-0.5 w-7 rounded-full bg-[#c8f135]" />
+                  <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-[#c8f135]">Цитата дня</p>
+                </div>
+                <blockquote className="text-[21px] font-medium leading-[1.42] tracking-normal text-[#f0f0f0] sm:text-[23px]">
+                  {LOGIN_QUOTE.text}
+                </blockquote>
+                <p className="mt-4 text-[11px] font-medium uppercase tracking-[0.1em] text-[#5e7534]">
+                  {LOGIN_QUOTE.author}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-[10px] tracking-[0.03em] text-[#405524]">
+              © 2026 Скайтех. Все права защищены.
+            </p>
+          </div>
         </section>
 
-        <section className="flex w-full items-center justify-center border-t border-[#161616] bg-[#0e0e0e] px-6 py-10 sm:px-8 lg:w-[380px] lg:min-w-[380px] lg:border-l lg:border-t-0 lg:px-11 lg:py-12">
+        <section className="flex w-full items-center justify-center border-t border-[#161616] bg-[#0e0e0e] px-6 py-10 sm:px-8 lg:w-[420px] lg:min-w-[420px] lg:border-l lg:border-t-0 lg:px-11 lg:py-12">
           <div className="w-full max-w-[380px] lg:max-w-none">
             <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[#555]">Авторизация</p>
             <h2 className="text-[22px] font-medium leading-7 tracking-normal text-[#f0f0f0]">Добро пожаловать</h2>

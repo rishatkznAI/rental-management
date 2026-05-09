@@ -3570,8 +3570,9 @@ function EquipmentRow({
           const showOverdueAlert = rental.status === 'active' && rental.endDate < todayStr;
           const barLeft = pos.left + 2;
           const barWidth = Math.max(10, pos.width - 4);
-          const markerLabelVisible = barHeight >= 22 && barWidth > 180;
+          const markerLabelVisible = barWidth > 180;
           const verboseMarkerLabel = barWidth > 360;
+          const verboseAlertLabel = barWidth > 520;
           const paidMarkerLabel = financeBar.paidThroughDate
             ? `${verboseMarkerLabel ? 'Оплачено до ' : 'до '}${safeRentalMarkerDate(financeBar.paidThroughDate)}`
             : '';
@@ -3650,7 +3651,10 @@ function EquipmentRow({
                 />
               )}
               {barWidth > 110 && (
-                <span className="pointer-events-none relative z-[1] min-w-0 truncate px-2 leading-none">
+                <span
+                  className="pointer-events-none relative z-[1] min-w-0 truncate px-2 leading-none"
+                  style={{ paddingRight: showPaymentAlert || showUpdAlert || showOverdueAlert ? 'clamp(76px,7vw,190px)' : undefined }}
+                >
                   <span className="mr-1 rounded bg-black/16 px-1 py-0.5 text-[clamp(8px,0.48vw,10px)] uppercase tracking-[0.08em] text-white/85">
                     {statusLabel}
                   </span>
@@ -3692,12 +3696,64 @@ function EquipmentRow({
               )}
               {(showPaymentAlert || showUpdAlert || showOverdueAlert) && (
                 <span
-                  className="pointer-events-none absolute bottom-0.5 right-1 z-[3] flex"
+                  data-payment-alerts="rental-bar"
+                  className="pointer-events-none absolute right-1 top-1/2 z-[4] flex -translate-y-1/2 items-center"
                   style={{ gap: 'clamp(2px,0.18vw,4px)' }}
                 >
-                  {showPaymentAlert && <span className="block rounded-full bg-white/85 shadow-sm" style={{ width: 'clamp(7px,0.46vw,10px)', height: 'clamp(7px,0.46vw,10px)' }} />}
-                  {showUpdAlert && <span className="block rounded-full bg-amber-200 shadow-sm" style={{ width: 'clamp(7px,0.46vw,10px)', height: 'clamp(7px,0.46vw,10px)' }} />}
-                  {showOverdueAlert && <span className="block rounded-full bg-red-100 shadow-sm" style={{ width: 'clamp(7px,0.46vw,10px)', height: 'clamp(7px,0.46vw,10px)' }} />}
+                  {showPaymentAlert && (
+                    <span
+                      data-payment-alert="payment"
+                      className="inline-flex items-center rounded-full bg-white/92 font-semibold text-slate-900 shadow-sm ring-1 ring-black/10"
+                      style={{
+                        display: 'inline-flex',
+                        flex: '0 0 auto',
+                        width: 'auto',
+                        height: 'clamp(17px,1.05vw,24px)',
+                        padding: verboseAlertLabel ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
+                        fontSize: 'clamp(9px,0.52vw,12px)',
+                        gap: 'clamp(3px,0.25vw,5px)',
+                      }}
+                    >
+                      <CreditCard style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
+                      {verboseAlertLabel && <span>Оплата</span>}
+                    </span>
+                  )}
+                  {showUpdAlert && (
+                    <span
+                      data-payment-alert="upd"
+                      className="inline-flex items-center rounded-full bg-amber-200 font-semibold text-amber-950 shadow-sm ring-1 ring-amber-950/10"
+                      style={{
+                        display: 'inline-flex',
+                        flex: '0 0 auto',
+                        width: 'auto',
+                        height: 'clamp(17px,1.05vw,24px)',
+                        padding: verboseAlertLabel ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
+                        fontSize: 'clamp(9px,0.52vw,12px)',
+                        gap: 'clamp(3px,0.25vw,5px)',
+                      }}
+                    >
+                      <ClipboardCheck style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
+                      {verboseAlertLabel && <span>УПД</span>}
+                    </span>
+                  )}
+                  {showOverdueAlert && (
+                    <span
+                      data-payment-alert="return-overdue"
+                      className="inline-flex items-center rounded-full bg-red-100 font-semibold text-red-700 shadow-sm ring-1 ring-red-900/10"
+                      style={{
+                        display: 'inline-flex',
+                        flex: '0 0 auto',
+                        width: 'auto',
+                        height: 'clamp(17px,1.05vw,24px)',
+                        padding: verboseAlertLabel ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
+                        fontSize: 'clamp(9px,0.52vw,12px)',
+                        gap: 'clamp(3px,0.25vw,5px)',
+                      }}
+                    >
+                      <AlertTriangle style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
+                      {verboseAlertLabel && <span>Срок</span>}
+                    </span>
+                  )}
                 </span>
               )}
             </button>

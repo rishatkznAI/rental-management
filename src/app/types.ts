@@ -864,20 +864,56 @@ export interface ClientContract {
   updatedAt?: string;
 }
 
-export type DocumentType = 'contract' | 'act' | 'invoice' | 'work_order';
+export type DocumentType = 'contract' | 'act' | 'upd' | 'invoice' | 'service_act' | 'work_order' | 'other';
 export type DocumentStatus = 'draft' | 'signed' | 'sent';
 export type DocumentContractKind = 'rental' | 'supply';
+
+export interface DocumentHistoryEntry {
+  id: string;
+  action: string;
+  field?: string;
+  oldValue?: unknown;
+  newValue?: unknown;
+  comment?: string;
+  createdBy?: string;
+  createdByUserId?: string;
+  createdAt: string;
+}
+
+export interface DocumentRegistrySummary {
+  total: number;
+  withoutNumber: number;
+  duplicateNumbers: number;
+  unsigned: number;
+  signed: number;
+  currentMonth: number;
+  duplicates?: Array<{ id: string; number: string; type: DocumentType; year: number }>;
+  invalidNumbers?: Array<{ id: string; number: string; type: DocumentType; year: number }>;
+}
+
+export interface DocumentNumberingSetting {
+  documentType: DocumentType;
+  prefix: string;
+  year: number;
+  nextNumber: number;
+  padding: number;
+  resetPeriod: 'yearly' | 'never';
+  isActive: boolean;
+}
 
 export interface Document {
   id: string;
   type: DocumentType;
+  documentType?: DocumentType;
   contractKind?: DocumentContractKind;
   number: string;
+  documentNumber?: string;
   clientId?: string;
   objectId?: string;
   contractId?: string;
   client: string;
   date: string;
+  documentDate?: string;
   amount?: number;
   status: DocumentStatus;
   signatoryName?: string;
@@ -887,14 +923,28 @@ export interface Document {
   equipmentId?: string;
   equipmentInv?: string;
   equipment?: string;
+  serviceTicketId?: string;
   serviceTicket?: string;
   manager?: string;
+  createdAt?: string;
+  createdBy?: string;
+  createdByUserId?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  updatedByUserId?: string;
   contentHtml?: string;
+  fileName?: string;
+  fileUrl?: string;
   signedScanDataUrl?: string;
   signedScanFileName?: string;
   signedScanMimeType?: string;
+  sentAt?: string;
+  sentBy?: string;
   signedAt?: string;
   signedBy?: string;
+  comment?: string;
+  attachments?: unknown[];
+  history?: DocumentHistoryEntry[];
 }
 
 export interface MechanicDocument {

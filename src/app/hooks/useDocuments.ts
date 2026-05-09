@@ -4,6 +4,7 @@ import type { Document } from '../types';
 
 export const DOCUMENT_KEYS = {
   all: ['documents'] as const,
+  summary: ['documents', 'summary'] as const,
   detail: (id: string) => ['documents', id] as const,
   byRental: (rentalId: string) => ['documents', 'rental', rentalId] as const,
 };
@@ -37,6 +38,15 @@ export function useDocumentsByRental(rentalId: string) {
   });
 }
 
+export function useDocumentRegistrySummary(options: QueryOptions = {}) {
+  return useQuery({
+    queryKey: DOCUMENT_KEYS.summary,
+    queryFn: documentsService.getRegistrySummary,
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60 * 2,
+  });
+}
+
 export function useCreateDocument() {
   const qc = useQueryClient();
   return useMutation({
@@ -52,6 +62,18 @@ export function useUpdateDocument() {
       documentsService.update(id, data),
     onSuccess: (_res, { id }) => {
       qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(id) });
+    },
+  });
+}
+
+export function useAssignDocumentNumber() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => documentsService.assignNumber(id),
+    onSuccess: (_res, id) => {
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.summary });
       qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(id) });
     },
   });

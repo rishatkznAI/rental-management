@@ -36,7 +36,13 @@ import {
 } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { useClientsList } from '../hooks/useClients';
-import { useCreateDocument, useDocumentsList, useUpdateDocument } from '../hooks/useDocuments';
+import {
+  useAssignDocumentNumber,
+  useCreateDocument,
+  useDocumentRegistrySummary,
+  useDocumentsList,
+  useUpdateDocument,
+} from '../hooks/useDocuments';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { buildDocumentControl, getDocumentControlStatusLabel } from '../lib/documentControl.js';
@@ -69,7 +75,7 @@ import type { GanttRentalData } from '../mock-data';
 
 type DocumentsView = 'general' | 'control' | 'mechanics';
 
-const VALID_DOCUMENT_TYPES = new Set<DocumentType>(['contract', 'act', 'invoice', 'work_order']);
+const VALID_DOCUMENT_TYPES = new Set<DocumentType>(['contract', 'act', 'upd', 'invoice', 'service_act', 'work_order', 'other']);
 const VALID_DOCUMENT_STATUSES = new Set<DocumentStatus>(['draft', 'signed', 'sent']);
 
 type ContractFormState = {
@@ -144,8 +150,11 @@ export function getDocumentTypeLabel(doc: Partial<Doc> | null | undefined): stri
   const labels: Record<DocumentType, string> = {
     contract: getContractKindLabel(doc?.contractKind),
     act: 'Акт',
+    upd: 'УПД',
     invoice: 'Счёт',
+    service_act: 'Сервисный акт',
     work_order: 'Заказ-наряд',
+    other: 'Прочее',
   };
   const type = doc?.type;
   return VALID_DOCUMENT_TYPES.has(type as DocumentType) ? labels[type as DocumentType] : 'Документ';
@@ -165,6 +174,18 @@ function getDocumentEquipmentId(doc: Partial<Doc> | null | undefined) {
 
 function getDocumentEquipmentInv(doc: Partial<Doc> | null | undefined) {
   return displayText(doc?.equipmentInv || doc?.equipment, '');
+}
+
+function getDocumentNumber(doc: Partial<Doc> | null | undefined) {
+  return displayText(doc?.documentNumber || doc?.number, '');
+}
+
+function getDocumentDate(doc: Partial<Doc> | null | undefined) {
+  return displayText(doc?.documentDate || doc?.date, '');
+}
+
+function getDocumentServiceTicket(doc: Partial<Doc> | null | undefined) {
+  return displayText(doc?.serviceTicketId || doc?.serviceTicket, '');
 }
 
 function getRentalSourceId(entry: GanttRentalData) {
@@ -307,12 +328,14 @@ export default function Documents() {
     normalizedRole === 'Офис-менеджер' ||
     normalizedRole.includes('Механик');
   const { data: documentList = [] } = useDocumentsList();
+  const { data: registrySummary } = useDocumentRegistrySummary();
   const { data: clients = [] } = useClientsList();
   const { data: rentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: equipment = [] } = useEquipmentList();
   const createDocument = useCreateDocument();
   const updateDocument = useUpdateDocument();
+  const assignDocumentNumber = useAssignDocumentNumber();
   const { data: mechanics = EMPTY_MECHANICS } = useQuery<Mechanic[]>({
     queryKey: ['mechanics'],
     queryFn: mechanicsService.getAll,
@@ -325,6 +348,8 @@ export default function Documents() {
 
   const [search, setSearch] = React.useState('');
   const [unsignedOnly, setUnsignedOnly] = React.useState(false);
+  const [withoutNumberOnly, setWithoutNumberOnly] = React.useState(false);
+  const [duplicatesOnly, setDuplicatesOnly] = React.useState(false);
   const [clientFilter, setClientFilter] = React.useState<string>('all');
   const [rentalFilter, setRentalFilter] = React.useState<string>('all');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
@@ -344,6 +369,8 @@ export default function Documents() {
   const [selectedMechanicId, setSelectedMechanicId] = React.useState<string>('');
   const [mechanicDocuments, setMechanicDocuments] = React.useState<MechanicDocument[]>([]);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+  const [selectedDocument, setSelectedDocument] = React.useState<Doc | null>(null);
+  const [sortKey, setSortKey] = React.useState<'date' | 'number' | 'client' | 'status' | 'createdAt'>('date');
   const [createContractKind, setCreateContractKind] = React.useState<DocumentContractKind>('rental');
   const [contractForm, setContractForm] = React.useState<ContractFormState>({
     clientId: '',
@@ -452,6 +479,21 @@ export default function Documents() {
     return Array.from(names).sort((a, b) => a.localeCompare(b, 'ru'));
   }, [documents, rentals, rentalsById]);
 
+  const duplicateDocumentIds = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    documents.forEach(doc => {
+      const number = getDocumentNumber(doc).toLowerCase();
+      if (!number) return;
+      const year = getDocumentDate(doc).slice(0, 4);
+      const key = `${doc.type}:${year}:${number}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    const duplicates = new Set([...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
+    return new Set(documents
+      .filter(doc => duplicates.has(`${doc.type}:${getDocumentDate(doc).slice(0, 4)}:${getDocumentNumber(doc).toLowerCase()}`))
+      .map(doc => doc.id));
+  }, [documents]);
+
   React.useEffect(() => {
     const hasContext = hasClientContext(quickActionContext)
       || quickActionContext.rentalId
@@ -494,6 +536,7 @@ export default function Documents() {
 
   const filteredDocuments = documents.filter(doc => {
     const q = search.trim().toLowerCase();
+    const docNumber = getDocumentNumber(doc);
     const rentalId = getDocumentRentalId(doc);
     const equipmentId = getDocumentEquipmentId(doc);
     const equipmentInv = getDocumentEquipmentInv(doc);
@@ -506,6 +549,7 @@ export default function Documents() {
     const normalizedClient = doc.client || rental?.client || clientsById.get(normalizedClientId)?.company || '';
     const normalizedManager = doc.manager || rental?.manager || gantt?.manager || '';
     const matchesSearch = q === ''
+      || searchText(docNumber).includes(q)
       || searchText(doc.number).includes(q)
       || searchText(normalizedClient).includes(q)
       || searchText(rentalId).includes(q)
@@ -519,6 +563,8 @@ export default function Documents() {
     const safeStatus = getSafeDocumentStatus(doc.status);
     const matchesStatus = statusFilter === 'all' || safeStatus === statusFilter;
     const matchesUnsigned = !unsignedOnly || safeStatus !== 'signed';
+    const matchesWithoutNumber = !withoutNumberOnly || !docNumber;
+    const matchesDuplicates = !duplicatesOnly || duplicateDocumentIds.has(doc.id);
     const matchesClient = clientFilter === 'all'
       || normalizedClientId === clientFilter
       || normalizedClient === clientsById.get(clientFilter)?.company;
@@ -529,7 +575,15 @@ export default function Documents() {
     const matchesRental = rentalFilter === 'all' || rentalId === rentalFilter;
     const matchesManager = managerFilter === 'all' || normalizedManager === managerFilter;
 
-    return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesClient && matchesQuickClient && matchesRental && matchesManager;
+    return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesWithoutNumber && matchesDuplicates && matchesClient && matchesQuickClient && matchesRental && matchesManager;
+  }).sort((left, right) => {
+    const leftClient = left.client || clientsById.get(left.clientId || '')?.company || '';
+    const rightClient = right.client || clientsById.get(right.clientId || '')?.company || '';
+    if (sortKey === 'number') return getDocumentNumber(left).localeCompare(getDocumentNumber(right), 'ru');
+    if (sortKey === 'client') return leftClient.localeCompare(rightClient, 'ru');
+    if (sortKey === 'status') return getSafeDocumentStatus(left.status).localeCompare(getSafeDocumentStatus(right.status), 'ru');
+    if (sortKey === 'createdAt') return String(right.createdAt || '').localeCompare(String(left.createdAt || ''));
+    return getDocumentDate(right).localeCompare(getDocumentDate(left));
   });
 
   const documentControl = React.useMemo(() => buildDocumentControl({
@@ -564,6 +618,8 @@ export default function Documents() {
   const activeFilterCount = [
     search.trim() !== '',
     unsignedOnly,
+    withoutNumberOnly,
+    duplicatesOnly,
     clientFilter !== 'all',
     rentalFilter !== 'all',
     typeFilter !== 'all',
@@ -680,7 +736,7 @@ export default function Documents() {
     const payload: Omit<Doc, 'id'> = {
       type: 'contract',
       contractKind: createContractKind,
-      number: generatedContractNumber,
+      number: '',
       clientId: contractForm.clientId,
       client: contractForm.client.trim(),
       date: contractForm.date,
@@ -688,15 +744,7 @@ export default function Documents() {
       signatoryName: contractForm.signatoryName.trim(),
       signatoryBasis: contractForm.signatoryBasis.trim(),
       manager: user?.name || 'Система',
-      contentHtml: buildContractDraftHtml({
-        kind: createContractKind,
-        number: generatedContractNumber,
-        client: contractForm.client.trim(),
-        date: contractForm.date,
-        signatoryName: contractForm.signatoryName.trim(),
-        signatoryBasis: contractForm.signatoryBasis.trim(),
-        comment: contractForm.comment.trim() || undefined,
-      }),
+      contentHtml: '',
     };
     const rental = contractForm.rentalId ? rentalsById.get(contractForm.rentalId) : undefined;
     const gantt = contractForm.rentalId ? ganttByRentalId.get(contractForm.rentalId) : undefined;
@@ -711,9 +759,33 @@ export default function Documents() {
       payload.equipment = payload.equipmentInv;
     }
 
-    await createDocument.mutateAsync(payload);
+    const created = await createDocument.mutateAsync(payload);
+    await updateDocument.mutateAsync({
+      id: created.id,
+      data: {
+        contentHtml: buildContractDraftHtml({
+          kind: createContractKind,
+          number: getDocumentNumber(created),
+          client: contractForm.client.trim(),
+          date: contractForm.date,
+          signatoryName: contractForm.signatoryName.trim(),
+          signatoryBasis: contractForm.signatoryBasis.trim(),
+          comment: contractForm.comment.trim() || undefined,
+        }),
+      },
+    });
     setCreateDialogOpen(false);
-    toast.success(`${getContractKindLabel(createContractKind)} создан.`);
+    toast.success(`${getContractKindLabel(createContractKind)} создан: ${getDocumentNumber(created)}.`);
+  }
+
+  async function handleAssignNumber(doc: Doc) {
+    try {
+      const updated = await assignDocumentNumber.mutateAsync(doc.id);
+      toast.success(`Номер присвоен: ${getDocumentNumber(updated)}.`);
+      setSelectedDocument(current => current?.id === updated.id ? updated : current);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось присвоить номер.');
+    }
   }
 
   function openDocument(doc: Doc) {
@@ -803,6 +875,26 @@ export default function Documents() {
 
       {view === 'general' ? (
         <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {[
+              ['Всего', registrySummary?.total ?? documents.length],
+              ['Без номера', registrySummary?.withoutNumber ?? documents.filter(doc => !getDocumentNumber(doc)).length],
+              ['Дубли', registrySummary?.duplicateNumbers ?? duplicateDocumentIds.size],
+              ['Неподписанные', registrySummary?.unsigned ?? documents.filter(doc => getSafeDocumentStatus(doc.status) !== 'signed').length],
+              ['Подписанные', registrySummary?.signed ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'signed').length],
+              ['За месяц', registrySummary?.currentMonth ?? documents.filter(doc => getDocumentDate(doc).slice(0, 7) === new Date().toISOString().slice(0, 7)).length],
+            ].map(([label, value]) => (
+              <div key={String(label)} className={`rounded-lg border p-4 ${
+                Number(value) > 0 && ['Без номера', 'Дубли'].includes(String(label))
+                  ? 'border-amber-300 bg-amber-50/70 dark:border-amber-900/70 dark:bg-amber-950/20'
+                  : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
+              }`}>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
+              </div>
+            ))}
+          </div>
+
           <div className="flex flex-wrap items-center justify-end gap-2">
             {canManageDocuments ? (
               <>
@@ -827,11 +919,14 @@ export default function Documents() {
             onReset={() => {
               setSearch('');
               setUnsignedOnly(false);
+              setWithoutNumberOnly(false);
+              setDuplicatesOnly(false);
               setClientFilter('all');
               setRentalFilter('all');
               setTypeFilter('all');
               setStatusFilter('all');
               setManagerFilter('all');
+              setSortKey('date');
             }}
           >
             <div className="grid gap-4 md:grid-cols-2">
@@ -856,6 +951,26 @@ export default function Documents() {
                   <FileSignature className="h-4 w-4" />
                   Без подписи
                 </Button>
+              </FilterField>
+              <FilterField label="Нумерация">
+                <div className="grid gap-2">
+                  <Button
+                    type="button"
+                    variant={withoutNumberOnly ? 'default' : 'secondary'}
+                    onClick={() => setWithoutNumberOnly(value => !value)}
+                    className="w-full justify-start"
+                  >
+                    Без номера
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={duplicatesOnly ? 'default' : 'secondary'}
+                    onClick={() => setDuplicatesOnly(value => !value)}
+                    className="w-full justify-start"
+                  >
+                    Дубли номеров
+                  </Button>
+                </div>
               </FilterField>
               <FilterField label="Клиент">
                 <Select value={clientFilter} onValueChange={setClientFilter}>
@@ -892,8 +1007,11 @@ export default function Documents() {
                     <SelectItem value="all">Все типы</SelectItem>
                     <SelectItem value="contract">Договоры</SelectItem>
                     <SelectItem value="act">Акты</SelectItem>
+                    <SelectItem value="upd">УПД</SelectItem>
                     <SelectItem value="invoice">Счета</SelectItem>
+                    <SelectItem value="service_act">Сервисные акты</SelectItem>
                     <SelectItem value="work_order">Заказ-наряды</SelectItem>
+                    <SelectItem value="other">Прочие</SelectItem>
                   </SelectContent>
                 </Select>
               </FilterField>
@@ -923,6 +1041,20 @@ export default function Documents() {
                   </SelectContent>
                 </Select>
               </FilterField>
+              <FilterField label="Сортировка">
+                <Select value={sortKey} onValueChange={(value) => setSortKey(value as typeof sortKey)}>
+                  <SelectTrigger className="app-filter-input">
+                    <SelectValue placeholder="Сортировка" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="date">Дата документа</SelectItem>
+                    <SelectItem value="number">Номер</SelectItem>
+                    <SelectItem value="client">Клиент</SelectItem>
+                    <SelectItem value="status">Статус</SelectItem>
+                    <SelectItem value="createdAt">Дата создания</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FilterField>
             </div>
           </FilterDialog>
 
@@ -940,12 +1072,16 @@ export default function Documents() {
                 <TableRow>
                   <TableHead>Тип</TableHead>
                   <TableHead>Номер</TableHead>
+                  <TableHead>Дата документа</TableHead>
                   <TableHead>Клиент</TableHead>
                   <TableHead>Аренда</TableHead>
                   <TableHead>Техника</TableHead>
-                  <TableHead>Подписант</TableHead>
-                  <TableHead>Дата</TableHead>
+                  <TableHead>Сервис</TableHead>
+                  <TableHead>Сумма</TableHead>
+                  <TableHead>Ответственный</TableHead>
                   <TableHead>Статус</TableHead>
+                  <TableHead>Создан</TableHead>
+                  <TableHead>Отправлен/подписан</TableHead>
                   <TableHead className="w-[160px]">Действия</TableHead>
                 </TableRow>
               </TableHeader>
@@ -961,8 +1097,10 @@ export default function Documents() {
                     : (equipmentInv ? equipmentByInventory.get(equipmentInv) : undefined);
                   const clientName = doc.client || rental?.client || clientsById.get(doc.clientId || '')?.company;
                   const managerName = doc.manager || rental?.manager || gantt?.manager;
+                  const docNumber = getDocumentNumber(doc);
+                  const serviceTicket = getDocumentServiceTicket(doc);
                   return (
-                  <TableRow key={doc.id || doc.number || index}>
+                  <TableRow key={doc.id || doc.number || index} className="cursor-pointer" onClick={() => setSelectedDocument(doc)}>
                     <TableCell>
                       <div>
                         <p className="text-sm font-medium">{getDocumentTypeLabel(doc)}</p>
@@ -975,17 +1113,18 @@ export default function Documents() {
                     </TableCell>
                     <TableCell>
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{displayText(doc.number)}</p>
+                        <p className="font-medium text-gray-900 dark:text-white">{docNumber || 'Без номера'}</p>
+                        {duplicateDocumentIds.has(doc.id) ? (
+                          <p className="text-xs text-amber-600 dark:text-amber-400">Дубль номера</p>
+                        ) : null}
                         {doc.signedScanFileName ? (
                           <p className="text-xs text-green-600 dark:text-green-400">Скан загружен</p>
                         ) : null}
                       </div>
                     </TableCell>
+                    <TableCell>{formatDate(getDocumentDate(doc))}</TableCell>
                     <TableCell>
                       <p className="text-sm">{displayText(clientName)}</p>
-                      {managerName ? (
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{managerName}</p>
-                      ) : null}
                     </TableCell>
                     <TableCell>
                       <p className="text-sm">{displayText(rentalId)}</p>
@@ -999,25 +1138,44 @@ export default function Documents() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">{displayText(`${equipmentItem.manufacturer || ''} ${equipmentItem.model || ''}`.trim())}</p>
                       ) : null}
                     </TableCell>
+                    <TableCell>{displayText(serviceTicket)}</TableCell>
+                    <TableCell>{doc.amount ? formatCurrency(doc.amount) : '—'}</TableCell>
                     <TableCell>
                       <div>
-                        <p className="text-sm">{doc.signatoryName || '—'}</p>
-                        {doc.signatoryBasis ? (
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{doc.signatoryBasis}</p>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm">{formatDate(String(doc.date || ''))}</p>
-                        {doc.signedAt ? (
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.signedAt)}</p>
+                        <p className="text-sm">{displayText(managerName || doc.createdBy)}</p>
+                        {doc.updatedBy ? (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">изм. {doc.updatedBy}</p>
                         ) : null}
                       </div>
                     </TableCell>
                     <TableCell>{getDocumentStatusBadge(getSafeDocumentStatus(doc.status))}</TableCell>
                     <TableCell>
-                      <div className="flex gap-2">
+                      <div>
+                        <p className="text-sm">{doc.createdAt ? formatDateTime(doc.createdAt) : '—'}</p>
+                        {doc.createdBy ? (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{doc.createdBy}</p>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <p className="text-sm">{doc.sentAt ? formatDateTime(doc.sentAt) : '—'}</p>
+                        {doc.signedAt ? (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">подп. {formatDateTime(doc.signedAt)}</p>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2" onClick={(event) => event.stopPropagation()}>
+                        {!docNumber && canManageDocuments ? (
+                          <button
+                            onClick={() => void handleAssignNumber(doc)}
+                            className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                            title="Присвоить номер"
+                          >
+                            <FileSignature className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                          </button>
+                        ) : null}
                         <button
                           onClick={() => openDocument(doc)}
                           disabled={!doc.contentHtml && !doc.signedScanDataUrl}
@@ -1214,6 +1372,110 @@ export default function Documents() {
                   Создать договор
                 </Button>
               </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={Boolean(selectedDocument)} onOpenChange={(open) => !open && setSelectedDocument(null)}>
+            <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-3xl">
+              {selectedDocument ? (
+                <>
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <FileSignature className="h-5 w-5" />
+                      {getDocumentNumber(selectedDocument) || 'Документ без номера'}
+                    </DialogTitle>
+                    <DialogDescription>
+                      {getDocumentTypeLabel(selectedDocument)} · {formatDate(getDocumentDate(selectedDocument))}
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="max-h-[58vh] space-y-4 overflow-y-auto pr-1">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {[
+                        ['Статус', getSafeDocumentStatus(selectedDocument.status) === 'signed' ? 'Подписан' : getSafeDocumentStatus(selectedDocument.status) === 'sent' ? 'Отправлен' : 'Черновик'],
+                        ['Клиент', displayText(selectedDocument.client || clientsById.get(selectedDocument.clientId || '')?.company)],
+                        ['Аренда', displayText(getDocumentRentalId(selectedDocument))],
+                        ['Техника', displayText(getDocumentEquipmentInv(selectedDocument) || selectedDocument.equipmentId)],
+                        ['Сервисная заявка', displayText(getDocumentServiceTicket(selectedDocument))],
+                        ['Сумма', selectedDocument.amount ? formatCurrency(selectedDocument.amount) : '—'],
+                        ['Создал', displayText(selectedDocument.createdBy)],
+                        ['Изменил', displayText(selectedDocument.updatedBy)],
+                        ['Создан', selectedDocument.createdAt ? formatDateTime(selectedDocument.createdAt) : '—'],
+                        ['Подписан', selectedDocument.signedAt ? formatDateTime(selectedDocument.signedAt) : '—'],
+                      ].map(([label, value]) => (
+                        <div key={String(label)} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+                          <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {(selectedDocument.fileUrl || selectedDocument.fileName || selectedDocument.signedScanFileName) ? (
+                      <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Файл</p>
+                        <p className="mt-1 text-sm text-gray-900 dark:text-white">
+                          {selectedDocument.fileName || selectedDocument.signedScanFileName || selectedDocument.fileUrl}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700">
+                      <div className="border-b border-gray-200 px-3 py-2 text-sm font-medium dark:border-gray-700">
+                        История изменений
+                      </div>
+                      <div className="max-h-64 overflow-y-auto p-3">
+                        {selectedDocument.history?.length ? (
+                          <div className="space-y-3">
+                            {[...selectedDocument.history].reverse().map(entry => (
+                              <div key={entry.id} className="rounded-md bg-gray-50 p-3 text-sm dark:bg-gray-900/40">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-medium text-gray-900 dark:text-white">
+                                    {entry.action === 'created' ? 'Создание' : entry.action === 'number_assigned' ? 'Номер присвоен' : entry.action === 'number_changed' ? 'Номер изменён' : 'Изменение'}
+                                  </span>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(entry.createdAt)}</span>
+                                </div>
+                                {entry.field ? (
+                                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    {entry.field}: {displayText(entry.oldValue, '—')} → {displayText(entry.newValue, '—')}
+                                  </p>
+                                ) : null}
+                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{displayText(entry.createdBy)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">История пока не зафиксирована.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <DialogFooter>
+                    {!getDocumentNumber(selectedDocument) && canManageDocuments ? (
+                      <Button variant="secondary" onClick={() => void handleAssignNumber(selectedDocument)}>
+                        Присвоить номер
+                      </Button>
+                    ) : null}
+                    {canManageDocuments ? (
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          void updateDocument.mutateAsync({
+                            id: selectedDocument.id,
+                            data: { status: selectedDocument.status === 'signed' ? 'draft' : 'sent' },
+                          }).then(updated => {
+                            setSelectedDocument(updated);
+                            toast.success('Статус документа обновлён.');
+                          });
+                        }}
+                      >
+                        Изменить статус
+                      </Button>
+                    ) : null}
+                    <Button variant="secondary" onClick={() => setSelectedDocument(null)}>Закрыть</Button>
+                  </DialogFooter>
+                </>
+              ) : null}
             </DialogContent>
           </Dialog>
         </>

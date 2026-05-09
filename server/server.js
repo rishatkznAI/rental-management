@@ -122,6 +122,7 @@ const {
 const { registerCrudRoutes } = require('./routes/crud');
 const { registerDebtCollectionPlanRoutes } = require('./routes/debt-collection-plans');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
+const { registerDocumentRoutes } = require('./routes/documents');
 const { registerFinanceRoutes } = require('./routes/finance');
 const { registerGsmRoutes } = require('./routes/gsm');
 const { registerLeasingRoutes } = require('./routes/leasing');
@@ -1329,6 +1330,20 @@ apiRouter.use(registerStaffRoutes({
   readData,
   requireAuth,
 }));
+
+registerDocumentRoutes(apiRouter, {
+  readData,
+  writeData,
+  requireAuth,
+  requireRead,
+  requireWrite,
+  accessControl,
+  generateId,
+  idPrefixes: ID_PREFIXES,
+  nowIso,
+  auditLog,
+  normalizeRecordClientLink,
+});
 
 apiRouter.use(registerCrudRoutes({
   collections: COLLECTIONS,

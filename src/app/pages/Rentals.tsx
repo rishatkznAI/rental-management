@@ -486,6 +486,11 @@ function safeRentalCompactDate(value?: string) {
   return typeof value === 'string' && value.length >= 10 ? value.slice(5, 10) : '—';
 }
 
+function safeRentalMarkerDate(value?: string) {
+  if (typeof value !== 'string' || value.length < 10) return '—';
+  return `${value.slice(8, 10)}.${value.slice(5, 7)}`;
+}
+
 function safeMovementDateLabel(value?: string) {
   if (!value) return '—';
   const date = new Date(value);
@@ -3565,6 +3570,14 @@ function EquipmentRow({
           const showOverdueAlert = rental.status === 'active' && rental.endDate < todayStr;
           const barLeft = pos.left + 2;
           const barWidth = Math.max(10, pos.width - 4);
+          const markerLabelVisible = barHeight >= 22 && barWidth > 180;
+          const verboseMarkerLabel = barWidth > 360;
+          const paidMarkerLabel = financeBar.paidThroughDate
+            ? `${verboseMarkerLabel ? 'Оплачено до ' : 'до '}${safeRentalMarkerDate(financeBar.paidThroughDate)}`
+            : '';
+          const overdueMarkerLabel = financeBar.overdueSince
+            ? `${verboseMarkerLabel ? 'Просрочка с ' : 'с '}${safeRentalMarkerDate(financeBar.overdueSince)}`
+            : '';
           const tooltip = `${rental.client || 'Без клиента'} · ${equipment.model || rental.equipmentInv || 'Техника'} · ${safeRentalCompactDate(rental.startDate)} — ${safeRentalCompactDate(rental.endDate)} · ${statusLabel} · ${paymentLabel}${
             financeBar.amount ? ` · сумма ${formatCurrency(financeBar.amount)}` : ''
           }${
@@ -3584,7 +3597,7 @@ function EquipmentRow({
               key={rental.id}
               type="button"
               onClick={() => onBarClick(rental)}
-              className={`absolute z-[8] flex cursor-pointer items-center overflow-hidden rounded-lg border border-white/25 bg-slate-600 text-left text-[10px] font-semibold text-white shadow-sm shadow-slate-950/20 transition-all hover:z-[11] hover:-translate-y-[1px] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/70 dark:border-white/15 ${
+              className={`absolute z-[8] flex cursor-pointer items-center overflow-hidden rounded-lg border border-white/25 bg-slate-600 text-left text-[clamp(10px,0.62vw,12px)] font-semibold text-white shadow-sm shadow-slate-950/20 transition-all hover:z-[11] hover:-translate-y-[1px] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/70 dark:border-white/15 ${
                 isConflict ? 'ring-2 ring-red-500 ring-offset-1 dark:ring-red-400' : ''
               }`}
               style={{
@@ -3614,19 +3627,31 @@ function EquipmentRow({
               <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/35" />
               {financeBar.paidThroughDate && financeBar.paidThroughPercent !== null && financeBar.paidThroughPercent > 0 && financeBar.paidThroughPercent < 100 && (
                 <span
-                  className="pointer-events-none absolute inset-y-0 w-px bg-white/80 shadow-[0_0_0_1px_rgba(15,23,42,0.22)]"
-                  style={{ left: `${financeBar.paidThroughPercent}%` }}
+                  data-payment-marker="paid-through"
+                  className="pointer-events-none absolute top-1/2 z-[2] block -translate-y-1/2 rounded-full bg-white/90 shadow-[0_0_0_1px_rgba(15,23,42,0.25),0_0_10px_rgba(255,255,255,0.22)]"
+                  style={{
+                    display: 'block',
+                    left: `${financeBar.paidThroughPercent}%`,
+                    width: 'clamp(2px,0.14vw,4px)',
+                    height: 'clamp(18px,1.1vw,26px)',
+                  }}
                 />
               )}
               {financeBar.overdueSince && financeBar.overdueSincePercent !== null && (
                 <span
-                  className="pointer-events-none absolute inset-y-0 w-0.5 bg-red-950/80 dark:bg-red-100/90"
-                  style={{ left: `${financeBar.overdueSincePercent}%` }}
+                  data-payment-marker="overdue-since"
+                  className="pointer-events-none absolute top-1/2 z-[2] block -translate-y-1/2 rounded-full bg-red-950/90 shadow-[0_0_0_1px_rgba(255,255,255,0.32),0_0_12px_rgba(239,68,68,0.38)] dark:bg-red-100/95"
+                  style={{
+                    display: 'block',
+                    left: `${financeBar.overdueSincePercent}%`,
+                    width: 'clamp(3px,0.18vw,5px)',
+                    height: 'clamp(18px,1.1vw,26px)',
+                  }}
                 />
               )}
               {barWidth > 110 && (
                 <span className="pointer-events-none relative z-[1] min-w-0 truncate px-2 leading-none">
-                  <span className="mr-1 rounded bg-black/16 px-1 py-0.5 text-[8px] uppercase tracking-[0.08em] text-white/85">
+                  <span className="mr-1 rounded bg-black/16 px-1 py-0.5 text-[clamp(8px,0.48vw,10px)] uppercase tracking-[0.08em] text-white/85">
                     {statusLabel}
                   </span>
                   {rental.clientShort || rental.client || rental.equipmentInv || 'Аренда'}
@@ -3635,27 +3660,44 @@ function EquipmentRow({
               {barWidth <= 110 && isConflict && (
                 <AlertTriangle className="relative z-[1] ml-1.5 h-3 w-3 shrink-0" />
               )}
-              {barWidth > 170 && financeBar.paidThroughDate && (
+              {markerLabelVisible && financeBar.paidThroughDate && (
                 <span
-                  className="pointer-events-none absolute bottom-0.5 z-[1] max-w-[92px] truncate rounded bg-black/22 px-1 py-0.5 text-[8px] font-medium text-white/90"
-                  style={{ left: `${Math.min(Math.max(financeBar.paidThroughPercent ?? 0, 4), 72)}%` }}
+                  data-payment-marker-label="paid-through"
+                  className="pointer-events-none absolute bottom-0.5 z-[3] truncate rounded bg-black/32 font-medium text-white/95 shadow-sm ring-1 ring-white/15"
+                  style={{
+                    left: `${Math.min(Math.max(financeBar.paidThroughPercent ?? 0, 4), 72)}%`,
+                    maxWidth: 'clamp(82px,7.4vw,150px)',
+                    padding: 'clamp(2px,0.18vw,4px) clamp(5px,0.36vw,8px)',
+                    fontSize: 'clamp(9px,0.55vw,12px)',
+                    lineHeight: 1,
+                  }}
                 >
-                  до {safeRentalCompactDate(financeBar.paidThroughDate)}
+                  {paidMarkerLabel}
                 </span>
               )}
-              {barWidth > 180 && financeBar.overdueSince && (
+              {markerLabelVisible && financeBar.overdueSince && (
                 <span
-                  className="pointer-events-none absolute top-0.5 z-[1] max-w-[104px] truncate rounded bg-red-950/50 px-1 py-0.5 text-[8px] font-medium text-white"
-                  style={{ left: `${Math.min(Math.max(financeBar.overdueSincePercent ?? 0, 4), 70)}%` }}
+                  data-payment-marker-label="overdue-since"
+                  className="pointer-events-none absolute top-0.5 z-[3] truncate rounded bg-red-950/70 font-medium text-white shadow-sm ring-1 ring-red-100/25"
+                  style={{
+                    left: `${Math.min(Math.max(financeBar.overdueSincePercent ?? 0, 4), 70)}%`,
+                    maxWidth: 'clamp(78px,8vw,160px)',
+                    padding: 'clamp(2px,0.18vw,4px) clamp(5px,0.36vw,8px)',
+                    fontSize: 'clamp(9px,0.55vw,12px)',
+                    lineHeight: 1,
+                  }}
                 >
-                  с {safeRentalCompactDate(financeBar.overdueSince)}
+                  {overdueMarkerLabel}
                 </span>
               )}
               {(showPaymentAlert || showUpdAlert || showOverdueAlert) && (
-                <span className="pointer-events-none absolute bottom-0.5 right-1 z-[1] flex gap-0.5">
-                  {showPaymentAlert && <span className="h-1.5 w-1.5 rounded-full bg-white/80" />}
-                  {showUpdAlert && <span className="h-1.5 w-1.5 rounded-full bg-amber-200" />}
-                  {showOverdueAlert && <span className="h-1.5 w-1.5 rounded-full bg-red-100" />}
+                <span
+                  className="pointer-events-none absolute bottom-0.5 right-1 z-[3] flex"
+                  style={{ gap: 'clamp(2px,0.18vw,4px)' }}
+                >
+                  {showPaymentAlert && <span className="block rounded-full bg-white/85 shadow-sm" style={{ width: 'clamp(7px,0.46vw,10px)', height: 'clamp(7px,0.46vw,10px)' }} />}
+                  {showUpdAlert && <span className="block rounded-full bg-amber-200 shadow-sm" style={{ width: 'clamp(7px,0.46vw,10px)', height: 'clamp(7px,0.46vw,10px)' }} />}
+                  {showOverdueAlert && <span className="block rounded-full bg-red-100 shadow-sm" style={{ width: 'clamp(7px,0.46vw,10px)', height: 'clamp(7px,0.46vw,10px)' }} />}
                 </span>
               )}
             </button>

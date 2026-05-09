@@ -91,8 +91,8 @@ export default function Login() {
     <main className="min-h-screen w-screen overflow-x-hidden bg-[#0e0e0e] text-[#f0f0f0]">
       <h1 className="sr-only">Страница авторизации Скайтех</h1>
 
-      <div className="flex min-h-screen w-full flex-col bg-[#0e0e0e] lg:flex-row">
-        <section className="relative flex min-h-[220px] overflow-hidden bg-[#0b1120] px-6 py-6 sm:px-8 lg:min-h-screen lg:flex-1 lg:px-12 lg:py-10">
+      <div className="grid min-h-screen w-full bg-[#0e0e0e] lg:grid-cols-2">
+        <section className="relative flex min-h-[220px] overflow-hidden bg-[#0b1120] px-6 py-6 sm:px-8 lg:min-h-screen lg:justify-end lg:px-12 lg:py-10 xl:px-20">
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(200,241,53,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(200,241,53,0.03)_1px,transparent_1px)] bg-[size:40px_40px]"
@@ -103,7 +103,7 @@ export default function Login() {
           />
 
           <div className="relative z-10 flex w-full max-w-[560px] flex-col justify-between">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 lg:ml-auto lg:w-full lg:max-w-[360px]">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[#c8f135] text-[#0b1120] shadow-lg shadow-[#c8f135]/10">
                 <TowerControl className="h-[18px] w-[18px]" aria-hidden="true" strokeWidth={2.2} />
               </div>
@@ -113,7 +113,7 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="my-8 max-w-[360px] lg:my-0 lg:flex lg:flex-1 lg:items-center">
+            <div className="my-8 max-w-[360px] lg:my-0 lg:ml-auto lg:flex lg:flex-1 lg:items-center">
               <div>
                 <div className="mb-5 flex items-center gap-3">
                   <div className="h-0.5 w-7 rounded-full bg-[#c8f135]" />
@@ -128,14 +128,14 @@ export default function Login() {
               </div>
             </div>
 
-            <p className="text-[10px] tracking-[0.03em] text-[#405524]">
+            <p className="text-[10px] tracking-[0.03em] text-[#405524] lg:ml-auto lg:w-full lg:max-w-[360px]">
               © 2026 Скайтех. Все права защищены.
             </p>
           </div>
         </section>
 
-        <section className="flex w-full items-center justify-center border-t border-[#161616] bg-[#0e0e0e] px-6 py-10 sm:px-8 lg:w-[420px] lg:min-w-[420px] lg:border-l lg:border-t-0 lg:px-11 lg:py-12">
-          <div className="w-full max-w-[380px] lg:max-w-none">
+        <section className="flex w-full items-center justify-center border-t border-[#161616] bg-[#0e0e0e] px-6 py-10 sm:px-8 lg:border-l lg:border-t-0 lg:px-12 lg:py-12 xl:px-20">
+          <div className="w-full max-w-[420px]">
             <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[#555]">Авторизация</p>
             <h2 className="text-[22px] font-medium leading-7 tracking-normal text-[#f0f0f0]">Добро пожаловать</h2>
             <p className="mt-1 mb-8 text-[13px] leading-5 text-[#666]">Войдите, чтобы продолжить работу</p>

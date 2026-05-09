@@ -119,8 +119,8 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-lg rounded-xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
+      <div data-state="open" className="app-animate-overlay absolute inset-0 bg-black/50" onClick={onClose} />
+      <div data-state="open" className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Добавить платёж</h2>
           <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700">

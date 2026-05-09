@@ -307,12 +307,20 @@ export function RentalDrawer({
   const hasMaintenanceFilters = maintenanceRows.some(row => !!row.value?.trim());
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-0 z-50">
       {/* Overlay */}
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div
+        data-state="open"
+        className="app-animate-overlay absolute inset-0 bg-black/30"
+        onClick={onClose}
+      />
 
       {/* Drawer */}
-      <div className="relative z-10 flex w-[38%] min-w-[420px] max-w-[600px] flex-col bg-white shadow-2xl dark:bg-gray-800">
+      <div
+        data-side="right"
+        data-state="open"
+        className="app-animate-drawer fixed inset-y-0 right-0 z-10 flex w-full max-w-[600px] flex-col bg-white shadow-2xl sm:w-[38%] sm:min-w-[420px] dark:bg-gray-800"
+      >
         {/* Header */}
         <div className="flex items-start justify-between border-b border-gray-200 p-5 dark:border-gray-700">
           <div className="min-w-0 flex-1">

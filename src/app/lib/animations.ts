@@ -2,9 +2,9 @@ import { cn } from './utils';
 
 export const animationDurations = {
   instant: 1,
-  fast: 140,
-  base: 180,
-  relaxed: 220,
+  fast: 160,
+  base: 220,
+  relaxed: 260,
 } as const;
 
 export const animationEasings = {
@@ -19,9 +19,9 @@ export const animationSpring = {
 } as const;
 
 export const drawerOffset = {
-  compact: '1rem',
-  default: '1.5rem',
-  wide: '2rem',
+  compact: '100%',
+  default: '100%',
+  wide: '100%',
 } as const;
 
 export const animationClasses = {

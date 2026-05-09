@@ -41,15 +41,16 @@
   --sidebar-border: rgba(23, 25, 35, 0.08);
   --sidebar-ring: rgba(212, 247, 74, 0.5);
   --motion-duration-instant: 1ms;
-  --motion-duration-fast: 140ms;
-  --motion-duration-base: 180ms;
-  --motion-duration-relaxed: 220ms;
+  --motion-duration-fast: 160ms;
+  --motion-duration-base: 220ms;
+  --motion-duration-relaxed: 260ms;
   --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --motion-ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
-  --motion-modal-scale-from: 0.96;
-  --motion-section-y: 6px;
-  --motion-drawer-offset: 1.5rem;
+  --motion-modal-scale-from: 0.94;
+  --motion-modal-y: 8px;
+  --motion-section-y: 10px;
+  --motion-drawer-offset: 100%;
 }
 
 .dark {
@@ -376,11 +377,11 @@
   }
 
   .app-animate-tabs {
-    animation: app-tabs-in var(--motion-duration-fast) var(--motion-ease-standard) both;
+    animation: app-tabs-in 180ms var(--motion-ease-standard) both;
   }
 
   .app-animate-popover {
-    animation-duration: var(--motion-duration-fast);
+    animation-duration: 150ms;
     animation-timing-function: var(--motion-ease-standard);
     animation-fill-mode: both;
     transform-origin: var(--radix-select-content-transform-origin, center);
@@ -414,7 +415,7 @@
 @keyframes app-modal-in {
   from {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(var(--motion-modal-scale-from));
+    transform: translate(-50%, calc(-50% + var(--motion-modal-y))) scale(var(--motion-modal-scale-from));
   }
   to {
     opacity: 1;
@@ -429,48 +430,48 @@
   }
   to {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(var(--motion-modal-scale-from));
+    transform: translate(-50%, calc(-50% + var(--motion-modal-y))) scale(var(--motion-modal-scale-from));
   }
 }
 
 @keyframes app-drawer-right-in {
-  from { transform: translateX(var(--motion-drawer-offset)); opacity: 0.98; }
+  from { transform: translateX(var(--motion-drawer-offset)); opacity: 0.96; }
   to { transform: translateX(0); opacity: 1; }
 }
 
 @keyframes app-drawer-right-out {
   from { transform: translateX(0); opacity: 1; }
-  to { transform: translateX(var(--motion-drawer-offset)); opacity: 0.98; }
+  to { transform: translateX(var(--motion-drawer-offset)); opacity: 0.96; }
 }
 
 @keyframes app-drawer-left-in {
-  from { transform: translateX(calc(var(--motion-drawer-offset) * -1)); opacity: 0.98; }
+  from { transform: translateX(calc(var(--motion-drawer-offset) * -1)); opacity: 0.96; }
   to { transform: translateX(0); opacity: 1; }
 }
 
 @keyframes app-drawer-left-out {
   from { transform: translateX(0); opacity: 1; }
-  to { transform: translateX(calc(var(--motion-drawer-offset) * -1)); opacity: 0.98; }
+  to { transform: translateX(calc(var(--motion-drawer-offset) * -1)); opacity: 0.96; }
 }
 
 @keyframes app-drawer-top-in {
-  from { transform: translateY(calc(var(--motion-drawer-offset) * -1)); opacity: 0.98; }
+  from { transform: translateY(calc(var(--motion-drawer-offset) * -1)); opacity: 0.96; }
   to { transform: translateY(0); opacity: 1; }
 }
 
 @keyframes app-drawer-top-out {
   from { transform: translateY(0); opacity: 1; }
-  to { transform: translateY(calc(var(--motion-drawer-offset) * -1)); opacity: 0.98; }
+  to { transform: translateY(calc(var(--motion-drawer-offset) * -1)); opacity: 0.96; }
 }
 
 @keyframes app-drawer-bottom-in {
-  from { transform: translateY(var(--motion-drawer-offset)); opacity: 0.98; }
+  from { transform: translateY(var(--motion-drawer-offset)); opacity: 0.96; }
   to { transform: translateY(0); opacity: 1; }
 }
 
 @keyframes app-drawer-bottom-out {
   from { transform: translateY(0); opacity: 1; }
-  to { transform: translateY(var(--motion-drawer-offset)); opacity: 0.98; }
+  to { transform: translateY(var(--motion-drawer-offset)); opacity: 0.96; }
 }
 
 @keyframes app-section-in {
@@ -487,7 +488,7 @@
 @keyframes app-tabs-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -498,7 +499,7 @@
 @keyframes app-popover-in {
   from {
     opacity: 0;
-    transform: translateY(2px) scale(0.98);
+    transform: translateY(4px) scale(0.97);
   }
   to {
     opacity: 1;
@@ -513,14 +514,14 @@
   }
   to {
     opacity: 0;
-    transform: translateY(2px) scale(0.98);
+    transform: translateY(4px) scale(0.97);
   }
 }
 
 @keyframes app-toast-in {
   from {
     opacity: 0;
-    transform: translate3d(var(--app-toast-translate-x, 0), 8px, 0);
+    transform: translate3d(var(--app-toast-translate-x, 0), 14px, 0);
   }
   to {
     opacity: 1;

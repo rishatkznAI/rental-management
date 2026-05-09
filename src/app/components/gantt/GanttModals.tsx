@@ -158,8 +158,8 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+      <div data-state="open" className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
+      <div data-state="open" className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <RotateCcw className="h-5 w-5 text-[--color-primary]" />
@@ -310,8 +310,8 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+      <div data-state="open" className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
+      <div data-state="open" className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <PauseCircle className="h-5 w-5 text-amber-500" />
@@ -575,8 +575,8 @@ export function NewRentalModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+      <div data-state="open" className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
+      <div data-state="open" className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Новая аренда</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">

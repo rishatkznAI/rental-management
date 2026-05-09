@@ -6,10 +6,11 @@ export const DEBT_COLLECTION_PLAN_KEYS = {
   all: ['debt_collection_plans'] as const,
 };
 
-export function useDebtCollectionPlans() {
+export function useDebtCollectionPlans(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: DEBT_COLLECTION_PLAN_KEYS.all,
     queryFn: debtCollectionPlansService.getAll,
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2,
   });
 }

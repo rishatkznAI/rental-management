@@ -20,7 +20,7 @@ import {
   Plus, TrendingUp, AlertTriangle, Wrench, DollarSign, Calendar,
   User, Target, FileText, CreditCard, RefreshCw, CheckCircle, Truck,
   ShieldAlert, Clock, Ban, ArrowRight, ChevronDown, ChevronUp,
-  PackageX, ClipboardX, Zap, ListChecks,
+  PackageX, ClipboardX, Zap, ListChecks, Activity,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { formatCurrency, formatDate, getRentalDays } from '../lib/utils';
@@ -33,6 +33,7 @@ import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
 import { financeService } from '../services/finance.service';
 import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
+import { deliveriesService } from '../services/deliveries.service';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { useClientsList } from '../hooks/useClients';
@@ -57,6 +58,7 @@ import type {
   Document,
   EquipmentStatus,
   ManagerBreakdownResponse,
+  Delivery,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
@@ -109,6 +111,13 @@ function isUnsignedDocument(doc: Document) {
   return (doc.type === 'contract' || doc.type === 'act') && doc.status !== 'signed';
 }
 
+function toDateKey(value?: string | null) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
+}
+
 type RoleFocusCard = {
   id: string;
   title: string;
@@ -128,23 +137,41 @@ export default function Dashboard() {
   const { can } = usePermissions();
   const qc = useQueryClient();
   const canViewReports = can('view', 'reports');
+  const canViewFinance = can('view', 'finance');
+  const canViewPayments = can('view', 'payments');
+  const canViewMoney = canViewFinance || canViewPayments;
+  const canViewDocuments = can('view', 'documents');
+  const canViewService = can('view', 'service');
+  const canViewEquipment = can('view', 'equipment');
+  const canViewClients = can('view', 'clients');
+  const canViewRentals = can('view', 'rentals');
+  const canViewPlanner = can('view', 'planner');
+  const canViewDeliveries = can('view', 'deliveries');
+  const canViewTasksCenter = can('view', 'tasks_center');
 
   // All data via react-query (auto-refetches on window focus by default)
-  const { data: equipment = [] }  = useEquipmentList();
-  const { data: rentals = [] }    = useRentalsList();
-  const { data: rawTickets = [] } = useServiceTicketsList();
+  const { data: equipment = [] }  = useEquipmentList({ enabled: canViewEquipment });
+  const { data: rentals = [] }    = useRentalsList({ enabled: canViewRentals });
+  const { data: rawTickets = [] } = useServiceTicketsList({ enabled: canViewService });
   const tickets = useMemo(() => rawTickets.filter(isRegularServiceTicket), [rawTickets]);
-  const { data: clients = [] }    = useClientsList();
-  const { data: payments = [] }   = usePaymentsList();
-  const { data: documents = [] }  = useDocumentsList();
-  const { data: debtCollectionPlansResponse } = useDebtCollectionPlans();
+  const { data: clients = [] }    = useClientsList({ enabled: canViewClients });
+  const { data: payments = [] }   = usePaymentsList({ enabled: canViewMoney });
+  const { data: documents = [] }  = useDocumentsList({ enabled: canViewDocuments });
+  const { data: debtCollectionPlansResponse } = useDebtCollectionPlans({ enabled: canViewMoney });
   const debtCollectionPlans = debtCollectionPlansResponse?.plans ?? [];
   const { data: tasksCenterData } = useQuery({
     queryKey: ['tasks-center', 'dashboard-summary'],
     queryFn: tasksCenterService.getAll,
+    enabled: canViewTasksCenter,
     staleTime: 60_000,
   });
-  const { data: ganttRentals = [] } = useGanttData();
+  const { data: ganttRentals = [] } = useGanttData({ enabled: canViewRentals || canViewPlanner });
+  const { data: deliveries = [] } = useQuery<Delivery[]>({
+    queryKey: ['deliveries', 'dashboard'],
+    queryFn: deliveriesService.getAll,
+    enabled: canViewDeliveries,
+    staleTime: 1000 * 60 * 2,
+  });
   const { data: mechanicWorkload } = useQuery<MechanicsWorkloadReport>({
     queryKey: ['reports', 'mechanicsWorkload'],
     queryFn: reportsService.getMechanicsWorkload,
@@ -226,17 +253,11 @@ export default function Dashboard() {
     () => buildClientDebtAgingRows(clients, rentalDebtRows, today.toISOString().slice(0, 10)),
     [clients, rentalDebtRows, today],
   );
-  const canViewFinance = can('view', 'finance');
-  const canViewDocuments = can('view', 'documents');
-  const canViewService = can('view', 'service');
-  const canViewEquipment = can('view', 'equipment');
-  const canViewClients = can('view', 'clients');
-  const canViewTasksCenter = can('view', 'tasks_center');
   const shouldShowAttentionSummary =
     user?.role === 'Администратор'
     || user?.role === 'Офис-менеджер'
     || user?.role === 'Коммерческий директор'
-    || (canViewFinance && canViewDocuments);
+    || (canViewMoney && canViewDocuments);
   const computedClients = useMemo(
     () => clients.map(client => {
       const financial = clientFinancials.find(item => item.clientId === client.id);
@@ -369,7 +390,7 @@ export default function Dashboard() {
   } = useQuery<ManagerBreakdownResponse>({
     queryKey: ['finance', 'manager-breakdown', managerBreakdownName, todayKey],
     queryFn: () => financeService.getManagerBreakdown(managerBreakdownName || '', todayKey),
-    enabled: !!managerBreakdownName,
+    enabled: canViewMoney && !!managerBreakdownName,
     staleTime: 1000 * 60,
   });
 
@@ -985,6 +1006,198 @@ export default function Dashboard() {
     ? Math.round(serviceInDaysRows.reduce((sum, row) => sum + row.daysInService, 0) / serviceInDaysRows.length)
     : 0;
   const maxServiceDays = serviceInDaysRows.length > 0 ? serviceInDaysRows[0].daysInService : 0;
+  const overdueServiceTickets = serviceInDaysRows.filter(row =>
+    row.plannedDate && toDateKey(row.plannedDate) < todayKey,
+  );
+  const readyServiceTickets = openServiceTickets.filter(ticket => ticket.status === 'ready');
+  const activeDeliveries = deliveries.filter(delivery =>
+    delivery.status !== 'completed' && delivery.status !== 'cancelled',
+  );
+  const todayDeliveries = activeDeliveries.filter(delivery =>
+    toDateKey(delivery.transportDate || delivery.neededBy) === todayKey,
+  );
+  const overdueDeliveries = activeDeliveries.filter(delivery => {
+    const deliveryDate = toDateKey(delivery.transportDate || delivery.neededBy);
+    return Boolean(deliveryDate) && deliveryDate < todayKey;
+  });
+  const unassignedDeliveries = activeDeliveries.filter(delivery => !delivery.carrierId && !delivery.carrierName);
+  const todayPaymentRows = canViewMoney
+    ? rentalDebtRows.filter(row => {
+        if (!row.outstanding) return false;
+        const compareDate = row.expectedPaymentDate || row.endDate;
+        return toDateKey(compareDate) === todayKey;
+      })
+    : [];
+  const todayServiceTickets = openServiceTickets.filter(ticket =>
+    toDateKey(ticket.plannedDate || ticket.createdAt) === todayKey,
+  );
+  const tasksWithoutResponsible = (tasksCenterData?.tasks ?? []).filter(task =>
+    task.status !== 'done' && !task.assignedTo && !task.responsible,
+  );
+
+  const operationalSummaryCards = [
+    canViewRentals && {
+      id: 'active-rentals',
+      label: 'Активные аренды',
+      value: String(activeRentalsList.length),
+      hint: `${rentedOrReservedEquipment} ед. техники задействовано`,
+      icon: Calendar,
+      tone: 'default',
+      onClick: () => setSelectedKPI('activeRentals'),
+    },
+    canViewRentals && {
+      id: 'returns',
+      label: 'Возвраты сегодня / завтра',
+      value: `${rentalsEndingToday.length}/${rentalsEndingTomorrow.length}`,
+      hint: rentalsEndingToday.length > 0 ? 'Проверить закрытие дня' : 'Ближайшие возвраты без пика',
+      icon: Clock,
+      tone: rentalsEndingToday.length > 0 ? 'warning' : 'default',
+      onClick: () => setSelectedKPI('returnsTodayTomorrow'),
+    },
+    canViewRentals && {
+      id: 'overdue-returns',
+      label: 'Просроченные возвраты',
+      value: String(overdueRentalsList.length),
+      hint: overdueRentalsList.length > 0 ? `Макс. ${maxOverdueDays} дн.` : 'Просрочек нет',
+      icon: AlertTriangle,
+      tone: overdueRentalsList.length > 0 ? 'danger' : 'success',
+      onClick: () => setSelectedKPI('overdueReturns'),
+    },
+    canViewEquipment && {
+      id: 'available-equipment',
+      label: 'Свободная техника',
+      value: String(availableEquipment),
+      hint: activeEquipment > 0 ? `Загрузка парка ${utilization}%` : 'Активный парк не сформирован',
+      icon: Truck,
+      tone: 'success',
+      onClick: () => setSelectedKPI('utilization'),
+    },
+    canViewEquipment && {
+      id: 'rented-equipment',
+      label: 'Техника в аренде',
+      value: String(rentedEquipment),
+      hint: `${activeEquipment} ед. активного парка`,
+      icon: Activity,
+      tone: 'default',
+      onClick: () => setSelectedKPI('utilization'),
+    },
+    canViewService && {
+      id: 'service-equipment',
+      label: 'Техника в сервисе',
+      value: String(equipmentInServiceList.length),
+      hint: `Ср. ${averageServiceDays || 0} дн. · макс. ${maxServiceDays || 0} дн.`,
+      icon: Wrench,
+      tone: equipmentInServiceList.length > 0 ? 'warning' : 'success',
+      onClick: () => setSelectedKPI('serviceInDays'),
+    },
+    canViewMoney && {
+      id: 'overdue-debt',
+      label: 'Просроченная дебиторка',
+      value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽',
+      hint: `${overdueDebtClients.length} клиентов с долгом`,
+      icon: CreditCard,
+      tone: totalDebt > 0 ? 'danger' : 'success',
+      onClick: () => setSelectedKPI('totalDebt'),
+    },
+    canViewDocuments && {
+      id: 'unsigned-docs',
+      label: 'Документы без подписи',
+      value: String(officeUnsignedDocuments.length),
+      hint: documentControl.kpi.closedRentalsWithoutClosingDocs > 0
+        ? `${documentControl.kpi.closedRentalsWithoutClosingDocs} завершённых без УПД`
+        : 'Контроль подписей',
+      icon: FileText,
+      tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
+      href: '/documents',
+    },
+    canViewService && {
+      id: 'service-blockers',
+      label: 'Сервисные блокеры',
+      value: `${openServiceTickets.length}/${unassignedServiceTickets.length}`,
+      hint: `Просрочено ${overdueServiceTickets.length} · без механика ${unassignedServiceTickets.length}`,
+      icon: PackageX,
+      tone: unassignedServiceTickets.length + overdueServiceTickets.length > 0 ? 'warning' : 'success',
+      onClick: () => setSelectedKPI('unassignedService'),
+    },
+  ].filter(Boolean) as Array<{
+    id: string;
+    label: string;
+    value: string;
+    hint: string;
+    icon: React.ElementType;
+    tone: 'default' | 'warning' | 'danger' | 'success';
+    href?: string;
+    onClick?: () => void;
+  }>;
+
+  const todayWorkRows = [
+    canViewRentals && {
+      id: 'today-returns',
+      label: 'Возвраты сегодня',
+      value: String(rentalsEndingToday.length),
+      detail: rentalsEndingToday[0]?.client || 'План возвратов пуст',
+      href: '/rentals',
+      tone: rentalsEndingToday.length > 0 ? 'warning' : 'success',
+    },
+    canViewDeliveries && {
+      id: 'today-deliveries',
+      label: 'Доставки сегодня',
+      value: String(todayDeliveries.length),
+      detail: overdueDeliveries.length > 0
+        ? `Просрочено ${overdueDeliveries.length}`
+        : unassignedDeliveries.length > 0
+          ? `Без перевозчика ${unassignedDeliveries.length}`
+          : 'Без срочных блокеров',
+      href: '/deliveries',
+      tone: overdueDeliveries.length > 0 ? 'danger' : unassignedDeliveries.length > 0 ? 'warning' : 'default',
+    },
+    canViewMoney && {
+      id: 'today-payments',
+      label: 'Платежи сегодня',
+      value: String(todayPaymentRows.length),
+      detail: todayPaymentRows.length > 0
+        ? formatCurrency(todayPaymentRows.reduce((sum, row) => sum + row.outstanding, 0))
+        : 'Ожидаемых оплат нет',
+      href: '/payments',
+      tone: todayPaymentRows.length > 0 ? 'warning' : 'success',
+    },
+    canViewService && {
+      id: 'today-service',
+      label: 'Сервис сегодня',
+      value: String(todayServiceTickets.length),
+      detail: readyServiceTickets.length > 0
+        ? `Готово к закрытию ${readyServiceTickets.length}`
+        : ticketsWaitingParts.length > 0
+          ? `Ждут запчасти ${ticketsWaitingParts.length}`
+          : 'Без срочных закрытий',
+      href: '/service',
+      tone: readyServiceTickets.length + ticketsWaitingParts.length > 0 ? 'warning' : 'default',
+    },
+    canViewTasksCenter && {
+      id: 'unassigned-tasks',
+      label: 'Без ответственного',
+      value: String(tasksWithoutResponsible.length),
+      detail: tasksWithoutResponsible[0]?.title || 'Очередь распределена',
+      href: '/tasks',
+      tone: tasksWithoutResponsible.length > 0 ? 'warning' : 'success',
+    },
+  ].filter(Boolean) as Array<{
+    id: string;
+    label: string;
+    value: string;
+    detail: string;
+    href: string;
+    tone: 'default' | 'warning' | 'danger' | 'success';
+  }>;
+
+  const quickActions = [
+    can('create', 'rentals') && { id: 'new-rental', label: 'Новая аренда', href: '/rentals/new', icon: Calendar },
+    can('create', 'service') && { id: 'new-service', label: 'Новая заявка', href: '/service/new', icon: Wrench },
+    can('create', 'deliveries') && { id: 'new-delivery', label: 'Новая доставка', href: '/deliveries/new', icon: Truck },
+    can('create', 'clients') && { id: 'new-client', label: 'Новый клиент', href: '/clients/new', icon: User },
+    can('create', 'equipment') && { id: 'new-equipment', label: 'Новая техника', href: '/equipment/new', icon: Plus },
+    canViewPlanner && { id: 'planner', label: 'Планировщик', href: '/planner', icon: Target },
+  ].filter(Boolean) as Array<{ id: string; label: string; href: string; icon: React.ElementType }>;
 
   // Equipment in service with critical tickets (blocking rentals)
   const criticalInService = equipmentInServiceList.filter(e =>
@@ -1046,21 +1259,23 @@ export default function Dashboard() {
   }
 
   // 2. Просроченные платежи (критично если > 7 дней, иначе высокий)
-  overduePayments.forEach(p => {
-    const compareDate = p.expectedPaymentDate || p.endDate;
-    const days = Math.max(0, Math.ceil((today.getTime() - new Date(compareDate).getTime()) / 86400000));
-    alertItems.push({
-      id: `overdue-pay-${p.rentalId}`,
-      priority: days > 7 ? 'critical' : 'high',
-      icon: DollarSign,
-      category: 'Неоплаченный счёт',
-      title: p.client,
-      entity: p.rentalId ? `Аренда ${p.rentalId}` : 'Дебиторка',
-      detail: `${formatCurrency(p.outstanding)} · ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'} просрочки`,
-      link: `/rentals/${p.rentalId}`,
-      linkLabel: 'Открыть аренду',
+  if (canViewMoney) {
+    overduePayments.forEach(p => {
+      const compareDate = p.expectedPaymentDate || p.endDate;
+      const days = Math.max(0, Math.ceil((today.getTime() - new Date(compareDate).getTime()) / 86400000));
+      alertItems.push({
+        id: `overdue-pay-${p.rentalId}`,
+        priority: days > 7 ? 'critical' : 'high',
+        icon: DollarSign,
+        category: 'Неоплаченный счёт',
+        title: p.client,
+        entity: p.rentalId ? `Аренда ${p.rentalId}` : 'Дебиторка',
+        detail: `${formatCurrency(p.outstanding)} · ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'} просрочки`,
+        link: `/rentals/${p.rentalId}`,
+        linkLabel: 'Открыть аренду',
+      });
     });
-  });
+  }
 
   // 3. Критические сервисные заявки
   criticalTickets.forEach(t => {
@@ -1168,7 +1383,7 @@ export default function Dashboard() {
         category: 'Заблокированный клиент',
         title: c.company,
         entity: 'Есть активные аренды',
-        detail: c.debt > 0 ? `Долг: ${formatCurrency(c.debt)}` : 'Риск срыва выдачи',
+        detail: canViewMoney && c.debt > 0 ? `Долг: ${formatCurrency(c.debt)}` : 'Риск срыва выдачи',
         link: `/clients/${c.id}`,
         linkLabel: 'Карточка клиента',
       });
@@ -1176,19 +1391,21 @@ export default function Dashboard() {
   });
 
   // 8. Долг превышает кредитный лимит
-  computedClients.filter(c => c.creditLimit > 0 && c.debt > c.creditLimit).forEach(c => {
-    alertItems.push({
-      id: `credit-limit-${c.id}`,
-      priority: 'high',
-      icon: ShieldAlert,
-      category: 'Превышен кредитный лимит',
-      title: c.company,
-      entity: `Лимит: ${formatCurrency(c.creditLimit)}`,
-      detail: `Долг: ${formatCurrency(c.debt)}`,
-      link: `/clients/${c.id}`,
-      linkLabel: 'К клиенту',
+  if (canViewMoney) {
+    computedClients.filter(c => c.creditLimit > 0 && c.debt > c.creditLimit).forEach(c => {
+      alertItems.push({
+        id: `credit-limit-${c.id}`,
+        priority: 'high',
+        icon: ShieldAlert,
+        category: 'Превышен кредитный лимит',
+        title: c.company,
+        entity: `Лимит: ${formatCurrency(c.creditLimit)}`,
+        detail: `Долг: ${formatCurrency(c.debt)}`,
+        link: `/clients/${c.id}`,
+        linkLabel: 'К клиенту',
+      });
     });
-  });
+  }
 
   // 9. Аренды с флагом риска
   viewRentals.filter(r => r.risk && (r.status === 'active' || r.status === 'confirmed')).forEach(r => {
@@ -1411,6 +1628,128 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <section className={dashboardSectionClass}>
+        <div className={dashboardSectionHeaderClass}>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+            Операционная сводка
+          </p>
+          <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Что важно увидеть за первые секунды</h2>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+          <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+            {operationalSummaryCards.map(item => {
+              const Icon = item.icon;
+              const toneClass =
+                item.tone === 'danger'
+                  ? 'border-red-500/30 bg-red-500/10'
+                  : item.tone === 'warning'
+                  ? 'border-amber-400/30 bg-amber-400/10'
+                  : item.tone === 'success'
+                  ? 'border-emerald-400/25 bg-emerald-400/8'
+                  : 'border-border/80 bg-card/95';
+              const iconClass =
+                item.tone === 'danger'
+                  ? 'bg-red-500/14 text-red-300'
+                  : item.tone === 'warning'
+                  ? 'bg-amber-400/14 text-amber-300'
+                  : item.tone === 'success'
+                  ? 'bg-emerald-400/12 text-emerald-300'
+                  : 'bg-primary/12 text-primary';
+              const cardContent = (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${iconClass}`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <ArrowRight className="mt-1 h-4 w-4 text-muted-foreground/60" />
+                  </div>
+                  <p className="mt-4 text-sm font-medium text-muted-foreground">{item.label}</p>
+                  <p className="mt-1 text-2xl font-bold text-foreground">{item.value}</p>
+                  <p className="mt-2 min-h-9 text-sm text-muted-foreground">{item.hint}</p>
+                </>
+              );
+
+              if (item.href) {
+                return (
+                  <Link key={item.id} to={item.href} className={`rounded-2xl border p-4 transition hover:border-primary/40 ${toneClass}`}>
+                    {cardContent}
+                  </Link>
+                );
+              }
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={item.onClick}
+                  className={`rounded-2xl border p-4 text-left transition hover:border-primary/40 ${toneClass}`}
+                >
+                  {cardContent}
+                </button>
+              );
+            })}
+          </div>
+
+          <Card className={dashboardCardClass}>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <ListChecks className="h-5 w-5 text-[--color-primary]" />
+                Сегодня
+              </CardTitle>
+              <CardDescription>Рабочая панель дня без лишней аналитики.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {todayWorkRows.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
+                  Для текущей роли нет дневных задач на дашборде.
+                </div>
+              ) : todayWorkRows.map(item => {
+                const toneClass =
+                  item.tone === 'danger'
+                    ? 'border-red-500/30 bg-red-500/10 text-red-200'
+                    : item.tone === 'warning'
+                    ? 'border-amber-400/30 bg-amber-400/10 text-amber-200'
+                    : item.tone === 'success'
+                    ? 'border-emerald-400/25 bg-emerald-400/8 text-emerald-200'
+                    : 'border-border bg-secondary/50 text-foreground';
+                return (
+                  <Link key={item.id} to={item.href} className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 transition hover:border-primary/40 ${toneClass}`}>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">{item.label}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.detail}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className="text-xl font-bold text-foreground">{item.value}</span>
+                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  </Link>
+                );
+              })}
+
+              {quickActions.length > 0 && (
+                <div className="border-t border-border pt-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Быстрые действия</p>
+                  <div className="flex flex-wrap gap-2">
+                    {quickActions.map(action => {
+                      const Icon = action.icon;
+                      return (
+                        <Button key={action.id} asChild size="sm" variant="secondary">
+                          <Link to={action.href}>
+                            <Icon className="h-4 w-4" />
+                            {action.label}
+                          </Link>
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
       {roleDashboardMeta && roleDashboardCards.length > 0 && (
         <Card className={dashboardCardClass}>
           <CardHeader className="pb-4">
@@ -1512,11 +1851,11 @@ export default function Dashboard() {
                     </Badge>
                   </div>
                   <p className={`mt-3 text-2xl font-bold ${attentionSummary.receivables.overdueDebt > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300'}`}>
-                    {canViewFinance ? formatCurrency(attentionSummary.receivables.overdueDebt) : 'Сумма скрыта'}
+                    {canViewMoney ? formatCurrency(attentionSummary.receivables.overdueDebt) : 'Сумма скрыта'}
                   </p>
                   <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
                     60+ дней: {attentionSummary.receivables.rentals60Plus} аренд
-                    {canViewFinance ? ` · ${formatCurrency(attentionSummary.receivables.debt60Plus)}` : ' · без суммы'}
+                    {canViewMoney ? ` · ${formatCurrency(attentionSummary.receivables.debt60Plus)}` : ' · без суммы'}
                   </p>
                 </div>
 
@@ -1541,7 +1880,7 @@ export default function Dashboard() {
                           <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
                           <p className="text-gray-500 dark:text-gray-400">
                             {row.nextAction} · {row.nextActionDate ? formatDate(row.nextActionDate) : 'дата не назначена'}
-                            {canViewFinance ? ` · ${formatCurrency(row.debt)}` : ' · сумма скрыта'}
+                            {canViewMoney ? ` · ${formatCurrency(row.debt)}` : ' · сумма скрыта'}
                           </p>
                         </div>
                       ))}
@@ -1639,7 +1978,7 @@ export default function Dashboard() {
                     <ShieldAlert className="h-5 w-5 text-red-500" />
                   </div>
                   <div className="mt-3 space-y-2">
-                    {!canViewFinance ? (
+                    {!canViewMoney ? (
                       <p className="text-sm text-gray-600 dark:text-gray-300">Детализация долга скрыта правами доступа.</p>
                     ) : attentionSummary.highRiskClients.top.length === 0 ? (
                       <p className="text-sm text-emerald-600 dark:text-emerald-300">Клиентов высокого риска нет.</p>
@@ -1653,13 +1992,13 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-                {canViewFinance && <Button asChild variant="secondary" size="sm"><Link to="/finance">Финансы</Link></Button>}
-                {can('view', 'rentals') && <Button asChild variant="secondary" size="sm"><Link to="/rentals">Аренды</Link></Button>}
-                {canViewDocuments && <Button asChild variant="secondary" size="sm"><Link to="/documents">Документы</Link></Button>}
-                {canViewService && <Button asChild variant="secondary" size="sm"><Link to="/service">Сервис</Link></Button>}
-                {canViewEquipment && <Button asChild variant="secondary" size="sm"><Link to="/equipment">Техника</Link></Button>}
-                {canViewClients && <Button asChild variant="secondary" size="sm"><Link to="/clients">Клиенты</Link></Button>}
+              <div className="grid grid-cols-2 gap-2 border-t border-border pt-4 sm:flex sm:flex-wrap">
+                {canViewFinance && <Button asChild variant="secondary" size="sm" className="w-full sm:w-auto"><Link to="/finance">Финансы</Link></Button>}
+                {can('view', 'rentals') && <Button asChild variant="secondary" size="sm" className="w-full sm:w-auto"><Link to="/rentals">Аренды</Link></Button>}
+                {canViewDocuments && <Button asChild variant="secondary" size="sm" className="w-full sm:w-auto"><Link to="/documents">Документы</Link></Button>}
+                {canViewService && <Button asChild variant="secondary" size="sm" className="w-full sm:w-auto"><Link to="/service">Сервис</Link></Button>}
+                {canViewEquipment && <Button asChild variant="secondary" size="sm" className="w-full sm:w-auto"><Link to="/equipment">Техника</Link></Button>}
+                {canViewClients && <Button asChild variant="secondary" size="sm" className="w-full sm:w-auto"><Link to="/clients">Клиенты</Link></Button>}
               </div>
             </CardContent>
           </Card>
@@ -1863,36 +2202,38 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card
-            className={`cursor-pointer border transition-all hover:shadow-lg ${
-              totalDebt > 0
-                ? 'border-orange-300 bg-orange-50/50 dark:border-orange-800 dark:bg-orange-950/20'
-                : dashboardCardClass
-            }`}
-            onClick={() => setSelectedKPI('totalDebt')}
-          >
-            <CardHeader className={dashboardCardHeaderClass}>
-              <CardDescription className="flex items-center justify-between">
-                <span className={totalDebt > 0 ? 'text-orange-700 dark:text-orange-400' : ''}>Просроченная дебиторка</span>
-                <CreditCard className={`h-4 w-4 ${totalDebt > 0 ? 'text-orange-500' : 'text-gray-400'}`} />
-              </CardDescription>
-              <CardTitle className={`text-4xl font-bold ${
-                totalDebt > 100_000 ? 'text-red-600 dark:text-red-400' :
-                totalDebt > 0 ? 'text-orange-600 dark:text-orange-400' :
-                'text-gray-900 dark:text-white'
-              }`}>
-                {totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className={dashboardCardContentClass}>
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                {overdueDebtClients.length} {formatCountLabel(overdueDebtClients.length, 'клиент', 'клиента', 'клиентов')} с долгом
-              </p>
-              <p className={`text-sm ${totalDebt > 0 ? 'text-orange-700 dark:text-orange-300' : 'text-green-600 dark:text-green-400'}`}>
-                {totalDebt > 0 ? 'Нужно подтвердить оплаты и отработать просрочку.' : 'Критичной задолженности сейчас нет.'}
-              </p>
-            </CardContent>
-          </Card>
+          {canViewMoney && (
+            <Card
+              className={`cursor-pointer border transition-all hover:shadow-lg ${
+                totalDebt > 0
+                  ? 'border-orange-300 bg-orange-50/50 dark:border-orange-800 dark:bg-orange-950/20'
+                  : dashboardCardClass
+              }`}
+              onClick={() => setSelectedKPI('totalDebt')}
+            >
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription className="flex items-center justify-between">
+                  <span className={totalDebt > 0 ? 'text-orange-700 dark:text-orange-400' : ''}>Просроченная дебиторка</span>
+                  <CreditCard className={`h-4 w-4 ${totalDebt > 0 ? 'text-orange-500' : 'text-gray-400'}`} />
+                </CardDescription>
+                <CardTitle className={`text-4xl font-bold ${
+                  totalDebt > 100_000 ? 'text-red-600 dark:text-red-400' :
+                  totalDebt > 0 ? 'text-orange-600 dark:text-orange-400' :
+                  'text-gray-900 dark:text-white'
+                }`}>
+                  {totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className={dashboardCardContentClass}>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  {overdueDebtClients.length} {formatCountLabel(overdueDebtClients.length, 'клиент', 'клиента', 'клиентов')} с долгом
+                </p>
+                <p className={`text-sm ${totalDebt > 0 ? 'text-orange-700 dark:text-orange-300' : 'text-green-600 dark:text-green-400'}`}>
+                  {totalDebt > 0 ? 'Нужно подтвердить оплаты и отработать просрочку.' : 'Критичной задолженности сейчас нет.'}
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </section>
 
@@ -2028,31 +2369,33 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('weekRevenue')}>
-            <CardHeader className={dashboardCardHeaderClass}>
-              <CardDescription className="flex items-center justify-between">
-                <span>Выручка за {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</span>
-                <DollarSign className="h-3.5 w-3.5 text-gray-400" />
-              </CardDescription>
-              <CardTitle className={`text-2xl font-bold ${dashMonthRevenue === 0 ? 'text-gray-400' : 'text-gray-900 dark:text-white'}`}>
-                {dashMonthRevenue > 0 ? formatCurrency(Math.round(dashMonthRevenue)) : 'Нет данных'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className={dashboardCardContentClass}>
-              {MONTHLY_PLAN > 0 ? (
-                <>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
-                    <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${Math.min(100, Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100))}%` }} />
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">План {formatCurrency(MONTHLY_PLAN)} · {Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100)}%</p>
-                </>
-              ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {monthRentals.length > 0 ? `${monthRentals.length} аренд в этом месяце` : 'Нет аренд в этом месяце'}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          {canViewMoney && (
+            <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('weekRevenue')}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription className="flex items-center justify-between">
+                  <span>Выручка за {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</span>
+                  <DollarSign className="h-3.5 w-3.5 text-gray-400" />
+                </CardDescription>
+                <CardTitle className={`text-2xl font-bold ${dashMonthRevenue === 0 ? 'text-gray-400' : 'text-gray-900 dark:text-white'}`}>
+                  {dashMonthRevenue > 0 ? formatCurrency(Math.round(dashMonthRevenue)) : 'Нет данных'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className={dashboardCardContentClass}>
+                {MONTHLY_PLAN > 0 ? (
+                  <>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                      <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${Math.min(100, Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100))}%` }} />
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">План {formatCurrency(MONTHLY_PLAN)} · {Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100)}%</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {monthRentals.length > 0 ? `${monthRentals.length} аренд в этом месяце` : 'Нет аренд в этом месяце'}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('idleEquipment')}>
             <CardHeader className={dashboardCardHeaderClass}>
@@ -2132,7 +2475,7 @@ export default function Dashboard() {
       </section>
 
       {/* ── Manager Stats ─────────────────────────────────────────────────────── */}
-      {!isAdminRole && (
+      {!isAdminRole && isManagerRole && (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -2419,7 +2762,7 @@ export default function Dashboard() {
                       </div>
                       <div className="ml-3 shrink-0 text-right">
                         <p className="text-[17px] font-semibold text-foreground sm:text-[18px]">
-                          {rental.amount > 0 ? formatCurrency(rental.amount) : '—'}
+                          {canViewMoney && rental.amount > 0 ? formatCurrency(rental.amount) : '—'}
                         </p>
                         <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${
                           rental.status === 'active'

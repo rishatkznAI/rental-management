@@ -44,7 +44,7 @@ import { canEquipmentParticipateInRentals, compareEquipmentByPriority } from '..
 import { resolveRentalEquipment } from '../lib/rentalEquipment';
 import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { buildClientReceivables, buildRentalDebtRows, getEffectivePaidAmount, mergeClientsWithFinancials } from '../lib/finance';
-import { buildRentalDayTiles, classifyRentalPaymentTone } from '../lib/rentalTimeline.js';
+import { buildRentalPaymentBar } from '../lib/rentalTimeline.js';
 import {
   appendRentalHistory,
   buildRentalCreationHistory,
@@ -380,27 +380,35 @@ const EQ_STATUS_LABELS: Record<string, { label: string; color: string }> = {
 
 type RentalPaymentTone = 'paid' | 'unpaid' | 'partial' | 'overdue' | 'unknown';
 
-const RENTAL_PAYMENT_TILE_STYLES: Record<RentalPaymentTone, { label: string; className: string }> = {
+const RENTAL_PAYMENT_SEGMENT_STYLES: Record<Exclude<RentalPaymentTone, 'partial'>, { label: string; className: string; dotClassName: string }> = {
   paid: {
-    label: 'Оплачено',
-    className: 'border-emerald-400/70 bg-emerald-500 text-white shadow-emerald-950/20 dark:border-emerald-300/50 dark:bg-emerald-500',
+    label: 'Оплаченный период',
+    className: 'bg-emerald-500 dark:bg-emerald-400',
+    dotClassName: 'border-emerald-300 bg-emerald-500 dark:border-emerald-200 dark:bg-emerald-400',
   },
   unpaid: {
-    label: 'Не оплачено',
-    className: 'border-blue-400/70 bg-blue-500 text-white shadow-blue-950/20 dark:border-blue-300/50 dark:bg-blue-500',
-  },
-  partial: {
-    label: 'Частично',
-    className: 'border-amber-300/80 bg-amber-500 text-amber-950 shadow-amber-950/20 dark:border-amber-200/60 dark:bg-amber-400 dark:text-amber-950',
+    label: 'Неоплаченный период',
+    className: 'bg-blue-500 dark:bg-blue-400',
+    dotClassName: 'border-blue-300 bg-blue-500 dark:border-blue-200 dark:bg-blue-400',
   },
   overdue: {
-    label: 'Просрочено',
-    className: 'border-red-400/80 bg-red-600 text-white shadow-red-950/20 dark:border-red-300/60 dark:bg-red-500',
+    label: 'Просрочка',
+    className: 'bg-red-600 dark:bg-red-500',
+    dotClassName: 'border-red-300 bg-red-600 dark:border-red-200 dark:bg-red-500',
   },
   unknown: {
     label: 'Нет данных',
-    className: 'border-slate-400/70 bg-slate-500 text-white shadow-slate-950/20 dark:border-slate-300/40 dark:bg-slate-500',
+    className: 'bg-slate-500 dark:bg-slate-500',
+    dotClassName: 'border-slate-300 bg-slate-500 dark:border-slate-200 dark:bg-slate-500',
   },
+};
+
+const RENTAL_PAYMENT_STATUS_LABEL: Record<RentalPaymentTone, string> = {
+  paid: 'Оплачено',
+  unpaid: 'Не оплачено',
+  partial: 'Частично',
+  overdue: 'Просрочено',
+  unknown: 'Нет данных',
 };
 
 const RENTAL_STATUS_LABEL: Record<GanttRentalData['status'], string> = {
@@ -800,26 +808,6 @@ export default function Rentals() {
     [rentalDebtRows],
   );
 
-  // Map rentalId → paid fraction (0..1) for bar coloring
-  const rentalPaidFractions = useMemo(() => {
-    const byRentalId = new Map<string, Payment[]>();
-    payments.forEach(p => {
-      if (!p.rentalId) return;
-      if (!byRentalId.has(p.rentalId)) byRentalId.set(p.rentalId, []);
-      byRentalId.get(p.rentalId)!.push(p);
-    });
-    const map = new Map<string, number>();
-    ganttRentals.forEach(r => {
-      const ps = byRentalId.get(r.id) ?? [];
-      const paid = ps.reduce((s, p) => s + getEffectivePaidAmount(p), 0);
-      const total = r.amount || 0;
-      const fraction = total > 0
-        ? Math.min(1, paid / total)
-        : 0;
-      if (fraction > 0) map.set(r.id, fraction);
-    });
-    return map;
-  }, [payments, ganttRentals]);
   const clientReceivables = useMemo(
     () => buildClientReceivables(clientsData, rentalDebtRows),
     [clientsData, rentalDebtRows],
@@ -2661,9 +2649,9 @@ export default function Rentals() {
 
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-card/80 px-3 py-2 text-[11px] text-muted-foreground shadow-sm">
         <span className="mr-1 font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">Оплата</span>
-        {(Object.entries(RENTAL_PAYMENT_TILE_STYLES) as Array<[RentalPaymentTone, typeof RENTAL_PAYMENT_TILE_STYLES[RentalPaymentTone]]>).map(([tone, item]) => (
+        {(Object.entries(RENTAL_PAYMENT_SEGMENT_STYLES) as Array<[Exclude<RentalPaymentTone, 'partial'>, typeof RENTAL_PAYMENT_SEGMENT_STYLES[Exclude<RentalPaymentTone, 'partial'>]]>).map(([tone, item]) => (
           <span key={tone} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-            <span className={`h-2.5 w-2.5 rounded-[3px] border ${item.className}`} />
+            <span className={`h-2.5 w-2.5 rounded-[3px] border ${item.dotClassName}`} />
             {item.label}
           </span>
         ))}
@@ -2824,7 +2812,6 @@ export default function Rentals() {
                     scale={scale}
                     days={days}
                     today={today}
-                    paymentFractions={rentalPaidFractions}
                     rentalDebtRowsById={rentalDebtRowsById}
                     onBarClick={(rental) => setSelectedRental(withEquipmentRowContext(rental, eq))}
                     onNewRental={() => handleOpenNewRental(eq.id)}
@@ -3356,7 +3343,6 @@ interface EquipmentRowProps {
   densityMode: DensityMode;
   rowHeight: number;
   todayOffset: number | null;
-  paymentFractions: Map<string, number>;
   rentalDebtRowsById: Map<string, ReturnType<typeof buildRentalDebtRows>[number]>;
   viewEnd: Date;
   scale: Scale;
@@ -3372,7 +3358,7 @@ function EquipmentRow({
   rowIndex,
   equipment, rentals, downtimes, servicePeriods, conflictIds,
   viewStart, totalDays, dayWidth, densityMode, rowHeight, todayOffset, viewEnd, scale, days, today,
-  onBarClick, onNewRental, onReturn, onDowntime, paymentFractions, rentalDebtRowsById,
+  onBarClick, onNewRental, onReturn, onDowntime, rentalDebtRowsById,
 }: EquipmentRowProps) {
   const { can: canDo } = usePermissions();
   const isCompact = densityMode === 'compact';
@@ -3480,7 +3466,7 @@ function EquipmentRow({
         {/* Today line */}
         {todayOffset !== null && (
           <div
-            className="absolute top-0 z-10 h-full w-0.5 bg-red-500 dark:bg-red-400"
+            className="pointer-events-none absolute top-0 z-10 h-full w-0.5 bg-red-500 dark:bg-red-400"
             style={{ left: todayOffset }}
           >
             <div className="absolute -left-1 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500 dark:bg-red-400 ring-2 ring-red-200 dark:ring-red-800" />
@@ -3551,13 +3537,14 @@ function EquipmentRow({
 
         {/* Rental bars */}
         {rentals.map((rental, rIdx) => {
-          const tiles = buildRentalDayTiles(rental, format(viewStart, 'yyyy-MM-dd'), totalDays);
-          if (tiles.length === 0) return null;
+          const pos = barPosition(new Date(rental.startDate), new Date(rental.endDate), viewStart, totalDays, dayWidth);
+          if (!pos) return null;
           const isConflict = conflictIds.has(rental.id);
           const statusLabel = RENTAL_STATUS_LABEL[rental.status];
           const debtRow = rentalDebtRowsById.get(rental.id);
-          const paymentTone = classifyRentalPaymentTone(rental, debtRow, todayStr) as RentalPaymentTone;
-          const paymentStyle = RENTAL_PAYMENT_TILE_STYLES[paymentTone] ?? RENTAL_PAYMENT_TILE_STYLES.unknown;
+          const financeBar = buildRentalPaymentBar(rental, debtRow, todayStr);
+          const paymentTone = financeBar.tone as RentalPaymentTone;
+          const paymentLabel = RENTAL_PAYMENT_STATUS_LABEL[paymentTone] ?? RENTAL_PAYMENT_STATUS_LABEL.unknown;
           // Stack bars vertically if there are overlaps (simple: use index-based offset)
           const overlapping = rentals.filter((r2, j) => {
             if (j >= rIdx) return false;
@@ -3573,17 +3560,18 @@ function EquipmentRow({
               ? Math.round((rowHeight - barHeight) / 2)
               : (isCompact ? 4 : 6) + stackIndex * (barHeight + rentalStackGap);
 
-          const paidFraction = paymentFractions.get(rental.id) ?? 0;
           const showUpdAlert = !rental.updSigned;
-          const showPaymentAlert = rental.paymentStatus !== 'paid';
+          const showPaymentAlert = paymentTone !== 'paid';
           const showOverdueAlert = rental.status === 'active' && rental.endDate < todayStr;
-          const tileWidth = Math.max(4, Math.min(dayWidth - 2, Math.round(dayWidth * 0.76)));
-          const tileInset = Math.max(1, Math.round((dayWidth - tileWidth) / 2));
-          const tooltip = `${rental.client || 'Без клиента'} · ${equipment.model || rental.equipmentInv || 'Техника'} · ${safeRentalCompactDate(rental.startDate)} — ${safeRentalCompactDate(rental.endDate)} · ${statusLabel} · ${paymentStyle.label}${
-            rental.amount ? ` · ${formatCurrency(rental.amount)}` : ''
+          const barLeft = pos.left + 2;
+          const barWidth = Math.max(10, pos.width - 4);
+          const tooltip = `${rental.client || 'Без клиента'} · ${equipment.model || rental.equipmentInv || 'Техника'} · ${safeRentalCompactDate(rental.startDate)} — ${safeRentalCompactDate(rental.endDate)} · ${statusLabel} · ${paymentLabel}${
+            financeBar.amount ? ` · сумма ${formatCurrency(financeBar.amount)}` : ''
           }${
-            debtRow?.outstanding ? ` · долг ${formatCurrency(debtRow.outstanding)}` : ''
+            financeBar.paidAmount ? ` · оплачено ${formatCurrency(financeBar.paidAmount)}` : ''
           }${
+            financeBar.outstanding ? ` · остаток ${formatCurrency(financeBar.outstanding)}` : ''
+          } · оплачено до: ${financeBar.paidThroughDate ? safeRentalCompactDate(financeBar.paidThroughDate) : 'нет данных'} · просрочка с: ${financeBar.overdueSince ? safeRentalCompactDate(financeBar.overdueSince) : 'нет просрочки'}${
             rental.manager ? ` · менеджер ${rental.manager}` : ''
           }${
             showOverdueAlert ? ' · Срок истёк, возврат не оформлен' : ''
@@ -3592,39 +3580,85 @@ function EquipmentRow({
           }`;
 
           return (
-            <React.Fragment key={rental.id}>
-              {tiles.map((tile, tileIndex) => (
-                <button
-                  key={`${rental.id}-${tile.date}`}
-                  type="button"
-                  onClick={() => onBarClick(rental)}
-                  className={`absolute z-[8] flex cursor-pointer items-center justify-center overflow-hidden rounded-[5px] border text-[8px] font-semibold shadow-sm transition-all hover:z-[11] hover:-translate-y-[1px] hover:scale-105 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/70 ${paymentStyle.className} ${
-                    isConflict ? 'ring-2 ring-red-500 ring-offset-1 dark:ring-red-400' : ''
-                  }`}
-                  style={{
-                    left: tile.index * dayWidth + tileInset,
-                    width: tileWidth,
-                    top: topOffset,
-                    height: barHeight,
-                  }}
-                  title={tooltip}
-                  aria-label={`${rental.client || 'Аренда'}: ${tile.date}, ${paymentStyle.label}`}
+            <button
+              key={rental.id}
+              type="button"
+              onClick={() => onBarClick(rental)}
+              className={`absolute z-[8] flex cursor-pointer items-center overflow-hidden rounded-lg border border-white/25 bg-slate-600 text-left text-[10px] font-semibold text-white shadow-sm shadow-slate-950/20 transition-all hover:z-[11] hover:-translate-y-[1px] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/70 dark:border-white/15 ${
+                isConflict ? 'ring-2 ring-red-500 ring-offset-1 dark:ring-red-400' : ''
+              }`}
+              style={{
+                left: barLeft,
+                width: barWidth,
+                top: topOffset,
+                height: barHeight,
+              }}
+              title={tooltip}
+              aria-label={`${rental.client || 'Аренда'}: ${statusLabel}, ${paymentLabel}`}
+            >
+              <span className="pointer-events-none absolute inset-0 bg-slate-500 dark:bg-slate-600" />
+              {financeBar.segments.map((segment, segmentIndex) => {
+                const segmentTone = segment.tone as Exclude<RentalPaymentTone, 'partial'>;
+                const segmentStyle = RENTAL_PAYMENT_SEGMENT_STYLES[segmentTone] ?? RENTAL_PAYMENT_SEGMENT_STYLES.unknown;
+                return (
+                  <span
+                    key={`${rental.id}-${segmentTone}-${segment.startDate}-${segmentIndex}`}
+                    className={`pointer-events-none absolute inset-y-0 ${segmentStyle.className}`}
+                    style={{
+                      left: `${segment.startPercent}%`,
+                      width: `${segment.widthPercent}%`,
+                    }}
+                  />
+                );
+              })}
+              <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/35" />
+              {financeBar.paidThroughDate && financeBar.paidThroughPercent !== null && financeBar.paidThroughPercent > 0 && financeBar.paidThroughPercent < 100 && (
+                <span
+                  className="pointer-events-none absolute inset-y-0 w-px bg-white/80 shadow-[0_0_0_1px_rgba(15,23,42,0.22)]"
+                  style={{ left: `${financeBar.paidThroughPercent}%` }}
+                />
+              )}
+              {financeBar.overdueSince && financeBar.overdueSincePercent !== null && (
+                <span
+                  className="pointer-events-none absolute inset-y-0 w-0.5 bg-red-950/80 dark:bg-red-100/90"
+                  style={{ left: `${financeBar.overdueSincePercent}%` }}
+                />
+              )}
+              {barWidth > 110 && (
+                <span className="pointer-events-none relative z-[1] min-w-0 truncate px-2 leading-none">
+                  <span className="mr-1 rounded bg-black/16 px-1 py-0.5 text-[8px] uppercase tracking-[0.08em] text-white/85">
+                    {statusLabel}
+                  </span>
+                  {rental.clientShort || rental.client || rental.equipmentInv || 'Аренда'}
+                </span>
+              )}
+              {barWidth <= 110 && isConflict && (
+                <AlertTriangle className="relative z-[1] ml-1.5 h-3 w-3 shrink-0" />
+              )}
+              {barWidth > 170 && financeBar.paidThroughDate && (
+                <span
+                  className="pointer-events-none absolute bottom-0.5 z-[1] max-w-[92px] truncate rounded bg-black/22 px-1 py-0.5 text-[8px] font-medium text-white/90"
+                  style={{ left: `${Math.min(Math.max(financeBar.paidThroughPercent ?? 0, 4), 72)}%` }}
                 >
-                  <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/25" />
-                  {tileIndex === 0 && dayWidth >= 32 && (
-                    <span className="truncate px-1 leading-none">
-                      {rental.clientShort || statusLabel}
-                    </span>
-                  )}
-                  {tileIndex === 0 && dayWidth < 32 && isConflict && (
-                    <AlertTriangle className="h-3 w-3" />
-                  )}
-                  {tileIndex === tiles.length - 1 && dayWidth >= 24 && (showPaymentAlert || showUpdAlert || showOverdueAlert || paidFraction > 0) && (
-                    <span className="absolute bottom-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-white/75" />
-                  )}
-                </button>
-              ))}
-            </React.Fragment>
+                  до {safeRentalCompactDate(financeBar.paidThroughDate)}
+                </span>
+              )}
+              {barWidth > 180 && financeBar.overdueSince && (
+                <span
+                  className="pointer-events-none absolute top-0.5 z-[1] max-w-[104px] truncate rounded bg-red-950/50 px-1 py-0.5 text-[8px] font-medium text-white"
+                  style={{ left: `${Math.min(Math.max(financeBar.overdueSincePercent ?? 0, 4), 70)}%` }}
+                >
+                  с {safeRentalCompactDate(financeBar.overdueSince)}
+                </span>
+              )}
+              {(showPaymentAlert || showUpdAlert || showOverdueAlert) && (
+                <span className="pointer-events-none absolute bottom-0.5 right-1 z-[1] flex gap-0.5">
+                  {showPaymentAlert && <span className="h-1.5 w-1.5 rounded-full bg-white/80" />}
+                  {showUpdAlert && <span className="h-1.5 w-1.5 rounded-full bg-amber-200" />}
+                  {showOverdueAlert && <span className="h-1.5 w-1.5 rounded-full bg-red-100" />}
+                </span>
+              )}
+            </button>
           );
         })}
       </div>

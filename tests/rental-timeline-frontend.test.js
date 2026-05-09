@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildRentalDayTiles,
+  buildRentalPaymentBar,
   classifyRentalPaymentTone,
 } from '../src/app/lib/rentalTimeline.js';
 
@@ -16,28 +16,73 @@ const baseRental = {
   status: 'active',
 };
 
-test('buildRentalDayTiles renders one tile for one rental day', () => {
-  const tiles = buildRentalDayTiles(baseRental, '2026-05-01', 31);
+test('buildRentalPaymentBar renders a single continuous bar segment for one rental day', () => {
+  const bar = buildRentalPaymentBar(baseRental, undefined, '2026-05-01');
 
-  assert.equal(tiles.length, 1);
-  assert.deepEqual(tiles[0], { date: '2026-05-10', index: 9 });
+  assert.equal(bar.segments.length, 1);
+  assert.equal(bar.segments[0].startDate, '2026-05-10');
+  assert.equal(bar.segments[0].endDate, '2026-05-10');
 });
 
-test('buildRentalDayTiles renders one tile per occupied calendar day', () => {
-  const tiles = buildRentalDayTiles(
+test('buildRentalPaymentBar does not split a five day rental into daily tiles', () => {
+  const bar = buildRentalPaymentBar(
     { ...baseRental, startDate: '2026-05-10', endDate: '2026-05-14' },
-    '2026-05-01',
-    31,
+    { rentalId: 'GR-1', amount: 100000, paidAmount: 0, outstanding: 100000, paymentStatus: 'unpaid', expectedPaymentDate: '2026-05-20' },
+    '2026-05-11',
   );
 
-  assert.equal(tiles.length, 5);
-  assert.deepEqual(tiles.map(tile => tile.date), [
-    '2026-05-10',
+  assert.equal(bar.segments.length, 1);
+  assert.equal(bar.segments[0].tone, 'unpaid');
+  assert.equal(bar.segments[0].startDate, '2026-05-10');
+  assert.equal(bar.segments[0].endDate, '2026-05-14');
+});
+
+test('buildRentalPaymentBar marks fully paid rentals through end date', () => {
+  const bar = buildRentalPaymentBar(
+    { ...baseRental, startDate: '2026-05-10', endDate: '2026-05-14', paymentStatus: 'paid' },
+    { rentalId: 'GR-1', amount: 100000, paidAmount: 100000, outstanding: 0, paymentStatus: 'paid' },
     '2026-05-11',
-    '2026-05-12',
+  );
+
+  assert.equal(bar.paidThroughDate, '2026-05-14');
+  assert.equal(bar.overdueSince, null);
+  assert.deepEqual(bar.segments.map(segment => segment.tone), ['paid']);
+});
+
+test('buildRentalPaymentBar derives paid-through date for partial payments', () => {
+  const bar = buildRentalPaymentBar(
+    { ...baseRental, startDate: '2026-05-10', endDate: '2026-05-14', amount: 100000, paymentStatus: 'partial' },
+    { rentalId: 'GR-1', amount: 100000, paidAmount: 40000, outstanding: 60000, paymentStatus: 'partial', expectedPaymentDate: '2026-05-20' },
+    '2026-05-11',
+  );
+
+  assert.equal(bar.paidThroughDate, '2026-05-11');
+  assert.equal(bar.overdueSince, null);
+  assert.deepEqual(bar.segments.map(segment => segment.tone), ['paid', 'unpaid']);
+});
+
+test('buildRentalPaymentBar marks overdue since the day after due date', () => {
+  const bar = buildRentalPaymentBar(
+    { ...baseRental, startDate: '2026-05-10', endDate: '2026-05-14', amount: 100000, paymentStatus: 'unpaid', expectedPaymentDate: '2026-05-11' },
+    { rentalId: 'GR-1', amount: 100000, paidAmount: 0, outstanding: 100000, paymentStatus: 'unpaid', expectedPaymentDate: '2026-05-11' },
     '2026-05-13',
-    '2026-05-14',
-  ]);
+  );
+
+  assert.equal(bar.paidThroughDate, null);
+  assert.equal(bar.overdueSince, '2026-05-12');
+  assert.deepEqual(bar.segments.map(segment => segment.tone), ['unpaid', 'overdue']);
+});
+
+test('buildRentalPaymentBar does not mark future unpaid due date as overdue', () => {
+  const bar = buildRentalPaymentBar(
+    { ...baseRental, startDate: '2026-05-10', endDate: '2026-05-14', amount: 100000, paymentStatus: 'unpaid', expectedPaymentDate: '2026-05-20' },
+    { rentalId: 'GR-1', amount: 100000, paidAmount: 0, outstanding: 100000, paymentStatus: 'unpaid', expectedPaymentDate: '2026-05-20' },
+    '2026-05-13',
+  );
+
+  assert.equal(bar.paidThroughDate, null);
+  assert.equal(bar.overdueSince, null);
+  assert.deepEqual(bar.segments.map(segment => segment.tone), ['unpaid']);
 });
 
 test('classifyRentalPaymentTone detects paid rentals from debt facts', () => {

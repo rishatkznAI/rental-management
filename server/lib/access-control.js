@@ -189,7 +189,16 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'maintenanceCHTO',
     'maintenancePTO',
     'notes',
+    'isForSale',
     'saleCondition',
+    'salePdiStatus',
+    'saleReceiptStatus',
+    'plannedArrivalDate',
+    'actualArrivalDate',
+    'acceptanceComment',
+    'acceptancePhotos',
+    'acceptanceChecklist',
+    'acceptanceDefects',
     'photos',
     'gsmImei',
     'gsmDeviceId',
@@ -803,7 +812,7 @@ function canMutateEntity(collection, entity, user, readData) {
     return isOfficeManager(user);
   }
   if (collection === 'equipment') {
-    return isOfficeManager(user);
+    return isOfficeManager(user) || isSalesManager(user) || isMechanic(user);
   }
   if (collection === 'rentals' || collection === 'gantt_rentals') {
     if (isOfficeManager(user)) return true;
@@ -920,6 +929,35 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
     throw forbidden();
   }
   if (isAdmin(user)) return { ...(input || {}) };
+  if (collection === 'equipment' && isMechanic(user)) {
+    const allowed = new Set([
+      'saleReceiptStatus',
+      'actualArrivalDate',
+      'acceptanceComment',
+      'acceptancePhotos',
+      'acceptanceChecklist',
+      'acceptanceDefects',
+    ]);
+    return Object.entries(input || {}).reduce((acc, [field, value]) => {
+      if (allowed.has(field)) acc[field] = value;
+      return acc;
+    }, {});
+  }
+  if (collection === 'equipment' && isSalesManager(user)) {
+    const allowed = new Set([
+      'isForSale',
+      'saleCondition',
+      'salePdiStatus',
+      'saleReceiptStatus',
+      'plannedArrivalDate',
+      'actualArrivalDate',
+      'acceptanceComment',
+    ]);
+    return Object.entries(input || {}).reduce((acc, [field, value]) => {
+      if (allowed.has(field)) acc[field] = value;
+      return acc;
+    }, {});
+  }
   if (collection === 'service' && isMechanic(user)) {
     const safe = {};
     for (const [field, value] of Object.entries(input || {})) {

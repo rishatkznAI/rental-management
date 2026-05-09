@@ -1,4 +1,4 @@
-import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentSaleCondition, EquipmentSalePdiStatus } from '../types';
+import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentSaleCondition, EquipmentSalePdiStatus, EquipmentSaleReceiptStatus } from '../types';
 import { DEFAULT_EQUIPMENT_TYPE_CATALOG, findEquipmentTypeLabel } from './equipmentTypes';
 import { normalizeEquipmentSaleCondition } from './equipmentSaleMode.js';
 
@@ -34,6 +34,18 @@ export const EQUIPMENT_SALE_PDI_LABELS: Record<EquipmentSalePdiStatus, string> =
   issues: 'PDI есть замечания',
   ready: 'PDI готов',
 };
+
+export const EQUIPMENT_SALE_RECEIPT_LABELS: Record<EquipmentSaleReceiptStatus, string> = {
+  planned_arrival: 'Планируется поступление',
+  arrived_waiting_acceptance: 'Ожидает приёмки',
+  acceptance_in_progress: 'Приёмка в работе',
+  accepted: 'Принята',
+  acceptance_rejected: 'С замечаниями',
+  cancelled: 'Отменено',
+};
+
+export const EQUIPMENT_SALE_RECEIPT_OPTIONS = Object.entries(EQUIPMENT_SALE_RECEIPT_LABELS)
+  .map(([value, label]) => ({ value: value as EquipmentSaleReceiptStatus, label }));
 
 export function normalizeEquipment<T extends Partial<Equipment>>(equipment: T): T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority' | 'isForSale' | 'salePdiStatus'> {
   const saleCondition = normalizeEquipmentSaleCondition(equipment) as EquipmentSaleCondition | undefined;

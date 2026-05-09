@@ -26,6 +26,10 @@ const {
   normalizeClientContractRecord,
   normalizeClientObjectRecord,
 } = require('../lib/client-relations');
+const {
+  normalizeEquipmentReceiptPatch,
+  shouldCreateReceiptServiceTicket,
+} = require('../lib/equipment-receipt');
 
 function registerCrudRoutes(deps) {
   const {
@@ -104,6 +108,41 @@ function registerCrudRoutes(deps) {
     const currentGanttRentals = readData('gantt_rentals') || [];
     const nextGanttRentals = syncGanttRentalPaymentStatuses(currentGanttRentals, payments);
     writeData('gantt_rentals', nextGanttRentals);
+  }
+
+  function createReceiptServiceTicket(previousItem, nextItem, authorName) {
+    if (!shouldCreateReceiptServiceTicket(previousItem, nextItem)) return;
+    const service = readData('service') || [];
+    const alreadyExists = service.some(ticket =>
+      ticket?.source === 'sales_receipt'
+      && ticket?.equipmentId === nextItem.id
+      && !['closed', 'ready'].includes(String(ticket?.status || '').toLowerCase())
+    );
+    if (alreadyExists) return;
+    const ticket = {
+      id: generateId(idPrefixes.service || 'S'),
+      type: 'pdi',
+      scenario: 'pdi',
+      source: 'sales_receipt',
+      saleMode: true,
+      status: 'new',
+      priority: 'high',
+      equipmentId: nextItem.id,
+      equipment: [nextItem.manufacturer, nextItem.model].filter(Boolean).join(' ') || nextItem.inventoryNumber || nextItem.id,
+      inventoryNumber: nextItem.inventoryNumber || '',
+      serialNumber: nextItem.serialNumber || '',
+      reason: 'Замечания при приёмке новой техники',
+      description: [
+        nextItem.acceptanceComment,
+        ...(Array.isArray(nextItem.acceptanceDefects) ? nextItem.acceptanceDefects : []),
+      ].filter(Boolean).join('\n'),
+      photos: nextItem.acceptancePhotos || {},
+      createdAt: nowIso(),
+      createdBy: authorName || 'Система',
+      createdByUserId: '',
+    };
+    writeData('service', [...service, ticket]);
+    applyServiceTicketCreationEffects?.(ticket, authorName || 'Система');
   }
 
   function relatedRentalsById() {
@@ -788,7 +827,13 @@ function registerCrudRoutes(deps) {
       }
       try {
         accessControl.assertCanCreateCollection(collection, req.user, req.body);
-        const input = accessControl.sanitizeCreateInput(collection, req.body, req.user);
+        let input = accessControl.sanitizeCreateInput(collection, req.body, req.user);
+        if (collection === 'equipment') {
+          input = normalizeEquipmentReceiptPatch({}, input, {
+            user: req.user,
+            nowIso,
+          });
+        }
         if (collection === 'rentals' || collection === 'gantt_rentals') {
           const validation = validateRentalPayload(collection, input, readData(collection) || []);
           if (!validation.ok) {
@@ -953,7 +998,13 @@ function registerCrudRoutes(deps) {
       }
 
       try {
-        const safePatch = accessControl.sanitizeUpdateInput(collection, req.body, req.user, data[idx]);
+        let safePatch = accessControl.sanitizeUpdateInput(collection, req.body, req.user, data[idx]);
+        if (collection === 'equipment') {
+          safePatch = normalizeEquipmentReceiptPatch(data[idx], safePatch, {
+            user: req.user,
+            nowIso,
+          });
+        }
         const previousItem = { ...data[idx] };
         if (collection === 'payments') {
           validatePaymentRecord({ ...data[idx], ...safePatch });
@@ -1027,6 +1078,9 @@ function registerCrudRoutes(deps) {
               : nextItem);
         }
         writeData(collection, data);
+        if (collection === 'equipment') {
+          createReceiptServiceTicket(previousItem, data[idx], req.user.userName);
+        }
         if (collection === 'clients') {
           normalizeStoredClientLinksAfterClientWrite();
         }

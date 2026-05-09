@@ -434,7 +434,7 @@ sessionCleanupTimer.unref?.();
 const WARRANTY_MECHANIC_ROLES = [WARRANTY_MECHANIC_ROLE, ...WARRANTY_MECHANIC_ROLE_ALIASES];
 
 const WRITE_PERMISSIONS = {
-  equipment:      ['Администратор', 'Офис-менеджер'],
+  equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по продажам', ...MECHANIC_ROLES],
   client_objects: ['Администратор', 'Офис-менеджер'],
   client_contracts: ['Администратор', 'Офис-менеджер'],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],

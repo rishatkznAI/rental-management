@@ -52,6 +52,29 @@ test('sale quick actions hide rental and fleet service actions', () => {
   assert.ok(!labels.includes('Документы техники'));
 });
 
+test('planned arrival sale equipment blocks PDI quick action until receipt is accepted', () => {
+  const plannedActions = buildEquipmentQuickActions({
+    equipment: { id: 'EQ-planned', status: 'available', saleMode: true, saleReceiptStatus: 'planned_arrival' },
+    can: allowAll,
+  });
+  const acceptedActions = buildEquipmentQuickActions({
+    equipment: { id: 'EQ-accepted', status: 'available', saleMode: true, saleReceiptStatus: 'accepted' },
+    can: allowAll,
+  });
+
+  assert.equal(plannedActions.find(action => action.id === 'equipment-sale-pdi')?.disabled, true);
+  assert.equal(acceptedActions.find(action => action.id === 'equipment-sale-pdi')?.disabled, false);
+});
+
+test('sales available quick filter excludes planned arrivals from physically available stock', () => {
+  const salesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
+
+  assert.match(salesSource, /function isPhysicallyAvailableForSale/);
+  assert.match(salesSource, /quickFilter === 'available_only'[\s\S]*isPhysicallyAvailableForSale\(equipment\)/);
+  assert.match(salesSource, /const availableCount = saleEquipment\.filter[\s\S]*isPhysicallyAvailableForSale\(equipment\)/);
+});
+
+
 test('sold sale equipment keeps sales actions without rental actions', () => {
   const actions = buildEquipmentQuickActions({
     equipment: { id: 'EQ-sold', inventoryNumber: 'INV-sold', category: 'sold', status: 'inactive', saleStatus: 'Продана', saleMode: true },

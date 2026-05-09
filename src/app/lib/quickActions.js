@@ -94,6 +94,14 @@ export function buildEquipmentQuickActions({ equipment, can, currentRental, crmD
   const saleMode = equipment?.saleMode === true;
   const saleKind = saleStatusKind(equipment);
   const safeCrmDealsRoute = safeText(crmDealsRoute);
+  const saleReceiptStatus = safeText(equipment?.saleReceiptStatus);
+  const receiptBlocksPdi = [
+    'planned_arrival',
+    'arrived_waiting_acceptance',
+    'acceptance_in_progress',
+    'acceptance_rejected',
+    'cancelled',
+  ].includes(saleReceiptStatus);
 
   if (saleMode) {
     if (canDo(can, 'create', 'service')) {
@@ -101,6 +109,8 @@ export function buildEquipmentQuickActions({ equipment, can, currentRental, crmD
         id: 'equipment-sale-pdi',
         label: 'Создать PDI',
         kind: 'primary',
+        disabled: receiptBlocksPdi,
+        reason: receiptBlocksPdi ? 'PDI доступна после завершения приёмки поступившей техники' : undefined,
       });
     }
     actions.push({ id: 'equipment-sale-photo', label: 'Добавить фото' });

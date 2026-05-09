@@ -11,6 +11,13 @@ export type EquipmentCategory = 'own' | 'sold' | 'client' | 'partner';
 export type EquipmentPriority = 'low' | 'medium' | 'high' | 'critical';
 export type EquipmentSaleCondition = 'new' | 'used';
 export type EquipmentSalePdiStatus = 'not_started' | 'in_progress' | 'issues' | 'ready';
+export type EquipmentSaleReceiptStatus =
+  | 'planned_arrival'
+  | 'arrived_waiting_acceptance'
+  | 'acceptance_in_progress'
+  | 'accepted'
+  | 'acceptance_rejected'
+  | 'cancelled';
 export type RepairEventType = 'repair' | 'maintenance' | 'diagnostics' | 'breakdown';
 export type RepairSource = 'manual' | 'bot';
 export type ShippingEventType = 'shipping' | 'receiving';
@@ -44,6 +51,43 @@ export interface EquipmentHandoffChecklist {
   basket: boolean;
   tires: boolean;
   leaksAndDamage: boolean;
+}
+
+export type EquipmentAcceptancePhotoKey =
+  | 'front'
+  | 'rear'
+  | 'left'
+  | 'right'
+  | 'serial_plate'
+  | 'hour_meter'
+  | 'lower_controls'
+  | 'upper_controls'
+  | 'platform'
+  | 'engine_bay'
+  | 'undercarriage'
+  | 'defects';
+
+export interface EquipmentAcceptanceChecklist {
+  serialNumberConfirmed?: boolean | string;
+  modelConfirmed?: boolean | string;
+  configurationChecked?: boolean | string;
+  documentsReceived?: boolean | string;
+  keysRemoteChargerSpareReceived?: 'yes' | 'no' | 'na' | string;
+  visualDamageFound?: boolean | string;
+  starts?: boolean | string;
+  serviceRequired?: boolean | string;
+  mechanicComment?: string;
+}
+
+export interface EquipmentReceiptHistoryEntry {
+  date: string;
+  oldStatus?: string;
+  newStatus?: string;
+  oldStatusLabel?: string;
+  newStatusLabel?: string;
+  userId?: string;
+  userName?: string;
+  comment?: string;
 }
 
 export interface EquipmentGsmPositionPoint {
@@ -91,6 +135,17 @@ export interface Equipment {
   saleCondition?: EquipmentSaleCondition;
   saleType?: EquipmentSaleCondition;
   salePdiStatus?: EquipmentSalePdiStatus;
+  saleReceiptStatus?: EquipmentSaleReceiptStatus;
+  plannedArrivalDate?: string;
+  actualArrivalDate?: string;
+  acceptedAt?: string;
+  acceptedByUserId?: string;
+  acceptedByName?: string;
+  acceptanceComment?: string;
+  acceptancePhotos?: Partial<Record<EquipmentAcceptancePhotoKey, PhotoReference[]>>;
+  acceptanceChecklist?: EquipmentAcceptanceChecklist;
+  acceptanceDefects?: string[];
+  receiptHistory?: EquipmentReceiptHistoryEntry[];
   salePrice1?: number;
   salePrice2?: number;
   salePrice3?: number;

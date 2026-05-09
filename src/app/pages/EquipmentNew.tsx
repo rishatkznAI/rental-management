@@ -19,7 +19,7 @@ import { useCreateEquipment } from '../hooks/useEquipment';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { createAuditEntry } from '../lib/entity-history';
-import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS } from '../lib/equipmentClassification';
+import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS } from '../lib/equipmentClassification';
 import { useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 
 // ─── Вспомогательные компоненты ────────────────────────────────────────────
@@ -182,6 +182,8 @@ export default function EquipmentNew() {
     isForSale: isSaleMode ? 'yes' : 'no',
     saleCondition: 'new',
     salePdiStatus: 'not_started',
+    saleReceiptStatus: 'planned_arrival',
+    plannedArrivalDate: '',
     salePrice1: '',
     salePrice2: '',
     salePrice3: '',
@@ -207,6 +209,7 @@ export default function EquipmentNew() {
       inventoryNumber: '',
       activeInFleet: 'no',
       saleCondition: 'new',
+      saleReceiptStatus: 'planned_arrival',
     }));
   }, [isSaleMode]);
 
@@ -240,6 +243,8 @@ export default function EquipmentNew() {
       isForSale:             form.isForSale === 'yes',
       saleCondition:         form.isForSale === 'yes' ? form.saleCondition as 'new' | 'used' : undefined,
       salePdiStatus:         form.isForSale === 'yes' ? form.salePdiStatus as 'not_started' | 'in_progress' | 'issues' | 'ready' : undefined,
+      saleReceiptStatus:     form.isForSale === 'yes' && form.saleCondition === 'new' ? form.saleReceiptStatus as 'planned_arrival' | 'arrived_waiting_acceptance' | 'acceptance_in_progress' | 'accepted' | 'acceptance_rejected' | 'cancelled' : undefined,
+      plannedArrivalDate:    form.isForSale === 'yes' && form.saleCondition === 'new' ? form.plannedArrivalDate || undefined : undefined,
       salePrice1:            form.isForSale === 'yes' && form.salePrice1 ? Number(form.salePrice1) : undefined,
       salePrice2:            form.isForSale === 'yes' && form.salePrice2 ? Number(form.salePrice2) : undefined,
       salePrice3:            form.isForSale === 'yes' && form.salePrice3 ? Number(form.salePrice3) : undefined,
@@ -584,6 +589,30 @@ export default function EquipmentNew() {
                       ]}
                       hint="Показывает, готова ли техника к продаже и передаче клиенту."
                     />
+
+                    {form.saleCondition === 'new' && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Поступление</h3>
+                        <div className="mt-3 grid gap-4 md:grid-cols-2">
+                          <SelectField
+                            label="Статус поступления"
+                            value={form.saleReceiptStatus}
+                            onValueChange={v => update('saleReceiptStatus', v)}
+                            options={[
+                              { value: 'planned_arrival', label: EQUIPMENT_SALE_RECEIPT_LABELS.planned_arrival },
+                              { value: 'arrived_waiting_acceptance', label: EQUIPMENT_SALE_RECEIPT_LABELS.arrived_waiting_acceptance },
+                            ]}
+                            hint="Отдельный статус физического поступления, не состояние Новая / Б/у."
+                          />
+                          <Input
+                            label="Плановая дата поступления"
+                            type="date"
+                            value={form.plannedArrivalDate}
+                            onChange={e => update('plannedArrivalDate', e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid gap-4 md:grid-cols-3">
                       <div>

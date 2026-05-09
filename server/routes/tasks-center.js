@@ -193,6 +193,7 @@ function buildTasksCenterPayload(input) {
   const payments = collectionData({ readData, accessControl, req, collection: 'payments' });
   const documents = collectionData({ readData, accessControl, req, collection: 'documents' });
   const service = collectionData({ readData, accessControl, req, collection: 'service' });
+  const equipment = collectionData({ readData, accessControl, req, collection: 'equipment' });
   const deliveries = collectionData({ readData, accessControl, req, collection: 'deliveries' });
   const plans = collectionData({ readData, accessControl, req, collection: 'debt_collection_plans' });
   const documentsByRentalId = new Map();
@@ -225,6 +226,22 @@ function buildTasksCenterPayload(input) {
         detectedAt: generatedAt,
       }));
     }
+  }
+
+  for (const item of equipment.filter(entry => normalizeStatus(entry?.saleReceiptStatus) === 'arrived_waiting_acceptance')) {
+    tasks.push(makeTask({
+      type: 'equipment.sale_receipt_waiting_acceptance',
+      title: 'Новая техника ожидает приёмки',
+      description: `${safeEquipmentName([item?.manufacturer, item?.model].filter(Boolean).join(' '), item?.inventoryNumber)} · SN ${item?.serialNumber || 'не указан'}`,
+      priority: 'high',
+      dueDate: dateKey(item?.actualArrivalDate) || todayKey,
+      section: 'service',
+      entityType: 'equipment',
+      entityId: item?.id,
+      responsible: 'Младший стационарный механик',
+      actionUrl: item?.id ? `/sales/equipment/${item.id}` : '/service',
+      detectedAt: generatedAt,
+    }));
   }
 
   if (payments.length > 0 && ganttRentals.length > 0) {

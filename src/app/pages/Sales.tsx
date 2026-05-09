@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link, Navigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Tag } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -9,11 +10,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { usePermissions } from '../lib/permissions';
-import { EQUIPMENT_SALE_PDI_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
+import { EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
 import { getSaleOperationHistory, isSaleModeEquipment, saleConditionKind, saleConditionLabel, saleStatusKind, saleStatusLabel } from '../lib/equipmentSaleMode.js';
 import { formatCurrency } from '../lib/utils';
 import { deriveSignalState } from '../lib/gsm';
-import type { Equipment, EquipmentSalePdiStatus } from '../types';
+import { equipmentService } from '../services/equipment.service';
+import type { Equipment, EquipmentSalePdiStatus, EquipmentSaleReceiptStatus } from '../types';
 
 function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
   const variants: Record<EquipmentSalePdiStatus, 'default' | 'warning' | 'success' | 'error'> = {
@@ -31,6 +33,24 @@ function getSaleReadinessBadge(status: EquipmentSalePdiStatus = 'not_started') {
       {status === 'ready' ? 'PDI готов' : status === 'issues' ? 'PDI с замечаниями' : 'PDI не готов'}
     </Badge>
   );
+}
+
+function getSaleReceiptBadge(status?: EquipmentSaleReceiptStatus) {
+  if (!status) return <Badge variant="default">Поступление не указано</Badge>;
+  const variants: Record<EquipmentSaleReceiptStatus, 'default' | 'warning' | 'success' | 'error'> = {
+    planned_arrival: 'warning',
+    arrived_waiting_acceptance: 'warning',
+    acceptance_in_progress: 'warning',
+    accepted: 'success',
+    acceptance_rejected: 'error',
+    cancelled: 'default',
+  };
+  return <Badge variant={variants[status]}>{EQUIPMENT_SALE_RECEIPT_LABELS[status]}</Badge>;
+}
+
+function isPhysicallyAvailableForSale(equipment: Equipment) {
+  const receiptStatus = equipment.saleReceiptStatus;
+  return !receiptStatus || receiptStatus === 'accepted';
 }
 
 function apiErrorMessage(error: unknown, fallback: string) {
@@ -82,13 +102,25 @@ function getGsmSaleValue(equipment: Partial<Equipment>) {
 
 export default function Sales() {
   const { can } = usePermissions();
+  const queryClient = useQueryClient();
   const equipmentQuery = useEquipmentList();
   const rawEquipment = equipmentQuery.data ?? [];
   const [search, setSearch] = React.useState('');
   const [pdiFilter, setPdiFilter] = React.useState<string>('all');
+  const [receiptFilter, setReceiptFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [quickFilter, setQuickFilter] = React.useState<'all' | 'pdi_ready' | 'pdi_in_progress' | 'no_price' | 'available_only'>('all');
   const [showFilters, setShowFilters] = React.useState(false);
+  const markArrivalMutation = useMutation({
+    mutationFn: (equipment: Equipment) => equipmentService.update(equipment.id, {
+      saleReceiptStatus: 'arrived_waiting_acceptance',
+      actualArrivalDate: new Date().toISOString().slice(0, 10),
+      acceptanceComment: 'Поступление отмечено из раздела продаж',
+    }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['equipment'] });
+    },
+  });
 
   if (!can('view', 'sales')) {
     return <Navigate to="/" replace />;
@@ -108,6 +140,7 @@ export default function Sales() {
         || equipment.serialNumber.toLowerCase().includes(query)
         || equipment.location.toLowerCase().includes(query);
       const matchesPdi = pdiFilter === 'all' || equipment.salePdiStatus === pdiFilter;
+      const matchesReceipt = receiptFilter === 'all' || equipment.saleReceiptStatus === receiptFilter;
       const matchesStatus = statusFilter === 'all' || saleStatusKind(equipment) === statusFilter;
       const hasNoPrices = !equipment.salePrice1 && !equipment.salePrice2 && !equipment.salePrice3;
       const saleKind = saleStatusKind(equipment);
@@ -116,19 +149,24 @@ export default function Sales() {
         || (quickFilter === 'pdi_ready' && equipment.salePdiStatus === 'ready')
         || (quickFilter === 'pdi_in_progress' && equipment.salePdiStatus === 'in_progress')
         || (quickFilter === 'no_price' && hasNoPrices)
-        || (quickFilter === 'available_only' && equipment.status === 'available' && saleKind !== 'sold' && saleKind !== 'removed');
-      return matchesSearch && matchesPdi && matchesStatus && matchesQuickFilter;
+        || (quickFilter === 'available_only' && equipment.status === 'available' && isPhysicallyAvailableForSale(equipment) && saleKind !== 'sold' && saleKind !== 'removed');
+      return matchesSearch && matchesPdi && matchesReceipt && matchesStatus && matchesQuickFilter;
     }),
-    [pdiFilter, quickFilter, saleEquipment, search, statusFilter],
+    [pdiFilter, quickFilter, receiptFilter, saleEquipment, search, statusFilter],
   );
 
   const readyCount = saleEquipment.filter((equipment) => equipment.salePdiStatus === 'ready').length;
   const inProgressCount = saleEquipment.filter((equipment) => equipment.salePdiStatus === 'in_progress').length;
   const noPriceCount = saleEquipment.filter((equipment) => !equipment.salePrice1 && !equipment.salePrice2 && !equipment.salePrice3).length;
-  const availableCount = saleEquipment.filter((equipment) => equipment.status === 'available' && !['sold', 'removed'].includes(saleStatusKind(equipment))).length;
+  const availableCount = saleEquipment.filter((equipment) => equipment.status === 'available' && isPhysicallyAvailableForSale(equipment) && !['sold', 'removed'].includes(saleStatusKind(equipment))).length;
+  const plannedArrivalCount = saleEquipment.filter((equipment) => equipment.saleReceiptStatus === 'planned_arrival').length;
+  const waitingAcceptanceCount = saleEquipment.filter((equipment) => equipment.saleReceiptStatus === 'arrived_waiting_acceptance').length;
+  const acceptedReceiptCount = saleEquipment.filter((equipment) => equipment.saleReceiptStatus === 'accepted').length;
+  const rejectedReceiptCount = saleEquipment.filter((equipment) => equipment.saleReceiptStatus === 'acceptance_rejected').length;
   const activeFilterCount = [
     search.trim() !== '',
     pdiFilter !== 'all',
+    receiptFilter !== 'all',
     statusFilter !== 'all',
     quickFilter !== 'all',
   ].filter(Boolean).length;
@@ -194,6 +232,41 @@ export default function Sales() {
         </Card>
       </div>
 
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Планируется поступление</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold text-amber-600 dark:text-amber-300">{plannedArrivalCount}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Ожидает приёмки</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold text-amber-600 dark:text-amber-300">{waitingAcceptanceCount}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Принято</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold text-green-600 dark:text-green-300">{acceptedReceiptCount}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">С замечаниями</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold text-red-600 dark:text-red-300">{rejectedReceiptCount}</p>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="flex justify-end">
         <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
       </div>
@@ -206,6 +279,7 @@ export default function Sales() {
         onReset={() => {
           setSearch('');
           setPdiFilter('all');
+          setReceiptFilter('all');
           setStatusFilter('all');
           setQuickFilter('all');
         }}
@@ -254,6 +328,16 @@ export default function Sales() {
                 <option value="ready">{EQUIPMENT_SALE_PDI_LABELS.ready}</option>
               </select>
             </FilterField>
+            <FilterField label="Поступление">
+              <select value={receiptFilter} onChange={(e) => setReceiptFilter(e.target.value)} className="app-filter-input">
+                <option value="all">Все статусы поступления</option>
+                <option value="planned_arrival">{EQUIPMENT_SALE_RECEIPT_LABELS.planned_arrival}</option>
+                <option value="arrived_waiting_acceptance">{EQUIPMENT_SALE_RECEIPT_LABELS.arrived_waiting_acceptance}</option>
+                <option value="acceptance_in_progress">{EQUIPMENT_SALE_RECEIPT_LABELS.acceptance_in_progress}</option>
+                <option value="accepted">{EQUIPMENT_SALE_RECEIPT_LABELS.accepted}</option>
+                <option value="acceptance_rejected">{EQUIPMENT_SALE_RECEIPT_LABELS.acceptance_rejected}</option>
+              </select>
+            </FilterField>
             <FilterField label="Статус продажи">
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-filter-input">
                 <option value="all">Все статусы продажи</option>
@@ -288,6 +372,7 @@ export default function Sales() {
               <span className="text-sm font-semibold text-amber-700 dark:text-amber-300">{equipment.manufacturer} {equipment.model}</span>
               <Badge variant={conditionKind === 'used' ? 'warning' : 'default'}>{saleConditionLabel(equipment)}</Badge>
               <Badge variant={saleStatusKind(equipment) === 'sold' ? 'success' : saleStatusKind(equipment) === 'removed' ? 'default' : 'warning'}>{saleStatusLabel(equipment)}</Badge>
+              {getSaleReceiptBadge(equipment.saleReceiptStatus)}
               {getSalePdiBadge(equipment.salePdiStatus)}
               {getSaleReadinessBadge(equipment.salePdiStatus)}
             </div>
@@ -295,6 +380,41 @@ export default function Sales() {
               SN: {equipment.serialNumber || 'не указан'}
             </p>
             <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Локация: {equipment.location}</p>
+            <div className="mt-3 rounded-lg border border-amber-200/70 p-3 text-xs dark:border-amber-700/60">
+              <p className="font-semibold text-gray-700 dark:text-gray-200">Поступление</p>
+              <div className="mt-2 grid gap-2">
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500 dark:text-gray-400">План</span>
+                  <span className="text-right font-medium text-gray-900 dark:text-white">{formatSaleDate(equipment.plannedArrivalDate)}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500 dark:text-gray-400">Факт</span>
+                  <span className="text-right font-medium text-gray-900 dark:text-white">{formatSaleDate(equipment.actualArrivalDate)}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500 dark:text-gray-400">Принял</span>
+                  <span className="text-right font-medium text-gray-900 dark:text-white">{equipment.acceptedByName || '—'}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500 dark:text-gray-400">Фотоотчёт</span>
+                  <span className="text-right font-medium text-gray-900 dark:text-white">{equipment.acceptancePhotos ? 'Есть' : 'Нет'}</span>
+                </div>
+              </div>
+              {equipment.saleReceiptStatus === 'planned_arrival' && can('edit', 'equipment') && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="mt-3"
+                  disabled={markArrivalMutation.isPending}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    markArrivalMutation.mutate(equipment);
+                  }}
+                >
+                  Отметить поступление
+                </Button>
+              )}
+            </div>
             <div className="mt-3 rounded-lg border border-gray-200/70 p-3 text-xs dark:border-gray-700">
               <p className="font-semibold text-gray-700 dark:text-gray-200">Идентификация</p>
               <div className="mt-2 grid gap-2">
@@ -358,6 +478,7 @@ export default function Sales() {
             <TableRow>
               <TableHead>Техника</TableHead>
               <TableHead>Статус продажи</TableHead>
+              <TableHead>Поступление</TableHead>
               <TableHead>PDI</TableHead>
               <TableHead>Готовность</TableHead>
               <TableHead>Локация</TableHead>
@@ -394,6 +515,26 @@ export default function Sales() {
                   )}
                 </TableCell>
                 <TableCell><Badge variant={saleStatusKind(equipment) === 'sold' ? 'success' : saleStatusKind(equipment) === 'removed' ? 'default' : 'warning'}>{saleStatusLabel(equipment)}</Badge></TableCell>
+                <TableCell>
+                  <div className="space-y-1">
+                    {getSaleReceiptBadge(equipment.saleReceiptStatus)}
+                    <p className="text-xs text-gray-500 dark:text-gray-400">План: {formatSaleDate(equipment.plannedArrivalDate)}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Факт: {formatSaleDate(equipment.actualArrivalDate)}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Принял: {equipment.acceptedByName || '—'}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Фото: {equipment.acceptancePhotos ? 'есть' : 'нет'}</p>
+                    {equipment.saleReceiptStatus === 'planned_arrival' && can('edit', 'equipment') && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={markArrivalMutation.isPending}
+                        onClick={() => markArrivalMutation.mutate(equipment)}
+                      >
+                        Отметить поступление
+                      </Button>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell>{getSalePdiBadge(equipment.salePdiStatus)}</TableCell>
                 <TableCell>{getSaleReadinessBadge(equipment.salePdiStatus)}</TableCell>
                 <TableCell className="text-gray-700 dark:text-gray-300">{equipment.location}</TableCell>

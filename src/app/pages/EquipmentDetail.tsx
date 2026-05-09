@@ -22,8 +22,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../components/ui/select';
-import type { Equipment, EquipmentOwnerType, EquipmentSalePdiStatus, RepairEventType } from '../types';
-import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS } from '../lib/equipmentClassification';
+import type { Equipment, EquipmentOwnerType, EquipmentSalePdiStatus, EquipmentSaleReceiptStatus, RepairEventType } from '../types';
+import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS, EQUIPMENT_SALE_RECEIPT_OPTIONS } from '../lib/equipmentClassification';
 import type { GanttRentalData } from '../mock-data';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -1352,6 +1352,72 @@ export default function EquipmentDetail() {
     context: routeContext,
   });
   const salePdiStatus = (equipment?.salePdiStatus ?? 'not_started') as EquipmentSalePdiStatus;
+  const saleReceiptStatus = equipment?.saleReceiptStatus as EquipmentSaleReceiptStatus | undefined;
+
+  const updateReceiptStatus = React.useCallback(async (patch: Partial<Equipment>) => {
+    if (!equipment) return;
+    const updated = await equipmentService.update(equipment.id, patch);
+    setAllEquipment(prev => prev.map(item => item.id === equipment.id ? updated : item));
+    await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
+  }, [equipment, queryClient]);
+
+  const handleMarkArrival = React.useCallback(() => {
+    void updateReceiptStatus({
+      saleReceiptStatus: 'arrived_waiting_acceptance',
+      actualArrivalDate: new Date().toISOString().slice(0, 10),
+      acceptanceComment: 'Поступление отмечено из карточки техники',
+    });
+  }, [updateReceiptStatus]);
+
+  const handleStartAcceptance = React.useCallback(() => {
+    void updateReceiptStatus({
+      saleReceiptStatus: 'acceptance_in_progress',
+      actualArrivalDate: equipment?.actualArrivalDate || new Date().toISOString().slice(0, 10),
+      acceptanceComment: 'Приёмка начата',
+    });
+  }, [equipment?.actualArrivalDate, updateReceiptStatus]);
+
+  const handleCompleteAcceptance = React.useCallback((withDefects: boolean) => {
+    const comment = window.prompt('Комментарий механика по приёмке', equipment?.acceptanceComment || '');
+    if (comment === null) return;
+    const defectsText = withDefects ? window.prompt('Список замечаний через точку с запятой', (equipment?.acceptanceDefects || []).join('; ')) : '';
+    if (withDefects && defectsText === null) return;
+    const photoUrl = window.prompt('Ссылка/описание фотоотчёта для обязательных ракурсов', '');
+    if (photoUrl === null) return;
+    const photo = photoUrl.trim() || `Фотоотчёт ${new Date().toISOString()}`;
+    const acceptancePhotos = {
+      front: [photo],
+      rear: [photo],
+      left: [photo],
+      right: [photo],
+      serial_plate: [photo],
+      hour_meter: [photo],
+      lower_controls: [photo],
+      upper_controls: [photo],
+      platform: [photo],
+      engine_bay: [photo],
+      undercarriage: [photo],
+      ...(withDefects ? { defects: [photo] } : {}),
+    };
+    void updateReceiptStatus({
+      saleReceiptStatus: withDefects ? 'acceptance_rejected' : 'accepted',
+      actualArrivalDate: equipment?.actualArrivalDate || new Date().toISOString().slice(0, 10),
+      acceptanceComment: comment,
+      acceptanceDefects: withDefects ? (defectsText || '').split(';').map(item => item.trim()).filter(Boolean) : [],
+      acceptancePhotos,
+      acceptanceChecklist: {
+        serialNumberConfirmed: true,
+        modelConfirmed: true,
+        configurationChecked: true,
+        documentsReceived: true,
+        keysRemoteChargerSpareReceived: 'yes',
+        visualDamageFound: withDefects,
+        starts: !withDefects,
+        serviceRequired: withDefects,
+        mechanicComment: comment || 'Проверено',
+      },
+    });
+  }, [equipment?.acceptanceComment, equipment?.acceptanceDefects, equipment?.actualArrivalDate, updateReceiptStatus]);
 
   useEffect(() => {
     if (!saleMode) return;
@@ -1730,6 +1796,18 @@ export default function EquipmentDetail() {
                 <div className="space-y-2 rounded-xl border border-border bg-card/70 p-4">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Быстрые действия</p>
                   <div className="flex flex-wrap gap-2">
+                    {saleReceiptStatus === 'planned_arrival' && (
+                      <Button size="sm" variant="secondary" onClick={handleMarkArrival}>Отметить поступление</Button>
+                    )}
+                    {saleReceiptStatus === 'arrived_waiting_acceptance' && (
+                      <Button size="sm" variant="secondary" onClick={handleStartAcceptance}>Начать приёмку</Button>
+                    )}
+                    {saleReceiptStatus === 'acceptance_in_progress' && (
+                      <>
+                        <Button size="sm" variant="default" onClick={() => handleCompleteAcceptance(false)}>Завершить приёмку</Button>
+                        <Button size="sm" variant="secondary" onClick={() => handleCompleteAcceptance(true)}>Завершить с замечаниями</Button>
+                      </>
+                    )}
                     {quickActions.map(action => {
                       const onClick = action.id === 'equipment-sale-pdi'
                         ? () => setShowCreateServiceModal(true)
@@ -1787,6 +1865,41 @@ export default function EquipmentDetail() {
                   <CompactMetric label="Инв. №" value={equipment.inventoryNumber || 'Не указано'} />
                   <CompactMetric label="Тип" value={saleConditionLabel(equipment, saleConditionContext)} tone={saleCondition === 'used' ? 'warning' : 'success'} />
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-amber-300/60 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-foreground">Поступление и приёмка</h3>
+                  {getSaleReceiptBadge(saleReceiptStatus)}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <CompactMetric label="Плановая дата" value={formatDate(equipment.plannedArrivalDate)} />
+                  <CompactMetric label="Фактическая дата" value={formatDate(equipment.actualArrivalDate)} />
+                  <CompactMetric label="Кто принял" value={equipment.acceptedByName || '—'} />
+                  <CompactMetric label="Дата приёмки" value={formatDate(equipment.acceptedAt)} />
+                  <CompactMetric label="Фотоотчёт" value={equipment.acceptancePhotos ? 'Добавлен' : 'Не добавлен'} tone={equipment.acceptancePhotos ? 'success' : 'warning'} />
+                  <CompactMetric label="Чеклист" value={equipment.acceptanceChecklist ? 'Заполнен' : 'Не заполнен'} tone={equipment.acceptanceChecklist ? 'success' : 'warning'} />
+                  <CompactMetric label="Дефекты" value={equipment.acceptanceDefects?.length ? `${equipment.acceptanceDefects.length}` : 'Нет'} tone={equipment.acceptanceDefects?.length ? 'warning' : 'success'} />
+                  <CompactMetric label="Комментарий" value={equipment.acceptanceComment || '—'} />
+                </div>
+                {equipment.acceptanceDefects?.length ? (
+                  <div className="mt-3 rounded-lg border border-amber-300/50 bg-white/60 p-3 text-sm dark:border-amber-500/30 dark:bg-black/10">
+                    <p className="font-semibold text-foreground">Замечания</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                      {equipment.acceptanceDefects.map((defect, index) => <li key={`${defect}-${index}`}>{defect}</li>)}
+                    </ul>
+                  </div>
+                ) : null}
+                {equipment.receiptHistory?.length ? (
+                  <div className="mt-3 space-y-2 text-sm">
+                    {equipment.receiptHistory.slice(-4).reverse().map((entry, index) => (
+                      <div key={`${entry.date}-${index}`} className="rounded-lg border border-border bg-card/70 p-3">
+                        <p className="font-medium text-foreground">{entry.oldStatusLabel || 'Не указан'} → {entry.newStatusLabel || 'Не указан'}</p>
+                        <p className="text-xs text-muted-foreground">{formatDate(entry.date)} · {entry.userName || 'Система'}{entry.comment ? ` · ${entry.comment}` : ''}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
 
               {showSaleOperationHistory && (
@@ -3697,6 +3810,12 @@ export default function EquipmentDetail() {
               isForSale: 'на продаже',
               saleCondition: 'тип продажной техники',
               salePdiStatus: 'статус PDI',
+              saleReceiptStatus: 'статус поступления',
+              plannedArrivalDate: 'плановая дата поступления',
+              actualArrivalDate: 'фактическая дата поступления',
+              acceptedAt: 'дата приёмки',
+              acceptedByName: 'принял',
+              acceptanceComment: 'комментарий приёмки',
               salePrice1: 'цена 1',
               salePrice2: 'цена 2',
               salePrice3: 'цена 3',
@@ -4005,6 +4124,19 @@ function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
     ready: 'success',
   };
   return <Badge variant={variants[status]}>{EQUIPMENT_SALE_PDI_LABELS[status]}</Badge>;
+}
+
+function getSaleReceiptBadge(status?: EquipmentSaleReceiptStatus) {
+  if (!status) return <Badge variant="default">Поступление не указано</Badge>;
+  const variants: Record<EquipmentSaleReceiptStatus, 'default' | 'warning' | 'success' | 'error'> = {
+    planned_arrival: 'warning',
+    arrived_waiting_acceptance: 'warning',
+    acceptance_in_progress: 'warning',
+    accepted: 'success',
+    acceptance_rejected: 'error',
+    cancelled: 'default',
+  };
+  return <Badge variant={variants[status]}>{EQUIPMENT_SALE_RECEIPT_LABELS[status]}</Badge>;
 }
 
 // ── Main modal ────────────────────────────────────────────────────────────────
@@ -4369,6 +4501,40 @@ function EditEquipmentModal({
                         ]}
                       />
                     </FormField>
+
+                    {form.saleCondition === 'new' && (
+                      <>
+                        <FormField label="Статус поступления" hint="Отдельный статус физического поступления новой техники">
+                          <FieldSelect
+                            value={form.saleReceiptStatus || 'planned_arrival'}
+                            onValueChange={setStr('saleReceiptStatus')}
+                            options={EQUIPMENT_SALE_RECEIPT_OPTIONS}
+                          />
+                        </FormField>
+                        <FormField label="Плановая дата поступления">
+                          <FieldInput
+                            type="date"
+                            value={String(form.plannedArrivalDate || '')}
+                            onChange={setStr('plannedArrivalDate')}
+                          />
+                        </FormField>
+                        <FormField label="Фактическая дата поступления">
+                          <FieldInput
+                            type="date"
+                            value={String(form.actualArrivalDate || '')}
+                            onChange={setStr('actualArrivalDate')}
+                          />
+                        </FormField>
+                        <FormField label="Комментарий приёмки">
+                          <textarea
+                            className="min-h-[80px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                            value={form.acceptanceComment || ''}
+                            onChange={event => set('acceptanceComment', event.target.value)}
+                            placeholder="Что важно знать менеджеру продаж или PDI"
+                          />
+                        </FormField>
+                      </>
+                    )}
 
                     {canViewFinance ? (
                       <>

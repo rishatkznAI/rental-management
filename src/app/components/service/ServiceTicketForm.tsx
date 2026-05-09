@@ -26,6 +26,11 @@ type ServiceTicketFormProps = {
   onCancel: () => void;
   onCreated?: (ticket: ServiceTicket) => void | Promise<void>;
   submitLabel?: string;
+  initialReason?: string;
+  initialDescription?: string;
+  scenarioTitle?: string;
+  scenarioDescription?: string;
+  hideScenarioSelect?: boolean;
 };
 
 export function ServiceTicketForm({
@@ -34,6 +39,11 @@ export function ServiceTicketForm({
   onCancel,
   onCreated,
   submitLabel = 'Создать заявку',
+  initialReason = '',
+  initialDescription = '',
+  scenarioTitle,
+  scenarioDescription,
+  hideScenarioSelect = false,
 }: ServiceTicketFormProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -57,8 +67,8 @@ export function ServiceTicketForm({
     client: '',
     objectId: '',
     contractId: '',
-    reason: '',
-    description: '',
+    reason: initialReason,
+    description: initialDescription,
     notes: '',
   });
 
@@ -84,6 +94,14 @@ export function ServiceTicketForm({
       location: eq?.location ?? prev.location,
     }));
   }, [equipmentList, initialEquipmentId]);
+
+  useEffect(() => {
+    setFormData(prev => ({
+      ...prev,
+      reason: prev.reason || initialReason,
+      description: prev.description || initialDescription,
+    }));
+  }, [initialDescription, initialReason]);
 
   const [photos, setPhotos] = useState<string[]>([]);
   const [photoErrors, setPhotoErrors] = useState<string[]>([]);
@@ -436,13 +454,13 @@ export function ServiceTicketForm({
 
       <Card>
         <CardHeader>
-          <CardTitle>{isRepairScenario ? 'Ремонт' : scenarioLabel}</CardTitle>
+          <CardTitle>{scenarioTitle || (isRepairScenario ? 'Ремонт' : scenarioLabel)}</CardTitle>
           <CardDescription>
-            {isRepairScenario ? 'Укажите срочность и опишите неисправность' : `Зафиксируйте сценарий ${scenarioLabel} и выполненные работы`}
+            {scenarioDescription || (isRepairScenario ? 'Укажите срочность и опишите неисправность' : `Зафиксируйте сценарий ${scenarioLabel} и выполненные работы`)}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-1.5">
+          {!hideScenarioSelect && <div className="space-y-1.5">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
               Сценарий сервисной заявки
             </label>
@@ -456,7 +474,7 @@ export function ServiceTicketForm({
               <option value="chto">ЧТО</option>
               <option value="pto">ПТО</option>
             </select>
-          </div>
+          </div>}
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
               Приоритет заявки

@@ -89,6 +89,30 @@ export function buildEquipmentQuickActions({ equipment, can, currentRental } = {
   const actions = [];
   const status = safeText(equipment?.status);
   const rentalBlocked = status === 'in_service' || status === 'inactive';
+  const saleMode = equipment?.saleMode === true;
+
+  if (saleMode) {
+    if (canDo(can, 'create', 'service')) {
+      actions.push({
+        id: 'equipment-sale-pdi',
+        label: 'Создать PDI',
+        kind: 'primary',
+      });
+    }
+    if (canDo(can, 'view', 'documents')) {
+      actions.push({ id: 'equipment-sale-documents', label: 'Документы техники', to: withQuery('/documents', context) });
+    }
+    actions.push({ id: 'equipment-sale-photo', label: 'Добавить фото' });
+    if (canDo(can, 'view', 'crm')) {
+      actions.push({ id: 'equipment-sale-deal', label: 'Открыть сделки', to: withQuery('/crm', context) });
+    }
+    if (canDo(can, 'edit', 'equipment')) {
+      actions.push({ id: 'equipment-sale-reserve', label: 'Поставить в резерв' });
+      actions.push({ id: 'equipment-sale-remove', label: 'Снять с продажи' });
+      actions.push({ id: 'equipment-sale-sold', label: 'Отметить проданной' });
+    }
+    return actions;
+  }
 
   if (canDo(can, 'create', 'service')) {
     actions.push({

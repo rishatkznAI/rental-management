@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -47,6 +47,7 @@ import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
+import { isSaleModeEquipment, saleDocumentsReadiness, saleStatusLabel } from '../lib/equipmentSaleMode.js';
 import { getEffectivePaidAmount } from '../lib/finance';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
@@ -85,6 +86,13 @@ const SERVICE_STATUS_LABELS: Record<string, string> = {
   ready: 'Готово',
   closed: 'Закрыта',
 };
+
+const SALE_READINESS_LABELS = {
+  not_started: 'Не начат',
+  in_progress: 'В работе',
+  ready: 'Готов',
+  problem: 'Проблема',
+} as const;
 
 const HANDOFF_CHECKLIST_LABELS = {
   exterior: 'Внешний осмотр выполнен',
@@ -633,12 +641,15 @@ export default function EquipmentDetail() {
   const canViewDocuments = can('view', 'documents');
   const canViewClients = can('view', 'clients');
   const canViewFinance = can('view', 'finance');
+  const canViewCrm = can('view', 'crm');
   const canCreateService = can('create', 'service');
   const canManageAcceptance = canEditEquipment || canCreateService || isMechanicRole(user?.role);
   const normalizedRole = normalizeUserRole(user?.role);
   const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
     || isMechanicRole(normalizedRole);
   const { id } = useParams();
+  const location = useLocation();
+  const routeContext = new URLSearchParams(location.search).get('context') || '';
   const equipmentTypeCatalog = useEquipmentTypeCatalog();
 
   const [allEquipment, setAllEquipment] = useState<Equipment[]>([]);
@@ -1283,6 +1294,19 @@ export default function EquipmentDetail() {
     });
   }, []);
 
+  const saleMode = isSaleModeEquipment(equipment, {
+    salesContext: routeContext === 'sales',
+    context: routeContext,
+  });
+  const salePdiStatus = (equipment?.salePdiStatus ?? 'not_started') as EquipmentSalePdiStatus;
+
+  useEffect(() => {
+    if (!saleMode) return;
+    if (!['overview', 'photos', 'documents'].includes(activeTab)) {
+      setActiveTab('overview');
+    }
+  }, [activeTab, saleMode]);
+
   // ── Not found screen ──
   if (!equipment) {
     return (
@@ -1364,16 +1388,22 @@ export default function EquipmentDetail() {
   const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const equipment360 = buildEquipment360Summary({
     equipment,
-    rentals: canViewRentals ? allGanttRentals : [],
-    serviceTickets: canViewService ? allServiceTickets : [],
+    rentals: saleMode ? [] : (canViewRentals ? allGanttRentals : []),
+    serviceTickets: saleMode ? [] : (canViewService ? allServiceTickets : []),
     documents: canViewDocuments ? documentData : [],
-    payments: canViewFinance ? allPayments : [],
-    clients: canViewClients ? clientData : [],
+    payments: saleMode ? [] : (canViewFinance ? allPayments : []),
+    clients: saleMode ? [] : (canViewClients ? clientData : []),
     inventoryIsUnique: (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1,
-    utilizationPercent: utilizationMonth,
+    utilizationPercent: saleMode ? null : utilizationMonth,
+  });
+  const saleDocuments = equipment360.documents.latest;
+  const saleDocsReadiness = saleDocumentsReadiness(saleDocuments);
+  const salePdiTickets = serviceHistory.filter(ticket => {
+    const haystack = `${ticket.serviceKind || ''} ${ticket.reason || ''} ${ticket.description || ''}`.toLowerCase();
+    return haystack.includes('pdi') || haystack.includes('предпрод');
   });
   const quickActions = buildEquipmentQuickActions({
-    equipment,
+    equipment: { ...equipment, saleMode },
     can,
     currentRental: equipment360.occupancy.currentRental,
   });
@@ -1384,11 +1414,11 @@ export default function EquipmentDetail() {
     <div className="equipment-detail-skin space-y-5 p-4 sm:space-y-6 sm:p-6 md:p-8">
       <div>
         <Link
-          to="/equipment"
+          to={saleMode ? '/sales' : '/equipment'}
           className="inline-flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Вернуться к списку
+            {saleMode ? 'Вернуться в продажи' : 'Вернуться к списку'}
         </Link>
 
         <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -1423,9 +1453,9 @@ export default function EquipmentDetail() {
               }`}>
                 {ownerLabels[equipment.owner]}
               </Badge>
-              {equipment.isForSale && (
+              {saleMode && (
                 <Badge className="border-0 bg-orange-500/12 text-orange-300">
-                  На продажу
+                  {saleStatusLabel(equipment)}
                 </Badge>
               )}
             </div>
@@ -1447,7 +1477,7 @@ export default function EquipmentDetail() {
                 Редактировать
               </Button>
             )}
-            {canViewRentals && (
+            {!saleMode && canViewRentals && (
               <Link to="/rentals">
                 <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
                   <Calendar className="h-3.5 w-3.5" />
@@ -1455,11 +1485,27 @@ export default function EquipmentDetail() {
                 </Button>
               </Link>
             )}
-            {canViewService && (
+            {!saleMode && canViewService && (
               <Link to="/service">
                 <Button size="sm" className="app-button-primary rounded-xl px-4">
                   <Wrench className="h-3.5 w-3.5" />
                   В сервис
+                </Button>
+              </Link>
+            )}
+            {saleMode && canViewDocuments && (
+              <Link to="/documents">
+                <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
+                  <FileText className="h-3.5 w-3.5" />
+                  Документы
+                </Button>
+              </Link>
+            )}
+            {saleMode && canViewCrm && (
+              <Link to="/crm">
+                <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
+                  <User className="h-3.5 w-3.5" />
+                  Сделки
                 </Button>
               </Link>
             )}
@@ -1469,10 +1515,10 @@ export default function EquipmentDetail() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className={`rounded-2xl border p-4 ${
-          equipment.isForSale
-            ? equipment.salePdiStatus === 'ready'
+          saleMode
+            ? salePdiStatus === 'ready'
               ? 'border-emerald-500/25 bg-emerald-500/8'
-              : equipment.salePdiStatus === 'in_progress'
+              : salePdiStatus === 'in_progress'
               ? 'border-orange-500/25 bg-orange-500/8'
               : 'border-border bg-card/95'
             : equipment.status === 'in_service'
@@ -1487,13 +1533,13 @@ export default function EquipmentDetail() {
             <div>
               <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Статус</p>
               <p className="mt-1 text-lg font-semibold text-foreground">
-                {equipment.isForSale
-                  ? (equipment.salePdiStatus === 'ready' ? 'PDI готов' : 'PDI не готов')
+                {saleMode
+                  ? (salePdiStatus === 'ready' ? 'PDI готов' : salePdiStatus === 'in_progress' ? 'PDI в работе' : 'PDI не начат')
                   : EQ_STATUS_LABELS[equipment.status]}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {equipment.isForSale
-                  ? EQUIPMENT_SALE_PDI_LABELS[equipment.salePdiStatus ?? 'not_started']
+                {saleMode
+                  ? EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]
                   : (equipment.currentClient || 'Техника без активного клиента')}
               </p>
             </div>
@@ -1502,7 +1548,7 @@ export default function EquipmentDetail() {
         </div>
 
         <div className={`rounded-2xl border p-4 ${
-          equipment.isForSale
+          saleMode
             ? 'border-border bg-card/95'
             : daysUntilMaintenance <= 7
             ? 'border-red-500/25 bg-red-500/8'
@@ -1513,14 +1559,14 @@ export default function EquipmentDetail() {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-                {equipment.isForSale ? 'Продажный контур' : 'Следующее ТО'}
+                {saleMode ? 'Продажный статус' : 'Следующее ТО'}
               </p>
               <p className="mt-1 text-lg font-semibold text-foreground">
-                {equipment.isForSale ? 'На продаже' : formatDate(equipment.nextMaintenance)}
+                {saleMode ? saleStatusLabel(equipment) : formatDate(equipment.nextMaintenance)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {equipment.isForSale
-                  ? 'Карточка адаптирована под продажу и готовность PDI'
+                {saleMode
+                  ? 'Режим продажи без арендной логики'
                   : (daysUntilMaintenance > 0 ? `через ${daysUntilMaintenance} дн.` : 'просрочено')}
               </p>
             </div>
@@ -1531,19 +1577,21 @@ export default function EquipmentDetail() {
         <div className="rounded-2xl border border-border bg-card/95 p-4">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Утилизация · {format(today, 'MMM', { locale: ru })}</p>
-              <p className="mt-1 text-lg font-semibold text-foreground">{utilizationMonth}%</p>
-              <p className="mt-1 text-xs text-muted-foreground">{daysRentedThisMonth} из {daysInCurrentMonth} дней</p>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{saleMode ? 'Документы' : `Утилизация · ${format(today, 'MMM', { locale: ru })}`}</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{saleMode ? saleDocsReadiness.label : `${utilizationMonth}%`}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{saleMode ? `${saleDocsReadiness.count} связанных документов` : `${daysRentedThisMonth} из ${daysInCurrentMonth} дней`}</p>
             </div>
-            <TrendingUp className="h-5 w-5 text-blue-300" />
+            {saleMode ? <FileText className="h-5 w-5 text-blue-300" /> : <TrendingUp className="h-5 w-5 text-blue-300" />}
           </div>
-          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+          {!saleMode && <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
             <div className="h-full rounded-full bg-primary" style={{ width: `${utilizationMonth}%` }} />
-          </div>
+          </div>}
         </div>
 
         <div className={`rounded-2xl border p-4 ${
-          criticalTickets.length > 0
+          saleMode
+            ? 'border-border bg-card/95'
+            : criticalTickets.length > 0
             ? 'border-red-500/25 bg-red-500/8'
             : openServiceTickets.length > 0
             ? 'border-orange-500/25 bg-orange-500/8'
@@ -1551,18 +1599,18 @@ export default function EquipmentDetail() {
         }`}>
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Сервисные заявки</p>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{saleMode ? 'Фото / комплектация' : 'Сервисные заявки'}</p>
               <p className="mt-1 text-lg font-semibold text-foreground">
-                {openServiceTickets.length > 0 ? `${openServiceTickets.length} открыт.` : 'Нет заявок'}
+                {saleMode ? (equipment.photo ? 'Фото есть' : 'Фото не добавлены') : (openServiceTickets.length > 0 ? `${openServiceTickets.length} открыт.` : 'Нет заявок')}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">всего {serviceHistory.length} в истории</p>
+              <p className="mt-1 text-xs text-muted-foreground">{saleMode ? 'Предпродажная готовность и комплектация' : `всего ${serviceHistory.length} в истории`}</p>
             </div>
-            <AlertTriangle className="h-5 w-5 text-muted-foreground" />
+            {saleMode ? <Camera className="h-5 w-5 text-muted-foreground" /> : <AlertTriangle className="h-5 w-5 text-muted-foreground" />}
           </div>
         </div>
       </div>
 
-      {!equipment.isForSale && daysUntilMaintenance <= 30 && (
+      {!saleMode && daysUntilMaintenance <= 30 && (
         <div className={`rounded-2xl border px-4 py-3 ${
           daysUntilMaintenance <= 7
             ? 'border-red-500/25 bg-red-500/8'
@@ -1586,16 +1634,20 @@ export default function EquipmentDetail() {
         <CardHeader>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <CardTitle>Техника 360°</CardTitle>
-              <CardDescription>Сводка по занятости, сервису, документам и рискам без изменения данных</CardDescription>
+              <CardTitle>{saleMode ? 'Продажа 360°' : 'Техника 360°'}</CardTitle>
+              <CardDescription>
+                {saleMode
+                  ? 'Продажная карточка, PDI, документы, фото, сделки и история предпродажной подготовки'
+                  : 'Сводка по занятости, сервису, документам и рискам без изменения данных'}
+              </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
-              {canViewRentals && (
+              {!saleMode && canViewRentals && (
                 <Link to="/rentals">
                   <Button size="sm" variant="secondary"><Calendar className="h-4 w-4" /> Аренды</Button>
                 </Link>
               )}
-              {canViewService && (
+              {!saleMode && canViewService && (
                 <Link to="/service">
                   <Button size="sm" variant="secondary"><Wrench className="h-4 w-4" /> Сервис</Button>
                 </Link>
@@ -1605,7 +1657,12 @@ export default function EquipmentDetail() {
                   <Button size="sm" variant="secondary"><FileText className="h-4 w-4" /> Документы</Button>
                 </Link>
               )}
-              {canViewClients && equipment360.occupancy.currentRental?.clientId && (
+              {saleMode && canViewCrm && (
+                <Link to="/crm">
+                  <Button size="sm" variant="secondary"><User className="h-4 w-4" /> Сделки</Button>
+                </Link>
+              )}
+              {!saleMode && canViewClients && equipment360.occupancy.currentRental?.clientId && (
                 <Link to={`/clients/${equipment360.occupancy.currentRental.clientId}`}>
                   <Button size="sm" variant="secondary"><User className="h-4 w-4" /> Клиент</Button>
                 </Link>
@@ -1614,6 +1671,136 @@ export default function EquipmentDetail() {
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
+          {saleMode ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <CompactMetric label="PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} tone={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'in_progress' ? 'warning' : 'default'} />
+                <CompactMetric label="Продажный статус" value={saleStatusLabel(equipment)} tone={equipment.category === 'sold' ? 'success' : 'default'} />
+                <CompactMetric label="Документы" value={saleDocsReadiness.label} tone={saleDocsReadiness.count > 0 ? 'success' : 'warning'} />
+                <CompactMetric label="Комплектация / фото" value={equipment.photo ? 'Фото есть' : 'Нужно добавить'} tone={equipment.photo ? 'success' : 'warning'} />
+              </div>
+
+              {quickActions.length > 0 && (
+                <div className="space-y-2 rounded-xl border border-border bg-card/70 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Быстрые действия</p>
+                  <div className="flex flex-wrap gap-2">
+                    {quickActions.map(action => {
+                      const onClick = action.id === 'equipment-sale-pdi'
+                        ? () => setShowCreateServiceModal(true)
+                        : action.id === 'equipment-sale-photo'
+                          ? () => mainPhotoInputRef.current?.click()
+                            : action.id === 'equipment-sale-reserve'
+                            ? () => {
+                                const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, status: 'reserved' as const, isForSale: true }, createAuditEntry(user?.name || 'Система', 'Техника поставлена в резерв продажи')) : item);
+                                void persistEquipment(list);
+                              }
+                            : action.id === 'equipment-sale-remove'
+                              ? () => {
+                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, isForSale: false, status: item.status === 'reserved' ? 'available' as const : item.status }, createAuditEntry(user?.name || 'Система', 'Техника снята с продажи')) : item);
+                                  void persistEquipment(list);
+                                }
+                            : action.id === 'equipment-sale-sold'
+                              ? () => {
+                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, category: 'sold' as const, isForSale: false, activeInFleet: false, status: 'inactive' as const }, createAuditEntry(user?.name || 'Система', 'Техника отмечена проданной')) : item);
+                                  void persistEquipment(list);
+                                }
+                              : undefined;
+                      const button = (
+                        <Button
+                          size="sm"
+                          variant={action.kind === 'primary' ? 'default' : 'secondary'}
+                          disabled={action.disabled}
+                          title={action.reason || undefined}
+                          onClick={onClick}
+                        >
+                          {action.id === 'equipment-sale-pdi' && <Wrench className="h-4 w-4" />}
+                          {action.id === 'equipment-sale-documents' && <FileText className="h-4 w-4" />}
+                          {action.id === 'equipment-sale-photo' && <Camera className="h-4 w-4" />}
+                          {action.id === 'equipment-sale-deal' && <User className="h-4 w-4" />}
+                          {action.label}
+                        </Button>
+                      );
+                      return action.disabled || !action.to
+                        ? <span key={action.id}>{button}</span>
+                        : <Link key={action.id} to={action.to}>{button}</Link>;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid gap-4 xl:grid-cols-3">
+                <div className="rounded-xl border border-border bg-card/70 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-foreground">Карточка продажи</h3>
+                  <div className="grid gap-2">
+                    <CompactMetric label="Цена 1" value={canViewFinance ? formatCurrency(equipment.salePrice1 ?? 0) : 'Скрыто правами'} />
+                    <CompactMetric label="Цена 2" value={canViewFinance ? formatCurrency(equipment.salePrice2 ?? 0) : 'Скрыто правами'} />
+                    <CompactMetric label="Цена 3" value={canViewFinance ? formatCurrency(equipment.salePrice3 ?? 0) : 'Скрыто правами'} />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border bg-card/70 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold text-foreground">PDI / предпродажная подготовка</h3>
+                    <Badge variant={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'in_progress' ? 'warning' : 'default'}>
+                      {SALE_READINESS_LABELS[salePdiStatus] ?? EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]}
+                    </Badge>
+                  </div>
+                  {salePdiTickets.length > 0 ? (
+                    <div className="space-y-2">
+                      {salePdiTickets.slice(0, 3).map(ticket => (
+                        <LinkedRow
+                          key={ticket.id}
+                          title={ticket.reason || 'PDI / предпродажная подготовка'}
+                          meta={`${SERVICE_STATUS_LABELS[ticket.status] || ticket.status} · ${formatDate(ticket.createdAt)}`}
+                          href={`/service/${ticket.id}`}
+                          canOpen={canViewService}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">PDI-заявка не найдена. Используйте действие «Создать PDI».</p>
+                  )}
+                </div>
+                <div className="rounded-xl border border-border bg-card/70 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-foreground">Фото и комплектация</h3>
+                  <div className="grid gap-2">
+                    <CompactMetric label="Основное фото" value={equipment.photo ? 'Добавлено' : 'Не добавлено'} tone={equipment.photo ? 'success' : 'warning'} />
+                    <CompactMetric label="Комплектация" value={equipment.notes ? 'Есть комментарий менеджера' : 'Не описана'} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-3">
+                <CompactList
+                  title="Документы техники"
+                  emptyText={canViewDocuments ? 'Связанных документов нет.' : 'Раздел документов недоступен для этой роли.'}
+                  items={canViewDocuments ? saleDocuments.slice(0, 5).map(doc => ({
+                    id: doc.id,
+                    title: `${doc.type} ${doc.id ? `· ${doc.id}` : ''}`,
+                    meta: `${formatDate(doc.date)} · ${doc.status}`,
+                    href: '/documents',
+                  })) : []}
+                  canOpen={canViewDocuments}
+                />
+                <div className="rounded-xl border border-border bg-card/70 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-foreground">Связанные сделки / клиенты</h3>
+                  {canViewCrm ? (
+                    <LinkedRow title="CRM сделки" meta="Открыть воронку продаж" href="/crm" canOpen={canViewCrm} />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">CRM недоступна для этой роли.</p>
+                  )}
+                </div>
+                <div className="rounded-xl border border-border bg-card/70 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-foreground">Комментарии и история</h3>
+                  {equipment.notes ? (
+                    <p className="whitespace-pre-wrap text-sm text-muted-foreground">{equipment.notes}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Комментарий менеджера пока не заполнен.</p>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+          <>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <CompactMetric label="Статус" value={equipment360.occupancy.label} tone={equipment360.flags.length > 0 ? 'warning' : 'default'} />
             <CompactMetric label="Собственник" value={equipment.ownerName || ownerLabels[equipment.owner] || 'Не указан'} />
@@ -1760,6 +1947,8 @@ export default function EquipmentDetail() {
               </div>
             )}
           </div>
+          </>
+          )}
         </CardContent>
       </Card>
 
@@ -1849,7 +2038,7 @@ export default function EquipmentDetail() {
               <InfoField label="Серийный номер" value={equipment.serialNumber} mono />
               <InfoField label="Инвентарный номер" value={equipment.inventoryNumber} mono />
               <InfoField label="Год выпуска" value={String(equipment.year)} />
-              {!equipment.isForSale && <InfoField label="Моточасы" value={`${equipment.hours} ч`} />}
+              {!saleMode && <InfoField label="Моточасы" value={`${equipment.hours} ч`} />}
               <InfoField label="Высота подъёма" value={`${equipment.liftHeight} м`} />
               {equipment.workingHeight && <InfoField label="Рабочая высота" value={`${equipment.workingHeight} м`} />}
               {equipment.loadCapacity && <InfoField label="Грузоподъёмность" value={`${equipment.loadCapacity} кг`} />}
@@ -1860,12 +2049,12 @@ export default function EquipmentDetail() {
               {canViewFinance && equipment.owner === 'sublease' && equipment.subleasePrice && (
                 <InfoField label="Стоимость субаренды" value={`${formatCurrency(equipment.subleasePrice)}/мес`} highlight="orange" />
               )}
-              {!equipment.isForSale && (
+              {!saleMode && (
                 <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} highlight={daysUntilMaintenance <= 0 ? 'red' : undefined} />
               )}
             </div>
 
-            {equipment.currentClient && (
+            {!saleMode && equipment.currentClient && (
               <div className="mt-4 rounded-xl border border-blue-500/20 bg-blue-500/8 p-3">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <InfoField label="Текущий клиент" value={equipment.currentClient} />
@@ -1885,7 +2074,7 @@ export default function EquipmentDetail() {
               </div>
             )}
 
-            <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/8 p-3">
+            {!saleMode && <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/8 p-3">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-cyan-300">GSM</p>
@@ -1928,9 +2117,9 @@ export default function EquipmentDetail() {
                 <InfoField label="Напряжение" value={typeof (equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage) === 'number' ? `${(equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage)!.toFixed(1)} В` : '—'} />
                 <InfoField label="Моточасы" value={typeof (equipment.gsmLastMotoHours ?? equipment.gsmHourmeter) === 'number' ? `${(equipment.gsmLastMotoHours ?? equipment.gsmHourmeter)!.toLocaleString('ru-RU')} м/ч` : '—'} />
               </div>
-            </div>
+            </div>}
 
-            {equipment.isForSale && (
+            {saleMode && (
               <div className="mt-4 rounded-xl border border-orange-500/20 bg-orange-500/8 p-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
@@ -1938,13 +2127,13 @@ export default function EquipmentDetail() {
                     <p className="text-xs text-muted-foreground">Коммерческий контур и готовность PDI</p>
                   </div>
                   <Badge className={`border-0 ${
-                    equipment.salePdiStatus === 'ready'
+                    salePdiStatus === 'ready'
                       ? 'bg-emerald-500/12 text-emerald-300'
-                      : equipment.salePdiStatus === 'in_progress'
+                      : salePdiStatus === 'in_progress'
                       ? 'bg-orange-500/12 text-orange-300'
                       : 'bg-secondary text-muted-foreground'
                   }`}>
-                    {EQUIPMENT_SALE_PDI_LABELS[equipment.salePdiStatus ?? 'not_started']}
+                    {EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]}
                   </Badge>
                 </div>
                 {canViewFinance ? (
@@ -1959,7 +2148,7 @@ export default function EquipmentDetail() {
               </div>
             )}
 
-            {!equipment.isForSale && (
+            {!saleMode && (
               <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-3">
                 <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} />
                 {equipment.maintenanceCHTO && <InfoField label="Дата ЧТО" value={formatDate(equipment.maintenanceCHTO)} />}
@@ -1976,22 +2165,22 @@ export default function EquipmentDetail() {
           <TabsTrigger value="overview" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><CheckCircle className="h-3.5 w-3.5" /> Обзор</span>
           </TabsTrigger>
-          {canViewFinance && (
+          {!saleMode && canViewFinance && (
             <TabsTrigger value="financial" className={tabTriggerClass}>
               <span className="flex items-center gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Финансы</span>
             </TabsTrigger>
           )}
-          {canViewRentals && (
+          {!saleMode && canViewRentals && (
             <TabsTrigger value="rental-history" className={tabTriggerClass}>
               <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Аренды {ganttRentals.length > 0 && <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">{ganttRentals.length}</span>}</span>
             </TabsTrigger>
           )}
-          {canViewService && (
+          {!saleMode && canViewService && (
             <TabsTrigger value="service-history" className={tabTriggerClass}>
               <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Сервис {openServiceTickets.length > 0 && <span className="rounded-full bg-red-500/12 px-1.5 text-xs text-red-300">{openServiceTickets.length}</span>}</span>
             </TabsTrigger>
           )}
-          {canViewService && (
+          {!saleMode && canViewService && (
             <TabsTrigger value="repair-history" className={tabTriggerClass}>
               <span className="flex items-center gap-1.5"><Wrench className="h-3.5 w-3.5" /> Ремонты</span>
             </TabsTrigger>
@@ -2008,6 +2197,7 @@ export default function EquipmentDetail() {
 
         {/* ══ OVERVIEW TAB ══ */}
         <TabsContent value="overview" className="space-y-6">
+          {!saleMode && (
           <div className="grid gap-6 lg:grid-cols-2">
             {/* Rental block */}
             <Card>
@@ -2160,9 +2350,10 @@ export default function EquipmentDetail() {
               </CardContent>
             </Card>
           </div>
+          )}
 
           {/* Economics summary */}
-          {canViewFinance && (
+          {!saleMode && canViewFinance && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -2235,7 +2426,7 @@ export default function EquipmentDetail() {
         </TabsContent>
 
         {/* ══ FINANCIAL TAB ══ */}
-        {canViewFinance && (
+        {!saleMode && canViewFinance && (
         <TabsContent value="financial">
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
@@ -2364,7 +2555,7 @@ export default function EquipmentDetail() {
         )}
 
         {/* ══ RENTAL HISTORY TAB ══ */}
-        {canViewRentals && (
+        {!saleMode && canViewRentals && (
         <TabsContent value="rental-history">
           <Card>
             <CardHeader>
@@ -2449,7 +2640,7 @@ export default function EquipmentDetail() {
         )}
 
         {/* ══ SERVICE HISTORY TAB ══ */}
-        {canViewService && (
+        {!saleMode && canViewService && (
         <TabsContent value="service-history">
           <Card>
             <CardHeader>
@@ -2530,7 +2721,7 @@ export default function EquipmentDetail() {
         )}
 
         {/* ══ REPAIR HISTORY TAB ══ */}
-        {canViewService && (
+        {!saleMode && canViewService && (
         <TabsContent value="repair-history">
           <Card>
             <CardHeader>
@@ -2590,6 +2781,45 @@ export default function EquipmentDetail() {
 
         {/* ══ PHOTOS TAB ══ */}
         <TabsContent value="photos">
+          {saleMode ? (
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle>Фото и комплектация</CardTitle>
+                    <CardDescription>Основное фото, комплектация и предпродажная готовность</CardDescription>
+                  </div>
+                  {canEditEquipment && (
+                    <Button size="sm" variant="secondary" onClick={() => mainPhotoInputRef.current?.click()}>
+                      <Camera className="h-4 w-4" />
+                      Добавить фото
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {equipment.photo ? (
+                  <button type="button" className="block w-full" onClick={() => setPreviewImage(equipment.photo ?? null)}>
+                    <img src={displayPhotoUrl(equipment.photo)} alt={equipment.model} className="max-h-[32rem] w-full rounded-xl border border-border object-contain" />
+                  </button>
+                ) : (
+                  <EmptyState icon={<Camera className="h-12 w-12" />} text="Фото техники для продажи пока нет">
+                    {canEditEquipment && (
+                      <Button variant="secondary" size="sm" className="mt-4" onClick={() => mainPhotoInputRef.current?.click()}>
+                        Добавить фото
+                      </Button>
+                    )}
+                  </EmptyState>
+                )}
+                <div className="grid gap-3 md:grid-cols-3">
+                  <CompactMetric label="PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} />
+                  <CompactMetric label="Комплектация" value={equipment.notes ? 'Описана в комментарии' : 'Не описана'} />
+                  <CompactMetric label="Предпродажная готовность" value={salePdiStatus === 'ready' && equipment.photo ? 'Готова' : 'Требует проверки'} tone={salePdiStatus === 'ready' && equipment.photo ? 'success' : 'warning'} />
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+          <>
           {Object.keys(PHOTO_CATEGORY_LABELS).map(key => (
             <input
               key={key}
@@ -3266,6 +3496,8 @@ export default function EquipmentDetail() {
               )}
             </CardContent>
           </Card>
+          </>
+          )}
         </TabsContent>
 
         {/* ══ DOCUMENTS TAB ══ */}
@@ -3305,10 +3537,12 @@ export default function EquipmentDetail() {
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">
-                  Новая сервисная заявка
+                  {saleMode ? 'PDI / предпродажная подготовка' : 'Новая сервисная заявка'}
                 </Dialog.Title>
                 <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  Заявка будет создана сразу для текущего подъемника.
+                  {saleMode
+                    ? 'Запись будет показана в карточке продажи как PDI, без вывода обычной очереди ТО.'
+                    : 'Заявка будет создана сразу для текущего подъемника.'}
                 </Dialog.Description>
               </div>
               <Dialog.Close asChild>
@@ -3320,10 +3554,31 @@ export default function EquipmentDetail() {
             <ServiceTicketForm
               initialEquipmentId={equipment.id}
               lockEquipment
-              submitLabel="Создать заявку"
+              submitLabel={saleMode ? 'Создать PDI' : 'Создать заявку'}
+              initialReason={saleMode ? 'PDI / предпродажная подготовка' : undefined}
+              initialDescription={saleMode ? 'Проверка техники перед продажей, комплектация, документы и фото.' : undefined}
+              scenarioTitle={saleMode ? 'PDI / предпродажная подготовка' : undefined}
+              scenarioDescription={saleMode ? 'Зафиксируйте предпродажную проверку, готовность документов, комплектацию и фото.' : undefined}
+              hideScenarioSelect={saleMode}
               onCancel={() => setShowCreateServiceModal(false)}
               onCreated={(ticket) => {
                 setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
+                if (saleMode) {
+                  const nextEquipment = allEquipment.map(item =>
+                    item.id === equipment.id
+                      ? appendAuditHistory(
+                          { ...item, salePdiStatus: item.salePdiStatus === 'ready' ? item.salePdiStatus : 'in_progress' },
+                          createAuditEntry(
+                            user?.name || 'Система',
+                            `Создана PDI / предпродажная подготовка ${ticket.id}: ${ticket.reason}`,
+                          ),
+                        )
+                      : item,
+                  );
+                  void persistEquipment(nextEquipment);
+                  setShowCreateServiceModal(false);
+                  return;
+                }
                 const nextEquipment = allEquipment.map(item =>
                   item.id === equipment.id
                     ? appendAuditHistory(

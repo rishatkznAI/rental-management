@@ -153,6 +153,25 @@ test('sales page keeps sold equipment discoverable through sales status filter',
   assert.match(source, /saleStatusLabel\(equipment\)/);
 });
 
+test('sale mode keeps sale prices in sale 360 and not in basic characteristics', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+  const basicStart = source.indexOf('<CardTitle>Основные характеристики</CardTitle>');
+  const basicEnd = source.indexOf('{/* ── Tabs ── */}', basicStart);
+  const basicSection = source.slice(basicStart, basicEnd);
+
+  assert.ok(basicStart > -1);
+  assert.ok(basicEnd > basicStart);
+  assert.match(source, /<CardTitle>\{saleMode \? 'Продажа 360°' : 'Техника 360°'\}<\/CardTitle>/);
+  assert.match(source, /<CompactMetric label="Цена 1"/);
+  assert.match(source, /<CompactMetric label="Цена 2"/);
+  assert.match(source, /<CompactMetric label="Цена 3"/);
+
+  assert.doesNotMatch(basicSection, /<p className="text-sm font-semibold text-orange-300">Продажа<\/p>/);
+  assert.doesNotMatch(basicSection, /<InfoField label="Цена 1"/);
+  assert.doesNotMatch(basicSection, /<InfoField label="Цена 2"/);
+  assert.doesNotMatch(basicSection, /<InfoField label="Цена 3"/);
+});
+
 test('PDI form contains presale fields and no service scenario selector', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/components/sales/PdiForm.tsx'), 'utf8');
 

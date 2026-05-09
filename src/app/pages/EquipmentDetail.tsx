@@ -2100,35 +2100,6 @@ export default function EquipmentDetail() {
               </div>
             </div>}
 
-            {saleMode && (
-              <div className="mt-4 rounded-xl border border-orange-500/20 bg-orange-500/8 p-3">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-orange-300">Продажа</p>
-                    <p className="text-xs text-muted-foreground">Коммерческий контур и готовность PDI</p>
-                  </div>
-                  <Badge className={`border-0 ${
-                    salePdiStatus === 'ready'
-                      ? 'bg-emerald-500/12 text-emerald-300'
-                      : salePdiStatus === 'in_progress' || salePdiStatus === 'issues'
-                      ? 'bg-orange-500/12 text-orange-300'
-                      : 'bg-secondary text-muted-foreground'
-                  }`}>
-                    {EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]}
-                  </Badge>
-                </div>
-                {canViewFinance ? (
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <InfoField label="Цена 1" value={formatCurrency(equipment.salePrice1 ?? 0)} />
-                    <InfoField label="Цена 2" value={formatCurrency(equipment.salePrice2 ?? 0)} />
-                    <InfoField label="Цена 3" value={formatCurrency(equipment.salePrice3 ?? 0)} />
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Финансовые параметры продажи скрыты правами доступа.</p>
-                )}
-              </div>
-            )}
-
             {!saleMode && (
               <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-3">
                 <InfoField label="След. ТО" value={formatDate(equipment.nextMaintenance)} />

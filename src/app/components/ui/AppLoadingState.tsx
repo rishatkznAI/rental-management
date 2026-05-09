@@ -1,4 +1,5 @@
 import { Loader2 } from 'lucide-react';
+import { animationClasses } from '../../lib/animations';
 
 type AppLoadingStateProps = {
   title?: string;
@@ -14,7 +15,7 @@ export function AppLoadingState({
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className={compact ? 'w-full max-w-sm' : 'w-full max-w-md'}>
-        <div className="rounded-2xl border border-border bg-card/80 px-6 py-8 text-center shadow-sm backdrop-blur">
+        <div className={`rounded-2xl border border-border bg-card/80 px-6 py-8 text-center shadow-sm backdrop-blur ${animationClasses.section}`}>
           <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-primary/10">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>

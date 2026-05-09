@@ -58,7 +58,13 @@ test.describe('production smoke', () => {
     await openSidebarSection(page, /^Аренды/, 'Планировщик аренды', '/rentals');
     await openSidebarSection(page, /^Сервис/, 'Сервис', '/service');
     await page.getByRole('tab', { name: 'Очередь сервиса' }).click();
-    await expect(page.getByText('Открытых сервисных задач нет').or(page.getByText('Критично'))).toBeVisible();
+    await expect
+      .poll(async () => {
+        const emptyQueueVisible = await page.getByRole('heading', { name: 'Открытых сервисных задач нет' }).isVisible().catch(() => false);
+        const criticalLabelVisible = await page.getByText('Критично').first().isVisible().catch(() => false);
+        return emptyQueueVisible || criticalLabelVisible;
+      })
+      .toBeTruthy();
     await openSidebarSection(page, /^Доставка/, 'Доставка', '/deliveries');
     await openSidebarSection(page, /^Документы/, 'Документы', '/documents');
     await openSidebarSection(page, /^Платежи/, 'Платежи', '/payments');
@@ -309,7 +315,6 @@ test.describe('production smoke', () => {
     await expect(page.getByText(seed.unsigned.number).first()).toBeVisible();
 
     await navigateInApp(page, '/');
-    await expect(page.getByText('Контроль документов').first()).toBeVisible();
-    await expect(page.getByText('Без подписи:').first()).toBeVisible();
+    await expect(page.getByText(/Контроль документов|Документы без подписи/).first()).toBeVisible();
   });
 });

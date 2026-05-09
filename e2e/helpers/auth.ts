@@ -19,7 +19,7 @@ export const RENTAL_MANAGER_CREDENTIALS: Credentials = {
 export async function login(page: Page, credentials: Credentials) {
   await page.goto('./', { waitUntil: 'domcontentloaded' });
   await page.getByLabel('Логин').fill(credentials.login ?? credentials.email);
-  await page.getByLabel('Пароль').fill(credentials.password);
+  await page.getByRole('textbox', { name: 'Пароль' }).fill(credentials.password);
   await page.getByRole('button', { name: 'Войти' }).click();
 }
 

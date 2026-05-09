@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { animatedModalClassName, animatedOverlayClassName } from '../../lib/animations';
 
 interface NewClientModalProps {
   open: boolean;
@@ -33,8 +34,8 @@ export function NewClientModal({ open, onOpenChange }: NewClientModalProps) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/50 z-50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white dark:bg-gray-800 p-6 shadow-lg">
+        <Dialog.Overlay className={animatedOverlayClassName()} />
+        <Dialog.Content className={animatedModalClassName('max-w-md bg-white dark:bg-gray-800')}>
           <div className="flex items-center justify-between mb-4">
             <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">
               Новый клиент

@@ -4,6 +4,7 @@ import { X, TrendingUp, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { formatCurrency, formatDate } from '../../lib/utils';
+import { animatedModalClassName, animatedOverlayClassName } from '../../lib/animations';
 
 interface KPIDetailModalProps {
   open: boolean;
@@ -557,8 +558,8 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/50 z-50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white dark:bg-gray-800 p-6 shadow-lg max-h-[90vh] overflow-y-auto">
+        <Dialog.Overlay className={animatedOverlayClassName()} />
+        <Dialog.Content className={animatedModalClassName('max-h-[90vh] max-w-2xl overflow-y-auto bg-white dark:bg-gray-800')}>
           <div className="flex items-center justify-between mb-2">
             <Dialog.Title className="text-2xl font-bold text-gray-900 dark:text-white">
               {content.title}

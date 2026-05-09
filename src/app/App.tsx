@@ -8,6 +8,7 @@ import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { AppLoadingState } from './components/ui/AppLoadingState';
 import { BuildDebugBadge } from './components/ui/BuildDebugBadge';
 import { DemoModeBadge } from './components/ui/DemoModeBadge';
+import { animationClasses } from './lib/animations';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,7 +39,16 @@ export default function App() {
             />
             <DemoModeBadge />
             <BuildDebugBadge />
-            <Toaster position="top-right" />
+            <Toaster
+              position="top-right"
+              richColors
+              closeButton
+              toastOptions={{
+                classNames: {
+                  toast: animationClasses.toast,
+                },
+              }}
+            />
           </ThemeProvider>
         </AuthProvider>
       </QueryClientProvider>

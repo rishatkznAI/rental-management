@@ -17,6 +17,7 @@ import {
 import type { PhotoReference, ShippingPhoto, ServiceTicket, Payment, EquipmentStatus, EquipmentOperationPhotoCategory, ShippingEventType, Document, Client } from '../types';
 import { formatDate, formatDateTime, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
 import { cn } from '../lib/utils';
+import { animatedModalClassName, animatedOverlayClassName } from '../lib/animations';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import {
@@ -3705,8 +3706,8 @@ export default function EquipmentDetail() {
       {/* ── Modals ── */}
       <Dialog.Root open={showCreateServiceModal} onOpenChange={setShowCreateServiceModal}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[min(96vw,960px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-900">
+          <Dialog.Overlay className={animatedOverlayClassName('bg-black/60')} />
+          <Dialog.Content className={animatedModalClassName('max-h-[92vh] w-[min(96vw,960px)] overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-900')}>
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">
@@ -3843,8 +3844,8 @@ export default function EquipmentDetail() {
       />
       <Dialog.Root open={!!previewImage} onOpenChange={(open) => { if (!open) setPreviewImage(null); }}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[min(96vw,1200px)] -translate-x-1/2 -translate-y-1/2 items-center justify-center outline-none">
+          <Dialog.Overlay className={animatedOverlayClassName('bg-black/75')} />
+          <Dialog.Content className={animatedModalClassName('flex max-h-[92vh] w-[min(96vw,1200px)] items-center justify-center border-0 bg-transparent p-0 shadow-none outline-none')}>
             {previewImage && (
               <div className="relative w-full">
                 <button
@@ -4166,8 +4167,8 @@ function EditEquipmentModal({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-gray-900">
+        <Dialog.Overlay className={animatedOverlayClassName()} />
+        <Dialog.Content className={animatedModalClassName('max-h-[92vh] max-w-2xl overflow-hidden rounded-xl bg-white p-0 shadow-2xl dark:bg-gray-900')}>
 
           {/* Header */}
           <div className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">

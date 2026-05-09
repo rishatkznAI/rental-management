@@ -40,6 +40,16 @@
   --sidebar-accent-foreground: #171923;
   --sidebar-border: rgba(23, 25, 35, 0.08);
   --sidebar-ring: rgba(212, 247, 74, 0.5);
+  --motion-duration-instant: 1ms;
+  --motion-duration-fast: 140ms;
+  --motion-duration-base: 180ms;
+  --motion-duration-relaxed: 220ms;
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --motion-modal-scale-from: 0.96;
+  --motion-section-y: 6px;
+  --motion-drawer-offset: 1.5rem;
 }
 
 .dark {
@@ -265,5 +275,275 @@
 
   .app-filter-chip[data-active="true"] {
     @apply border-primary/30 bg-accent text-foreground;
+  }
+
+  .app-animate-overlay {
+    animation-duration: var(--motion-duration-base);
+    animation-timing-function: var(--motion-ease-standard);
+    animation-fill-mode: both;
+  }
+
+  .app-animate-overlay[data-state="open"] {
+    animation-name: app-overlay-in;
+  }
+
+  .app-animate-overlay[data-state="closed"] {
+    animation-name: app-overlay-out;
+    animation-duration: var(--motion-duration-fast);
+    animation-timing-function: var(--motion-ease-exit);
+  }
+
+  .app-animate-modal {
+    animation-duration: var(--motion-duration-base);
+    animation-timing-function: var(--motion-ease-entrance);
+    animation-fill-mode: both;
+    transform-origin: center;
+    will-change: opacity, transform;
+  }
+
+  .app-animate-modal[data-state="open"] {
+    animation-name: app-modal-in;
+  }
+
+  .app-animate-modal[data-state="closed"] {
+    animation-name: app-modal-out;
+    animation-duration: var(--motion-duration-fast);
+    animation-timing-function: var(--motion-ease-exit);
+  }
+
+  .app-animate-drawer {
+    animation-duration: var(--motion-duration-relaxed);
+    animation-timing-function: var(--motion-ease-entrance);
+    animation-fill-mode: both;
+  }
+
+  .app-animate-drawer[data-state="closed"] {
+    animation-duration: var(--motion-duration-base);
+    animation-timing-function: var(--motion-ease-exit);
+  }
+
+  .app-animate-drawer[data-side="right"][data-state="open"] {
+    animation-name: app-drawer-right-in;
+  }
+
+  .app-animate-drawer[data-side="right"][data-state="closed"] {
+    animation-name: app-drawer-right-out;
+  }
+
+  .app-animate-drawer[data-side="left"][data-state="open"] {
+    animation-name: app-drawer-left-in;
+  }
+
+  .app-animate-drawer[data-side="left"][data-state="closed"] {
+    animation-name: app-drawer-left-out;
+  }
+
+  .app-animate-drawer[data-side="top"][data-state="open"] {
+    animation-name: app-drawer-top-in;
+  }
+
+  .app-animate-drawer[data-side="top"][data-state="closed"] {
+    animation-name: app-drawer-top-out;
+  }
+
+  .app-animate-drawer[data-side="bottom"][data-state="open"] {
+    animation-name: app-drawer-bottom-in;
+  }
+
+  .app-animate-drawer[data-side="bottom"][data-state="closed"] {
+    animation-name: app-drawer-bottom-out;
+  }
+
+  .app-animate-section {
+    animation: app-section-in var(--motion-duration-relaxed) var(--motion-ease-entrance) both;
+    will-change: opacity, transform;
+  }
+
+  .app-animate-collapse {
+    transition:
+      grid-template-rows var(--motion-duration-base) var(--motion-ease-standard),
+      opacity var(--motion-duration-base) var(--motion-ease-standard);
+  }
+
+  .app-animate-collapse[data-state="open"] {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .app-animate-collapse[data-state="closed"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+
+  .app-animate-tabs {
+    animation: app-tabs-in var(--motion-duration-fast) var(--motion-ease-standard) both;
+  }
+
+  .app-animate-popover {
+    animation-duration: var(--motion-duration-fast);
+    animation-timing-function: var(--motion-ease-standard);
+    animation-fill-mode: both;
+    transform-origin: var(--radix-select-content-transform-origin, center);
+    will-change: opacity, transform;
+  }
+
+  .app-animate-popover[data-state="open"] {
+    animation-name: app-popover-in;
+  }
+
+  .app-animate-popover[data-state="closed"] {
+    animation-name: app-popover-out;
+  }
+
+  .app-animate-toast {
+    animation: app-toast-in var(--motion-duration-relaxed) var(--motion-ease-entrance) both;
+    will-change: opacity, transform;
+  }
+}
+
+@keyframes app-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes app-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes app-modal-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(var(--motion-modal-scale-from));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes app-modal-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(var(--motion-modal-scale-from));
+  }
+}
+
+@keyframes app-drawer-right-in {
+  from { transform: translateX(var(--motion-drawer-offset)); opacity: 0.98; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes app-drawer-right-out {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(var(--motion-drawer-offset)); opacity: 0.98; }
+}
+
+@keyframes app-drawer-left-in {
+  from { transform: translateX(calc(var(--motion-drawer-offset) * -1)); opacity: 0.98; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes app-drawer-left-out {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(calc(var(--motion-drawer-offset) * -1)); opacity: 0.98; }
+}
+
+@keyframes app-drawer-top-in {
+  from { transform: translateY(calc(var(--motion-drawer-offset) * -1)); opacity: 0.98; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes app-drawer-top-out {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(calc(var(--motion-drawer-offset) * -1)); opacity: 0.98; }
+}
+
+@keyframes app-drawer-bottom-in {
+  from { transform: translateY(var(--motion-drawer-offset)); opacity: 0.98; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes app-drawer-bottom-out {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(var(--motion-drawer-offset)); opacity: 0.98; }
+}
+
+@keyframes app-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-section-y));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes app-tabs-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes app-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes app-popover-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(2px) scale(0.98);
+  }
+}
+
+@keyframes app-toast-in {
+  from {
+    opacity: 0;
+    transform: translate3d(var(--app-toast-translate-x, 0), 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(var(--app-toast-translate-x, 0), 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+
+  .app-animate-overlay,
+  .app-animate-modal,
+  .app-animate-drawer,
+  .app-animate-section,
+  .app-animate-collapse,
+  .app-animate-tabs,
+  .app-animate-popover,
+  .app-animate-toast {
+    animation-duration: var(--motion-duration-instant) !important;
+    animation-timing-function: linear !important;
   }
 }

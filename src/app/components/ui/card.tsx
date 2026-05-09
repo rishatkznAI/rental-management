@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import { animationClasses } from "../../lib/animations";
 import { cn } from "./utils";
 
 function Card({ className, ...props }: React.ComponentProps<"div">) {
@@ -8,6 +9,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="card"
       className={cn(
         "bg-card text-card-foreground flex flex-col gap-6 rounded-xl border",
+        animationClasses.card,
         className,
       )}
       {...props}

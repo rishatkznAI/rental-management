@@ -59,6 +59,7 @@ import {
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { cn, formatCurrency, getRentalDays } from '../lib/utils';
+import { animationClasses } from '../lib/animations';
 
 // ========== Constants & Types ==========
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
@@ -3439,7 +3440,7 @@ export default function Rentals() {
       </Sheet>
       {/* ===== Toast notification ===== */}
       {toast && (
-        <div className={`fixed bottom-6 left-1/2 z-[100] -translate-x-1/2 transform rounded-xl px-5 py-3 shadow-lg text-sm font-medium text-white transition-all ${
+        <div className={`fixed bottom-6 left-1/2 z-[100] -translate-x-1/2 rounded-xl px-5 py-3 shadow-lg text-sm font-medium text-white [--app-toast-translate-x:-50%] ${animationClasses.toast} ${
           toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
         }`}>
           {toast.message}

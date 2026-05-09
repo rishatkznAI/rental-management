@@ -559,24 +559,26 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={animatedOverlayClassName()} />
-        <Dialog.Content className={animatedModalClassName('max-h-[90vh] max-w-2xl overflow-y-auto bg-white dark:bg-gray-800')}>
-          <div className="flex items-center justify-between mb-2">
-            <Dialog.Title className="text-2xl font-bold text-gray-900 dark:text-white">
-              {content.title}
-            </Dialog.Title>
-            <Dialog.Close asChild>
-              <button className="rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-700">
-                <X className="h-5 w-5 text-gray-500" />
-              </button>
-            </Dialog.Close>
+        <Dialog.Content className={animatedModalClassName('flex !max-h-[85vh] !w-[calc(100vw-2rem)] !max-w-2xl flex-col overflow-hidden bg-white dark:bg-gray-800')}>
+          <div className="shrink-0">
+            <div className="mb-2 flex items-start justify-between gap-4 pr-8">
+              <Dialog.Title className="text-2xl font-bold text-gray-900 dark:text-white">
+                {content.title}
+              </Dialog.Title>
+              <Dialog.Close asChild>
+                <button className="rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-700">
+                  <X className="h-5 w-5 text-gray-500" />
+                </button>
+              </Dialog.Close>
+            </div>
+            <Dialog.Description className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+              {content.description}
+            </Dialog.Description>
           </div>
-          <Dialog.Description className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-            {content.description}
-          </Dialog.Description>
 
-          <div>{content.details}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">{content.details}</div>
 
-          <div className="flex justify-end mt-6">
+          <div className="mt-4 flex shrink-0 justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
             <Button variant="secondary" onClick={() => onOpenChange(false)}>
               Закрыть
             </Button>

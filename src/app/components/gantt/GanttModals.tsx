@@ -170,7 +170,7 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <RotateCcw className="h-5 w-5 text-[--color-primary]" />
@@ -332,7 +332,7 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <PauseCircle className="h-5 w-5 text-amber-500" />
@@ -605,17 +605,18 @@ export function NewRentalModal({
   const hasNoEquipment = availableEquipment.length === 0 && busyEquipment.length === 0;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
-        <div className="mb-4 flex items-center justify-between">
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-lg flex-col overflow-hidden rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+        <div className="mb-4 flex shrink-0 items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Новая аренда</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="space-y-4">
 
           {/* Клиент */}
           <div>
@@ -782,28 +783,30 @@ export function NewRentalModal({
             </div>
           </div>
 
-          <div className="flex gap-3 pt-2">
-            <Button
-              onClick={() => {
-                if (!selectedEquipment || !selectedClient) return;
-                onConfirm({
-                  clientId: selectedClient.id,
-                  client: selectedClient.company,
-                  equipmentId: selectedEquipment.id,
-                  equipmentInv: selectedEquipment.inventoryNumber,
-                  startDate,
-                  endDate,
-                  manager,
-                  amount: totalAmount,
-                });
-                onClose();
-              }}
-              disabled={!selectedClient || !selectedEquipment || !startDate || !endDate}
-            >
-              Создать аренду
-            </Button>
-            <Button variant="secondary" onClick={onClose}>Отмена</Button>
           </div>
+        </div>
+
+        <div className="mt-4 flex shrink-0 gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+          <Button
+            onClick={() => {
+              if (!selectedEquipment || !selectedClient) return;
+              onConfirm({
+                clientId: selectedClient.id,
+                client: selectedClient.company,
+                equipmentId: selectedEquipment.id,
+                equipmentInv: selectedEquipment.inventoryNumber,
+                startDate,
+                endDate,
+                manager,
+                amount: totalAmount,
+              });
+              onClose();
+            }}
+            disabled={!selectedClient || !selectedEquipment || !startDate || !endDate}
+          >
+            Создать аренду
+          </Button>
+          <Button variant="secondary" onClick={onClose}>Отмена</Button>
         </div>
       </div>
     </div>

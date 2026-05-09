@@ -2943,8 +2943,8 @@ export default function Dashboard() {
       )}
 
       <Sheet open={!!managerBreakdownName} onOpenChange={(open) => !open && setManagerBreakdownName(null)}>
-        <SheetContent side="right" className="w-full overflow-y-auto border-gray-200 bg-white sm:max-w-2xl dark:border-gray-700 dark:bg-gray-950">
-          <SheetHeader className="border-b border-gray-200 pb-4 dark:border-gray-700">
+        <SheetContent side="right" className="flex w-full flex-col overflow-hidden border-gray-200 bg-white p-0 sm:max-w-2xl dark:border-gray-700 dark:bg-gray-950">
+          <SheetHeader className="shrink-0 border-b border-gray-200 pb-4 pr-12 dark:border-gray-700">
             <SheetTitle className="flex items-center gap-2 text-left">
               <User className="h-5 w-5 text-[--color-primary]" />
               Расшифровка карточки менеджера
@@ -2956,7 +2956,7 @@ export default function Dashboard() {
             </SheetDescription>
           </SheetHeader>
 
-          <div className="space-y-4 p-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
             {managerBreakdownLoading ? (
               <div className="flex items-center gap-2 rounded-xl border border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
                 <RefreshCw className="h-4 w-4 animate-spin" />
@@ -3216,94 +3216,95 @@ export default function Dashboard() {
           if (!open) setOfficeUpdManagerFilter('');
         }}
       >
-        <DialogContent className="max-w-5xl">
-          <DialogHeader>
+        <DialogContent className="!max-h-[85vh] !w-[calc(100vw-2rem)] !max-w-5xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0">
+          <DialogHeader className="border-b border-gray-200 px-6 pb-4 pt-6 pr-12 dark:border-gray-700">
             <DialogTitle>Контроль УПД по завершённым арендам</DialogTitle>
             <DialogDescription>
               Здесь офис видит, у каких клиентов аренда уже завершилась, по каким сделкам УПД ещё не отмечен, и может сразу поставить отметку.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/20">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">Нужно оформить УПД</p>
-              <p className="mt-1 text-2xl font-bold text-amber-700 dark:text-amber-300">{officeFilteredPendingUpdRentals.length}</p>
-              <p className="mt-1 text-sm text-amber-700/80 dark:text-amber-400/80">
-                {officeUpdManagerFilter
-                  ? officeUpdManagerFilter
-                  : `${officePendingUpdClientCount} ${formatCountLabel(officePendingUpdClientCount, 'клиент', 'клиента', 'клиентов')}`}
-              </p>
-            </div>
-            <div className="rounded-xl border border-green-200 bg-green-50/70 px-4 py-3 dark:border-green-900 dark:bg-green-950/20">
-              <p className="text-xs font-semibold uppercase tracking-wide text-green-700 dark:text-green-400">УПД уже отмечен</p>
-              <p className="mt-1 text-2xl font-bold text-green-700 dark:text-green-300">{officeFilteredSignedUpdRentals.length}</p>
-              <p className="mt-1 text-sm text-green-700/80 dark:text-green-400/80">
-                {officeUpdManagerFilter ? 'По выбранному менеджеру' : 'Контроль по завершённым арендам'}
-              </p>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/70">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Завершено всего</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{officeFilteredCompletedRentals.length}</p>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {officeFilteredClientCount} {formatCountLabel(officeFilteredClientCount, 'клиент', 'клиента', 'клиентов')}
-              </p>
-            </div>
-          </div>
-
-          {officeUpdManagerRows.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Быстрый фильтр по менеджеру</h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Помогает сразу увидеть, у кого зависли УПД чаще всего.</p>
-                </div>
-                {officeUpdManagerFilter && (
-                  <Button size="sm" variant="ghost" onClick={() => setOfficeUpdManagerFilter('')}>
-                    Сбросить
-                  </Button>
-                )}
+          <div className="min-h-0 space-y-5 overflow-y-auto px-6 py-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/20">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">Нужно оформить УПД</p>
+                <p className="mt-1 text-2xl font-bold text-amber-700 dark:text-amber-300">{officeFilteredPendingUpdRentals.length}</p>
+                <p className="mt-1 text-sm text-amber-700/80 dark:text-amber-400/80">
+                  {officeUpdManagerFilter
+                    ? officeUpdManagerFilter
+                    : `${officePendingUpdClientCount} ${formatCountLabel(officePendingUpdClientCount, 'клиент', 'клиента', 'клиентов')}`}
+                </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setOfficeUpdManagerFilter('')}
-                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
-                    officeUpdManagerFilter === ''
-                      ? 'border-[--color-primary] bg-[--color-primary]/10 text-[--color-primary]'
-                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
-                  }`}
-                >
-                  <span>Все менеджеры</span>
-                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                    {officePendingUpdRentals.length}
-                  </span>
-                </button>
-                {officeUpdManagerRows.map(row => (
+              <div className="rounded-xl border border-green-200 bg-green-50/70 px-4 py-3 dark:border-green-900 dark:bg-green-950/20">
+                <p className="text-xs font-semibold uppercase tracking-wide text-green-700 dark:text-green-400">УПД уже отмечен</p>
+                <p className="mt-1 text-2xl font-bold text-green-700 dark:text-green-300">{officeFilteredSignedUpdRentals.length}</p>
+                <p className="mt-1 text-sm text-green-700/80 dark:text-green-400/80">
+                  {officeUpdManagerFilter ? 'По выбранному менеджеру' : 'Контроль по завершённым арендам'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/70">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Завершено всего</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{officeFilteredCompletedRentals.length}</p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {officeFilteredClientCount} {formatCountLabel(officeFilteredClientCount, 'клиент', 'клиента', 'клиентов')}
+                </p>
+              </div>
+            </div>
+
+            {officeUpdManagerRows.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Быстрый фильтр по менеджеру</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Помогает сразу увидеть, у кого зависли УПД чаще всего.</p>
+                  </div>
+                  {officeUpdManagerFilter && (
+                    <Button size="sm" variant="ghost" onClick={() => setOfficeUpdManagerFilter('')}>
+                      Сбросить
+                    </Button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
                   <button
-                    key={row.name}
                     type="button"
-                    onClick={() => setOfficeUpdManagerFilter(row.name)}
+                    onClick={() => setOfficeUpdManagerFilter('')}
                     className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
-                      officeUpdManagerFilter === row.name
+                      officeUpdManagerFilter === ''
                         ? 'border-[--color-primary] bg-[--color-primary]/10 text-[--color-primary]'
                         : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
                     }`}
                   >
-                    <span>{row.name}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${
-                      row.pendingCount > 0
-                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                        : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                    }`}>
-                      {row.pendingCount}/{row.completedCount}
+                    <span>Все менеджеры</span>
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                      {officePendingUpdRentals.length}
                     </span>
                   </button>
-                ))}
+                  {officeUpdManagerRows.map(row => (
+                    <button
+                      key={row.name}
+                      type="button"
+                      onClick={() => setOfficeUpdManagerFilter(row.name)}
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
+                        officeUpdManagerFilter === row.name
+                          ? 'border-[--color-primary] bg-[--color-primary]/10 text-[--color-primary]'
+                          : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
+                      }`}
+                    >
+                      <span>{row.name}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${
+                        row.pendingCount > 0
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                          : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                      }`}>
+                        {row.pendingCount}/{row.completedCount}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          <div className="max-h-[65vh] space-y-6 overflow-y-auto pr-1">
+            <div className="space-y-6">
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -3431,6 +3432,7 @@ export default function Dashboard() {
                 ))
               )}
             </section>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

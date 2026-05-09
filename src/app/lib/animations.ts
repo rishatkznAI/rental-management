@@ -31,7 +31,7 @@ export const animationClasses = {
   overlay:
     'app-animate-overlay fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]',
   modal:
-    'app-animate-modal fixed left-1/2 top-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-background p-6 shadow-lg sm:max-w-lg',
+    'app-animate-modal fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-lg gap-4 rounded-lg border bg-background p-6 shadow-lg',
   drawerBase:
     'app-animate-drawer fixed z-50 flex flex-col gap-4 bg-background shadow-lg will-change-transform',
   card: 'app-animate-section',

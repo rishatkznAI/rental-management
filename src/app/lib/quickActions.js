@@ -1,3 +1,5 @@
+import { saleStatusKind } from './equipmentSaleMode.js';
+
 const MANAGE_ACTIONS = ['create', 'edit'];
 
 function canDo(can, action, section) {
@@ -90,6 +92,7 @@ export function buildEquipmentQuickActions({ equipment, can, currentRental, crmD
   const status = safeText(equipment?.status);
   const rentalBlocked = status === 'in_service' || status === 'inactive';
   const saleMode = equipment?.saleMode === true;
+  const saleKind = saleStatusKind(equipment);
   const safeCrmDealsRoute = safeText(crmDealsRoute);
 
   if (saleMode) {
@@ -105,9 +108,18 @@ export function buildEquipmentQuickActions({ equipment, can, currentRental, crmD
       actions.push({ id: 'equipment-sale-deal', label: 'Создать сделку', to: withQuery(safeCrmDealsRoute, context) });
     }
     if (canDo(can, 'edit', 'equipment')) {
-      actions.push({ id: 'equipment-sale-reserve', label: 'Поставить в резерв' });
-      actions.push({ id: 'equipment-sale-remove', label: 'Снять с продажи' });
-      actions.push({ id: 'equipment-sale-sold', label: 'Отметить проданной' });
+      if (saleKind === 'sold' || saleKind === 'removed') {
+        actions.push({ id: 'equipment-sale-return', label: 'Вернуть в продажу', kind: 'primary' });
+      }
+      if (saleKind !== 'reserved') {
+        actions.push({ id: 'equipment-sale-reserve', label: saleKind === 'sold' ? 'Вернуть в резерв' : 'Поставить в резерв' });
+      }
+      if (saleKind !== 'removed') {
+        actions.push({ id: 'equipment-sale-remove', label: 'Снять с продажи' });
+      }
+      if (saleKind !== 'sold') {
+        actions.push({ id: 'equipment-sale-sold', label: 'Отметить проданной' });
+      }
     }
     return actions;
   }

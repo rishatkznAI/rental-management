@@ -10,6 +10,7 @@ import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter
 import { useEquipmentList } from '../hooks/useEquipment';
 import { usePermissions } from '../lib/permissions';
 import { EQUIPMENT_SALE_PDI_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
+import { isSaleModeEquipment, saleStatusKind, saleStatusLabel } from '../lib/equipmentSaleMode.js';
 import { formatCurrency } from '../lib/utils';
 import type { EquipmentSalePdiStatus } from '../types';
 
@@ -53,7 +54,7 @@ export default function Sales() {
   }
 
   const saleEquipment = React.useMemo(
-    () => normalizeEquipmentList(rawEquipment).filter((equipment) => equipment.isForSale && equipment.category !== 'sold'),
+    () => normalizeEquipmentList(rawEquipment).filter((equipment) => isSaleModeEquipment(equipment)),
     [rawEquipment],
   );
 
@@ -66,14 +67,15 @@ export default function Sales() {
         || equipment.serialNumber.toLowerCase().includes(query)
         || equipment.location.toLowerCase().includes(query);
       const matchesPdi = pdiFilter === 'all' || equipment.salePdiStatus === pdiFilter;
-      const matchesStatus = statusFilter === 'all' || equipment.status === statusFilter;
+      const matchesStatus = statusFilter === 'all' || saleStatusKind(equipment) === statusFilter;
       const hasNoPrices = !equipment.salePrice1 && !equipment.salePrice2 && !equipment.salePrice3;
+      const saleKind = saleStatusKind(equipment);
       const matchesQuickFilter =
         quickFilter === 'all'
         || (quickFilter === 'pdi_ready' && equipment.salePdiStatus === 'ready')
         || (quickFilter === 'pdi_in_progress' && equipment.salePdiStatus === 'in_progress')
         || (quickFilter === 'no_price' && hasNoPrices)
-        || (quickFilter === 'available_only' && equipment.status === 'available');
+        || (quickFilter === 'available_only' && equipment.status === 'available' && saleKind !== 'sold' && saleKind !== 'removed');
       return matchesSearch && matchesPdi && matchesStatus && matchesQuickFilter;
     }),
     [pdiFilter, quickFilter, saleEquipment, search, statusFilter],
@@ -82,7 +84,7 @@ export default function Sales() {
   const readyCount = saleEquipment.filter((equipment) => equipment.salePdiStatus === 'ready').length;
   const inProgressCount = saleEquipment.filter((equipment) => equipment.salePdiStatus === 'in_progress').length;
   const noPriceCount = saleEquipment.filter((equipment) => !equipment.salePrice1 && !equipment.salePrice2 && !equipment.salePrice3).length;
-  const availableCount = saleEquipment.filter((equipment) => equipment.status === 'available').length;
+  const availableCount = saleEquipment.filter((equipment) => equipment.status === 'available' && !['sold', 'removed'].includes(saleStatusKind(equipment))).length;
   const activeFilterCount = [
     search.trim() !== '',
     pdiFilter !== 'all',
@@ -211,13 +213,14 @@ export default function Sales() {
                 <option value="ready">{EQUIPMENT_SALE_PDI_LABELS.ready}</option>
               </select>
             </FilterField>
-            <FilterField label="Статус техники">
+            <FilterField label="Статус продажи">
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-filter-input">
-                <option value="all">Все статусы</option>
-                <option value="available">Свободен</option>
-                <option value="reserved">Бронь</option>
-                <option value="in_service">В сервисе</option>
-                <option value="inactive">Списан</option>
+                <option value="all">Все статусы продажи</option>
+                <option value="on_sale">На продаже</option>
+                <option value="reserved">Резерв</option>
+                <option value="in_deal">В сделке</option>
+                <option value="sold">Продана</option>
+                <option value="removed">Снята с продажи</option>
               </select>
             </FilterField>
           </div>
@@ -238,6 +241,7 @@ export default function Sales() {
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-amber-700 dark:text-amber-300">{equipment.manufacturer} {equipment.model}</span>
+              <Badge variant={saleStatusKind(equipment) === 'sold' ? 'success' : saleStatusKind(equipment) === 'removed' ? 'default' : 'warning'}>{saleStatusLabel(equipment)}</Badge>
               {getSalePdiBadge(equipment.salePdiStatus)}
               {getSaleReadinessBadge(equipment.salePdiStatus)}
             </div>
@@ -268,6 +272,7 @@ export default function Sales() {
           <TableHeader>
             <TableRow>
               <TableHead>Техника</TableHead>
+              <TableHead>Статус продажи</TableHead>
               <TableHead>PDI</TableHead>
               <TableHead>Готовность</TableHead>
               <TableHead>Локация</TableHead>
@@ -285,6 +290,7 @@ export default function Sales() {
                   </Link>
                   <p className="text-xs text-gray-500 dark:text-gray-400">SN: {equipment.serialNumber || 'не указан'}</p>
                 </TableCell>
+                <TableCell><Badge variant={saleStatusKind(equipment) === 'sold' ? 'success' : saleStatusKind(equipment) === 'removed' ? 'default' : 'warning'}>{saleStatusLabel(equipment)}</Badge></TableCell>
                 <TableCell>{getSalePdiBadge(equipment.salePdiStatus)}</TableCell>
                 <TableCell>{getSaleReadinessBadge(equipment.salePdiStatus)}</TableCell>
                 <TableCell className="text-gray-700 dark:text-gray-300">{equipment.location}</TableCell>

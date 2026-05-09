@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isSaleModeEquipment, saleStatusLabel } from '../src/app/lib/equipmentSaleMode.js';
+import { buildSaleStatusPatch, isSaleModeEquipment, saleStatusKind, saleStatusLabel } from '../src/app/lib/equipmentSaleMode.js';
 import { buildEquipmentQuickActions } from '../src/app/lib/quickActions.js';
 
 const allowAll = () => true;
@@ -15,6 +15,8 @@ test('sale mode turns on from sales route context and explicit sale fields', () 
   assert.equal(isSaleModeEquipment({ id: 'EQ-5', salesStatus: 'on_sale' }), true);
   assert.equal(isSaleModeEquipment({ id: 'EQ-6', status: 'На продаже' }), true);
   assert.equal(isSaleModeEquipment({ id: 'EQ-7', tags: ['склад', 'продажа'] }), true);
+  assert.equal(isSaleModeEquipment({ id: 'EQ-8', category: 'sold', status: 'inactive' }), true);
+  assert.equal(isSaleModeEquipment({ id: 'EQ-9', saleStatus: 'Снята с продажи', status: 'inactive' }), true);
   assert.equal(isSaleModeEquipment({ id: 'EQ-8', status: 'available', category: 'own' }), false);
 });
 
@@ -39,6 +41,47 @@ test('sale quick actions hide rental and fleet service actions', () => {
   assert.ok(!labels.includes('Очередь сервиса'));
   assert.ok(!labels.includes('Создать сервисную заявку'));
   assert.ok(!labels.includes('Документы техники'));
+});
+
+test('sold sale equipment keeps sales actions without rental actions', () => {
+  const actions = buildEquipmentQuickActions({
+    equipment: { id: 'EQ-sold', inventoryNumber: 'INV-sold', category: 'sold', status: 'inactive', saleStatus: 'Продана', saleMode: true },
+    can: allowAll,
+  });
+  const ids = actions.map(action => action.id);
+  const labels = actions.map(action => action.label);
+
+  assert.ok(ids.includes('equipment-sale-return'));
+  assert.ok(ids.includes('equipment-sale-reserve'));
+  assert.ok(ids.includes('equipment-sale-remove'));
+  assert.ok(!ids.includes('equipment-sale-sold'));
+  assert.ok(labels.includes('Вернуть в продажу'));
+  assert.ok(!labels.includes('Создать аренду'));
+  assert.ok(!labels.includes('Создать сервисную заявку'));
+  assert.ok(!labels.includes('Очередь сервиса'));
+});
+
+test('sale status patches keep returned sold equipment out of rental fleet', () => {
+  const sold = { id: 'EQ-sold', category: 'sold', status: 'inactive', activeInFleet: false, isForSale: false, saleStatus: 'Продана' };
+  const returned = { ...sold, ...buildSaleStatusPatch(sold, 'on_sale') };
+  const reserved = { ...sold, ...buildSaleStatusPatch(sold, 'reserved') };
+  const removed = { ...sold, ...buildSaleStatusPatch(sold, 'removed') };
+
+  assert.equal(saleStatusKind(returned), 'on_sale');
+  assert.equal(saleStatusLabel(returned), 'На продаже');
+  assert.equal(returned.isForSale, true);
+  assert.equal(returned.activeInFleet, false);
+  assert.equal(returned.category, 'own');
+  assert.equal(returned.status, 'available');
+
+  assert.equal(saleStatusKind(reserved), 'reserved');
+  assert.equal(reserved.activeInFleet, false);
+  assert.equal(reserved.status, 'reserved');
+
+  assert.equal(saleStatusKind(removed), 'removed');
+  assert.equal(removed.isForSale, false);
+  assert.equal(removed.activeInFleet, false);
+  assert.equal(removed.status, 'inactive');
 });
 
 test('sale deal quick action renders only with a safe configured route', () => {
@@ -90,6 +133,24 @@ test('sale mode PDI action opens dedicated PDI form instead of service ticket fo
   assert.match(source, /: \(\s*<ServiceTicketForm/s);
   assert.doesNotMatch(source, /hideScenarioSelect=\{saleMode\}/);
   assert.doesNotMatch(source, /submitLabel=\{saleMode \? 'Создать PDI'/);
+});
+
+test('marking equipment sold requires confirmation and return action uses sale status patch', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+
+  assert.match(source, /equipment-sale-return/);
+  assert.match(source, /buildSaleStatusPatch\(item, 'on_sale'\)/);
+  assert.match(source, /window\.confirm\('Вы уверены, что хотите отметить технику как проданную\?/);
+  assert.match(source, /buildSaleStatusPatch\(item, 'sold'\)/);
+});
+
+test('sales page keeps sold equipment discoverable through sales status filter', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
+
+  assert.match(source, /filter\(\(equipment\) => isSaleModeEquipment\(equipment\)\)/);
+  assert.match(source, /saleStatusKind\(equipment\) === statusFilter/);
+  assert.match(source, /<option value="sold">Продана<\/option>/);
+  assert.match(source, /saleStatusLabel\(equipment\)/);
 });
 
 test('PDI form contains presale fields and no service scenario selector', () => {

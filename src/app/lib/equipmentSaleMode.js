@@ -21,7 +21,37 @@ function hasSaleMarker(value) {
     'продажа',
     'продается',
     'продаётся',
+    'reserved',
+    'резерв',
+    'in_deal',
+    'deal',
+    'в сделке',
+    'sold',
+    'продана',
+    'продано',
+    'removed',
+    'withdrawn',
+    'снята с продажи',
+    'снято с продажи',
   ].includes(normalized);
+}
+
+export const SALE_STATUS_LABELS = {
+  on_sale: 'На продаже',
+  reserved: 'Резерв',
+  in_deal: 'В сделке',
+  sold: 'Продана',
+  removed: 'Снята с продажи',
+};
+
+export function saleStatusKind(equipment = {}) {
+  const rawStatus = lower(equipment.saleStatus || equipment.salesStatus || equipment.status || equipment.category);
+  if (equipment.category === 'sold' || rawStatus === 'sold' || rawStatus === 'продана' || rawStatus === 'продано') return 'sold';
+  if (rawStatus === 'removed' || rawStatus === 'withdrawn' || rawStatus === 'снята с продажи' || rawStatus === 'снято с продажи') return 'removed';
+  if (rawStatus === 'reserved' || rawStatus === 'резерв') return 'reserved';
+  if (rawStatus === 'in_deal' || rawStatus === 'deal' || rawStatus === 'в сделке') return 'in_deal';
+  if (hasSaleMarker(rawStatus) || equipment.isForSale) return 'on_sale';
+  return 'unknown';
 }
 
 export function isSaleModeEquipment(equipment, context = {}) {
@@ -40,13 +70,61 @@ export function isSaleModeEquipment(equipment, context = {}) {
 }
 
 export function saleStatusLabel(equipment = {}) {
-  if (equipment.category === 'sold') return 'Продана';
+  const kind = saleStatusKind(equipment);
+  if (SALE_STATUS_LABELS[kind]) return SALE_STATUS_LABELS[kind];
   const rawStatus = text(equipment.saleStatus || equipment.salesStatus);
   if (rawStatus) return rawStatus;
-  if (lower(equipment.status) === 'reserved') return 'Резерв';
-  if (hasSaleMarker(equipment.status)) return 'На продаже';
-  if (equipment.isForSale) return 'На продаже';
   return 'Продажный статус не указан';
+}
+
+export function buildSaleStatusPatch(equipment = {}, nextStatus) {
+  const baseCategory = equipment.category === 'sold' ? 'own' : (equipment.category || 'own');
+  if (nextStatus === 'on_sale') {
+    return {
+      category: baseCategory,
+      isForSale: true,
+      activeInFleet: false,
+      status: 'available',
+      saleStatus: SALE_STATUS_LABELS.on_sale,
+    };
+  }
+  if (nextStatus === 'reserved') {
+    return {
+      category: baseCategory,
+      isForSale: true,
+      activeInFleet: false,
+      status: 'reserved',
+      saleStatus: SALE_STATUS_LABELS.reserved,
+    };
+  }
+  if (nextStatus === 'in_deal') {
+    return {
+      category: baseCategory,
+      isForSale: true,
+      activeInFleet: false,
+      status: 'reserved',
+      saleStatus: SALE_STATUS_LABELS.in_deal,
+    };
+  }
+  if (nextStatus === 'sold') {
+    return {
+      category: 'sold',
+      isForSale: false,
+      activeInFleet: false,
+      status: 'inactive',
+      saleStatus: SALE_STATUS_LABELS.sold,
+    };
+  }
+  if (nextStatus === 'removed') {
+    return {
+      category: baseCategory,
+      isForSale: false,
+      activeInFleet: false,
+      status: 'inactive',
+      saleStatus: SALE_STATUS_LABELS.removed,
+    };
+  }
+  return {};
 }
 
 export function saleDocumentsReadiness(documents = []) {

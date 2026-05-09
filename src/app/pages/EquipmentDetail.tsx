@@ -48,7 +48,7 @@ import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
-import { isSaleModeEquipment, saleDocumentsReadiness, saleStatusLabel } from '../lib/equipmentSaleMode.js';
+import { buildSaleStatusPatch, isSaleModeEquipment, saleDocumentsReadiness, saleStatusLabel } from '../lib/equipmentSaleMode.js';
 import { getEffectivePaidAmount } from '../lib/finance';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
@@ -1669,19 +1669,25 @@ export default function EquipmentDetail() {
                         ? () => setShowCreateServiceModal(true)
                         : action.id === 'equipment-sale-photo'
                           ? () => mainPhotoInputRef.current?.click()
+                            : action.id === 'equipment-sale-return'
+                              ? () => {
+                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, ...buildSaleStatusPatch(item, 'on_sale') }, createAuditEntry(user?.name || 'Система', 'Техника возвращена в продажу')) : item);
+                                  void persistEquipment(list);
+                                }
                             : action.id === 'equipment-sale-reserve'
                             ? () => {
-                                const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, status: 'reserved' as const, isForSale: true }, createAuditEntry(user?.name || 'Система', 'Техника поставлена в резерв продажи')) : item);
+                                const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, ...buildSaleStatusPatch(item, 'reserved') }, createAuditEntry(user?.name || 'Система', 'Техника поставлена в резерв продажи')) : item);
                                 void persistEquipment(list);
                               }
                             : action.id === 'equipment-sale-remove'
                               ? () => {
-                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, isForSale: false, status: item.status === 'reserved' ? 'available' as const : item.status }, createAuditEntry(user?.name || 'Система', 'Техника снята с продажи')) : item);
+                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, ...buildSaleStatusPatch(item, 'removed') }, createAuditEntry(user?.name || 'Система', 'Техника снята с продажи')) : item);
                                   void persistEquipment(list);
                                 }
                             : action.id === 'equipment-sale-sold'
                               ? () => {
-                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, category: 'sold' as const, isForSale: false, activeInFleet: false, status: 'inactive' as const }, createAuditEntry(user?.name || 'Система', 'Техника отмечена проданной')) : item);
+                                  if (!window.confirm('Вы уверены, что хотите отметить технику как проданную? Это уберёт её из активной продажи и изменит статус продажи.')) return;
+                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, ...buildSaleStatusPatch(item, 'sold') }, createAuditEntry(user?.name || 'Система', 'Техника отмечена проданной')) : item);
                                   void persistEquipment(list);
                                 }
                               : undefined;

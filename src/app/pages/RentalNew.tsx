@@ -113,6 +113,12 @@ export default function RentalNew() {
     }
   }, [clientId, clients, searchParams]);
 
+  useEffect(() => {
+    if (!clientId || client) return;
+    const selected = clients.find(item => item.id === clientId);
+    if (selected) setClient(selected.company);
+  }, [client, clientId, clients]);
+
   const selectedClient = clients.find(item => item.id === clientId) ?? clients.find(item => item.company === client);
   const selectedClientName = selectedClient?.company ?? client;
   const selectedClientObjects = useMemo(

@@ -131,6 +131,11 @@ test.describe('production smoke', () => {
 
     await navigateInApp(page, `/rentals/new?clientId=${client.id}`);
     await expect(page.getByRole('heading', { name: 'Новая аренда' })).toBeVisible();
+    const clientSelect = page.getByRole('combobox').first();
+    if (await clientSelect.getByText?.('Выберите клиента').isVisible().catch(() => false)) {
+      await clientSelect.click();
+      await page.getByRole('option', { name: company }).click();
+    }
     await selectEquipment(page, serialNumber);
     await page.locator('input[type="number"]').first().fill('1500');
     await page.getByRole('button', { name: 'Создать договор' }).click();

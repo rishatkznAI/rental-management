@@ -22,6 +22,7 @@ import {
   matchesClientContext,
   normalizeContextName,
 } from '../lib/quickActionContext.js';
+import { animationDurations, useAnimatedPresence } from '../lib/animations';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ function today() { return new Date().toISOString().slice(0, 10); }
 // ─── AddPaymentModal ─────────────────────────────────────────────────────────
 
 interface AddPaymentModalProps {
+  open: boolean;
   onClose: () => void;
   onSave: (p: Payment) => void;
   existing: Payment[];
@@ -43,7 +45,8 @@ interface AddPaymentModalProps {
   allPayments: Payment[];
 }
 
-function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayments }: AddPaymentModalProps) {
+function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, allPayments }: AddPaymentModalProps) {
+  const presence = useAnimatedPresence(open, animationDurations.base);
   const [clientError, setClientError] = useState('');
   const [formError, setFormError] = useState('');
   const [form, setForm] = useState({
@@ -57,6 +60,15 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
     status: 'paid' as PaymentStatus,
     comment: '',
   });
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose, open]);
 
   const set = (k: string, v: string) => {
     setForm(f => {
@@ -117,10 +129,12 @@ function AddPaymentModal({ onClose, onSave, existing, rentals, clients, allPayme
     onSave(newPayment);
   };
 
+  if (!presence.shouldRender) return null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div data-state="open" className="app-animate-overlay absolute inset-0 bg-black/50" onClick={onClose} />
-      <div data-state="open" className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
+      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/50" onClick={onClose} />
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Добавить платёж</h2>
           <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700">
@@ -386,16 +400,15 @@ export default function Payments() {
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
-      {showAddModal && (
-        <AddPaymentModal
-          onClose={() => setShowAddModal(false)}
-          onSave={handleAddPayment}
-          existing={paymentList}
-          rentals={ganttRentals as GanttRentalData[]}
-          clients={clients}
-          allPayments={paymentList}
-        />
-      )}
+      <AddPaymentModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSave={handleAddPayment}
+        existing={paymentList}
+        rentals={ganttRentals as GanttRentalData[]}
+        clients={clients}
+        allPayments={paymentList}
+      />
 
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -49,6 +49,8 @@
   --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --motion-modal-scale-from: 0.94;
   --motion-modal-y: 8px;
+  --motion-modal-exit-scale: 0.96;
+  --motion-modal-exit-y: 6px;
   --motion-section-y: 10px;
   --motion-drawer-offset: 100%;
 }
@@ -430,7 +432,7 @@
   }
   to {
     opacity: 0;
-    transform: translate(-50%, calc(-50% + var(--motion-modal-y))) scale(var(--motion-modal-scale-from));
+    transform: translate(-50%, calc(-50% + var(--motion-modal-exit-y))) scale(var(--motion-modal-exit-scale));
   }
 }
 

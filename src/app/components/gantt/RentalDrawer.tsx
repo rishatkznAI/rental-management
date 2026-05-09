@@ -11,6 +11,7 @@ import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { formatCurrency, formatDate, formatDateTime, getRentalDays } from '../../lib/utils';
 import { findConflictingRental } from '../../lib/rental-conflicts';
+import { animationDurations, useAnimatedPresence } from '../../lib/animations';
 import type { GanttRentalData } from '../../mock-data';
 import type { Client, Equipment, Payment } from '../../types';
 import type { ClientReceivableRow } from '../../lib/finance';
@@ -75,12 +76,14 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
 };
 
 export function RentalDrawer({
-  rental, equipment, allRentals, payments,
+  rental: rentalProp, equipment, allRentals, payments,
   clients = [], clientReceivables = [], managers = [],
   canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
   onRestore, onUpdate, onAddComment, onAddPayment, onEarlyReturn, onUpdChange, onUpdateMaintenanceFilters,
 }: RentalDrawerProps) {
+  const presence = useAnimatedPresence(Boolean(rentalProp), animationDurations.relaxed);
+  const [retainedRental, setRetainedRental] = useState<GanttRentalData | null>(rentalProp);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [editClientId, setEditClientId] = useState('');
@@ -120,7 +123,21 @@ export function RentalDrawer({
   const [fuelFilter, setFuelFilter] = useState('');
   const [hydraulicFilter, setHydraulicFilter] = useState('');
 
-  if (!rental) return null;
+  useEffect(() => {
+    if (rentalProp) setRetainedRental(rentalProp);
+  }, [rentalProp]);
+
+  useEffect(() => {
+    if (!rentalProp) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose, rentalProp]);
+
+  const rental = rentalProp ?? retainedRental;
+  if (!presence.shouldRender || !rental) return null;
 
   const rentalDetailId = String(
     rental.rentalId ||
@@ -310,7 +327,7 @@ export function RentalDrawer({
     <div className="fixed inset-0 z-50">
       {/* Overlay */}
       <div
-        data-state="open"
+        data-state={presence.dataState}
         className="app-animate-overlay absolute inset-0 bg-black/30"
         onClick={onClose}
       />
@@ -318,7 +335,8 @@ export function RentalDrawer({
       {/* Drawer */}
       <div
         data-side="right"
-        data-state="open"
+        data-state={presence.dataState}
+        onAnimationEnd={presence.onExitAnimationEnd}
         className="app-animate-drawer fixed inset-y-0 right-0 z-10 flex w-full max-w-[600px] flex-col bg-white shadow-2xl sm:w-[38%] sm:min-w-[420px] dark:bg-gray-800"
       >
         {/* Header */}

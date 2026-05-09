@@ -8,13 +8,62 @@ import {
   ChevronUpIcon,
 } from "lucide-react";
 
-import { animationClasses } from "../../lib/animations";
+import { animationClasses, animationDurations, useAnimatedPresence } from "../../lib/animations";
 import { cn } from "./utils";
 
+type SelectMotionContextValue = ReturnType<typeof useAnimatedPresence>;
+
+const SelectMotionContext = React.createContext<SelectMotionContextValue | null>(null);
+
 function Select({
+  open: controlledOpen,
+  defaultOpen,
+  onOpenChange,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />;
+  const [radixOpen, setRadixOpen] = React.useState(Boolean(defaultOpen));
+  const [visualOpen, setVisualOpen] = React.useState(Boolean(defaultOpen));
+  const isControlled = controlledOpen !== undefined;
+  const requestedOpen = isControlled ? Boolean(controlledOpen) : radixOpen;
+  const presence = useAnimatedPresence(visualOpen, animationDurations.fast);
+
+  React.useEffect(() => {
+    if (requestedOpen) {
+      setRadixOpen(true);
+      setVisualOpen(true);
+      return undefined;
+    }
+
+    setVisualOpen(false);
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const timeout = window.setTimeout(() => {
+      setRadixOpen(false);
+    }, reduceMotion ? 20 : animationDurations.fast + 40);
+    return () => window.clearTimeout(timeout);
+  }, [requestedOpen]);
+
+  const handleOpenChange = React.useCallback((nextOpen: boolean) => {
+    if (nextOpen) {
+      setRadixOpen(true);
+      setVisualOpen(true);
+    } else {
+      setVisualOpen(false);
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.setTimeout(() => setRadixOpen(false), reduceMotion ? 20 : animationDurations.fast + 40);
+    }
+    onOpenChange?.(nextOpen);
+  }, [onOpenChange]);
+
+  return (
+    <SelectMotionContext.Provider value={presence}>
+      <SelectPrimitive.Root
+        data-slot="select"
+        open={radixOpen}
+        onOpenChange={handleOpenChange}
+        {...props}
+      />
+    </SelectMotionContext.Provider>
+  );
 }
 
 function SelectGroup({
@@ -61,10 +110,14 @@ function SelectContent({
   position = "popper",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  const presence = React.useContext(SelectMotionContext);
+  if (presence && !presence.shouldRender) return null;
+
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal forceMount={Boolean(presence)}>
       <SelectPrimitive.Content
         data-slot="select-content"
+        data-state={presence?.dataState}
         className={cn(
           "bg-popover text-popover-foreground relative z-50 max-h-(--radix-select-content-available-height) min-w-[8rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border shadow-md",
           animationClasses.popover,
@@ -72,6 +125,7 @@ function SelectContent({
             "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className,
         )}
+        onAnimationEnd={presence?.onExitAnimationEnd}
         position={position}
         {...props}
       >

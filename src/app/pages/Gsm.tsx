@@ -35,6 +35,7 @@ import { Badge, getEquipmentStatusBadge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { cn } from '../lib/utils';
+import { animationDurations, useAnimatedPresence } from '../lib/animations';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useClientsList } from '../hooks/useClients';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
@@ -586,6 +587,8 @@ export default function Gsm() {
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [selectedPacket, setSelectedPacket] = React.useState<GsmGatewayPacket | null>(null);
+  const packetDrawerPresence = useAnimatedPresence(Boolean(selectedPacket), animationDurations.relaxed);
+  const [retainedPacket, setRetainedPacket] = React.useState<GsmGatewayPacket | null>(selectedPacket);
   const [routeEquipmentId, setRouteEquipmentId] = React.useState('');
   const [routeFrom, setRouteFrom] = React.useState('');
   const [routeTo, setRouteTo] = React.useState('');
@@ -598,6 +601,19 @@ export default function Gsm() {
   const [gsmBindingForm, setGsmBindingForm] = React.useState<GsmBindingForm>(EMPTY_GSM_BINDING_FORM);
   const canSendGprsCommands = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
   const canBindGsmEquipment = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
+
+  React.useEffect(() => {
+    if (selectedPacket) setRetainedPacket(selectedPacket);
+  }, [selectedPacket]);
+
+  React.useEffect(() => {
+    if (!selectedPacket) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedPacket(null);
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [selectedPacket]);
 
   const { data: gatewayStatus = DEFAULT_GATEWAY_STATUS } = useQuery({
     queryKey: ['gsmGateway', 'status'],
@@ -2445,14 +2461,20 @@ export default function Gsm() {
           </SheetContent>
         </Sheet>
 
-        {selectedPacket && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/50">
-            <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 text-white shadow-2xl">
+        {packetDrawerPresence.shouldRender && retainedPacket && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div data-state={packetDrawerPresence.dataState} className="app-animate-overlay absolute inset-0 bg-black/50" />
+            <div
+              data-side="right"
+              data-state={packetDrawerPresence.dataState}
+              onAnimationEnd={packetDrawerPresence.onExitAnimationEnd}
+              className="app-animate-drawer fixed inset-y-0 right-0 h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 text-white shadow-2xl"
+            >
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">GSM packet</div>
                   <h2 className="mt-1 text-xl font-bold">Детали пакета</h2>
-                  <p className="mt-1 text-sm text-slate-400">{formatDateTime(packetReceivedAt(selectedPacket))}</p>
+                  <p className="mt-1 text-sm text-slate-400">{formatDateTime(packetReceivedAt(retainedPacket))}</p>
                 </div>
                 <Button
                   type="button"
@@ -2467,20 +2489,20 @@ export default function Gsm() {
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">IP</div>
-                  <div className="mt-1 text-sm text-white">{packetSourceIp(selectedPacket)}</div>
+                  <div className="mt-1 text-sm text-white">{packetSourceIp(retainedPacket)}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Порт</div>
-                  <div className="mt-1 text-sm text-white">{selectedPacket.remotePort || '—'}</div>
+                  <div className="mt-1 text-sm text-white">{retainedPacket.remotePort || '—'}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">IMEI / Device ID</div>
-                  <div className="mt-1 text-sm text-white">{selectedPacket.imei || selectedPacket.deviceId || '—'}</div>
+                  <div className="mt-1 text-sm text-white">{retainedPacket.imei || retainedPacket.deviceId || '—'}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Статус парсинга</div>
                   <div className="mt-1">
-                    <Badge variant={getParseStatusBadge(selectedPacket.parseStatus)}>{selectedPacket.parseStatus || 'pending'}</Badge>
+                    <Badge variant={getParseStatusBadge(retainedPacket.parseStatus)}>{retainedPacket.parseStatus || 'pending'}</Badge>
                   </div>
                 </div>
               </div>
@@ -2489,24 +2511,24 @@ export default function Gsm() {
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">rawHex</div>
                   <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 p-3 font-mono text-xs text-cyan-200">
-                    {packetRawHex(selectedPacket) || '—'}
+                    {packetRawHex(retainedPacket) || '—'}
                   </pre>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">rawText</div>
                   <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 p-3 text-sm text-slate-200">
-                    {packetRawText(selectedPacket) || '—'}
+                    {packetRawText(retainedPacket) || '—'}
                   </pre>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">parsed</div>
                   <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 p-3 font-mono text-xs text-lime-200">
-                    {JSON.stringify(selectedPacket.parsed || selectedPacket.parsedPayload || null, null, 2)}
+                    {JSON.stringify(retainedPacket.parsed || retainedPacket.parsedPayload || null, null, 2)}
                   </pre>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">parseError</div>
-                  <div className="text-sm text-rose-300">{selectedPacket.parseError || '—'}</div>
+                  <div className="text-sm text-rose-300">{retainedPacket.parseError || '—'}</div>
                 </div>
               </div>
             </div>

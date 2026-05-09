@@ -18,6 +18,7 @@ import { calculateRentalAmount, formatCurrency, getRentalDays } from '../../lib/
 import { buildClientFinancialSnapshots } from '../../lib/finance';
 import { EquipmentCombobox } from '../ui/EquipmentCombobox';
 import { ClientCombobox } from '../ui/ClientCombobox';
+import { animationDurations, useAnimatedPresence } from '../../lib/animations';
 
 // ─── Локальные хелперы ──────────────────────────────────────────────────────
 
@@ -118,6 +119,7 @@ interface ReturnModalProps {
 }
 
 export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRentalsProp, onClose, onConfirm }: ReturnModalProps) {
+  const presence = useAnimatedPresence(open, animationDurations.base);
   const [returnDate, setReturnDate] = useState(new Date().toISOString().split('T')[0]);
   const [result, setResult] = useState<'available' | 'service' | 'downtime'>('available');
   const [selectedRentalId, setSelectedRentalId] = useState('');
@@ -131,6 +133,15 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
       setSelectedRentalId(rentalProp?.id ?? '');
     }
   }, [open, rentalProp]);
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose, open]);
 
   const { data: fetchedGanttRentals = [] } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
@@ -154,12 +165,12 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
   // Определяем рабочую аренду: переданная через props ИЛИ выбранная в дропдауне
   const rental = rentalProp ?? activeRentals.find(r => r.id === selectedRentalId) ?? null;
 
-  if (!open) return null;
+  if (!presence.shouldRender) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div data-state="open" className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
-      <div data-state="open" className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <RotateCcw className="h-5 w-5 text-[--color-primary]" />
@@ -287,6 +298,7 @@ interface DowntimeModalProps {
 }
 
 export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }: DowntimeModalProps) {
+  const presence = useAnimatedPresence(open, animationDurations.base);
   const [equipmentInv, setEquipmentInv] = useState(preselectedEquipment || '');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate,   setEndDate]   = useState('');
@@ -306,12 +318,21 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
     if (preselectedEquipment) setEquipmentInv(preselectedEquipment);
   }, [preselectedEquipment]);
 
-  if (!open) return null;
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose, open]);
+
+  if (!presence.shouldRender) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div data-state="open" className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
-      <div data-state="open" className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <PauseCircle className="h-5 w-5 text-amber-500" />
@@ -402,6 +423,7 @@ export function NewRentalModal({
   onClose,
   onConfirm,
 }: NewRentalModalProps) {
+  const presence = useAnimatedPresence(open, animationDurations.base);
   const today = new Date().toISOString().split('T')[0];
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
@@ -454,6 +476,15 @@ export function NewRentalModal({
     const selected = (equipmentListProp ?? fetchedEquipment).find(item => item.id === preselectedEquipmentId);
     if (selected) setEquipmentId(selected.id);
   }, [open, preselectedEquipmentId, equipmentListProp, fetchedEquipment]);
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose, open]);
 
   // ─── Данные из справочников ────────────────────────────────────────────────
   const allClients = useMemo(() => clientsProp ?? clientsData, [clientsData, clientsProp]);
@@ -569,14 +600,14 @@ export function NewRentalModal({
     [dailyRate, startDate, endDate],
   );
 
-  if (!open) return null;
+  if (!presence.shouldRender) return null;
 
   const hasNoEquipment = availableEquipment.length === 0 && busyEquipment.length === 0;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div data-state="open" className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
-      <div data-state="open" className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Новая аренда</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">

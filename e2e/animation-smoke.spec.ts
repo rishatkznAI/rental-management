@@ -21,6 +21,14 @@ async function expectAnimation(locator: Locator, className: string, animationNam
   return snapshot;
 }
 
+async function expectExitAnimation(locator: Locator, animationName: RegExp) {
+  await expect(locator).toHaveAttribute('data-state', 'closed');
+  const snapshot = await motionSnapshot(locator);
+  expect(snapshot.animationName).toMatch(animationName);
+  expect(snapshot.animationDuration).not.toBe('0s');
+  return snapshot;
+}
+
 test.describe('animation smoke', () => {
   test('core primitives expose visible motion classes and respect reduced motion', async ({ page }) => {
     await loginAsAdmin(page);
@@ -38,6 +46,8 @@ test.describe('animation smoke', () => {
     const sheetMotion = await expectAnimation(sheet, 'app-animate-drawer', /app-drawer-right-in/);
     expect(sheetMotion.animationDuration).toMatch(/0\.26s|260ms/);
     await page.keyboard.press('Escape');
+    const sheetExit = await expectExitAnimation(sheet, /app-drawer-right-out/);
+    expect(sheetExit.animationDuration).toMatch(/0\.22s|220ms/);
     await expect(sheet).toBeHidden();
 
     await navigateInApp(page, '/documents');
@@ -46,15 +56,35 @@ test.describe('animation smoke', () => {
     await expect(dialog).toBeVisible();
     const dialogMotion = await expectAnimation(dialog, 'app-animate-modal', /app-modal-in/);
     expect(dialogMotion.animationDuration).toMatch(/0\.22s|220ms/);
+    await page.keyboard.press('Escape');
+    const dialogEscapeExit = await expectExitAnimation(dialog, /app-modal-out/);
+    expect(dialogEscapeExit.animationDuration).toMatch(/0\.16s|160ms/);
+    await expect(dialog).toBeHidden();
 
-    await dialog.getByRole('combobox').first().click();
+    await page.getByRole('button', { name: /Фильтры/ }).first().click();
+    const selectDialog = page.locator('[data-slot="dialog-content"]').first();
+    await expect(selectDialog).toBeVisible();
+
+    await selectDialog.getByRole('combobox').first().click();
     const selectContent = page.locator('[data-slot="select-content"]').first();
     await expect(selectContent).toBeVisible();
     const selectMotion = await expectAnimation(selectContent, 'app-animate-popover', /app-popover-in/);
     expect(selectMotion.animationDuration).toMatch(/0\.15s|150ms/);
     await page.keyboard.press('Escape');
+    await expectExitAnimation(selectContent, /app-popover-out/);
+    await selectDialog.getByRole('button', { name: 'Готово' }).click();
+    const dialogButtonExit = await expectExitAnimation(selectDialog, /app-modal-out/);
+    expect(dialogButtonExit.animationDuration).toMatch(/0\.16s|160ms/);
+    await expect(selectDialog).toBeHidden();
+
+    await navigateInApp(page, '/payments');
+    await page.getByRole('button', { name: /Добавить платёж/ }).first().click();
+    const customPaymentDialog = page.locator('.app-animate-modal').first();
+    await expect(customPaymentDialog).toBeVisible();
+    await expectAnimation(customPaymentDialog, 'app-animate-modal', /app-modal-in/);
     await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
+    await expectExitAnimation(customPaymentDialog, /app-modal-out/);
+    await expect(customPaymentDialog).toBeHidden();
 
     await navigateInApp(page, '/service');
     await page.getByRole('tab', { name: 'Очередь сервиса' }).click();
@@ -70,5 +100,7 @@ test.describe('animation smoke', () => {
     await expect(reducedDialog).toBeVisible();
     const reducedMotion = await motionSnapshot(reducedDialog);
     expect(reducedMotion.animationDuration).toMatch(/0\.001s|1ms/);
+    await page.keyboard.press('Escape');
+    await expect(reducedDialog).toBeHidden();
   });
 });

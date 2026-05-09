@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { cn } from './utils';
 
 export const animationDurations = {
@@ -24,6 +25,8 @@ export const drawerOffset = {
   wide: '100%',
 } as const;
 
+export type AnimationPresenceState = 'open' | 'closed';
+
 export const animationClasses = {
   overlay:
     'app-animate-overlay fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]',
@@ -49,4 +52,43 @@ export function animatedOverlayClassName(className?: string) {
 
 export function animatedDrawerClassName(className?: string) {
   return cn(animationClasses.drawerBase, className);
+}
+
+function getPresenceExitDelay(durationMs: number) {
+  if (typeof window === 'undefined') return durationMs + 40;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return 20;
+  return durationMs + 40;
+}
+
+export function useAnimatedPresence(open: boolean, durationMs = animationDurations.base) {
+  const [shouldRender, setShouldRender] = React.useState(open);
+  const [dataState, setDataState] = React.useState<AnimationPresenceState>(open ? 'open' : 'closed');
+
+  React.useEffect(() => {
+    if (open) {
+      setShouldRender(true);
+      setDataState('open');
+      return undefined;
+    }
+
+    if (!shouldRender) {
+      setDataState('closed');
+      return undefined;
+    }
+
+    setDataState('closed');
+    const timeout = window.setTimeout(() => {
+      setShouldRender(false);
+    }, getPresenceExitDelay(durationMs));
+
+    return () => window.clearTimeout(timeout);
+  }, [durationMs, open, shouldRender]);
+
+  const onExitAnimationEnd = React.useCallback((event: React.AnimationEvent<HTMLElement>) => {
+    if (event.currentTarget !== event.target) return;
+    if (!String(event.animationName).endsWith('-out')) return;
+    if (!open) setShouldRender(false);
+  }, [open]);
+
+  return { shouldRender, dataState, onExitAnimationEnd } as const;
 }

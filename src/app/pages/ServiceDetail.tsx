@@ -54,6 +54,7 @@ import {
 import { buildServiceQuickActions } from '../lib/quickActions.js';
 import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media';
 import { normalizeUserRole } from '../lib/userStorage';
+import { animationDurations, useAnimatedPresence } from '../lib/animations';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -463,9 +464,19 @@ export default function ServiceDetail() {
   const [selectedPartCost, setSelectedPartCost] = useState('');
   const [repairFormError, setRepairFormError] = useState<string | null>(null);
   const [revisionModalOpen, setRevisionModalOpen] = useState(false);
+  const revisionModalPresence = useAnimatedPresence(revisionModalOpen, animationDurations.base);
   const [revisionReason, setRevisionReason] = useState('');
   const [revisionDetails, setRevisionDetails] = useState('');
   const [revisionChecklist, setRevisionChecklist] = useState<string[]>([]);
+
+  React.useEffect(() => {
+    if (!revisionModalOpen) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setRevisionModalOpen(false);
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [revisionModalOpen]);
   const [revisionError, setRevisionError] = useState<string | null>(null);
   const [revisionBusy, setRevisionBusy] = useState(false);
   const [resolutionComment, setResolutionComment] = useState('');
@@ -2061,9 +2072,10 @@ export default function ServiceDetail() {
           </div>
         </div>
       )}
-      {revisionModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-xl rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900">
+      {revisionModalPresence.shouldRender && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div data-state={revisionModalPresence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" />
+          <div data-state={revisionModalPresence.dataState} onAnimationEnd={revisionModalPresence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold text-gray-900 dark:text-white">Вернуть механику на доработку</h2>

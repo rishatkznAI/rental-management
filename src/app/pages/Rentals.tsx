@@ -2970,29 +2970,28 @@ export default function Rentals() {
       </div>
 
       {/* ===== Drawer ===== */}
-      {selectedRental && (
-        <RentalDrawer
-          rental={selectedRental}
-          equipment={equipmentList.find(e => matchesEquipmentRow(selectedRental, e))}
-          allRentals={ganttRentals}
-          payments={payments}
-          clients={computedClients}
-          clientReceivables={clientReceivables}
-          managers={managersList}
-          canEditRentals={canEditRentals}
-          canEditRentalDates={canEditRentalDates}
-          dateConflictsRequireApproval={!isAdminRole}
-          canReassignManager={user?.role === 'Администратор'}
-          canRestoreRentals={canRestoreRentals}
-          canDeleteRentals={canDeleteRentals}
-          canCreatePayments={canCreatePayments}
-          onClose={() => setSelectedRental(null)}
-          onAddPayment={handleAddPayment}
-          onEarlyReturn={handleEarlyReturn}
-          onUpdChange={handleUpdChange}
-          onUpdateMaintenanceFilters={handleUpdateMaintenanceFilters}
-          onRestore={handleRestoreRental}
-          onReturn={(r) => {
+      <RentalDrawer
+        rental={selectedRental}
+        equipment={selectedRental ? equipmentList.find(e => matchesEquipmentRow(selectedRental, e)) : undefined}
+        allRentals={ganttRentals}
+        payments={payments}
+        clients={computedClients}
+        clientReceivables={clientReceivables}
+        managers={managersList}
+        canEditRentals={canEditRentals}
+        canEditRentalDates={canEditRentalDates}
+        dateConflictsRequireApproval={!isAdminRole}
+        canReassignManager={user?.role === 'Администратор'}
+        canRestoreRentals={canRestoreRentals}
+        canDeleteRentals={canDeleteRentals}
+        canCreatePayments={canCreatePayments}
+        onClose={() => setSelectedRental(null)}
+        onAddPayment={handleAddPayment}
+        onEarlyReturn={handleEarlyReturn}
+        onUpdChange={handleUpdChange}
+        onUpdateMaintenanceFilters={handleUpdateMaintenanceFilters}
+        onRestore={handleRestoreRental}
+        onReturn={(r) => {
             if (!canEditRentals) return;
             setSelectedRental(null);
             handleOpenReturn(r);
@@ -3143,10 +3142,9 @@ export default function Rentals() {
               }
             })();
           }}
-          onUpdate={handleUpdateRental}
-          onAddComment={handleAddRentalComment}
-        />
-      )}
+        onUpdate={handleUpdateRental}
+        onAddComment={handleAddRentalComment}
+      />
 
       {/* ===== Modals ===== */}
         <ReturnModal

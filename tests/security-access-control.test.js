@@ -263,6 +263,38 @@ test('new mass assignment protected fields are stripped for non-admin roles', ()
   assert.equal(investorSafe.notes, 'visible note');
 });
 
+test('non-admin service create allows only explicit PDI markers and strips unsafe assignment fields', () => {
+  const access = createAccess({});
+  const manager = { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' };
+
+  const safe = access.sanitizeCreateInput('service', {
+    serviceKind: 'repair',
+    type: 'pdi',
+    scenario: 'pdi',
+    source: 'sales',
+    saleMode: true,
+    pdiData: { status: 'in_progress' },
+    equipmentId: 'EQ-1',
+    reason: 'PDI / предпродажная подготовка',
+    assignedTo: 'Другой механик',
+    assignedMechanicId: 'M-2',
+    resultData: { summary: 'done' },
+    location: 'Склад',
+    closedAt: '2026-05-01T10:00:00.000Z',
+  }, manager);
+
+  assert.equal(safe.type, 'pdi');
+  assert.equal(safe.scenario, 'pdi');
+  assert.equal(safe.source, 'sales');
+  assert.equal(safe.saleMode, true);
+  assert.deepEqual(safe.pdiData, { status: 'in_progress' });
+  assert.equal(safe.assignedTo, undefined);
+  assert.equal(safe.assignedMechanicId, undefined);
+  assert.equal(safe.resultData, undefined);
+  assert.equal(safe.location, undefined);
+  assert.equal(safe.closedAt, undefined);
+});
+
 test('bulk replace is admin-only by default', () => {
   const access = createAccess({});
   const admin = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' };

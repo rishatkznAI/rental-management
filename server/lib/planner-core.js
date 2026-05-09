@@ -1,4 +1,5 @@
 const { resolveRentalEquipment } = require('./equipment-matching');
+const { isRegularServiceTicket } = require('./service-ticket-kind');
 
 function sameText(left, right) {
   return String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
@@ -273,7 +274,7 @@ function buildPlannerRows(collections, options = {}) {
     });
   }
 
-  for (const ticket of serviceTickets) {
+  for (const ticket of serviceTickets.filter(isRegularServiceTicket)) {
     if (!ticket?.plannedDate) continue;
     if (ticket.status === 'closed') continue;
 

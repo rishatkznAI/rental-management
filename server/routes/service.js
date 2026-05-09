@@ -10,6 +10,7 @@ function registerServiceRoutes(router, deps) {
     calculateWorkAmount,
     normalizePayType,
   } = require('../lib/mechanic-workload');
+  const { isRegularServiceTicket } = require('../lib/service-ticket-kind');
   const {
     readData,
     writeData,
@@ -675,7 +676,9 @@ function registerServiceRoutes(router, deps) {
 
   router.get('/reports/mechanics-workload', requireAuth, requireRead('reports'), (req, res) => {
     const mechanics = readData('mechanics') || [];
-    const tickets = accessControl.filterCollectionByScope('service', readData('service') || [], req.user);
+    const tickets = accessControl
+      .filterCollectionByScope('service', readData('service') || [], req.user)
+      .filter(isRegularServiceTicket);
     const equipment = readData('equipment') || [];
     const workItems = accessControl.filterCollectionByScope('repair_work_items', readData('repair_work_items') || [], req.user);
     const serviceWorks = (readData('service_works') || []).map(normalizeServiceWorkRecord);

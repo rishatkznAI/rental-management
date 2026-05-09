@@ -34,6 +34,7 @@ import { equipmentService } from '../services/equipment.service';
 import { financeService } from '../services/finance.service';
 import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
+import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { useClientsList } from '../hooks/useClients';
 import { usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
@@ -131,7 +132,8 @@ export default function Dashboard() {
   // All data via react-query (auto-refetches on window focus by default)
   const { data: equipment = [] }  = useEquipmentList();
   const { data: rentals = [] }    = useRentalsList();
-  const { data: tickets = [] }    = useServiceTicketsList();
+  const { data: rawTickets = [] } = useServiceTicketsList();
+  const tickets = useMemo(() => rawTickets.filter(isRegularServiceTicket), [rawTickets]);
   const { data: clients = [] }    = useClientsList();
   const { data: payments = [] }   = usePaymentsList();
   const { data: documents = [] }  = useDocumentsList();

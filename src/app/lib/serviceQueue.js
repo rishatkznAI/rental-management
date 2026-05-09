@@ -1,3 +1,5 @@
+import { isRegularServiceTicket } from './serviceTicketKind.js';
+
 const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'needs_revision', 'ready']);
 const OPEN_RENTAL_STATUSES = new Set(['created', 'confirmed', 'active', 'return_planned']);
 
@@ -113,7 +115,7 @@ function groupLabel(group) {
 
 export function buildServiceQueue(input = {}) {
   const todayKey = dateKey(input.today) || new Date().toISOString().slice(0, 10);
-  const tickets = Array.isArray(input.serviceTickets) ? input.serviceTickets : [];
+  const tickets = (Array.isArray(input.serviceTickets) ? input.serviceTickets : []).filter(isRegularServiceTicket);
   const equipmentList = Array.isArray(input.equipment) ? input.equipment : [];
   const rentals = Array.isArray(input.rentals) ? input.rentals : [];
   const canViewFinance = input.canViewFinance === true;

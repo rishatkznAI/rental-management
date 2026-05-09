@@ -23,6 +23,7 @@ import { formatDate } from '../lib/utils';
 import type { ServiceTicket } from '../types';
 import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
 import { buildServiceQueue } from '../lib/serviceQueue';
+import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { clientsService } from '../services/clients.service';
@@ -451,7 +452,10 @@ export default function Service() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const ticketsQuery = useServiceTicketsList();
-  const ticketList = ticketsQuery.data ?? [];
+  const ticketList = React.useMemo(
+    () => (ticketsQuery.data ?? []).filter(isRegularServiceTicket),
+    [ticketsQuery.data],
+  );
   const canManageWarrantyClaims = can('edit', 'service');
   const canViewEquipment = can('view', 'equipment');
   const canViewRentals = can('view', 'rentals');

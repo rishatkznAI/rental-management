@@ -9,7 +9,7 @@ export type EquipmentDrive = 'diesel' | 'electric';
 export type EquipmentOwnerType = 'own' | 'investor' | 'sublease';
 export type EquipmentCategory = 'own' | 'sold' | 'client' | 'partner';
 export type EquipmentPriority = 'low' | 'medium' | 'high' | 'critical';
-export type EquipmentSalePdiStatus = 'not_started' | 'in_progress' | 'ready';
+export type EquipmentSalePdiStatus = 'not_started' | 'in_progress' | 'issues' | 'ready';
 export type RepairEventType = 'repair' | 'maintenance' | 'diagnostics' | 'breakdown';
 export type RepairSource = 'manual' | 'bot';
 export type ShippingEventType = 'shipping' | 'receiving';
@@ -619,6 +619,10 @@ export interface ServiceTicket {
   equipmentId: string;
   equipment: string;
   serviceKind?: ServiceScenario;
+  type?: string;
+  scenario?: string;
+  saleMode?: boolean;
+  pdiData?: Record<string, unknown>;
   inventoryNumber?: string;
   serialNumber?: string;
   equipmentType?: string;
@@ -645,7 +649,7 @@ export interface ServiceTicket {
   createdByUserId?: string;
   createdByUserName?: string;
   reporterContact?: string;
-  source?: 'manual' | 'bot' | 'manager' | 'system';
+  source?: 'manual' | 'bot' | 'manager' | 'system' | 'sales';
   status: ServiceStatus;
   plannedDate?: string;
   closedAt?: string;

@@ -236,7 +236,7 @@ export default function EquipmentNew() {
       priority:              form.priority as 'low' | 'medium' | 'high' | 'critical',
       activeInFleet:         form.activeInFleet === 'yes',
       isForSale:             form.isForSale === 'yes',
-      salePdiStatus:         form.isForSale === 'yes' ? form.salePdiStatus as 'not_started' | 'in_progress' | 'ready' : undefined,
+      salePdiStatus:         form.isForSale === 'yes' ? form.salePdiStatus as 'not_started' | 'in_progress' | 'issues' | 'ready' : undefined,
       salePrice1:            form.isForSale === 'yes' && form.salePrice1 ? Number(form.salePrice1) : undefined,
       salePrice2:            form.isForSale === 'yes' && form.salePrice2 ? Number(form.salePrice2) : undefined,
       salePrice3:            form.isForSale === 'yes' && form.salePrice3 ? Number(form.salePrice3) : undefined,
@@ -565,6 +565,7 @@ export default function EquipmentNew() {
                       options={[
                         { value: 'not_started', label: EQUIPMENT_SALE_PDI_LABELS.not_started },
                         { value: 'in_progress', label: EQUIPMENT_SALE_PDI_LABELS.in_progress },
+                        { value: 'issues', label: EQUIPMENT_SALE_PDI_LABELS.issues },
                         { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
                       ]}
                       hint="Показывает, готова ли техника к продаже и передаче клиенту."

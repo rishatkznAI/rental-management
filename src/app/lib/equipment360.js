@@ -1,3 +1,5 @@
+import { isRegularServiceTicket } from './serviceTicketKind.js';
+
 const OPEN_RENTAL_STATUSES = new Set(['active', 'created', 'confirmed', 'return_planned']);
 const CLOSED_RENTAL_STATUSES = new Set(['returned', 'closed', 'cancelled']);
 const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'needs_revision', 'ready']);
@@ -164,6 +166,7 @@ export function buildEquipment360Summary(input = {}) {
     || null;
 
   const serviceTickets = (Array.isArray(input.serviceTickets) ? input.serviceTickets : [])
+    .filter(isRegularServiceTicket)
     .filter(item => matchesEquipmentBySafeKey(item, equipment, inventoryIsUnique))
     .sort((a, b) => sortByDateDesc(a, b, 'createdAt'));
   const openService = serviceTickets.filter(isOpenService);

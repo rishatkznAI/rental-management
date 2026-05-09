@@ -1,6 +1,7 @@
 const express = require('express');
 const { buildClientDebtAgingRows, buildRentalDebtRows } = require('../lib/finance-core');
 const { normalizeRole } = require('../lib/role-groups');
+const { isRegularServiceTicket } = require('../lib/service-ticket-kind');
 
 const OPEN_RENTAL_STATUSES = new Set(['active', 'confirmed', 'return_planned']);
 const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'ready']);
@@ -411,7 +412,7 @@ function buildTasksCenterPayload(input) {
     }
   }
 
-  for (const ticket of service.filter(isOpenService)) {
+  for (const ticket of service.filter(item => isRegularServiceTicket(item) && isOpenService(item))) {
     const noMechanic = !normalizeText(ticket?.assignedMechanicId) && !normalizeText(ticket?.assignedMechanicName) && !normalizeText(ticket?.assignedTo);
     const status = normalizeStatus(ticket?.status);
     const priority = normalizeStatus(ticket?.priority);

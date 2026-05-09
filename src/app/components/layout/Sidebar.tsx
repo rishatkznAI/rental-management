@@ -48,6 +48,7 @@ import { useEquipmentList } from '../../hooks/useEquipment';
 import { useClientsList } from '../../hooks/useClients';
 import { useGanttData, useRentalsList } from '../../hooks/useRentals';
 import { useServiceTicketsList } from '../../hooks/useServiceTickets';
+import { isRegularServiceTicket } from '../../lib/serviceTicketKind.js';
 import { documentsService } from '../../services/documents.service';
 import { paymentsService } from '../../services/payments.service';
 import { deliveriesService } from '../../services/deliveries.service';
@@ -286,7 +287,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         (item.status === 'active' || item.status === 'created')
         && item.endDate <= todayKey,
       ).length,
-      service: serviceTickets.filter(item => item.status !== 'closed').length,
+      service: serviceTickets.filter(item => isRegularServiceTicket(item) && item.status !== 'closed').length,
       documents: 0,
       payments: 0,
     };

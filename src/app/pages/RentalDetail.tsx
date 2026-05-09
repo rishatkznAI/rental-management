@@ -9,6 +9,7 @@ import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
 import { RENTAL_KEYS, useGanttData, useRentalAuditHistory, useRentalsList } from '../hooks/useRentals';
 import { useClientContractsList, useClientObjectsList } from '../hooks/useClientRelations';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
+import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
@@ -372,6 +373,7 @@ export default function RentalDetail() {
   const relatedPayments = payments.filter(p => p.rentalId === rental?.id);
   const paidAmount = relatedPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const relatedService = serviceTickets.filter(ticket =>
+    isRegularServiceTicket(ticket) &&
     resolvedRentalEquipment.some(eq => eq.id === ticket.equipmentId),
   );
   const paymentsByInvoice = useMemo(() => {

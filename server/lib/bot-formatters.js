@@ -1,4 +1,5 @@
 const { isMechanicRole, normalizeRole } = require('./role-groups');
+const { isRegularServiceTicket } = require('./service-ticket-kind');
 
 function createBotFormatters(deps) {
   const {
@@ -258,6 +259,7 @@ function createBotFormatters(deps) {
     const tickets = readServiceTickets();
     if (isMechanicRole(authUser.userRole)) {
       return tickets.filter(ticket =>
+        isRegularServiceTicket(ticket) &&
         ticket.status !== 'closed' &&
         (
           !ticket.assignedMechanicName ||
@@ -265,15 +267,16 @@ function createBotFormatters(deps) {
         )
       );
     }
-    return tickets.filter(ticket => ticket.status !== 'closed');
+    return tickets.filter(ticket => isRegularServiceTicket(ticket) && ticket.status !== 'closed');
   }
 
   function getAssignedServiceTickets(authUser) {
     const tickets = readServiceTickets();
     if (!isMechanicRole(authUser.userRole)) {
-      return tickets.filter(ticket => ticket.status !== 'closed');
+      return tickets.filter(ticket => isRegularServiceTicket(ticket) && ticket.status !== 'closed');
     }
     return tickets.filter(ticket =>
+      isRegularServiceTicket(ticket) &&
       ticket.status !== 'closed' &&
       normalizeBotText(ticket.assignedMechanicName) === normalizeBotText(authUser.userName)
     );
@@ -646,7 +649,7 @@ function createBotFormatters(deps) {
   }
 
   function formatService(tickets) {
-    const open = tickets.filter(item => item.status !== 'closed');
+    const open = tickets.filter(item => isRegularServiceTicket(item) && item.status !== 'closed');
     if (!open.length) return '✅ Открытых заявок нет.';
 
     const priorityIcon = { critical: '🔴', high: '🟠', medium: '🟡', low: '⚪' };

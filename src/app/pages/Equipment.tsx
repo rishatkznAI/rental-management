@@ -126,6 +126,7 @@ function getStatusLabel(status: EquipmentStatus) {
 function getSalePdiAppearance(status: EquipmentSalePdiStatus = 'not_started') {
   if (status === 'ready') return 'bg-emerald-500/12 text-emerald-300';
   if (status === 'in_progress') return 'bg-orange-500/12 text-orange-300';
+  if (status === 'issues') return 'bg-red-500/12 text-red-300';
   return 'bg-secondary text-muted-foreground';
 }
 

@@ -1,3 +1,5 @@
+import { isRegularServiceTicket } from './serviceTicketKind.js';
+
 const OPEN_RENTAL_STATUSES = new Set(['active', 'created', 'confirmed', 'return_planned']);
 const CLOSED_RENTAL_STATUSES = new Set(['returned', 'closed', 'cancelled']);
 const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'ready']);
@@ -186,6 +188,7 @@ export function buildClient360Summary(input = {}) {
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const serviceTickets = (Array.isArray(input.serviceTickets) ? input.serviceTickets : [])
+    .filter(isRegularServiceTicket)
     .filter(item =>
       (item?.clientId && client.id && String(item.clientId) === String(client.id))
       || rentalIds.has(normalizeText(item?.rentalId))

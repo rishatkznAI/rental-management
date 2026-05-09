@@ -41,6 +41,7 @@ import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
+import { PdiForm } from '../components/sales/PdiForm';
 import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
 import { getToken } from '../lib/api';
 import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media';
@@ -90,6 +91,7 @@ const SERVICE_STATUS_LABELS: Record<string, string> = {
 const SALE_READINESS_LABELS = {
   not_started: 'Не начат',
   in_progress: 'В работе',
+  issues: 'Есть замечания',
   ready: 'Готов',
   problem: 'Проблема',
 } as const;
@@ -1517,7 +1519,7 @@ export default function EquipmentDetail() {
               <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Статус</p>
               <p className="mt-1 text-lg font-semibold text-foreground">
                 {saleMode
-                  ? (salePdiStatus === 'ready' ? 'PDI готов' : salePdiStatus === 'in_progress' ? 'PDI в работе' : 'PDI не начат')
+                  ? EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]
                   : EQ_STATUS_LABELS[equipment.status]}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -1652,7 +1654,7 @@ export default function EquipmentDetail() {
           {saleMode ? (
             <>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <CompactMetric label="PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} tone={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'in_progress' ? 'warning' : 'default'} />
+                <CompactMetric label="PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} tone={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'in_progress' || salePdiStatus === 'issues' ? 'warning' : 'default'} />
                 <CompactMetric label="Продажный статус" value={saleStatusLabel(equipment)} tone={equipment.category === 'sold' ? 'success' : 'default'} />
                 <CompactMetric label="Документы" value={saleDocsReadiness.label} tone={saleDocsReadiness.count > 0 ? 'success' : 'warning'} />
                 <CompactMetric label="Комплектация / фото" value={equipment.photo ? 'Фото есть' : 'Нужно добавить'} tone={equipment.photo ? 'success' : 'warning'} />
@@ -1717,7 +1719,7 @@ export default function EquipmentDetail() {
                 <div className="rounded-xl border border-border bg-card/70 p-4">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold text-foreground">PDI / предпродажная подготовка</h3>
-                    <Badge variant={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'in_progress' ? 'warning' : 'default'}>
+                    <Badge variant={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'issues' ? 'error' : salePdiStatus === 'in_progress' ? 'warning' : 'default'}>
                       {SALE_READINESS_LABELS[salePdiStatus] ?? EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]}
                     </Badge>
                   </div>
@@ -2102,7 +2104,7 @@ export default function EquipmentDetail() {
                   <Badge className={`border-0 ${
                     salePdiStatus === 'ready'
                       ? 'bg-emerald-500/12 text-emerald-300'
-                      : salePdiStatus === 'in_progress'
+                      : salePdiStatus === 'in_progress' || salePdiStatus === 'issues'
                       ? 'bg-orange-500/12 text-orange-300'
                       : 'bg-secondary text-muted-foreground'
                   }`}>
@@ -3524,34 +3526,35 @@ export default function EquipmentDetail() {
                 </button>
               </Dialog.Close>
             </div>
-            <ServiceTicketForm
-              initialEquipmentId={equipment.id}
-              lockEquipment
-              submitLabel={saleMode ? 'Создать PDI' : 'Создать заявку'}
-              initialReason={saleMode ? 'PDI / предпродажная подготовка' : undefined}
-              initialDescription={saleMode ? 'Проверка техники перед продажей, комплектация, документы и фото.' : undefined}
-              scenarioTitle={saleMode ? 'PDI / предпродажная подготовка' : undefined}
-              scenarioDescription={saleMode ? 'Зафиксируйте предпродажную проверку, готовность документов, комплектацию и фото.' : undefined}
-              hideScenarioSelect={saleMode}
-              onCancel={() => setShowCreateServiceModal(false)}
-              onCreated={(ticket) => {
-                setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
-                if (saleMode) {
+            {saleMode ? (
+              <PdiForm
+                equipment={equipment}
+                onCancel={() => setShowCreateServiceModal(false)}
+                onCreated={(ticket, nextPdiStatus) => {
+                  setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
                   const nextEquipment = allEquipment.map(item =>
                     item.id === equipment.id
                       ? appendAuditHistory(
-                          { ...item, salePdiStatus: item.salePdiStatus === 'ready' ? item.salePdiStatus : 'in_progress' },
+                          { ...item, salePdiStatus: nextPdiStatus },
                           createAuditEntry(
                             user?.name || 'Система',
-                            `Создана PDI / предпродажная подготовка ${ticket.id}: ${ticket.reason}`,
+                            `Сохранена PDI / предпродажная подготовка ${ticket.id}: ${ticket.reason}`,
                           ),
                         )
                       : item,
                   );
                   void persistEquipment(nextEquipment);
                   setShowCreateServiceModal(false);
-                  return;
-                }
+                }}
+              />
+            ) : (
+              <ServiceTicketForm
+                initialEquipmentId={equipment.id}
+                lockEquipment
+                submitLabel="Создать заявку"
+                onCancel={() => setShowCreateServiceModal(false)}
+                onCreated={(ticket) => {
+                setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
                 const nextEquipment = allEquipment.map(item =>
                   item.id === equipment.id
                     ? appendAuditHistory(
@@ -3566,7 +3569,8 @@ export default function EquipmentDetail() {
                 void persistEquipment(nextEquipment);
                 setShowCreateServiceModal(false);
               }}
-            />
+              />
+            )}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -3908,9 +3912,10 @@ function FieldSelect({
 }
 
 function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
-  const variants: Record<EquipmentSalePdiStatus, 'default' | 'warning' | 'success'> = {
+  const variants: Record<EquipmentSalePdiStatus, 'default' | 'warning' | 'success' | 'error'> = {
     not_started: 'default',
     in_progress: 'warning',
+    issues: 'error',
     ready: 'success',
   };
   return <Badge variant={variants[status]}>{EQUIPMENT_SALE_PDI_LABELS[status]}</Badge>;
@@ -4262,6 +4267,7 @@ function EditEquipmentModal({
                         options={[
                           { value: 'not_started', label: EQUIPMENT_SALE_PDI_LABELS.not_started },
                           { value: 'in_progress', label: EQUIPMENT_SALE_PDI_LABELS.in_progress },
+                          { value: 'issues', label: EQUIPMENT_SALE_PDI_LABELS.issues },
                           { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
                         ]}
                       />

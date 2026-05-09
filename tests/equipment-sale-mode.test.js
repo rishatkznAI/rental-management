@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { isSaleModeEquipment, saleStatusLabel } from '../src/app/lib/equipmentSaleMode.js';
 import { buildEquipmentQuickActions } from '../src/app/lib/quickActions.js';
 
@@ -78,6 +80,67 @@ test('normal equipment keeps rental quick actions', () => {
   assert.ok(labels.includes('История аренд'));
   assert.ok(labels.includes('Очередь сервиса'));
   assert.ok(labels.includes('Создать сервисную заявку'));
+});
+
+test('sale mode PDI action opens dedicated PDI form instead of service ticket form', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+
+  assert.match(source, /import \{ PdiForm \} from '\.\.\/components\/sales\/PdiForm';/);
+  assert.match(source, /saleMode \? \(\s*<PdiForm/s);
+  assert.match(source, /: \(\s*<ServiceTicketForm/s);
+  assert.doesNotMatch(source, /hideScenarioSelect=\{saleMode\}/);
+  assert.doesNotMatch(source, /submitLabel=\{saleMode \? 'Создать PDI'/);
+});
+
+test('PDI form contains presale fields and no service scenario selector', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/components/sales/PdiForm.tsx'), 'utf8');
+
+  assert.match(source, /PDI \/ предпродажная подготовка/);
+  assert.match(source, /Статус PDI/);
+  assert.match(source, /Ответственный/);
+  assert.match(source, /Дата проверки/);
+  assert.match(source, /Дедлайн готовности/);
+  assert.match(source, /Внешний осмотр/);
+  assert.match(source, /Гидравлика/);
+  assert.match(source, /Электрика/);
+  assert.match(source, /АКБ \/ зарядка/);
+  assert.match(source, /Паспорт/);
+  assert.match(source, /Сертификаты/);
+  assert.match(source, /Фото с 4 сторон/);
+  assert.match(source, /Шильдик \/ серийный номер/);
+  assert.match(source, /Готова к продаже/);
+
+  assert.doesNotMatch(source, /Сценарий сервисной заявки/);
+  assert.doesNotMatch(source, /option value="repair"/);
+  assert.doesNotMatch(source, /option value="to"/);
+  assert.doesNotMatch(source, /option value="chto"/);
+  assert.doesNotMatch(source, /option value="pto"/);
+  assert.doesNotMatch(source, />Клиент</);
+  assert.doesNotMatch(source, />Объект</);
+  assert.doesNotMatch(source, /clientId/);
+  assert.doesNotMatch(source, /rentalId/);
+});
+
+test('PDI payload is explicitly marked as sales PDI', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/components/sales/PdiForm.tsx'), 'utf8');
+
+  assert.match(source, /equipmentId: equipment\.id/);
+  assert.match(source, /type: 'pdi'/);
+  assert.match(source, /scenario: 'pdi'/);
+  assert.match(source, /source: 'sales'/);
+  assert.match(source, /saleMode: true/);
+  assert.match(source, /pdiData/);
+});
+
+test('ordinary service ticket form still keeps service scenarios', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/components/service/ServiceTicketForm.tsx'), 'utf8');
+
+  assert.match(source, /Сценарий сервисной заявки/);
+  assert.match(source, /option value="repair">Ремонт/);
+  assert.match(source, /option value="to">ТО/);
+  assert.match(source, /option value="chto">ЧТО/);
+  assert.match(source, /option value="pto">ПТО/);
+  assert.match(source, /Клиент и объект/);
 });
 
 test('sale status label uses existing sale and sold fields', () => {

@@ -1,5 +1,6 @@
 const { createAuditEntry } = require('./audit-history');
 const { isUniqueInventoryNumber } = require('./equipment-matching');
+const { isPdiServiceTicket } = require('./service-ticket-kind');
 
 function createServiceCore(deps) {
   const {
@@ -54,6 +55,7 @@ function createServiceCore(deps) {
 
   function applyServiceTicketCreationEffects(ticket, author = 'Система') {
     if (!ticket) return;
+    if (isPdiServiceTicket(ticket)) return;
 
     const equipmentList = readData('equipment') || [];
     const ganttRentals = readData('gantt_rentals') || [];

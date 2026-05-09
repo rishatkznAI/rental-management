@@ -80,3 +80,16 @@ test('service queue handles legacy missing data and hides finance fields', () =>
   assert.equal(serialized.includes('undefined'), false);
   assert.equal(serialized.includes('[object Object]'), false);
 });
+
+test('service queue excludes sales PDI records from ordinary service work', () => {
+  const queue = buildServiceQueue({
+    today: '2026-05-02',
+    serviceTickets: [
+      { id: 'PDI-1', equipmentId: 'E-sale', type: 'pdi', scenario: 'pdi', source: 'sales', saleMode: true, pdiData: { result: 'ready_for_sale' }, reason: 'PDI / предпродажная подготовка', priority: 'low', status: 'in_progress', createdAt: '2026-05-01' },
+      { id: 'S-1', equipmentId: 'E-1', reason: 'Гидравлика', priority: 'high', status: 'new', createdAt: '2026-05-01' },
+    ],
+  });
+
+  assert.deepEqual(queue.rows.map(item => item.ticketId), ['S-1']);
+  assert.equal(queue.metrics.totalOpen, 1);
+});

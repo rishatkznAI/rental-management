@@ -42,6 +42,7 @@ import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
 import { canEquipmentParticipateInRentals, compareEquipmentByPriority } from '../lib/equipmentClassification';
 import { resolveRentalEquipment } from '../lib/rentalEquipment';
+import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { buildClientReceivables, buildRentalDebtRows, getEffectivePaidAmount, mergeClientsWithFinancials } from '../lib/finance';
 import {
   appendRentalHistory,
@@ -619,6 +620,7 @@ const EMPTY_RENTAL_CHANGE_REQUESTS: RentalChangeRequest[] = [];
 function hasOpenServiceTicketForEquipment(serviceTickets: ServiceTicket[], equipment: Equipment) {
   const inventoryIsUnique = serviceTickets.filter(ticket => ticket.inventoryNumber === equipment.inventoryNumber).length <= 1;
   return serviceTickets.some(ticket =>
+    isRegularServiceTicket(ticket) &&
     OPEN_SERVICE_STATUSES.includes(ticket.status)
     && (
       ticket.equipmentId === equipment.id
@@ -1208,6 +1210,7 @@ export default function Rentals() {
       rentals = rentals.filter(r => {
         const inventoryIsUnique = (inventoryCounts.get(r.equipmentInv) || 0) <= 1;
         return serviceTickets.some(ticket =>
+          isRegularServiceTicket(ticket) &&
           OPEN_SERVICE_STATUSES.includes(ticket.status)
           && (
             (!!r.equipmentId && ticket.equipmentId === r.equipmentId)
@@ -1256,7 +1259,7 @@ export default function Rentals() {
 
   const servicePeriods = useMemo<ServicePeriod[]>(() => {
     return serviceTickets
-      .filter(ticket => OPEN_SERVICE_STATUSES.includes(ticket.status))
+      .filter(ticket => isRegularServiceTicket(ticket) && OPEN_SERVICE_STATUSES.includes(ticket.status))
       .map(ticket => {
         const matchedEquipment = ticket.equipmentId
           ? equipmentList.find(item => item.id === ticket.equipmentId)

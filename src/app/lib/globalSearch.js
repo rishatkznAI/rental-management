@@ -1,3 +1,5 @@
+import { isRegularServiceTicket } from './serviceTicketKind.js';
+
 const GROUP_ORDER = [
   'Клиенты',
   'Техника',
@@ -208,7 +210,7 @@ export function buildGlobalSearchGroups(data, options = {}) {
   }
 
   if (canView(options, 'service')) {
-    for (const item of serviceTickets) {
+    for (const item of serviceTickets.filter(isRegularServiceTicket)) {
       const rentalId = safeSearchText(item?.rentalId);
       const clientName = safeSearchText(item?.client) || safeSearchText(item?.clientName) || safeSearchText(ganttById.get(rentalId)?.client);
       addResult(groups, {

@@ -275,6 +275,11 @@ const NON_ADMIN_CREATE_FIELDS = {
   ...NON_ADMIN_UPDATE_FIELDS,
   service: new Set([
     'serviceKind',
+    'type',
+    'scenario',
+    'source',
+    'saleMode',
+    'pdiData',
     'reason',
     'description',
     'equipment',

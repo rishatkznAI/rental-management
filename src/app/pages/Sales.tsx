@@ -14,9 +14,10 @@ import { formatCurrency } from '../lib/utils';
 import type { EquipmentSalePdiStatus } from '../types';
 
 function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
-  const variants: Record<EquipmentSalePdiStatus, 'default' | 'warning' | 'success'> = {
+  const variants: Record<EquipmentSalePdiStatus, 'default' | 'warning' | 'success' | 'error'> = {
     not_started: 'default',
     in_progress: 'warning',
+    issues: 'error',
     ready: 'success',
   };
   return <Badge variant={variants[status]}>{EQUIPMENT_SALE_PDI_LABELS[status]}</Badge>;
@@ -25,7 +26,7 @@ function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
 function getSaleReadinessBadge(status: EquipmentSalePdiStatus = 'not_started') {
   return (
     <Badge variant={status === 'ready' ? 'success' : 'warning'}>
-      {status === 'ready' ? 'PDI готов' : 'PDI не готов'}
+      {status === 'ready' ? 'PDI готов' : status === 'issues' ? 'PDI с замечаниями' : 'PDI не готов'}
     </Badge>
   );
 }
@@ -206,6 +207,7 @@ export default function Sales() {
                 <option value="all">Все PDI</option>
                 <option value="not_started">{EQUIPMENT_SALE_PDI_LABELS.not_started}</option>
                 <option value="in_progress">{EQUIPMENT_SALE_PDI_LABELS.in_progress}</option>
+                <option value="issues">{EQUIPMENT_SALE_PDI_LABELS.issues}</option>
                 <option value="ready">{EQUIPMENT_SALE_PDI_LABELS.ready}</option>
               </select>
             </FilterField>

@@ -52,3 +52,31 @@ test('ready service ticket no longer blocks equipment for new work', () => {
   assert.equal(state.equipment[0].status, 'available');
   assert.equal(core.getOpenTicketByEquipment(state.equipment[0]), null);
 });
+
+test('sales PDI creation does not move equipment into ordinary service', () => {
+  const { state, core } = createMemoryServiceCore();
+  state.equipment[0] = { ...state.equipment[0], status: 'available', saleMode: true };
+  state.gantt_rentals = [{
+    id: 'GR-1',
+    equipmentId: 'EQ-1',
+    status: 'active',
+    startDate: '2026-04-01',
+    endDate: '2026-05-20',
+    comments: [],
+  }];
+
+  core.applyServiceTicketCreationEffects({
+    id: 'PDI-1',
+    equipmentId: 'EQ-1',
+    type: 'pdi',
+    scenario: 'pdi',
+    source: 'sales',
+    saleMode: true,
+    pdiData: { result: 'ready_for_sale' },
+    reason: 'PDI / предпродажная подготовка',
+  }, 'Оператор');
+
+  assert.equal(state.equipment[0].status, 'available');
+  assert.equal(state.gantt_rentals[0].status, 'active');
+  assert.deepEqual(state.gantt_rentals[0].comments, []);
+});

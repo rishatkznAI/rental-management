@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import {
   Plus, ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightSmall, SlidersHorizontal, RotateCcw, CirclePause as PauseCircle,
   Search, CircleCheck, CircleAlert, CreditCard, ArrowRightLeft,
-  AlertTriangle, ClipboardCheck, Wrench
+  AlertTriangle, Archive, CalendarCheck, ClipboardCheck, Clock, HelpCircle, PackageCheck, Wrench
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import {
@@ -370,12 +370,50 @@ const TYPE_LABELS: Record<string, string> = {
   mast: 'Мачтовый',
 };
 
-const EQ_STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  available: { label: 'Свободна', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-  rented: { label: 'В аренде', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-  reserved: { label: 'Бронь', color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
-  in_service: { label: 'В сервисе', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
-  inactive: { label: 'Списан', color: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' },
+const EQ_STATUS_LABELS: Record<string, { label: string; color: string; iconColor: string; icon: typeof CircleCheck }> = {
+  available: {
+    label: 'Свободна',
+    color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+    iconColor: 'text-emerald-500 dark:text-emerald-400',
+    icon: CircleCheck,
+  },
+  rented: {
+    label: 'В аренде',
+    color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+    iconColor: 'text-blue-500 dark:text-blue-400',
+    icon: CalendarCheck,
+  },
+  reserved: {
+    label: 'Бронь',
+    color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
+    iconColor: 'text-amber-500 dark:text-amber-400',
+    icon: Clock,
+  },
+  in_service: {
+    label: 'В сервисе',
+    color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+    iconColor: 'text-red-500 dark:text-red-400',
+    icon: Wrench,
+  },
+  sold: {
+    label: 'Продана',
+    color: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+    iconColor: 'text-slate-500 dark:text-slate-400',
+    icon: PackageCheck,
+  },
+  inactive: {
+    label: 'Списана',
+    color: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+    iconColor: 'text-slate-500 dark:text-slate-400',
+    icon: Archive,
+  },
+};
+
+const EQ_UNKNOWN_STATUS = {
+  label: 'Статус не указан',
+  color: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+  iconColor: 'text-slate-400 dark:text-slate-500',
+  icon: HelpCircle,
 };
 
 type RentalPaymentTone = 'paid' | 'unpaid' | 'partial' | 'overdue' | 'unknown';
@@ -3447,7 +3485,8 @@ function EquipmentRow({
   const todayStr = format(today, 'yyyy-MM-dd');
   // Статус вычисляется динамически из аренд, а не из equipment.status
   const effectiveStatus = computeEffectiveStatus(equipment, rentals, today, { start: viewStart, end: viewEnd });
-  const eqStatus = EQ_STATUS_LABELS[effectiveStatus] || EQ_STATUS_LABELS.available;
+  const eqStatus = EQ_STATUS_LABELS[effectiveStatus] || EQ_UNKNOWN_STATUS;
+  const EquipmentStatusIcon = eqStatus.icon;
   const activeRental = rentals.find(r => r.status === 'active');
   const timelineWidth = totalDays * dayWidth;
   const hasServiceBars = servicePeriods.length > 0;
@@ -3468,6 +3507,7 @@ function EquipmentRow({
     || equipment.inventoryNumber
     || equipment.serialNumber
     || 'Модель не указана';
+  const hasEquipmentMeta = Boolean(equipment.inventoryNumber || equipment.serialNumber);
 
   return (
     <div
@@ -3488,13 +3528,36 @@ function EquipmentRow({
               {equipmentModelLabel}
             </span>
           </div>
-          <div className={`mt-0.5 flex min-w-0 items-center ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
-            <span className={`shrink-0 rounded-full bg-slate-100 font-mono text-gray-500 dark:bg-white/8 dark:text-gray-400 ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'}`}>{equipment.inventoryNumber}</span>
-            <span className={`inline-flex shrink-0 rounded-full font-medium ${eqStatus.color} ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'}`}>
-              {eqStatus.label}
-            </span>
-            <span className="truncate uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-              SN {equipment.serialNumber || 'не указан'}
+          <div className={`mt-0.5 flex min-w-0 items-center text-gray-500 dark:text-gray-400 ${isCompact ? 'gap-1 text-[9px]' : 'gap-1.5 text-[10px]'}`}>
+            {equipment.inventoryNumber && (
+              <span
+                className="shrink-0 font-mono"
+                title={`Инвентарный номер: ${equipment.inventoryNumber}`}
+              >
+                Инв. {equipment.inventoryNumber}
+              </span>
+            )}
+            {equipment.inventoryNumber && equipment.serialNumber && (
+              <span className="shrink-0 text-gray-300 dark:text-gray-600">·</span>
+            )}
+            {equipment.serialNumber && (
+              <span
+                className="min-w-0 flex-1 truncate font-mono uppercase tracking-[0.04em] text-gray-600 dark:text-gray-300"
+                title={`Серийный номер: ${equipment.serialNumber}`}
+              >
+                SN {equipment.serialNumber}
+              </span>
+            )}
+            {hasEquipmentMeta && <span className="shrink-0 text-gray-300 dark:text-gray-600">·</span>}
+            <span
+              className="inline-flex shrink-0 items-center justify-center"
+              title={eqStatus.label}
+              aria-label={`Статус техники: ${eqStatus.label}`}
+            >
+              <EquipmentStatusIcon
+                className={`${isCompact ? 'h-3 w-3' : 'h-3.5 w-3.5'} ${eqStatus.iconColor}`}
+                strokeWidth={2.4}
+              />
             </span>
           </div>
         </div>

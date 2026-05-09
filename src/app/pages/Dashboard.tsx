@@ -76,10 +76,6 @@ import {
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
-function safeDiv(a: number, b: number, fallback = 0): number {
-  return b > 0 ? a / b : fallback;
-}
-
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
@@ -1241,16 +1237,6 @@ export default function Dashboard() {
     )
   ).length;
 
-  // Month revenue (role-aware)
-  const monthRentals = viewRentals.filter(r => {
-    const start = new Date(r.startDate);
-    return start >= monthStart && (r.status === 'active' || r.status === 'closed' || r.status === 'confirmed');
-  });
-  const dashMonthRevenue = monthRentals.reduce((sum, r) => sum + (r.price || 0), 0);
-
-  // Monthly plan (0 = not configured, shows no target bar)
-  const MONTHLY_PLAN = 0;
-
   const overdueDebtCount = overduePayments.length;
 
   // ── Alert items ─────────────────────────────────────────────────────────────
@@ -2055,16 +2041,16 @@ export default function Dashboard() {
         </section>
       )}
 
-      {activeDashboardTab === 'service' && isAdminRole && (
+      {activeDashboardTab === 'rentals' && isAdminRole && (
         <section className={dashboardSectionClass}>
           <div className={dashboardSectionHeaderClass}>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-              Команда
+              Коммерция
             </p>
-            <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Результаты по каждому менеджеру и механику</h2>
+            <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Результаты менеджеров аренды</h2>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-4">
             <Card className={dashboardCardClass}>
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2">
@@ -2124,7 +2110,20 @@ export default function Dashboard() {
                 )}
               </CardContent>
             </Card>
+          </div>
+        </section>
+      )}
 
+      {activeDashboardTab === 'service' && isAdminRole && (
+        <section className={dashboardSectionClass}>
+          <div className={dashboardSectionHeaderClass}>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+              Сервисная команда
+            </p>
+            <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Механики и сервисная нагрузка</h2>
+          </div>
+
+          <div className="grid gap-4">
             <Card className={dashboardCardClass}>
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2">
@@ -2296,7 +2295,7 @@ export default function Dashboard() {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
             Операционная работа
           </p>
-          <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Что происходит в аренде и сервисе</h2>
+          <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Что происходит в аренде</h2>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -2365,50 +2364,6 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('openService')}>
-            <CardHeader className={dashboardCardHeaderClass}>
-              <CardDescription className="flex items-center justify-between">
-                <span>Открытые заявки</span>
-                <Wrench className="h-3.5 w-3.5 text-gray-400" />
-              </CardDescription>
-              <CardTitle className={`text-3xl font-bold ${openServiceTickets.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>
-                {openServiceTickets.length}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className={dashboardCardContentClass}>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{criticalTickets.length} крит./высоких · {equipmentInServiceList.length} ед. в сервисе</p>
-            </CardContent>
-          </Card>
-
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('waitingParts')}>
-            <CardHeader className={dashboardCardHeaderClass}>
-              <CardDescription className="flex items-center justify-between">
-                <span>Ждут запчасти</span>
-                <PackageX className="h-3.5 w-3.5 text-gray-400" />
-              </CardDescription>
-              <CardTitle className={`text-3xl font-bold ${ticketsWaitingParts.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'}`}>
-                {ticketsWaitingParts.length}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className={dashboardCardContentClass}>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{ticketsWaitingParts.length > 0 ? 'Нужен контроль поставки и сроков.' : 'Зависших заявок по запчастям нет.'}</p>
-            </CardContent>
-          </Card>
-
-          <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('serviceInDays')}>
-            <CardHeader className={dashboardCardHeaderClass}>
-              <CardDescription className="flex items-center justify-between">
-                <span>Техника в сервисе по дням</span>
-                <Clock className="h-3.5 w-3.5 text-gray-400" />
-              </CardDescription>
-              <CardTitle className={`text-3xl font-bold ${equipmentInServiceList.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400'}`}>
-                {equipmentInServiceList.length}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className={dashboardCardContentClass}>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Ср.: {averageServiceDays || 0} дн. · Макс.: {maxServiceDays || 0} дн.</p>
-            </CardContent>
-          </Card>
         </div>
       </section>
       )}
@@ -2424,34 +2379,6 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {activeDashboardTab === 'money' && canViewMoney && (
-            <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('weekRevenue')}>
-              <CardHeader className={dashboardCardHeaderClass}>
-                <CardDescription className="flex items-center justify-between">
-                  <span>Выручка за {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</span>
-                  <DollarSign className="h-3.5 w-3.5 text-gray-400" />
-                </CardDescription>
-                <CardTitle className={`text-2xl font-bold ${dashMonthRevenue === 0 ? 'text-gray-400' : 'text-gray-900 dark:text-white'}`}>
-                  {dashMonthRevenue > 0 ? formatCurrency(Math.round(dashMonthRevenue)) : 'Нет данных'}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className={dashboardCardContentClass}>
-                {MONTHLY_PLAN > 0 ? (
-                  <>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
-                      <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${Math.min(100, Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100))}%` }} />
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">План {formatCurrency(MONTHLY_PLAN)} · {Math.round(safeDiv(dashMonthRevenue, MONTHLY_PLAN) * 100)}%</p>
-                  </>
-                ) : (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {monthRentals.length > 0 ? `${monthRentals.length} аренд в этом месяце` : 'Нет аренд в этом месяце'}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
           <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('idleEquipment')}>
             <CardHeader className={dashboardCardHeaderClass}>
               <CardDescription className="flex items-center justify-between">

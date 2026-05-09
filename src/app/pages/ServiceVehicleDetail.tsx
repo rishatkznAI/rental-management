@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Car, Plus, Trash2, Edit2, Save, X,
   AlertTriangle, CheckCircle, FileText, History,
-  MapPin, User, Calendar, Gauge, Wrench,
+  MapPin, User, Calendar, Gauge, Wrench, Ban,
 } from 'lucide-react';
 import { cn, formatDate } from '../lib/utils';
 import { usePermissions } from '../lib/permissions';
@@ -11,7 +11,23 @@ import { useAuth } from '../contexts/AuthContext';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Textarea } from '../components/ui/textarea';
 import {
   useServiceVehicleById,
   useCreateVehicle,
@@ -19,6 +35,7 @@ import {
   useDeleteVehicle,
   useVehicleTrips,
   useCreateTrip,
+  useUpdateTrip,
   useDeleteTrip,
 } from '../hooks/useServiceVehicles';
 import type { ServiceVehicle, VehicleStatus, VehicleType, VehicleTrip } from '../types';
@@ -39,6 +56,14 @@ const TYPE_LABELS: Record<VehicleType, string> = {
   truck:   'Грузовой',
   minibus: 'Микроавтобус',
   other:   'Другой',
+};
+
+const TRIP_STATUS_LABELS: Record<NonNullable<VehicleTrip['status']>, string> = {
+  draft: 'Черновик',
+  issued: 'Выдан',
+  in_progress: 'В рейсе',
+  completed: 'Закрыт',
+  cancelled: 'Отменён',
 };
 
 type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'default';
@@ -112,11 +137,58 @@ function blankVehicle(): CreateVehiclePayload {
 function blankTrip(vehicleId: string, currentMileage: number): CreateTripPayload {
   return {
     vehicleId,
+    sheetNumber: '',
     date: new Date().toISOString().slice(0, 10),
-    driver: '', route: '', purpose: '',
+    driver: '',
+    driverName: '',
+    driverId: null,
+    mechanicId: null,
+    serviceRequestId: null,
+    route: '',
+    routeFrom: '',
+    routeTo: '',
+    purpose: '',
     startMileage: currentMileage,
-    endMileage: currentMileage,
+    endMileage: null,
+    odometerStart: currentMileage,
+    odometerEnd: null,
+    fuelStart: null,
+    fuelAdded: null,
+    fuelEnd: null,
+    status: 'draft',
+    startedAt: null,
+    completedAt: null,
     serviceTicketId: null, clientId: null, comment: '',
+  };
+}
+
+function tripFormFromTrip(trip: VehicleTrip): CreateTripPayload {
+  return {
+    vehicleId: trip.vehicleId,
+    sheetNumber: trip.sheetNumber || '',
+    date: trip.date,
+    driver: trip.driverName || trip.driver || '',
+    driverName: trip.driverName || trip.driver || '',
+    driverId: trip.driverId || null,
+    mechanicId: trip.mechanicId || null,
+    serviceRequestId: trip.serviceRequestId || trip.serviceTicketId || null,
+    route: trip.route || '',
+    routeFrom: trip.routeFrom || '',
+    routeTo: trip.routeTo || '',
+    purpose: trip.purpose || '',
+    startMileage: trip.odometerStart ?? trip.startMileage ?? 0,
+    endMileage: trip.odometerEnd ?? trip.endMileage ?? null,
+    odometerStart: trip.odometerStart ?? trip.startMileage ?? 0,
+    odometerEnd: trip.odometerEnd ?? trip.endMileage ?? null,
+    fuelStart: trip.fuelStart ?? null,
+    fuelAdded: trip.fuelAdded ?? null,
+    fuelEnd: trip.fuelEnd ?? null,
+    status: trip.status || 'draft',
+    startedAt: trip.startedAt || null,
+    completedAt: trip.completedAt || null,
+    serviceTicketId: trip.serviceTicketId || trip.serviceRequestId || null,
+    clientId: trip.clientId || null,
+    comment: trip.comment || '',
   };
 }
 
@@ -142,6 +214,7 @@ export default function ServiceVehicleDetail() {
   const updateVehicle = useUpdateVehicle();
   const deleteVehicle = useDeleteVehicle();
   const createTrip    = useCreateTrip();
+  const updateTrip    = useUpdateTrip();
   const deleteTrip    = useDeleteTrip();
 
   // Form state
@@ -151,6 +224,7 @@ export default function ServiceVehicleDetail() {
 
   // Trip form
   const [tripOpen,  setTripOpen]  = useState(false);
+  const [editingTrip, setEditingTrip] = useState<VehicleTrip | null>(null);
   const [tripForm,  setTripForm]  = useState<CreateTripPayload>(blankTrip('', 0));
   const [tripError, setTripError] = useState('');
 
@@ -202,23 +276,73 @@ export default function ServiceVehicleDetail() {
   }
 
   function openTripForm() {
+    setEditingTrip(null);
     setTripForm(blankTrip(id!, vehicle?.currentMileage ?? 0));
+    setTripError('');
+    setTripOpen(true);
+  }
+
+  function openEditTrip(trip: VehicleTrip) {
+    setEditingTrip(trip);
+    setTripForm(tripFormFromTrip(trip));
     setTripError('');
     setTripOpen(true);
   }
 
   async function handleSaveTrip() {
     setTripError('');
-    if (!tripForm.driver.trim()) return setTripError('Введите водителя');
-    if (!tripForm.route.trim())  return setTripError('Введите маршрут');
-    if (tripForm.endMileage < tripForm.startMileage)
+    const driverName = String(tripForm.driverName || tripForm.driver || '').trim();
+    const route = [tripForm.routeFrom, tripForm.routeTo].filter(Boolean).join(' — ') || String(tripForm.route || '').trim();
+    const odometerStart = Number(tripForm.odometerStart ?? tripForm.startMileage);
+    const odometerEnd = tripForm.odometerEnd === null || tripForm.odometerEnd === undefined
+      ? null
+      : Number(tripForm.odometerEnd);
+    if (!driverName) return setTripError('Введите водителя');
+    if (!route)  return setTripError('Введите маршрут');
+    if (tripForm.status === 'completed' && (odometerEnd === null || !Number.isFinite(odometerStart))) {
+      return setTripError('Для закрытия заполните начальный и конечный пробег');
+    }
+    if (odometerEnd !== null && odometerEnd < odometerStart)
       return setTripError('Конечный пробег не может быть меньше начального');
 
     try {
-      await createTrip.mutateAsync(tripForm);
+      const payload = {
+        ...tripForm,
+        driver: driverName,
+        driverName,
+        route,
+        startMileage: odometerStart,
+        endMileage: odometerEnd,
+        odometerStart,
+        odometerEnd,
+        serviceTicketId: tripForm.serviceRequestId || tripForm.serviceTicketId || null,
+      };
+      if (editingTrip) {
+        await updateTrip.mutateAsync({ id: editingTrip.id, vehicleId: editingTrip.vehicleId, payload });
+      } else {
+        await createTrip.mutateAsync(payload);
+      }
       setTripOpen(false);
+      setEditingTrip(null);
     } catch (e: any) {
       setTripError(e?.message ?? 'Ошибка сохранения');
+    }
+  }
+
+  async function updateTripStatus(trip: VehicleTrip, status: NonNullable<VehicleTrip['status']>) {
+    setTripError('');
+    try {
+      await updateTrip.mutateAsync({
+        id: trip.id,
+        vehicleId: trip.vehicleId,
+        payload: {
+          status,
+          completedAt: status === 'completed' ? new Date().toISOString() : trip.completedAt,
+        },
+      });
+    } catch (e: any) {
+      setTripError(e?.message ?? 'Ошибка обновления путевого листа');
+      openEditTrip(trip);
     }
   }
 
@@ -230,15 +354,18 @@ export default function ServiceVehicleDetail() {
   // ── Waybill stub ────────────────────────────────────────────────────────────
 
   function handleWaybill(trip: VehicleTrip) {
+    const distance = trip.distanceKm ?? trip.distance ?? 0;
+    const route = trip.route || [trip.routeFrom, trip.routeTo].filter(Boolean).join(' — ');
     alert(
       `Путевой лист (заготовка)\n\n` +
       `Машина: ${vehicle?.make} ${vehicle?.model} (${vehicle?.plateNumber})\n` +
+      `Номер: ${trip.sheetNumber || trip.id}\n` +
       `Дата: ${trip.date}\n` +
-      `Водитель: ${trip.driver}\n` +
-      `Маршрут: ${trip.route}\n` +
+      `Водитель: ${trip.driverName || trip.driver}\n` +
+      `Маршрут: ${route}\n` +
       `Цель: ${trip.purpose || '—'}\n` +
-      `Пробег: ${trip.startMileage} → ${trip.endMileage} км (${trip.distance} км)\n` +
-      (trip.serviceTicketId ? `Заявка: ${trip.serviceTicketId}\n` : '') +
+      `Пробег: ${trip.odometerStart ?? trip.startMileage} → ${trip.odometerEnd ?? trip.endMileage ?? '—'} км (${distance} км)\n` +
+      (trip.serviceRequestId || trip.serviceTicketId ? `Заявка: ${trip.serviceRequestId || trip.serviceTicketId}\n` : '') +
       `\n⚠ Полноценная генерация PDF будет добавлена в следующей версии.`,
     );
   }
@@ -263,6 +390,23 @@ export default function ServiceVehicleDetail() {
   }
 
   const displayVehicle = vehicle ?? form as unknown as ServiceVehicle;
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const monthTrips = trips.filter(trip => String(trip.date || '').startsWith(currentMonth));
+  const completedTrips = trips.filter(trip => (trip.status || 'completed') === 'completed');
+  const monthDistance = monthTrips.reduce((sum, trip) => sum + (trip.distanceKm ?? trip.distance ?? 0), 0);
+  const totalDistance = trips.reduce((sum, trip) => sum + (trip.distanceKm ?? trip.distance ?? 0), 0);
+  const lastClosedTrip = completedTrips
+    .slice()
+    .sort((a, b) => String(b.completedAt || b.date || '').localeCompare(String(a.completedAt || a.date || '')))[0];
+  const lastDriver = trips[0]?.driverName || trips[0]?.driver || '—';
+  const lastMileage = lastClosedTrip?.odometerEnd ?? lastClosedTrip?.endMileage ?? vehicle?.currentMileage ?? 0;
+  const tripsWithFuel = trips.filter(trip => Number.isFinite(Number(trip.fuelConsumption)) && (trip.distanceKm ?? trip.distance ?? 0) > 0);
+  const avgFuel = tripsWithFuel.length > 0
+    ? tripsWithFuel.reduce((sum, trip) => {
+      const distance = trip.distanceKm ?? trip.distance ?? 0;
+      return sum + ((Number(trip.fuelConsumption) / distance) * 100);
+    }, 0) / tripsWithFuel.length
+    : null;
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -331,7 +475,7 @@ export default function ServiceVehicleDetail() {
       {/* Tabs (only for existing) */}
       {!isNew && (
         <div className="flex border-b border-gray-200 dark:border-gray-700 gap-1">
-          {([['info', 'Карточка', Car], ['trips', 'Журнал поездок', History]] as const).map(
+          {([['info', 'Карточка', Car], ['trips', 'Путевые листы', History]] as const).map(
             ([key, label, Icon]) => (
               <button
                 key={key}
@@ -539,131 +683,125 @@ export default function ServiceVehicleDetail() {
       {/* ── Tab: Trips ── */}
       {!isNew && tab === 'trips' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Итого поездок: <span className="font-medium text-gray-800 dark:text-gray-200">{trips.length}</span>
-              {trips.length > 0 && (
-                <> · Общий пробег: <span className="font-medium text-gray-800 dark:text-gray-200">
-                  {trips.reduce((s, t) => s + t.distance, 0).toLocaleString('ru-RU')} км
-                </span></>
-              )}
-            </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Путевые листы</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Выезды, пробег, топливо и связанные сервисные задачи.</p>
+            </div>
             {canEdit && (
               <Button size="sm" onClick={openTripForm}>
-                <Plus className="h-3.5 w-3.5 mr-1" /> Добавить поездку
+                <Plus className="h-3.5 w-3.5 mr-1" /> Создать путевой лист
               </Button>
             )}
           </div>
 
-          {/* Trip form */}
-          {tripOpen && (
-            <Card className="border-blue-200 dark:border-blue-800">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Новая поездка</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <TripField label="Дата" type="date"
-                    value={tripForm.date}
-                    onChange={v => setTripForm(p => ({ ...p, date: v }))}
-                  />
-                  <TripField label="Водитель *"
-                    value={tripForm.driver}
-                    onChange={v => setTripForm(p => ({ ...p, driver: v }))}
-                  />
-                  <TripField label="Маршрут *"
-                    value={tripForm.route}
-                    onChange={v => setTripForm(p => ({ ...p, route: v }))}
-                  />
-                  <TripField label="Цель поездки"
-                    value={tripForm.purpose}
-                    onChange={v => setTripForm(p => ({ ...p, purpose: v }))}
-                  />
-                  <TripField label="Начальный пробег (км)" type="number"
-                    value={String(tripForm.startMileage)}
-                    onChange={v => setTripForm(p => ({ ...p, startMileage: Math.max(0, Number(v)) }))}
-                  />
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                      Конечный пробег (км)
-                    </label>
-                    <input
-                      type="number"
-                      value={tripForm.endMileage}
-                      onChange={e => setTripForm(p => ({ ...p, endMileage: Math.max(0, Number(e.target.value)) }))}
-                      min={tripForm.startMileage}
-                      className={cn(
-                        'block w-full h-9 rounded-md border px-3 text-sm',
-                        'bg-white dark:bg-gray-800 text-gray-900 dark:text-white',
-                        'focus:outline-none focus:ring-2 focus:ring-blue-500',
-                        tripForm.endMileage < tripForm.startMileage
-                          ? 'border-red-500' : 'border-gray-200 dark:border-gray-700',
-                      )}
-                    />
-                    <p className="text-xs text-gray-400">
-                      Пробег за поездку: <span className="font-medium">
-                        {Math.max(0, tripForm.endMileage - tripForm.startMileage).toLocaleString('ru-RU')} км
-                      </span>
-                    </p>
-                  </div>
-                  <TripField label="Связанная заявка (ID)"
-                    value={tripForm.serviceTicketId ?? ''}
-                    onChange={v => setTripForm(p => ({ ...p, serviceTicketId: v || null }))}
-                  />
-                  <TripField label="Клиент / объект"
-                    value={tripForm.clientId ?? ''}
-                    onChange={v => setTripForm(p => ({ ...p, clientId: v || null }))}
-                  />
-                  <div className="sm:col-span-2 space-y-1">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Комментарий</label>
-                    <textarea
-                      value={tripForm.comment}
-                      onChange={e => setTripForm(p => ({ ...p, comment: e.target.value }))}
-                      rows={2}
-                      className="block w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                    />
-                  </div>
-                </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <TripKpi title="Листов за месяц" value={monthTrips.length} />
+            <TripKpi title="Пробег за месяц" value={`${monthDistance.toLocaleString('ru-RU')} км`} />
+            <TripKpi title="Средний расход" value={avgFuel === null ? '—' : `${avgFuel.toFixed(1)} л/100 км`} />
+            <TripKpi title="Последний пробег" value={`${Number(lastMileage || 0).toLocaleString('ru-RU')} км`} />
+            <TripKpi title="Последний водитель" value={lastDriver} />
+          </div>
 
-                {tripError && (
-                  <p className="mt-2 text-sm text-red-500 flex items-center gap-1">
-                    <AlertTriangle className="h-3.5 w-3.5" />{tripError}
-                  </p>
-                )}
-
-                <div className="flex gap-2 mt-4">
-                  <Button size="sm" onClick={handleSaveTrip} disabled={createTrip.isPending}>
-                    <Save className="h-3.5 w-3.5 mr-1" /> Сохранить
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => setTripOpen(false)}>
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+          {tripError && (
+            <div className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
+              <AlertTriangle className="h-4 w-4" />{tripError}
+            </div>
           )}
 
-          {/* Trips list */}
-          {trips.length === 0 && !tripOpen ? (
+          {trips.length === 0 ? (
             <div className="flex flex-col items-center py-12 text-gray-400 dark:text-gray-500">
               <History className="h-10 w-10 mb-2 opacity-40" />
-              <p>Поездок пока нет</p>
+              <p>Путевых листов пока нет</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {trips.map(trip => (
-                <TripCard
-                  key={trip.id}
-                  trip={trip}
-                  canEdit={canEdit}
-                  onDelete={() => handleDeleteTrip(trip.id)}
-                  onWaybill={() => handleWaybill(trip)}
-                />
-              ))}
+            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Номер / дата</TableHead>
+                    <TableHead>Водитель</TableHead>
+                    <TableHead>Маршрут</TableHead>
+                    <TableHead>Цель</TableHead>
+                    <TableHead>Пробег</TableHead>
+                    <TableHead>Топливо</TableHead>
+                    <TableHead>Статус</TableHead>
+                    <TableHead className="w-[150px]">Действия</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {trips.map(trip => (
+                    <TripRow
+                      key={trip.id}
+                      trip={trip}
+                      canEdit={canEdit}
+                      onEdit={() => openEditTrip(trip)}
+                      onClose={() => updateTripStatus(trip, 'completed')}
+                      onCancel={() => updateTripStatus(trip, 'cancelled')}
+                      onDelete={() => handleDeleteTrip(trip.id)}
+                      onWaybill={() => handleWaybill(trip)}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           )}
+
+          <p className="text-xs text-gray-400">Итого по машине: {trips.length} листов · {totalDistance.toLocaleString('ru-RU')} км</p>
         </div>
       )}
+
+      <Dialog open={tripOpen} onOpenChange={(open) => { setTripOpen(open); if (!open) setEditingTrip(null); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{editingTrip ? 'Редактировать путевой лист' : 'Создать путевой лист'}</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <TripField label="Дата выезда" type="date" value={tripForm.date} onChange={v => setTripForm(p => ({ ...p, date: v }))} />
+            <TripField label="Номер путевого листа" value={tripForm.sheetNumber || ''} onChange={v => setTripForm(p => ({ ...p, sheetNumber: v }))} />
+            <TripField label="Водитель / механик *" value={tripForm.driverName || tripForm.driver || ''} onChange={v => setTripForm(p => ({ ...p, driver: v, driverName: v }))} />
+            <TripField label="ID механика" value={tripForm.mechanicId || ''} onChange={v => setTripForm(p => ({ ...p, mechanicId: v || null }))} />
+            <TripField label="Связанная сервисная заявка" value={tripForm.serviceRequestId || tripForm.serviceTicketId || ''} onChange={v => setTripForm(p => ({ ...p, serviceRequestId: v || null, serviceTicketId: v || null }))} />
+            <Select value={tripForm.status || 'draft'} onValueChange={value => setTripForm(p => ({ ...p, status: value as NonNullable<VehicleTrip['status']> }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(TRIP_STATUS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <TripField label="Откуда" value={tripForm.routeFrom || ''} onChange={v => setTripForm(p => ({ ...p, routeFrom: v }))} />
+            <TripField label="Куда" value={tripForm.routeTo || ''} onChange={v => setTripForm(p => ({ ...p, routeTo: v }))} />
+            <TripField label="Цель поездки" value={tripForm.purpose || ''} onChange={v => setTripForm(p => ({ ...p, purpose: v }))} />
+            <TripField label="Пробег на начало" type="number" value={String(tripForm.odometerStart ?? tripForm.startMileage ?? 0)} onChange={v => setTripForm(p => ({ ...p, odometerStart: Math.max(0, Number(v)), startMileage: Math.max(0, Number(v)) }))} />
+            <TripField label="Пробег на конец" type="number" value={tripForm.odometerEnd === null || tripForm.odometerEnd === undefined ? '' : String(tripForm.odometerEnd)} onChange={v => setTripForm(p => ({ ...p, odometerEnd: v === '' ? null : Math.max(0, Number(v)), endMileage: v === '' ? null : Math.max(0, Number(v)) }))} />
+            <div className="flex items-end pb-2 text-sm text-gray-500 dark:text-gray-400">
+              Пробег: {Math.max(0, Number(tripForm.odometerEnd ?? tripForm.endMileage ?? tripForm.odometerStart ?? tripForm.startMileage ?? 0) - Number(tripForm.odometerStart ?? tripForm.startMileage ?? 0)).toLocaleString('ru-RU')} км
+            </div>
+            <TripField label="Топливо на начало" type="number" value={tripForm.fuelStart === null || tripForm.fuelStart === undefined ? '' : String(tripForm.fuelStart)} onChange={v => setTripForm(p => ({ ...p, fuelStart: v === '' ? null : Math.max(0, Number(v)) }))} />
+            <TripField label="Долив топлива" type="number" value={tripForm.fuelAdded === null || tripForm.fuelAdded === undefined ? '' : String(tripForm.fuelAdded)} onChange={v => setTripForm(p => ({ ...p, fuelAdded: v === '' ? null : Math.max(0, Number(v)) }))} />
+            <TripField label="Топливо на конец" type="number" value={tripForm.fuelEnd === null || tripForm.fuelEnd === undefined ? '' : String(tripForm.fuelEnd)} onChange={v => setTripForm(p => ({ ...p, fuelEnd: v === '' ? null : Math.max(0, Number(v)) }))} />
+            <div className="flex items-end pb-2 text-sm text-gray-500 dark:text-gray-400">
+              Расход: {tripForm.fuelStart !== null && tripForm.fuelStart !== undefined && tripForm.fuelAdded !== null && tripForm.fuelAdded !== undefined && tripForm.fuelEnd !== null && tripForm.fuelEnd !== undefined
+                ? `${Math.max(0, Number(tripForm.fuelStart) + Number(tripForm.fuelAdded) - Number(tripForm.fuelEnd)).toLocaleString('ru-RU')} л`
+                : '—'}
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Комментарий</label>
+              <Textarea value={tripForm.comment || ''} onChange={e => setTripForm(p => ({ ...p, comment: e.target.value }))} rows={3} />
+            </div>
+          </div>
+          {tripError && (
+            <p className="text-sm text-red-500 flex items-center gap-1">
+              <AlertTriangle className="h-3.5 w-3.5" />{tripError}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setTripOpen(false); setEditingTrip(null); }}>Отмена</Button>
+            <Button onClick={handleSaveTrip} disabled={createTrip.isPending || updateTrip.isPending}>
+              <Save className="h-3.5 w-3.5 mr-1" /> Сохранить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -714,53 +852,85 @@ function TripField({
   );
 }
 
-function TripCard({
-  trip, canEdit, onDelete, onWaybill,
+function TripKpi({ title, value }: { title: string; value: React.ReactNode }) {
+  return (
+    <Card>
+      <CardHeader className="pb-1">
+        <CardTitle className="text-xs font-medium text-gray-500 dark:text-gray-400">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="truncate text-lg font-semibold text-gray-900 dark:text-white">{value}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function tripStatusVariant(status: NonNullable<VehicleTrip['status']> | undefined): BadgeVariant {
+  if (status === 'completed') return 'success';
+  if (status === 'cancelled') return 'default';
+  if (status === 'in_progress') return 'info';
+  if (status === 'issued') return 'warning';
+  return 'default';
+}
+
+function TripRow({
+  trip, canEdit, onDelete, onWaybill, onEdit, onClose, onCancel,
 }: {
   trip: VehicleTrip;
   canEdit: boolean;
   onDelete: () => void;
   onWaybill: () => void;
+  onEdit: () => void;
+  onClose: () => void;
+  onCancel: () => void;
 }) {
+  const status = trip.status || 'completed';
+  const distance = trip.distanceKm ?? trip.distance ?? 0;
+  const fuel = trip.fuelConsumption;
+  const route = trip.route || [trip.routeFrom, trip.routeTo].filter(Boolean).join(' — ');
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0 space-y-1.5">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="flex items-center gap-1 text-sm font-medium text-gray-900 dark:text-white">
-              <Calendar className="h-3.5 w-3.5 text-gray-400" />
-              {trip.date}
-            </span>
-            <span className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
-              <User className="h-3.5 w-3.5 text-gray-400" />
-              {trip.driver}
-            </span>
-            <span className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
-              <Gauge className="h-3.5 w-3.5 text-gray-400" />
-              {trip.distance.toLocaleString('ru-RU')} км
-            </span>
-          </div>
-          <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
-            <MapPin className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-            <span className="truncate">{trip.route}</span>
-          </div>
-          {trip.purpose && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">{trip.purpose}</p>
-          )}
-          <div className="flex items-center gap-3 text-xs text-gray-400">
-            <span>{trip.startMileage.toLocaleString('ru-RU')} → {trip.endMileage.toLocaleString('ru-RU')} км</span>
-            {trip.serviceTicketId && (
-              <span className="flex items-center gap-0.5">
-                <Wrench className="h-3 w-3" />
-                {trip.serviceTicketId}
-              </span>
-            )}
-          </div>
-          {trip.comment && (
-            <p className="text-xs italic text-gray-400">{trip.comment}</p>
-          )}
+    <TableRow>
+      <TableCell>
+        <div className="min-w-28">
+          <p className="font-medium text-gray-900 dark:text-white">{trip.sheetNumber || trip.id}</p>
+          <p className="mt-1 flex items-center gap-1 text-xs text-gray-500"><Calendar className="h-3 w-3" />{formatDate(trip.date)}</p>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1">
+          <User className="h-3.5 w-3.5 text-gray-400" />
+          {trip.driverName || trip.driver}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="max-w-[220px] truncate" title={route}>
+          <MapPin className="mr-1 inline h-3.5 w-3.5 text-gray-400" />
+          {route}
+        </div>
+        {(trip.serviceRequestId || trip.serviceTicketId) && (
+          <p className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+            <Wrench className="h-3 w-3" />
+            {trip.serviceRequestId || trip.serviceTicketId}
+          </p>
+        )}
+      </TableCell>
+      <TableCell>
+        <p className="max-w-[180px] truncate" title={trip.purpose || ''}>{trip.purpose || '—'}</p>
+        {trip.comment && <p className="mt-1 max-w-[180px] truncate text-xs text-gray-400">{trip.comment}</p>}
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1">
+          <Gauge className="h-3.5 w-3.5 text-gray-400" />
+          {distance.toLocaleString('ru-RU')} км
+        </div>
+        <p className="mt-1 text-xs text-gray-500">
+          {Number(trip.odometerStart ?? trip.startMileage ?? 0).toLocaleString('ru-RU')} → {trip.odometerEnd ?? trip.endMileage ?? '—'}
+        </p>
+      </TableCell>
+      <TableCell>{fuel === null || fuel === undefined ? '—' : `${Number(fuel).toLocaleString('ru-RU')} л`}</TableCell>
+      <TableCell><Badge variant={tripStatusVariant(status)}>{TRIP_STATUS_LABELS[status]}</Badge></TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1">
           <button
             onClick={onWaybill}
             title="Путевой лист"
@@ -769,6 +939,32 @@ function TripCard({
             <FileText className="h-4 w-4" />
           </button>
           {canEdit && (
+            <>
+            <button
+              onClick={onEdit}
+              title="Редактировать"
+              className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-blue-500 transition-colors"
+            >
+              <Edit2 className="h-4 w-4" />
+            </button>
+            {status !== 'completed' && status !== 'cancelled' && (
+              <button
+                onClick={onClose}
+                title="Закрыть путевой лист"
+                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-emerald-500 transition-colors"
+              >
+                <CheckCircle className="h-4 w-4" />
+              </button>
+            )}
+            {status !== 'cancelled' && (
+              <button
+                onClick={onCancel}
+                title="Отменить"
+                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-amber-500 transition-colors"
+              >
+                <Ban className="h-4 w-4" />
+              </button>
+            )}
             <button
               onClick={onDelete}
               title="Удалить"
@@ -776,9 +972,10 @@ function TripCard({
             >
               <Trash2 className="h-4 w-4" />
             </button>
+            </>
           )}
         </div>
-      </div>
-    </div>
+      </TableCell>
+    </TableRow>
   );
 }

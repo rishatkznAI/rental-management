@@ -1571,18 +1571,37 @@ export interface ServiceVehicle {
 export interface VehicleTrip {
   id: string;
   vehicleId: string;
+  sheetNumber?: string;
   date: string;
-  driver: string;                     // Водитель (фактически ездил)
-  route: string;
+  driver: string;                     // Legacy/display alias for driverName
+  driverId?: string | null;
+  driverName?: string;
+  mechanicId?: string | null;
+  serviceRequestId?: string | null;
+  route: string;                      // Legacy/display route
+  routeFrom?: string;
+  routeTo?: string;
   purpose: string;
-  startMileage: number;
-  endMileage: number;
-  distance: number;                   // авторасчёт: endMileage - startMileage
+  startMileage: number;               // Legacy alias for odometerStart
+  endMileage: number | null;          // Legacy alias for odometerEnd
+  distance: number;                   // Legacy alias for distanceKm
+  odometerStart?: number;
+  odometerEnd?: number | null;
+  distanceKm?: number;
+  fuelStart?: number | null;
+  fuelAdded?: number | null;
+  fuelEnd?: number | null;
+  fuelConsumption?: number | null;
+  status?: 'draft' | 'issued' | 'in_progress' | 'completed' | 'cancelled';
+  startedAt?: string | null;
+  completedAt?: string | null;
   serviceTicketId: string | null;     // Связанная сервисная заявка
   clientId: string | null;
   comment: string;
   createdAt: string;
   createdBy: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 // ── Планировщик подготовки техники к аренде ───────────────────────────────────

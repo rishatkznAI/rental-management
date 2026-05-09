@@ -130,6 +130,8 @@ type RoleFocusCard = {
   icon: React.ElementType;
 };
 
+type DashboardTabId = 'overview' | 'rentals' | 'fleet' | 'service' | 'money' | 'documents' | 'deliveries';
+
 // ─── main component ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -225,6 +227,7 @@ export default function Dashboard() {
   const [showClientModal, setShowClientModal] = useState(false);
   const [showRentalModal, setShowRentalModal] = useState(false);
   const [showOfficeUpdModal, setShowOfficeUpdModal] = useState(false);
+  const [activeDashboardTab, setActiveDashboardTab] = useState<DashboardTabId>('overview');
   const [officeUpdUpdatingId, setOfficeUpdUpdatingId] = useState<string | null>(null);
   const [officeUpdManagerFilter, setOfficeUpdManagerFilter] = useState('');
   const [managerBreakdownName, setManagerBreakdownName] = useState<string | null>(null);
@@ -1129,6 +1132,10 @@ export default function Dashboard() {
     href?: string;
     onClick?: () => void;
   }>;
+  const overviewSummaryCards = operationalSummaryCards.filter(item =>
+    ['active-rentals', 'returns', 'overdue-returns', 'available-equipment', 'service-equipment', 'overdue-debt', 'unsigned-docs']
+      .includes(item.id),
+  ).slice(0, 7);
 
   const todayWorkRows = [
     canViewRentals && {
@@ -1198,6 +1205,28 @@ export default function Dashboard() {
     can('create', 'equipment') && { id: 'new-equipment', label: 'Новая техника', href: '/equipment/new', icon: Plus },
     canViewPlanner && { id: 'planner', label: 'Планировщик', href: '/planner', icon: Target },
   ].filter(Boolean) as Array<{ id: string; label: string; href: string; icon: React.ElementType }>;
+  const dashboardTabs = [
+    { id: 'overview' as const, label: 'Обзор', visible: true },
+    { id: 'rentals' as const, label: 'Аренда', visible: canViewRentals },
+    { id: 'fleet' as const, label: 'Техника', visible: canViewEquipment },
+    { id: 'service' as const, label: 'Сервис', visible: canViewService },
+    { id: 'money' as const, label: 'Деньги', visible: canViewMoney },
+    { id: 'documents' as const, label: 'Документы', visible: canViewDocuments },
+    { id: 'deliveries' as const, label: 'Доставка', visible: canViewDeliveries },
+  ].filter(tab => tab.visible);
+  const roleDashboardTab: DashboardTabId = isMechanicRole(user?.role)
+    ? 'service'
+    : user?.role === 'Офис-менеджер' || user?.role === 'Администратор'
+      ? 'documents'
+      : isManagerRole
+        ? 'rentals'
+        : 'overview';
+
+  useEffect(() => {
+    if (!dashboardTabs.some(tab => tab.id === activeDashboardTab)) {
+      setActiveDashboardTab('overview');
+    }
+  }, [activeDashboardTab, dashboardTabs]);
 
   // Equipment in service with critical tickets (blocking rentals)
   const criticalInService = equipmentInServiceList.filter(e =>
@@ -1628,6 +1657,26 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <div className="overflow-x-auto pb-1">
+        <div className="inline-flex min-w-max gap-2 rounded-2xl border border-border/80 bg-card/80 p-1">
+          {dashboardTabs.map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveDashboardTab(tab.id)}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                activeDashboardTab === tab.id
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeDashboardTab === 'overview' && (
       <section className={dashboardSectionClass}>
         <div className={dashboardSectionHeaderClass}>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
@@ -1638,7 +1687,7 @@ export default function Dashboard() {
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
           <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-            {operationalSummaryCards.map(item => {
+            {overviewSummaryCards.map(item => {
               const Icon = item.icon;
               const toneClass =
                 item.tone === 'danger'
@@ -1749,8 +1798,9 @@ export default function Dashboard() {
           </Card>
         </div>
       </section>
+      )}
 
-      {roleDashboardMeta && roleDashboardCards.length > 0 && (
+      {activeDashboardTab === roleDashboardTab && roleDashboardMeta && roleDashboardCards.length > 0 && (
         <Card className={dashboardCardClass}>
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
@@ -1805,7 +1855,7 @@ export default function Dashboard() {
 
       {/* Header old block removed */}
 
-      {canViewTasksCenter && (
+      {activeDashboardTab === 'rentals' && canViewTasksCenter && (
         <Card className={dashboardCardClass}>
           <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-3">
@@ -1826,7 +1876,7 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {shouldShowAttentionSummary && (
+      {activeDashboardTab === 'money' && canViewMoney && shouldShowAttentionSummary && (
         <section className={dashboardSectionClass}>
           <div className={dashboardSectionHeaderClass}>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
@@ -2005,7 +2055,7 @@ export default function Dashboard() {
         </section>
       )}
 
-      {isAdminRole && (
+      {activeDashboardTab === 'service' && isAdminRole && (
         <section className={dashboardSectionClass}>
           <div className={dashboardSectionHeaderClass}>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
@@ -2133,6 +2183,7 @@ export default function Dashboard() {
       )}
 
       {/* ── Priority Actions ─────────────────────────────────────────────────── */}
+      {activeDashboardTab === 'overview' && (
       <section className={dashboardSectionClass}>
         <div className={dashboardSectionHeaderClass}>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
@@ -2236,8 +2287,10 @@ export default function Dashboard() {
           )}
         </div>
       </section>
+      )}
 
       {/* ── Operational Layer ───────────────────────────────────────────────── */}
+      {activeDashboardTab === 'rentals' && (
       <section className={dashboardSectionClass}>
         <div className={dashboardSectionHeaderClass}>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
@@ -2358,8 +2411,10 @@ export default function Dashboard() {
           </Card>
         </div>
       </section>
+      )}
 
       {/* ── Summary Layer ───────────────────────────────────────────────────── */}
+      {activeDashboardTab === 'fleet' && (
       <section className={dashboardSectionClass}>
         <div className={dashboardSectionHeaderClass}>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
@@ -2369,7 +2424,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {canViewMoney && (
+          {activeDashboardTab === 'money' && canViewMoney && (
             <Card className={`cursor-pointer transition-all hover:shadow-lg ${dashboardCardClass}`} onClick={() => setSelectedKPI('weekRevenue')}>
               <CardHeader className={dashboardCardHeaderClass}>
                 <CardDescription className="flex items-center justify-between">
@@ -2473,9 +2528,10 @@ export default function Dashboard() {
           </Card>
         </div>
       </section>
+      )}
 
       {/* ── Manager Stats ─────────────────────────────────────────────────────── */}
-      {!isAdminRole && isManagerRole && (
+      {activeDashboardTab === 'rentals' && !isAdminRole && isManagerRole && (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -2543,7 +2599,7 @@ export default function Dashboard() {
       </Card>
       )}
 
-      {(dashboardEquipmentRisk.length > 0 || dashboardModelRisk.length > 0) && (
+      {activeDashboardTab === 'fleet' && (dashboardEquipmentRisk.length > 0 || dashboardModelRisk.length > 0) && (
         <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
           <Card className="border-amber-200 dark:border-amber-800">
             <CardHeader>
@@ -2612,6 +2668,7 @@ export default function Dashboard() {
       )}
 
       {/* ── Alerts + Recent rentals ───────────────────────────────────────────── */}
+      {activeDashboardTab === 'rentals' && (
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
 
         {/* ── Alerts Panel (redesigned) ─────────────────────────────────── */}
@@ -2782,6 +2839,181 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+      )}
+
+      {activeDashboardTab === 'service' && (
+        <section className={dashboardSectionClass}>
+          <div className={dashboardSectionHeaderClass}>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+              Сервис
+            </p>
+            <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Что тормозит парк</h2>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Card className={dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Заявки в работе</CardDescription>
+                <CardTitle className="text-3xl font-bold">{openServiceTickets.length}</CardTitle>
+              </CardHeader>
+              <CardContent className={dashboardCardContentClass}>
+                <p className="text-sm text-muted-foreground">{criticalTickets.length} крит./высоких · {readyServiceTickets.length} готово</p>
+              </CardContent>
+            </Card>
+            <Card className={unassignedServiceTickets.length > 0 ? 'border-amber-400/40 bg-amber-400/10' : dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Без механика</CardDescription>
+                <CardTitle className="text-3xl font-bold">{unassignedServiceTickets.length}</CardTitle>
+              </CardHeader>
+              <CardContent className={dashboardCardContentClass}>
+                <p className="text-sm text-muted-foreground">{unassignedServiceTickets.length > 0 ? 'Нужно распределить очередь.' : 'Очередь распределена.'}</p>
+              </CardContent>
+            </Card>
+            <Card className={ticketsWaitingParts.length > 0 ? 'border-orange-400/40 bg-orange-400/10' : dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Ожидание запчастей</CardDescription>
+                <CardTitle className="text-3xl font-bold">{ticketsWaitingParts.length}</CardTitle>
+              </CardHeader>
+              <CardContent className={dashboardCardContentClass}>
+                <p className="text-sm text-muted-foreground">{overdueServiceTickets.length} просроченных заявок</p>
+              </CardContent>
+            </Card>
+            <Card className={dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>В сервисе по дням</CardDescription>
+                <CardTitle className="text-3xl font-bold">{equipmentInServiceList.length}</CardTitle>
+              </CardHeader>
+              <CardContent className={dashboardCardContentClass}>
+                <p className="text-sm text-muted-foreground">Ср. {averageServiceDays || 0} дн. · макс. {maxServiceDays || 0} дн.</p>
+              </CardContent>
+            </Card>
+          </div>
+          {serviceInDaysRows.length > 0 ? (
+            <Card className={dashboardCardClass}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Дольше всего в сервисе</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {serviceInDaysRows.slice(0, 6).map(row => (
+                  <Link key={row.id} to={`/service/${row.id}`} className="rounded-xl border border-border bg-secondary/50 p-4 transition hover:border-primary/40">
+                    <p className="font-semibold text-foreground">{row.equipmentLabel || row.equipment || row.id}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{row.inventoryLabel || 'Без INV'} · {row.daysInService} дн.</p>
+                  </Link>
+                ))}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className={dashboardCardClass}>
+              <CardContent className="p-6 text-sm text-muted-foreground">Открытых сервисных заявок сейчас нет.</CardContent>
+            </Card>
+          )}
+        </section>
+      )}
+
+      {activeDashboardTab === 'documents' && (
+        <section className={dashboardSectionClass}>
+          <div className={dashboardSectionHeaderClass}>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+              Документы
+            </p>
+            <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Что тормозит закрытие и оплату</h2>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Card className={dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Без подписи</CardDescription>
+                <CardTitle className="text-3xl font-bold">{documentControl.kpi.unsignedDocuments}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card className={dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Завершённые без УПД</CardDescription>
+                <CardTitle className="text-3xl font-bold">{officePendingUpdRentals.length}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card className={dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Просрочено</CardDescription>
+                <CardTitle className="text-3xl font-bold">{documentControl.kpi.overdueSignature}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card className={dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Без договора</CardDescription>
+                <CardTitle className="text-3xl font-bold">{documentControl.kpi.rentalsWithoutContract}</CardTitle>
+              </CardHeader>
+            </Card>
+          </div>
+          <Card className={dashboardCardClass}>
+            <CardContent className="space-y-2 p-5">
+              {documentControl.rows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Критичных документных рисков нет.</p>
+              ) : documentControl.rows.slice(0, 8).map(item => (
+                <div key={item.id} className="flex flex-col gap-2 rounded-xl border border-border bg-secondary/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-foreground">{item.statusLabel} · {item.client}</p>
+                    <p className="text-sm text-muted-foreground">{item.rentalId || item.documentId || 'документ'} · {item.responsible}</p>
+                  </div>
+                  <Button asChild size="sm" variant="secondary">
+                    <Link to="/documents">Открыть</Link>
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
+      {activeDashboardTab === 'deliveries' && (
+        <section className={dashboardSectionClass}>
+          <div className={dashboardSectionHeaderClass}>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+              Доставка
+            </p>
+            <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Транспортные задачи и блокеры</h2>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Card className={dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Сегодня</CardDescription>
+                <CardTitle className="text-3xl font-bold">{todayDeliveries.length}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card className={overdueDeliveries.length > 0 ? 'border-red-500/30 bg-red-500/10' : dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Просрочено</CardDescription>
+                <CardTitle className="text-3xl font-bold">{overdueDeliveries.length}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card className={unassignedDeliveries.length > 0 ? 'border-amber-400/40 bg-amber-400/10' : dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Без перевозчика</CardDescription>
+                <CardTitle className="text-3xl font-bold">{unassignedDeliveries.length}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card className={dashboardCardClass}>
+              <CardHeader className={dashboardCardHeaderClass}>
+                <CardDescription>Активные</CardDescription>
+                <CardTitle className="text-3xl font-bold">{activeDeliveries.length}</CardTitle>
+              </CardHeader>
+            </Card>
+          </div>
+          <Card className={dashboardCardClass}>
+            <CardContent className="space-y-2 p-5">
+              {activeDeliveries.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Активных доставок нет.</p>
+              ) : activeDeliveries.slice(0, 8).map(delivery => (
+                <Link key={delivery.id} to="/deliveries" className="flex flex-col gap-2 rounded-xl border border-border bg-secondary/50 px-4 py-3 transition hover:border-primary/40 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-foreground">{delivery.client || delivery.cargo || delivery.id}</p>
+                    <p className="text-sm text-muted-foreground">{formatDate(delivery.transportDate)} · {delivery.carrierName || 'перевозчик не назначен'}</p>
+                  </div>
+                  <Badge variant={delivery.status === 'new' ? 'warning' : 'default'}>{delivery.status}</Badge>
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
+      )}
 
       <Sheet open={!!managerBreakdownName} onOpenChange={(open) => !open && setManagerBreakdownName(null)}>
         <SheetContent side="right" className="w-full overflow-y-auto border-gray-200 bg-white sm:max-w-2xl dark:border-gray-700 dark:bg-gray-950">

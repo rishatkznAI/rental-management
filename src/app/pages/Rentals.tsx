@@ -405,10 +405,74 @@ const RENTAL_PAYMENT_SEGMENT_STYLES: Record<Exclude<RentalPaymentTone, 'partial'
 
 const RENTAL_PAYMENT_STATUS_LABEL: Record<RentalPaymentTone, string> = {
   paid: 'Оплачено',
-  unpaid: 'Не оплачено',
+  unpaid: 'Долг',
   partial: 'Частично',
-  overdue: 'Просрочено',
+  overdue: 'Просрочка',
   unknown: 'Нет данных',
+};
+
+const RENTAL_PAYMENT_BADGE_STYLES: Record<RentalPaymentTone, { label: string; shortLabel: string; tooltip: string; className: string; icon: typeof CircleCheck }> = {
+  paid: {
+    label: 'Оплачено',
+    shortLabel: 'Опл.',
+    tooltip: 'Аренда оплачена полностью',
+    className: 'bg-emerald-200 text-emerald-950 ring-emerald-950/10',
+    icon: CircleCheck,
+  },
+  partial: {
+    label: 'Частично',
+    shortLabel: 'Част.',
+    tooltip: 'Оплачено частично, есть остаток',
+    className: 'bg-amber-300 text-amber-950 ring-amber-950/10',
+    icon: CreditCard,
+  },
+  unpaid: {
+    label: 'Долг',
+    shortLabel: 'Долг',
+    tooltip: 'Есть неоплаченный остаток',
+    className: 'bg-orange-300 text-orange-950 ring-orange-950/10',
+    icon: CreditCard,
+  },
+  overdue: {
+    label: 'Просрочка',
+    shortLabel: 'Проср.',
+    tooltip: 'Платёж просрочен',
+    className: 'bg-red-500 text-white ring-red-100/25',
+    icon: AlertTriangle,
+  },
+  unknown: {
+    label: 'Нет данных',
+    shortLabel: '?',
+    tooltip: 'Недостаточно данных для определения оплаты',
+    className: 'bg-slate-300 text-slate-900 ring-slate-950/10',
+    icon: CircleAlert,
+  },
+};
+
+type RentalUpdBadgeTone = 'signed' | 'unsigned' | 'missing';
+
+const RENTAL_UPD_BADGE_STYLES: Record<RentalUpdBadgeTone, { label: string; shortLabel: string; tooltip: string; className: string; icon: typeof CircleCheck }> = {
+  signed: {
+    label: 'УПД подписан',
+    shortLabel: '✓ УПД',
+    tooltip: 'УПД подписан',
+    className: 'bg-emerald-100 text-emerald-950 ring-emerald-950/10',
+    icon: CircleCheck,
+  },
+  unsigned: {
+    label: 'УПД не подписан',
+    shortLabel: '! УПД',
+    tooltip: 'УПД есть, но ещё не подписан',
+    className: 'bg-amber-200 text-amber-950 ring-amber-950/10',
+    icon: ClipboardCheck,
+  },
+  missing: {
+    label: 'УПД нет',
+    shortLabel: 'УПД нет',
+    tooltip: 'УПД по аренде не найден',
+    className: 'bg-slate-300 text-slate-900 ring-slate-950/10',
+    icon: CircleAlert,
+  },
 };
 
 const RENTAL_STATUS_LABEL: Record<GanttRentalData['status'], string> = {
@@ -489,6 +553,12 @@ function safeRentalCompactDate(value?: string) {
 function safeRentalMarkerDate(value?: string) {
   if (typeof value !== 'string' || value.length < 10) return '—';
   return `${value.slice(8, 10)}.${value.slice(5, 7)}`;
+}
+
+function getRentalUpdBadgeTone(rental: Pick<GanttRentalData, 'updSigned' | 'updDate'>): RentalUpdBadgeTone {
+  if (rental.updSigned) return 'signed';
+  if (rental.updDate) return 'unsigned';
+  return 'missing';
 }
 
 function safeMovementDateLabel(value?: string) {
@@ -2652,11 +2722,18 @@ export default function Rentals() {
       </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-card/80 px-3 py-2 text-[11px] text-muted-foreground shadow-sm">
-        <span className="mr-1 font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">Оплата</span>
-        {(Object.entries(RENTAL_PAYMENT_SEGMENT_STYLES) as Array<[Exclude<RentalPaymentTone, 'partial'>, typeof RENTAL_PAYMENT_SEGMENT_STYLES[Exclude<RentalPaymentTone, 'partial'>]]>).map(([tone, item]) => (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-border/70 bg-card/80 px-3 py-2 text-[11px] text-muted-foreground shadow-sm">
+        <span className="font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">Финансы</span>
+        {(Object.entries(RENTAL_PAYMENT_BADGE_STYLES) as Array<[RentalPaymentTone, typeof RENTAL_PAYMENT_BADGE_STYLES[RentalPaymentTone]]>).map(([tone, item]) => (
           <span key={tone} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-            <span className={`h-2.5 w-2.5 rounded-[3px] border ${item.dotClassName}`} />
+            <span className={`h-2.5 w-2.5 rounded-full ring-1 ${item.className}`} />
+            {item.label}
+          </span>
+        ))}
+        <span className="ml-1 font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">Документы</span>
+        {(Object.entries(RENTAL_UPD_BADGE_STYLES) as Array<[RentalUpdBadgeTone, typeof RENTAL_UPD_BADGE_STYLES[RentalUpdBadgeTone]]>).map(([tone, item]) => (
+          <span key={tone} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <span className={`h-2.5 w-2.5 rounded-full ring-1 ${item.className}`} />
             {item.label}
           </span>
         ))}
@@ -3549,7 +3626,11 @@ function EquipmentRow({
           const debtRow = rentalDebtRowsById.get(rental.id);
           const financeBar = buildRentalPaymentBar(rental, debtRow, todayStr);
           const paymentTone = financeBar.tone as RentalPaymentTone;
-          const paymentLabel = RENTAL_PAYMENT_STATUS_LABEL[paymentTone] ?? RENTAL_PAYMENT_STATUS_LABEL.unknown;
+          const paymentBadge = RENTAL_PAYMENT_BADGE_STYLES[paymentTone] ?? RENTAL_PAYMENT_BADGE_STYLES.unknown;
+          const PaymentBadgeIcon = paymentBadge.icon;
+          const updBadgeTone = getRentalUpdBadgeTone(rental);
+          const updBadge = RENTAL_UPD_BADGE_STYLES[updBadgeTone];
+          const UpdBadgeIcon = updBadge.icon;
           // Stack bars vertically if there are overlaps (simple: use index-based offset)
           const overlapping = rentals.filter((r2, j) => {
             if (j >= rIdx) return false;
@@ -3566,31 +3647,33 @@ function EquipmentRow({
               : (isCompact ? 4 : 6) + stackIndex * (barHeight + rentalStackGap);
 
           const showUpdAlert = !rental.updSigned;
-          const showPaymentAlert = paymentTone !== 'paid';
           const showOverdueAlert = rental.status === 'active' && rental.endDate < todayStr;
           const barLeft = pos.left + 2;
           const barWidth = Math.max(10, pos.width - 4);
           const markerLabelVisible = barWidth > 180;
           const verboseMarkerLabel = barWidth > 360;
-          const verboseAlertLabel = barWidth > 520;
+          const showBadgeText = barWidth > 240;
+          const verboseAlertLabel = barWidth > 620;
+          const paymentBadgeLabel = verboseAlertLabel ? paymentBadge.label : paymentBadge.shortLabel;
+          const updBadgeLabel = verboseAlertLabel ? updBadge.label : updBadge.shortLabel;
           const paidMarkerLabel = financeBar.paidThroughDate
             ? `${verboseMarkerLabel ? 'Оплачено до ' : 'до '}${safeRentalMarkerDate(financeBar.paidThroughDate)}`
             : '';
           const overdueMarkerLabel = financeBar.overdueSince
             ? `${verboseMarkerLabel ? 'Просрочка с ' : 'с '}${safeRentalMarkerDate(financeBar.overdueSince)}`
             : '';
-          const tooltip = `${rental.client || 'Без клиента'} · ${equipment.model || rental.equipmentInv || 'Техника'} · ${safeRentalCompactDate(rental.startDate)} — ${safeRentalCompactDate(rental.endDate)} · ${statusLabel} · ${paymentLabel}${
+          const tooltip = `${rental.client || 'Без клиента'} · ${equipment.model || rental.equipmentInv || 'Техника'} · ${safeRentalCompactDate(rental.startDate)} — ${safeRentalCompactDate(rental.endDate)} · ${statusLabel} · ${paymentBadge.label}${
             financeBar.amount ? ` · сумма ${formatCurrency(financeBar.amount)}` : ''
           }${
             financeBar.paidAmount ? ` · оплачено ${formatCurrency(financeBar.paidAmount)}` : ''
           }${
             financeBar.outstanding ? ` · остаток ${formatCurrency(financeBar.outstanding)}` : ''
-          } · оплачено до: ${financeBar.paidThroughDate ? safeRentalCompactDate(financeBar.paidThroughDate) : 'нет данных'} · просрочка с: ${financeBar.overdueSince ? safeRentalCompactDate(financeBar.overdueSince) : 'нет просрочки'}${
+          } · оплачено до: ${financeBar.paidThroughDate ? safeRentalCompactDate(financeBar.paidThroughDate) : 'нет данных'} · просрочка с: ${financeBar.overdueSince ? safeRentalCompactDate(financeBar.overdueSince) : 'нет просрочки'} · ${paymentBadge.tooltip} · ${updBadge.tooltip}${
+            rental.updDate ? ` (${safeRentalCompactDate(rental.updDate)})` : ''
+          }${
             rental.manager ? ` · менеджер ${rental.manager}` : ''
           }${
             showOverdueAlert ? ' · Срок истёк, возврат не оформлен' : ''
-          }${
-            showUpdAlert ? ' · УПД не подписан' : ''
           }`;
 
           return (
@@ -3608,7 +3691,7 @@ function EquipmentRow({
                 height: barHeight,
               }}
               title={tooltip}
-              aria-label={`${rental.client || 'Аренда'}: ${statusLabel}, ${paymentLabel}`}
+              aria-label={`${rental.client || 'Аренда'}: ${statusLabel}, ${paymentBadge.label}, ${updBadge.label}`}
             >
               <span className="pointer-events-none absolute inset-0 bg-slate-500 dark:bg-slate-600" />
               {financeBar.segments.map((segment, segmentIndex) => {
@@ -3653,7 +3736,7 @@ function EquipmentRow({
               {barWidth > 110 && (
                 <span
                   className="pointer-events-none relative z-[1] min-w-0 truncate px-2 leading-none"
-                  style={{ paddingRight: showPaymentAlert || showUpdAlert || showOverdueAlert ? 'clamp(76px,7vw,190px)' : undefined }}
+                  style={{ paddingRight: showOverdueAlert ? 'clamp(124px,12vw,320px)' : 'clamp(96px,9vw,260px)' }}
                 >
                   <span className="mr-1 rounded bg-black/16 px-1 py-0.5 text-[clamp(8px,0.48vw,10px)] uppercase tracking-[0.08em] text-white/85">
                     {statusLabel}
@@ -3694,68 +3777,65 @@ function EquipmentRow({
                   {overdueMarkerLabel}
                 </span>
               )}
-              {(showPaymentAlert || showUpdAlert || showOverdueAlert) && (
+              <span
+                data-payment-alerts="rental-bar"
+                className="pointer-events-none absolute right-1 top-1/2 z-[4] flex -translate-y-1/2 items-center"
+                style={{ gap: 'clamp(2px,0.18vw,4px)' }}
+              >
                 <span
-                  data-payment-alerts="rental-bar"
-                  className="pointer-events-none absolute right-1 top-1/2 z-[4] flex -translate-y-1/2 items-center"
-                  style={{ gap: 'clamp(2px,0.18vw,4px)' }}
+                  data-payment-alert="payment"
+                  className={`inline-flex items-center rounded-full font-semibold shadow-sm ring-1 ${paymentBadge.className}`}
+                  title={paymentBadge.tooltip}
+                  style={{
+                    display: 'inline-flex',
+                    flex: '0 0 auto',
+                    width: 'auto',
+                    height: 'clamp(17px,1.05vw,24px)',
+                    padding: showBadgeText ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
+                    fontSize: 'clamp(9px,0.52vw,12px)',
+                    gap: 'clamp(3px,0.25vw,5px)',
+                  }}
                 >
-                  {showPaymentAlert && (
-                    <span
-                      data-payment-alert="payment"
-                      className="inline-flex items-center rounded-full bg-white/92 font-semibold text-slate-900 shadow-sm ring-1 ring-black/10"
-                      style={{
-                        display: 'inline-flex',
-                        flex: '0 0 auto',
-                        width: 'auto',
-                        height: 'clamp(17px,1.05vw,24px)',
-                        padding: verboseAlertLabel ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
-                        fontSize: 'clamp(9px,0.52vw,12px)',
-                        gap: 'clamp(3px,0.25vw,5px)',
-                      }}
-                    >
-                      <CreditCard style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
-                      {verboseAlertLabel && <span>Оплата</span>}
-                    </span>
-                  )}
-                  {showUpdAlert && (
-                    <span
-                      data-payment-alert="upd"
-                      className="inline-flex items-center rounded-full bg-amber-200 font-semibold text-amber-950 shadow-sm ring-1 ring-amber-950/10"
-                      style={{
-                        display: 'inline-flex',
-                        flex: '0 0 auto',
-                        width: 'auto',
-                        height: 'clamp(17px,1.05vw,24px)',
-                        padding: verboseAlertLabel ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
-                        fontSize: 'clamp(9px,0.52vw,12px)',
-                        gap: 'clamp(3px,0.25vw,5px)',
-                      }}
-                    >
-                      <ClipboardCheck style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
-                      {verboseAlertLabel && <span>УПД</span>}
-                    </span>
-                  )}
-                  {showOverdueAlert && (
-                    <span
-                      data-payment-alert="return-overdue"
-                      className="inline-flex items-center rounded-full bg-red-100 font-semibold text-red-700 shadow-sm ring-1 ring-red-900/10"
-                      style={{
-                        display: 'inline-flex',
-                        flex: '0 0 auto',
-                        width: 'auto',
-                        height: 'clamp(17px,1.05vw,24px)',
-                        padding: verboseAlertLabel ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
-                        fontSize: 'clamp(9px,0.52vw,12px)',
-                        gap: 'clamp(3px,0.25vw,5px)',
-                      }}
-                    >
-                      <AlertTriangle style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
-                      {verboseAlertLabel && <span>Срок</span>}
-                    </span>
-                  )}
+                  <PaymentBadgeIcon style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
+                  {showBadgeText && <span>{paymentBadgeLabel}</span>}
                 </span>
-              )}
+                <span
+                  data-payment-alert="upd"
+                  className={`inline-flex items-center rounded-full font-semibold shadow-sm ring-1 ${updBadge.className}`}
+                  title={updBadge.tooltip}
+                  style={{
+                    display: 'inline-flex',
+                    flex: '0 0 auto',
+                    width: 'auto',
+                    height: 'clamp(17px,1.05vw,24px)',
+                    padding: showBadgeText ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
+                    fontSize: 'clamp(9px,0.52vw,12px)',
+                    gap: 'clamp(3px,0.25vw,5px)',
+                  }}
+                >
+                  <UpdBadgeIcon style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
+                  {showBadgeText && <span>{updBadgeLabel}</span>}
+                </span>
+                {showOverdueAlert && (
+                  <span
+                    data-payment-alert="return-overdue"
+                    className="inline-flex items-center rounded-full bg-red-100 font-semibold text-red-700 shadow-sm ring-1 ring-red-900/10"
+                    title="Срок аренды истёк, возврат не оформлен"
+                    style={{
+                      display: 'inline-flex',
+                      flex: '0 0 auto',
+                      width: 'auto',
+                      height: 'clamp(17px,1.05vw,24px)',
+                      padding: showBadgeText ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
+                      fontSize: 'clamp(9px,0.52vw,12px)',
+                      gap: 'clamp(3px,0.25vw,5px)',
+                    }}
+                  >
+                    <AlertTriangle style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
+                    {verboseAlertLabel && <span>Срок</span>}
+                  </span>
+                )}
+              </span>
             </button>
           );
         })}

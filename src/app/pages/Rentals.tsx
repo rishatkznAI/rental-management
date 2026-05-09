@@ -3463,6 +3463,11 @@ function EquipmentRow({
     ? (isCompact ? 18 : 22)
     : (isCompact ? 24 : 30);
   const rentalStackGap = isCompact ? 1 : 2;
+  const equipmentModelLabel = [equipment.manufacturer, equipment.model].filter(Boolean).join(' ').trim()
+    || equipment.model
+    || equipment.inventoryNumber
+    || equipment.serialNumber
+    || 'Модель не указана';
 
   return (
     <div
@@ -3475,15 +3480,22 @@ function EquipmentRow({
         style={{ width: LEFT_PANEL_WIDTH }}
       >
         <div className="min-w-0 flex-1">
-          <div className={`flex items-center ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
-            <span className={`truncate font-semibold text-gray-900 dark:text-white ${isCompact ? 'text-[12px]' : 'text-[13px]'}`}>{equipment.model}</span>
+          <div className="min-w-0">
+            <span
+              className={`block truncate font-semibold leading-tight text-gray-900 dark:text-white ${isCompact ? 'text-[12px]' : 'text-[13px]'}`}
+              title={equipmentModelLabel}
+            >
+              {equipmentModelLabel}
+            </span>
+          </div>
+          <div className={`mt-0.5 flex min-w-0 items-center ${isCompact ? 'gap-1' : 'gap-1.5'}`}>
             <span className={`shrink-0 rounded-full bg-slate-100 font-mono text-gray-500 dark:bg-white/8 dark:text-gray-400 ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'}`}>{equipment.inventoryNumber}</span>
             <span className={`inline-flex shrink-0 rounded-full font-medium ${eqStatus.color} ${isCompact ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'}`}>
               {eqStatus.label}
             </span>
-          </div>
-          <div className={`mt-0.5 flex items-center text-gray-500 dark:text-gray-400 ${isCompact ? 'gap-1 text-[9px]' : 'gap-1.5 text-[10px]'}`}>
-            <span className="truncate uppercase tracking-[0.08em]">SN {equipment.serialNumber || 'не указан'}</span>
+            <span className="truncate uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+              SN {equipment.serialNumber || 'не указан'}
+            </span>
           </div>
         </div>
         {/* Quick actions */}

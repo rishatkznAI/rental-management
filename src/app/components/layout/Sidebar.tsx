@@ -13,7 +13,6 @@ import {
   Settings,
   Moon,
   Sun,
-  LogOut,
   X,
   CalendarClock,
   Car,
@@ -41,7 +40,6 @@ import {
 } from '../../lib/navigation';
 import { getInvestorBinding, isInvestorUser } from '../../lib/userStorage';
 import { buildGlobalSearchGroups, normalizeGlobalSearchQuery } from '../../lib/globalSearch.js';
-import { NotificationCenter } from './NotificationCenter';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { useEquipmentList } from '../../hooks/useEquipment';
@@ -78,14 +76,6 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Личные настройки', href: '/settings', icon: UserCog,      section: 'profile_settings' },
   { name: 'Панель администратора', href: '/admin', icon: Shield,     section: 'admin_panel' },
 ];
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('');
-}
 
 interface SidebarProps {
   isOpen: boolean;
@@ -170,7 +160,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { can, canView } = usePermissions();
   const canSearchEquipment = canView('equipment');
   const canSearchClients = canView('clients');
@@ -293,11 +283,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     };
   }, [equipment, serviceTickets, visibleGanttRentals]);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login', { replace: true });
-  };
-
   const handleNavClick = () => {
     // Close mobile sidebar on navigation
     onClose();
@@ -400,7 +385,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     <aside
       className={cn(
         'fixed left-0 top-0 z-40 h-screen w-64',
-        'border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[0_36px_60px_-34px_rgba(0,0,0,0.7)] backdrop-blur-xl',
+        'border-r border-sidebar-border bg-[linear-gradient(180deg,#081225_0%,#0b1730_54%,#101b3f_100%)] text-sidebar-foreground shadow-[0_36px_60px_-34px_rgba(0,0,0,0.7)] backdrop-blur-xl dark:bg-sidebar',
         'transition-transform duration-300 ease-in-out',
         'sm:translate-x-0',
         isOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0',
@@ -413,12 +398,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             <div className="app-shell-title text-[15px] font-extrabold text-sidebar-foreground">Скайтех</div>
           </div>
           <div className="ml-auto flex items-center gap-1">
-            <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/60">
-              <NotificationCenter />
-            </div>
             <button
               onClick={toggleTheme}
-              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              className="rounded-lg p-2 text-white/68 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
               aria-label="Переключить тему"
             >
               {theme === 'light' ? (
@@ -429,7 +411,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             </button>
             <button
               onClick={onClose}
-              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:hidden"
+              className="rounded-lg p-2 text-white/68 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:hidden"
               aria-label="Закрыть меню"
             >
               <X className="h-4 w-4" />
@@ -439,7 +421,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         <div className="px-3 py-3" ref={searchRef}>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/55" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -447,12 +429,12 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 if (normalizedSearch.length > 0) setIsSearchOpen(true);
               }}
               placeholder="Поиск: техника, клиенты, аренды, сервис"
-              className="h-10 rounded-xl border-sidebar-border bg-sidebar-accent pl-9 pr-3 text-sm text-sidebar-foreground placeholder:text-muted-foreground"
+              className="h-10 rounded-xl border-sidebar-border bg-white/8 pl-9 pr-3 text-sm text-sidebar-foreground placeholder:text-white/45 focus-visible:border-blue-300/60 focus-visible:ring-blue-400/25"
             />
           </div>
 
           {isSearchOpen && (
-            <div className="mt-2 rounded-2xl border border-sidebar-border bg-card shadow-[0_24px_45px_-30px_rgba(0,0,0,0.85)]">
+            <div className="mt-2 rounded-2xl border border-sidebar-border bg-[#0f1b34] shadow-[0_24px_45px_-30px_rgba(0,0,0,0.85)]">
               {searchResultsCount === 0 ? (
                 <div className="px-4 py-4 text-sm text-muted-foreground">
                   Ничего не найдено
@@ -461,7 +443,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 <div className="max-h-96 overflow-y-auto py-2">
                   {groupedResults.map(({ group, items, hiddenCount }) => (
                     <div key={group}>
-                      <div className="flex items-center justify-between px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      <div className="flex items-center justify-between px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">
                         <span>{group}</span>
                         {hiddenCount > 0 ? <span>ещё {hiddenCount}</span> : null}
                       </div>
@@ -473,20 +455,20 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                               key={result.id}
                               type="button"
                               onClick={() => handleSearchNavigate(result.href)}
-                              className="flex w-full items-start gap-3 rounded-xl px-2 py-2 text-left hover:bg-sidebar-accent"
+                              className="flex w-full items-start gap-3 rounded-xl px-2 py-2 text-left hover:bg-white/8"
                             >
-                              <div className="mt-0.5 rounded-lg bg-sidebar-accent p-2 text-muted-foreground">
+                              <div className="mt-0.5 rounded-lg bg-white/8 p-2 text-white/60">
                                 <Icon className="h-4 w-4" />
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="truncate text-sm font-medium text-sidebar-foreground">
                                   {highlightMatch(result.title, normalizedSearch)}
                                 </div>
-                                <div className="line-clamp-2 text-xs text-muted-foreground">
+                                <div className="line-clamp-2 text-xs text-white/55">
                                   {highlightMatch(result.subtitle, normalizedSearch)}
                                 </div>
                               </div>
-                              <span className="mt-1 shrink-0 text-[11px] font-medium text-primary">Открыть</span>
+                              <span className="mt-1 shrink-0 text-[11px] font-medium text-blue-300">Открыть</span>
                             </button>
                           );
                         })}
@@ -502,7 +484,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         <nav className="flex-1 overflow-y-auto px-2 pb-2">
           {groupedNav.map(group => (
             <div key={group.title} className="mb-2">
-              <div className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              <div className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.18em] text-white/45">
                 {group.title}
               </div>
               <div className="space-y-1">
@@ -524,8 +506,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       className={cn(
                         'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] transition-colors',
                         isActive
-                          ? 'bg-primary text-primary-foreground shadow-[0_16px_30px_-22px_rgba(212,247,74,0.95)]'
-                          : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                          ? 'bg-[linear-gradient(135deg,#2563eb_0%,#6366f1_100%)] text-white shadow-[0_16px_30px_-22px_rgba(59,130,246,0.95)] dark:bg-primary dark:text-primary-foreground dark:shadow-[0_16px_30px_-22px_rgba(212,247,74,0.95)]'
+                          : 'text-white/68 hover:bg-white/8 hover:text-sidebar-foreground',
                       )}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
@@ -552,12 +534,12 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         <div className="border-t border-sidebar-border px-3 pb-3 pt-2">
           <div className={cn(
-            'mb-2 flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors',
+            'flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors',
             theme === 'dark'
               ? 'border-sidebar-border bg-sidebar-accent text-sidebar-foreground'
-              : 'border-sidebar-border bg-sidebar-accent/80 text-muted-foreground',
+              : 'border-sidebar-border bg-white/8 text-white/70',
           )}>
-            {theme === 'dark' ? <Moon className="h-4 w-4 text-sidebar-foreground" /> : <Sun className="h-4 w-4 text-muted-foreground" />}
+            {theme === 'dark' ? <Moon className="h-4 w-4 text-sidebar-foreground" /> : <Sun className="h-4 w-4 text-white/70" />}
             <span>{theme === 'dark' ? 'Тёмный режим' : 'Светлый режим'}</span>
             <button
               type="button"
@@ -567,43 +549,17 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 'ml-auto inline-flex h-6 w-12 items-center rounded-full border p-1 transition-all',
                 theme === 'dark'
                   ? 'justify-end border-primary/30 bg-primary/90 text-primary-foreground shadow-[0_10px_24px_-18px_rgba(212,247,74,0.95)]'
-                  : 'justify-start border-sidebar-border bg-accent text-muted-foreground hover:border-primary/30',
+                  : 'justify-start border-sidebar-border bg-white/10 text-white/70 hover:border-blue-300/40',
               )}
             >
               <span className={cn(
                 'inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none transition-colors',
                 theme === 'dark'
                   ? 'bg-black/20 text-primary-foreground'
-                  : 'bg-muted/80 text-foreground',
+                  : 'bg-white/85 text-slate-700',
               )}>
                 {theme === 'dark' ? 'On' : 'Off'}
               </span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 px-3 py-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
-              {user?.profilePhoto ? (
-                <img src={user.profilePhoto} alt={user.name} className="h-10 w-10 rounded-full object-cover" />
-              ) : (
-                user ? getInitials(user.name) : '?'
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="truncate text-sm font-medium text-sidebar-foreground">
-                {user?.name ?? '—'}
-              </p>
-              <p className="truncate text-xs text-muted-foreground">
-                {user?.role ?? 'Пользователь'}
-              </p>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-sidebar-foreground"
-              aria-label="Выйти"
-              title="Выйти"
-            >
-              <LogOut className="h-4 w-4" />
             </button>
           </div>
         </div>

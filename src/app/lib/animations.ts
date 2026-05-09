@@ -31,9 +31,9 @@ export const animationClasses = {
   overlay:
     'app-animate-overlay fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]',
   modal:
-    'app-animate-modal fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-lg gap-4 rounded-lg border bg-background p-6 shadow-lg',
+    'app-animate-modal fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-lg gap-4 rounded-2xl border border-border bg-card p-6 shadow-[0_28px_80px_-42px_rgba(15,23,42,0.55)] dark:bg-background dark:shadow-lg',
   drawerBase:
-    'app-animate-drawer fixed z-50 flex flex-col gap-4 bg-background shadow-lg will-change-transform',
+    'app-animate-drawer fixed z-50 flex flex-col gap-4 border-border bg-card shadow-[0_28px_80px_-42px_rgba(15,23,42,0.55)] will-change-transform dark:bg-background dark:shadow-lg',
   card: 'app-animate-section',
   section: 'app-animate-section',
   collapse: 'app-animate-collapse',

@@ -1,4 +1,5 @@
 const WARRANTY_MECHANIC_ROLE = 'Механик по гарантии';
+const SERVICE_FOREMAN_ROLE = 'Бригадир';
 const WARRANTY_MECHANIC_ROLE_ALIASES = [
   'механик по гарантии',
   'warranty_mechanic',
@@ -31,6 +32,9 @@ const ROLE_ALIASES = new Map([
   ['менеджер_аренды', 'Менеджер по аренде'],
   ['sales_manager', 'Менеджер по продажам'],
   ['mechanic', 'Механик'],
+  ['foreman', SERVICE_FOREMAN_ROLE],
+  ['service_foreman', SERVICE_FOREMAN_ROLE],
+  ['brigadier', SERVICE_FOREMAN_ROLE],
   ['carrier', 'Перевозчик'],
   ['delivery_carrier', 'Перевозчик'],
   ['investor', 'Инвестор'],
@@ -69,6 +73,7 @@ function isWarrantyMechanicRoleValue(role) {
 
 module.exports = {
   MECHANIC_ROLES,
+  SERVICE_FOREMAN_ROLE,
   WARRANTY_MECHANIC_ROLE,
   WARRANTY_MECHANIC_ROLE_ALIASES,
   isMechanicRole,

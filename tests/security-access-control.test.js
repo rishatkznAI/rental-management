@@ -118,6 +118,31 @@ test('mechanic sees and mutates only assigned service tickets', () => {
   assert.equal(access.canMutateEntity('service', state.service[1], mechanic), false);
 });
 
+test('service foreman can dispatch service work without finance or admin access', () => {
+  const state = {
+    service: [
+      { id: 'S-1', assignedMechanicId: 'M-1' },
+      { id: 'S-2', assignedMechanicId: 'M-2' },
+    ],
+    mechanics: [
+      { id: 'M-1', name: 'Петров', status: 'active' },
+      { id: 'M-2', name: 'Иванов', status: 'active' },
+    ],
+    payments: [{ id: 'P-1', clientId: 'C-1' }],
+    documents: [{ id: 'D-1', clientId: 'C-1' }],
+    users: [{ id: 'U-admin', role: 'Администратор' }],
+  };
+  const access = createAccess(state);
+  const foreman = { userId: 'U-foreman', userName: 'Бригадир', userRole: 'Бригадир' };
+
+  assert.deepEqual(access.filterCollectionByScope('service', state.service, foreman).map(item => item.id), ['S-1', 'S-2']);
+  assert.deepEqual(access.filterCollectionByScope('mechanics', state.mechanics, foreman).map(item => item.id), ['M-1', 'M-2']);
+  assert.equal(access.canMutateEntity('service', state.service[0], foreman), true);
+  assert.deepEqual(access.filterCollectionByScope('payments', state.payments, foreman), []);
+  assert.deepEqual(access.filterCollectionByScope('documents', state.documents, foreman), []);
+  assert.deepEqual(access.filterCollectionByScope('users', state.users, foreman), []);
+});
+
 test('warranty mechanic can view fleet and rentals and work with service and warranty claims', () => {
   const state = {
     service: [

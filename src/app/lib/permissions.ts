@@ -42,6 +42,7 @@ export type Section =
   | 'admin_panel';
 
 export type Action = 'view' | 'create' | 'edit' | 'delete';
+export type AppPermission = 'service_day_plan_view' | 'service_day_plan_manage';
 
 type RolePermissions = Partial<Record<Section, Action[]>>;
 
@@ -51,6 +52,7 @@ const ALL: Action[] = ['view', 'create', 'edit', 'delete'];
 const VIEW: Action[] = ['view'];
 const VIEW_CREATE: Action[] = ['view', 'create'];
 const VIEW_CREATE_EDIT: Action[] = ['view', 'create', 'edit'];
+export const SERVICE_FOREMAN_ROLE = 'Бригадир';
 
 const PERMISSIONS: Record<string, RolePermissions> = {
   'Администратор': {
@@ -144,6 +146,15 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     rentals:          VIEW,
     service:          VIEW_CREATE_EDIT,
   },
+  [SERVICE_FOREMAN_ROLE]: {
+    tasks_center:     VIEW,
+    equipment:        VIEW,
+    gsm:              VIEW,
+    planner:          VIEW,
+    service:          VIEW_CREATE_EDIT,
+    service_vehicles: VIEW,
+    profile_settings: ['view', 'edit'],
+  },
   ...Object.fromEntries(
     MECHANIC_ROLES.map(role => [role, {
       // dashboard: нет
@@ -157,6 +168,35 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     }]),
   ),
 };
+
+const APP_PERMISSIONS: Record<AppPermission, string[]> = {
+  service_day_plan_view: [
+    'Администратор',
+    'Офис-менеджер',
+    SERVICE_FOREMAN_ROLE,
+    WARRANTY_MECHANIC_ROLE,
+    ...MECHANIC_ROLES,
+  ],
+  service_day_plan_manage: [
+    'Администратор',
+    'Офис-менеджер',
+    SERVICE_FOREMAN_ROLE,
+    'Старший стационарный механик',
+  ],
+};
+
+export function hasAppPermission(role: string | null | undefined, permission: AppPermission): boolean {
+  const normalizedRole = normalizeUserRole(role);
+  return APP_PERMISSIONS[permission]?.includes(normalizedRole) ?? false;
+}
+
+export function canViewServiceDayPlan(role: string | null | undefined): boolean {
+  return hasAppPermission(role, 'service_day_plan_view');
+}
+
+export function canManageServiceDayPlan(role: string | null | undefined): boolean {
+  return hasAppPermission(role, 'service_day_plan_manage');
+}
 
 // ── Маппинг URL → Section ─────────────────────────────────────────────────────
 

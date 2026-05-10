@@ -156,6 +156,18 @@ async function exerciseFilters(page: Page, label: string) {
   }
 }
 
+async function expectServiceDayPlan(page: Page) {
+  await goToRoute(page, '/service');
+  await page.getByRole('tab', { name: 'План дня' }).click();
+  await expect(page.getByRole('heading', { name: 'Диспетчерская доска' })).toBeVisible();
+  await expect(page.getByText(/Задачи механиков на сегодня/)).toBeVisible();
+  await expect(page.getByText('Всего задач')).toBeVisible();
+  await expect(page.getByText('Без механика').first()).toBeVisible();
+  await expect(page.getByLabel(/Открыть заявку/).first()).toBeVisible();
+  await page.getByLabel(/Открыть заявку/).first().click();
+  await expect(page).toHaveURL(/#\/service\/.+/);
+}
+
 async function postJson<T>(api: APIRequestContext, path: string, data: unknown): Promise<T> {
   const response = await api.post(path, { data });
   expect(response.ok(), `${path}: ${response.status()} ${await response.text()}`).toBeTruthy();
@@ -408,6 +420,10 @@ test('smoke-office can use permitted office UI without admin access or runtime e
     await exerciseVisibleTabs(page, section.label);
     await exerciseFilters(page, section.label);
   }
+
+  action = 'service day plan board';
+  await expectServiceDayPlan(page);
+  await expectHealthyScreen(page, action);
 
   action = 'client creation';
   await navigateInApp(page, '/clients/new');

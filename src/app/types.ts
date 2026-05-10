@@ -505,6 +505,10 @@ export type ReferenceStatus = 'active' | 'inactive';
 export interface Mechanic {
   id: string;
   name: string;
+  userId?: string;
+  email?: string;
+  role?: string;
+  type?: string;
   phone?: string;
   notes?: string;
   status: ReferenceStatus;
@@ -710,6 +714,14 @@ export interface ServiceTicket {
   source?: 'manual' | 'bot' | 'manager' | 'system' | 'sales';
   status: ServiceStatus;
   plannedDate?: string;
+  scheduledDate?: string;
+  dueDate?: string;
+  deadline?: string;
+  targetDate?: string;
+  completedAt?: string;
+  mechanicId?: string;
+  assignedUserId?: string;
+  responsibleUserId?: string;
   closedAt?: string;
   result?: string;
   resultData?: ServiceRepairResult;

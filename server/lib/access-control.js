@@ -1,5 +1,6 @@
 const {
   MECHANIC_ROLES,
+  SERVICE_FOREMAN_ROLE,
   WARRANTY_MECHANIC_ROLE,
   isWarrantyMechanicRole,
   normalizeRole,
@@ -12,6 +13,7 @@ const ROLES = {
   SALES_MANAGER: 'Менеджер по продажам',
   INVESTOR: 'Инвестор',
   CARRIER: 'Перевозчик',
+  SERVICE_FOREMAN: SERVICE_FOREMAN_ROLE,
   WARRANTY_MECHANIC: WARRANTY_MECHANIC_ROLE,
 };
 
@@ -696,6 +698,10 @@ function isCarrier(user) {
   return roleIs(user, ROLES.CARRIER);
 }
 
+function isServiceForeman(user) {
+  return roleIs(user, ROLES.SERVICE_FOREMAN);
+}
+
 function isMechanic(user) {
   return MECHANIC_ROLES.includes(normalizeRole(user?.userRole || user?.role));
 }
@@ -968,7 +974,7 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isMechanic(user)) return isMechanicLinkedEntity(entity, user, readData);
       return false;
     case 'service':
-      if (isOfficeManager(user) || isRentalManager(user)) return true;
+      if (isOfficeManager(user) || isRentalManager(user) || isServiceForeman(user)) return true;
       if (isWarrantyMechanic(user)) return true;
       if (isMechanic(user)) return isAssignedMechanic(entity, user, readData);
       return false;
@@ -1017,7 +1023,7 @@ function canAccessEntity(collection, entity, user, readData) {
       return false;
     case 'mechanics':
       if (isWarrantyMechanic(user)) return true;
-      if (isOfficeManager(user)) return true;
+      if (isOfficeManager(user) || isServiceForeman(user)) return true;
       if (isMechanic(user)) {
         const mechanicIds = getMechanicIdsForUser(user, readData);
         const entityKeys = compact([entity.id, entity.userId, entity.name, entity.email]);
@@ -1028,7 +1034,7 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'service_works':
     case 'spare_parts':
     case 'service_route_norms':
-      return isOfficeManager(user) || isMechanic(user) || isWarrantyMechanic(user);
+      return isOfficeManager(user) || isServiceForeman(user) || isMechanic(user) || isWarrantyMechanic(user);
     case 'service_work_catalog':
     case 'spare_parts_catalog':
     case 'delivery_carriers':
@@ -1086,7 +1092,7 @@ function canMutateEntity(collection, entity, user, readData) {
     return false;
   }
   if (collection === 'service') {
-    if (isOfficeManager(user)) return true;
+    if (isOfficeManager(user) || isServiceForeman(user)) return true;
     if (isRentalManager(user)) return false;
     if (isWarrantyMechanic(user)) return canAccessEntity(collection, entity, user, readData);
     if (isMechanic(user)) return canAccessEntity(collection, entity, user, readData);
@@ -1367,6 +1373,7 @@ function createAccessControl({ readData }) {
     isOfficeManager,
     isRentalManager,
     isSalesManager,
+    isServiceForeman,
     matchesScopedRental: (entity, user) => matchesScopedRental(entity, user, readData),
     matchesUserManager,
     sanitizeCreateInput,

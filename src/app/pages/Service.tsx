@@ -14,19 +14,21 @@ import {
 import { getServicePriorityBadge, getServiceStatusBadge } from '../components/ui/badge';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { ServiceDayPlanBoard } from '../components/service/ServiceDayPlanBoard';
 import { WarrantyClaimsTab } from '../components/service/WarrantyClaimsTab';
 import { useAuth } from '../contexts/AuthContext';
-import { usePermissions } from '../lib/permissions';
-import { isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
+import { canManageServiceDayPlan, canViewServiceDayPlan, usePermissions } from '../lib/permissions';
+import { isMechanicRole, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
-import type { ServiceTicket } from '../types';
+import type { Mechanic, ServiceTicket } from '../types';
 import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
 import { buildServiceQueue } from '../lib/serviceQueue';
 import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { clientsService } from '../services/clients.service';
+import { mechanicsService } from '../services/mechanics.service';
 
 const RESULT_BATCH_SIZE = 80;
 
@@ -461,6 +463,9 @@ export default function Service() {
   const canViewRentals = can('view', 'rentals');
   const canViewClients = can('view', 'clients');
   const canViewFinance = can('view', 'finance');
+  const normalizedRole = normalizeUserRole(user?.role);
+  const showDayPlan = canViewServiceDayPlan(normalizedRole);
+  const canManageDayPlan = canManageServiceDayPlan(normalizedRole);
   const [search, setSearch] = React.useState('');
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
@@ -490,6 +495,12 @@ export default function Service() {
     queryKey: ['clients', 'service-queue'],
     queryFn: clientsService.getAll,
     enabled: canViewClients,
+    staleTime: 1000 * 60 * 2,
+  });
+  const mechanicsQuery = useQuery<Mechanic[]>({
+    queryKey: ['mechanics', 'service-day-plan'],
+    queryFn: mechanicsService.getAll,
+    enabled: showDayPlan,
     staleTime: 1000 * 60 * 2,
   });
 
@@ -829,6 +840,14 @@ export default function Service() {
           >
             Очередь сервиса
           </TabsTrigger>
+          {showDayPlan && (
+            <TabsTrigger
+              value="day-plan"
+              className="flex-none rounded-none border-0 border-b-4 border-transparent bg-transparent px-0 pb-4 pt-0 text-xl font-black text-gray-500 data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:data-[state=active]:bg-transparent"
+            >
+              План дня
+            </TabsTrigger>
+          )}
           {canManageWarrantyClaims && (
             <TabsTrigger
               value="warranty"
@@ -971,6 +990,25 @@ export default function Service() {
             canViewClients={canViewClients}
           />
         </TabsContent>
+
+        {showDayPlan && (
+          <TabsContent value="day-plan" className="space-y-5">
+            <ServiceDayPlanBoard
+              tickets={ticketList}
+              mechanics={mechanicsQuery.data ?? []}
+              isLoading={ticketsQuery.isFetching || mechanicsQuery.isFetching}
+              onRefresh={() => {
+                void ticketsQuery.refetch();
+                void mechanicsQuery.refetch();
+              }}
+            />
+            {!canManageDayPlan && !isMechanicRole(normalizedRole) && (
+              <p className="text-xs text-gray-500 dark:text-gray-500">
+                Быстрые изменения скрыты: для этой роли доступен только просмотр сервисного плана.
+              </p>
+            )}
+          </TabsContent>
+        )}
 
         {canManageWarrantyClaims && (
           <TabsContent value="warranty">

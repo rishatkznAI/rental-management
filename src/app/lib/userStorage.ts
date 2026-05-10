@@ -36,6 +36,7 @@ export type UserRole =
   | 'Младший стационарный механик'
   | 'Выездной механик'
   | 'Старший стационарный механик'
+  | 'Бригадир'
   | 'Офис-менеджер'
   | 'Перевозчик';
 export type UserStatus = 'Активен' | 'Неактивен';
@@ -104,6 +105,9 @@ const ROLE_ALIASES = new Map<string, string>([
   ['rent_manager', 'Менеджер по аренде'],
   ['sales_manager', 'Менеджер по продажам'],
   ['mechanic', 'Механик'],
+  ['foreman', 'Бригадир'],
+  ['service_foreman', 'Бригадир'],
+  ['brigadier', 'Бригадир'],
   ['carrier', 'Перевозчик'],
   ['delivery_carrier', 'Перевозчик'],
   ['investor', 'Инвестор'],

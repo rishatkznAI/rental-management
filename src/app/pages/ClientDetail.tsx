@@ -18,7 +18,7 @@ import {
   ArrowLeft, Edit, FileText, TrendingUp, Clock, Phone, Mail,
   Building2, MapPin, User, CreditCard, CheckCircle, XCircle,
   AlertTriangle, Download, Plus, Save, Trash2, Upload, X, Wrench,
-  ShieldAlert, MoreHorizontal, Printer, MessageCircle, Paperclip,
+  ShieldAlert, MoreHorizontal, Printer, Paperclip,
   Star, CalendarDays, ReceiptText, BriefcaseBusiness, MapPinned,
 } from 'lucide-react';
 import { cn, formatDate, formatDateTime, formatCurrency } from '../lib/utils';
@@ -218,12 +218,38 @@ function downloadDataUrl(dataUrl: string, fileName: string) {
   document.body.removeChild(link);
 }
 
-function Field({ label, value, mono, className }: { label: string; value?: string | null; mono?: boolean; className?: string }) {
-  if (!value) return null;
+const profileCardHeaderClassName = 'flex flex-row items-start justify-between gap-3 pb-0';
+const profileCardTitleClassName = 'flex min-h-6 items-center gap-2 text-base font-semibold leading-6 [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0';
+const profileCardContentClassName = 'pt-0';
+const profileFieldGridClassName = 'grid grid-cols-1 gap-x-8 gap-y-5 md:grid-cols-2 xl:grid-cols-3';
+const profileRailHeaderClassName = 'flex flex-row items-center justify-between gap-3 pb-0';
+const profileRailContentClassName = 'space-y-3 pt-0';
+
+function Field({
+  label,
+  value,
+  mono,
+  className,
+  hideWhenEmpty = false,
+}: {
+  label: string;
+  value?: React.ReactNode;
+  mono?: boolean;
+  className?: string;
+  hideWhenEmpty?: boolean;
+}) {
+  const isEmpty = value === undefined || value === null || value === '';
+  if (hideWhenEmpty && isEmpty) return null;
   return (
-    <div className={className}>
-      <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className={`text-sm font-medium text-gray-900 dark:text-white ${mono ? 'font-mono' : ''}`}>{value}</p>
+    <div className={cn('min-w-0 space-y-1.5', className)}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
+      <div className={cn(
+        'min-h-5 break-words text-sm font-medium leading-5 text-gray-950 dark:text-white',
+        mono && 'font-mono',
+        isEmpty && 'font-normal text-gray-400 dark:text-gray-500',
+      )}>
+        {isEmpty ? '—' : value}
+      </div>
     </div>
   );
 }
@@ -298,11 +324,11 @@ function StatTile({
   tone?: 'default' | 'danger' | 'success';
 }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white/80 p-4 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.5)] dark:border-gray-800 dark:bg-gray-900/60">
-      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</p>
+    <div className="flex min-h-[116px] flex-col justify-between rounded-2xl border border-gray-100 bg-white/80 p-4 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.5)] dark:border-gray-800 dark:bg-gray-900/60">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
       <div
         className={cn(
-          'mt-2 text-xl font-bold text-gray-950 dark:text-white',
+          'mt-4 text-2xl font-bold leading-none text-gray-950 dark:text-white',
           tone === 'danger' && 'text-red-600 dark:text-red-300',
           tone === 'success' && 'text-emerald-600 dark:text-emerald-300',
         )}
@@ -314,16 +340,12 @@ function StatTile({
 }
 
 function InfoPill({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value?: string | null }) {
-  if (!value) return null;
   return (
-    <div className="flex min-w-0 items-start gap-3 rounded-2xl bg-gray-50 p-3 dark:bg-gray-900/60">
+    <div className="flex min-w-0 items-start gap-3 rounded-2xl border border-gray-100 bg-gray-50/80 p-3.5 dark:border-gray-800 dark:bg-gray-900/60">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-blue-600 shadow-sm dark:bg-gray-800 dark:text-blue-300">
         <Icon className="h-4 w-4" />
       </span>
-      <div className="min-w-0">
-        <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
-        <p className="mt-0.5 break-words text-sm font-medium text-gray-950 dark:text-white">{value}</p>
-      </div>
+      <Field label={label} value={value} />
     </div>
   );
 }
@@ -1301,14 +1323,14 @@ export default function ClientDetail() {
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
             <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <CardHeader className={profileCardHeaderClassName}>
+                <CardTitle className={profileCardTitleClassName}>
                   <Building2 className="h-4 w-4 text-blue-600" />
                   Основная информация
                   {editing && <Badge variant="info">Редактируется</Badge>}
                 </CardTitle>
               </CardHeader>
-              <CardContent className={editing ? 'space-y-4' : 'grid gap-3 2xl:grid-cols-2'}>
+              <CardContent className={editing ? cn(profileCardContentClassName, 'space-y-4') : cn(profileCardContentClassName, 'grid gap-4 2xl:grid-cols-2')}>
                 {editing ? (
                   <>
                     <div className="grid gap-3 md:grid-cols-2">
@@ -1381,15 +1403,15 @@ export default function ClientDetail() {
             </Card>
 
             <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
-              <CardHeader className="flex flex-row items-center justify-between gap-3">
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <CardHeader className={profileCardHeaderClassName}>
+                <CardTitle className={profileCardTitleClassName}>
                   <CreditCard className="h-4 w-4 text-emerald-600" />
                   Финансовая сводка
                   {editing && <Badge variant="info">Редактируется</Badge>}
                 </CardTitle>
                 <span className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">На сегодня</span>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className={cn(profileCardContentClassName, 'space-y-4')}>
                 {editing ? (
                   <div className="space-y-4">
                     <EditField label="Условия оплаты">
@@ -1483,15 +1505,15 @@ export default function ClientDetail() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between gap-3">
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <CardHeader className={profileCardHeaderClassName}>
+                <CardTitle className={profileCardTitleClassName}>
                   <TrendingUp className="h-4 w-4 text-blue-600" />
                   Текущие аренды
                   <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">{client360.rentals.active.length}</span>
                 </CardTitle>
                 <Link to="/rentals" className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-300">Смотреть все</Link>
               </CardHeader>
-              <CardContent>
+              <CardContent className={profileCardContentClassName}>
                 {client360.rentals.latest.length === 0 ? (
                   <p className="text-sm text-gray-500 dark:text-gray-400">Аренд не найдено.</p>
                 ) : (
@@ -1506,7 +1528,7 @@ export default function ClientDetail() {
                           disabled={!navigationId}
                           title={navigationId ? 'Открыть карточку аренды' : unavailableTitle}
                           className={cn(
-                            'flex w-full items-center gap-4 bg-white p-3 text-left transition-colors dark:bg-gray-950',
+                            'grid w-full grid-cols-[56px_minmax(0,1fr)] items-center gap-3 bg-white p-3 text-left transition-colors dark:bg-gray-950 sm:grid-cols-[64px_minmax(0,1fr)_auto] sm:gap-4',
                             navigationId
                               ? 'hover:bg-gray-50 dark:hover:bg-gray-900'
                               : 'cursor-not-allowed opacity-75',
@@ -1534,7 +1556,7 @@ export default function ClientDetail() {
                             </div>
                           </div>
                           {canViewFinance && (
-                            <div className="text-right text-sm font-semibold text-gray-950 dark:text-white">
+                            <div className="col-span-2 text-left text-sm font-semibold text-gray-950 dark:text-white sm:col-span-1 sm:self-start sm:pt-1 sm:text-right">
                               {formatCurrency(rental.amount || 0)}
                             </div>
                           )}
@@ -1547,13 +1569,13 @@ export default function ClientDetail() {
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <CardHeader className={profileCardHeaderClassName}>
+                <CardTitle className={profileCardTitleClassName}>
                   <Clock className="h-4 w-4 text-orange-500" />
                   История активности
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className={profileCardContentClassName}>
                 {recentActivity.length === 0 ? (
                   <p className="text-sm text-gray-500 dark:text-gray-400">Активность пока не зафиксирована.</p>
                 ) : (
@@ -1561,7 +1583,7 @@ export default function ClientDetail() {
                     {recentActivity.map(item => {
                       const Icon = item.icon;
                       return (
-                        <div key={item.id} className="flex gap-3">
+                        <div key={item.id} className="grid grid-cols-[36px_minmax(0,1fr)] gap-3">
                           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-300">
                             <Icon className="h-4 w-4" />
                           </span>
@@ -1581,8 +1603,8 @@ export default function ClientDetail() {
 
         <div className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base font-semibold">
+            <CardHeader className={profileRailHeaderClassName}>
+              <CardTitle className={profileCardTitleClassName}>
                 Контакты
                 {editing && <Badge variant="info">Форма</Badge>}
               </CardTitle>
@@ -1598,7 +1620,7 @@ export default function ClientDetail() {
                 </Button>
               )}
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className={profileRailContentClassName}>
               {editing ? (
                 <div className="space-y-3">
                   <EditField label="Контактное лицо">
@@ -1626,19 +1648,26 @@ export default function ClientDetail() {
                 </div>
               ) : (
                 primaryContacts.map((contact, index) => (
-                  <div key={`${contact.name}-${index}`} className="border-b border-gray-100 pb-4 last:border-0 last:pb-0 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold text-gray-950 dark:text-white">{contact.name}</p>
-                      {contact.role && <Badge variant="success">{contact.role}</Badge>}
+                  <div key={`${contact.name}-${index}`} className="rounded-2xl border border-gray-100 p-3.5 last:mb-0 dark:border-gray-800">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="min-w-0 break-words text-sm font-semibold leading-5 text-gray-950 dark:text-white">{contact.name}</p>
+                      {contact.role && <Badge variant="success" className="shrink-0">{contact.role}</Badge>}
                     </div>
-                    {contact.phone && <a href={`tel:${contact.phone}`} className="mt-2 block text-sm text-gray-700 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-300">{contact.phone}</a>}
-                    {contact.email && <a href={`mailto:${contact.email}`} className="mt-1 block break-all text-sm text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300">{contact.email}</a>}
+                    <div className="mt-3 grid gap-2">
+                      {contact.phone && (
+                        <a href={`tel:${contact.phone}`} className="grid grid-cols-[18px_minmax(0,1fr)] items-center gap-2 text-sm leading-5 text-gray-700 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-300">
+                          <Phone className="h-4 w-4 text-gray-400" />
+                          <span className="truncate">{contact.phone}</span>
+                        </a>
+                      )}
+                      {contact.email && (
+                        <a href={`mailto:${contact.email}`} className="grid grid-cols-[18px_minmax(0,1fr)] items-center gap-2 text-sm leading-5 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300">
+                          <Mail className="h-4 w-4 text-gray-400" />
+                          <span className="truncate">{contact.email}</span>
+                        </a>
+                      )}
+                    </div>
                     {contact.comment && <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{contact.comment}</p>}
-                    <div className="mt-3 flex gap-2 text-gray-500 dark:text-gray-400">
-                      {contact.phone && <Phone className="h-4 w-4" />}
-                      {contact.email && <Mail className="h-4 w-4" />}
-                      <MessageCircle className="h-4 w-4" />
-                    </div>
                   </div>
                 ))
               )}
@@ -1646,8 +1675,8 @@ export default function ClientDetail() {
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base font-semibold">
+            <CardHeader className={profileRailHeaderClassName}>
+              <CardTitle className={profileCardTitleClassName}>
                 Заметки
                 {editing && <Badge variant="info">Редактируется</Badge>}
               </CardTitle>
@@ -1663,7 +1692,7 @@ export default function ClientDetail() {
                 </Button>
               )}
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className={profileRailContentClassName}>
               {editing ? (
                 <EditField label="Примечания">
                   <Textarea
@@ -1674,25 +1703,25 @@ export default function ClientDetail() {
                   />
                 </EditField>
               ) : client.notes ? (
-                <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm leading-6 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
                   <p className="whitespace-pre-wrap">{client.notes}</p>
-                  <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">{client.manager || user?.name || 'Система'}</p>
+                  <p className="mt-3 text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300">{client.manager || user?.name || 'Система'}</p>
                 </div>
               ) : (
                 <p className="text-sm text-gray-500 dark:text-gray-400">Заметок по клиенту пока нет.</p>
               )}
               {clientDebtPlan?.comment && (
-                <div className="rounded-2xl bg-blue-50 p-4 text-sm text-blue-950 dark:bg-blue-950/30 dark:text-blue-100">
+                <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-blue-950 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
                   <p className="whitespace-pre-wrap">{clientDebtPlan.comment}</p>
-                  <p className="mt-3 text-xs text-blue-700 dark:text-blue-300">План взыскания</p>
+                  <p className="mt-3 text-xs font-medium uppercase tracking-wide text-blue-700 dark:text-blue-300">План взыскания</p>
                 </div>
               )}
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base font-semibold">Прикреплённые файлы</CardTitle>
+            <CardHeader className={profileRailHeaderClassName}>
+              <CardTitle className={profileCardTitleClassName}>Прикреплённые файлы</CardTitle>
               {canEdit ? (
                 <Button
                   size="icon"
@@ -1705,12 +1734,12 @@ export default function ClientDetail() {
                 </Button>
               ) : null}
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className={profileRailContentClassName}>
               {visibleFiles.length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">Файлы не прикреплены.</p>
               ) : (
                 visibleFiles.map(file => (
-                  <div key={file.id} className="flex items-start gap-3 rounded-2xl border border-gray-100 p-3 dark:border-gray-800">
+                  <div key={file.id} className="grid grid-cols-[36px_minmax(0,1fr)] items-start gap-3 rounded-2xl border border-gray-100 p-3 dark:border-gray-800">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300">
                       <Paperclip className="h-4 w-4" />
                     </span>
@@ -1990,14 +2019,14 @@ export default function ClientDetail() {
 
           {/* Main info */}
           <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
+            <CardHeader className={profileCardHeaderClassName}>
+              <CardTitle className={profileCardTitleClassName}>
                 <Building2 className="h-4 w-4" />
                 Основная информация
                 {editing && <Badge variant="info">Форма</Badge>}
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className={cn(profileCardContentClassName, 'space-y-4')}>
               {editing ? (
                 <div className="space-y-4">
                   <EditField label="Наименование компании">
@@ -2039,17 +2068,14 @@ export default function ClientDetail() {
                   </EditField>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div className={profileFieldGridClassName}>
                   <Field label="Компания" value={client.company} className="col-span-2" />
                   <Field label="ИНН" value={client.inn} mono />
                   <Field label="Email" value={client.email} />
                   {client.address && (
-                    <div className="flex items-start gap-1.5 col-span-2">
-                      <MapPin className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Адрес</p>
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">{client.address}</p>
-                      </div>
+                    <div className="col-span-2 grid grid-cols-[18px_minmax(0,1fr)] items-start gap-2">
+                      <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                      <Field label="Адрес" value={client.address} />
                     </div>
                   )}
                   {client.createdAt && <Field label="Клиент с" value={formatDate(client.createdAt)} />}
@@ -2061,14 +2087,14 @@ export default function ClientDetail() {
 
           {/* Contact */}
           <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
+            <CardHeader className={profileCardHeaderClassName}>
+              <CardTitle className={profileCardTitleClassName}>
                 <User className="h-4 w-4" />
                 Контакт
                 {editing && <Badge variant="info">Форма</Badge>}
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className={profileCardContentClassName}>
               {editing ? (
                 <div className="space-y-4">
                   <EditField label="Контактное лицо">
@@ -2079,31 +2105,30 @@ export default function ClientDetail() {
                   </EditField>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Контактное лицо</p>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{client.contact}</p>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <Phone className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Телефон</p>
-                      <a href={`tel:${client.phone}`} className="text-sm font-medium text-[--color-primary] hover:underline">
+                <div className={profileFieldGridClassName}>
+                  <Field label="Контактное лицо" value={client.contact} />
+                  <div className="grid grid-cols-[18px_minmax(0,1fr)] items-start gap-2">
+                    <Phone className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <Field
+                      label="Телефон"
+                      value={client.phone ? (
+                        <a href={`tel:${client.phone}`} className="text-[--color-primary] hover:underline">
                         {client.phone}
                       </a>
-                    </div>
+                      ) : null}
+                    />
                   </div>
-                  {client.email && (
-                    <div className="flex items-start gap-2">
-                      <Mail className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Email</p>
-                        <a href={`mailto:${client.email}`} className="text-sm font-medium text-[--color-primary] hover:underline">
+                  <div className="grid grid-cols-[18px_minmax(0,1fr)] items-start gap-2">
+                    <Mail className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <Field
+                      label="Email"
+                      value={client.email ? (
+                        <a href={`mailto:${client.email}`} className="text-[--color-primary] hover:underline">
                           {client.email}
                         </a>
-                      </div>
-                    </div>
-                  )}
+                      ) : null}
+                    />
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -2111,14 +2136,14 @@ export default function ClientDetail() {
 
           {/* Commercial */}
           <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
+            <CardHeader className={profileCardHeaderClassName}>
+              <CardTitle className={profileCardTitleClassName}>
                 <CreditCard className="h-4 w-4" />
                 Коммерческие условия
                 {editing && <Badge variant="info">Форма</Badge>}
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className={profileCardContentClassName}>
               {editing ? (
                 <div className="space-y-4">
                   <EditField label="Условия оплаты">
@@ -2175,21 +2200,18 @@ export default function ClientDetail() {
                   </EditField>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div className={profileFieldGridClassName}>
                   <Field label="Условия оплаты" value={client.paymentTerms} />
                   {canViewFinance ? (
                     <>
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Кредитный лимит</p>
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(client.creditLimit)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Задолженность</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(displayedDebt)}</p>
-                          <Badge variant={debtVariant(displayedDebt)}>{debtLabel(displayedDebt)}</Badge>
+                      <Field label="Кредитный лимит" value={formatCurrency(client.creditLimit)} />
+                      <div className="min-w-0 space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Задолженность</p>
+                        <div className="flex min-h-6 flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold leading-5 text-gray-950 dark:text-white">{formatCurrency(displayedDebt)}</span>
+                          <Badge variant={debtVariant(displayedDebt)} className="shrink-0">{debtLabel(displayedDebt)}</Badge>
                         </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                        <div className="flex flex-wrap items-center gap-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
                           <Badge variant={debtRiskVariant(clientFinancial)}>{debtRiskLabel(clientFinancial)}</Badge>
                           {clientFinancial && displayedDebt > 0 && (
                             <span>
@@ -2200,10 +2222,7 @@ export default function ClientDetail() {
                         </div>
                       </div>
                       {(canEditDebt || (client.debt ?? 0) > 0) && (
-                        <div>
-                          <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Ручная дебиторка</p>
-                          <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(client.debt ?? 0)}</p>
-                        </div>
+                        <Field label="Ручная дебиторка" value={formatCurrency(client.debt ?? 0)} />
                       )}
                     </>
                   ) : (

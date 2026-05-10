@@ -132,6 +132,8 @@ export function buildClient360Summary(input = {}) {
     .slice(0, 10)
     .map(item => ({
       id: normalizeText(item?.id),
+      rentalId: normalizeText(item?.rentalId || item?.sourceRentalId || item?.originalRentalId),
+      ganttRentalId: normalizeText(item?.ganttRentalId || (item?.rentalId || item?.sourceRentalId || item?.originalRentalId ? item?.id : '')),
       equipment: normalizeText(item?.equipmentInv) || normalizeText(Array.isArray(item?.equipment) ? item.equipment.join(', ') : item?.equipment) || 'Техника не указана',
       startDate: dateKey(item?.startDate),
       endDate: dateKey(item?.endDate || item?.plannedReturnDate),

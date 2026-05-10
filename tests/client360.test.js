@@ -29,6 +29,8 @@ test('client 360 summary links rentals payments documents and service defensivel
   });
 
   assert.equal(summary.rentals.active.length, 1);
+  assert.equal(summary.rentals.latest.find(item => item.id === 'R-1')?.rentalId, '');
+  assert.equal(summary.rentals.latest.find(item => item.id === 'R-1')?.ganttRentalId, '');
   assert.equal(summary.rentals.completed.length, 1);
   assert.equal(summary.rentals.overdueReturns.length, 1);
   assert.equal(summary.debt.total, 71000);
@@ -55,4 +57,18 @@ test('client 360 summary returns empty safe state for missing legacy data', () =
   assert.equal(summary.service.latest.length, 0);
   assert.equal(summary.flags.length, 0);
   assert.equal(JSON.stringify(summary).includes('NaN'), false);
+});
+
+test('client 360 summary preserves canonical rentalId from gantt rentals', () => {
+  const summary = buildClient360Summary({
+    client: { id: 'C-1', company: 'ООО 360' },
+    today: '2026-05-02',
+    rentals: [
+      { id: 'GR-1776239571252', rentalId: 'R-2026-01', clientId: 'C-1', client: 'ООО 360', equipmentInv: 'INV-1', startDate: '2026-04-01', endDate: '2026-05-01', status: 'active' },
+    ],
+  });
+
+  assert.equal(summary.rentals.latest[0].id, 'GR-1776239571252');
+  assert.equal(summary.rentals.latest[0].rentalId, 'R-2026-01');
+  assert.equal(summary.rentals.latest[0].ganttRentalId, 'GR-1776239571252');
 });

@@ -5,7 +5,7 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
-import { Select } from '../components/ui/select';
+import { Textarea } from '../components/ui/textarea';
 import {
   ArrowLeft, Edit, FileText, TrendingUp, Clock, Phone, Mail,
   Building2, MapPin, User, CreditCard, CheckCircle, XCircle,
@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { cn, formatDate, formatDateTime, formatCurrency } from '../lib/utils';
 import { useClientById, useDeleteClient, useUpdateClient } from '../hooks/useClients';
-import { useGanttData } from '../hooks/useRentals';
+import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -29,6 +29,7 @@ import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history
 import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import { buildClient360Summary } from '../lib/client360.js';
 import { buildClientQuickActions } from '../lib/quickActions.js';
+import { resolveRentalNavigationId } from '../lib/rentalNavigation.js';
 import {
   debtCollectionActionLabel,
   debtCollectionPriorityLabel,
@@ -185,6 +186,48 @@ function Field({ label, value, mono, className }: { label: string; value?: strin
   );
 }
 
+const editInputClassName = 'h-11 rounded-xl border-blue-200 bg-white text-gray-950 shadow-sm focus-visible:border-blue-500 focus-visible:ring-blue-500/20 dark:border-blue-900/70 dark:bg-gray-950 dark:text-white dark:focus-visible:border-blue-400';
+const editTextareaClassName = 'min-h-[92px] rounded-xl border-blue-200 bg-white text-gray-950 shadow-sm focus-visible:border-blue-500 focus-visible:ring-blue-500/20 dark:border-blue-900/70 dark:bg-gray-950 dark:text-white dark:focus-visible:border-blue-400';
+const editSelectClassName = 'h-11 w-full rounded-xl border border-blue-200 bg-white px-3 text-sm text-gray-950 shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 dark:border-blue-900/70 dark:bg-gray-950 dark:text-white dark:focus:border-blue-400';
+
+function EditField({
+  label,
+  children,
+  hint,
+  readonly = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  hint?: string;
+  readonly?: boolean;
+}) {
+  return (
+    <label className={cn(
+      'block rounded-2xl border p-3',
+      readonly
+        ? 'border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/60'
+        : 'border-blue-100 bg-blue-50/40 dark:border-blue-900/60 dark:bg-blue-950/20',
+    )}>
+      <span className={cn(
+        'mb-1.5 block text-xs font-semibold uppercase tracking-wide',
+        readonly ? 'text-gray-500 dark:text-gray-400' : 'text-blue-700 dark:text-blue-300',
+      )}>
+        {label}
+      </span>
+      {children}
+      {hint && <span className="mt-1.5 block text-xs text-gray-500 dark:text-gray-400">{hint}</span>}
+    </label>
+  );
+}
+
+function ReadonlyEditValue({ value }: { value?: React.ReactNode }) {
+  return (
+    <span className="block min-h-11 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200">
+      {value || 'Не указано'}
+    </span>
+  );
+}
+
 function getInitials(value?: string | null) {
   const words = String(value || '')
     .replace(/[«»"]/g, ' ')
@@ -250,6 +293,17 @@ const PAYMENT_TERMS_OPTIONS = [
   { value: 'Предоплата 50%', label: 'Предоплата 50%' },
   { value: 'Без предоплаты', label: 'Без предоплаты' },
 ];
+const CLIENT_TYPE_OPTIONS = [
+  { value: 'legal', label: 'Юридическое лицо' },
+  { value: 'individual_entrepreneur', label: 'ИП' },
+  { value: 'individual', label: 'Физлицо' },
+];
+const CLIENT_STATUS_OPTIONS: Array<{ value: ClientStatus; label: string }> = [
+  { value: 'active', label: CLIENT_STATUS_LABELS.active },
+  { value: 'new', label: CLIENT_STATUS_LABELS.new },
+  { value: 'blocked', label: CLIENT_STATUS_LABELS.blocked },
+  { value: 'inactive', label: CLIENT_STATUS_LABELS.inactive },
+];
 const INN_ERROR = 'Укажите корректный ИНН: 10 цифр для юрлица или 12 цифр для ИП';
 
 function normalizeInn(value?: string | null) {
@@ -281,6 +335,7 @@ export default function ClientDetail() {
   const canDelete = user?.role === 'Администратор' && can('delete', 'clients');
   const canEditDebt = user?.role === 'Администратор';
   const canCreateRentals = can('create', 'rentals');
+  const canViewRentals = can('view', 'rentals');
 
   const { data: fetchedClient } = useClientById(id ?? '');
   const updateClient = useUpdateClient();
@@ -304,6 +359,7 @@ export default function ClientDetail() {
   const [contractForm, setContractForm] = useState({ number: '', date: '', title: '', objectId: '', notes: '' });
 
   // Related data via react-query
+  const { data: rentals = [] } = useRentalsList({ enabled: canViewRentals });
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
   const { data: serviceTickets = [] } = useServiceTicketsList();
@@ -487,14 +543,21 @@ export default function ClientDetail() {
       {
         company: 'компания',
         inn: 'ИНН',
+        kpp: 'КПП',
+        ogrn: 'ОГРН',
+        clientType: 'тип клиента',
+        verified: 'проверка клиента',
         email: 'email',
         address: 'адрес',
+        legalAddress: 'юридический адрес',
+        actualAddress: 'фактический адрес',
         contact: 'контакт',
         phone: 'телефон',
         paymentTerms: 'условия оплаты',
         creditLimit: 'кредитный лимит',
         debt: 'задолженность',
         manager: 'менеджер',
+        managerRole: 'роль менеджера',
         notes: 'примечание',
         status: 'статус',
       },
@@ -745,9 +808,9 @@ export default function ClientDetail() {
             </>
           ) : (
             <>
-              <Button onClick={saveEdit}>
+              <Button onClick={saveEdit} disabled={updateClient.isPending} className="shadow-lg shadow-blue-500/20">
                 <Save className="h-4 w-4" />
-                Сохранить
+                {updateClient.isPending ? 'Сохранение...' : 'Сохранить'}
               </Button>
               <Button variant="secondary" onClick={cancelEdit}>
                 <X className="h-4 w-4" />
@@ -758,63 +821,192 @@ export default function ClientDetail() {
         </div>
       </div>
 
+      {editing && (
+        <div className="rounded-3xl border border-blue-200 bg-blue-50/80 p-4 shadow-[0_18px_50px_-36px_rgba(37,99,235,0.8)] dark:border-blue-900/70 dark:bg-blue-950/30">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
+                <Edit className="h-5 w-5" />
+              </span>
+              <div>
+                <h2 className="text-base font-semibold text-blue-950 dark:text-blue-100">Режим редактирования клиента</h2>
+                <p className="mt-1 text-sm text-blue-800 dark:text-blue-200">
+                  Измените нужные поля и нажмите “Сохранить”. Серые поля ниже доступны только для просмотра.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 md:shrink-0">
+              <Button onClick={saveEdit} disabled={updateClient.isPending}>
+                <Save className="h-4 w-4" />
+                {updateClient.isPending ? 'Сохранение...' : 'Сохранить'}
+              </Button>
+              <Button variant="secondary" onClick={cancelEdit}>
+                <X className="h-4 w-4" />
+                Отмена
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
           <Card className="overflow-hidden rounded-[24px] border-gray-200/80 bg-white shadow-[0_24px_80px_-56px_rgba(15,23,42,0.65)] dark:border-gray-800 dark:bg-gray-950">
             <CardContent className="p-0">
-              <div className="flex flex-col gap-6 p-5 sm:p-7 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex min-w-0 flex-col gap-5 sm:flex-row sm:items-center">
+              <div className={cn(
+                'flex flex-col gap-6 p-5 sm:p-7',
+                editing ? 'lg:items-stretch' : 'lg:flex-row lg:items-center lg:justify-between',
+              )}>
+                <div className={cn(
+                  'flex min-w-0 flex-1 flex-col gap-5 sm:flex-row',
+                  editing ? 'sm:items-start' : 'sm:items-center',
+                )}>
                   <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-50 via-violet-50 to-emerald-50 text-3xl font-bold text-blue-700 ring-1 ring-blue-100 dark:from-blue-950/60 dark:via-violet-950/40 dark:to-emerald-950/30 dark:text-blue-200 dark:ring-blue-900/60">
                     {getInitials(client.company)}
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h1 className="min-w-0 break-words text-xl font-bold leading-tight text-gray-950 dark:text-white sm:text-2xl">
-                        {client.company}
-                      </h1>
-                      {client.status && (
-                        <Badge variant={clientStatusVariant(client.status)}>
-                          {CLIENT_STATUS_LABELS[client.status]}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600 dark:text-gray-300">
-                      {client.inn && <span>ИНН {client.inn}</span>}
-                      {client.kpp && <><span className="text-gray-300 dark:text-gray-700">•</span><span>КПП {client.kpp}</span></>}
-                      {client.ogrn && <><span className="text-gray-300 dark:text-gray-700">•</span><span>ОГРН {client.ogrn}</span></>}
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                        {clientTypeLabel(client)}
-                      </span>
-                      {client.verified && (
-                        <Badge variant="info">
-                          <CheckCircle className="mr-1 h-3 w-3" />
-                          Проверен
-                        </Badge>
-                      )}
-                      <Badge variant={client360RiskVariant(client360.debt.riskLevel)}>
-                        {client360.debt.riskLabel} риск
-                      </Badge>
-                    </div>
+                  <div className="min-w-0 flex-1">
+                    {editing ? (
+                      <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_190px]">
+                        <EditField label="Название компании">
+                          <Input
+                            className={editInputClassName}
+                            value={editData.company ?? ''}
+                            onChange={e => setEditData({ ...editData, company: e.target.value })}
+                            placeholder="ООО «Компания»"
+                          />
+                        </EditField>
+                        <EditField label="Статус клиента">
+                          <select
+                            className={editSelectClassName}
+                            value={editData.status || 'new'}
+                            onChange={e => setEditData({ ...editData, status: e.target.value as ClientStatus })}
+                          >
+                            {CLIENT_STATUS_OPTIONS.map(option => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </EditField>
+                        <EditField label="ИНН">
+                          <Input
+                            className={editInputClassName}
+                            value={editData.inn ?? ''}
+                            onChange={e => setEditData({ ...editData, inn: e.target.value })}
+                            inputMode="numeric"
+                          />
+                        </EditField>
+                        <EditField label="КПП">
+                          <Input
+                            className={editInputClassName}
+                            value={editData.kpp ?? ''}
+                            onChange={e => setEditData({ ...editData, kpp: e.target.value })}
+                            inputMode="numeric"
+                            placeholder="Если есть"
+                          />
+                        </EditField>
+                        <EditField label="ОГРН">
+                          <Input
+                            className={editInputClassName}
+                            value={editData.ogrn ?? ''}
+                            onChange={e => setEditData({ ...editData, ogrn: e.target.value })}
+                            inputMode="numeric"
+                            placeholder="Если есть"
+                          />
+                        </EditField>
+                        <EditField label="Тип клиента">
+                          <select
+                            className={editSelectClassName}
+                            value={editData.clientType || 'legal'}
+                            onChange={e => setEditData({ ...editData, clientType: e.target.value })}
+                          >
+                            {CLIENT_TYPE_OPTIONS.map(option => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </EditField>
+                        <div className="lg:col-span-2">
+                          <label className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-3 text-sm font-medium text-gray-800 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-gray-100">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500 dark:border-blue-800"
+                              checked={Boolean(editData.verified)}
+                              onChange={e => setEditData({ ...editData, verified: e.target.checked })}
+                            />
+                            Клиент проверен
+                          </label>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <h1 className="min-w-0 break-words text-xl font-bold leading-tight text-gray-950 dark:text-white sm:text-2xl">
+                            {client.company}
+                          </h1>
+                          {client.status && (
+                            <Badge variant={clientStatusVariant(client.status)}>
+                              {CLIENT_STATUS_LABELS[client.status]}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600 dark:text-gray-300">
+                          {client.inn && <span>ИНН {client.inn}</span>}
+                          {client.kpp && <><span className="text-gray-300 dark:text-gray-700">•</span><span>КПП {client.kpp}</span></>}
+                          {client.ogrn && <><span className="text-gray-300 dark:text-gray-700">•</span><span>ОГРН {client.ogrn}</span></>}
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                            {clientTypeLabel(client)}
+                          </span>
+                          {client.verified && (
+                            <Badge variant="info">
+                              <CheckCircle className="mr-1 h-3 w-3" />
+                              Проверен
+                            </Badge>
+                          )}
+                          <Badge variant={client360RiskVariant(client360.debt.riskLevel)}>
+                            {client360.debt.riskLabel} риск
+                          </Badge>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
-                <div className="min-w-[220px] rounded-2xl bg-gray-50 p-4 dark:bg-gray-900/70">
+                <div className={cn(
+                  'rounded-2xl p-4',
+                  editing ? 'border border-blue-100 bg-blue-50/50 dark:border-blue-900/60 dark:bg-blue-950/20' : 'bg-gray-50 dark:bg-gray-900/70',
+                  editing ? 'w-full' : 'min-w-[220px]',
+                )}>
                   <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Менеджер</p>
-                  <div className="mt-3 flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-white text-sm font-semibold text-blue-700 shadow-sm dark:bg-gray-800 dark:text-blue-200">
-                      {client.managerAvatar ? (
-                        <img src={client.managerAvatar} alt={client.manager || 'Менеджер'} className="h-full w-full object-cover" />
-                      ) : (
-                        getInitials(client.manager || user?.name || 'МН')
-                      )}
+                  {editing ? (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <Input
+                        className={editInputClassName}
+                        value={editData.manager ?? ''}
+                        onChange={e => setEditData({ ...editData, manager: e.target.value })}
+                        placeholder="Имя менеджера"
+                      />
+                      <Input
+                        className={editInputClassName}
+                        value={editData.managerRole ?? ''}
+                        onChange={e => setEditData({ ...editData, managerRole: e.target.value })}
+                        placeholder="Роль менеджера"
+                      />
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-gray-950 dark:text-white">{client.manager || 'Не назначен'}</p>
-                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">{client.managerRole || 'Ответственный'}</p>
+                  ) : (
+                    <div className="mt-3 flex items-center gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-white text-sm font-semibold text-blue-700 shadow-sm dark:bg-gray-800 dark:text-blue-200">
+                        {client.managerAvatar ? (
+                          <img src={client.managerAvatar} alt={client.manager || 'Менеджер'} className="h-full w-full object-cover" />
+                        ) : (
+                          getInitials(client.manager || user?.name || 'МН')
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-gray-950 dark:text-white">{client.manager || 'Не назначен'}</p>
+                        <p className="truncate text-xs text-gray-500 dark:text-gray-400">{client.managerRole || 'Ответственный'}</p>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
 
@@ -850,35 +1042,144 @@ export default function ClientDetail() {
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
-            <Card>
+            <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base font-semibold">
                   <Building2 className="h-4 w-4 text-blue-600" />
                   Основная информация
+                  {editing && <Badge variant="info">Редактируется</Badge>}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="grid gap-3 2xl:grid-cols-2">
-                <InfoPill icon={BriefcaseBusiness} label="Полное название" value={client.company} />
-                <InfoPill icon={Building2} label="Тип клиента" value={clientTypeLabel(client)} />
-                <InfoPill icon={CalendarDays} label="Дата регистрации" value={client.createdAt ? formatDate(client.createdAt) : undefined} />
-                <InfoPill icon={Star} label="Рейтинг" value={client360.debt.riskLabel} />
-                <InfoPill icon={MapPinned} label="Юр. адрес" value={client.legalAddress || client.address} />
-                <InfoPill icon={MapPin} label="Факт. адрес" value={client.actualAddress || client.address} />
-                <InfoPill icon={Mail} label="Email" value={client.email} />
-                <InfoPill icon={Phone} label="Телефон" value={client.phone} />
+              <CardContent className={editing ? 'space-y-4' : 'grid gap-3 2xl:grid-cols-2'}>
+                {editing ? (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <EditField label="Контактное лицо">
+                        <Input
+                          className={editInputClassName}
+                          value={editData.contact ?? ''}
+                          onChange={e => setEditData({ ...editData, contact: e.target.value })}
+                        />
+                      </EditField>
+                      <EditField label="Телефон">
+                        <Input
+                          className={editInputClassName}
+                          value={editData.phone ?? ''}
+                          onChange={e => setEditData({ ...editData, phone: e.target.value })}
+                        />
+                      </EditField>
+                      <EditField label="Email">
+                        <Input
+                          className={editInputClassName}
+                          type="email"
+                          value={editData.email ?? ''}
+                          onChange={e => setEditData({ ...editData, email: e.target.value })}
+                        />
+                      </EditField>
+                      <EditField label="Дата регистрации" readonly>
+                        <ReadonlyEditValue value={client.createdAt ? formatDate(client.createdAt) : 'Не указана'} />
+                      </EditField>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <EditField label="Юридический адрес">
+                        <Textarea
+                          className={editTextareaClassName}
+                          value={editData.legalAddress ?? editData.address ?? ''}
+                          onChange={e => setEditData({ ...editData, legalAddress: e.target.value })}
+                          placeholder="Юридический адрес"
+                        />
+                      </EditField>
+                      <EditField label="Фактический адрес">
+                        <Textarea
+                          className={editTextareaClassName}
+                          value={editData.actualAddress ?? editData.address ?? ''}
+                          onChange={e => setEditData({ ...editData, actualAddress: e.target.value })}
+                          placeholder="Фактический адрес"
+                        />
+                      </EditField>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <EditField label="ID клиента" readonly>
+                        <ReadonlyEditValue value={client.id} />
+                      </EditField>
+                      <EditField label="Кто создал" readonly>
+                        <ReadonlyEditValue value={client.createdBy || 'Не указано'} />
+                      </EditField>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <InfoPill icon={BriefcaseBusiness} label="Полное название" value={client.company} />
+                    <InfoPill icon={Building2} label="Тип клиента" value={clientTypeLabel(client)} />
+                    <InfoPill icon={CalendarDays} label="Дата регистрации" value={client.createdAt ? formatDate(client.createdAt) : undefined} />
+                    <InfoPill icon={Star} label="Рейтинг" value={client360.debt.riskLabel} />
+                    <InfoPill icon={MapPinned} label="Юр. адрес" value={client.legalAddress || client.address} />
+                    <InfoPill icon={MapPin} label="Факт. адрес" value={client.actualAddress || client.address} />
+                    <InfoPill icon={Mail} label="Email" value={client.email} />
+                    <InfoPill icon={Phone} label="Телефон" value={client.phone} />
+                  </>
+                )}
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
               <CardHeader className="flex flex-row items-center justify-between gap-3">
                 <CardTitle className="flex items-center gap-2 text-base font-semibold">
                   <CreditCard className="h-4 w-4 text-emerald-600" />
                   Финансовая сводка
+                  {editing && <Badge variant="info">Редактируется</Badge>}
                 </CardTitle>
                 <span className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">На сегодня</span>
               </CardHeader>
               <CardContent className="space-y-4">
-                {!canViewFinance ? (
+                {editing ? (
+                  <div className="space-y-4">
+                    <EditField label="Условия оплаты">
+                      <select
+                        className={editSelectClassName}
+                        value={editData.paymentTerms ?? ''}
+                        onChange={e => setEditData({ ...editData, paymentTerms: e.target.value })}
+                      >
+                        <option value="">Не указано</option>
+                        {PAYMENT_TERMS_OPTIONS.map(option => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </EditField>
+                    {canViewFinance ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <EditField label="Кредитный лимит, ₽">
+                          <Input
+                            className={editInputClassName}
+                            type="number"
+                            min={0}
+                            value={String(editData.creditLimit ?? 0)}
+                            onChange={e => setEditData({ ...editData, creditLimit: Number(e.target.value) })}
+                          />
+                        </EditField>
+                        {canEditDebt ? (
+                          <EditField label="Ручная дебиторка, ₽" hint="Итоговый долг также учитывает неоплаченные аренды.">
+                            <Input
+                              className={editInputClassName}
+                              type="number"
+                              min={0}
+                              value={String(editData.debt ?? 0)}
+                              onChange={e => setEditData({ ...editData, debt: Number(e.target.value) })}
+                            />
+                          </EditField>
+                        ) : (
+                          <EditField label="Текущая задолженность" readonly>
+                            <ReadonlyEditValue value={formatCurrency(displayedDebt)} />
+                          </EditField>
+                        )}
+                      </div>
+                    ) : (
+                      <EditField label="Финансовые данные" readonly>
+                        <ReadonlyEditValue value="Скрыты правами доступа" />
+                      </EditField>
+                    )}
+                  </div>
+                ) : !canViewFinance ? (
                   <p className="text-sm text-gray-500 dark:text-gray-400">Финансовые данные скрыты правами доступа.</p>
                 ) : (
                   <>
@@ -937,30 +1238,51 @@ export default function ClientDetail() {
                   <p className="text-sm text-gray-500 dark:text-gray-400">Аренд не найдено.</p>
                 ) : (
                   <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-100 dark:divide-gray-800 dark:border-gray-800">
-                    {client360.rentals.latest.slice(0, 3).map(rental => (
-                      <button
-                        key={rental.id}
-                        type="button"
-                        className="flex w-full items-center gap-4 bg-white p-3 text-left transition-colors hover:bg-gray-50 dark:bg-gray-950 dark:hover:bg-gray-900"
-                        onClick={() => navigate(`/rentals/${rental.id}`)}
-                      >
-                        <div className="flex h-14 w-16 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
-                          <Wrench className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-gray-950 dark:text-white">{rental.equipment || rental.id}</p>
-                          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                            {rental.id} · {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
-                          </p>
-                          <Badge variant={rentalStatusVariant(rental.status)} className="mt-1">{rentalStatusLabel(rental.status)}</Badge>
-                        </div>
-                        {canViewFinance && (
-                          <div className="text-right text-sm font-semibold text-gray-950 dark:text-white">
-                            {formatCurrency(rental.amount || 0)}
+                    {client360.rentals.latest.slice(0, 3).map(rental => {
+                      const navigationId = canViewRentals ? resolveRentalNavigationId(rental, rentals, ganttRentals) : null;
+                      const unavailableTitle = canViewRentals ? 'Нет связи с карточкой аренды' : 'Нет доступа к карточке аренды';
+                      return (
+                        <button
+                          key={rental.id}
+                          type="button"
+                          disabled={!navigationId}
+                          title={navigationId ? 'Открыть карточку аренды' : unavailableTitle}
+                          className={cn(
+                            'flex w-full items-center gap-4 bg-white p-3 text-left transition-colors dark:bg-gray-950',
+                            navigationId
+                              ? 'hover:bg-gray-50 dark:hover:bg-gray-900'
+                              : 'cursor-not-allowed opacity-75',
+                          )}
+                          onClick={() => {
+                            if (navigationId) navigate(`/rentals/${navigationId}`);
+                          }}
+                        >
+                          <div className="flex h-14 w-16 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
+                            <Wrench className="h-5 w-5" />
                           </div>
-                        )}
-                      </button>
-                    ))}
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-gray-950 dark:text-white">{rental.equipment || rental.id}</p>
+                            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                              {(navigationId || rental.id)} · {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
+                            </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              <Badge variant={rentalStatusVariant(rental.status)}>{rentalStatusLabel(rental.status)}</Badge>
+                              {!navigationId && (
+                                <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-300">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {unavailableTitle}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {canViewFinance && (
+                            <div className="text-right text-sm font-semibold text-gray-950 dark:text-white">
+                              {formatCurrency(rental.amount || 0)}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -1002,39 +1324,85 @@ export default function ClientDetail() {
         <div className="space-y-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base font-semibold">Контакты</CardTitle>
-              <Button size="icon" variant="ghost" title="Добавить контакт">
-                <Plus className="h-4 w-4" />
-              </Button>
+              <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                Контакты
+                {editing && <Badge variant="info">Форма</Badge>}
+              </CardTitle>
+              {!editing && (
+                <Button size="icon" variant="ghost" title="Добавить контакт">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-4">
-              {primaryContacts.map((contact, index) => (
-                <div key={`${contact.name}-${index}`} className="border-b border-gray-100 pb-4 last:border-0 last:pb-0 dark:border-gray-800">
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-gray-950 dark:text-white">{contact.name}</p>
-                    {contact.role && <Badge variant="success">{contact.role}</Badge>}
-                  </div>
-                  {contact.phone && <a href={`tel:${contact.phone}`} className="mt-2 block text-sm text-gray-700 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-300">{contact.phone}</a>}
-                  {contact.email && <a href={`mailto:${contact.email}`} className="mt-1 block break-all text-sm text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300">{contact.email}</a>}
-                  <div className="mt-3 flex gap-2 text-gray-500 dark:text-gray-400">
-                    {contact.phone && <Phone className="h-4 w-4" />}
-                    {contact.email && <Mail className="h-4 w-4" />}
-                    <MessageCircle className="h-4 w-4" />
-                  </div>
+              {editing ? (
+                <div className="space-y-3">
+                  <EditField label="Контактное лицо">
+                    <Input
+                      className={editInputClassName}
+                      value={editData.contact ?? ''}
+                      onChange={e => setEditData({ ...editData, contact: e.target.value })}
+                    />
+                  </EditField>
+                  <EditField label="Телефон">
+                    <Input
+                      className={editInputClassName}
+                      value={editData.phone ?? ''}
+                      onChange={e => setEditData({ ...editData, phone: e.target.value })}
+                    />
+                  </EditField>
+                  <EditField label="Email">
+                    <Input
+                      className={editInputClassName}
+                      type="email"
+                      value={editData.email ?? ''}
+                      onChange={e => setEditData({ ...editData, email: e.target.value })}
+                    />
+                  </EditField>
                 </div>
-              ))}
+              ) : (
+                primaryContacts.map((contact, index) => (
+                  <div key={`${contact.name}-${index}`} className="border-b border-gray-100 pb-4 last:border-0 last:pb-0 dark:border-gray-800">
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold text-gray-950 dark:text-white">{contact.name}</p>
+                      {contact.role && <Badge variant="success">{contact.role}</Badge>}
+                    </div>
+                    {contact.phone && <a href={`tel:${contact.phone}`} className="mt-2 block text-sm text-gray-700 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-300">{contact.phone}</a>}
+                    {contact.email && <a href={`mailto:${contact.email}`} className="mt-1 block break-all text-sm text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300">{contact.email}</a>}
+                    <div className="mt-3 flex gap-2 text-gray-500 dark:text-gray-400">
+                      {contact.phone && <Phone className="h-4 w-4" />}
+                      {contact.email && <Mail className="h-4 w-4" />}
+                      <MessageCircle className="h-4 w-4" />
+                    </div>
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base font-semibold">Заметки</CardTitle>
-              <Button size="icon" variant="ghost" title="Добавить заметку">
-                <Plus className="h-4 w-4" />
-              </Button>
+              <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                Заметки
+                {editing && <Badge variant="info">Редактируется</Badge>}
+              </CardTitle>
+              {!editing && (
+                <Button size="icon" variant="ghost" title="Добавить заметку">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
-              {client.notes ? (
+              {editing ? (
+                <EditField label="Примечания">
+                  <Textarea
+                    className={editTextareaClassName}
+                    value={editData.notes ?? ''}
+                    onChange={e => setEditData({ ...editData, notes: e.target.value })}
+                    placeholder="Внутренние заметки по клиенту"
+                  />
+                </EditField>
+              ) : client.notes ? (
                 <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
                   <p className="whitespace-pre-wrap">{client.notes}</p>
                   <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">{client.manager || user?.name || 'Система'}</p>
@@ -1352,20 +1720,27 @@ export default function ClientDetail() {
         <div className="lg:col-span-2 space-y-6">
 
           {/* Main info */}
-          <Card>
+          <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Building2 className="h-4 w-4" />
                 Основная информация
+                {editing && <Badge variant="info">Форма</Badge>}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {editing ? (
                 <div className="space-y-4">
-                  <Input label="Наименование компании" value={editData.company ?? ''} onChange={e => setEditData({ ...editData, company: e.target.value })} />
+                  <EditField label="Наименование компании">
+                    <Input className={editInputClassName} value={editData.company ?? ''} onChange={e => setEditData({ ...editData, company: e.target.value })} />
+                  </EditField>
                   <div className="grid grid-cols-2 gap-4">
-                    <Input label="ИНН" value={editData.inn ?? ''} onChange={e => setEditData({ ...editData, inn: e.target.value })} />
-                    <Input label="Email" type="email" value={editData.email ?? ''} onChange={e => setEditData({ ...editData, email: e.target.value })} />
+                    <EditField label="ИНН">
+                      <Input className={editInputClassName} value={editData.inn ?? ''} onChange={e => setEditData({ ...editData, inn: e.target.value })} />
+                    </EditField>
+                    <EditField label="Email">
+                      <Input className={editInputClassName} type="email" value={editData.email ?? ''} onChange={e => setEditData({ ...editData, email: e.target.value })} />
+                    </EditField>
                   </div>
                   {duplicateClient && (
                     <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
@@ -1385,16 +1760,14 @@ export default function ClientDetail() {
                       {innError}
                     </div>
                   )}
-                  <div>
-                    <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Адрес</label>
-                    <textarea
-                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-[--color-primary] focus:outline-none focus:ring-1 focus:ring-[--color-primary]"
-                      rows={2}
+                  <EditField label="Адрес">
+                    <Textarea
+                      className={editTextareaClassName}
                       value={editData.address ?? ''}
                       onChange={e => setEditData({ ...editData, address: e.target.value })}
                       placeholder="Юридический / фактический адрес"
                     />
-                  </div>
+                  </EditField>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -1418,18 +1791,23 @@ export default function ClientDetail() {
           </Card>
 
           {/* Contact */}
-          <Card>
+          <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <User className="h-4 w-4" />
                 Контакт
+                {editing && <Badge variant="info">Форма</Badge>}
               </CardTitle>
             </CardHeader>
             <CardContent>
               {editing ? (
                 <div className="space-y-4">
-                  <Input label="Контактное лицо" value={editData.contact ?? ''} onChange={e => setEditData({ ...editData, contact: e.target.value })} />
-                  <Input label="Телефон" value={editData.phone ?? ''} onChange={e => setEditData({ ...editData, phone: e.target.value })} />
+                  <EditField label="Контактное лицо">
+                    <Input className={editInputClassName} value={editData.contact ?? ''} onChange={e => setEditData({ ...editData, contact: e.target.value })} />
+                  </EditField>
+                  <EditField label="Телефон">
+                    <Input className={editInputClassName} value={editData.phone ?? ''} onChange={e => setEditData({ ...editData, phone: e.target.value })} />
+                  </EditField>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-4">
@@ -1463,62 +1841,69 @@ export default function ClientDetail() {
           </Card>
 
           {/* Commercial */}
-          <Card>
+          <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <CreditCard className="h-4 w-4" />
                 Коммерческие условия
+                {editing && <Badge variant="info">Форма</Badge>}
               </CardTitle>
             </CardHeader>
             <CardContent>
               {editing ? (
                 <div className="space-y-4">
-                  <Select
-                    label="Условия оплаты"
-                    value={editData.paymentTerms ?? ''}
-                    onValueChange={v => setEditData({ ...editData, paymentTerms: v })}
-                    options={PAYMENT_TERMS_OPTIONS}
-                  />
+                  <EditField label="Условия оплаты">
+                    <select
+                      className={editSelectClassName}
+                      value={editData.paymentTerms ?? ''}
+                      onChange={e => setEditData({ ...editData, paymentTerms: e.target.value })}
+                    >
+                      <option value="">Не указано</option>
+                      {PAYMENT_TERMS_OPTIONS.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </EditField>
                   <div className={`grid gap-4 ${canEditDebt ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
-                    <div>
-                      <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Кредитный лимит, ₽</label>
+                    <EditField label="Кредитный лимит, ₽">
                       <Input
+                        className={editInputClassName}
                         type="number"
                         min={0}
                         value={String(editData.creditLimit ?? 0)}
                         onChange={e => setEditData({ ...editData, creditLimit: Number(e.target.value) })}
                       />
-                    </div>
+                    </EditField>
                     {canEditDebt && (
-                      <div>
-                        <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Ручная дебиторка, ₽</label>
+                      <EditField label="Ручная дебиторка, ₽">
                         <Input
+                          className={editInputClassName}
                           type="number"
                           min={0}
                           value={String(editData.debt ?? 0)}
                           onChange={e => setEditData({ ...editData, debt: Number(e.target.value) })}
                         />
-                      </div>
+                      </EditField>
                     )}
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     Итоговая задолженность складывается из ручной дебиторки и неоплаченных аренд.
                   </p>
-                  <Input
-                    label="Ответственный менеджер"
-                    value={editData.manager ?? ''}
-                    onChange={e => setEditData({ ...editData, manager: e.target.value })}
-                  />
-                  <div>
-                    <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Примечания</label>
-                    <textarea
-                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-[--color-primary] focus:outline-none focus:ring-1 focus:ring-[--color-primary]"
-                      rows={2}
+                  <EditField label="Ответственный менеджер">
+                    <Input
+                      className={editInputClassName}
+                      value={editData.manager ?? ''}
+                      onChange={e => setEditData({ ...editData, manager: e.target.value })}
+                    />
+                  </EditField>
+                  <EditField label="Примечания">
+                    <Textarea
+                      className={editTextareaClassName}
                       value={editData.notes ?? ''}
                       onChange={e => setEditData({ ...editData, notes: e.target.value })}
                       placeholder="Примечания..."
                     />
-                  </div>
+                  </EditField>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -1640,31 +2025,49 @@ export default function ClientDetail() {
               ) : (
                 <div className="space-y-3">
                   {client360.rentals.latest.map((rental) => {
+                    const navigationId = canViewRentals ? resolveRentalNavigationId(rental, rentals, ganttRentals) : null;
+                    const unavailableTitle = canViewRentals ? 'Нет связи с карточкой аренды' : 'Нет доступа к карточке аренды';
                     return (
                       <div
                         key={rental.id}
-                        className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:border-blue-400 cursor-pointer transition-colors"
-                        onClick={() => navigate(`/rentals/${rental.id}`)}
+                        className={cn(
+                          'rounded-lg border border-gray-200 p-4 transition-colors dark:border-gray-700',
+                          navigationId ? 'cursor-pointer hover:border-blue-400' : 'opacity-75',
+                        )}
+                        title={navigationId ? 'Открыть карточку аренды' : unavailableTitle}
+                        onClick={() => {
+                          if (navigationId) navigate(`/rentals/${navigationId}`);
+                        }}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <p className="font-medium text-gray-900 dark:text-white text-sm">{rental.id}</p>
+                              <p className="font-medium text-gray-900 dark:text-white text-sm">{navigationId || rental.id}</p>
                               <Badge variant={rentalStatusVariant(rental.status)}>{rentalStatusLabel(rental.status)}</Badge>
                             </div>
                             <p className="text-xs text-gray-500 truncate">{rental.equipment || '—'}</p>
                             <p className="text-xs text-gray-400 mt-0.5">
                               {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
                             </p>
+                            {!navigationId && (
+                              <p className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-300">
+                                <AlertTriangle className="h-3 w-3" />
+                                {unavailableTitle}
+                              </p>
+                            )}
                           </div>
                           <div className="text-right shrink-0">
                             <p className="font-semibold text-sm text-gray-900 dark:text-white">
                               {canViewFinance ? formatCurrency(rental.amount || 0) : 'Сумма скрыта'}
                             </p>
                             <p className="text-xs text-gray-500">{rental.manager || '—'}</p>
-                            <Link to={`/rentals/${rental.id}`} className="mt-1 inline-block text-xs text-[--color-primary] hover:underline" onClick={event => event.stopPropagation()}>
-                              Открыть аренду
-                            </Link>
+                            {navigationId ? (
+                              <Link to={`/rentals/${navigationId}`} className="mt-1 inline-block text-xs text-[--color-primary] hover:underline" onClick={event => event.stopPropagation()}>
+                                Открыть аренду
+                              </Link>
+                            ) : (
+                              <span className="mt-1 inline-block text-xs text-gray-400">Связь повреждена</span>
+                            )}
                           </div>
                         </div>
                       </div>

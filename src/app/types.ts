@@ -819,23 +819,40 @@ export interface ServiceFieldTrip {
   createdByUserName?: string | null;
 }
 
-export type ClientStatus = 'active' | 'inactive' | 'blocked';
+export type ClientStatus = 'active' | 'inactive' | 'blocked' | 'new';
+
+export interface ClientContactPerson {
+  id?: string;
+  name: string;
+  role?: string;
+  phone?: string;
+  email?: string;
+}
 
 export interface Client {
   id: string;
   company: string;
   inn: string;
   innNormalized?: string;
+  kpp?: string;
+  ogrn?: string;
+  clientType?: 'legal' | 'individual_entrepreneur' | 'individual' | string;
+  verified?: boolean;
   contact: string;
   phone: string;
   email: string;
+  contacts?: ClientContactPerson[];
   address?: string;
+  legalAddress?: string;
+  actualAddress?: string;
   paymentTerms: string;
   creditLimit: number;
   debt: number;
   lastRentalDate?: string;
   totalRentals: number;
   manager?: string;
+  managerRole?: string;
+  managerAvatar?: string;
   status?: ClientStatus;
   notes?: string;
   partnerCardFileName?: string;

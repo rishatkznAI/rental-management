@@ -10,9 +10,10 @@ import {
   ArrowLeft, Edit, FileText, TrendingUp, Clock, Phone, Mail,
   Building2, MapPin, User, CreditCard, CheckCircle, XCircle,
   AlertTriangle, Download, Plus, Save, Trash2, Upload, X, Wrench,
-  ShieldAlert,
+  ShieldAlert, MoreHorizontal, Printer, MessageCircle, Paperclip,
+  Star, CalendarDays, ReceiptText, BriefcaseBusiness, MapPinned,
 } from 'lucide-react';
-import { formatDate, formatDateTime, formatCurrency } from '../lib/utils';
+import { cn, formatDate, formatDateTime, formatCurrency } from '../lib/utils';
 import { useClientById, useDeleteClient, useUpdateClient } from '../hooks/useClients';
 import { useGanttData } from '../hooks/useRentals';
 import { usePaymentsList } from '../hooks/usePayments';
@@ -40,14 +41,16 @@ import {
 type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'default';
 
 const CLIENT_STATUS_LABELS: Record<ClientStatus, string> = {
-  active: 'Активен',
-  inactive: 'Неактивен',
-  blocked: 'Заблокирован',
+  active: 'Активный',
+  inactive: 'Архив',
+  blocked: 'Проблемный',
+  new: 'Новый',
 };
 
 function clientStatusVariant(s?: ClientStatus): BadgeVariant {
   if (s === 'active') return 'success';
   if (s === 'blocked') return 'error';
+  if (s === 'new') return 'info';
   return 'default';
 }
 
@@ -178,6 +181,64 @@ function Field({ label, value, mono, className }: { label: string; value?: strin
     <div className={className}>
       <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
       <p className={`text-sm font-medium text-gray-900 dark:text-white ${mono ? 'font-mono' : ''}`}>{value}</p>
+    </div>
+  );
+}
+
+function getInitials(value?: string | null) {
+  const words = String(value || '')
+    .replace(/[«»"]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word && !/^(ооо|ао|пао|ип|зао)$/iu.test(word));
+  const initials = words.slice(0, 2).map(word => word[0]).join('').toUpperCase();
+  return initials || 'КЛ';
+}
+
+function clientTypeLabel(client: Client) {
+  if (client.clientType === 'individual_entrepreneur') return 'ИП';
+  if (client.clientType === 'individual') return 'Физлицо';
+  if (client.clientType === 'legal') return 'Юридическое лицо';
+  const innLength = normalizeInn(client.inn).length;
+  if (innLength === 12) return 'ИП';
+  return 'Юридическое лицо';
+}
+
+function StatTile({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: 'default' | 'danger' | 'success';
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-white/80 p-4 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.5)] dark:border-gray-800 dark:bg-gray-900/60">
+      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</p>
+      <div
+        className={cn(
+          'mt-2 text-xl font-bold text-gray-950 dark:text-white',
+          tone === 'danger' && 'text-red-600 dark:text-red-300',
+          tone === 'success' && 'text-emerald-600 dark:text-emerald-300',
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function InfoPill({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex min-w-0 items-start gap-3 rounded-2xl bg-gray-50 p-3 dark:bg-gray-900/60">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-blue-600 shadow-sm dark:bg-gray-800 dark:text-blue-300">
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+        <p className="mt-0.5 break-words text-sm font-medium text-gray-950 dark:text-white">{value}</p>
+      </div>
     </div>
   );
 }
@@ -330,6 +391,60 @@ export default function ClientDetail() {
   const displayedTotalRentals = clientFinancial?.totalRentals ?? client?.totalRentals ?? 0;
   const displayedActiveRentals = clientFinancial?.activeRentals ?? activeRentals.length;
   const displayedLastRentalDate = clientFinancial?.lastRentalDate ?? client?.lastRentalDate;
+  const primaryContacts = useMemo(() => {
+    const contacts = Array.isArray(client?.contacts) ? client.contacts : [];
+    const rows = contacts
+      .filter(item => item?.name || item?.phone || item?.email)
+      .slice(0, 3);
+    if (rows.length > 0) return rows;
+    return [{
+      name: client?.contact || 'Контакт не указан',
+      role: client?.clientType === 'individual_entrepreneur' ? 'ИП' : 'Контактное лицо',
+      phone: client?.phone,
+      email: client?.email,
+    }];
+  }, [client]);
+  const visibleFiles = useMemo(() => {
+    const files = [];
+    if (client?.partnerCardDataUrl) {
+      files.push({
+        id: 'partner-card',
+        title: client.partnerCardFileName || 'Карта партнёра',
+        meta: [
+          client.partnerCardMimeType || 'Файл',
+          client.partnerCardUploadedAt ? formatDate(client.partnerCardUploadedAt) : '',
+        ].filter(Boolean).join(' · '),
+      });
+    }
+    client360.documents.latest.slice(0, 2).forEach(doc => {
+      files.push({
+        id: doc.id,
+        title: doc.type || 'Документ',
+        meta: [doc.status, doc.date ? formatDate(doc.date) : ''].filter(Boolean).join(' · '),
+      });
+    });
+    return files.slice(0, 3);
+  }, [client, client360.documents.latest]);
+  const recentActivity = useMemo(() => {
+    const history = [...(client?.history || [])]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 3)
+      .map(entry => ({
+        id: `${entry.date}-${entry.author}-${entry.text}`,
+        title: entry.text,
+        meta: [entry.author, formatDateTime(entry.date)].filter(Boolean).join(' · '),
+        icon: Clock,
+        tone: 'blue',
+      }));
+    if (history.length > 0) return history;
+    return client360.rentals.latest.slice(0, 3).map(rental => ({
+      id: rental.id,
+      title: `Аренда ${rentalStatusLabel(rental.status).toLowerCase()}`,
+      meta: [rental.equipment, rental.endDate ? `до ${formatDate(rental.endDate)}` : ''].filter(Boolean).join(' · '),
+      icon: TrendingUp,
+      tone: 'green',
+    }));
+  }, [client?.history, client360.rentals.latest]);
 
   // Persist changes — optimistic + server PATCH
   const persist = useCallback((updated: Client) => {
@@ -587,27 +702,18 @@ export default function ClientDetail() {
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-4">
-          <Button variant="secondary" onClick={() => navigate('/clients')}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{client.company}</h1>
-              {client.status && (
-                <Badge variant={clientStatusVariant(client.status)}>
-                  {CLIENT_STATUS_LABELS[client.status]}
-                </Badge>
-              )}
-            </div>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">ИНН: {client.inn}</p>
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <Button variant="ghost" className="w-fit text-gray-600 hover:text-gray-950 dark:text-gray-300 dark:hover:text-white" onClick={() => navigate('/clients')}>
+          <ArrowLeft className="h-4 w-4" />
+          Назад к списку клиентов
+        </Button>
+        <div className="flex flex-wrap gap-2">
           {!editing ? (
             <>
+              <Button variant="secondary">
+                <MoreHorizontal className="h-4 w-4" />
+                Ещё
+              </Button>
               {canEdit && (
                 <Button variant="secondary" onClick={startEdit}>
                   <Edit className="h-4 w-4" />
@@ -622,6 +728,9 @@ export default function ClientDetail() {
                   </Button>
                 </Link>
               )}
+              <Button variant="secondary" size="icon" onClick={() => window.print()} title="Печать">
+                <Printer className="h-4 w-4" />
+              </Button>
               {canDelete && (
                 <Button
                   variant="secondary"
@@ -649,44 +758,359 @@ export default function ClientDetail() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Building2 className="h-4 w-4" />
-            Сводка по клиенту
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <Field label="Компания" value={client.company} />
-            <Field label="ИНН" value={client.inn || '—'} mono />
-            <Field label="Контактное лицо" value={client.contact || '—'} />
-            <Field label="Ответственный менеджер" value={client.manager || 'Не назначен'} />
-            <Field label="Телефон" value={client.phone || '—'} />
-            <Field label="Email" value={client.email || '—'} />
-            <Field label="Условия оплаты" value={client.paymentTerms || '—'} />
-            <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">Риск клиента</p>
-              <Badge variant={client360RiskVariant(client360.debt.riskLevel)}>{client360.debt.riskLabel}</Badge>
-            </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-4">
+          <Card className="overflow-hidden rounded-[24px] border-gray-200/80 bg-white shadow-[0_24px_80px_-56px_rgba(15,23,42,0.65)] dark:border-gray-800 dark:bg-gray-950">
+            <CardContent className="p-0">
+              <div className="flex flex-col gap-6 p-5 sm:p-7 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex min-w-0 flex-col gap-5 sm:flex-row sm:items-center">
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-50 via-violet-50 to-emerald-50 text-3xl font-bold text-blue-700 ring-1 ring-blue-100 dark:from-blue-950/60 dark:via-violet-950/40 dark:to-emerald-950/30 dark:text-blue-200 dark:ring-blue-900/60">
+                    {getInitials(client.company)}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h1 className="min-w-0 break-words text-xl font-bold leading-tight text-gray-950 dark:text-white sm:text-2xl">
+                        {client.company}
+                      </h1>
+                      {client.status && (
+                        <Badge variant={clientStatusVariant(client.status)}>
+                          {CLIENT_STATUS_LABELS[client.status]}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600 dark:text-gray-300">
+                      {client.inn && <span>ИНН {client.inn}</span>}
+                      {client.kpp && <><span className="text-gray-300 dark:text-gray-700">•</span><span>КПП {client.kpp}</span></>}
+                      {client.ogrn && <><span className="text-gray-300 dark:text-gray-700">•</span><span>ОГРН {client.ogrn}</span></>}
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                        {clientTypeLabel(client)}
+                      </span>
+                      {client.verified && (
+                        <Badge variant="info">
+                          <CheckCircle className="mr-1 h-3 w-3" />
+                          Проверен
+                        </Badge>
+                      )}
+                      <Badge variant={client360RiskVariant(client360.debt.riskLevel)}>
+                        {client360.debt.riskLabel} риск
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="min-w-[220px] rounded-2xl bg-gray-50 p-4 dark:bg-gray-900/70">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Менеджер</p>
+                  <div className="mt-3 flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-white text-sm font-semibold text-blue-700 shadow-sm dark:bg-gray-800 dark:text-blue-200">
+                      {client.managerAvatar ? (
+                        <img src={client.managerAvatar} alt={client.manager || 'Менеджер'} className="h-full w-full object-cover" />
+                      ) : (
+                        getInitials(client.manager || user?.name || 'МН')
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-gray-950 dark:text-white">{client.manager || 'Не назначен'}</p>
+                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">{client.managerRole || 'Ответственный'}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-1 overflow-x-auto border-t border-gray-100 px-5 dark:border-gray-800 sm:px-7">
+                {[
+                  ['Обзор', null],
+                  ['Аренды', clientRentals.length],
+                  ['Платежи', canViewPayments ? client360.payments.total : null],
+                  ['Документы', client360.documents.total],
+                  ['Техника', client360.rentals.active.length],
+                  ['История активности', (client.history || []).length],
+                ].map(([label, count], index) => (
+                  <button
+                    key={String(label)}
+                    type="button"
+                    className={cn(
+                      'flex h-12 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors',
+                      index === 0
+                        ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-300'
+                        : 'border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white',
+                    )}
+                  >
+                    {label}
+                    {typeof count === 'number' && (
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                  <Building2 className="h-4 w-4 text-blue-600" />
+                  Основная информация
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 2xl:grid-cols-2">
+                <InfoPill icon={BriefcaseBusiness} label="Полное название" value={client.company} />
+                <InfoPill icon={Building2} label="Тип клиента" value={clientTypeLabel(client)} />
+                <InfoPill icon={CalendarDays} label="Дата регистрации" value={client.createdAt ? formatDate(client.createdAt) : undefined} />
+                <InfoPill icon={Star} label="Рейтинг" value={client360.debt.riskLabel} />
+                <InfoPill icon={MapPinned} label="Юр. адрес" value={client.legalAddress || client.address} />
+                <InfoPill icon={MapPin} label="Факт. адрес" value={client.actualAddress || client.address} />
+                <InfoPill icon={Mail} label="Email" value={client.email} />
+                <InfoPill icon={Phone} label="Телефон" value={client.phone} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-3">
+                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                  <CreditCard className="h-4 w-4 text-emerald-600" />
+                  Финансовая сводка
+                </CardTitle>
+                <span className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">На сегодня</span>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!canViewFinance ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Финансовые данные скрыты правами доступа.</p>
+                ) : (
+                  <>
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Общая задолженность</p>
+                      <p className={cn('mt-1 text-3xl font-bold', displayedDebt > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300')}>
+                        {formatCurrency(displayedDebt)}
+                      </p>
+                      {client360.debt.overdue > 0 && (
+                        <span className="mt-2 inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-200">
+                          Просрочено: {formatCurrency(client360.debt.overdue)}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="mb-2 flex items-center justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">Доступный лимит</span>
+                        <span className="font-semibold text-gray-950 dark:text-white">{formatCurrency(Math.max(0, (client.creditLimit || 0) - displayedDebt))}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                        <div
+                          className="h-full rounded-full bg-emerald-500"
+                          style={{ width: `${Math.max(0, Math.min(100, client.creditLimit ? ((client.creditLimit - displayedDebt) / client.creditLimit) * 100 : 0))}%` }}
+                        />
+                      </div>
+                    </div>
+                    <Divider />
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">Кредитный лимит</span>
+                      <span className="font-semibold text-gray-950 dark:text-white">{formatCurrency(client.creditLimit || 0)}</span>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
           </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <StatTile label="Текущие аренды" value={displayedActiveRentals} />
+            <StatTile label="Всего аренд" value={clientRentals.length || displayedTotalRentals} />
+            <StatTile label="Открытых сервисных заявок" value={client360.service.open} tone={client360.service.open > 0 ? 'danger' : 'success'} />
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-3">
+                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                  <TrendingUp className="h-4 w-4 text-blue-600" />
+                  Текущие аренды
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">{client360.rentals.active.length}</span>
+                </CardTitle>
+                <Link to="/rentals" className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-300">Смотреть все</Link>
+              </CardHeader>
+              <CardContent>
+                {client360.rentals.latest.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Аренд не найдено.</p>
+                ) : (
+                  <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-100 dark:divide-gray-800 dark:border-gray-800">
+                    {client360.rentals.latest.slice(0, 3).map(rental => (
+                      <button
+                        key={rental.id}
+                        type="button"
+                        className="flex w-full items-center gap-4 bg-white p-3 text-left transition-colors hover:bg-gray-50 dark:bg-gray-950 dark:hover:bg-gray-900"
+                        onClick={() => navigate(`/rentals/${rental.id}`)}
+                      >
+                        <div className="flex h-14 w-16 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
+                          <Wrench className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-gray-950 dark:text-white">{rental.equipment || rental.id}</p>
+                          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                            {rental.id} · {formatDate(rental.startDate)} — {formatDate(rental.endDate)}
+                          </p>
+                          <Badge variant={rentalStatusVariant(rental.status)} className="mt-1">{rentalStatusLabel(rental.status)}</Badge>
+                        </div>
+                        {canViewFinance && (
+                          <div className="text-right text-sm font-semibold text-gray-950 dark:text-white">
+                            {formatCurrency(rental.amount || 0)}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                  <Clock className="h-4 w-4 text-orange-500" />
+                  История активности
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {recentActivity.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Активность пока не зафиксирована.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {recentActivity.map(item => {
+                      const Icon = item.icon;
+                      return (
+                        <div key={item.id} className="flex gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-300">
+                            <Icon className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="line-clamp-2 text-sm font-medium text-gray-950 dark:text-white">{item.title}</p>
+                            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{item.meta}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base font-semibold">Контакты</CardTitle>
+              <Button size="icon" variant="ghost" title="Добавить контакт">
+                <Plus className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {primaryContacts.map((contact, index) => (
+                <div key={`${contact.name}-${index}`} className="border-b border-gray-100 pb-4 last:border-0 last:pb-0 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-gray-950 dark:text-white">{contact.name}</p>
+                    {contact.role && <Badge variant="success">{contact.role}</Badge>}
+                  </div>
+                  {contact.phone && <a href={`tel:${contact.phone}`} className="mt-2 block text-sm text-gray-700 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-300">{contact.phone}</a>}
+                  {contact.email && <a href={`mailto:${contact.email}`} className="mt-1 block break-all text-sm text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300">{contact.email}</a>}
+                  <div className="mt-3 flex gap-2 text-gray-500 dark:text-gray-400">
+                    {contact.phone && <Phone className="h-4 w-4" />}
+                    {contact.email && <Mail className="h-4 w-4" />}
+                    <MessageCircle className="h-4 w-4" />
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base font-semibold">Заметки</CardTitle>
+              <Button size="icon" variant="ghost" title="Добавить заметку">
+                <Plus className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {client.notes ? (
+                <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+                  <p className="whitespace-pre-wrap">{client.notes}</p>
+                  <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">{client.manager || user?.name || 'Система'}</p>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">Заметок по клиенту пока нет.</p>
+              )}
+              {clientDebtPlan?.comment && (
+                <div className="rounded-2xl bg-blue-50 p-4 text-sm text-blue-950 dark:bg-blue-950/30 dark:text-blue-100">
+                  <p className="whitespace-pre-wrap">{clientDebtPlan.comment}</p>
+                  <p className="mt-3 text-xs text-blue-700 dark:text-blue-300">План взыскания</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base font-semibold">Прикреплённые файлы</CardTitle>
+              {canEdit ? (
+                <label title="Загрузить файл">
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+                    onChange={handlePartnerCardUpload}
+                  />
+                  <span className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
+                    <Plus className="h-4 w-4" />
+                  </span>
+                </label>
+              ) : null}
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {visibleFiles.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">Файлы не прикреплены.</p>
+              ) : (
+                visibleFiles.map(file => (
+                  <div key={file.id} className="flex items-start gap-3 rounded-2xl border border-gray-100 p-3 dark:border-gray-800">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300">
+                      <Paperclip className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-blue-600 dark:text-blue-300">{file.title}</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{file.meta}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+              {visibleFiles.length > 0 && (
+                <Link to="/documents" className="block rounded-xl border border-gray-200 px-3 py-2 text-center text-sm font-medium text-blue-600 hover:bg-gray-50 dark:border-gray-700 dark:text-blue-300 dark:hover:bg-gray-900">
+                  Все файлы
+                </Link>
+              )}
+            </CardContent>
+          </Card>
+
           {quickActions.length > 0 && (
-            <div className="space-y-2 border-t border-gray-100 pt-4 dark:border-gray-800">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Быстрые действия</p>
-              <div className="flex flex-wrap gap-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base font-semibold">Быстрые действия</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
                 {quickActions.map(action => (
                   <Link key={action.id} to={action.to}>
                     <Button variant={action.kind === 'primary' ? 'default' : 'secondary'} size="sm">
-                      {action.id === 'client-create-rental' && <Plus className="h-4 w-4" />}
+                      {action.id === 'client-create-rental' ? <Plus className="h-4 w-4" /> : <ReceiptText className="h-4 w-4" />}
                       {action.label}
                     </Button>
                   </Link>
                 ))}
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>

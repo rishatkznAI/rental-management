@@ -395,7 +395,7 @@ export function Sidebar({
     <aside
       className={cn(
         'fixed left-0 top-0 z-40 h-screen w-64',
-        'border-r border-sidebar-border bg-[linear-gradient(180deg,#081225_0%,#0b1730_54%,#101b3f_100%)] text-sidebar-foreground shadow-[0_36px_60px_-34px_rgba(0,0,0,0.7)] backdrop-blur-xl dark:bg-sidebar',
+        'border-r border-sidebar-border bg-[linear-gradient(180deg,#081225_0%,#0b1730_54%,#101b3f_100%)] text-sidebar-foreground shadow-[0_36px_60px_-34px_rgba(0,0,0,0.7)] backdrop-blur-xl dark:bg-none dark:bg-sidebar',
         'transition-[transform,width] duration-300 ease-in-out',
         desktopCollapsed ? 'sm:w-20' : 'sm:w-64',
         isOpen ? 'translate-x-0' : '-translate-x-full',
@@ -457,7 +457,7 @@ export function Sidebar({
           </div>
 
           {isSearchOpen && !desktopCollapsed && (
-            <div className="mt-2 rounded-2xl border border-sidebar-border bg-[#0f1b34] shadow-[0_24px_45px_-30px_rgba(0,0,0,0.85)]">
+            <div className="mt-2 rounded-2xl border border-sidebar-border bg-[#0f1b34] shadow-[0_24px_45px_-30px_rgba(0,0,0,0.85)] dark:bg-popover">
               {searchResultsCount === 0 ? (
                 <div className="px-4 py-4 text-sm text-muted-foreground">
                   Ничего не найдено
@@ -531,7 +531,7 @@ export function Sidebar({
                         'relative flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] transition-colors',
                         desktopCollapsed && 'sm:h-11 sm:justify-center sm:gap-0 sm:px-0',
                         isActive
-                          ? 'bg-[linear-gradient(135deg,#2563eb_0%,#6366f1_100%)] text-white shadow-[0_16px_30px_-22px_rgba(59,130,246,0.95)] dark:bg-primary dark:text-primary-foreground dark:shadow-[0_16px_30px_-22px_rgba(212,247,74,0.95)]'
+                          ? 'bg-[linear-gradient(135deg,#2563eb_0%,#6366f1_100%)] text-white shadow-[0_16px_30px_-22px_rgba(59,130,246,0.95)] dark:bg-none dark:bg-primary dark:text-primary-foreground dark:shadow-[0_16px_30px_-22px_rgba(212,247,74,0.95)]'
                           : 'text-white/68 hover:bg-white/8 hover:text-sidebar-foreground',
                       )}
                     >

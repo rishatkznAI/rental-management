@@ -80,9 +80,16 @@ function equipmentOptionLabel(eq: Equipment): string {
 
 // ─── selectClass — единый стиль для нативных <select> ──────────────────────
 const selectClass =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm ' +
-  'focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] ' +
-  'dark:border-gray-600 dark:bg-gray-700 dark:text-white';
+  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm ' +
+  'focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 ' +
+  'dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400';
+
+const modalOverlayClass = 'app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px] dark:bg-black/60';
+const modalSurfaceClass = 'app-animate-modal fixed left-1/2 top-1/2 z-10 flex w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl';
+const modalHeaderClass = 'flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800';
+const modalBodyClass = 'min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5';
+const modalFooterClass = 'flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 sm:flex-row sm:justify-end dark:border-gray-800 dark:bg-gray-950/95';
+const modalCloseClass = 'absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200';
 
 function getGanttRentalSourceId(rental: GanttRentalData): string {
   return String(
@@ -169,19 +176,24 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
-        <div className="mb-4 flex items-center justify-between">
+      <div data-state={presence.dataState} className={modalOverlayClass} onClick={onClose} />
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className={`${modalSurfaceClass} max-w-md`}>
+        <div className={modalHeaderClass}>
           <div className="flex items-center gap-2">
-            <RotateCcw className="h-5 w-5 text-[--color-primary]" />
-            <h3 className="text-lg text-gray-900 dark:text-white">Возврат техники</h3>
+            <span className="flex size-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300">
+              <RotateCcw className="h-5 w-5" />
+            </span>
+            <div>
+              <h3 className="text-xl font-semibold text-slate-950 dark:text-white">Возврат техники</h3>
+              <p className="mt-0.5 text-sm text-slate-500 dark:text-gray-400">Зафиксируйте дату и состояние техники после возврата.</p>
+            </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
+          <button onClick={onClose} className={modalCloseClass}>
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className={modalBodyClass}>
 
           {/* Выбор аренды — только когда аренда не передана заранее */}
           {showPicker && (
@@ -212,7 +224,7 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
 
           {/* Карточка выбранной аренды */}
           {rental && (
-            <div className="rounded-lg bg-gray-50 p-3 text-sm dark:bg-gray-900/50">
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 text-sm dark:border-gray-800 dark:bg-gray-900/60">
               <div className="mb-1 text-xs text-gray-500">Аренда</div>
               <div className="font-medium text-gray-900 dark:text-white">
                 {rental.id} — {rental.client}
@@ -248,7 +260,7 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
                     { value: 'service',   label: 'Отправить в сервис' },
                     { value: 'downtime',  label: 'Простой' },
                   ].map((opt) => (
-                    <label key={opt.value} className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 p-2.5 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900/50">
+                    <label key={opt.value} className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:bg-slate-50 dark:border-gray-800 dark:bg-gray-900/60 dark:hover:bg-gray-900">
                       <input
                         type="radio"
                         name="result"
@@ -264,8 +276,10 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
               </div>
             </>
           )}
+        </div>
 
-          <div className="flex gap-3 pt-2">
+          <div className={modalFooterClass}>
+            <Button variant="secondary" onClick={onClose}>Отмена</Button>
             <Button
               onClick={() => {
                 if (!rental) return;
@@ -281,9 +295,7 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
             >
               Подтвердить возврат
             </Button>
-            <Button variant="secondary" onClick={onClose}>Отмена</Button>
           </div>
-        </div>
       </div>
     </div>
   );
@@ -331,19 +343,24 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
-        <div className="mb-4 flex items-center justify-between">
+      <div data-state={presence.dataState} className={modalOverlayClass} onClick={onClose} />
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className={`${modalSurfaceClass} max-w-md`}>
+        <div className={modalHeaderClass}>
           <div className="flex items-center gap-2">
-            <PauseCircle className="h-5 w-5 text-amber-500" />
-            <h3 className="text-lg text-gray-900 dark:text-white">Отметить простой</h3>
+            <span className="flex size-10 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-300">
+              <PauseCircle className="h-5 w-5" />
+            </span>
+            <div>
+              <h3 className="text-xl font-semibold text-slate-950 dark:text-white">Отметить простой</h3>
+              <p className="mt-0.5 text-sm text-slate-500 dark:text-gray-400">Укажите технику, период и причину простоя.</p>
+            </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
+          <button onClick={onClose} className={modalCloseClass}>
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className={modalBodyClass}>
           <div>
             <label className="mb-1.5 block text-sm text-gray-700 dark:text-gray-300">Техника</label>
             {allEquipment.length === 0 ? (
@@ -376,13 +393,14 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
             </select>
           </div>
 
-          <div className="flex gap-3 pt-2">
+        </div>
+
+          <div className={modalFooterClass}>
+            <Button variant="secondary" onClick={onClose}>Отмена</Button>
             <Button onClick={() => onConfirm({ equipmentInv, startDate, endDate, reason })}>
               Сохранить простой
             </Button>
-            <Button variant="secondary" onClick={onClose}>Отмена</Button>
           </div>
-        </div>
       </div>
     </div>
   );
@@ -606,17 +624,19 @@ export function NewRentalModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-lg flex-col overflow-hidden rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-800">
-        <div className="mb-4 flex shrink-0 items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Новая аренда</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
+      <div data-state={presence.dataState} className={modalOverlayClass} onClick={onClose} />
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className={`${modalSurfaceClass} max-h-[85vh] max-w-lg`}>
+        <div className={modalHeaderClass}>
+          <div>
+            <h3 className="text-xl font-semibold text-slate-950 dark:text-white">Новая аренда</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">Выберите клиента, период, технику и коммерческие условия.</p>
+          </div>
+          <button onClick={onClose} className={modalCloseClass}>
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <div className="space-y-4">
+        <div className={modalBodyClass}>
 
           {/* Клиент */}
           <div>
@@ -643,7 +663,7 @@ export function NewRentalModal({
           </div>
 
           {clientId && selectedClientFinancial && (
-            <div className={`rounded-lg border px-3 py-3 text-sm ${
+            <div className={`rounded-2xl border px-3 py-3 text-sm ${
               selectedClientFinancial.exceededLimit || selectedClientFinancial.overdueRentals > 0
                 ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
                 : selectedClientFinancial.currentDebt > 0
@@ -727,7 +747,7 @@ export function NewRentalModal({
 
             {/* Предупреждение о конфликте с деталями */}
             {conflictWarn && (
-              <div className="mt-1.5 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700 dark:border-orange-700 dark:bg-orange-900/20 dark:text-orange-400">
+              <div className="mt-2 rounded-2xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700 dark:border-orange-700 dark:bg-orange-900/20 dark:text-orange-400">
                 <p className="font-medium">⚠ Техника занята на выбранный период</p>
                 {conflictingRental ? (
                   <>
@@ -774,7 +794,7 @@ export function NewRentalModal({
             />
           </div>
 
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900/50">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-gray-800 dark:bg-gray-900/60">
             <div className="flex items-center justify-between gap-3">
               <span className="text-gray-500 dark:text-gray-400">
                 {rentalDays > 0 ? `Итого за ${rentalDays} дн.` : 'Итого'}
@@ -783,10 +803,10 @@ export function NewRentalModal({
             </div>
           </div>
 
-          </div>
         </div>
 
-        <div className="mt-4 flex shrink-0 gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+        <div className={modalFooterClass}>
+          <Button variant="secondary" onClick={onClose}>Отмена</Button>
           <Button
             onClick={() => {
               if (!selectedEquipment || !selectedClient) return;
@@ -806,7 +826,6 @@ export function NewRentalModal({
           >
             Создать аренду
           </Button>
-          <Button variant="secondary" onClick={onClose}>Отмена</Button>
         </div>
       </div>
     </div>

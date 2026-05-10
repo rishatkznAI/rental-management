@@ -53,12 +53,15 @@ const DialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         data-slot="dialog-content"
-        className={animatedModalClassName(cn("grid", className))}
+        className={animatedModalClassName(cn(
+          "grid max-h-[min(90vh,760px)] overflow-hidden",
+          className,
+        ))}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
-          <XIcon />
+        <DialogPrimitive.Close className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:pointer-events-none dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200 [&_svg]:pointer-events-none [&_svg]:shrink-0">
+          <XIcon className="size-4" />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
@@ -70,7 +73,10 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-left", className)}
+      className={cn(
+        "flex flex-col gap-2 border-b border-slate-100 pb-4 pr-10 text-left dark:border-gray-800",
+        className,
+      )}
       {...props}
     />
   );
@@ -81,7 +87,7 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="dialog-footer"
       className={cn(
-        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+        "mt-2 flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end dark:border-gray-800",
         className,
       )}
       {...props}
@@ -96,7 +102,7 @@ function DialogTitle({
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-lg leading-none font-semibold", className)}
+      className={cn("text-xl font-semibold leading-tight text-slate-950 dark:text-white", className)}
       {...props}
     />
   );
@@ -109,7 +115,7 @@ function DialogDescription({
   return (
     <DialogPrimitive.Description
       data-slot="dialog-description"
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn("text-sm leading-6 text-slate-500 dark:text-gray-400", className)}
       {...props}
     />
   );

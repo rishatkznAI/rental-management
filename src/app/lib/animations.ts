@@ -29,11 +29,11 @@ export type AnimationPresenceState = 'open' | 'closed';
 
 export const animationClasses = {
   overlay:
-    'app-animate-overlay fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]',
+    'app-animate-overlay fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-[3px] dark:bg-black/60',
   modal:
-    'app-animate-modal fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-lg gap-4 rounded-2xl border border-border bg-card p-6 shadow-[0_28px_80px_-42px_rgba(15,23,42,0.55)] dark:bg-background dark:shadow-lg',
+    'app-animate-modal fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-lg gap-4 rounded-2xl border border-slate-200/90 bg-white p-6 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl',
   drawerBase:
-    'app-animate-drawer fixed z-50 flex flex-col gap-4 border-border bg-card shadow-[0_28px_80px_-42px_rgba(15,23,42,0.55)] will-change-transform dark:bg-background dark:shadow-lg',
+    'app-animate-drawer fixed z-50 flex flex-col border-slate-200/90 bg-white shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] will-change-transform dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl',
   card: 'app-animate-section',
   section: 'app-animate-section',
   collapse: 'app-animate-collapse',

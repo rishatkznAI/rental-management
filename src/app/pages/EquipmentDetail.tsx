@@ -3706,21 +3706,21 @@ export default function EquipmentDetail() {
       {/* ── Modals ── */}
       <Dialog.Root open={showCreateServiceModal} onOpenChange={setShowCreateServiceModal}>
         <Dialog.Portal>
-          <Dialog.Overlay className={animatedOverlayClassName('bg-black/60')} />
-          <Dialog.Content className={animatedModalClassName('max-h-[92vh] w-[min(96vw,960px)] overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-900')}>
-            <div className="mb-4 flex items-start justify-between gap-4">
+          <Dialog.Overlay className={animatedOverlayClassName()} />
+          <Dialog.Content className={animatedModalClassName('max-h-[92vh] w-[min(96vw,960px)] overflow-y-auto rounded-2xl border-slate-200/90 bg-white p-6 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950')}>
+            <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4 pr-10 dark:border-gray-800">
               <div>
-                <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">
+                <Dialog.Title className="text-xl font-semibold text-slate-950 dark:text-white">
                   {saleMode ? 'PDI / предпродажная подготовка' : 'Новая сервисная заявка'}
                 </Dialog.Title>
-                <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                <Dialog.Description className="mt-1 text-sm leading-6 text-slate-500 dark:text-gray-400">
                   {saleMode
                     ? 'Запись будет показана в карточке продажи как PDI, без вывода обычной очереди ТО.'
                     : 'Заявка будет создана сразу для текущего подъемника.'}
                 </Dialog.Description>
               </div>
               <Dialog.Close asChild>
-                <button className="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200">
+                <button className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200">
                   <X className="h-5 w-5" />
                 </button>
               </Dialog.Close>
@@ -4168,14 +4168,14 @@ function EditEquipmentModal({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={animatedOverlayClassName()} />
-        <Dialog.Content className={animatedModalClassName('max-h-[92vh] max-w-2xl overflow-hidden rounded-xl bg-white p-0 shadow-2xl dark:bg-gray-900')}>
+        <Dialog.Content className={animatedModalClassName('max-h-[92vh] max-w-2xl overflow-hidden rounded-2xl border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950')}>
 
           {/* Header */}
-          <div className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
-            <Dialog.Title className="text-lg font-bold text-gray-900 dark:text-white">
+          <div className="border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
+            <Dialog.Title className="text-xl font-semibold text-slate-950 dark:text-white">
               Редактировать технику
             </Dialog.Title>
-            <Dialog.Description className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+            <Dialog.Description className="mt-1 text-sm leading-6 text-slate-500 dark:text-gray-400">
               {equipment.inventoryNumber} · {equipment.manufacturer} {equipment.model}
             </Dialog.Description>
           </div>
@@ -4656,7 +4656,7 @@ function EditEquipmentModal({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4 dark:border-gray-700">
+          <div className="flex items-center justify-between border-t border-slate-100 bg-white/95 px-6 py-4 dark:border-gray-800 dark:bg-gray-950/95">
             <p className="text-xs text-gray-400 dark:text-gray-500">
               Поля, отмеченные <span className="text-red-500">*</span>, обязательны
             </p>

@@ -337,7 +337,7 @@ export function RentalDrawer({
       {/* Overlay */}
       <div
         data-state={presence.dataState}
-        className="app-animate-overlay absolute inset-0 bg-black/30"
+        className="app-animate-overlay absolute inset-0 bg-slate-950/40 backdrop-blur-[3px] dark:bg-black/60"
         onClick={onClose}
       />
 
@@ -346,13 +346,13 @@ export function RentalDrawer({
         data-side="right"
         data-state={presence.dataState}
         onAnimationEnd={presence.onExitAnimationEnd}
-        className="app-animate-drawer fixed inset-y-0 right-0 z-10 flex w-full max-w-[600px] flex-col bg-white shadow-2xl sm:w-[38%] sm:min-w-[420px] dark:bg-gray-800"
+        className="app-animate-drawer fixed inset-y-0 right-0 z-10 flex w-full max-w-[640px] flex-col overflow-hidden rounded-l-2xl border-l border-slate-200/90 bg-white shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] sm:w-[42%] sm:min-w-[440px] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl"
       >
         {/* Header */}
-        <div className="flex items-start justify-between border-b border-gray-200 p-5 dark:border-gray-700">
+        <div className="flex shrink-0 items-start justify-between border-b border-slate-100 bg-white px-6 py-5 dark:border-gray-800 dark:bg-gray-950">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h2 className="truncate text-lg text-gray-900 dark:text-white">{rental.client}</h2>
+              <h2 className="truncate text-xl font-semibold text-slate-950 dark:text-white">{rental.client}</h2>
               <Badge variant={statusVariants[rental.status]}>{statusLabels[rental.status]}</Badge>
               {isReturnOverdue && (
                 <Badge variant="warning">
@@ -360,7 +360,7 @@ export function RentalDrawer({
                 </Badge>
               )}
             </div>
-            <div className="mt-1 flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500 dark:text-gray-400">
               <span className="font-mono">{rental.id}</span>
               <span>·</span>
               <span>
@@ -371,16 +371,16 @@ export function RentalDrawer({
           </div>
           <button
             onClick={onClose}
-            className="ml-3 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
+            className="ml-3 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 space-y-5 overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-slate-50/40 p-6 dark:bg-gray-950">
           {isReturnOverdue && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm dark:border-amber-800 dark:bg-amber-900/20">
               <div className="flex items-start gap-2">
                 <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                 <div>
@@ -402,7 +402,7 @@ export function RentalDrawer({
                   setShowEdit(v => !v);
                   setEditError('');
                 }}
-                className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300 dark:hover:bg-gray-700/50"
+                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-gray-800 dark:bg-gray-900/70 dark:text-gray-300 dark:hover:bg-gray-900"
               >
                 <div className="flex items-center gap-2">
                   <Edit className="h-4 w-4 text-gray-400" />
@@ -412,7 +412,7 @@ export function RentalDrawer({
               </button>
 
               {showEdit && (
-                <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50/70 p-4 shadow-sm dark:border-blue-800 dark:bg-blue-900/20">
                   <div className="grid grid-cols-2 gap-2">
                     <div className="col-span-2">
                       <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Клиент *</label>

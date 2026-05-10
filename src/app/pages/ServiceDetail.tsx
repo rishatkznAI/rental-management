@@ -2074,28 +2074,28 @@ export default function ServiceDetail() {
       )}
       {revisionModalPresence.shouldRender && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div data-state={revisionModalPresence.dataState} className="app-animate-overlay absolute inset-0 bg-black/40" />
-          <div data-state={revisionModalPresence.dataState} onAnimationEnd={revisionModalPresence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900">
-            <div className="flex items-start justify-between gap-4">
+          <div data-state={revisionModalPresence.dataState} className="app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px] dark:bg-black/60" />
+          <div data-state={revisionModalPresence.dataState} onAnimationEnd={revisionModalPresence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 flex max-h-[90vh] w-[calc(100vw-2rem)] max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
               <div>
-                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Вернуть механику на доработку</h2>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                <h2 className="text-xl font-semibold text-slate-950 dark:text-white">Вернуть механику на доработку</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-gray-400">
                   Укажите причину, чтобы механик увидел заявку в активных и понял, что нужно уточнить.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setRevisionModalOpen(false)}
-                className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800"
+                className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="mt-4 space-y-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
               <div>
                 <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Причина возврата</label>
                 <textarea
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400"
                   rows={3}
                   value={revisionReason}
                   onChange={event => setRevisionReason(event.target.value)}
@@ -2123,7 +2123,7 @@ export default function ServiceDetail() {
               <div>
                 <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Что нужно уточнить</label>
                 <textarea
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-[--color-primary] dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400"
                   rows={2}
                   value={revisionDetails}
                   onChange={event => setRevisionDetails(event.target.value)}
@@ -2131,12 +2131,12 @@ export default function ServiceDetail() {
                 />
               </div>
               {revisionError && <p className="text-sm text-red-500">{revisionError}</p>}
-              <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => setRevisionModalOpen(false)}>Отмена</Button>
-                <Button onClick={() => void returnForRevision()} disabled={revisionBusy || !revisionReason.trim()}>
-                  Вернуть механику
-                </Button>
-              </div>
+            </div>
+            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 sm:flex-row sm:justify-end dark:border-gray-800 dark:bg-gray-950/95">
+              <Button variant="secondary" onClick={() => setRevisionModalOpen(false)}>Отмена</Button>
+              <Button onClick={() => void returnForRevision()} disabled={revisionBusy || !revisionReason.trim()}>
+                Вернуть механику
+              </Button>
             </div>
           </div>
         </div>

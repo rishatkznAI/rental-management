@@ -76,7 +76,7 @@ export function FilterDialog({
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
 
-        <div className="space-y-5">{children}</div>
+        <div className="min-h-0 space-y-5 overflow-y-auto pr-1">{children}</div>
 
         <DialogFooter>
           {onReset ? (

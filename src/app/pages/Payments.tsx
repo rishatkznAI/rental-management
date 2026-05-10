@@ -133,17 +133,21 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-black/50" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Добавить платёж</h2>
-          <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700">
+      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px] dark:bg-black/60" onClick={onClose} />
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 flex max-h-[90vh] w-[calc(100vw-2rem)] max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-950 dark:text-white">Добавить платёж</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">Свяжите оплату с клиентом и, при необходимости, с арендой.</p>
+          </div>
+          <button onClick={onClose} className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
           {formError && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300">
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
               {formError}
             </div>
           )}
@@ -155,7 +159,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
             <select
               value={form.rentalId}
               onChange={e => set('rentalId', e.target.value)}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400"
             >
               <option value="">— Выбрать аренду —</option>
               {rentals.map(r => (
@@ -287,7 +291,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
             <select
               value={form.status}
               onChange={e => set('status', e.target.value)}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400"
             >
               <option value="paid">Оплачено</option>
               <option value="partial">Частично оплачено</option>
@@ -306,13 +310,14 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
               placeholder="Примечание к платежу..."
               value={form.comment}
               onChange={e => set('comment', e.target.value)}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400"
             />
           </div>
 
-          <div className="flex gap-3 pt-1">
-            <Button type="submit" className="flex-1">Сохранить платёж</Button>
+          </div>
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 sm:flex-row dark:border-gray-800 dark:bg-gray-950/95">
             <Button type="button" variant="secondary" onClick={onClose}>Отмена</Button>
+            <Button type="submit" className="flex-1">Сохранить платёж</Button>
           </div>
         </form>
       </div>

@@ -8,21 +8,22 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { formatCurrency, formatDate, formatDateTime, getRentalDays } from '../../lib/utils';
 import { findConflictingRental } from '../../lib/rental-conflicts';
 import { animationDurations, useAnimatedPresence } from '../../lib/animations';
 import type { GanttRentalData } from '../../mock-data';
-import type { Client, Equipment, Payment } from '../../types';
+import type { Client, Equipment, Payment, ServiceTicket } from '../../types';
 import type { ClientReceivableRow } from '../../lib/finance';
 import { getEffectivePaidAmount } from '../../lib/finance';
 import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
+import { buildRentalServiceAlert, type RentalServiceAlertSeverity } from '../../lib/rentalServiceAlert';
 
 interface RentalDrawerProps {
   rental: GanttRentalData | null;
   equipment: Equipment | undefined;
   allRentals: GanttRentalData[];
   payments: Payment[];
+  serviceTickets?: ServiceTicket[];
   clients?: Client[];
   clientReceivables?: ClientReceivableRow[];
   managers?: SystemUser[];
@@ -43,10 +44,6 @@ interface RentalDrawerProps {
   onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string) => void;
   onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
   onUpdChange: (rental: GanttRentalData, updSigned: boolean, updDate?: string) => void;
-  onUpdateMaintenanceFilters: (
-    equipment: Equipment,
-    data: Pick<Equipment, 'maintenanceEngineFilter' | 'maintenanceFuelFilter' | 'maintenanceHydraulicFilter'>,
-  ) => void;
 }
 
 const statusLabels: Record<GanttRentalData['status'], string> = {
@@ -75,12 +72,40 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
   partial: 'warning',
 };
 
+const serviceAlertStyles: Record<RentalServiceAlertSeverity, {
+  container: string;
+  icon: string;
+  title: string;
+  description: string;
+}> = {
+  critical: {
+    container: 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20',
+    icon: 'text-red-600 dark:text-red-400',
+    title: 'text-red-800 dark:text-red-300',
+    description: 'text-red-700 dark:text-red-400',
+  },
+  warning: {
+    container: 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20',
+    icon: 'text-amber-600 dark:text-amber-400',
+    title: 'text-amber-800 dark:text-amber-300',
+    description: 'text-amber-700 dark:text-amber-400',
+  },
+  info: {
+    container: 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20',
+    icon: 'text-blue-600 dark:text-blue-400',
+    title: 'text-blue-800 dark:text-blue-300',
+    description: 'text-blue-700 dark:text-blue-400',
+  },
+};
+
+const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
+
 export function RentalDrawer({
-  rental: rentalProp, equipment, allRentals, payments,
+  rental: rentalProp, equipment, allRentals, payments, serviceTickets = EMPTY_SERVICE_TICKETS,
   clients = [], clientReceivables = [], managers = [],
   canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals, canCreatePayments,
   onClose, onReturn, onStatusChange, onDelete,
-  onRestore, onUpdate, onAddComment, onAddPayment, onEarlyReturn, onUpdChange, onUpdateMaintenanceFilters,
+  onRestore, onUpdate, onAddComment, onAddPayment, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
   const presence = useAnimatedPresence(Boolean(rentalProp), animationDurations.relaxed);
   const [retainedRental, setRetainedRental] = useState<GanttRentalData | null>(rentalProp);
@@ -119,10 +144,6 @@ export function RentalDrawer({
   const [updEditMode, setUpdEditMode] = useState(false);
   const [updDateInput, setUpdDateInput] = useState(() => new Date().toISOString().slice(0, 10));
   const [updUnsignConfirm, setUpdUnsignConfirm] = useState(false);
-  const [showMaintenanceDialog, setShowMaintenanceDialog] = useState(false);
-  const [engineFilter, setEngineFilter] = useState('');
-  const [fuelFilter, setFuelFilter] = useState('');
-  const [hydraulicFilter, setHydraulicFilter] = useState('');
 
   useEffect(() => {
     if (rentalProp) setRetainedRental(rentalProp);
@@ -159,14 +180,7 @@ export function RentalDrawer({
     setCommentText('');
     setCommentError('');
     setManagerEditMode(false);
-    setShowMaintenanceDialog(false);
   }, [displayRental]);
-
-  useEffect(() => {
-    setEngineFilter(displayEquipment?.maintenanceEngineFilter || '');
-    setFuelFilter(displayEquipment?.maintenanceFuelFilter || '');
-    setHydraulicFilter(displayEquipment?.maintenanceHydraulicFilter || '');
-  }, [displayEquipment]);
 
   if (!presence.shouldRender || !displayRental) return null;
 
@@ -197,6 +211,8 @@ export function RentalDrawer({
     ?? clients.find(item => !rental.clientId && item.company === rental.client);
   const clientDebt = clientReceivables.find(item => item.clientId === rental.clientId)
     ?? clientReceivables.find(item => !rental.clientId && item.client === rental.client);
+  const serviceAlert = buildRentalServiceAlert(rental, currentEquipment, serviceTickets, todayKey);
+  const serviceAlertStyle = serviceAlert ? serviceAlertStyles[serviceAlert.severity] : null;
 
   // Handle add payment submit
   const handlePaySubmit = () => {
@@ -315,23 +331,6 @@ export function RentalDrawer({
     });
     setManagerEditMode(false);
   };
-
-  const handleMaintenanceSave = () => {
-    if (!currentEquipment) return;
-    onUpdateMaintenanceFilters(currentEquipment, {
-      maintenanceEngineFilter: engineFilter.trim() || undefined,
-      maintenanceFuelFilter: fuelFilter.trim() || undefined,
-      maintenanceHydraulicFilter: hydraulicFilter.trim() || undefined,
-    });
-    setShowMaintenanceDialog(false);
-  };
-
-  const maintenanceRows = [
-    { label: 'Фильтр двигателя', value: currentEquipment?.maintenanceEngineFilter },
-    { label: 'Топливная система', value: currentEquipment?.maintenanceFuelFilter },
-    { label: 'Гидравлический фильтр', value: currentEquipment?.maintenanceHydraulicFilter },
-  ];
-  const hasMaintenanceFilters = maintenanceRows.some(row => !!row.value?.trim());
 
   return (
     <div className="fixed inset-0 z-50">
@@ -525,46 +524,28 @@ export function RentalDrawer({
             </div>
           </section>
 
-          <section>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                <Wrench className="h-4 w-4" />
-                <span>ТО</span>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setShowMaintenanceDialog(true)}
-                disabled={!currentEquipment}
-              >
-                ТО
-              </Button>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
-              {!currentEquipment ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Техника для этой аренды не найдена.
-                </p>
-              ) : hasMaintenanceFilters ? (
-                <div className="space-y-2">
-                  {maintenanceRows.map(row => (
-                    <div key={row.label} className="flex items-start justify-between gap-4">
-                      <span className="text-xs uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
-                        {row.label}
-                      </span>
-                      <span className="max-w-[62%] text-right text-sm font-medium text-gray-900 dark:text-white">
-                        {row.value}
-                      </span>
+          {serviceAlert && serviceAlertStyle && (
+            <div className={`rounded-lg border px-4 py-3 ${serviceAlertStyle.container}`}>
+              <div className="flex items-start gap-2">
+                <Wrench className={`mt-0.5 h-4 w-4 shrink-0 ${serviceAlertStyle.icon}`} />
+                <div className="min-w-0 flex-1">
+                  <p className={`text-sm font-semibold ${serviceAlertStyle.title}`}>
+                    {serviceAlert.title}
+                  </p>
+                  <p className={`mt-1 text-xs ${serviceAlertStyle.description}`}>
+                    {serviceAlert.description}
+                  </p>
+                  {serviceAlert.actionLabel && serviceAlert.actionTarget && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" asChild>
+                        <Link to={serviceAlert.actionTarget}>{serviceAlert.actionLabel}</Link>
+                      </Button>
                     </div>
-                  ))}
+                  )}
                 </div>
-              ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Фильтры для ТО ещё не заполнены.
-                </p>
-              )}
+              </div>
             </div>
-          </section>
+          )}
 
           {/* Payment Block */}
           <section>
@@ -1139,64 +1120,6 @@ export function RentalDrawer({
         </div>
       </div>
 
-      <Dialog open={showMaintenanceDialog} onOpenChange={setShowMaintenanceDialog}>
-        <DialogContent className="sm:max-w-[620px]">
-          <DialogHeader>
-            <DialogTitle>ТО и фильтры</DialogTitle>
-            <DialogDescription>
-              {currentEquipment
-                ? `${currentEquipment.manufacturer} ${currentEquipment.model} · INV ${currentEquipment.inventoryNumber}`
-                : 'Заполните расходники для техники в аренде.'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Фильтр двигателя
-              </label>
-              <input
-                type="text"
-                value={engineFilter}
-                onChange={event => setEngineFilter(event.target.value)}
-                placeholder="Например: Fleetguard LF3349"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Фильтр топливной системы
-              </label>
-              <input
-                type="text"
-                value={fuelFilter}
-                onChange={event => setFuelFilter(event.target.value)}
-                placeholder="Например: Donaldson P550588"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Гидравлический фильтр
-              </label>
-              <input
-                type="text"
-                value={hydraulicFilter}
-                onChange={event => setHydraulicFilter(event.target.value)}
-                placeholder="Например: HY90438"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowMaintenanceDialog(false)}>
-              Отмена
-            </Button>
-            <Button onClick={handleMaintenanceSave} disabled={!currentEquipment}>
-              Сохранить
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

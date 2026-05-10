@@ -1985,43 +1985,6 @@ export default function Rentals() {
     showToast('Запись добавлена в историю аренды');
   }, [canEditRentals, ganttRentals, historyAuthor, persistGanttRentals, selectedRental, showToast]);
 
-  const handleUpdateMaintenanceFilters = useCallback((
-    equipment: Equipment,
-    data: Pick<Equipment, 'maintenanceEngineFilter' | 'maintenanceFuelFilter' | 'maintenanceHydraulicFilter'>,
-  ) => {
-    const fieldLabels = {
-      maintenanceEngineFilter: 'фильтр двигателя',
-      maintenanceFuelFilter: 'фильтр топливной системы',
-      maintenanceHydraulicFilter: 'гидравлический фильтр',
-    } as const;
-
-    const changedFields = (Object.keys(fieldLabels) as Array<keyof typeof fieldLabels>)
-      .filter(key => (equipment[key] || '') !== (data[key] || ''))
-      .map(key => `${fieldLabels[key]}: ${data[key] ? `«${data[key]}»` : 'очищен'}`);
-
-    if (changedFields.length === 0) {
-      showToast('Изменений по ТО нет');
-      return;
-    }
-
-    const updatedEquipment = equipmentList.map(item =>
-      item.id !== equipment.id
-        ? item
-        : appendEquipmentHistoryEntry(
-            {
-              ...item,
-              maintenanceEngineFilter: data.maintenanceEngineFilter,
-              maintenanceFuelFilter: data.maintenanceFuelFilter,
-              maintenanceHydraulicFilter: data.maintenanceHydraulicFilter,
-            },
-            `Обновлены фильтры ТО: ${changedFields.join('; ')}`,
-          ),
-    );
-
-    void persistEquipment(updatedEquipment);
-    showToast('Фильтры ТО сохранены');
-  }, [appendEquipmentHistoryEntry, equipmentList, persistEquipment, showToast]);
-
   // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
   const handleEarlyReturn = useCallback(async (rental: GanttRentalData, actualReturnDate: string) => {
     if (!canEditRentals || !canEditRentalDates) return;
@@ -2975,6 +2938,7 @@ export default function Rentals() {
         equipment={selectedRental ? equipmentList.find(e => matchesEquipmentRow(selectedRental, e)) : undefined}
         allRentals={ganttRentals}
         payments={payments}
+        serviceTickets={serviceTickets}
         clients={computedClients}
         clientReceivables={clientReceivables}
         managers={managersList}
@@ -2989,7 +2953,6 @@ export default function Rentals() {
         onAddPayment={handleAddPayment}
         onEarlyReturn={handleEarlyReturn}
         onUpdChange={handleUpdChange}
-        onUpdateMaintenanceFilters={handleUpdateMaintenanceFilters}
         onRestore={handleRestoreRental}
         onReturn={(r) => {
             if (!canEditRentals) return;

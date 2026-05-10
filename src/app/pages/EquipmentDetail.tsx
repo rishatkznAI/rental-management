@@ -10,7 +10,7 @@ import {
   ArrowLeft, CircleAlert, FileText, Image as ImageIcon, Wrench, Camera,
   DollarSign, TrendingUp, Clock, Plus, Bot, User, Calendar,
   CheckCircle, AlertTriangle, MapPin, ChevronRight, ChevronDown, MessageSquare,
-  Upload, Trash2, X, PenLine, RotateCcw, Download,
+  Upload, Trash2, X, PenLine, RotateCcw, Download, Star,
 } from 'lucide-react';
 import {
 } from '../mock-data';
@@ -50,12 +50,11 @@ import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmen
 import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
 import {
-  buildSaleStatusPatch,
-  getSaleOperationHistory,
   isSaleModeEquipment,
   saleConditionKind,
   saleConditionLabel,
   saleDocumentsReadiness,
+  saleStatusKind,
   saleStatusLabel,
 } from '../lib/equipmentSaleMode.js';
 import { getEffectivePaidAmount } from '../lib/finance';
@@ -1524,9 +1523,6 @@ export default function EquipmentDetail() {
     rentalRevenue: Math.max(totalRevenue, equipment360.finance.revenue || 0),
   };
   const saleCondition = saleConditionKind(equipment, saleConditionContext);
-  const saleOperationHistory = getSaleOperationHistory(equipment, saleConditionContext);
-  const showSaleOperationHistory = saleCondition === 'used' || saleOperationHistory.hasAny;
-  const lastSaleRental = equipment360.rentals.latest[0] || ganttRentals[0];
   const salePdiTickets = serviceHistory.filter(ticket => {
     const haystack = `${ticket.serviceKind || ''} ${ticket.reason || ''} ${ticket.description || ''}`.toLowerCase();
     return haystack.includes('pdi') || haystack.includes('предпрод');
@@ -1536,6 +1532,108 @@ export default function EquipmentDetail() {
     can,
     currentRental: equipment360.occupancy.currentRental,
   });
+  const saleTitle = `${equipment.manufacturer} ${equipment.model}`.trim() || equipment.inventoryNumber || 'Техника на продажу';
+  const saleStatusKindValue = saleStatusKind(equipment);
+  const saleStatusText = saleStatusKindValue === 'in_deal' ? 'Зарезервирована' : saleStatusLabel(equipment);
+  const salePdiLabel = salePdiStatus === 'ready'
+    ? 'PDI завершён'
+    : salePdiStatus === 'in_progress'
+      ? 'PDI в процессе'
+      : salePdiStatus === 'issues'
+        ? 'PDI с замечаниями'
+        : 'PDI не начат';
+  const salePdiProgress = salePdiStatus === 'ready' ? 100 : salePdiStatus === 'in_progress' ? 70 : salePdiStatus === 'issues' ? 55 : 20;
+  const saleMainPrice = equipment.salePrice1 || equipment.salePrice2 || equipment.salePrice3 || 0;
+  const saleMinPrice = equipment.salePrice2 || 0;
+  const saleCostPrice = equipment.salePrice3 || 0;
+  const saleMargin = saleMainPrice > 0 && saleCostPrice > 0 ? Math.max(saleMainPrice - saleCostPrice, 0) : 0;
+  const saleMarginPercent = saleMainPrice > 0 && saleMargin > 0 ? Math.round((saleMargin / saleMainPrice) * 1000) / 10 : 0;
+  const saleGalleryPhotos = [
+    equipment.photo,
+    ...shippingPhotos.flatMap(event => [
+      ...(Array.isArray(event.photos) ? event.photos : []),
+      ...Object.values(event.photoCategories || {}).flatMap(photos => Array.isArray(photos) ? photos : []),
+    ]),
+    ...Object.values(equipment.acceptancePhotos || {}).flatMap(photos => Array.isArray(photos) ? photos : []),
+  ].filter(Boolean) as PhotoReference[];
+  const saleGalleryPreview = saleGalleryPhotos.slice(0, 4);
+  const saleReceiptReady = !saleReceiptStatus || saleReceiptStatus === 'accepted';
+  const saleDocsReady = saleDocsReadiness.count > 0;
+  const salePhotoReady = Boolean(equipment.photo);
+  const salePriceReady = saleMainPrice > 0;
+  const saleReadinessItems = [
+    { id: 'pdi', label: 'PDI', ready: salePdiStatus === 'ready' },
+    { id: 'documents', label: 'Документы', ready: saleDocsReady },
+    { id: 'photo', label: 'Фото', ready: salePhotoReady },
+    { id: 'price', label: 'Цена', ready: salePriceReady },
+    { id: 'receipt', label: 'Готовность к отгрузке', ready: saleReceiptReady },
+  ];
+  const saleReadinessPercent = Math.round((saleReadinessItems.filter(item => item.ready).length / saleReadinessItems.length) * 100);
+  const saleBlockers = [
+    salePdiStatus !== 'ready' ? {
+      id: 'pdi',
+      title: salePdiStatus === 'issues' ? 'PDI с замечаниями' : 'PDI не завершён',
+      text: salePdiTickets.length > 0 ? 'Остались работы по предпродажной подготовке' : 'Создайте PDI-заявку после приёмки',
+      action: 'Открыть PDI',
+      onClick: () => setShowCreateServiceModal(true),
+      danger: salePdiStatus === 'issues',
+    } : null,
+    !saleDocsReady ? {
+      id: 'documents',
+      title: 'Нет комплекта документов',
+      text: 'Добавьте связанные документы техники',
+      action: 'Открыть документы',
+      to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`,
+    } : null,
+    !salePhotoReady ? {
+      id: 'photo',
+      title: 'Нет основного фото',
+      text: 'Добавьте фото для витрины продаж',
+      action: 'Добавить фото',
+      onClick: () => mainPhotoInputRef.current?.click(),
+    } : null,
+    !saleReceiptReady ? {
+      id: 'receipt',
+      title: 'Не указана готовность к отгрузке',
+      text: 'Завершите приёмку перед отгрузкой',
+      action: saleReceiptStatus === 'acceptance_in_progress' ? 'Завершить' : 'Заполнить',
+      onClick: saleReceiptStatus === 'acceptance_in_progress'
+        ? () => handleCompleteAcceptance(false)
+        : saleReceiptStatus === 'arrived_waiting_acceptance'
+          ? handleStartAcceptance
+          : handleMarkArrival,
+    } : null,
+    !salePriceReady ? {
+      id: 'price',
+      title: 'Не указана цена продажи',
+      text: 'Заполните цену перед созданием КП',
+      action: 'Редактировать',
+      onClick: () => setShowEditModal(true),
+    } : null,
+  ].filter(Boolean) as Array<{
+    id: string;
+    title: string;
+    text: string;
+    action: string;
+    to?: string;
+    onClick?: () => void;
+    danger?: boolean;
+  }>;
+  const saleQuickActions: Array<{
+    id: string;
+    label: string;
+    icon: React.ElementType;
+    to?: string;
+    onClick?: () => void;
+    show: boolean;
+  }> = [
+    { id: 'photo', label: 'Добавить фото', icon: Camera, onClick: () => mainPhotoInputRef.current?.click(), show: canEditEquipment },
+    { id: 'documents', label: 'Открыть документы', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`, show: canViewDocuments },
+    { id: 'pdi', label: 'Открыть PDI', icon: Wrench, onClick: () => setShowCreateServiceModal(true), show: canCreateService || canViewService },
+    { id: 'quote', label: 'Создать КП', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create&type=quote`, show: canViewDocuments },
+    { id: 'delivery', label: 'Создать доставку', icon: Calendar, to: `/deliveries?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create`, show: can('create', 'deliveries') || can('view', 'deliveries') },
+    { id: 'edit', label: 'Редактировать', icon: PenLine, onClick: () => setShowEditModal(true), show: canEditEquipment },
+  ].filter(action => action.show);
 
   const tabTriggerClass = 'whitespace-nowrap';
 
@@ -1547,69 +1645,124 @@ export default function EquipmentDetail() {
           className="inline-flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-            {saleMode ? 'Вернуться в продажи' : 'Вернуться к списку'}
+            {saleMode ? 'Назад к списку продаж' : 'Вернуться к списку'}
         </Link>
 
         <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className={`border-0 ${
-                equipment.priority === 'critical' || equipment.priority === 'high'
-                  ? 'bg-red-500/12 text-red-300'
-                  : equipment.priority === 'medium'
-                  ? 'bg-blue-500/12 text-blue-300'
-                  : 'bg-emerald-500/12 text-emerald-300'
-              }`}>
-                {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
-              </Badge>
-              <Badge className={`border-0 ${
-                equipment.status === 'in_service'
-                  ? 'bg-orange-500/12 text-orange-300'
-                  : equipment.status === 'rented'
-                  ? 'bg-blue-500/12 text-blue-300'
-                  : equipment.status === 'reserved'
-                  ? 'bg-yellow-500/12 text-yellow-300'
-                  : 'bg-emerald-500/12 text-emerald-300'
-              }`}>
-                {EQ_STATUS_LABELS[equipment.status]}
-              </Badge>
-              <Badge className={`border-0 ${
-                equipment.owner === 'own'
-                  ? 'bg-emerald-500/12 text-emerald-300'
-                  : equipment.owner === 'investor'
-                  ? 'bg-blue-500/12 text-blue-300'
-                  : 'bg-orange-500/12 text-orange-300'
-              }`}>
-                {ownerLabels[equipment.owner]}
-              </Badge>
-              {saleMode && (
-                <Badge className="border-0 bg-orange-500/12 text-orange-300">
-                  {saleStatusLabel(equipment)}
-                </Badge>
-              )}
-              {saleMode && (
-                <Badge className={`border-0 ${saleCondition === 'used' ? 'bg-amber-500/12 text-amber-300' : 'bg-emerald-500/12 text-emerald-300'}`}>
-                  {saleConditionLabel(equipment, saleConditionContext)}
-                </Badge>
-              )}
-            </div>
-            <h1 className="app-shell-title mt-3 text-3xl font-extrabold text-foreground sm:text-4xl">
-              {equipment.manufacturer} {equipment.model}
-            </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || 'не указан'}
-            </p>
-            <div className="mt-2 flex items-center gap-1 text-sm text-muted-foreground">
-              <MapPin className="h-3.5 w-3.5" />
-              {equipment.location || 'Локация не указана'}
-            </div>
+            {saleMode ? (
+              <>
+                <div className="flex items-center gap-3">
+                  <h1 className="app-shell-title text-3xl font-extrabold text-foreground sm:text-4xl">
+                    {saleTitle}
+                  </h1>
+                  <button
+                    type="button"
+                    className="rounded-full p-1 text-blue-300 transition hover:bg-blue-500/10 hover:text-blue-200"
+                    aria-label="Избранное"
+                    title="Избранное"
+                  >
+                    <Star className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Badge variant={saleStatusText === 'Продана' ? 'success' : saleStatusText === 'Снята с продажи' ? 'default' : 'success'}>
+                    {saleStatusText}
+                  </Badge>
+                  <Badge variant={saleCondition === 'used' ? 'warning' : 'info'}>
+                    {saleCondition === 'used' ? 'Б/у' : 'Новая'}
+                  </Badge>
+                  <Badge variant={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'issues' ? 'error' : salePdiStatus === 'in_progress' ? 'warning' : 'default'}>
+                    {salePdiLabel}
+                  </Badge>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className={`border-0 ${
+                    equipment.priority === 'critical' || equipment.priority === 'high'
+                      ? 'bg-red-500/12 text-red-300'
+                      : equipment.priority === 'medium'
+                      ? 'bg-blue-500/12 text-blue-300'
+                      : 'bg-emerald-500/12 text-emerald-300'
+                  }`}>
+                    {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
+                  </Badge>
+                  <Badge className={`border-0 ${
+                    equipment.status === 'in_service'
+                      ? 'bg-orange-500/12 text-orange-300'
+                      : equipment.status === 'rented'
+                      ? 'bg-blue-500/12 text-blue-300'
+                      : equipment.status === 'reserved'
+                      ? 'bg-yellow-500/12 text-yellow-300'
+                      : 'bg-emerald-500/12 text-emerald-300'
+                  }`}>
+                    {EQ_STATUS_LABELS[equipment.status]}
+                  </Badge>
+                  <Badge className={`border-0 ${
+                    equipment.owner === 'own'
+                      ? 'bg-emerald-500/12 text-emerald-300'
+                      : equipment.owner === 'investor'
+                      ? 'bg-blue-500/12 text-blue-300'
+                      : 'bg-orange-500/12 text-orange-300'
+                  }`}>
+                    {ownerLabels[equipment.owner]}
+                  </Badge>
+                </div>
+                <h1 className="app-shell-title mt-3 text-3xl font-extrabold text-foreground sm:text-4xl">
+                  {equipment.manufacturer} {equipment.model}
+                </h1>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || 'не указан'}
+                </p>
+                <div className="mt-2 flex items-center gap-1 text-sm text-muted-foreground">
+                  <MapPin className="h-3.5 w-3.5" />
+                  {equipment.location || 'Локация не указана'}
+                </div>
+              </>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-2">
             {can('edit', 'equipment') && (
               <Button variant="secondary" size="sm" className="app-button-ghost rounded-xl px-4" onClick={() => setShowEditModal(true)}>
+                {saleMode && <PenLine className="h-3.5 w-3.5" />}
                 Редактировать
               </Button>
+            )}
+            {saleMode && (
+              <div className="group relative">
+                <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
+                  Ещё
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+                <div className="invisible absolute right-0 z-20 mt-2 w-56 rounded-xl border border-border bg-card p-1.5 opacity-0 shadow-xl transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
+                  <button
+                    type="button"
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-foreground hover:bg-secondary"
+                    onClick={() => window.print()}
+                  >
+                    Распечатать карточку
+                  </button>
+                  {canViewDocuments && (
+                    <Link
+                      to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`}
+                      className="block rounded-lg px-3 py-2 text-sm text-foreground hover:bg-secondary"
+                    >
+                      Документы техники
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+            {saleMode && canViewDocuments && (
+              <Link to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create&type=quote`}>
+                <Button size="sm" className="app-button-primary rounded-xl px-4">
+                  <FileText className="h-3.5 w-3.5" />
+                  Создать КП
+                </Button>
+              </Link>
             )}
             {!saleMode && canViewRentals && (
               <Link to="/rentals">
@@ -1631,7 +1784,7 @@ export default function EquipmentDetail() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {!saleMode && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className={`rounded-2xl border p-4 ${
           saleMode
             ? salePdiStatus === 'ready'
@@ -1726,7 +1879,7 @@ export default function EquipmentDetail() {
             {saleMode ? <Camera className="h-5 w-5 text-muted-foreground" /> : <AlertTriangle className="h-5 w-5 text-muted-foreground" />}
           </div>
         </div>
-      </div>
+      </div>}
 
       {!saleMode && daysUntilMaintenance <= 30 && (
         <div className={`rounded-2xl border px-4 py-3 ${
@@ -1752,10 +1905,10 @@ export default function EquipmentDetail() {
         <CardHeader>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <CardTitle>{saleMode ? 'Продажа 360°' : 'Техника 360°'}</CardTitle>
+              <CardTitle>{saleMode ? 'Витрина продажной техники' : 'Техника 360°'}</CardTitle>
               <CardDescription>
                 {saleMode
-                  ? 'Карточка продажной техники: PDI, документы, фото, сделки и история предпродажной подготовки'
+                  ? 'Цена, состояние, готовность, документы и действия для подготовки продажи'
                   : 'Сводка по занятости, сервису, документам и рискам без изменения данных'}
               </CardDescription>
             </div>
@@ -1786,219 +1939,247 @@ export default function EquipmentDetail() {
         <CardContent className="space-y-5">
           {saleMode ? (
             <>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <CompactMetric label="PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} tone={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'in_progress' || salePdiStatus === 'issues' ? 'warning' : 'default'} />
-                <CompactMetric label="Продажный статус" value={saleStatusLabel(equipment)} tone={equipment.category === 'sold' ? 'success' : 'default'} />
-                <CompactMetric label="Документы" value={saleDocsReadiness.label} tone={saleDocsReadiness.count > 0 ? 'success' : 'warning'} />
-                <CompactMetric label="Комплектация / фото" value={equipment.photo ? 'Фото есть' : 'Нужно добавить'} tone={equipment.photo ? 'success' : 'warning'} />
-              </div>
-
-              {quickActions.length > 0 && (
-                <div className="space-y-2 rounded-xl border border-border bg-card/70 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Быстрые действия</p>
-                  <div className="flex flex-wrap gap-2">
-                    {saleReceiptStatus === 'planned_arrival' && (
-                      <Button size="sm" variant="secondary" onClick={handleMarkArrival}>Отметить поступление</Button>
+              <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr_0.8fr_0.9fr]">
+                <div className="overflow-hidden rounded-2xl border border-border bg-card/80">
+                  <input
+                    ref={mainPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleMainPhotoUpload}
+                  />
+                  <div className="flex min-h-[22rem] items-center justify-center bg-secondary">
+                    {equipment.photo ? (
+                      <img
+                        src={photoSource(equipment.photo)}
+                        onError={(event) => {
+                          const fallback = photoFallbackSource(equipment.photo);
+                          if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                        }}
+                        alt={saleTitle}
+                        className="h-full max-h-[26rem] w-full cursor-zoom-in object-cover"
+                        onClick={() => setPreviewImage(photoSource(equipment.photo))}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="flex h-full min-h-[22rem] w-full flex-col items-center justify-center gap-3 text-muted-foreground"
+                        onClick={() => mainPhotoInputRef.current?.click()}
+                      >
+                        <ImageIcon className="h-16 w-16" />
+                        <span className="text-sm">Добавить фото техники</span>
+                      </button>
                     )}
-                    {saleReceiptStatus === 'arrived_waiting_acceptance' && (
-                      <Button size="sm" variant="secondary" onClick={handleStartAcceptance}>Начать приёмку</Button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 p-2">
+                    {saleGalleryPreview.length > 0 ? saleGalleryPreview.map((photo, index) => (
+                      <button
+                        type="button"
+                        key={`${photoSource(photo)}-${index}`}
+                        className="h-16 overflow-hidden rounded-lg border border-border bg-secondary"
+                        onClick={() => setPreviewImage(photoSource(photo))}
+                      >
+                        <img src={photoSource(photo)} alt="" className="h-full w-full object-cover" />
+                      </button>
+                    )) : (
+                      <button
+                        type="button"
+                        className="col-span-3 h-16 rounded-lg border border-dashed border-border text-xs text-muted-foreground"
+                        onClick={() => mainPhotoInputRef.current?.click()}
+                      >
+                        Галерея пуста
+                      </button>
                     )}
-                    {saleReceiptStatus === 'acceptance_in_progress' && (
-                      <>
-                        <Button size="sm" variant="default" onClick={() => handleCompleteAcceptance(false)}>Завершить приёмку</Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleCompleteAcceptance(true)}>Завершить с замечаниями</Button>
-                      </>
-                    )}
-                    {quickActions.map(action => {
-                      const onClick = action.id === 'equipment-sale-pdi'
-                        ? () => setShowCreateServiceModal(true)
-                        : action.id === 'equipment-sale-photo'
-                          ? () => mainPhotoInputRef.current?.click()
-                            : action.id === 'equipment-sale-return'
-                              ? () => {
-                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, ...buildSaleStatusPatch(item, 'on_sale') }, createAuditEntry(user?.name || 'Система', 'Техника возвращена в продажу')) : item);
-                                  void persistEquipment(list);
-                                }
-                            : action.id === 'equipment-sale-reserve'
-                            ? () => {
-                                const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, ...buildSaleStatusPatch(item, 'reserved') }, createAuditEntry(user?.name || 'Система', 'Техника поставлена в резерв продажи')) : item);
-                                void persistEquipment(list);
-                              }
-                            : action.id === 'equipment-sale-remove'
-                              ? () => {
-                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, ...buildSaleStatusPatch(item, 'removed') }, createAuditEntry(user?.name || 'Система', 'Техника снята с продажи')) : item);
-                                  void persistEquipment(list);
-                                }
-                            : action.id === 'equipment-sale-sold'
-                              ? () => {
-                                  if (!window.confirm('Вы уверены, что хотите отметить технику как проданную? Это уберёт её из активной продажи и изменит статус продажи.')) return;
-                                  const list = allEquipment.map(item => item.id === equipment.id ? appendAuditHistory({ ...item, ...buildSaleStatusPatch(item, 'sold') }, createAuditEntry(user?.name || 'Система', 'Техника отмечена проданной')) : item);
-                                  void persistEquipment(list);
-                                }
-                              : undefined;
-                      const button = (
-                        <Button
-                          size="sm"
-                          variant={action.kind === 'primary' ? 'default' : 'secondary'}
-                          disabled={action.disabled}
-                          title={action.reason || undefined}
-                          onClick={onClick}
-                        >
-                          {action.id === 'equipment-sale-pdi' && <Wrench className="h-4 w-4" />}
-                          {action.id === 'equipment-sale-photo' && <Camera className="h-4 w-4" />}
-                          {action.id === 'equipment-sale-deal' && <User className="h-4 w-4" />}
-                          {action.label}
-                        </Button>
-                      );
-                      return action.disabled || !action.to
-                        ? <span key={action.id}>{button}</span>
-                        : <Link key={action.id} to={action.to}>{button}</Link>;
-                    })}
+                    <button
+                      type="button"
+                      className="h-16 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-2 text-xs font-medium text-blue-300"
+                      onClick={() => mainPhotoInputRef.current?.click()}
+                    >
+                      +{Math.max(shippingGalleryPhotoCount + saleGalleryPhotos.length - saleGalleryPreview.length, 0)} фото
+                    </button>
                   </div>
                 </div>
-              )}
 
-              <div className="rounded-xl border border-border bg-card/70 p-4">
-                <h3 className="text-sm font-semibold text-foreground">Идентификация продажи</h3>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <CompactMetric label="Модель" value={`${equipment.manufacturer} ${equipment.model}`.trim()} />
-                  <CompactMetric label="Серийный номер" value={equipment.serialNumber || 'Не указан'} />
-                  <CompactMetric label="Инв. №" value={equipment.inventoryNumber || 'Не указано'} />
-                  <CompactMetric label="Тип" value={saleConditionLabel(equipment, saleConditionContext)} tone={saleCondition === 'used' ? 'warning' : 'success'} />
-                </div>
-              </div>
+                <SalePanel title="Паспорт техники">
+                  <SaleField label="Инвентарный №" value={equipment.inventoryNumber || '—'} mono />
+                  <SaleField label="Серийный №" value={equipment.serialNumber || '—'} mono />
+                  <SaleField label="Год выпуска" value={equipment.year ? String(equipment.year) : '—'} />
+                  <SaleField label="Наработка" value={typeof equipment.hours === 'number' ? `${equipment.hours.toLocaleString('ru-RU')} м/ч` : '—'} />
+                  <SaleField label="Собственник" value={equipment.ownerName || ownerLabels[equipment.owner] || '—'} />
+                  <SaleField label="Локация" value={equipment.location || '—'} icon={<MapPin className="h-4 w-4 text-blue-400" />} />
+                  <SaleField label="Тип" value={findEquipmentTypeLabel(equipment.type, equipmentTypeCatalog)} />
+                  <SaleField label="Рабочая высота" value={equipment.workingHeight ? `${equipment.workingHeight} м` : equipment.liftHeight ? `${equipment.liftHeight} м` : '—'} />
+                  <SaleField label="Грузоподъёмность" value={equipment.loadCapacity ? `${equipment.loadCapacity} кг` : '—'} />
+                  <SaleField label="Привод" value={equipment.drive === 'diesel' ? 'Дизельный' : 'Электрический'} />
+                </SalePanel>
 
-              <div className="rounded-xl border border-amber-300/60 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-foreground">Поступление и приёмка</h3>
-                  {getSaleReceiptBadge(saleReceiptStatus)}
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <CompactMetric label="Плановая дата" value={formatDate(equipment.plannedArrivalDate)} />
-                  <CompactMetric label="Фактическая дата" value={formatDate(equipment.actualArrivalDate)} />
-                  <CompactMetric label="Кто принял" value={equipment.acceptedByName || '—'} />
-                  <CompactMetric label="Дата приёмки" value={formatDate(equipment.acceptedAt)} />
-                  <CompactMetric label="Фотоотчёт" value={equipment.acceptancePhotos ? 'Добавлен' : 'Не добавлен'} tone={equipment.acceptancePhotos ? 'success' : 'warning'} />
-                  <CompactMetric label="Чеклист" value={equipment.acceptanceChecklist ? 'Заполнен' : 'Не заполнен'} tone={equipment.acceptanceChecklist ? 'success' : 'warning'} />
-                  <CompactMetric label="Дефекты" value={equipment.acceptanceDefects?.length ? `${equipment.acceptanceDefects.length}` : 'Нет'} tone={equipment.acceptanceDefects?.length ? 'warning' : 'success'} />
-                  <CompactMetric label="Комментарий" value={equipment.acceptanceComment || '—'} />
-                </div>
-                {equipment.acceptanceDefects?.length ? (
-                  <div className="mt-3 rounded-lg border border-amber-300/50 bg-white/60 p-3 text-sm dark:border-amber-500/30 dark:bg-black/10">
-                    <p className="font-semibold text-foreground">Замечания</p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-                      {equipment.acceptanceDefects.map((defect, index) => <li key={`${defect}-${index}`}>{defect}</li>)}
-                    </ul>
+                <SalePanel title="Цена и маржа">
+                  <div>
+                    <p className="text-3xl font-extrabold text-foreground">{canViewFinance ? formatCurrency(saleMainPrice) : 'Скрыто правами'}</p>
+                    <div className="mt-5 h-px bg-border" />
                   </div>
-                ) : null}
-                {equipment.receiptHistory?.length ? (
-                  <div className="mt-3 space-y-2 text-sm">
-                    {equipment.receiptHistory.slice(-4).reverse().map((entry, index) => (
-                      <div key={`${entry.date}-${index}`} className="rounded-lg border border-border bg-card/70 p-3">
-                        <p className="font-medium text-foreground">{entry.oldStatusLabel || 'Не указан'} → {entry.newStatusLabel || 'Не указан'}</p>
-                        <p className="text-xs text-muted-foreground">{formatDate(entry.date)} · {entry.userName || 'Система'}{entry.comment ? ` · ${entry.comment}` : ''}</p>
+                  <SaleField label="Минимальная цена" value={canViewFinance ? formatCurrency(saleMinPrice) : 'Скрыто'} />
+                  <SaleField label="Себестоимость" value={canViewFinance ? formatCurrency(saleCostPrice) : 'Скрыто'} />
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+                    <p className="text-sm text-emerald-200">Ожидаемая маржа</p>
+                    <div className="mt-2 flex items-end justify-between gap-3 text-emerald-300">
+                      <span className="text-xl font-bold">{canViewFinance ? formatCurrency(saleMargin) : 'Скрыто'}</span>
+                      {canViewFinance && <span className="text-lg font-bold">{saleMarginPercent}%</span>}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Цена обновлена: {formatDate(equipment.actualArrivalDate || equipment.plannedArrivalDate || new Date().toISOString())}</p>
+                </SalePanel>
+
+                <SalePanel title="Готовность к продаже">
+                  <div className="flex items-center gap-4">
+                    <div
+                      className="grid h-20 w-20 shrink-0 place-items-center rounded-full"
+                      style={{ background: `conic-gradient(#facc15 ${saleReadinessPercent * 3.6}deg, rgba(148,163,184,0.22) 0deg)` }}
+                    >
+                      <div className="grid h-14 w-14 place-items-center rounded-full bg-card text-lg font-bold text-foreground">
+                        {saleReadinessPercent}%
+                      </div>
+                    </div>
+                    <p className={cn('text-lg font-semibold', saleBlockers.length > 0 ? 'text-amber-300' : 'text-emerald-300')}>
+                      {saleBlockers.length > 0 ? 'Есть блокеры' : 'Готова'}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {saleReadinessItems.map(item => (
+                      <div key={item.id} className="flex items-center gap-2 text-sm">
+                        {item.ready ? <CheckCircle className="h-4 w-4 text-emerald-400" /> : <AlertTriangle className="h-4 w-4 text-amber-400" />}
+                        <span className="text-foreground">{item.label}</span>
                       </div>
                     ))}
                   </div>
-                ) : null}
+                </SalePanel>
               </div>
 
-              {showSaleOperationHistory && (
-                <div className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {saleCondition === 'used' ? 'История эксплуатации перед продажей' : 'Эксплуатационные данные заполнены вручную'}
-                  </h3>
-                  <p className="mb-3 mt-1 text-xs text-muted-foreground">
-                    {saleCondition === 'used'
-                      ? 'ТО, ЧТО, ПТО, GSM и аренды показаны как история до продажи.'
-                      : 'Эти данные не считаются основным блоком новой техники и показываются только потому, что заполнены в карточке.'}
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    <CompactMetric label="ТО" value={formatMaintenanceDate(equipment.nextMaintenance)} tone={getMaintenanceTone(equipment.nextMaintenance)} />
-                    <CompactMetric label="ЧТО" value={formatMaintenanceDate(equipment.maintenanceCHTO)} tone={getMaintenanceTone(equipment.maintenanceCHTO)} />
-                    <CompactMetric label="ПТО" value={formatMaintenanceDate(equipment.maintenancePTO)} tone={getMaintenanceTone(equipment.maintenancePTO)} />
-                    <CompactMetric label="GSM / IMEI / статус трекера" value={getGsmDisplayValue(equipment)} />
-                    {canViewFinance && canViewRentals && (
-                      <CompactMetric
-                        label="Доход от аренды"
-                        value={formatCurrency(equipment360.finance.revenue)}
-                        tone={equipment360.finance.revenue > 0 ? 'success' : 'default'}
-                      />
-                    )}
-                    {canViewRentals && lastSaleRental && (
-                      <CompactMetric
-                        label="Последняя аренда"
-                        value={`${lastSaleRental.client || 'Клиент не указан'} · ${formatDate(lastSaleRental.startDate)} — ${formatDate(lastSaleRental.endDate)}`}
-                      />
-                    )}
+              <div className="grid gap-4 xl:grid-cols-[1.25fr_1fr]">
+                <SalePanel title="Состояние и приёмка">
+                  <div className="grid gap-4 md:grid-cols-5">
+                    <SaleField label="Состояние" value={saleCondition === 'used' ? 'Б/у' : 'Новая'} badge />
+                    <SaleField label="Приёмка" value={saleReceiptStatus ? EQUIPMENT_SALE_RECEIPT_LABELS[saleReceiptStatus] : 'Не указана'} badge />
+                    <div>
+                      <p className="text-xs text-muted-foreground">PDI-статус</p>
+                      <p className="mt-1 text-sm font-semibold text-blue-300">{SALE_READINESS_LABELS[salePdiStatus] ?? EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]}</p>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
+                        <div className="h-full rounded-full bg-blue-500" style={{ width: `${salePdiProgress}%` }} />
+                      </div>
+                    </div>
+                    <SaleField label="Дата поступления" value={formatDate(equipment.actualArrivalDate || equipment.plannedArrivalDate)} />
+                    <SaleField label="Плановая готовность" value={salePdiStatus === 'ready' ? 'Готова' : formatDate(equipment.acceptedAt)} />
                   </div>
-                </div>
-              )}
+                  {equipment.acceptanceDefects?.length ? (
+                    <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3">
+                      <p className="text-sm font-semibold text-foreground">Замечания при приёмке</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                        {equipment.acceptanceDefects.map((defect, index) => <li key={`${defect}-${index}`}>{defect}</li>)}
+                      </ul>
+                    </div>
+                  ) : null}
+                </SalePanel>
 
-              <div className="grid gap-4 xl:grid-cols-3">
-                <div className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-foreground">Карточка продажи</h3>
-                  <div className="grid gap-2">
-                    <CompactMetric label="Цена 1" value={canViewFinance ? formatCurrency(equipment.salePrice1 ?? 0) : 'Скрыто правами'} />
-                    <CompactMetric label="Цена 2" value={canViewFinance ? formatCurrency(equipment.salePrice2 ?? 0) : 'Скрыто правами'} />
-                    <CompactMetric label="Цена 3" value={canViewFinance ? formatCurrency(equipment.salePrice3 ?? 0) : 'Скрыто правами'} />
-                  </div>
-                </div>
-                <div className="rounded-xl border border-border bg-card/70 p-4">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-foreground">PDI / предпродажная подготовка</h3>
-                    <Badge variant={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'issues' ? 'error' : salePdiStatus === 'in_progress' ? 'warning' : 'default'}>
-                      {SALE_READINESS_LABELS[salePdiStatus] ?? EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]}
-                    </Badge>
-                  </div>
-                  {salePdiTickets.length > 0 ? (
-                    <div className="space-y-2">
-                      {salePdiTickets.slice(0, 3).map(ticket => (
-                        <LinkedRow
-                          key={ticket.id}
-                          title={ticket.reason || 'PDI / предпродажная подготовка'}
-                          meta={`${SERVICE_STATUS_LABELS[ticket.status] || ticket.status} · ${formatDate(ticket.createdAt)}`}
-                          href={`/service/${ticket.id}`}
-                          canOpen={canViewService}
-                        />
+                <SalePanel title="Блокеры продажи" tone={saleBlockers.length > 0 ? 'danger' : 'default'}>
+                  {saleBlockers.length > 0 ? saleBlockers.map(blocker => {
+                    const row = (
+                      <div className="grid gap-3 rounded-xl border border-border bg-card/80 p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                        <div className="flex items-start gap-3">
+                          {blocker.danger ? <CircleAlert className="mt-0.5 h-4 w-4 text-red-400" /> : <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-400" />}
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">{blocker.title}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">{blocker.text}</p>
+                          </div>
+                        </div>
+                        {blocker.to ? (
+                          <Link to={blocker.to}>
+                            <Button size="sm" variant="secondary">{blocker.action}</Button>
+                          </Link>
+                        ) : (
+                          <Button size="sm" variant="secondary" onClick={blocker.onClick}>{blocker.action}</Button>
+                        )}
+                      </div>
+                    );
+                    return <React.Fragment key={blocker.id}>{row}</React.Fragment>;
+                  }) : (
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+                      Критичных блокеров по доступным данным нет.
+                    </div>
+                  )}
+                </SalePanel>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[0.9fr_0.9fr_0.9fr_1.2fr]">
+                <SalePanel title="Комплектация">
+                  {[
+                    equipment.acceptanceChecklist?.keysRemoteChargerSpareReceived ? `Ключи / пульт / ЗУ: ${equipment.acceptanceChecklist.keysRemoteChargerSpareReceived}` : 'Ключи / пульт / ЗУ не указаны',
+                    equipment.acceptanceChecklist?.configurationChecked ? 'Комплектация проверена' : 'Комплектация не подтверждена',
+                    equipment.notes || 'Комментарий по комплектации не заполнен',
+                  ].map((item, index) => (
+                    <SaleCheckRow key={`${item}-${index}`} ready={index === 0 ? Boolean(equipment.acceptanceChecklist?.keysRemoteChargerSpareReceived) : index === 1 ? Boolean(equipment.acceptanceChecklist?.configurationChecked) : Boolean(equipment.notes)} label={item} />
+                  ))}
+                </SalePanel>
+
+                <SalePanel title="Техническое состояние">
+                  <SaleStatusRow label="Двигатель / привод" value={equipment.acceptanceChecklist?.starts === false ? 'Проверить' : 'Отлично'} tone={equipment.acceptanceChecklist?.starts === false ? 'warning' : 'success'} />
+                  <SaleStatusRow label="Гидравлика" value={equipment.acceptanceChecklist?.visualDamageFound ? 'Проверить' : 'Отлично'} tone={equipment.acceptanceChecklist?.visualDamageFound ? 'warning' : 'success'} />
+                  <SaleStatusRow label="Электрика" value={salePdiStatus === 'issues' ? 'Есть замечания' : 'Отлично'} tone={salePdiStatus === 'issues' ? 'warning' : 'success'} />
+                  <SaleStatusRow label="Кузов и окраска" value={equipment.acceptanceChecklist?.visualDamageFound ? 'Есть замечания' : 'Хорошо'} tone={equipment.acceptanceChecklist?.visualDamageFound ? 'warning' : 'success'} />
+                  <SaleStatusRow label="Общее состояние" value={salePdiStatus === 'ready' ? 'Готово' : 'Требует проверки'} tone={salePdiStatus === 'ready' ? 'success' : 'warning'} />
+                </SalePanel>
+
+                <SalePanel title="Логистика продажи">
+                  <SaleField label="Локация техники" value={equipment.location || '—'} />
+                  <SaleField label="Готова к отгрузке" value={saleReceiptReady && salePdiStatus === 'ready' ? 'Да' : 'Нет'} />
+                  <SaleField label="Способ доставки" value="Самовывоз / доставка" />
+                  <SaleField label="Ориентировочная дата" value={saleReceiptReady ? 'По согласованию' : '—'} />
+                  {(can('create', 'deliveries') || can('view', 'deliveries')) && (
+                    <Link to={`/deliveries?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create`}>
+                      <Button variant="secondary" className="mt-2 w-full justify-center">
+                        <Calendar className="h-4 w-4" />
+                        Создать доставку
+                      </Button>
+                    </Link>
+                  )}
+                </SalePanel>
+
+                <SalePanel title="Документы">
+                  {saleDocuments.length > 0 ? (
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                      {saleDocuments.slice(0, 4).map(doc => (
+                        <SaleCheckRow key={doc.id} ready={doc.status !== 'draft'} label={`${doc.type}${doc.id ? ` · ${doc.id}` : ''}`} />
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">PDI-заявка не найдена. Используйте действие «Создать PDI».</p>
+                    <p className="text-sm text-muted-foreground">Связанных документов пока нет.</p>
                   )}
-                </div>
-                <div className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-foreground">Фото и комплектация</h3>
-                  <div className="grid gap-2">
-                    <CompactMetric label="Основное фото" value={equipment.photo ? 'Добавлено' : 'Не добавлено'} tone={equipment.photo ? 'success' : 'warning'} />
-                    <CompactMetric label="Комплектация" value={equipment.notes ? 'Есть комментарий менеджера' : 'Не описана'} />
-                  </div>
-                </div>
+                  {canViewDocuments && (
+                    <Link to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`} className="inline-flex text-sm font-medium text-blue-300 hover:underline">
+                      Открыть документы →
+                    </Link>
+                  )}
+                </SalePanel>
               </div>
 
-              <div className="grid gap-4 xl:grid-cols-3">
-                <CompactList
-                  title="Документы техники"
-                  emptyText={canViewDocuments ? 'Связанных документов нет.' : 'Раздел документов недоступен для этой роли.'}
-                  items={canViewDocuments ? saleDocuments.slice(0, 5).map(doc => ({
-                    id: doc.id,
-                    title: `${doc.type} ${doc.id ? `· ${doc.id}` : ''}`,
-                    meta: `${formatDate(doc.date)} · ${doc.status}`,
-                    href: '/documents',
-                  })) : []}
-                  canOpen={canViewDocuments}
-                />
-                <div className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-foreground">Связанные сделки / клиенты</h3>
-                  <p className="text-sm text-muted-foreground">Связанные сделки не отображаются: рабочий маршрут CRM для карточки техники пока не подключён.</p>
-                </div>
-                <div className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-foreground">Комментарии и история</h3>
-                  {equipment.notes ? (
-                    <p className="whitespace-pre-wrap text-sm text-muted-foreground">{equipment.notes}</p>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Комментарий менеджера пока не заполнен.</p>
-                  )}
+              <div className="rounded-2xl border border-border bg-card/80 p-4">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+                  <h3 className="text-base font-semibold text-foreground xl:w-44">Быстрые действия</h3>
+                  <div className="grid flex-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                    {saleQuickActions.map(action => {
+                      const Icon = action.icon;
+                      const button = (
+                        <Button
+                          variant={action.id === 'quote' ? 'default' : 'secondary'}
+                          className="w-full justify-center"
+                          onClick={action.onClick}
+                        >
+                          <Icon className="h-4 w-4" />
+                          {action.label}
+                        </Button>
+                      );
+                      return action.to ? <Link key={action.id} to={action.to}>{button}</Link> : <span key={action.id}>{button}</span>;
+                    })}
+                  </div>
                 </div>
               </div>
             </>
@@ -2155,7 +2336,7 @@ export default function EquipmentDetail() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:gap-6 lg:grid-cols-[260px_1fr]">
+      {!saleMode && <div className="grid gap-4 sm:gap-6 lg:grid-cols-[260px_1fr]">
         <Card>
           <CardContent className="p-0">
             <input
@@ -2331,10 +2512,10 @@ export default function EquipmentDetail() {
             )}
           </CardContent>
         </Card>
-      </div>
+      </div>}
 
       {/* ── Tabs ── */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+      {!saleMode && <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="">
           <TabsTrigger value="overview" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><CheckCircle className="h-3.5 w-3.5" /> Обзор</span>
@@ -3701,7 +3882,7 @@ export default function EquipmentDetail() {
           </Card>
         </TabsContent>
         )}
-      </Tabs>
+      </Tabs>}
 
       {/* ── Modals ── */}
       <Dialog.Root open={showCreateServiceModal} onOpenChange={setShowCreateServiceModal}>
@@ -3871,6 +4052,76 @@ export default function EquipmentDetail() {
 }
 
 // ── Helper Components ──
+
+function SalePanel({
+  title,
+  children,
+  tone = 'default',
+}: {
+  title: string;
+  children: React.ReactNode;
+  tone?: 'default' | 'danger';
+}) {
+  return (
+    <section className={cn(
+      'space-y-4 rounded-2xl border bg-card/80 p-4 shadow-sm',
+      tone === 'danger' ? 'border-red-500/25 bg-red-500/5' : 'border-border',
+    )}>
+      <h3 className="text-base font-semibold text-foreground">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function SaleField({
+  label,
+  value,
+  mono,
+  icon,
+  badge = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+  icon?: React.ReactNode;
+  badge?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <div className={cn('mt-1 flex min-h-5 items-center gap-2 text-sm font-semibold text-foreground', mono && 'font-mono')}>
+        {icon}
+        {badge ? <Badge variant="info">{value}</Badge> : <span className="min-w-0 break-words">{value || '—'}</span>}
+      </div>
+    </div>
+  );
+}
+
+function SaleCheckRow({ ready, label }: { ready: boolean; label: string }) {
+  return (
+    <div className="flex items-start gap-2 text-sm">
+      {ready ? <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />}
+      <span className="text-muted-foreground">{label}</span>
+    </div>
+  );
+}
+
+function SaleStatusRow({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'success' | 'warning';
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn('text-right font-semibold', tone === 'success' ? 'text-emerald-400' : 'text-amber-400')}>{value}</span>
+    </div>
+  );
+}
 
 function InfoField({ label, value, mono, highlight }: {
   label: string;

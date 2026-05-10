@@ -248,13 +248,17 @@ test('sale mode PDI action opens dedicated PDI form instead of service ticket fo
   assert.doesNotMatch(source, /submitLabel=\{saleMode \? 'Создать PDI'/);
 });
 
-test('marking equipment sold requires confirmation and return action uses sale status patch', () => {
+test('sale mode header uses storefront actions instead of CRM actions', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+  const saleStart = source.indexOf("saleMode ? (");
+  const saleEnd = source.indexOf(") : (", saleStart);
+  const saleBranch = source.slice(saleStart, saleEnd);
 
-  assert.match(source, /equipment-sale-return/);
-  assert.match(source, /buildSaleStatusPatch\(item, 'on_sale'\)/);
-  assert.match(source, /window\.confirm\('Вы уверены, что хотите отметить технику как проданную\?/);
-  assert.match(source, /buildSaleStatusPatch\(item, 'sold'\)/);
+  assert.match(source, /Назад к списку продаж/);
+  assert.match(source, /Создать КП/);
+  assert.match(source, /Витрина продажной техники/);
+  assert.match(source, /saleStatusKindValue === 'in_deal' \? 'Зарезервирована'/);
+  assert.doesNotMatch(saleBranch, /CRM|лид|сделк|ворон|Ответственный|Открыть CRM|Создать задачу/);
 });
 
 test('sales page keeps sold equipment discoverable through sales status filter', () => {
@@ -295,10 +299,12 @@ test('sale mode keeps sale prices in sale 360 and not in basic characteristics',
 
   assert.ok(basicStart > -1);
   assert.ok(basicEnd > basicStart);
-  assert.match(source, /<CardTitle>\{saleMode \? 'Продажа 360°' : 'Техника 360°'\}<\/CardTitle>/);
-  assert.match(source, /<CompactMetric label="Цена 1"/);
-  assert.match(source, /<CompactMetric label="Цена 2"/);
-  assert.match(source, /<CompactMetric label="Цена 3"/);
+  assert.match(source, /<CardTitle>\{saleMode \? 'Витрина продажной техники' : 'Техника 360°'\}<\/CardTitle>/);
+  assert.match(source, /<SalePanel title="Цена и маржа">/);
+  assert.match(source, /saleMainPrice/);
+  assert.match(source, /saleMinPrice/);
+  assert.match(source, /saleCostPrice/);
+  assert.match(source, /saleMarginPercent/);
 
   assert.doesNotMatch(basicSection, /<p className="text-sm font-semibold text-orange-300">Продажа<\/p>/);
   assert.doesNotMatch(basicSection, /<InfoField label="Цена 1"/);
@@ -306,24 +312,23 @@ test('sale mode keeps sale prices in sale 360 and not in basic characteristics',
   assert.doesNotMatch(basicSection, /<InfoField label="Цена 3"/);
 });
 
-test('sale mode separates new sale cards from used operation history', () => {
+test('sale mode uses sale storefront sections without operation-history CRM blocks', () => {
   const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
   const salesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
 
-  assert.match(detailSource, /Идентификация продажи/);
-  assert.match(detailSource, /История эксплуатации перед продажей/);
-  assert.match(detailSource, /Эксплуатационные данные заполнены вручную/);
-  assert.match(detailSource, /showSaleOperationHistory/);
-  assert.match(detailSource, /saleCondition === 'used'/);
-  assert.match(detailSource, /<CompactMetric label="Инв\. №"/);
-  assert.match(detailSource, /<CompactMetric label="Тип" value=\{saleConditionLabel\(equipment, saleConditionContext\)\}/);
-  assert.match(detailSource, /<CompactMetric label="ТО"/);
-  assert.match(detailSource, /<CompactMetric label="ЧТО"/);
-  assert.match(detailSource, /<CompactMetric label="ПТО"/);
-  assert.match(detailSource, /<CompactMetric label="GSM \/ IMEI \/ статус трекера" value=\{getGsmDisplayValue\(equipment\)\}/);
-  assert.match(detailSource, /label="Доход от аренды"/);
-  assert.match(detailSource, /formatCurrency\(equipment360\.finance\.revenue\)/);
-  assert.match(detailSource, /\{canViewFinance && canViewRentals && \(/);
+  assert.match(detailSource, /<SalePanel title="Паспорт техники">/);
+  assert.match(detailSource, /<SalePanel title="Готовность к продаже">/);
+  assert.match(detailSource, /<SalePanel title="Блокеры продажи"/);
+  assert.match(detailSource, /<SalePanel title="Состояние и приёмка">/);
+  assert.match(detailSource, /<SalePanel title="Комплектация">/);
+  assert.match(detailSource, /<SalePanel title="Техническое состояние">/);
+  assert.match(detailSource, /<SalePanel title="Логистика продажи">/);
+  assert.match(detailSource, /<SalePanel title="Документы">/);
+  assert.match(detailSource, /saleBlockers/);
+  assert.match(detailSource, /saleReadinessPercent/);
+  assert.doesNotMatch(detailSource, /showSaleOperationHistory/);
+  assert.doesNotMatch(detailSource, /История эксплуатации перед продажей/);
+  assert.doesNotMatch(detailSource, /Эксплуатационные данные заполнены вручную/);
   assert.match(detailSource, /rentals: canViewRentals \? allGanttRentals : \[\]/);
   assert.match(detailSource, /payments: canViewFinance \? allPayments : \[\]/);
 

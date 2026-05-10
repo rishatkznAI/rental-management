@@ -874,7 +874,7 @@ export default function Sales() {
                   <p className="text-xs text-gray-500 dark:text-gray-400">Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || '—'}</p>
                   <div className="mt-3 text-sm">Цена: <span className="font-semibold">{formatCurrency(equipment.salePrice1 ?? 0)}</span></div>
                   <div className="mt-1 text-sm">НДС, срок действия, доставка, гарантия и комплектация подтягиваются из карточки техники и шаблонов.</div>
-                  <Link to={`/documents?equipmentId=${equipment.id}&type=kp`}>
+                  <Link to={`/documents?equipmentId=${equipment.id}&type=commercial_offer&action=create`}>
                     <Button className="mt-4 app-button-primary h-9 rounded-xl">Создать КП</Button>
                   </Link>
                 </div>

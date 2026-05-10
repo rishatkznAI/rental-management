@@ -1,5 +1,6 @@
 const DOCUMENT_TYPE_CONFIG = {
   contract: { label: 'Договор', prefix: 'CONTRACT' },
+  commercial_offer: { label: 'Коммерческое предложение', prefix: 'KP' },
   act: { label: 'Акт', prefix: 'ACT' },
   upd: { label: 'УПД', prefix: 'UPD' },
   invoice: { label: 'Счёт', prefix: 'INVOICE' },
@@ -29,6 +30,7 @@ function text(value) {
 
 function normalizeDocumentType(value) {
   const key = text(value).toLowerCase();
+  if (key === 'quote' || key === 'kp' || key === 'кп' || key === 'commercial_offer') return 'commercial_offer';
   if (key === 'service' || key === 'service_act') return 'service_act';
   if (key === 'upd' || key === 'упд') return 'upd';
   if (DOCUMENT_TYPE_CONFIG[key]) return key;

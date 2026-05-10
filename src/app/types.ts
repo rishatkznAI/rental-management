@@ -896,6 +896,7 @@ export interface ClientContract {
 
 export type DocumentType =
   | 'contract'
+  | 'commercial_offer'
   | 'act'
   | 'upd'
   | 'invoice'

@@ -77,6 +77,7 @@ type DocumentsView = 'general' | 'control' | 'mechanics';
 
 const VALID_DOCUMENT_TYPES = new Set<DocumentType>([
   'contract',
+  'commercial_offer',
   'act',
   'upd',
   'invoice',
@@ -99,6 +100,20 @@ type ContractFormState = {
   signatoryName: string;
   signatoryBasis: string;
   date: string;
+  comment: string;
+};
+
+type CommercialOfferFormState = {
+  clientId: string;
+  client: string;
+  equipmentId: string;
+  date: string;
+  price: string;
+  validUntil: string;
+  paymentTerms: string;
+  deliveryTerms: string;
+  warrantyTerms: string;
+  kitComment: string;
   comment: string;
 };
 
@@ -162,6 +177,7 @@ function searchText(value: unknown) {
 export function getDocumentTypeLabel(doc: Partial<Doc> | null | undefined): string {
   const labels: Record<DocumentType, string> = {
     contract: getContractKindLabel(doc?.contractKind),
+    commercial_offer: 'Коммерческое предложение',
     act: 'Акт',
     upd: 'УПД',
     invoice: 'Счёт',
@@ -334,6 +350,78 @@ function buildContractDraftHtml(params: {
   `;
 }
 
+function buildCommercialOfferHtml(params: {
+  number: string;
+  client: string;
+  date: string;
+  validUntil: string;
+  equipmentLabel: string;
+  inventoryNumber: string;
+  serialNumber: string;
+  price: string;
+  paymentTerms: string;
+  deliveryTerms: string;
+  warrantyTerms: string;
+  kitComment: string;
+  comment?: string;
+}) {
+  const {
+    number,
+    client,
+    date,
+    validUntil,
+    equipmentLabel,
+    inventoryNumber,
+    serialNumber,
+    price,
+    paymentTerms,
+    deliveryTerms,
+    warrantyTerms,
+    kitComment,
+    comment,
+  } = params;
+  return `
+    <!doctype html>
+    <html lang="ru">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(number)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 32px; font-family: Arial, sans-serif; color: #111827; background: #fff; }
+          .sheet { border: 1px solid #d1d5db; border-radius: 18px; padding: 28px; }
+          h1 { margin: 0 0 12px; font-size: 24px; }
+          h2 { margin: 24px 0 8px; font-size: 16px; }
+          p { margin: 0 0 8px; font-size: 14px; line-height: 1.6; }
+          .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+          .box { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; background: #f9fafb; }
+          .label { margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #6b7280; }
+          .price { font-size: 24px; font-weight: 700; color: #0f172a; }
+        </style>
+      </head>
+      <body>
+        <div class="sheet">
+          <h1>Коммерческое предложение</h1>
+          <p><strong>Номер:</strong> ${escapeHtml(number)}</p>
+          <p><strong>Дата:</strong> ${escapeHtml(formatDate(date))}</p>
+          <p><strong>Действует до:</strong> ${escapeHtml(formatDate(validUntil))}</p>
+          <p><strong>Клиент:</strong> ${escapeHtml(client)}</p>
+          <div class="grid">
+            <div class="box"><div class="label">Техника</div><div>${escapeHtml(equipmentLabel)}</div></div>
+            <div class="box"><div class="label">Идентификация</div><div>Инв. № ${escapeHtml(inventoryNumber)} · SN ${escapeHtml(serialNumber)}</div></div>
+            <div class="box"><div class="label">Цена продажи</div><div class="price">${escapeHtml(price)}</div></div>
+            <div class="box"><div class="label">Комплектация</div><div>${escapeHtml(kitComment).replaceAll('\n', '<br />')}</div></div>
+          </div>
+          <h2>Условия оплаты</h2><p>${escapeHtml(paymentTerms).replaceAll('\n', '<br />')}</p>
+          <h2>Условия доставки</h2><p>${escapeHtml(deliveryTerms).replaceAll('\n', '<br />')}</p>
+          <h2>Гарантийные условия</h2><p>${escapeHtml(warrantyTerms).replaceAll('\n', '<br />')}</p>
+          ${comment ? `<h2>Комментарий</h2><p>${escapeHtml(comment).replaceAll('\n', '<br />')}</p>` : ''}
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 export default function Documents() {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -387,6 +475,7 @@ export default function Documents() {
   const [selectedMechanicId, setSelectedMechanicId] = React.useState<string>('');
   const [mechanicDocuments, setMechanicDocuments] = React.useState<MechanicDocument[]>([]);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+  const [commercialOfferDialogOpen, setCommercialOfferDialogOpen] = React.useState(false);
   const [selectedDocument, setSelectedDocument] = React.useState<Doc | null>(null);
   const [sortKey, setSortKey] = React.useState<'date' | 'number' | 'client' | 'status' | 'createdAt'>('date');
   const [createContractKind, setCreateContractKind] = React.useState<DocumentContractKind>('rental');
@@ -398,6 +487,19 @@ export default function Documents() {
     signatoryName: '',
     signatoryBasis: '',
     date: new Date().toISOString().slice(0, 10),
+    comment: '',
+  });
+  const [commercialOfferForm, setCommercialOfferForm] = React.useState<CommercialOfferFormState>({
+    clientId: '',
+    client: '',
+    equipmentId: '',
+    date: new Date().toISOString().slice(0, 10),
+    price: '',
+    validUntil: '',
+    paymentTerms: 'Предоплата до отгрузки.',
+    deliveryTerms: 'Самовывоз со склада или доставка по отдельному согласованию.',
+    warrantyTerms: 'Гарантийные условия указываются с учётом состояния техники.',
+    kitComment: 'Комплектация проверена. Подробности уточняются при подготовке к отгрузке.',
     comment: '',
   });
 
@@ -536,12 +638,21 @@ export default function Documents() {
     if (appliedQuickActionRef.current === actionKey) return;
     appliedQuickActionRef.current = actionKey;
 
-    openContractCreate('rental', {
-      clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
-      client: quickActionClient?.company || quickActionRental?.client || quickActionContext.clientName,
-      rentalId: quickActionRental?.id || '',
-      equipmentId: quickActionEquipment?.id || quickActionContext.equipmentId,
-    });
+    const requestedType = String(searchParams.get('type') || searchParams.get('documentType') || '').toLowerCase();
+    if (['commercial_offer', 'quote', 'kp', 'кп'].includes(requestedType)) {
+      openCommercialOfferCreate({
+        clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
+        client: quickActionClient?.company || quickActionRental?.client || quickActionContext.clientName,
+        equipmentId: quickActionEquipment?.id || quickActionContext.equipmentId,
+      });
+    } else {
+      openContractCreate('rental', {
+        clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
+        client: quickActionClient?.company || quickActionRental?.client || quickActionContext.clientName,
+        rentalId: quickActionRental?.id || '',
+        equipmentId: quickActionEquipment?.id || quickActionContext.equipmentId,
+      });
+    }
   }, [
     canManageDocuments,
     quickActionClient,
@@ -733,6 +844,27 @@ export default function Documents() {
     setCreateDialogOpen(true);
   }
 
+  function openCommercialOfferCreate(initial: Partial<CommercialOfferFormState> = {}) {
+    const equipmentItem = initial.equipmentId ? equipmentById.get(initial.equipmentId) : undefined;
+    const validUntil = new Date();
+    validUntil.setDate(validUntil.getDate() + 14);
+    setCommercialOfferForm({
+      clientId: '',
+      client: '',
+      equipmentId: '',
+      date: new Date().toISOString().slice(0, 10),
+      price: equipmentItem?.salePrice1 ? String(equipmentItem.salePrice1) : '',
+      validUntil: validUntil.toISOString().slice(0, 10),
+      paymentTerms: 'Предоплата до отгрузки.',
+      deliveryTerms: 'Самовывоз со склада или доставка по отдельному согласованию.',
+      warrantyTerms: 'Гарантийные условия указываются с учётом состояния техники.',
+      kitComment: equipmentItem?.notes || 'Комплектация проверена. Подробности уточняются при подготовке к отгрузке.',
+      comment: '',
+      ...initial,
+    });
+    setCommercialOfferDialogOpen(true);
+  }
+
   async function handleCreateContract() {
     if (!contractForm.clientId || !contractForm.client.trim()) {
       toast.error('Выберите клиента.');
@@ -794,6 +926,60 @@ export default function Documents() {
     });
     setCreateDialogOpen(false);
     toast.success(`${getContractKindLabel(createContractKind)} создан: ${getDocumentNumber(created)}.`);
+  }
+
+  async function handleCreateCommercialOffer() {
+    if (!commercialOfferForm.equipmentId) {
+      toast.error('Выберите технику для КП.');
+      return;
+    }
+    if (!commercialOfferForm.date) {
+      toast.error('Укажите дату КП.');
+      return;
+    }
+
+    const equipmentItem = equipmentById.get(commercialOfferForm.equipmentId);
+    const clientName = commercialOfferForm.client.trim() || 'Потенциальный клиент';
+    const payload: Omit<Doc, 'id'> = {
+      type: 'commercial_offer',
+      documentType: 'commercial_offer',
+      number: '',
+      clientId: commercialOfferForm.clientId || undefined,
+      client: clientName,
+      date: commercialOfferForm.date,
+      status: 'draft',
+      manager: user?.name || 'Система',
+      equipmentId: commercialOfferForm.equipmentId,
+      equipmentInv: equipmentItem?.inventoryNumber || '',
+      equipment: equipmentItem ? getEquipmentLabel(equipmentItem) : '',
+      amount: Number(commercialOfferForm.price) || undefined,
+      comment: commercialOfferForm.comment.trim() || undefined,
+      contentHtml: '',
+    };
+
+    const created = await createDocument.mutateAsync(payload);
+    await updateDocument.mutateAsync({
+      id: created.id,
+      data: {
+        contentHtml: buildCommercialOfferHtml({
+          number: getDocumentNumber(created),
+          client: clientName,
+          date: commercialOfferForm.date,
+          validUntil: commercialOfferForm.validUntil || commercialOfferForm.date,
+          equipmentLabel: equipmentItem ? `${equipmentItem.manufacturer} ${equipmentItem.model}` : 'Техника',
+          inventoryNumber: equipmentItem?.inventoryNumber || '—',
+          serialNumber: equipmentItem?.serialNumber || '—',
+          price: commercialOfferForm.price ? formatCurrency(Number(commercialOfferForm.price)) : 'По запросу',
+          paymentTerms: commercialOfferForm.paymentTerms,
+          deliveryTerms: commercialOfferForm.deliveryTerms,
+          warrantyTerms: commercialOfferForm.warrantyTerms,
+          kitComment: commercialOfferForm.kitComment,
+          comment: commercialOfferForm.comment.trim() || undefined,
+        }),
+      },
+    });
+    setCommercialOfferDialogOpen(false);
+    toast.success(`Коммерческое предложение создано: ${getDocumentNumber(created)}.`);
   }
 
   async function handleAssignNumber(doc: Doc) {
@@ -1024,6 +1210,7 @@ export default function Documents() {
                   <SelectContent>
                     <SelectItem value="all">Все типы</SelectItem>
                     <SelectItem value="contract">Договоры</SelectItem>
+                    <SelectItem value="commercial_offer">КП</SelectItem>
                     <SelectItem value="act">Акты</SelectItem>
                     <SelectItem value="upd">УПД</SelectItem>
                     <SelectItem value="invoice">Счета</SelectItem>
@@ -1388,6 +1575,125 @@ export default function Documents() {
                   disabled={createDocument.isPending}
                 >
                   Создать договор
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={commercialOfferDialogOpen} onOpenChange={setCommercialOfferDialogOpen}>
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <FileSignature className="h-5 w-5" />
+                  Коммерческое предложение
+                </DialogTitle>
+                <DialogDescription>
+                  Будет создан документ типа “Коммерческое предложение”. Минимальная цена в КП не выводится.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="grid gap-4 py-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-foreground">Клиент</div>
+                  <ClientCombobox
+                    clients={clients as Client[]}
+                    value={commercialOfferForm.client}
+                    valueId={commercialOfferForm.clientId}
+                    onChange={(value) => setCommercialOfferForm(current => ({ ...current, client: value }))}
+                    onClientSelect={(client) => setCommercialOfferForm(current => ({
+                      ...current,
+                      clientId: client?.id ?? '',
+                      client: client?.company ?? '',
+                    }))}
+                    placeholder="Выберите клиента или оставьте потенциального"
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">Техника</div>
+                    <Select
+                      value={commercialOfferForm.equipmentId || 'none'}
+                      onValueChange={(value) => {
+                        const equipmentItem = value === 'none' ? undefined : equipmentById.get(value);
+                        setCommercialOfferForm(current => ({
+                          ...current,
+                          equipmentId: value === 'none' ? '' : value,
+                          price: equipmentItem?.salePrice1 ? String(equipmentItem.salePrice1) : current.price,
+                          kitComment: equipmentItem?.notes || current.kitComment,
+                        }));
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Выберите технику" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Без техники</SelectItem>
+                        {(equipment as Equipment[]).map(item => (
+                          <SelectItem key={item.id} value={item.id}>{getEquipmentLabel(item)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">Цена продажи</div>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={commercialOfferForm.price}
+                      onChange={(event) => setCommercialOfferForm(current => ({ ...current, price: event.target.value }))}
+                      placeholder="Цена для клиента"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">Дата КП</div>
+                    <Input
+                      type="date"
+                      value={commercialOfferForm.date}
+                      onChange={(event) => setCommercialOfferForm(current => ({ ...current, date: event.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">Срок действия</div>
+                    <Input
+                      type="date"
+                      value={commercialOfferForm.validUntil}
+                      onChange={(event) => setCommercialOfferForm(current => ({ ...current, validUntil: event.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                {[
+                  ['paymentTerms', 'Условия оплаты'],
+                  ['deliveryTerms', 'Условия доставки'],
+                  ['warrantyTerms', 'Гарантийные условия'],
+                  ['kitComment', 'Комплектация'],
+                  ['comment', 'Комментарий'],
+                ].map(([key, label]) => (
+                  <div key={key} className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">{label}</div>
+                    <Textarea
+                      rows={key === 'comment' ? 2 : 3}
+                      value={commercialOfferForm[key as keyof CommercialOfferFormState]}
+                      onChange={(event) => setCommercialOfferForm(current => ({ ...current, [key]: event.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <DialogFooter>
+                <Button variant="secondary" onClick={() => setCommercialOfferDialogOpen(false)}>
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => void handleCreateCommercialOffer()}
+                  className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+                  disabled={createDocument.isPending || updateDocument.isPending}
+                >
+                  Создать КП
                 </Button>
               </DialogFooter>
             </DialogContent>

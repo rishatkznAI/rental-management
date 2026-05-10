@@ -282,6 +282,26 @@ test('sales equipment opens through sales route instead of common equipment rout
   assert.match(detailSource, /routeContext === 'sales' \? '\/sales' : '\/equipment'/);
 });
 
+test('sale quote actions create commercial offer documents instead of contracts', () => {
+  const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+  const salesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
+  const documentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf8');
+  const typesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/types.ts'), 'utf8');
+  const documentsCoreSource = fs.readFileSync(path.join(process.cwd(), 'server/lib/documents-core.js'), 'utf8');
+
+  assert.match(detailSource, /action=create&type=commercial_offer/);
+  assert.doesNotMatch(detailSource, /action=create&type=quote/);
+  assert.match(salesSource, /type=commercial_offer&action=create/);
+  assert.doesNotMatch(salesSource, /type=kp/);
+  assert.match(typesSource, /\| 'commercial_offer'/);
+  assert.match(documentsCoreSource, /commercial_offer: \{ label: 'Коммерческое предложение', prefix: 'KP' \}/);
+  assert.match(documentsCoreSource, /key === 'quote' \|\| key === 'kp'[\s\S]*return 'commercial_offer'/);
+  assert.match(documentsSource, /type: 'commercial_offer'/);
+  assert.match(documentsSource, /documentType: 'commercial_offer'/);
+  assert.match(documentsSource, /Коммерческое предложение/);
+  assert.match(documentsSource, /handleCreateCommercialOffer/);
+});
+
 test('active section separates sales equipment detail from common equipment detail', () => {
   const permissionsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/permissions.ts'), 'utf8');
   const sidebarSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/layout/Sidebar.tsx'), 'utf8');

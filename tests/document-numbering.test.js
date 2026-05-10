@@ -58,6 +58,31 @@ test('document numbering creates separate yearly sequences by document type', ()
   assert.equal(nextYear.document.number, 'ACT-2027-0001');
 });
 
+test('commercial offers use KP numbering and quote aliases normalize to commercial_offer', () => {
+  const offer = prepareDocumentCreate({
+    type: 'commercial_offer',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    date: '2026-05-09',
+    status: 'draft',
+  }, { documents: [], settings: [], nowIso, generateId, idPrefix: 'D', user });
+
+  assert.equal(offer.document.type, 'commercial_offer');
+  assert.equal(offer.document.documentType, 'commercial_offer');
+  assert.equal(offer.document.number, 'KP-2026-0001');
+
+  const quoteAlias = prepareDocumentCreate({
+    type: 'quote',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    date: '2026-05-10',
+    status: 'draft',
+  }, { documents: [offer.document], settings: offer.settings, nowIso, generateId, idPrefix: 'D', user });
+
+  assert.equal(quoteAlias.document.type, 'commercial_offer');
+  assert.equal(quoteAlias.document.number, 'KP-2026-0002');
+});
+
 test('document numbering rejects duplicate manual number and records history', () => {
   const created = prepareDocumentCreate({
     type: 'contract',

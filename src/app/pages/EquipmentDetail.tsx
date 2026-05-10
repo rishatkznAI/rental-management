@@ -1630,7 +1630,7 @@ export default function EquipmentDetail() {
     { id: 'photo', label: 'Добавить фото', icon: Camera, onClick: () => mainPhotoInputRef.current?.click(), show: canEditEquipment },
     { id: 'documents', label: 'Открыть документы', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`, show: canViewDocuments },
     { id: 'pdi', label: 'Открыть PDI', icon: Wrench, onClick: () => setShowCreateServiceModal(true), show: canCreateService || canViewService },
-    { id: 'quote', label: 'Создать КП', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create&type=quote`, show: canViewDocuments },
+    { id: 'quote', label: 'Создать КП', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create&type=commercial_offer`, show: canViewDocuments },
     { id: 'delivery', label: 'Создать доставку', icon: Calendar, to: `/deliveries?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create`, show: can('create', 'deliveries') || can('view', 'deliveries') },
     { id: 'edit', label: 'Редактировать', icon: PenLine, onClick: () => setShowEditModal(true), show: canEditEquipment },
   ].filter(action => action.show);
@@ -1789,7 +1789,7 @@ export default function EquipmentDetail() {
               </div>
             )}
             {saleMode && canViewDocuments && (
-              <Link to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create&type=quote`}>
+              <Link to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create&type=commercial_offer`}>
                 <Button size="sm" className="app-button-primary rounded-xl px-4">
                   <FileText className="h-3.5 w-3.5" />
                   Создать КП

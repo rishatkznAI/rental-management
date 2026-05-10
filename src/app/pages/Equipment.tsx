@@ -27,7 +27,7 @@ import type {
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
-type EquipmentTab = 'active' | 'sale' | 'sold' | 'service' | 'all';
+type EquipmentTab = 'all' | 'rental_fleet' | 'sale' | 'client' | 'partner' | 'service' | 'archive';
 
 function enrichEquipment(eqList: EquipmentEntity[], ganttRentals: GanttRentalData[]): EquipmentEntity[] {
   const inventoryCounts = new Map<string, number>();
@@ -130,11 +130,32 @@ function getSalePdiAppearance(status: EquipmentSalePdiStatus = 'not_started') {
   return 'bg-secondary text-muted-foreground';
 }
 
+function isSaleRegistryEquipment(equipment: EquipmentEntity) {
+  return Boolean(
+    equipment.isForSale
+    || equipment.salePdiStatus
+    || equipment.saleReceiptStatus
+    || equipment.salePrice1
+    || equipment.salePrice2
+    || equipment.salePrice3
+    || equipment.category === 'sold',
+  );
+}
+
 function matchesTabType(equipment: EquipmentEntity, activeTab: EquipmentTab) {
-  if (activeTab === 'active') return equipment.activeInFleet && (equipment.category === 'own' || equipment.category === 'partner');
-  if (activeTab === 'sale') return equipment.isForSale && equipment.category !== 'sold';
-  if (activeTab === 'sold') return equipment.category === 'sold';
-  if (activeTab === 'service') return equipment.category === 'client' || (!equipment.activeInFleet && equipment.category !== 'sold');
+  if (activeTab === 'all') return true;
+  if (activeTab === 'rental_fleet') {
+    return equipment.activeInFleet
+      && (equipment.category === 'own' || equipment.category === 'partner')
+      && equipment.category !== 'sold'
+      && equipment.status !== 'inactive'
+      && !isSaleRegistryEquipment(equipment);
+  }
+  if (activeTab === 'sale') return isSaleRegistryEquipment(equipment) && equipment.category !== 'sold';
+  if (activeTab === 'client') return equipment.category === 'client';
+  if (activeTab === 'partner') return equipment.category === 'partner' || equipment.owner === 'investor' || equipment.owner === 'sublease';
+  if (activeTab === 'service') return equipment.status === 'in_service';
+  if (activeTab === 'archive') return equipment.category === 'sold' || equipment.status === 'inactive';
   return true;
 }
 
@@ -186,11 +207,12 @@ function EquipmentMobileCard({
   isSaleTab: boolean;
   equipmentTypeLabel: string;
 }) {
+  const detailPath = isSaleTab ? `/sales/equipment/${equipment.id}` : `/equipment/${equipment.id}`;
   return (
     <div className="rounded-2xl border border-border bg-card/95 p-4 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <Link to={`/equipment/${equipment.id}`} className="app-shell-title text-base font-extrabold text-foreground hover:text-primary">
+          <Link to={detailPath} className="app-shell-title text-base font-extrabold text-foreground hover:text-primary">
             {equipment.manufacturer} {equipment.model}
           </Link>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -258,7 +280,7 @@ export default function Equipment() {
   const ganttRentals = ganttQuery.data ?? [];
   const equipmentTypeCatalog = useEquipmentTypeCatalog();
   const [search, setSearch] = React.useState('');
-  const [activeTab, setActiveTab] = React.useState<EquipmentTab>('active');
+  const [activeTab, setActiveTab] = React.useState<EquipmentTab>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [driveFilter, setDriveFilter] = React.useState<string>('all');
@@ -329,11 +351,13 @@ export default function Equipment() {
   React.useEffect(() => {
     if (!shouldLogWarrantyDebug() || !isWarrantyMechanicRole(user?.role)) return;
     const byTab = {
-      active: enrichedEquipmentList.filter((item) => matchesTabType(item, 'active')).length,
-      sale: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sale')).length,
-      sold: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sold')).length,
-      service: enrichedEquipmentList.filter((item) => matchesTabType(item, 'service')).length,
       all: enrichedEquipmentList.length,
+      rental_fleet: enrichedEquipmentList.filter((item) => matchesTabType(item, 'rental_fleet')).length,
+      sale: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sale')).length,
+      client: enrichedEquipmentList.filter((item) => matchesTabType(item, 'client')).length,
+      partner: enrichedEquipmentList.filter((item) => matchesTabType(item, 'partner')).length,
+      service: enrichedEquipmentList.filter((item) => matchesTabType(item, 'service')).length,
+      archive: enrichedEquipmentList.filter((item) => matchesTabType(item, 'archive')).length,
     };
     const filters = { activeTab, search, categoryFilter, fleetFilter, statusFilter, typeFilter, ownerFilter, driveFilter, locationFilter };
     const excluded = enrichedEquipmentList
@@ -367,11 +391,13 @@ export default function Equipment() {
   ]);
 
   const tabCounts = React.useMemo(() => ({
-    active: enrichedEquipmentList.filter((item) => matchesTabType(item, 'active')).length,
-    sale: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sale')).length,
-    sold: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sold')).length,
-    service: enrichedEquipmentList.filter((item) => matchesTabType(item, 'service')).length,
     all: enrichedEquipmentList.length,
+    rental_fleet: enrichedEquipmentList.filter((item) => matchesTabType(item, 'rental_fleet')).length,
+    sale: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sale')).length,
+    client: enrichedEquipmentList.filter((item) => matchesTabType(item, 'client')).length,
+    partner: enrichedEquipmentList.filter((item) => matchesTabType(item, 'partner')).length,
+    service: enrichedEquipmentList.filter((item) => matchesTabType(item, 'service')).length,
+    archive: enrichedEquipmentList.filter((item) => matchesTabType(item, 'archive')).length,
   }), [enrichedEquipmentList]);
   const activeFilterCount = [
     search.trim() !== '',
@@ -407,7 +433,7 @@ export default function Equipment() {
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div>
               <h1 className="app-shell-title text-3xl font-extrabold text-foreground">Техника</h1>
-              <p className="mt-2 text-sm text-muted-foreground">Управление парком подъёмных платформ</p>
+              <p className="mt-2 text-sm text-muted-foreground">Единый реестр физических единиц техники</p>
             </div>
             {can('create', 'equipment') && (
               <Link to="/equipment/new">
@@ -421,11 +447,13 @@ export default function Equipment() {
 
           <div className="mt-5 flex flex-wrap gap-2">
             {[
-              { key: 'active', label: 'Активный парк' },
-              { key: 'sale', label: 'На продажу' },
-              { key: 'sold', label: 'Проданная техника' },
-              { key: 'service', label: 'Сервисная / клиентская техника' },
               { key: 'all', label: 'Вся техника' },
+              { key: 'rental_fleet', label: 'Арендный парк' },
+              { key: 'sale', label: 'На продаже' },
+              { key: 'client', label: 'Клиентская техника' },
+              { key: 'partner', label: 'Партнёрская техника' },
+              { key: 'service', label: 'В сервисе' },
+              { key: 'archive', label: 'Списанная / архив' },
             ].map((tab) => {
               const count = tabCounts[tab.key as EquipmentTab];
               return (
@@ -587,7 +615,7 @@ export default function Equipment() {
                     <div key={equipment.id} className="border-b border-border/80 px-5 py-4 transition-colors hover:bg-secondary/60">
                       <div className="grid items-center gap-3" style={{ gridTemplateColumns: saleRowColumns }}>
                         <div className="min-w-0">
-                          <Link to={`/equipment/${equipment.id}`} className="app-shell-title text-[15px] font-extrabold text-foreground hover:text-primary">
+                          <Link to={`/sales/equipment/${equipment.id}`} className="app-shell-title text-[15px] font-extrabold text-foreground hover:text-primary">
                             {equipment.manufacturer} {equipment.model}
                           </Link>
                           <div className="mt-1 text-xs text-muted-foreground">Инв. № {equipment.inventoryNumber || '—'}</div>
@@ -629,7 +657,7 @@ export default function Equipment() {
                                 align="end"
                               >
                                 <DropdownMenu.Item asChild className="cursor-pointer rounded-lg px-3 py-2 text-sm text-foreground outline-none hover:bg-accent">
-                                  <Link to={`/equipment/${equipment.id}`}>Открыть карточку</Link>
+                                  <Link to={`/sales/equipment/${equipment.id}`}>Открыть карточку</Link>
                                 </DropdownMenu.Item>
                               </DropdownMenu.Content>
                             </DropdownMenu.Portal>

@@ -10,6 +10,7 @@ import {
 import { RefreshCw, Truck, BarChart2, Wrench, TrendingUp, Download } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import { formatCurrency } from '../lib/utils';
+import { isSaleModeEquipment, saleConditionLabel } from '../lib/equipmentSaleMode.js';
 import { assessServiceRisk } from '../lib/serviceRisk';
 import {
   buildClientDebtAgingRows,
@@ -25,6 +26,7 @@ import {
   calculateMonthlyFleetUtilization,
 } from '../lib/fleetUtilization';
 import type { Equipment, ServiceTicket } from '../types';
+import type { Document } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
 import { equipmentService } from '../services/equipment.service';
@@ -33,6 +35,7 @@ import { clientsService } from '../services/clients.service';
 import { paymentsService } from '../services/payments.service';
 import { rentalsService } from '../services/rentals.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
+import { documentsService } from '../services/documents.service';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
@@ -150,6 +153,30 @@ function formatDelta(current: number, previous: number, suffix = '') {
   return `${sign}${diff.toFixed(suffix ? 1 : 0)}${suffix}`;
 }
 
+function daysBetweenToday(value?: string | null) {
+  const parsed = new Date(String(value || ''));
+  if (!value || Number.isNaN(parsed.getTime())) return 0;
+  return Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 86400000));
+}
+
+function shortDate(value?: string | null) {
+  const parsed = new Date(String(value || ''));
+  if (!value || Number.isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleDateString('ru-RU');
+}
+
+function getEquipmentDocuments(equipment: Equipment, documents: Document[]) {
+  const label = `${equipment.manufacturer} ${equipment.model}`.trim().toLowerCase();
+  return documents.filter((document) => {
+    const equipmentLabel = String(document.equipment || '').toLowerCase();
+    return document.equipmentId === equipment.id
+      || document.equipmentInv === equipment.inventoryNumber
+      || document.equipmentId === equipment.inventoryNumber
+      || equipmentLabel.includes(equipment.inventoryNumber.toLowerCase())
+      || (label && equipmentLabel.includes(label));
+  });
+}
+
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Reports() {
@@ -168,6 +195,10 @@ export default function Reports() {
   const [serviceWorkSource, setServiceWorkSource] = useState('all');
   const [servicePresetId, setServicePresetId] = useState('none');
   const [activeTab, setActiveTab] = useState('analytics');
+  const [salesConditionFilter, setSalesConditionFilter] = useState('all');
+  const [salesReadinessFilter, setSalesReadinessFilter] = useState('all');
+  const [salesPdiFilter, setSalesPdiFilter] = useState('all');
+  const [salesDocsFilter, setSalesDocsFilter] = useState('all');
   const [servicePresets, setServicePresets] = useState<ServiceReportPreset[]>([]);
   const { data: equipment = [] } = useQuery<Equipment[]>({
     queryKey: EQUIPMENT_KEYS.all,
@@ -188,6 +219,10 @@ export default function Reports() {
   const { data: tickets = [] } = useQuery<ServiceTicket[]>({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
+  });
+  const { data: documents = [] } = useQuery<Document[]>({
+    queryKey: ['documents'],
+    queryFn: documentsService.getAll,
   });
   const { data: mechanicWorkload } = useQuery<MechanicsWorkloadReport>({
     queryKey: ['reports', 'mechanicsWorkload'],
@@ -1407,6 +1442,81 @@ export default function Reports() {
   }, [tickets]);
 
   // ─── Fleet structure ──────────────────────────────────────────────────────
+  const salesStockRows = useMemo(() => equipment
+    .filter(item => isSaleModeEquipment(item))
+    .map(item => {
+      const itemDocuments = getEquipmentDocuments(item, documents);
+      const price = item.salePrice1 ?? 0;
+      const cost = item.salePrice3 ?? 0;
+      const margin = price - cost;
+      const marginPercent = price > 0 && cost > 0 ? Math.round((margin / price) * 100) : 0;
+      const saleDate = item.actualArrivalDate || item.plannedArrivalDate || item.acceptedAt || item.history?.[0]?.date || '';
+      const daysOnSale = daysBetweenToday(saleDate);
+      const lastPriceDate = item.history?.find(entry => /цен|price|salePrice/i.test(entry.text))?.date || saleDate;
+      const blockers = [
+        price <= 0 ? 'нет цены' : '',
+        item.salePdiStatus !== 'ready' ? 'PDI' : '',
+        itemDocuments.length === 0 ? 'нет документов' : '',
+        !item.photo ? 'нет фото' : '',
+        item.saleReceiptStatus && item.saleReceiptStatus !== 'accepted' ? 'отгрузка' : '',
+      ].filter(Boolean);
+
+      return {
+        id: item.id,
+        model: `${item.manufacturer} ${item.model}`.trim(),
+        inventoryNumber: item.inventoryNumber,
+        condition: saleConditionLabel(item),
+        price,
+        cost,
+        margin,
+        marginPercent,
+        pdi: item.salePdiStatus ?? 'not_started',
+        documentsCount: itemDocuments.length,
+        blockers,
+        daysOnSale,
+        lastPriceDate,
+        owner: item.ownerName || item.owner,
+        location: item.location,
+        raw: item,
+      };
+    }), [documents, equipment]);
+
+  const filteredSalesStockRows = useMemo(() => salesStockRows.filter(row => {
+    if (salesConditionFilter !== 'all' && !row.condition.toLowerCase().includes(salesConditionFilter)) return false;
+    if (salesReadinessFilter === 'ready' && row.blockers.length > 0) return false;
+    if (salesReadinessFilter === 'blocked' && row.blockers.length === 0) return false;
+    if (salesPdiFilter !== 'all' && row.pdi !== salesPdiFilter) return false;
+    if (salesDocsFilter === 'with' && row.documentsCount === 0) return false;
+    if (salesDocsFilter === 'without' && row.documentsCount > 0) return false;
+    return true;
+  }), [salesConditionFilter, salesDocsFilter, salesPdiFilter, salesReadinessFilter, salesStockRows]);
+
+  const salesStockTotals = useMemo(() => {
+    const totalPrice = salesStockRows.reduce((sum, row) => sum + row.price, 0);
+    const totalCost = salesStockRows.reduce((sum, row) => sum + row.cost, 0);
+    const totalMargin = totalPrice - totalCost;
+    const pricedRows = salesStockRows.filter(row => row.price > 0);
+    return {
+      count: salesStockRows.length,
+      totalPrice,
+      totalCost,
+      totalMargin,
+      averageMargin: pricedRows.length === 0 ? 0 : Math.round(pricedRows.reduce((sum, row) => sum + row.marginPercent, 0) / pricedRows.length),
+      pdiReady: salesStockRows.filter(row => row.pdi === 'ready').length,
+      withBlockers: salesStockRows.filter(row => row.blockers.length > 0).length,
+      withoutPrice: salesStockRows.filter(row => row.price <= 0).length,
+      withoutDocuments: salesStockRows.filter(row => row.documentsCount === 0).length,
+      withoutPhoto: salesStockRows.filter(row => !row.raw.photo).length,
+      notReadyForShipment: salesStockRows.filter(row => row.raw.saleReceiptStatus && row.raw.saleReceiptStatus !== 'accepted').length,
+      over30: salesStockRows.filter(row => row.daysOnSale > 30).length,
+      over60: salesStockRows.filter(row => row.daysOnSale > 60).length,
+      over90: salesStockRows.filter(row => row.daysOnSale > 90).length,
+      stalePrice30: salesStockRows.filter(row => daysBetweenToday(row.lastPriceDate) > 30).length,
+      stalePrice45: salesStockRows.filter(row => daysBetweenToday(row.lastPriceDate) > 45).length,
+      stalePrice60: salesStockRows.filter(row => daysBetweenToday(row.lastPriceDate) > 60).length,
+    };
+  }, [salesStockRows]);
+
   const fleetStats = useMemo(() => [
     { label: 'Ножничные', count: equipment.filter(e => e.type === 'scissor').length, colorClass: 'bg-blue-500' },
     { label: 'Коленчатые', count: equipment.filter(e => e.type === 'articulated').length, colorClass: 'bg-green-500' },
@@ -1439,6 +1549,7 @@ export default function Reports() {
           {[
             { value: 'analytics', label: 'Аналитика' },
             { value: 'finance',   label: 'Финансы' },
+            { value: 'sales-stock', label: 'Продажный склад' },
             { value: 'managers',  label: 'По менеджерам' },
             { value: 'service',   label: 'По сервису' },
           ].map(tab => (
@@ -1736,6 +1847,113 @@ export default function Reports() {
         </Card>
       </div>
 
+        </TabsContent>
+
+        <TabsContent value="sales-stock" className="space-y-4 sm:space-y-6">
+          <div className="grid gap-4 md:grid-cols-4">
+            {[
+              { label: 'Техники на продаже', value: salesStockTotals.count },
+              { label: 'Сумма по цене продажи', value: formatCurrency(salesStockTotals.totalPrice) },
+              { label: 'Себестоимость', value: formatCurrency(salesStockTotals.totalCost) },
+              { label: 'Ожидаемая маржа', value: `${formatCurrency(salesStockTotals.totalMargin)} · ${salesStockTotals.averageMargin}%` },
+              { label: 'PDI завершён', value: salesStockTotals.pdiReady },
+              { label: 'С блокерами', value: salesStockTotals.withBlockers },
+              { label: 'Без цены', value: salesStockTotals.withoutPrice },
+              { label: 'Без документов', value: salesStockTotals.withoutDocuments },
+              { label: 'Без фото', value: salesStockTotals.withoutPhoto },
+              { label: 'Не готова к отгрузке', value: salesStockTotals.notReadyForShipment },
+              { label: 'На продаже больше 30/60/90 дней', value: `${salesStockTotals.over30}/${salesStockTotals.over60}/${salesStockTotals.over90}` },
+              { label: 'Цена не обновлялась 30/45/60 дней', value: `${salesStockTotals.stalePrice30}/${salesStockTotals.stalePrice45}/${salesStockTotals.stalePrice60}` },
+            ].map(item => (
+              <Card key={item.label}>
+                <CardHeader className="pb-2">
+                  <CardDescription>{item.label}</CardDescription>
+                  <CardTitle className="text-2xl">{item.value}</CardTitle>
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Продажный склад</CardTitle>
+              <CardDescription>
+                Управленческий отчёт по технике на продаже: цена, себестоимость, маржа, PDI, документы, блокеры и срок нахождения на продаже.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-4">
+                <select value={salesConditionFilter} onChange={(event) => setSalesConditionFilter(event.target.value)} className="app-filter-input">
+                  <option value="all">Все состояния</option>
+                  <option value="нов">Новая</option>
+                  <option value="б/у">Б/у</option>
+                </select>
+                <select value={salesReadinessFilter} onChange={(event) => setSalesReadinessFilter(event.target.value)} className="app-filter-input">
+                  <option value="all">Любая готовность</option>
+                  <option value="ready">Готова</option>
+                  <option value="blocked">С блокерами</option>
+                </select>
+                <select value={salesPdiFilter} onChange={(event) => setSalesPdiFilter(event.target.value)} className="app-filter-input">
+                  <option value="all">Любой PDI</option>
+                  <option value="not_started">PDI не начат</option>
+                  <option value="in_progress">PDI в процессе</option>
+                  <option value="issues">PDI с замечаниями</option>
+                  <option value="ready">PDI завершён</option>
+                </select>
+                <select value={salesDocsFilter} onChange={(event) => setSalesDocsFilter(event.target.value)} className="app-filter-input">
+                  <option value="all">Любые документы</option>
+                  <option value="with">С документами</option>
+                  <option value="without">Без документов</option>
+                </select>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-[1080px] w-full text-left text-sm">
+                  <thead className="border-b border-gray-200 text-xs uppercase text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    <tr>
+                      <th className="py-3 pr-4">Модель</th>
+                      <th className="py-3 pr-4">Инв. №</th>
+                      <th className="py-3 pr-4">Состояние</th>
+                      <th className="py-3 pr-4">Цена</th>
+                      <th className="py-3 pr-4">Себестоимость</th>
+                      <th className="py-3 pr-4">Маржа</th>
+                      <th className="py-3 pr-4">PDI</th>
+                      <th className="py-3 pr-4">Документы</th>
+                      <th className="py-3 pr-4">Блокеры</th>
+                      <th className="py-3 pr-4">Дней на продаже</th>
+                      <th className="py-3 pr-4">Дата цены</th>
+                      <th className="py-3 pr-4">Карточка</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSalesStockRows.map(row => (
+                      <tr key={row.id} className="border-b border-gray-100 dark:border-gray-800">
+                        <td className="py-3 pr-4 font-medium text-gray-900 dark:text-white">{row.model}</td>
+                        <td className="py-3 pr-4">{row.inventoryNumber || '—'}</td>
+                        <td className="py-3 pr-4">{row.condition}</td>
+                        <td className="py-3 pr-4">{formatCurrency(row.price)}</td>
+                        <td className="py-3 pr-4">{formatCurrency(row.cost)}</td>
+                        <td className="py-3 pr-4">{formatCurrency(row.margin)} · {row.marginPercent}%</td>
+                        <td className="py-3 pr-4">{row.pdi}</td>
+                        <td className="py-3 pr-4">{row.documentsCount}</td>
+                        <td className="py-3 pr-4">{row.blockers.length > 0 ? row.blockers.join(', ') : 'нет'}</td>
+                        <td className="py-3 pr-4">{row.daysOnSale}</td>
+                        <td className="py-3 pr-4">{shortDate(row.lastPriceDate)}</td>
+                        <td className="py-3 pr-4">
+                          <Link to={`/sales/equipment/${row.id}`} className="font-medium text-primary hover:underline">
+                            Открыть карточку
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {filteredSalesStockRows.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">По выбранным фильтрам продажная техника не найдена.</div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="finance" className="space-y-4 sm:space-y-6">

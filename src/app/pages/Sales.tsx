@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { usePermissions } from '../lib/permissions';
 import { EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
@@ -110,6 +111,7 @@ export default function Sales() {
   const [receiptFilter, setReceiptFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [quickFilter, setQuickFilter] = React.useState<'all' | 'pdi_ready' | 'pdi_in_progress' | 'no_price' | 'available_only'>('all');
+  const [activeSalesTab, setActiveSalesTab] = React.useState('showcase');
   const [showFilters, setShowFilters] = React.useState(false);
   const markArrivalMutation = useMutation({
     mutationFn: (equipment: Equipment) => equipmentService.update(equipment.id, {
@@ -170,6 +172,55 @@ export default function Sales() {
     statusFilter !== 'all',
     quickFilter !== 'all',
   ].filter(Boolean).length;
+  const priceByModel = React.useMemo(() => {
+    const rows = new Map<string, {
+      key: string;
+      model: string;
+      type: string;
+      newPrice: number;
+      usedPrice: number;
+      minPrice: number;
+      costPrice: number;
+      marginPercent: number;
+      updatedAt: string;
+      comment: string;
+    }>();
+
+    for (const equipment of saleEquipment) {
+      const model = `${equipment.manufacturer} ${equipment.model}`.trim();
+      const key = `${model}-${equipment.type}`;
+      const current = rows.get(key) ?? {
+        key,
+        model,
+        type: equipment.type,
+        newPrice: 0,
+        usedPrice: 0,
+        minPrice: 0,
+        costPrice: 0,
+        marginPercent: 0,
+        updatedAt: equipment.actualArrivalDate || equipment.plannedArrivalDate || equipment.acceptedAt || '',
+        comment: '',
+      };
+      const mainPrice = equipment.salePrice1 ?? 0;
+      const minPrice = equipment.salePrice2 ?? 0;
+      const costPrice = equipment.salePrice3 ?? 0;
+      if (saleConditionKind(equipment) === 'new') {
+        current.newPrice = Math.max(current.newPrice, mainPrice);
+      } else {
+        current.usedPrice = Math.max(current.usedPrice, mainPrice);
+      }
+      current.minPrice = Math.max(current.minPrice, minPrice);
+      current.costPrice = Math.max(current.costPrice, costPrice);
+      current.marginPercent = current.minPrice > 0 && current.costPrice > 0
+        ? Math.round(((current.minPrice - current.costPrice) / current.minPrice) * 100)
+        : current.marginPercent;
+      current.updatedAt = current.updatedAt || equipment.actualArrivalDate || equipment.plannedArrivalDate || equipment.acceptedAt || '';
+      current.comment = current.comment || equipment.notes || '';
+      rows.set(key, current);
+    }
+
+    return Array.from(rows.values()).sort((a, b) => a.model.localeCompare(b.model, 'ru'));
+  }, [saleEquipment]);
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -177,7 +228,7 @@ export default function Sales() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Продажи</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Наличие техники на продажу для менеджера с PDI и тремя уровнями цены.
+            Коммерческий инструмент по продажной технике: витрина, цены, КП и документы.
           </p>
         </div>
         {can('create', 'equipment') && (
@@ -202,6 +253,26 @@ export default function Sales() {
         </section>
       )}
 
+      <Tabs value={activeSalesTab} onValueChange={setActiveSalesTab} className="space-y-5">
+        <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
+          {[
+            { value: 'showcase', label: 'Витрина' },
+            { value: 'prices', label: 'Прайсы' },
+            { value: 'quotes', label: 'КП' },
+            { value: 'documents', label: 'Документы продаж' },
+            { value: 'settings', label: 'Настройки продаж' },
+          ].map(tab => (
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              className="whitespace-nowrap border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 transition-colors hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] dark:hover:text-gray-300"
+            >
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value="showcase" className="space-y-4">
       <div className="grid gap-3 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
@@ -343,7 +414,7 @@ export default function Sales() {
                 <option value="all">Все статусы продажи</option>
                 <option value="on_sale">На продаже</option>
                 <option value="reserved">Резерв</option>
-                <option value="in_deal">В сделке</option>
+                <option value="in_deal">Зарезервирована</option>
                 <option value="sold">Продана</option>
                 <option value="removed">Снята с продажи</option>
               </select>
@@ -554,6 +625,161 @@ export default function Sales() {
           </div>
         ) : null}
       </div>
+        </TabsContent>
+
+        <TabsContent value="prices" className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Прайс по моделям</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {priceByModel.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Продажная техника не найдена.</p>
+                ) : priceByModel.map(row => (
+                  <div key={row.key} className="rounded-xl border border-gray-200 p-4 text-sm dark:border-gray-700">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-gray-900 dark:text-white">{row.model}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{row.type}</p>
+                      </div>
+                      <Badge variant="default">Маржа {row.marginPercent || 0}%</Badge>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <div>Новая: <span className="font-medium">{formatCurrency(row.newPrice)}</span></div>
+                      <div>Б/у: <span className="font-medium">{formatCurrency(row.usedPrice)}</span></div>
+                      <div>Мин. цена: <span className="font-medium">{formatCurrency(row.minPrice)}</span></div>
+                      <div>Себестоимость: <span className="font-medium">{formatCurrency(row.costPrice)}</span></div>
+                    </div>
+                    <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                      Обновлено: {formatSaleDate(row.updatedAt)}{row.comment ? ` · ${row.comment}` : ''}
+                    </p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>История изменения цены</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-gray-600 dark:text-gray-300">
+                <p>
+                  История цены заложена как отдельная рабочая зона: старая цена, новая цена, автор,
+                  дата и причина изменения должны фиксироваться в истории карточки техники.
+                </p>
+                <div className="rounded-xl border border-dashed border-gray-300 p-4 dark:border-gray-700">
+                  24.04.2026 — 1 900 000 ₽ → 1 850 000 ₽ · Причина: корректировка по рынку.
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Прайс по конкретной единице</CardTitle>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Техника</TableHead>
+                    <TableHead>Инв. №</TableHead>
+                    <TableHead>SN</TableHead>
+                    <TableHead>Цена продажи</TableHead>
+                    <TableHead>Мин. цена</TableHead>
+                    <TableHead>Себестоимость</TableHead>
+                    <TableHead>Состояние</TableHead>
+                    <TableHead>Наработка</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {saleEquipment.map(equipment => (
+                    <TableRow key={equipment.id}>
+                      <TableCell>
+                        <Link to={`/sales/equipment/${equipment.id}`} className="font-medium text-amber-700 hover:underline dark:text-amber-300">
+                          {equipment.manufacturer} {equipment.model}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{equipment.inventoryNumber || '—'}</TableCell>
+                      <TableCell>{equipment.serialNumber || '—'}</TableCell>
+                      <TableCell>{formatCurrency(equipment.salePrice1 ?? 0)}</TableCell>
+                      <TableCell>{formatCurrency(equipment.salePrice2 ?? 0)}</TableCell>
+                      <TableCell>{formatCurrency(equipment.salePrice3 ?? 0)}</TableCell>
+                      <TableCell>{saleConditionLabel(equipment)}</TableCell>
+                      <TableCell>{equipment.hours ?? 0} м/ч</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="quotes" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Коммерческие предложения</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {saleEquipment.map(equipment => (
+                <div key={equipment.id} className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                  <p className="font-semibold text-gray-900 dark:text-white">{equipment.manufacturer} {equipment.model}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || '—'}</p>
+                  <div className="mt-3 text-sm">Цена: <span className="font-semibold">{formatCurrency(equipment.salePrice1 ?? 0)}</span></div>
+                  <div className="mt-1 text-sm">НДС, срок действия, доставка, гарантия и комплектация подтягиваются из карточки техники и шаблонов.</div>
+                  <Link to={`/documents?equipmentId=${equipment.id}&type=kp`}>
+                    <Button className="mt-4 app-button-primary h-9 rounded-xl">Создать КП</Button>
+                  </Link>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="documents" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Документы продаж</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {['КП', 'Счёт', 'Договор поставки', 'Спецификация', 'Акт приёма-передачи', 'УПД', 'Гарантийные документы', 'Сертификаты', 'Инструкции'].map(type => (
+                <div key={type} className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                  <p className="font-semibold text-gray-900 dark:text-white">{type}</p>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Документ связан с продажной техникой и открывается через общий реестр документов.</p>
+                  <Link to="/documents" className="mt-3 inline-flex text-sm font-medium text-primary hover:underline">
+                    Открыть документ
+                  </Link>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="settings" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Настройки продаж</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {[
+                'Шаблоны КП',
+                'Условия оплаты по умолчанию',
+                'Условия доставки по умолчанию',
+                'Гарантийные условия',
+                'Правила расчёта цены',
+                'Причины изменения цены',
+                'Шаблон комментария по комплектации',
+              ].map(item => (
+                <div key={item} className="rounded-xl border border-gray-200 p-4 text-sm dark:border-gray-700">
+                  <p className="font-semibold text-gray-900 dark:text-white">{item}</p>
+                  <p className="mt-1 text-gray-500 dark:text-gray-400">Настройка предусмотрена для коммерческой работы с техникой.</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

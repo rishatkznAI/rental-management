@@ -402,6 +402,22 @@ test('sales section is a commercial tool without publications crm or analytics t
   assert.match(source, /История изменения цены/);
 });
 
+test('sales settings tab is admin-only and persists editable app settings', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
+
+  assert.match(source, /const SALES_SETTINGS_KEY = 'sales_section_settings'/);
+  assert.match(source, /const isAdmin = normalizeUserRole\(user\?\.role\) === 'Администратор'/);
+  assert.match(source, /\.\.\.\(isAdmin \? \[\{ value: 'settings', label: 'Настройки продаж' \}\] : \[\]\)/);
+  assert.match(source, /appSettingsService\.getAll/);
+  assert.match(source, /enabled: isAdmin/);
+  assert.match(source, /appSettingsService\.update\(existing\.id, payload\)/);
+  assert.match(source, /appSettingsService\.create\(payload\)/);
+  assert.match(source, /onClick=\{\(\) => setEditingSettingId\(item\.id\)\}/);
+  assert.match(source, /<Dialog open=\{Boolean\(editingSetting\)\}/);
+  assert.match(source, /<Textarea/);
+  assert.match(source, /Сохранить/);
+});
+
 test('reports contain sales stock analytics outside the sales section', () => {
   const reportsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Reports.tsx'), 'utf8');
 

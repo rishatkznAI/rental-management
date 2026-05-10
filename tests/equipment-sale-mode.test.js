@@ -299,7 +299,7 @@ test('sale mode keeps sale prices in sale 360 and not in basic characteristics',
 
   assert.ok(basicStart > -1);
   assert.ok(basicEnd > basicStart);
-  assert.match(source, /<CardTitle>\{saleMode \? 'Витрина продажной техники' : 'Техника 360°'\}<\/CardTitle>/);
+  assert.match(source, /<CardTitle>\{saleMode \? 'Витрина продажной техники' : 'Карточка техники'\}<\/CardTitle>/);
   assert.match(source, /<SalePanel title="Цена и маржа">/);
   assert.match(source, /saleMainPrice/);
   assert.match(source, /saleMinPrice/);
@@ -341,6 +341,82 @@ test('sale mode uses sale storefront sections without operation-history CRM bloc
   assert.match(salesSource, /ТО:/);
   assert.match(salesSource, /ЧТО:/);
   assert.match(salesSource, /ПТО:/);
+});
+
+test('normal equipment detail is asset-centric instead of rental-centric', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+
+  assert.match(source, /'Карточка техники'/);
+  assert.match(source, /Паспорт, состояние, локация, документы, GSM, ТО и история актива/);
+  assert.match(source, /const showLegacyEquipmentSections = false/);
+  assert.match(source, /<SalePanel title="Паспорт техники">/);
+  assert.match(source, /<SalePanel title="Текущий статус">/);
+  assert.match(source, /<SalePanel title="Категория и классификация">/);
+  assert.match(source, /<SalePanel title="Местоположение">/);
+  assert.match(source, /<SalePanel title="PDI и приёмка">/);
+  assert.match(source, /<SalePanel title="Комплектация">/);
+  assert.match(source, /<SalePanel title="GSM \/ Трекер">/);
+  assert.match(source, /<SalePanel title="Техническое обслуживание">/);
+  assert.match(source, /<SalePanel title="История событий">/);
+  assert.match(source, /assetCurrentRental/);
+  assert.match(source, /Открыть аренду →/);
+});
+
+test('equipment registry uses asset-centric tabs for one equipment entity', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+
+  for (const label of [
+    'Вся техника',
+    'Арендный парк',
+    'На продаже',
+    'Клиентская техника',
+    'Партнёрская техника',
+    'В сервисе',
+    'Списанная / архив',
+  ]) {
+    assert.match(source, new RegExp(label.replace('/', '\\/')));
+  }
+
+  assert.match(source, /type EquipmentTab = 'all' \| 'rental_fleet' \| 'sale' \| 'client' \| 'partner' \| 'service' \| 'archive'/);
+  assert.match(source, /function isSaleRegistryEquipment/);
+  assert.match(source, /activeTab === 'sale'/);
+  assert.match(source, /to=\{`\/sales\/equipment\/\$\{equipment\.id\}`\}/);
+  assert.doesNotMatch(source, /Активный парк'/);
+  assert.doesNotMatch(source, /Сервисная \/ клиентская техника/);
+});
+
+test('sales section is a commercial tool without publications crm or analytics tabs', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
+
+  for (const label of ['Витрина', 'Прайсы', 'КП', 'Документы продаж', 'Настройки продаж', 'Создать КП']) {
+    assert.match(source, new RegExp(label));
+  }
+
+  for (const forbidden of ['Публикации', 'CRM', 'Лиды', 'Сделки', 'Аналитика', 'Открыть CRM']) {
+    assert.doesNotMatch(source, new RegExp(forbidden));
+  }
+
+  assert.match(source, /Коммерческий инструмент по продажной технике/);
+  assert.match(source, /Прайс по моделям/);
+  assert.match(source, /Прайс по конкретной единице/);
+  assert.match(source, /История изменения цены/);
+});
+
+test('reports contain sales stock analytics outside the sales section', () => {
+  const reportsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Reports.tsx'), 'utf8');
+
+  assert.match(reportsSource, /Продажный склад/);
+  assert.match(reportsSource, /Техники на продаже/);
+  assert.match(reportsSource, /Сумма по цене продажи/);
+  assert.match(reportsSource, /Себестоимость/);
+  assert.match(reportsSource, /Ожидаемая маржа/);
+  assert.match(reportsSource, /PDI завершён/);
+  assert.match(reportsSource, /С блокерами/);
+  assert.match(reportsSource, /Без цены/);
+  assert.match(reportsSource, /Без документов/);
+  assert.match(reportsSource, /На продаже больше 30\/60\/90 дней/);
+  assert.match(reportsSource, /Цена не обновлялась 30\/45\/60 дней/);
+  assert.match(reportsSource, /filteredSalesStockRows/);
 });
 
 test('equipment forms expose sale condition only inside sale settings', () => {

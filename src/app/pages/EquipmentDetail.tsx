@@ -1634,6 +1634,55 @@ export default function EquipmentDetail() {
     { id: 'delivery', label: 'Создать доставку', icon: Calendar, to: `/deliveries?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create`, show: can('create', 'deliveries') || can('view', 'deliveries') },
     { id: 'edit', label: 'Редактировать', icon: PenLine, onClick: () => setShowEditModal(true), show: canEditEquipment },
   ].filter(action => action.show);
+  const assetTitle = `${equipment.manufacturer} ${equipment.model}`.trim() || equipment.inventoryNumber || 'Карточка техники';
+  const assetGalleryPreview = saleGalleryPhotos.slice(0, 4);
+  const assetCurrentRental = equipment360.occupancy.currentRental;
+  const assetDocuments = equipment360.documents.latest;
+  const assetGsmState = deriveSignalState(equipment, equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || null);
+  const assetHasServiceAttention = criticalTickets.length > 0 || equipment.status === 'in_service';
+  const assetMaintenanceOverdue = daysUntilMaintenance <= 0;
+  const assetMaintenanceSoon = daysUntilMaintenance > 0 && daysUntilMaintenance <= 30;
+  const assetReadyForWork = equipment.status === 'available' && !assetHasServiceAttention && !assetMaintenanceOverdue;
+  const assetReadinessLabel = assetReadyForWork
+    ? 'Готова к работе'
+    : assetHasServiceAttention || assetMaintenanceOverdue
+      ? 'Не готова'
+      : 'Требует внимания';
+  const assetReadinessVariant = assetReadyForWork ? 'success' : assetReadinessLabel === 'Не готова' ? 'error' : 'warning';
+  const assetPhysicalCondition = criticalTickets.length > 0
+    ? 'Требует ремонта'
+    : openServiceTickets.length > 0 || assetMaintenanceSoon || assetMaintenanceOverdue
+      ? 'Требует внимания'
+      : 'Исправна';
+  const assetCreateRentalAction = quickActions.find(action => action.id === 'equipment-create-rental');
+  const assetQuickActions = [
+    assetCreateRentalAction ? {
+      id: 'rental',
+      label: 'Создать аренду',
+      icon: Calendar,
+      to: assetCreateRentalAction.to,
+      disabled: assetCreateRentalAction.disabled,
+      reason: assetCreateRentalAction.reason,
+      primary: true,
+      show: canViewRentals,
+    } : null,
+    { id: 'service', label: 'Создать сервисную заявку', icon: Wrench, to: `/service/new?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`, show: canCreateService },
+    { id: 'photo', label: 'Добавить фото', icon: Camera, onClick: () => mainPhotoInputRef.current?.click(), show: canEditEquipment },
+    { id: 'documents', label: 'Открыть документы', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`, show: canViewDocuments },
+    { id: 'move', label: 'Переместить технику', icon: MapPin, onClick: () => setShowEditModal(true), show: canEditEquipment },
+    { id: 'edit', label: 'Редактировать', icon: PenLine, onClick: () => setShowEditModal(true), show: canEditEquipment },
+  ].filter(Boolean).filter(action => action?.show) as Array<{
+    id: string;
+    label: string;
+    icon: React.ElementType;
+    to?: string;
+    onClick?: () => void;
+    disabled?: boolean;
+    reason?: string;
+    primary?: boolean;
+    show: boolean;
+  }>;
+  const showLegacyEquipmentSections = false;
 
   const tabTriggerClass = 'whitespace-nowrap';
 
@@ -1645,7 +1694,7 @@ export default function EquipmentDetail() {
           className="inline-flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-            {saleMode ? 'Назад к списку продаж' : 'Вернуться к списку'}
+            {saleMode ? 'Назад к списку продаж' : 'Назад к списку техники'}
         </Link>
 
         <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -1679,46 +1728,29 @@ export default function EquipmentDetail() {
               </>
             ) : (
               <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge className={`border-0 ${
-                    equipment.priority === 'critical' || equipment.priority === 'high'
-                      ? 'bg-red-500/12 text-red-300'
-                      : equipment.priority === 'medium'
-                      ? 'bg-blue-500/12 text-blue-300'
-                      : 'bg-emerald-500/12 text-emerald-300'
-                  }`}>
-                    {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
-                  </Badge>
-                  <Badge className={`border-0 ${
-                    equipment.status === 'in_service'
-                      ? 'bg-orange-500/12 text-orange-300'
-                      : equipment.status === 'rented'
-                      ? 'bg-blue-500/12 text-blue-300'
-                      : equipment.status === 'reserved'
-                      ? 'bg-yellow-500/12 text-yellow-300'
-                      : 'bg-emerald-500/12 text-emerald-300'
-                  }`}>
+                <div className="flex items-center gap-3">
+                  <h1 className="app-shell-title text-3xl font-extrabold text-foreground sm:text-4xl">
+                    {assetTitle}
+                  </h1>
+                  <button
+                    type="button"
+                    className="rounded-full p-1 text-blue-300 transition hover:bg-blue-500/10 hover:text-blue-200"
+                    aria-label="Избранное"
+                    title="Избранное"
+                  >
+                    <Star className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Badge variant={equipment.status === 'in_service' || equipment.status === 'inactive' ? 'warning' : equipment.status === 'rented' ? 'info' : 'success'}>
                     {EQ_STATUS_LABELS[equipment.status]}
                   </Badge>
-                  <Badge className={`border-0 ${
-                    equipment.owner === 'own'
-                      ? 'bg-emerald-500/12 text-emerald-300'
-                      : equipment.owner === 'investor'
-                      ? 'bg-blue-500/12 text-blue-300'
-                      : 'bg-orange-500/12 text-orange-300'
-                  }`}>
-                    {ownerLabels[equipment.owner]}
+                  <Badge variant={assetReadinessVariant}>
+                    {assetReadinessLabel}
                   </Badge>
-                </div>
-                <h1 className="app-shell-title mt-3 text-3xl font-extrabold text-foreground sm:text-4xl">
-                  {equipment.manufacturer} {equipment.model}
-                </h1>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || 'не указан'}
-                </p>
-                <div className="mt-2 flex items-center gap-1 text-sm text-muted-foreground">
-                  <MapPin className="h-3.5 w-3.5" />
-                  {equipment.location || 'Локация не указана'}
+                  <Badge variant={equipment.priority === 'critical' || equipment.priority === 'high' ? 'error' : equipment.priority === 'medium' ? 'default' : 'success'}>
+                    Приоритет: {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
+                  </Badge>
                 </div>
               </>
             )}
@@ -1764,27 +1796,56 @@ export default function EquipmentDetail() {
                 </Button>
               </Link>
             )}
-            {!saleMode && canViewRentals && (
-              <Link to="/rentals">
+            {!saleMode && (
+              <div className="group relative">
                 <Button variant="secondary" size="sm" className="app-button-outline rounded-xl px-4">
-                  <Calendar className="h-3.5 w-3.5" />
-                  Аренды
+                  Ещё
+                  <ChevronDown className="h-3.5 w-3.5" />
                 </Button>
-              </Link>
+                <div className="invisible absolute right-0 z-20 mt-2 w-56 rounded-xl border border-border bg-card p-1.5 opacity-0 shadow-xl transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
+                  <button
+                    type="button"
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-foreground hover:bg-secondary"
+                    onClick={() => window.print()}
+                  >
+                    Распечатать карточку
+                  </button>
+                  {canViewDocuments && (
+                    <Link
+                      to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`}
+                      className="block rounded-lg px-3 py-2 text-sm text-foreground hover:bg-secondary"
+                    >
+                      Документы техники
+                    </Link>
+                  )}
+                </div>
+              </div>
             )}
-            {!saleMode && canViewService && (
-              <Link to="/service">
-                <Button size="sm" className="app-button-primary rounded-xl px-4">
-                  <Wrench className="h-3.5 w-3.5" />
-                  В сервис
+            {!saleMode && canViewRentals && assetCreateRentalAction && (
+              assetCreateRentalAction.disabled ? (
+                <Button
+                  size="sm"
+                  className="app-button-primary rounded-xl px-4"
+                  disabled
+                  title={assetCreateRentalAction.reason || undefined}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Создать аренду
                 </Button>
-              </Link>
+              ) : (
+                <Link to={assetCreateRentalAction.to || '/rentals/new'}>
+                  <Button size="sm" className="app-button-primary rounded-xl px-4">
+                    <Plus className="h-3.5 w-3.5" />
+                    Создать аренду
+                  </Button>
+                </Link>
+              )
             )}
           </div>
         </div>
       </div>
 
-      {!saleMode && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {showLegacyEquipmentSections && !saleMode && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className={`rounded-2xl border p-4 ${
           saleMode
             ? salePdiStatus === 'ready'
@@ -1905,11 +1966,11 @@ export default function EquipmentDetail() {
         <CardHeader>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <CardTitle>{saleMode ? 'Витрина продажной техники' : 'Техника 360°'}</CardTitle>
+              <CardTitle>{saleMode ? 'Витрина продажной техники' : 'Карточка техники'}</CardTitle>
               <CardDescription>
                 {saleMode
                   ? 'Цена, состояние, готовность, документы и действия для подготовки продажи'
-                  : 'Сводка по занятости, сервису, документам и рискам без изменения данных'}
+                  : 'Паспорт, состояние, локация, документы, GSM, ТО и история актива'}
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -2184,159 +2245,229 @@ export default function EquipmentDetail() {
               </div>
             </>
           ) : (
-          <>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <CompactMetric label="Статус" value={equipment360.occupancy.label} tone={equipment360.flags.length > 0 ? 'warning' : 'default'} />
-            <CompactMetric label="Собственник" value={equipment.ownerName || ownerLabels[equipment.owner] || 'Не указан'} />
-            <CompactMetric label="Локация" value={equipment.location || 'Не указана'} />
-            <CompactMetric label="Простой" value={equipment360.downtime.label} tone={equipment360.downtime.reason === 'service' ? 'danger' : 'default'} />
-          </div>
-
-          {quickActions.length > 0 && (
-            <div className="space-y-2 rounded-xl border border-border bg-card/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Быстрые действия</p>
-              <div className="flex flex-wrap gap-2">
-                {quickActions.map(action => {
-                  const button = (
-                    <Button
-                      size="sm"
-                      variant={action.kind === 'primary' ? 'default' : 'secondary'}
-                      disabled={action.disabled}
-                      title={action.reason || undefined}
+            <>
+              <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr_0.75fr_0.85fr]">
+                <div className="overflow-hidden rounded-2xl border border-border bg-card/80">
+                  <input
+                    ref={mainPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleMainPhotoUpload}
+                  />
+                  <div className="relative flex min-h-[23rem] items-center justify-center bg-secondary">
+                    {equipment.photo ? (
+                      <img
+                        src={photoSource(equipment.photo)}
+                        onError={(event) => {
+                          const fallback = photoFallbackSource(equipment.photo);
+                          if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                        }}
+                        alt={assetTitle}
+                        className="h-full max-h-[28rem] w-full cursor-zoom-in object-cover"
+                        onClick={() => setPreviewImage(photoSource(equipment.photo))}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="flex h-full min-h-[23rem] w-full flex-col items-center justify-center gap-3 text-muted-foreground"
+                        onClick={() => mainPhotoInputRef.current?.click()}
+                      >
+                        <ImageIcon className="h-16 w-16" />
+                        <span className="text-sm">Добавить фото техники</span>
+                      </button>
+                    )}
+                    <span className="absolute bottom-3 left-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-medium text-white">
+                      {Math.max(assetGalleryPreview.length, equipment.photo ? 1 : 0)} / {Math.max(saleGalleryPhotos.length, 1)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 p-2">
+                    {assetGalleryPreview.length > 0 ? assetGalleryPreview.map((photo, index) => (
+                      <button
+                        type="button"
+                        key={`${photoSource(photo)}-${index}`}
+                        className="h-16 overflow-hidden rounded-lg border border-border bg-secondary"
+                        onClick={() => setPreviewImage(photoSource(photo))}
+                      >
+                        <img src={photoSource(photo)} alt="" className="h-full w-full object-cover" />
+                      </button>
+                    )) : (
+                      <button
+                        type="button"
+                        className="col-span-3 h-16 rounded-lg border border-dashed border-border text-xs text-muted-foreground"
+                        onClick={() => mainPhotoInputRef.current?.click()}
+                      >
+                        Галерея пуста
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="h-16 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-2 text-xs font-medium text-blue-300"
+                      onClick={() => mainPhotoInputRef.current?.click()}
                     >
-                      {action.id === 'equipment-create-service' && <Wrench className="h-4 w-4" />}
-                      {action.id === 'equipment-create-rental' && <Calendar className="h-4 w-4" />}
-                      {action.label}
-                    </Button>
-                  );
-                  return action.disabled || !action.to
-                    ? <span key={action.id}>{button}</span>
-                    : <Link key={action.id} to={action.to}>{button}</Link>;
-                })}
-              </div>
-            </div>
-          )}
+                      +{Math.max(shippingGalleryPhotoCount + saleGalleryPhotos.length - assetGalleryPreview.length, 0)} фото
+                    </button>
+                  </div>
+                </div>
 
-          <div className="grid gap-4 xl:grid-cols-3">
-            <div className="rounded-xl border border-border bg-card/70 p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-foreground">Текущая занятость</h3>
-                {equipment360.occupancy.overdueReturn && <Badge variant="error">Просрочен возврат</Badge>}
+                <SalePanel title="Паспорт техники">
+                  <SaleField label="Инвентарный №" value={equipment.inventoryNumber || '—'} mono />
+                  <SaleField label="Серийный №" value={equipment.serialNumber || '—'} mono />
+                  <SaleField label="Год выпуска" value={equipment.year ? String(equipment.year) : '—'} />
+                  <SaleField label="Тип" value={findEquipmentTypeLabel(equipment.type, equipmentTypeCatalog)} />
+                  <SaleField label="Рабочая высота" value={equipment.workingHeight ? `${equipment.workingHeight} м` : equipment.liftHeight ? `${equipment.liftHeight} м` : '—'} />
+                  <SaleField label="Грузоподъёмность" value={equipment.loadCapacity ? `${equipment.loadCapacity} кг` : '—'} />
+                  <SaleField label="Привод" value={equipment.drive === 'diesel' ? 'Дизельный' : 'Электрический'} />
+                  <SaleField label="Вес" value={equipment.weight ? `${equipment.weight.toLocaleString('ru-RU')} кг` : '—'} />
+                  <SaleField label="Габариты" value={equipment.dimensions || '—'} />
+                  <SaleField label="Наработка" value={typeof equipment.hours === 'number' ? `${equipment.hours.toLocaleString('ru-RU')} м/ч` : '—'} />
+                </SalePanel>
+
+                <SalePanel title="Текущий статус">
+                  <div className="flex items-start gap-3">
+                    <span className={cn('mt-1 h-3 w-3 rounded-full', assetReadyForWork ? 'bg-emerald-400' : assetHasServiceAttention ? 'bg-red-400' : 'bg-amber-400')} />
+                    <div>
+                      <p className="text-2xl font-bold text-foreground">{EQ_STATUS_LABELS[equipment.status]}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{assetReadinessLabel}</p>
+                    </div>
+                  </div>
+                  <div className="h-px bg-border" />
+                  <SaleStatusRow label="Состояние" value={assetPhysicalCondition} tone={assetPhysicalCondition === 'Исправна' ? 'success' : 'warning'} />
+                  <SaleStatusRow label="Готовность" value={assetReadyForWork ? '100%' : assetHasServiceAttention ? '40%' : '75%'} tone={assetReadyForWork ? 'success' : 'warning'} />
+                  <SaleStatusRow label="Последняя проверка" value={formatDate(equipment.actualArrivalDate || equipment.acceptedAt || equipment.maintenanceCHTO)} tone="success" />
+                  <SaleStatusRow label="Следующее ТО" value={formatMaintenanceDate(equipment.nextMaintenance)} tone={assetMaintenanceOverdue || assetMaintenanceSoon ? 'warning' : 'success'} />
+                  {assetCurrentRental && (
+                    <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3 text-sm">
+                      <p className="font-semibold text-foreground">Сейчас в аренде</p>
+                      <p className="mt-1 text-muted-foreground">{assetCurrentRental.client}</p>
+                      <p className="text-muted-foreground">Возврат: {formatDate(equipment.returnDate || assetCurrentRental.endDate)}</p>
+                      {canViewRentals && (
+                        <Link to={`/rentals/${assetCurrentRental.id}`} className="mt-2 inline-flex text-xs font-medium text-blue-300 hover:underline">
+                          Открыть аренду →
+                        </Link>
+                      )}
+                    </div>
+                  )}
+                </SalePanel>
+
+                <div className="grid gap-4">
+                  <SalePanel title="Категория и классификация">
+                    <SaleField label="Категория" value={EQUIPMENT_CATEGORY_LABELS[equipment.category]} />
+                    <SaleField label="Приоритет" value={EQUIPMENT_PRIORITY_LABELS[equipment.priority]} />
+                    <SaleField label="Класс техники" value={findEquipmentTypeLabel(equipment.type, equipmentTypeCatalog)} />
+                    <SaleField label="Собственник" value={equipment.ownerName || ownerLabels[equipment.owner] || '—'} />
+                  </SalePanel>
+                  <SalePanel title="Местоположение">
+                    <SaleField label="Локация" value={equipment.location || '—'} icon={<MapPin className="h-4 w-4 text-blue-400" />} />
+                    <SaleField label="Площадка" value={equipment.gsmAddress || '—'} />
+                    <SaleField label="Адрес" value={equipment.gsmAddress || equipment.location || '—'} />
+                    {canEditEquipment && (
+                      <button type="button" className="text-left text-sm font-medium text-blue-300 hover:underline" onClick={() => setShowEditModal(true)}>
+                        Переместить технику →
+                      </button>
+                    )}
+                  </SalePanel>
+                </div>
               </div>
-              {equipment360.occupancy.currentRental ? (
-                <div className="space-y-2 text-sm">
-                  <p className="font-medium text-foreground">{equipment360.occupancy.currentRental.client}</p>
-                  <p className="text-muted-foreground">
-                    {formatDate(equipment360.occupancy.currentRental.startDate)} — {formatDate(equipment360.occupancy.currentRental.endDate)}
-                  </p>
-                  <p className="text-muted-foreground">Менеджер: {equipment360.occupancy.currentRental.manager}</p>
-                  {canViewRentals && (
-                    <Link to={`/rentals/${equipment360.occupancy.currentRental.id}`} className="inline-flex items-center gap-1 text-xs text-[--color-primary] hover:underline">
-                      Открыть аренду <ChevronRight className="h-3 w-3" />
+
+              <div className="grid gap-4 xl:grid-cols-5">
+                <SalePanel title="PDI и приёмка">
+                  <SaleStatusRow label="Статус PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} tone={salePdiStatus === 'ready' ? 'success' : 'warning'} />
+                  <SaleStatusRow label="Приёмка" value={saleReceiptStatus ? EQUIPMENT_SALE_RECEIPT_LABELS[saleReceiptStatus] : 'Не указана'} tone={saleReceiptStatus === 'accepted' ? 'success' : 'warning'} />
+                  <SaleField label="Дата приёмки" value={formatDate(equipment.acceptedAt || equipment.actualArrivalDate)} />
+                  <SaleField label="Ответственный" value={equipment.acceptedByName || '—'} />
+                  {canCreateService && <button type="button" className="text-left text-sm font-medium text-blue-300 hover:underline" onClick={() => setShowCreateServiceModal(true)}>Открыть PDI →</button>}
+                </SalePanel>
+
+                <SalePanel title="Комплектация">
+                  <SaleCheckRow ready={Boolean(equipment.acceptanceChecklist?.keysRemoteChargerSpareReceived)} label={equipment.acceptanceChecklist?.keysRemoteChargerSpareReceived ? `Ключи / пульт / ЗУ: ${equipment.acceptanceChecklist.keysRemoteChargerSpareReceived}` : 'Ключи / пульт / ЗУ не указаны'} />
+                  <SaleCheckRow ready={Boolean(equipment.acceptanceChecklist?.configurationChecked)} label="Комплектация проверена" />
+                  <SaleCheckRow ready={!equipment.acceptanceChecklist?.visualDamageFound} label="Визуальных повреждений нет" />
+                  <SaleCheckRow ready={Boolean(equipment.notes)} label={equipment.notes ? 'Есть примечание по комплектации' : 'Примечание по комплектации не заполнено'} />
+                </SalePanel>
+
+                <SalePanel title="Документы">
+                  {assetDocuments.length > 0 ? assetDocuments.slice(0, 5).map(doc => (
+                    <SaleCheckRow key={doc.id} ready={doc.status !== 'draft'} label={`${doc.type}${doc.id ? ` · ${doc.id}` : ''}`} />
+                  )) : <p className="text-sm text-muted-foreground">Связанных документов пока нет.</p>}
+                  {canViewDocuments && (
+                    <Link to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`} className="inline-flex text-sm font-medium text-blue-300 hover:underline">
+                      Все документы →
                     </Link>
                   )}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">{equipment360.occupancy.label}</p>
-              )}
-              {equipment360.occupancy.nextRental && (
-                <div className="mt-3 rounded-lg border border-border bg-secondary/50 p-3 text-sm">
-                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Ближайшая будущая аренда</p>
-                  <p className="mt-1 font-medium text-foreground">{equipment360.occupancy.nextRental.client}</p>
-                  <p className="text-muted-foreground">{formatDate(equipment360.occupancy.nextRental.startDate)} — {formatDate(equipment360.occupancy.nextRental.endDate)}</p>
-                </div>
-              )}
-            </div>
+                </SalePanel>
 
-            <div className="rounded-xl border border-border bg-card/70 p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-foreground">Сервис и готовность</h3>
-                <Badge variant={equipment360.service.open.length > 0 ? 'warning' : 'default'}>{equipment360.service.open.length} открыто</Badge>
+                <SalePanel title="GSM / Трекер">
+                  <SaleField label="Устройство" value={equipment.gsmDeviceId || equipment.gsmTrackerId || equipment.gsmImei || '—'} mono />
+                  <SaleField label="SIM" value={equipment.gsmSimNumber || '—'} />
+                  <SaleStatusRow label="Связь" value={assetGsmState === 'online' ? 'Онлайн' : assetGsmState === 'offline' ? 'Офлайн' : 'Неизвестно'} tone={assetGsmState === 'online' ? 'success' : 'warning'} />
+                  <SaleField label="Последний сигнал" value={equipment.gsmLastSeenAt || equipment.gsmLastSignalAt ? formatDateTime(equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '') : '—'} />
+                  <Link to="/gsm" className="inline-flex text-sm font-medium text-blue-300 hover:underline">Открыть трекинг →</Link>
+                </SalePanel>
+
+                <SalePanel title="Техническое обслуживание">
+                  <SaleField label="Последнее ТО" value={formatMaintenanceDate(equipment.maintenanceCHTO || equipment.maintenancePTO)} />
+                  <SaleStatusRow label="Следующее ТО" value={formatMaintenanceDate(equipment.nextMaintenance)} tone={assetMaintenanceOverdue || assetMaintenanceSoon ? 'warning' : 'success'} />
+                  <SaleField label="Периодичность" value="250 м/ч или 3 мес." />
+                  <SaleField label="Наработка до ТО" value={daysUntilMaintenance > 0 ? `${daysUntilMaintenance} дн.` : 'Просрочено'} />
+                  {canViewService && <Link to="/service" className="inline-flex text-sm font-medium text-blue-300 hover:underline">История ТО →</Link>}
+                </SalePanel>
               </div>
-              {canViewService ? (
-                equipment360.service.open.length > 0 ? (
-                  <div className="space-y-2">
-                    {equipment360.service.open.slice(0, 3).map(ticket => (
-                      <LinkedRow
-                        key={ticket.id}
-                        title={ticket.reason}
-                        meta={`${ticket.statusLabel} · ${ticket.mechanic}${ticket.waitingParts ? ' · ждёт запчасти' : ''}`}
-                        href={`/service/${ticket.id}`}
-                        canOpen={canViewService}
-                      />
-                    ))}
+
+              <div className="grid gap-4 xl:grid-cols-[1fr_1fr_0.8fr]">
+                <SalePanel title="Примечания">
+                  {equipment.notes ? (
+                    <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{equipment.notes}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Примечаний по технике пока нет.</p>
+                  )}
+                </SalePanel>
+
+                <SalePanel title="История событий">
+                  {(equipment.history || []).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">История пока пуста.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {[...(equipment.history || [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 4).map((entry, index) => (
+                        <div key={`${entry.date}-${index}`} className="grid grid-cols-[18px_minmax(0,1fr)] gap-3">
+                          <Clock className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{entry.text}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">{formatDateTime(entry.date)} · {entry.author || 'Система'}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </SalePanel>
+
+                <SalePanel title="Быстрые действия">
+                  <div className="grid gap-2">
+                    {assetQuickActions.map(action => {
+                      const Icon = action.icon;
+                      const button = (
+                        <Button
+                          variant={action.primary ? 'default' : 'secondary'}
+                          className="w-full justify-start"
+                          onClick={action.onClick}
+                          disabled={action.disabled}
+                          title={action.reason || undefined}
+                        >
+                          <Icon className="h-4 w-4" />
+                          {action.label}
+                        </Button>
+                      );
+                      return action.to && !action.disabled ? <Link key={action.id} to={action.to}>{button}</Link> : <span key={action.id}>{button}</span>;
+                    })}
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Открытых сервисных заявок нет.</p>
-                )
-              ) : (
-                <p className="text-sm text-muted-foreground">Раздел сервиса недоступен для этой роли.</p>
-              )}
-            </div>
-
-            <div className="rounded-xl border border-border bg-card/70 p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-foreground">Красные флаги</h3>
-                <Badge variant={equipment360.flags.length > 0 ? 'error' : 'success'}>{equipment360.flags.length}</Badge>
+                </SalePanel>
               </div>
-              {equipment360.flags.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {equipment360.flags.slice(0, 8).map(flag => (
-                    <Badge key={flag.id} variant={flag.severity === 'high' ? 'error' : 'warning'}>{flag.label}</Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">Критичных сигналов по доступным данным нет.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-3">
-            <CompactList
-              title="Арендная история"
-              emptyText={canViewRentals ? 'Аренд по технике нет.' : 'Раздел аренд недоступен для этой роли.'}
-              items={canViewRentals ? equipment360.rentals.latest.slice(0, 5).map(rental => ({
-                id: rental.id,
-                title: rental.client,
-                meta: `${formatDate(rental.startDate)} — ${formatDate(rental.endDate)} · ${rental.statusLabel} · ${rental.manager}`,
-                href: `/rentals/${rental.id}`,
-              })) : []}
-              canOpen={canViewRentals}
-            />
-            <CompactList
-              title="Документы техники"
-              emptyText={canViewDocuments ? 'Связанных документов нет.' : 'Раздел документов недоступен для этой роли.'}
-              items={canViewDocuments ? equipment360.documents.latest.slice(0, 5).map(doc => ({
-                id: doc.id,
-                title: `${doc.type} ${doc.id ? `· ${doc.id}` : ''}`,
-                meta: `${formatDate(doc.date)} · ${doc.status}`,
-                href: '/documents',
-              })) : []}
-              canOpen={canViewDocuments}
-            />
-            {canViewFinance ? (
-              <div className="rounded-xl border border-border bg-card/70 p-4">
-                <h3 className="mb-3 text-sm font-semibold text-foreground">Финансы по технике</h3>
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                  <CompactMetric label="Выручка по арендам" value={formatCurrency(equipment360.finance.revenue)} tone="success" />
-                  <CompactMetric label="Задолженность по арендам" value={formatCurrency(equipment360.finance.outstanding)} tone={equipment360.finance.outstanding > 0 ? 'danger' : 'default'} />
-                  <CompactMetric label="Количество аренд" value={String(equipment360.finance.rentalCount)} />
-                  <CompactMetric label="Средняя длительность" value={equipment360.finance.averageDurationDays > 0 ? `${equipment360.finance.averageDurationDays} дн.` : 'Нет данных'} />
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-border bg-card/70 p-4">
-                <h3 className="mb-2 text-sm font-semibold text-foreground">Финансы по технике</h3>
-                <p className="text-sm text-muted-foreground">Финансовые показатели скрыты правами доступа.</p>
-              </div>
-            )}
-          </div>
-          </>
+            </>
           )}
         </CardContent>
       </Card>
 
-      {!saleMode && <div className="grid gap-4 sm:gap-6 lg:grid-cols-[260px_1fr]">
+      {showLegacyEquipmentSections && !saleMode && <div className="grid gap-4 sm:gap-6 lg:grid-cols-[260px_1fr]">
         <Card>
           <CardContent className="p-0">
             <input
@@ -2515,7 +2646,7 @@ export default function EquipmentDetail() {
       </div>}
 
       {/* ── Tabs ── */}
-      {!saleMode && <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+      {showLegacyEquipmentSections && !saleMode && <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="">
           <TabsTrigger value="overview" className={tabTriggerClass}>
             <span className="flex items-center gap-1.5"><CheckCircle className="h-3.5 w-3.5" /> Обзор</span>

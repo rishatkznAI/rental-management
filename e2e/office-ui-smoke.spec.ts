@@ -489,7 +489,7 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   await closeDialogIfOpen(page);
 
   for (const detail of [
-    { label: 'equipment detail', path: `/equipment/${seed.equipment.id}`, text: /Техника 360°/ },
+    { label: 'equipment detail', path: `/equipment/${seed.equipment.id}`, text: /Карточка техники/ },
     { label: 'client detail', path: `/clients/${seed.client.id}`, text: seed.client.company },
     { label: 'rental detail', path: `/rentals/${seed.rental.id}`, text: seed.rental.id },
     { label: 'service detail', path: `/service/${seed.serviceTicket.id}`, text: seed.serviceTicket.reason },

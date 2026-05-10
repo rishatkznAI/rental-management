@@ -23,6 +23,20 @@ import {
   PackageX, ClipboardX, Zap, ListChecks, Activity,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { formatCurrency, formatDate, getRentalDays } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
 import { useQueryClient } from '@tanstack/react-query';
@@ -127,6 +141,19 @@ type RoleFocusCard = {
 };
 
 type DashboardTabId = 'overview' | 'rentals' | 'fleet' | 'service' | 'money' | 'documents' | 'deliveries';
+
+const MONTH_LABELS = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+
+function monthKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatCompactCurrency(value: number) {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млн`;
+  if (abs >= 1_000) return `${Math.round(value / 1_000).toLocaleString('ru-RU')} тыс`;
+  return value.toLocaleString('ru-RU');
+}
 
 // ─── main component ────────────────────────────────────────────────────────────
 
@@ -1201,6 +1228,52 @@ export default function Dashboard() {
     can('create', 'equipment') && { id: 'new-equipment', label: 'Новая техника', href: '/equipment/new', icon: Plus },
     canViewPlanner && { id: 'planner', label: 'Планировщик', href: '/planner', icon: Target },
   ].filter(Boolean) as Array<{ id: string; label: string; href: string; icon: React.ElementType }>;
+
+  const overviewKpiCards = overviewSummaryCards.slice(0, 6);
+  const revenueTrendData = useMemo(() => {
+    const now = new Date(today);
+    const months = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+      return {
+        key: monthKey(date),
+        label: MONTH_LABELS[date.getMonth()],
+        revenue: 0,
+      };
+    });
+    const monthMap = new Map(months.map(item => [item.key, item]));
+    viewRentals.forEach(rental => {
+      const parsed = new Date(rental.startDate || rental.createdAt || '');
+      if (Number.isNaN(parsed.getTime())) return;
+      const target = monthMap.get(monthKey(parsed));
+      if (!target) return;
+      target.revenue += Number(rental.price || rental.amount || 0);
+    });
+    return months;
+  }, [today, viewRentals]);
+  const hasRevenueTrend = revenueTrendData.some(item => item.revenue > 0);
+  const receivablesAgingData = useMemo(() => ([
+    { label: '0-7', value: clientDebtAgingRows.filter(row => row.ageBucket === '0_7').reduce((sum, row) => sum + row.debt, 0), fill: '#3b82f6' },
+    { label: '8-30', value: clientDebtAgingRows.filter(row => row.ageBucket === '8_14' || row.ageBucket === '15_30').reduce((sum, row) => sum + row.debt, 0), fill: '#f59e0b' },
+    { label: '31-60', value: clientDebtAgingRows.filter(row => row.ageBucket === '31_60').reduce((sum, row) => sum + row.debt, 0), fill: '#fb7185' },
+    { label: '60+', value: clientDebtAgingRows.filter(row => row.ageBucket === '60_plus').reduce((sum, row) => sum + row.debt, 0), fill: '#ef4444' },
+  ]), [clientDebtAgingRows]);
+  const hasReceivablesAging = receivablesAgingData.some(item => item.value > 0);
+  const serviceStatusChartData = [
+    { label: 'Новые', value: openServiceTickets.filter(ticket => ticket.status === 'new').length, fill: '#60a5fa' },
+    { label: 'В работе', value: openServiceTickets.filter(ticket => ticket.status === 'in_progress').length, fill: '#6366f1' },
+    { label: 'Запчасти', value: ticketsWaitingParts.length, fill: '#f59e0b' },
+    { label: 'Готово', value: readyServiceTickets.length, fill: '#10b981' },
+    { label: 'Критич.', value: criticalTickets.length, fill: '#ef4444' },
+  ];
+  const hasServiceStatusData = serviceStatusChartData.some(item => item.value > 0);
+  const fleetDonutData = [
+    { label: 'Заняты', value: rentedEquipment, fill: '#2563eb' },
+    { label: 'Доступны', value: availableEquipment, fill: '#8b5cf6' },
+    { label: 'Сервис', value: equipmentInServiceList.length, fill: '#f59e0b' },
+    { label: 'Резерв', value: reservedEquipment, fill: '#94a3b8' },
+  ].filter(item => item.value > 0);
+  const hasFleetDonutData = fleetDonutData.length > 0;
+
   const dashboardTabs = [
     { id: 'overview' as const, label: 'Обзор', visible: true },
     { id: 'rentals' as const, label: 'Аренда', visible: canViewRentals },
@@ -1652,7 +1725,7 @@ export default function Dashboard() {
               onClick={() => setActiveDashboardTab(tab.id)}
               className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
                 activeDashboardTab === tab.id
-                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  ? 'bg-primary text-primary-foreground shadow-sm dark:bg-emerald-500/18 dark:text-emerald-200 dark:ring-1 dark:ring-emerald-400/30'
                   : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
               }`}
             >
@@ -1663,127 +1736,254 @@ export default function Dashboard() {
       </div>
 
       {activeDashboardTab === 'overview' && (
-      <section className={dashboardSectionClass}>
-        <div className={dashboardSectionHeaderClass}>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-            Операционная сводка
-          </p>
-          <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Что важно увидеть за первые секунды</h2>
-        </div>
+        <section className="space-y-5">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Executive overview</p>
+              <h2 className="app-shell-title mt-1 text-2xl font-extrabold text-foreground sm:text-3xl">
+                Операционная сводка компании
+              </h2>
+              <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+                Аренда, техника, сервис, документы и деньги в одном управленческом экране.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-card px-4 py-3 text-sm shadow-[0_18px_44px_-36px_rgba(15,23,42,0.38)] dark:shadow-none">
+              <span className="text-muted-foreground">Период</span>
+              <span className="ml-3 font-semibold text-foreground">
+                {today.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+              </span>
+            </div>
+          </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-          <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-            {overviewSummaryCards.map(item => {
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+            {overviewKpiCards.map(item => {
               const Icon = item.icon;
-              const toneClass =
-                item.tone === 'danger'
-                  ? 'border-red-500/30 bg-red-500/10'
-                  : item.tone === 'warning'
-                  ? 'border-amber-400/30 bg-amber-400/10'
+              const tone = item.tone === 'danger'
+                ? {
+                    card: 'border-red-200/80 bg-white hover:border-red-300 dark:border-red-900/50 dark:bg-card',
+                    bubble: 'bg-red-50 text-red-500 dark:bg-red-900/25 dark:text-red-300',
+                    accent: 'text-red-600 dark:text-red-300',
+                  }
+                : item.tone === 'warning'
+                  ? {
+                      card: 'border-amber-200/80 bg-white hover:border-amber-300 dark:border-amber-900/50 dark:bg-card',
+                      bubble: 'bg-amber-50 text-amber-500 dark:bg-amber-900/25 dark:text-amber-300',
+                      accent: 'text-amber-600 dark:text-amber-300',
+                    }
                   : item.tone === 'success'
-                  ? 'border-emerald-400/25 bg-emerald-400/8'
-                  : 'border-border/80 bg-card/95';
-              const iconClass =
-                item.tone === 'danger'
-                  ? 'bg-red-500/14 text-red-300'
-                  : item.tone === 'warning'
-                  ? 'bg-amber-400/14 text-amber-300'
-                  : item.tone === 'success'
-                  ? 'bg-emerald-400/12 text-emerald-300'
-                  : 'bg-primary/12 text-primary';
-              const cardContent = (
+                    ? {
+                        card: 'border-emerald-200/80 bg-white hover:border-emerald-300 dark:border-emerald-900/50 dark:bg-card',
+                        bubble: 'bg-emerald-50 text-emerald-500 dark:bg-emerald-900/25 dark:text-emerald-300',
+                        accent: 'text-emerald-600 dark:text-emerald-300',
+                      }
+                    : {
+                        card: 'border-border bg-white hover:border-blue-300 dark:bg-card',
+                        bubble: 'bg-blue-50 text-blue-600 dark:bg-primary/12 dark:text-primary',
+                        accent: 'text-blue-600 dark:text-primary',
+                      };
+              const content = (
                 <>
                   <div className="flex items-start justify-between gap-3">
-                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${iconClass}`}>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-muted-foreground">{item.label}</p>
+                      <p className="mt-2 text-2xl font-extrabold text-foreground">{item.value}</p>
+                    </div>
+                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${tone.bubble}`}>
                       <Icon className="h-5 w-5" />
                     </div>
-                    <ArrowRight className="mt-1 h-4 w-4 text-muted-foreground/60" />
                   </div>
-                  <p className="mt-4 text-sm font-medium text-muted-foreground">{item.label}</p>
-                  <p className="mt-1 text-2xl font-bold text-foreground">{item.value}</p>
-                  <p className="mt-2 min-h-9 text-sm text-muted-foreground">{item.hint}</p>
+                  <p className={`mt-4 line-clamp-2 text-sm ${tone.accent}`}>{item.hint}</p>
                 </>
               );
+              const className = `rounded-2xl border p-4 text-left shadow-[0_18px_44px_-36px_rgba(15,23,42,0.38)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_54px_-38px_rgba(15,23,42,0.45)] dark:shadow-none ${tone.card}`;
 
-              if (item.href) {
-                return (
-                  <Link key={item.id} to={item.href} className={`rounded-2xl border p-4 transition hover:border-primary/40 ${toneClass}`}>
-                    {cardContent}
-                  </Link>
-                );
-              }
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={item.onClick}
-                  className={`rounded-2xl border p-4 text-left transition hover:border-primary/40 ${toneClass}`}
-                >
-                  {cardContent}
+              return item.href ? (
+                <Link key={item.id} to={item.href} className={className}>
+                  {content}
+                </Link>
+              ) : (
+                <button key={item.id} type="button" onClick={item.onClick} className={className}>
+                  {content}
                 </button>
               );
             })}
           </div>
 
-          <Card className={dashboardCardClass}>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <ListChecks className="h-5 w-5 text-[--color-primary]" />
-                Сегодня
-              </CardTitle>
-              <CardDescription>Рабочая панель дня без лишней аналитики.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {todayWorkRows.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
-                  Для текущей роли нет дневных задач на дашборде.
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <Card className="overflow-hidden border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-8">
+              <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="app-shell-title text-xl font-extrabold">Динамика выручки</CardTitle>
+                  <CardDescription>Сумма аренд по датам начала за последние 6 месяцев.</CardDescription>
                 </div>
-              ) : todayWorkRows.map(item => {
-                const toneClass =
-                  item.tone === 'danger'
-                    ? 'border-red-500/30 bg-red-500/10 text-red-200'
-                    : item.tone === 'warning'
-                    ? 'border-amber-400/30 bg-amber-400/10 text-amber-200'
-                    : item.tone === 'success'
-                    ? 'border-emerald-400/25 bg-emerald-400/8 text-emerald-200'
-                    : 'border-border bg-secondary/50 text-foreground';
-                return (
-                  <Link key={item.id} to={item.href} className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 transition hover:border-primary/40 ${toneClass}`}>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-foreground">{item.label}</p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.detail}</p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <span className="text-xl font-bold text-foreground">{item.value}</span>
-                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  </Link>
-                );
-              })}
-
-              {quickActions.length > 0 && (
-                <div className="border-t border-border pt-4">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Быстрые действия</p>
-                  <div className="flex flex-wrap gap-2">
-                    {quickActions.map(action => {
-                      const Icon = action.icon;
-                      return (
-                        <Button key={action.id} asChild size="sm" variant="secondary">
-                          <Link to={action.href}>
-                            <Icon className="h-4 w-4" />
-                            {action.label}
-                          </Link>
-                        </Button>
-                      );
-                    })}
+                <Badge variant="info" className="w-fit bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  {hasRevenueTrend ? formatCurrency(revenueTrendData.reduce((sum, item) => sum + item.revenue, 0)) : 'Нет данных'}
+                </Badge>
+              </CardHeader>
+              <CardContent className="h-[300px] px-4 pb-5 pt-2 sm:px-6">
+                {hasRevenueTrend ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={revenueTrendData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="dashboardRevenueGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#2563eb" stopOpacity={0.28} />
+                          <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="currentColor" strokeDasharray="3 3" className="text-slate-200 dark:text-slate-800" vertical={false} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" tickFormatter={formatCompactCurrency} width={48} />
+                      <Tooltip
+                        formatter={(value) => [formatCurrency(Number(value)), 'Выручка']}
+                        contentStyle={{ borderRadius: 14, borderColor: 'var(--border)', boxShadow: '0 18px 42px -28px rgba(15,23,42,.45)' }}
+                      />
+                      <Area type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} fill="url(#dashboardRevenueGradient)" dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-center text-sm text-muted-foreground">
+                    Недостаточно данных по арендам для графика выручки.
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="app-shell-title text-xl font-extrabold">Сегодня</CardTitle>
+                <CardDescription>Задачи, риски и быстрые переходы.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {todayWorkRows.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                    Для текущей роли нет дневных задач на дашборде.
+                  </div>
+                ) : todayWorkRows.map(item => {
+                  const marker = item.tone === 'danger'
+                    ? 'bg-red-500'
+                    : item.tone === 'warning'
+                      ? 'bg-amber-500'
+                      : item.tone === 'success'
+                        ? 'bg-emerald-500'
+                        : 'bg-blue-500';
+                  return (
+                    <Link key={item.id} to={item.href} className="flex items-center gap-3 rounded-2xl border border-border bg-white px-3 py-3 transition hover:border-blue-300 hover:bg-blue-50/45 dark:bg-background/30 dark:hover:bg-accent/40">
+                      <span className={`h-9 w-1 rounded-full ${marker}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-foreground">{item.label}</p>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.detail}</p>
+                      </div>
+                      <span className="text-lg font-extrabold text-foreground">{item.value}</span>
+                    </Link>
+                  );
+                })}
+
+                {quickActions.length > 0 && (
+                  <div className="border-t border-border pt-4">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Быстрые действия</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {quickActions.slice(0, 6).map(action => {
+                        const Icon = action.icon;
+                        return (
+                          <Link
+                            key={action.id}
+                            to={action.href}
+                            className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-white px-3 py-3 text-center text-xs font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-50 dark:bg-background/30 dark:text-primary dark:hover:bg-accent/40"
+                          >
+                            <Icon className="h-5 w-5" />
+                            <span>{action.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="app-shell-title text-lg font-extrabold">Загрузка техники</CardTitle>
+                <CardDescription>{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="h-[210px]">
+                  {hasFleetDonutData ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={fleetDonutData} dataKey="value" nameKey="label" innerRadius="58%" outerRadius="82%" paddingAngle={4}>
+                          {fleetDonutData.map(item => <Cell key={item.label} fill={item.fill} />)}
+                        </Pie>
+                        <Tooltip contentStyle={{ borderRadius: 14, borderColor: 'var(--border)' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-sm text-muted-foreground">Нет данных по парку.</div>
+                  )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </section>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {fleetDonutData.map(item => (
+                    <div key={item.label} className="flex items-center gap-2 rounded-xl bg-muted/45 px-3 py-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.fill }} />
+                      <span className="text-muted-foreground">{item.label}</span>
+                      <span className="ml-auto font-semibold text-foreground">{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="app-shell-title text-lg font-extrabold">Возраст дебиторки</CardTitle>
+                <CardDescription>Долг по возрастным buckets без изменения расчётов.</CardDescription>
+              </CardHeader>
+              <CardContent className="h-[270px]">
+                {hasReceivablesAging ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={receivablesAgingData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke="currentColor" strokeDasharray="3 3" className="text-slate-200 dark:text-slate-800" vertical={false} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" tickFormatter={formatCompactCurrency} width={48} />
+                      <Tooltip formatter={(value) => [formatCurrency(Number(value)), 'Долг']} contentStyle={{ borderRadius: 14, borderColor: 'var(--border)' }} />
+                      <Bar dataKey="value" radius={[10, 10, 4, 4]}>
+                        {receivablesAgingData.map(item => <Cell key={item.label} fill={item.fill} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-sm text-muted-foreground">Просроченной дебиторки нет.</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="app-shell-title text-lg font-extrabold">Сервисные заявки</CardTitle>
+                <CardDescription>Открытые статусы и критичные обращения.</CardDescription>
+              </CardHeader>
+              <CardContent className="h-[270px]">
+                {hasServiceStatusData ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={serviceStatusChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke="currentColor" strokeDasharray="3 3" className="text-slate-200 dark:text-slate-800" vertical={false} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" />
+                      <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" width={32} />
+                      <Tooltip formatter={(value) => [Number(value).toLocaleString('ru-RU'), 'Заявки']} contentStyle={{ borderRadius: 14, borderColor: 'var(--border)' }} />
+                      <Bar dataKey="value" radius={[10, 10, 4, 4]}>
+                        {serviceStatusChartData.map(item => <Cell key={item.label} fill={item.fill} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-sm text-muted-foreground">Открытых сервисных заявок нет.</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </section>
       )}
 
       {activeDashboardTab === roleDashboardTab && roleDashboardMeta && roleDashboardCards.length > 0 && (
@@ -2179,113 +2379,6 @@ export default function Dashboard() {
             </Card>
           </div>
         </section>
-      )}
-
-      {/* ── Priority Actions ─────────────────────────────────────────────────── */}
-      {activeDashboardTab === 'overview' && (
-      <section className={dashboardSectionClass}>
-        <div className={dashboardSectionHeaderClass}>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-            Критично сейчас
-          </p>
-          <h2 className="app-shell-title text-lg font-extrabold text-gray-900 dark:text-white">Срочные зоны внимания</h2>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-3">
-          {shouldShowRentalAttention && (
-            <Card
-              className={`cursor-pointer border transition-all hover:shadow-lg ${
-                overdueRentalsList.length > 0
-                  ? 'border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20'
-                  : dashboardCardClass
-              }`}
-              onClick={() => setSelectedKPI('overdueReturns')}
-            >
-              <CardHeader className={dashboardCardHeaderClass}>
-                <CardDescription className="flex items-center justify-between">
-                  <span className={overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : ''}>Просроченные возвраты</span>
-                  <AlertTriangle className={`h-4 w-4 ${overdueRentalsList.length > 0 ? 'text-red-500' : 'text-gray-400'}`} />
-                </CardDescription>
-                <CardTitle className={`text-4xl font-bold ${overdueRentalsList.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
-                  {overdueRentalsList.length}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className={dashboardCardContentClass}>
-                {overdueRentalsList.length > 0 ? (
-                  <>
-                    <p className="text-sm font-medium text-red-700 dark:text-red-300">
-                      Макс. просрочка: {maxOverdueDays} {maxOverdueDays === 1 ? 'день' : maxOverdueDays < 5 ? 'дня' : 'дней'}
-                    </p>
-                    <p className="text-sm text-red-500 dark:text-red-400">Приоритет на сегодня для менеджеров, офиса и руководителя.</p>
-                  </>
-                ) : (
-                  <p className="text-sm text-green-600 dark:text-green-400">Возвраты идут по плану, просрочек нет.</p>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          <Card
-            className={`cursor-pointer border transition-all hover:shadow-lg ${
-              unassignedServiceTickets.length > 0
-                ? 'border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20'
-                : dashboardCardClass
-            }`}
-            onClick={() => setSelectedKPI('unassignedService')}
-          >
-            <CardHeader className={dashboardCardHeaderClass}>
-              <CardDescription className="flex items-center justify-between">
-                <span className={unassignedServiceTickets.length > 0 ? 'text-amber-700 dark:text-amber-400' : ''}>Заявки без механика</span>
-                <User className={`h-4 w-4 ${unassignedServiceTickets.length > 0 ? 'text-amber-500' : 'text-gray-400'}`} />
-              </CardDescription>
-              <CardTitle className={`text-4xl font-bold ${unassignedServiceTickets.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-900 dark:text-white'}`}>
-                {unassignedServiceTickets.length}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className={dashboardCardContentClass}>
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                {openServiceTickets.length} открытых заявок · {criticalTickets.length} крит./высоких
-              </p>
-              <p className={`text-sm ${unassignedServiceTickets.length > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-green-600 dark:text-green-400'}`}>
-                {unassignedServiceTickets.length > 0 ? 'Нужно назначить исполнителей и снять узкое место.' : 'Все заявки уже распределены.'}
-              </p>
-            </CardContent>
-          </Card>
-
-          {canViewMoney && (
-            <Card
-              className={`cursor-pointer border transition-all hover:shadow-lg ${
-                totalDebt > 0
-                  ? 'border-orange-300 bg-orange-50/50 dark:border-orange-800 dark:bg-orange-950/20'
-                  : dashboardCardClass
-              }`}
-              onClick={() => setSelectedKPI('totalDebt')}
-            >
-              <CardHeader className={dashboardCardHeaderClass}>
-                <CardDescription className="flex items-center justify-between">
-                  <span className={totalDebt > 0 ? 'text-orange-700 dark:text-orange-400' : ''}>Просроченная дебиторка</span>
-                  <CreditCard className={`h-4 w-4 ${totalDebt > 0 ? 'text-orange-500' : 'text-gray-400'}`} />
-                </CardDescription>
-                <CardTitle className={`text-4xl font-bold ${
-                  totalDebt > 100_000 ? 'text-red-600 dark:text-red-400' :
-                  totalDebt > 0 ? 'text-orange-600 dark:text-orange-400' :
-                  'text-gray-900 dark:text-white'
-                }`}>
-                  {totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽'}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className={dashboardCardContentClass}>
-                <p className="text-sm text-gray-600 dark:text-gray-300">
-                  {overdueDebtClients.length} {formatCountLabel(overdueDebtClients.length, 'клиент', 'клиента', 'клиентов')} с долгом
-                </p>
-                <p className={`text-sm ${totalDebt > 0 ? 'text-orange-700 dark:text-orange-300' : 'text-green-600 dark:text-green-400'}`}>
-                  {totalDebt > 0 ? 'Нужно подтвердить оплаты и отработать просрочку.' : 'Критичной задолженности сейчас нет.'}
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </section>
       )}
 
       {/* ── Operational Layer ───────────────────────────────────────────────── */}

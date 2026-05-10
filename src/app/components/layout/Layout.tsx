@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate, useNavigation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
-import { CalendarDays, ChevronDown, LayoutDashboard, LogOut, Menu, Plus, Truck, FileText, Wrench, Users } from 'lucide-react';
+import { CalendarDays, ChevronDown, LayoutDashboard, LogOut, Menu, Plus, Settings, Truck, FileText, Wrench, Users } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
 import { useAuth } from '../../contexts/AuthContext';
@@ -10,6 +10,8 @@ import { traceAuth } from '../../lib/authDebug';
 import { AppLoadingState } from '../ui/AppLoadingState';
 import { AppErrorState } from '../ui/AppErrorState';
 import { LiftLogo } from './LiftLogo';
+
+const SIDEBAR_STATE_STORAGE_KEY = 'rental-management:desktop-sidebar-state';
 
 const BOTTOM_NAV = [
   { name: 'Дашборд', href: '/', icon: LayoutDashboard },
@@ -30,6 +32,10 @@ function getInitials(name: string): string {
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(SIDEBAR_STATE_STORAGE_KEY) === 'collapsed';
+  });
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -53,6 +59,8 @@ export function Layout() {
     return null;
   }, [can]);
   const canOpenPlanner = canView('planner');
+  const desktopSidebarOffsetClass = desktopSidebarCollapsed ? 'sm:left-20' : 'sm:left-64';
+  const desktopSidebarMarginClass = desktopSidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64';
   const pageTitle = useMemo(() => {
     if (location.pathname === '/') return 'Дашборд';
     const segment = location.pathname.split('/').filter(Boolean)[0] || '';
@@ -83,6 +91,19 @@ export function Layout() {
     logout();
     setProfileOpen(false);
     navigate('/login', { replace: true });
+  };
+
+  const handleOpenProfileSettings = () => {
+    setProfileOpen(false);
+    navigate('/settings');
+  };
+
+  const handleToggleDesktopSidebar = () => {
+    setDesktopSidebarCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem(SIDEBAR_STATE_STORAGE_KEY, next ? 'collapsed' : 'expanded');
+      return next;
+    });
   };
 
   // Auth + permission guard via useEffect — avoids render-time <Navigate> which
@@ -177,7 +198,12 @@ export function Layout() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Desktop sidebar */}
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        desktopCollapsed={desktopSidebarCollapsed}
+        onToggleDesktopCollapse={handleToggleDesktopSidebar}
+      />
 
       {/* Mobile overlay */}
       {sidebarOpen && (
@@ -226,6 +252,17 @@ export function Layout() {
                   <p className="truncate text-sm font-semibold text-foreground">{user?.name ?? '—'}</p>
                   <p className="truncate text-xs text-muted-foreground">{user?.role ?? 'Пользователь'}</p>
                 </div>
+                {canView('profile_settings') ? (
+                  <button
+                    type="button"
+                    onClick={handleOpenProfileSettings}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                    role="menuitem"
+                  >
+                    <Settings className="h-4 w-4" />
+                    Настройки
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -242,7 +279,10 @@ export function Layout() {
       </header>
 
       {/* Desktop top bar */}
-      <header className="fixed left-64 right-0 top-0 z-20 hidden h-16 items-center justify-between border-b border-border/80 bg-white/88 px-6 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:bg-background/80 sm:flex">
+      <header className={cn(
+        'fixed right-0 top-0 z-20 hidden h-16 items-center justify-between border-b border-border/80 bg-white/88 px-6 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)] backdrop-blur-xl transition-[left] duration-300 dark:bg-background/80 sm:flex',
+        desktopSidebarOffsetClass,
+      )}>
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Рабочее пространство</p>
           <div className="app-shell-title truncate text-lg font-extrabold text-foreground">{pageTitle}</div>
@@ -299,6 +339,17 @@ export function Layout() {
                 role="menu"
                 className="absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-border bg-popover p-1 text-popover-foreground shadow-[0_24px_70px_-38px_rgba(15,23,42,0.55)]"
               >
+                {canView('profile_settings') ? (
+                  <button
+                    type="button"
+                    onClick={handleOpenProfileSettings}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                    role="menuitem"
+                  >
+                    <Settings className="h-4 w-4" />
+                    Настройки
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -317,13 +368,17 @@ export function Layout() {
       {/* Main content */}
       <main className={cn(
         'min-h-screen',
-        'sm:ml-64',
+        'transition-[margin] duration-300',
+        desktopSidebarMarginClass,
         'pt-14 pb-16 sm:pt-16 sm:pb-0',
         'relative',
       )}>
         <Outlet key={location.pathname} />
         {navigation.state !== 'idle' && (
-          <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm sm:left-64">
+          <div className={cn(
+            'pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm transition-[left] duration-300',
+            desktopSidebarOffsetClass,
+          )}>
             <div className="w-full max-w-sm rounded-2xl border border-border bg-card/95 px-6 py-7 text-center shadow-xl">
               <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
               <div className="space-y-1">

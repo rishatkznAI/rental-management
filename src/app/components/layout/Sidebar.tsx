@@ -10,7 +10,8 @@ import {
   FileCheck,
   CreditCard,
   BarChart3,
-  Settings,
+  PanelLeftClose,
+  PanelLeftOpen,
   Moon,
   Sun,
   X,
@@ -23,7 +24,6 @@ import {
   MapPinned,
   GraduationCap,
   Shield,
-  UserCog,
   WalletCards,
   ListChecks,
 } from 'lucide-react';
@@ -41,7 +41,6 @@ import {
 import { getInvestorBinding, isInvestorUser } from '../../lib/userStorage';
 import { buildGlobalSearchGroups, normalizeGlobalSearchQuery } from '../../lib/globalSearch.js';
 import { Input } from '../ui/input';
-import { Button } from '../ui/button';
 import { useEquipmentList } from '../../hooks/useEquipment';
 import { useClientsList } from '../../hooks/useClients';
 import { useGanttData, useRentalsList } from '../../hooks/useRentals';
@@ -73,13 +72,14 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Финансы',      href: '/finance',   icon: WalletCards,     section: 'finance'    },
   { name: 'Бот',          href: '/bots',      icon: Bot,             section: 'bots'       },
   { name: 'Отчёты',       href: '/reports',   icon: BarChart3,       section: 'reports'    },
-  { name: 'Личные настройки', href: '/settings', icon: UserCog,      section: 'profile_settings' },
   { name: 'Панель администратора', href: '/admin', icon: Shield,     section: 'admin_panel' },
 ];
 
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  desktopCollapsed?: boolean;
+  onToggleDesktopCollapse?: () => void;
 }
 
 type SearchResult = {
@@ -156,7 +156,12 @@ function highlightMatch(text: string, query: string): React.ReactNode {
   return parts.length > 0 ? parts : text;
 }
 
-export function Sidebar({ isOpen, onClose }: SidebarProps) {
+export function Sidebar({
+  isOpen,
+  onClose,
+  desktopCollapsed = false,
+  onToggleDesktopCollapse,
+}: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
@@ -303,6 +308,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     setIsSearchOpen(normalizedSearch.length > 0);
   }, [normalizedSearch]);
 
+  useEffect(() => {
+    if (!desktopCollapsed) return;
+    setIsSearchOpen(false);
+  }, [desktopCollapsed]);
+
   const groupedResults = useMemo(() => {
     return buildGlobalSearchGroups({
       equipment,
@@ -386,28 +396,30 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       className={cn(
         'fixed left-0 top-0 z-40 h-screen w-64',
         'border-r border-sidebar-border bg-[linear-gradient(180deg,#081225_0%,#0b1730_54%,#101b3f_100%)] text-sidebar-foreground shadow-[0_36px_60px_-34px_rgba(0,0,0,0.7)] backdrop-blur-xl dark:bg-sidebar',
-        'transition-transform duration-300 ease-in-out',
+        'transition-[transform,width] duration-300 ease-in-out',
+        desktopCollapsed ? 'sm:w-20' : 'sm:w-64',
+        isOpen ? 'translate-x-0' : '-translate-x-full',
         'sm:translate-x-0',
-        isOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0',
       )}
     >
       <div className="flex h-full flex-col">
-        <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
+        <div className={cn(
+          'flex items-center gap-3 border-b border-sidebar-border px-4 py-4',
+          desktopCollapsed && 'sm:justify-center sm:px-3',
+        )}>
           <LiftLogo className="h-9 w-9" />
-          <div className="min-w-0">
+          <div className={cn('min-w-0', desktopCollapsed && 'sm:hidden')}>
             <div className="app-shell-title text-[15px] font-extrabold text-sidebar-foreground">Скайтех</div>
           </div>
-          <div className="ml-auto flex items-center gap-1">
+          <div className={cn('ml-auto flex items-center gap-1', desktopCollapsed && 'sm:ml-0 sm:flex-col')}>
             <button
-              onClick={toggleTheme}
-              className="rounded-lg p-2 text-white/68 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-              aria-label="Переключить тему"
+              type="button"
+              onClick={onToggleDesktopCollapse}
+              className="hidden rounded-lg p-2 text-white/68 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:inline-flex"
+              aria-label={desktopCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
+              title={desktopCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
             >
-              {theme === 'light' ? (
-                <Moon className="h-4 w-4" />
-              ) : (
-                <Sun className="h-4 w-4" />
-              )}
+              {desktopCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
             </button>
             <button
               onClick={onClose}
@@ -419,8 +431,19 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           </div>
         </div>
 
-        <div className="px-3 py-3" ref={searchRef}>
-          <div className="relative">
+        <div className={cn('px-3 py-3', desktopCollapsed && 'sm:px-2')} ref={searchRef}>
+          {desktopCollapsed ? (
+            <button
+              type="button"
+              onClick={onToggleDesktopCollapse}
+              className="hidden h-10 w-full items-center justify-center rounded-xl border border-sidebar-border bg-white/8 text-white/60 transition hover:border-blue-300/40 hover:bg-white/12 hover:text-sidebar-foreground sm:flex"
+              aria-label="Поиск"
+              title="Поиск"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+          ) : null}
+          <div className={cn('relative', desktopCollapsed && 'sm:hidden')}>
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/55" />
             <Input
               value={search}
@@ -433,7 +456,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             />
           </div>
 
-          {isSearchOpen && (
+          {isSearchOpen && !desktopCollapsed && (
             <div className="mt-2 rounded-2xl border border-sidebar-border bg-[#0f1b34] shadow-[0_24px_45px_-30px_rgba(0,0,0,0.85)]">
               {searchResultsCount === 0 ? (
                 <div className="px-4 py-4 text-sm text-muted-foreground">
@@ -481,10 +504,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2 pb-2">
+        <nav className={cn('flex-1 overflow-y-auto px-2 pb-2', desktopCollapsed && 'sm:px-2')}>
           {groupedNav.map(group => (
             <div key={group.title} className="mb-2">
-              <div className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.18em] text-white/45">
+              <div className={cn('px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.18em] text-white/45', desktopCollapsed && 'sm:hidden')}>
                 {group.title}
               </div>
               <div className="space-y-1">
@@ -499,22 +522,25 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                     <button
                       key={item.name}
                       type="button"
+                      title={desktopCollapsed ? item.name : undefined}
                       onClick={() => {
                         navigate(item.href);
                         handleNavClick();
                       }}
                       className={cn(
-                        'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] transition-colors',
+                        'relative flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] transition-colors',
+                        desktopCollapsed && 'sm:h-11 sm:justify-center sm:gap-0 sm:px-0',
                         isActive
                           ? 'bg-[linear-gradient(135deg,#2563eb_0%,#6366f1_100%)] text-white shadow-[0_16px_30px_-22px_rgba(59,130,246,0.95)] dark:bg-primary dark:text-primary-foreground dark:shadow-[0_16px_30px_-22px_rgba(212,247,74,0.95)]'
                           : 'text-white/68 hover:bg-white/8 hover:text-sidebar-foreground',
                       )}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
-                      <span className="flex-1">{item.name}</span>
+                      <span className={cn('flex-1', desktopCollapsed && 'sm:hidden')}>{item.name}</span>
                       {typeof badgeValue === 'number' && badgeValue > 0 ? (
                         <span className={cn(
                           'rounded-full px-2 py-0.5 text-[10px] font-medium',
+                          desktopCollapsed && 'sm:absolute sm:right-1 sm:top-1 sm:min-w-4 sm:px-1 sm:text-[9px]',
                           isActive
                             ? 'bg-black/15 text-primary-foreground'
                             : item.section === 'service'
@@ -532,21 +558,29 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        <div className="border-t border-sidebar-border px-3 pb-3 pt-2">
+        <div className={cn('border-t border-sidebar-border px-3 pb-3 pt-2', desktopCollapsed && 'sm:px-2')}>
           <div className={cn(
             'flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors',
+            desktopCollapsed && 'sm:justify-center sm:px-0',
             theme === 'dark'
               ? 'border-sidebar-border bg-sidebar-accent text-sidebar-foreground'
               : 'border-sidebar-border bg-white/8 text-white/70',
           )}>
-            {theme === 'dark' ? <Moon className="h-4 w-4 text-sidebar-foreground" /> : <Sun className="h-4 w-4 text-white/70" />}
-            <span>{theme === 'dark' ? 'Тёмный режим' : 'Светлый режим'}</span>
+            {theme === 'dark' ? (
+              <Moon className={cn('h-4 w-4 text-sidebar-foreground', desktopCollapsed && 'sm:hidden')} />
+            ) : (
+              <Sun className={cn('h-4 w-4 text-white/70', desktopCollapsed && 'sm:hidden')} />
+            )}
+            <span className={cn(desktopCollapsed && 'sm:hidden')}>{theme === 'dark' ? 'Тёмный режим' : 'Светлый режим'}</span>
             <button
               type="button"
               onClick={toggleTheme}
               aria-pressed={theme === 'dark'}
+              aria-label="Переключить тему"
+              title={theme === 'dark' ? 'Тёмный режим' : 'Светлый режим'}
               className={cn(
                 'ml-auto inline-flex h-6 w-12 items-center rounded-full border p-1 transition-all',
+                desktopCollapsed && 'sm:ml-0 sm:h-8 sm:w-8 sm:justify-center sm:p-0',
                 theme === 'dark'
                   ? 'justify-end border-primary/30 bg-primary/90 text-primary-foreground shadow-[0_10px_24px_-18px_rgba(212,247,74,0.95)]'
                   : 'justify-start border-sidebar-border bg-white/10 text-white/70 hover:border-blue-300/40',
@@ -554,11 +588,17 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             >
               <span className={cn(
                 'inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none transition-colors',
+                desktopCollapsed && 'sm:h-5 sm:min-w-5 sm:px-0',
                 theme === 'dark'
                   ? 'bg-black/20 text-primary-foreground'
                   : 'bg-white/85 text-slate-700',
               )}>
-                {theme === 'dark' ? 'On' : 'Off'}
+                <span className={cn(desktopCollapsed && 'sm:hidden')}>{theme === 'dark' ? 'On' : 'Off'}</span>
+                {theme === 'dark' ? (
+                  <Moon className={cn('hidden h-3.5 w-3.5', desktopCollapsed && 'sm:block')} />
+                ) : (
+                  <Sun className={cn('hidden h-3.5 w-3.5', desktopCollapsed && 'sm:block')} />
+                )}
               </span>
             </button>
           </div>

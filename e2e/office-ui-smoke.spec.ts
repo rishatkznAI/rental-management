@@ -42,7 +42,6 @@ const OFFICE_SECTIONS: Array<{ name: RegExp; label: string; route: string }> = [
   { name: /^Документы/, label: 'Документы', route: '/documents' },
   { name: /^Платежи/, label: 'Платежи', route: '/payments' },
   { name: /^Финансы/, label: 'Финансы', route: '/finance' },
-  { name: /^Личные настройки/, label: 'Личные настройки', route: '/settings' },
 ];
 
 const FORBIDDEN_NAV_ITEMS = [
@@ -388,6 +387,20 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   for (const forbidden of FORBIDDEN_NAV_ITEMS) {
     await expect(sidebar.getByRole('button', { name: forbidden })).toBeHidden();
   }
+  await expect(sidebar.getByRole('button', { name: /^Личные настройки/ })).toBeHidden();
+
+  action = 'profile settings menu';
+  const desktopHeader = page.locator('header').filter({ hasText: 'Рабочее пространство' });
+  const profileButton = desktopHeader.locator('button[aria-haspopup="menu"]');
+  await expect(profileButton).toBeVisible();
+  await profileButton.click();
+  const profileMenu = page.getByRole('menu');
+  await expect(profileMenu.getByRole('menuitem', { name: 'Настройки' })).toBeVisible();
+  await expect(profileMenu.getByRole('menuitem', { name: 'Выйти' })).toBeVisible();
+  await profileMenu.getByRole('menuitem', { name: 'Настройки' }).click();
+  await expect(page).toHaveURL(/#\/settings/);
+  await expect(page.getByRole('heading', { name: 'Личные настройки' })).toBeVisible();
+  await expectHealthyScreen(page, action);
 
   for (const section of OFFICE_SECTIONS) {
     action = `section ${section.label}`;

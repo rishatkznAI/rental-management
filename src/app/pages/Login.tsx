@@ -13,12 +13,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { traceAuth } from '../lib/authDebug';
+import { getDailyQuote } from '../lib/dailyQuote';
 
 const DEMO_URL = String(import.meta.env.VITE_DEMO_URL || '').trim();
-const LOGIN_QUOTE = {
-  text: 'Не ждите идеального момента. Возьмите момент и сделайте его идеальным.',
-  author: '— Зои Сэйрс',
-};
 
 function getLoginErrorMessage(error: unknown): string {
   if (!(error instanceof Error)) return 'Неизвестная ошибка входа. Попробуйте ещё раз.';
@@ -61,6 +58,7 @@ export default function Login() {
 
   const { login } = useAuth();
   const navigate = useNavigate();
+  const dailyQuote = React.useMemo(() => getDailyQuote(), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,11 +118,13 @@ export default function Login() {
                   <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-[#c8f135]">Цитата дня</p>
                 </div>
                 <blockquote className="text-[21px] font-medium leading-[1.42] tracking-normal text-[#f0f0f0] sm:text-[23px]">
-                  {LOGIN_QUOTE.text}
+                  {dailyQuote.text}
                 </blockquote>
-                <p className="mt-4 text-[11px] font-medium uppercase tracking-[0.1em] text-[#5e7534]">
-                  {LOGIN_QUOTE.author}
-                </p>
+                {dailyQuote.author && (
+                  <p className="mt-4 text-[11px] font-medium uppercase tracking-[0.1em] text-[#5e7534]">
+                    - {dailyQuote.author}
+                  </p>
+                )}
               </div>
             </div>
 

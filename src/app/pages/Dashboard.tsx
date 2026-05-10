@@ -155,6 +155,198 @@ function formatCompactCurrency(value: number) {
   return value.toLocaleString('ru-RU');
 }
 
+type DashboardTone = 'default' | 'success' | 'warning' | 'danger' | 'info' | 'violet';
+
+type DashboardKpi = {
+  id: string;
+  label: string;
+  value: string;
+  hint: string;
+  icon: React.ElementType;
+  tone?: DashboardTone;
+  onClick?: () => void;
+  href?: string;
+};
+
+type DashboardRisk = {
+  id: string;
+  title: string;
+  detail: string;
+  value?: string;
+  href?: string;
+  tone?: DashboardTone;
+};
+
+const DASHBOARD_CHART_COLORS = ['#2563eb', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
+
+const toneStyles: Record<DashboardTone, { bubble: string; accent: string; dot: string }> = {
+  default: {
+    bubble: 'bg-blue-50 text-blue-600 dark:bg-primary/12 dark:text-primary',
+    accent: 'text-blue-600 dark:text-primary',
+    dot: 'bg-blue-500',
+  },
+  success: {
+    bubble: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/25 dark:text-emerald-300',
+    accent: 'text-emerald-600 dark:text-emerald-300',
+    dot: 'bg-emerald-500',
+  },
+  warning: {
+    bubble: 'bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-300',
+    accent: 'text-amber-600 dark:text-amber-300',
+    dot: 'bg-amber-500',
+  },
+  danger: {
+    bubble: 'bg-red-50 text-red-600 dark:bg-red-900/25 dark:text-red-300',
+    accent: 'text-red-600 dark:text-red-300',
+    dot: 'bg-red-500',
+  },
+  info: {
+    bubble: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-900/25 dark:text-cyan-300',
+    accent: 'text-cyan-600 dark:text-cyan-300',
+    dot: 'bg-cyan-500',
+  },
+  violet: {
+    bubble: 'bg-violet-50 text-violet-600 dark:bg-violet-900/25 dark:text-violet-300',
+    accent: 'text-violet-600 dark:text-violet-300',
+    dot: 'bg-violet-500',
+  },
+};
+
+function DashboardEmptyState({ text = 'Недостаточно данных для графика.' }: { text?: string }) {
+  return (
+    <div className="flex h-full min-h-48 items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 px-4 text-center text-sm text-muted-foreground">
+      {text}
+    </div>
+  );
+}
+
+function DashboardKpiGrid({ cards }: { cards: DashboardKpi[] }) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      {cards.map(card => {
+        const Icon = card.icon;
+        const tone = toneStyles[card.tone ?? 'default'];
+        const content = (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-muted-foreground">{card.label}</p>
+                <p className="mt-2 text-2xl font-extrabold text-foreground">{card.value}</p>
+              </div>
+              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${tone.bubble}`}>
+                <Icon className="h-5 w-5" />
+              </div>
+            </div>
+            <p className={`mt-4 line-clamp-2 text-sm ${tone.accent}`}>{card.hint}</p>
+          </>
+        );
+        const className = 'rounded-2xl border border-border bg-white p-4 text-left shadow-[0_18px_44px_-36px_rgba(15,23,42,0.38)] transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-[0_22px_54px_-38px_rgba(15,23,42,0.45)] dark:bg-card dark:shadow-none';
+
+        if (card.href) {
+          return <Link key={card.id} to={card.href} className={className}>{content}</Link>;
+        }
+        if (card.onClick) {
+          return <button key={card.id} type="button" onClick={card.onClick} className={className}>{content}</button>;
+        }
+        return <div key={card.id} className={className}>{content}</div>;
+      })}
+    </div>
+  );
+}
+
+function DashboardChartCard({
+  title,
+  description,
+  children,
+  empty,
+  className,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+  empty?: boolean;
+  className?: string;
+}) {
+  return (
+    <Card className={`app-panel overflow-hidden border-border/80 bg-card/95 ${className ?? ''}`}>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="h-72">
+        {empty ? <DashboardEmptyState /> : children}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DashboardRiskPanel({
+  title,
+  description,
+  items,
+  className,
+}: {
+  title: string;
+  description: string;
+  items: DashboardRisk[];
+  className?: string;
+}) {
+  return (
+    <Card className={`app-panel border-border/80 bg-card/95 ${className ?? ''}`}>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {items.length === 0 ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-5 text-sm text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-300">
+            Критичных сигналов нет.
+          </div>
+        ) : items.slice(0, 7).map(item => {
+          const tone = toneStyles[item.tone ?? 'default'];
+          const content = (
+            <>
+              <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${tone.dot}`} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-foreground">{item.title}</span>
+                <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{item.detail}</span>
+              </span>
+              {item.value ? <span className={`shrink-0 text-sm font-semibold ${tone.accent}`}>{item.value}</span> : null}
+            </>
+          );
+          const className = 'flex items-start gap-3 rounded-2xl border border-border bg-white px-4 py-3 transition hover:border-blue-300 dark:bg-background/30';
+          return item.href ? (
+            <Link key={item.id} to={item.href} className={className}>{content}</Link>
+          ) : (
+            <div key={item.id} className={className}>{content}</div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
+function groupCountChart<T>(
+  items: T[],
+  getKey: (item: T) => string | undefined | null,
+  labels: Record<string, string> = {},
+  colors = DASHBOARD_CHART_COLORS,
+) {
+  const map = new Map<string, number>();
+  items.forEach(item => {
+    const key = getKey(item) || 'unknown';
+    map.set(key, (map.get(key) || 0) + 1);
+  });
+  return [...map.entries()]
+    .map(([key, value], index) => ({
+      key,
+      label: labels[key] || key,
+      value,
+      fill: colors[index % colors.length],
+    }))
+    .sort((a, b) => b.value - a.value);
+}
+
 // ─── main component ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -1273,6 +1465,352 @@ export default function Dashboard() {
     { label: 'Резерв', value: reservedEquipment, fill: '#94a3b8' },
   ].filter(item => item.value > 0);
   const hasFleetDonutData = fleetDonutData.length > 0;
+  const rentalStatusLabels: Record<string, string> = {
+    active: 'Активные',
+    created: 'Созданы',
+    confirmed: 'Подтверждены',
+    return_planned: 'Возврат',
+    closed: 'Закрыты',
+    completed: 'Завершены',
+    returned: 'Возвращены',
+    cancelled: 'Отменены',
+  };
+  const equipmentStatusLabels: Record<string, string> = {
+    available: 'Доступно',
+    rented: 'В аренде',
+    reserved: 'Резерв',
+    in_service: 'Сервис',
+    inactive: 'Неактивно',
+    sold: 'Продано',
+  };
+  const serviceStatusLabels: Record<string, string> = {
+    new: 'Новые',
+    in_progress: 'В работе',
+    waiting_parts: 'Запчасти',
+    ready: 'Готово',
+    closed: 'Закрыто',
+  };
+  const priorityLabels: Record<string, string> = {
+    low: 'Низкий',
+    medium: 'Средний',
+    high: 'Высокий',
+    critical: 'Критичный',
+  };
+  const documentStatusLabels: Record<string, string> = {
+    draft: 'Черновик',
+    sent: 'Отправлен',
+    signed: 'Подписан',
+  };
+  const documentTypeLabels: Record<string, string> = {
+    contract: 'Договоры',
+    act: 'Акты',
+    invoice: 'Счета',
+    upd: 'УПД',
+    claim: 'Претензии',
+    notice: 'Уведомления',
+  };
+  const deliveryStatusLabels: Record<string, string> = {
+    new: 'Новые',
+    sent: 'Отправлены',
+    accepted: 'Приняты',
+    in_transit: 'В пути',
+    completed: 'Выполнены',
+    cancelled: 'Отменены',
+  };
+  const nextReturnBuckets = useMemo(() => Array.from({ length: 10 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    const key = date.toISOString().slice(0, 10);
+    return {
+      key,
+      label: index === 0 ? 'Сегодня' : date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
+      value: viewPlannerRentals.filter(rental => toDateKey(rental.endDate) === key && rental.status === 'active').length,
+    };
+  }), [today, viewPlannerRentals]);
+  const deliveryDayBuckets = useMemo(() => Array.from({ length: 10 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    const key = date.toISOString().slice(0, 10);
+    return {
+      key,
+      label: index === 0 ? 'Сегодня' : date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
+      value: activeDeliveries.filter(delivery => toDateKey(delivery.transportDate || delivery.neededBy) === key).length,
+    };
+  }), [activeDeliveries, today]);
+  const rentalStatusChartData = useMemo(() => groupCountChart(viewPlannerRentals, item => item.status, rentalStatusLabels), [viewPlannerRentals]);
+  const rentalManagerChartData = useMemo(() => groupCountChart(viewPlannerRentals, item => item.manager || 'Без менеджера').slice(0, 8), [viewPlannerRentals]);
+  const rentalsWithDebtCount = rentalDebtRows.filter(row => row.outstanding > 0).length;
+  const rentalsWithoutManager = viewPlannerRentals.filter(rental => !rental.manager);
+  const rentalsRiskItems: DashboardRisk[] = [
+    overdueRentalsList.length > 0 && {
+      id: 'overdue-returns',
+      title: 'Просроченные возвраты',
+      detail: `${overdueRentalsList.length} аренд требуют закрытия возврата`,
+      value: String(overdueRentalsList.length),
+      href: '/rentals',
+      tone: 'danger',
+    },
+    rentalsWithDebtCount > 0 && {
+      id: 'rentals-debt',
+      title: 'Аренды с долгом',
+      detail: 'Есть открытая дебиторка по арендам',
+      value: String(rentalsWithDebtCount),
+      href: '/finance',
+      tone: 'warning',
+    },
+    documentControl.kpi.rentalsWithoutContract > 0 && {
+      id: 'rentals-docs',
+      title: 'Аренды без договора',
+      detail: 'Документный контроль показывает отсутствие договора',
+      value: String(documentControl.kpi.rentalsWithoutContract),
+      href: '/documents',
+      tone: 'warning',
+    },
+    rentalsWithoutManager.length > 0 && {
+      id: 'rentals-manager',
+      title: 'Без ответственного',
+      detail: 'В арендах не указан менеджер',
+      value: String(rentalsWithoutManager.length),
+      href: '/rentals',
+      tone: 'warning',
+    },
+  ].filter(Boolean) as DashboardRisk[];
+  const fleetStatusChartData = useMemo(() => groupCountChart(equipmentList, item => item.status, equipmentStatusLabels), [equipmentList]);
+  const fleetTypeChartData = useMemo(() => groupCountChart(equipmentList, item => item.type || 'other').slice(0, 8), [equipmentList]);
+  const maintenanceOverdueEquipment = equipmentList.filter(item =>
+    [item.nextMaintenance, item.maintenanceCHTO, item.maintenancePTO].some(date => date && toDateKey(date) < todayKey),
+  );
+  const missingEquipmentIdentity = equipmentList.filter(item => !item.inventoryNumber || !item.serialNumber);
+  const fleetRiskItems: DashboardRisk[] = [
+    equipmentInServiceList.length > 0 && {
+      id: 'fleet-service',
+      title: 'Техника в сервисе',
+      detail: 'Единицы парка сейчас недоступны для выдачи',
+      value: String(equipmentInServiceList.length),
+      href: '/service',
+      tone: 'warning',
+    },
+    idleEquipmentList.length > 0 && {
+      id: 'fleet-idle',
+      title: 'Свободная техника',
+      detail: 'Резерв для выдачи или перераспределения',
+      value: String(idleEquipmentList.length),
+      href: '/equipment',
+      tone: 'info',
+    },
+    missingEquipmentIdentity.length > 0 && {
+      id: 'fleet-identity',
+      title: 'Нет INV/SN',
+      detail: 'Есть карточки техники без ключевых идентификаторов',
+      value: String(missingEquipmentIdentity.length),
+      href: '/equipment',
+      tone: 'warning',
+    },
+    maintenanceOverdueEquipment.length > 0 && {
+      id: 'fleet-maintenance',
+      title: 'Просроченное ТО',
+      detail: 'По карточкам техники есть даты обслуживания в прошлом',
+      value: String(maintenanceOverdueEquipment.length),
+      href: '/equipment',
+      tone: 'danger',
+    },
+  ].filter(Boolean) as DashboardRisk[];
+  const servicePriorityChartData = useMemo(() => groupCountChart(openServiceTickets, item => item.priority, priorityLabels, ['#10b981', '#60a5fa', '#f59e0b', '#ef4444']), [openServiceTickets]);
+  const mechanicWorkloadChartData = useMemo(() => {
+    const source = adminMechanicRows.length > 0
+      ? adminMechanicRows.map(row => ({ label: row.name, value: row.openTickets }))
+      : groupCountChart(openServiceTickets, item => item.assignedMechanicName || item.assignedTo || 'Без механика').map(item => ({ label: item.label, value: item.value }));
+    return source.filter(item => item.value > 0).slice(0, 8).map((item, index) => ({ ...item, fill: DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length] }));
+  }, [adminMechanicRows, openServiceTickets]);
+  const serviceRiskItems: DashboardRisk[] = [
+    unassignedServiceTickets.length > 0 && {
+      id: 'service-unassigned',
+      title: 'Без механика',
+      detail: 'Заявки ожидают распределения',
+      value: String(unassignedServiceTickets.length),
+      href: '/service',
+      tone: 'warning',
+    },
+    ticketsWaitingParts.length > 0 && {
+      id: 'service-parts',
+      title: 'Ожидание запчастей',
+      detail: 'Ремонт зависит от снабжения',
+      value: String(ticketsWaitingParts.length),
+      href: '/service',
+      tone: 'warning',
+    },
+    criticalTickets.length > 0 && {
+      id: 'service-critical',
+      title: 'Критичные заявки',
+      detail: 'Высокий или критичный приоритет',
+      value: String(criticalTickets.length),
+      href: '/service',
+      tone: 'danger',
+    },
+    readyServiceTickets.length > 0 && {
+      id: 'service-ready',
+      title: 'Готово к закрытию',
+      detail: 'Заявки можно довести до финального статуса',
+      value: String(readyServiceTickets.length),
+      href: '/service',
+      tone: 'success',
+    },
+  ].filter(Boolean) as DashboardRisk[];
+  const paymentTrendData = useMemo(() => {
+    const now = new Date(today);
+    const months = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+      return { key: monthKey(date), label: MONTH_LABELS[date.getMonth()], value: 0 };
+    });
+    const monthMap = new Map(months.map(item => [item.key, item]));
+    payments.forEach(payment => {
+      const parsed = new Date(payment.paidDate || payment.dueDate || '');
+      if (Number.isNaN(parsed.getTime())) return;
+      const target = monthMap.get(monthKey(parsed));
+      if (!target) return;
+      target.value += Number(payment.paidAmount || payment.amount || 0);
+    });
+    return months;
+  }, [payments, today]);
+  const financeLoadData = [
+    { label: 'Дебиторка', value: totalDebt, fill: '#ef4444' },
+    { label: 'Просрочка', value: overduePayments.reduce((sum, row) => sum + row.outstanding, 0), fill: '#f59e0b' },
+    { label: 'Сегодня', value: todayPaymentRows.reduce((sum, row) => sum + row.outstanding, 0), fill: '#2563eb' },
+  ];
+  const moneyRiskItems: DashboardRisk[] = [
+    debtCollectionSummary.overdueActions > 0 && {
+      id: 'money-actions',
+      title: 'Просрочены действия',
+      detail: 'Планы взыскания требуют обновления',
+      value: String(debtCollectionSummary.overdueActions),
+      href: '/finance',
+      tone: 'danger',
+    },
+    debtCollectionSummary.withoutPlan30Plus > 0 && {
+      id: 'money-plan',
+      title: 'Нет плана 30+',
+      detail: 'Клиенты с долгом без следующего шага',
+      value: String(debtCollectionSummary.withoutPlan30Plus),
+      href: '/finance',
+      tone: 'warning',
+    },
+    debtCollectionSummary.promisedToday > 0 && {
+      id: 'money-promises',
+      title: 'Обещания сегодня',
+      detail: 'Нужно проверить поступления и коммуникации',
+      value: String(debtCollectionSummary.promisedToday),
+      href: '/finance',
+      tone: 'info',
+    },
+    todayPaymentRows.length > 0 && {
+      id: 'money-due',
+      title: 'Платежи сегодня',
+      detail: 'Ожидаемые платежи по арендам',
+      value: String(todayPaymentRows.length),
+      href: '/payments',
+      tone: 'warning',
+    },
+  ].filter(Boolean) as DashboardRisk[];
+  const documentStatusChartData = useMemo(() => groupCountChart(documents, item => item.status, documentStatusLabels), [documents]);
+  const documentTypeChartData = useMemo(() => groupCountChart(documents, item => item.type || item.documentType || 'other', documentTypeLabels).slice(0, 8), [documents]);
+  const documentPeriodData = useMemo(() => {
+    const now = new Date(today);
+    const months = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+      return { key: monthKey(date), label: MONTH_LABELS[date.getMonth()], value: 0 };
+    });
+    const monthMap = new Map(months.map(item => [item.key, item]));
+    documents.forEach(document => {
+      const parsed = new Date(document.documentDate || document.date || document.createdAt || '');
+      if (Number.isNaN(parsed.getTime())) return;
+      const target = monthMap.get(monthKey(parsed));
+      if (!target) return;
+      target.value += 1;
+    });
+    return months;
+  }, [documents, today]);
+  const documentNumberCounts = documents.reduce((map, document) => {
+    const number = (document.documentNumber || document.number || '').trim();
+    if (number) map.set(number, (map.get(number) || 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  const duplicateDocumentNumbers = [...documentNumberCounts.values()].filter(count => count > 1).length;
+  const documentsWithoutNumber = documents.filter(document => !(document.documentNumber || document.number || '').trim()).length;
+  const documentsWithoutFile = documents.filter(document => !document.fileUrl && !document.fileName && !document.signedScanDataUrl).length;
+  const documentRiskItems: DashboardRisk[] = [
+    documentsWithoutNumber > 0 && {
+      id: 'doc-number',
+      title: 'Без номера',
+      detail: 'Документы требуют аккуратной нумерации',
+      value: String(documentsWithoutNumber),
+      href: '/documents',
+      tone: 'warning',
+    },
+    duplicateDocumentNumbers > 0 && {
+      id: 'doc-duplicates',
+      title: 'Дубли номеров',
+      detail: 'Одинаковые номера встречаются больше одного раза',
+      value: String(duplicateDocumentNumbers),
+      href: '/documents',
+      tone: 'danger',
+    },
+    documentControl.kpi.unsignedDocuments > 0 && {
+      id: 'doc-unsigned',
+      title: 'Неподписанные',
+      detail: 'Документы ждут подписи или закрытия',
+      value: String(documentControl.kpi.unsignedDocuments),
+      href: '/documents',
+      tone: 'warning',
+    },
+    documentsWithoutFile > 0 && {
+      id: 'doc-files',
+      title: 'Без файла',
+      detail: 'В карточках нет приложенного файла или скана',
+      value: String(documentsWithoutFile),
+      href: '/documents',
+      tone: 'info',
+    },
+  ].filter(Boolean) as DashboardRisk[];
+  const deliveryStatusChartData = useMemo(() => groupCountChart(deliveries, item => item.status, deliveryStatusLabels), [deliveries]);
+  const carrierWorkloadChartData = useMemo(() => groupCountChart(activeDeliveries, item => item.carrierName || 'Без перевозчика').slice(0, 8), [activeDeliveries]);
+  const tomorrowDeliveries = activeDeliveries.filter(delivery => toDateKey(delivery.transportDate || delivery.neededBy) === tomorrowStart.toISOString().slice(0, 10));
+  const completedDeliveriesThisMonth = deliveries.filter(delivery => delivery.status === 'completed' && new Date(delivery.completedAt || delivery.transportDate || delivery.updatedAt || '') >= monthStart);
+  const deliveriesWithoutAddress = activeDeliveries.filter(delivery => !(delivery.destination || delivery.objectAddress || '').trim());
+  const deliveriesWithoutContact = activeDeliveries.filter(delivery => !(delivery.contactPhone || delivery.objectContactPhone || delivery.contactName || '').trim());
+  const deliveryRiskItems: DashboardRisk[] = [
+    unassignedDeliveries.length > 0 && {
+      id: 'delivery-carrier',
+      title: 'Без перевозчика',
+      detail: 'Активные доставки не назначены перевозчику',
+      value: String(unassignedDeliveries.length),
+      href: '/deliveries',
+      tone: 'warning',
+    },
+    overdueDeliveries.length > 0 && {
+      id: 'delivery-overdue',
+      title: 'Просрочены',
+      detail: 'Дата доставки уже прошла',
+      value: String(overdueDeliveries.length),
+      href: '/deliveries',
+      tone: 'danger',
+    },
+    deliveriesWithoutAddress.length > 0 && {
+      id: 'delivery-address',
+      title: 'Без адреса',
+      detail: 'Нет понятного адреса назначения',
+      value: String(deliveriesWithoutAddress.length),
+      href: '/deliveries',
+      tone: 'warning',
+    },
+    deliveriesWithoutContact.length > 0 && {
+      id: 'delivery-contact',
+      title: 'Без контакта',
+      detail: 'Нет контакта клиента или объекта',
+      value: String(deliveriesWithoutContact.length),
+      href: '/deliveries',
+      tone: 'info',
+    },
+  ].filter(Boolean) as DashboardRisk[];
 
   const dashboardTabs = [
     { id: 'overview' as const, label: 'Обзор', visible: true },
@@ -1986,6 +2524,318 @@ export default function Dashboard() {
         </section>
       )}
 
+      {activeDashboardTab === 'rentals' && (
+        <section className="space-y-5">
+          <DashboardKpiGrid cards={[
+            { id: 'rentals-active', label: 'Активные аренды', value: String(activeRentalsList.length), hint: `${rentedOrReservedEquipment} ед. техники задействовано`, icon: Calendar, tone: 'default', onClick: () => setSelectedKPI('activeRentals') },
+            { id: 'rentals-new', label: 'Новые / ожидают', value: String(reservedRentalsList.length), hint: 'Созданы или подтверждены к выдаче', icon: Clock, tone: 'info', href: '/rentals' },
+            { id: 'rentals-today', label: 'Возвраты сегодня', value: String(rentalsEndingToday.length), hint: rentalsEndingToday.length > 0 ? 'Нужен контроль закрытия' : 'Пиков возврата нет', icon: RefreshCw, tone: rentalsEndingToday.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('returnsTodayTomorrow') },
+            { id: 'rentals-soon', label: 'Возвраты завтра', value: String(rentalsEndingTomorrow.length), hint: 'Ближайшая операционная нагрузка', icon: Calendar, tone: 'violet', onClick: () => setSelectedKPI('returnsTodayTomorrow') },
+            { id: 'rentals-overdue', label: 'Просроченные возвраты', value: String(overdueRentalsList.length), hint: maxOverdueDays > 0 ? `Макс. ${maxOverdueDays} дн.` : 'Просрочек нет', icon: AlertTriangle, tone: overdueRentalsList.length > 0 ? 'danger' : 'success', onClick: () => setSelectedKPI('overdueReturns') },
+            { id: 'rentals-debt', label: 'Аренды с долгом', value: String(rentalsWithDebtCount), hint: canViewMoney ? formatCurrency(totalDebt) : 'Сумма скрыта правами', icon: DollarSign, tone: rentalsWithDebtCount > 0 ? 'warning' : 'success', href: '/finance' },
+          ]} />
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <DashboardChartCard title="Аренды по статусам" description="Распределение текущего арендного портфеля." empty={rentalStatusChartData.length === 0} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={rentalStatusChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip cursor={{ fill: 'rgba(37,99,235,0.08)' }} />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{rentalStatusChartData.map(item => <Cell key={item.key} fill={item.fill} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardChartCard title="Возвраты по дням" description="Нагрузка на ближайшие 10 дней." empty={!nextReturnBuckets.some(item => item.value > 0)} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={nextReturnBuckets} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip cursor={{ fill: 'rgba(139,92,246,0.08)' }} />
+                  <Bar dataKey="value" fill="#8b5cf6" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardRiskPanel title="Риски аренды" description="Что может сорвать закрытие, оплату или документы." items={rentalsRiskItems} className="xl:col-span-4" />
+          </div>
+          <DashboardChartCard title="Аренды по менеджерам" description="Активность в арендном портфеле по ответственным." empty={rentalManagerChartData.length === 0}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={rentalManagerChartData} layout="vertical" margin={{ top: 8, right: 16, left: 24, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.24)" />
+                <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} fontSize={12} width={120} />
+                <Tooltip cursor={{ fill: 'rgba(16,185,129,0.08)' }} />
+                <Bar dataKey="value" fill="#10b981" radius={[0, 8, 8, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </DashboardChartCard>
+        </section>
+      )}
+
+      {activeDashboardTab === 'fleet' && (
+        <section className="space-y-5">
+          <DashboardKpiGrid cards={[
+            { id: 'fleet-total', label: 'Всего техники', value: String(totalEquipment), hint: `${activeEquipment} ед. активного парка`, icon: Truck, tone: 'default' },
+            { id: 'fleet-available', label: 'Доступно', value: String(availableEquipment), hint: 'Готово к выдаче', icon: CheckCircle, tone: 'success' },
+            { id: 'fleet-rented', label: 'В аренде', value: String(rentedEquipment), hint: activeEquipment > 0 ? `${utilization}% загрузки` : 'Активный парк не сформирован', icon: TrendingUp, tone: 'info', onClick: () => setSelectedKPI('utilization') },
+            { id: 'fleet-service', label: 'В сервисе', value: String(equipmentInServiceList.length), hint: `Ср. ${averageServiceDays || 0} дн.`, icon: Wrench, tone: equipmentInServiceList.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('serviceInDays') },
+            { id: 'fleet-idle', label: 'Свободно / простой', value: String(idleEquipmentList.length), hint: 'Резерв и неактивные единицы', icon: PackageX, tone: idleEquipmentList.length > 0 ? 'violet' : 'success', onClick: () => setSelectedKPI('idleEquipment') },
+            { id: 'fleet-inactive', label: 'Неактивно', value: String(inactiveEquipment), hint: 'Списано/не в работе по статусу', icon: Ban, tone: inactiveEquipment > 0 ? 'warning' : 'success' },
+          ]} />
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <DashboardChartCard title="Статусы парка" description="Снимок текущего состояния техники." empty={fleetStatusChartData.length === 0} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={fleetStatusChartData} dataKey="value" nameKey="label" innerRadius="56%" outerRadius="82%" paddingAngle={4}>
+                    {fleetStatusChartData.map(item => <Cell key={item.key} fill={item.fill} />)}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardChartCard title="Парк по типам" description="Структура техники по типам." empty={fleetTypeChartData.length === 0} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={fleetTypeChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip cursor={{ fill: 'rgba(37,99,235,0.08)' }} />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{fleetTypeChartData.map(item => <Cell key={item.key} fill={item.fill} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardRiskPanel title="Риски парка" description="Сигналы по доступности, ТО и качеству карточек." items={fleetRiskItems} className="xl:col-span-4" />
+          </div>
+          <Card className="app-panel border-border/80 bg-card/95">
+            <CardHeader>
+              <CardTitle className="text-lg">Загрузка парка</CardTitle>
+              <CardDescription>Snapshot текущей загрузки без искусственной динамики.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex items-end justify-between">
+                  <span className="text-4xl font-extrabold text-foreground">{activeEquipment === 0 ? '—' : `${utilization}%`}</span>
+                  <span className="text-sm text-muted-foreground">{rentedEquipment} из {activeEquipment} ед.</span>
+                </div>
+                <div className="h-3 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#2563eb,#8b5cf6)]" style={{ width: `${Math.min(100, Math.max(0, utilization))}%` }} />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
+      {activeDashboardTab === 'service' && (
+        <section className="space-y-5">
+          <DashboardKpiGrid cards={[
+            { id: 'service-open', label: 'Открытые заявки', value: String(openServiceTickets.length), hint: `${criticalTickets.length} крит./высоких`, icon: Wrench, tone: openServiceTickets.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('openService') },
+            { id: 'service-work', label: 'В работе', value: String(openServiceTickets.filter(ticket => ticket.status === 'in_progress').length), hint: 'Активная сервисная очередь', icon: Activity, tone: 'info' },
+            { id: 'service-parts', label: 'Ждут запчасти', value: String(ticketsWaitingParts.length), hint: 'Зависит от снабжения', icon: Clock, tone: ticketsWaitingParts.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('waitingParts') },
+            { id: 'service-ready', label: 'Готово к закрытию', value: String(readyServiceTickets.length), hint: 'Можно финализировать', icon: CheckCircle, tone: 'success' },
+            { id: 'service-critical', label: 'Критичные', value: String(criticalTickets.length), hint: 'Высокий приоритет', icon: ShieldAlert, tone: criticalTickets.length > 0 ? 'danger' : 'success' },
+            { id: 'service-age', label: 'Средний возраст', value: `${averageServiceDays || 0} дн.`, hint: maxServiceDays > 0 ? `Макс. ${maxServiceDays} дн.` : 'Открытых заявок нет', icon: Calendar, tone: averageServiceDays > 7 ? 'warning' : 'default', onClick: () => setSelectedKPI('serviceInDays') },
+          ]} />
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <DashboardChartCard title="Заявки по статусам" description="Текущая сервисная воронка." empty={!hasServiceStatusData} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={serviceStatusChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip cursor={{ fill: 'rgba(245,158,11,0.08)' }} />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{serviceStatusChartData.map(item => <Cell key={item.label} fill={item.fill} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardChartCard title="Заявки по приоритетам" description="Риск-профиль открытой очереди." empty={servicePriorityChartData.length === 0} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={servicePriorityChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip cursor={{ fill: 'rgba(239,68,68,0.08)' }} />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{servicePriorityChartData.map(item => <Cell key={item.key} fill={item.fill} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardRiskPanel title="Сервисные риски" description="Что тормозит возврат техники в парк." items={serviceRiskItems} className="xl:col-span-4" />
+          </div>
+          <DashboardChartCard title="Нагрузка по механикам" description="Открытые заявки по назначенным исполнителям." empty={mechanicWorkloadChartData.length === 0}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={mechanicWorkloadChartData} layout="vertical" margin={{ top: 8, right: 16, left: 24, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.24)" />
+                <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} fontSize={12} width={120} />
+                <Tooltip cursor={{ fill: 'rgba(99,102,241,0.08)' }} />
+                <Bar dataKey="value" radius={[0, 8, 8, 0]}>{mechanicWorkloadChartData.map(item => <Cell key={item.label} fill={item.fill} />)}</Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </DashboardChartCard>
+        </section>
+      )}
+
+      {activeDashboardTab === 'money' && canViewMoney && (
+        <section className="space-y-5">
+          <DashboardKpiGrid cards={[
+            { id: 'money-payments', label: 'Платежи', value: formatCurrency(payments.reduce((sum, payment) => sum + (payment.paidAmount || 0), 0)), hint: `${payments.length} записей`, icon: CreditCard, tone: 'success', href: '/payments' },
+            { id: 'money-debt', label: 'Дебиторка', value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽', hint: `${clientDebtAgingRows.length} клиентов в aging`, icon: DollarSign, tone: totalDebt > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('totalDebt') },
+            { id: 'money-overdue', label: 'Просрочка', value: formatCurrency(overduePayments.reduce((sum, row) => sum + row.outstanding, 0)), hint: `${overduePayments.length} строк`, icon: AlertTriangle, tone: overduePayments.length > 0 ? 'danger' : 'success' },
+            { id: 'money-actions', label: 'Планы взыскания', value: String(debtCollectionSummary.overdueActions), hint: `${debtCollectionSummary.promisedToday} обещаний сегодня`, icon: ListChecks, tone: debtCollectionSummary.overdueActions > 0 ? 'danger' : 'info', href: '/finance' },
+            { id: 'money-today', label: 'К оплате сегодня', value: String(todayPaymentRows.length), hint: todayPaymentRows.length > 0 ? formatCurrency(todayPaymentRows.reduce((sum, row) => sum + row.outstanding, 0)) : 'Нет ожидаемых оплат', icon: Clock, tone: todayPaymentRows.length > 0 ? 'warning' : 'success' },
+            { id: 'money-month', label: 'Просрочка месяца', value: monthDebt > 0 ? formatCurrency(monthDebt) : '0 ₽', hint: `${monthOverduePayments.length} строк`, icon: TrendingUp, tone: monthDebt > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('monthDebt') },
+          ]} />
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <DashboardChartCard title="Дебиторка по возрасту" description="Aging buckets без изменения финансовых расчётов." empty={!hasReceivablesAging} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={receivablesAgingData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis tickFormatter={formatCompactCurrency} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip formatter={(value) => formatCurrency(Number(value))} cursor={{ fill: 'rgba(239,68,68,0.08)' }} />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{receivablesAgingData.map(item => <Cell key={item.label} fill={item.fill} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardChartCard title="Финансовая нагрузка" description="Краткая сводка по уже доступным финансовым данным." empty={!financeLoadData.some(item => item.value > 0)} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={financeLoadData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis tickFormatter={formatCompactCurrency} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip formatter={(value) => formatCurrency(Number(value))} cursor={{ fill: 'rgba(37,99,235,0.08)' }} />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{financeLoadData.map(item => <Cell key={item.label} fill={item.fill} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardRiskPanel title="Финансовые риски" description="Куда перейти для детальной работы в финансах." items={moneyRiskItems} className="xl:col-span-4" />
+          </div>
+          <DashboardChartCard title="Платежи / поступления" description="Агрегация платежей по датам оплаты или срокам." empty={!paymentTrendData.some(item => item.value > 0)}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={paymentTrendData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="paymentTrendGradient" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.32} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                <YAxis tickFormatter={formatCompactCurrency} tickLine={false} axisLine={false} fontSize={12} />
+                <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={3} fill="url(#paymentTrendGradient)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </DashboardChartCard>
+        </section>
+      )}
+
+      {activeDashboardTab === 'documents' && (
+        <section className="space-y-5">
+          <DashboardKpiGrid cards={[
+            { id: 'doc-total', label: 'Всего документов', value: String(documents.length), hint: 'Реестр документов', icon: FileText, tone: 'default', href: '/documents' },
+            { id: 'doc-number', label: 'Без номера', value: String(documentsWithoutNumber), hint: 'Требуют аккуратной нумерации', icon: ClipboardX, tone: documentsWithoutNumber > 0 ? 'warning' : 'success' },
+            { id: 'doc-duplicates', label: 'Дубли номеров', value: String(duplicateDocumentNumbers), hint: 'Нужно проверить реестр', icon: ShieldAlert, tone: duplicateDocumentNumbers > 0 ? 'danger' : 'success' },
+            { id: 'doc-unsigned', label: 'Неподписанные', value: String(documentControl.kpi.unsignedDocuments), hint: `${documentControl.kpi.overdueSignature} просрочено`, icon: Clock, tone: documentControl.kpi.unsignedDocuments > 0 ? 'warning' : 'success' },
+            { id: 'doc-signed', label: 'Подписанные', value: String(documents.filter(document => document.status === 'signed').length), hint: 'Закрытый документооборот', icon: CheckCircle, tone: 'success' },
+            { id: 'doc-month', label: 'За месяц', value: String(documents.filter(document => new Date(document.documentDate || document.date || document.createdAt || '') >= monthStart).length), hint: today.toLocaleDateString('ru-RU', { month: 'long' }), icon: Calendar, tone: 'violet' },
+          ]} />
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <DashboardChartCard title="Документы по статусам" description="Черновики, отправленные и подписанные документы." empty={documentStatusChartData.length === 0} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={documentStatusChartData} dataKey="value" nameKey="label" innerRadius="56%" outerRadius="82%" paddingAngle={4}>
+                    {documentStatusChartData.map(item => <Cell key={item.key} fill={item.fill} />)}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardChartCard title="Документы по типам" description="Структура реестра по типам." empty={documentTypeChartData.length === 0} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={documentTypeChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip cursor={{ fill: 'rgba(139,92,246,0.08)' }} />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{documentTypeChartData.map(item => <Cell key={item.key} fill={item.fill} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardRiskPanel title="Документные риски" description="Что тормозит закрытие аренды и оплату." items={documentRiskItems} className="xl:col-span-4" />
+          </div>
+          <DashboardChartCard title="Документы за период" description="Создание документов по месяцам." empty={!documentPeriodData.some(item => item.value > 0)}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={documentPeriodData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="documentPeriodGradient" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.32} />
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                <Tooltip />
+                <Area type="monotone" dataKey="value" stroke="#8b5cf6" strokeWidth={3} fill="url(#documentPeriodGradient)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </DashboardChartCard>
+        </section>
+      )}
+
+      {activeDashboardTab === 'deliveries' && (
+        <section className="space-y-5">
+          <DashboardKpiGrid cards={[
+            { id: 'delivery-active', label: 'Активные доставки', value: String(activeDeliveries.length), hint: 'В работе сейчас', icon: Truck, tone: 'default', href: '/deliveries' },
+            { id: 'delivery-today', label: 'Сегодня', value: String(todayDeliveries.length), hint: 'План на текущий день', icon: Calendar, tone: todayDeliveries.length > 0 ? 'warning' : 'success' },
+            { id: 'delivery-tomorrow', label: 'Завтра', value: String(tomorrowDeliveries.length), hint: 'Ближайшая нагрузка', icon: Clock, tone: 'info' },
+            { id: 'delivery-overdue', label: 'Просрочено', value: String(overdueDeliveries.length), hint: overdueDeliveries.length > 0 ? 'Нужно вмешательство' : 'Просрочек нет', icon: AlertTriangle, tone: overdueDeliveries.length > 0 ? 'danger' : 'success' },
+            { id: 'delivery-done', label: 'Выполнено за месяц', value: String(completedDeliveriesThisMonth.length), hint: 'Закрытые перевозки', icon: CheckCircle, tone: 'success' },
+            { id: 'delivery-carrier', label: 'Без перевозчика', value: String(unassignedDeliveries.length), hint: 'Нужна диспетчеризация', icon: User, tone: unassignedDeliveries.length > 0 ? 'warning' : 'success' },
+          ]} />
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <DashboardChartCard title="Доставки по статусам" description="Текущий логистический поток." empty={deliveryStatusChartData.length === 0} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={deliveryStatusChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip cursor={{ fill: 'rgba(37,99,235,0.08)' }} />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{deliveryStatusChartData.map(item => <Cell key={item.key} fill={item.fill} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardChartCard title="Доставки по дням" description="Плановая нагрузка на ближайшие 10 дней." empty={!deliveryDayBuckets.some(item => item.value > 0)} className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={deliveryDayBuckets} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip cursor={{ fill: 'rgba(139,92,246,0.08)' }} />
+                  <Bar dataKey="value" fill="#8b5cf6" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardRiskPanel title="Логистические риски" description="Что может сорвать доставку или приёмку." items={deliveryRiskItems} className="xl:col-span-4" />
+          </div>
+          <DashboardChartCard title="Нагрузка по перевозчикам" description="Активные доставки по назначенным перевозчикам." empty={carrierWorkloadChartData.length === 0}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={carrierWorkloadChartData} layout="vertical" margin={{ top: 8, right: 16, left: 24, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.24)" />
+                <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} fontSize={12} width={120} />
+                <Tooltip cursor={{ fill: 'rgba(16,185,129,0.08)' }} />
+                <Bar dataKey="value" fill="#10b981" radius={[0, 8, 8, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </DashboardChartCard>
+        </section>
+      )}
+
+      {false && (
+      <>
       {activeDashboardTab === roleDashboardTab && roleDashboardMeta && roleDashboardCards.length > 0 && (
         <Card className={dashboardCardClass}>
           <CardHeader className="pb-4">
@@ -3033,6 +3883,9 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </section>
+      )}
+
+      </>
       )}
 
       <Sheet open={!!managerBreakdownName} onOpenChange={(open) => !open && setManagerBreakdownName(null)}>

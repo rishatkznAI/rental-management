@@ -148,6 +148,43 @@ function monthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function endOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+}
+
+function parseOptionalDate(value?: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isDateInRange(value: string | Date | null | undefined, start: Date, end: Date) {
+  const parsed = value instanceof Date ? value : parseOptionalDate(value);
+  if (!parsed) return false;
+  return parsed >= start && parsed <= end;
+}
+
+function overlapsRange(startValue: string | null | undefined, endValue: string | null | undefined, rangeStart: Date, rangeEnd: Date) {
+  const start = parseOptionalDate(startValue);
+  const end = parseOptionalDate(endValue) ?? start;
+  if (!start || !end) return false;
+  return start <= rangeEnd && end >= rangeStart;
+}
+
+function buildDayBuckets(start: Date, end: Date) {
+  const buckets: Array<{ key: string; label: string }> = [];
+  const cursor = startOfDay(start);
+  const last = startOfDay(end);
+  while (cursor <= last) {
+    buckets.push({
+      key: cursor.toISOString().slice(0, 10),
+      label: cursor.toLocaleDateString('ru-RU', { day: '2-digit' }),
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return buckets;
+}
+
 function formatCompactCurrency(value: number) {
   const abs = Math.abs(value);
   if (abs >= 1_000_000) return `${(value / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млн`;
@@ -259,12 +296,14 @@ function DashboardChartCard({
   description,
   children,
   empty,
+  emptyText,
   className,
 }: {
   title: string;
   description: string;
   children: React.ReactNode;
   empty?: boolean;
+  emptyText?: string;
   className?: string;
 }) {
   return (
@@ -274,7 +313,7 @@ function DashboardChartCard({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="h-72">
-        {empty ? <DashboardEmptyState /> : children}
+        {empty ? <DashboardEmptyState text={emptyText} /> : children}
       </CardContent>
     </Card>
   );
@@ -455,6 +494,10 @@ export default function Dashboard() {
   const today = startOfDay(new Date());
   const weekAgo = daysAgo(7);
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd = endOfMonth(today);
+  const monthDayBuckets = useMemo(() => buildDayBuckets(monthStart, monthEnd), [monthStart, monthEnd]);
+  const monthPeriodLabel = today.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  const monthRangeLabel = `${monthStart.toLocaleDateString('ru-RU')} — ${monthEnd.toLocaleDateString('ru-RU')}`;
   const tomorrowStart = new Date(today);
   tomorrowStart.setDate(tomorrowStart.getDate() + 1);
   const dayAfterTomorrowStart = new Date(today);
@@ -1253,6 +1296,46 @@ export default function Dashboard() {
     task.status !== 'done' && !task.assignedTo && !task.responsible,
   );
 
+  const rentalsStartedThisMonth = viewPlannerRentals.filter(rental =>
+    isDateInRange(rental.startDate, monthStart, monthEnd),
+  );
+  const rentalsIntersectingThisMonth = viewPlannerRentals.filter(rental =>
+    overlapsRange(rental.startDate, rental.endDate, monthStart, monthEnd),
+  );
+  const rentalsClosedThisMonth = viewPlannerRentals.filter(rental =>
+    (rental.status === 'closed' || rental.status === 'returned') && isDateInRange(rental.endDate, monthStart, monthEnd),
+  );
+  const rentalsReturningThisMonth = viewPlannerRentals.filter(rental =>
+    isDateInRange(rental.endDate, monthStart, monthEnd),
+  );
+  const monthlyRentalIds = new Set(rentalsStartedThisMonth.map(rental => rental.id));
+  const rentalsWithDebtThisMonth = rentalDebtRows.filter(row =>
+    row.outstanding > 0 && (monthlyRentalIds.has(row.rentalId) || isDateInRange(row.startDate || row.endDate, monthStart, monthEnd)),
+  );
+  const monthlyRevenue = rentalsStartedThisMonth.reduce((sum, rental) => sum + Number(rental.amount || 0), 0);
+  const monthlyPayments = payments.filter(payment =>
+    isDateInRange(payment.paidDate || payment.dueDate, monthStart, monthEnd),
+  );
+  const monthlyPaidAmount = monthlyPayments.reduce((sum, payment) => sum + Number(payment.paidAmount || (payment.status === 'paid' ? payment.amount : 0) || 0), 0);
+  const monthlyDebtAmount = rentalsWithDebtThisMonth.reduce((sum, row) => sum + row.outstanding, 0);
+  const serviceCreatedThisMonth = tickets.filter(ticket => isDateInRange(ticket.createdAt, monthStart, monthEnd));
+  const serviceClosedThisMonth = tickets.filter(ticket =>
+    ticket.status === 'closed' && isDateInRange(ticket.closedAt || ticket.plannedDate, monthStart, monthEnd),
+  );
+  const documentsCreatedThisMonth = documents.filter(document =>
+    isDateInRange(document.documentDate || document.date || document.createdAt, monthStart, monthEnd),
+  );
+  const documentsSignedThisMonth = documents.filter(document =>
+    document.status === 'signed' && isDateInRange(document.signedAt || document.documentDate || document.date, monthStart, monthEnd),
+  );
+  const deliveriesThisMonth = deliveries.filter(delivery =>
+    isDateInRange(delivery.transportDate || delivery.neededBy || delivery.createdAt, monthStart, monthEnd),
+  );
+  const completedDeliveriesThisMonth = deliveriesThisMonth.filter(delivery => delivery.status === 'completed');
+  const currentMonthUtilization = activeEquipment > 0
+    ? Math.round((new Set(rentalsIntersectingThisMonth.map(rental => getRentalEquipmentKey(rental, activeRentalFleetLookup)).filter(Boolean)).size / activeEquipment) * 100)
+    : 0;
+
   const operationalSummaryCards = [
     canViewRentals && {
       id: 'active-rentals',
@@ -1421,28 +1504,35 @@ export default function Dashboard() {
     canViewPlanner && { id: 'planner', label: 'Планировщик', href: '/planner', icon: Target },
   ].filter(Boolean) as Array<{ id: string; label: string; href: string; icon: React.ElementType }>;
 
-  const overviewKpiCards = overviewSummaryCards.slice(0, 6);
-  const revenueTrendData = useMemo(() => {
-    const now = new Date(today);
-    const months = Array.from({ length: 6 }, (_, index) => {
-      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
-      return {
-        key: monthKey(date),
-        label: MONTH_LABELS[date.getMonth()],
-        revenue: 0,
-      };
+  const overviewKpiCards = [
+    canViewRentals && { id: 'month-revenue', label: 'Начислено за месяц', value: monthlyRevenue > 0 ? formatCurrency(monthlyRevenue) : '0 ₽', hint: `${rentalsStartedThisMonth.length} аренд стартовало`, icon: TrendingUp, tone: monthlyRevenue > 0 ? 'success' : 'default' },
+    canViewMoney && { id: 'month-paid', label: 'Оплачено за месяц', value: monthlyPaidAmount > 0 ? formatCurrency(monthlyPaidAmount) : '0 ₽', hint: `${monthlyPayments.length} платежей за период`, icon: CreditCard, tone: monthlyPaidAmount > 0 ? 'success' : 'default', href: '/payments' },
+    canViewMoney && { id: 'debt-today', label: 'Дебиторка на сегодня', value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽', hint: `${clientDebtAgingRows.length} клиентов в aging`, icon: DollarSign, tone: totalDebt > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('totalDebt') },
+    canViewMoney && { id: 'overdue-today', label: 'Просрочка на сегодня', value: formatCurrency(overduePayments.reduce((sum, row) => sum + row.outstanding, 0)), hint: `${overduePayments.length} строк просрочки`, icon: AlertTriangle, tone: overduePayments.length > 0 ? 'danger' : 'success' },
+    canViewRentals && { id: 'active-now', label: 'Активные сейчас', value: String(activeRentalsList.length), hint: `${rentalsIntersectingThisMonth.length} пересекают месяц`, icon: Calendar, tone: 'default', onClick: () => setSelectedKPI('activeRentals') },
+    canViewService && { id: 'service-now', label: 'Техника в сервисе', value: String(equipmentInServiceList.length), hint: 'Текущее состояние парка', icon: Wrench, tone: equipmentInServiceList.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('serviceInDays') },
+  ].filter(Boolean) as DashboardKpi[];
+  const monthCashflowData = useMemo(() => {
+    const map = new Map(monthDayBuckets.map(bucket => [bucket.key, { ...bucket, revenue: 0, payments: 0 }]));
+    rentalsStartedThisMonth.forEach(rental => {
+      const target = map.get(toDateKey(rental.startDate));
+      if (target) target.revenue += Number(rental.amount || 0);
     });
-    const monthMap = new Map(months.map(item => [item.key, item]));
-    viewRentals.forEach(rental => {
-      const parsed = new Date(rental.startDate || rental.createdAt || '');
-      if (Number.isNaN(parsed.getTime())) return;
-      const target = monthMap.get(monthKey(parsed));
-      if (!target) return;
-      target.revenue += Number(rental.price || rental.amount || 0);
+    monthlyPayments.forEach(payment => {
+      const target = map.get(toDateKey(payment.paidDate || payment.dueDate));
+      if (target) target.payments += Number(payment.paidAmount || (payment.status === 'paid' ? payment.amount : 0) || 0);
     });
-    return months;
-  }, [today, viewRentals]);
-  const hasRevenueTrend = revenueTrendData.some(item => item.revenue > 0);
+    return [...map.values()];
+  }, [monthDayBuckets, monthlyPayments, rentalsStartedThisMonth]);
+  const hasMonthCashflow = monthCashflowData.some(item => item.revenue > 0 || item.payments > 0);
+  const monthEventsData = useMemo(() => monthDayBuckets.map(bucket => ({
+    ...bucket,
+    rentals: rentalsStartedThisMonth.filter(rental => toDateKey(rental.startDate) === bucket.key).length,
+    returns: rentalsReturningThisMonth.filter(rental => toDateKey(rental.endDate) === bucket.key).length,
+    service: serviceCreatedThisMonth.filter(ticket => toDateKey(ticket.createdAt) === bucket.key).length,
+    documents: documentsCreatedThisMonth.filter(document => toDateKey(document.documentDate || document.date || document.createdAt) === bucket.key).length,
+  })), [documentsCreatedThisMonth, monthDayBuckets, rentalsReturningThisMonth, rentalsStartedThisMonth, serviceCreatedThisMonth]);
+  const hasMonthEvents = monthEventsData.some(item => item.rentals + item.returns + item.service + item.documents > 0);
   const receivablesAgingData = useMemo(() => ([
     { label: '0-7', value: clientDebtAgingRows.filter(row => row.ageBucket === '0_7').reduce((sum, row) => sum + row.debt, 0), fill: '#3b82f6' },
     { label: '8-30', value: clientDebtAgingRows.filter(row => row.ageBucket === '8_14' || row.ageBucket === '15_30').reduce((sum, row) => sum + row.debt, 0), fill: '#f59e0b' },
@@ -1537,8 +1627,26 @@ export default function Dashboard() {
       value: activeDeliveries.filter(delivery => toDateKey(delivery.transportDate || delivery.neededBy) === key).length,
     };
   }), [activeDeliveries, today]);
-  const rentalStatusChartData = useMemo(() => groupCountChart(viewPlannerRentals, item => item.status, rentalStatusLabels), [viewPlannerRentals]);
-  const rentalManagerChartData = useMemo(() => groupCountChart(viewPlannerRentals, item => item.manager || 'Без менеджера').slice(0, 8), [viewPlannerRentals]);
+  const rentalStatusChartData = useMemo(() => groupCountChart(rentalsIntersectingThisMonth, item => item.status, rentalStatusLabels), [rentalsIntersectingThisMonth]);
+  const rentalManagerChartData = useMemo(() => groupCountChart(rentalsStartedThisMonth, item => item.manager || 'Без менеджера').slice(0, 8), [rentalsStartedThisMonth]);
+  const rentalDaysChartData = useMemo(() => monthDayBuckets.map(bucket => ({
+    ...bucket,
+    value: rentalsStartedThisMonth.filter(rental => toDateKey(rental.startDate) === bucket.key).length,
+  })), [monthDayBuckets, rentalsStartedThisMonth]);
+  const monthReturnBuckets = useMemo(() => {
+    const extraDays = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(monthEnd);
+      date.setDate(date.getDate() + index + 1);
+      return {
+        key: date.toISOString().slice(0, 10),
+        label: date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
+      };
+    });
+    return [...monthDayBuckets, ...extraDays].map(bucket => ({
+      ...bucket,
+      value: viewPlannerRentals.filter(rental => toDateKey(rental.endDate) === bucket.key).length,
+    }));
+  }, [monthDayBuckets, monthEnd, viewPlannerRentals]);
   const rentalsWithDebtCount = rentalDebtRows.filter(row => row.outstanding > 0).length;
   const rentalsWithoutManager = viewPlannerRentals.filter(rental => !rental.manager);
   const rentalsRiskItems: DashboardRisk[] = [
@@ -1616,12 +1724,18 @@ export default function Dashboard() {
     },
   ].filter(Boolean) as DashboardRisk[];
   const servicePriorityChartData = useMemo(() => groupCountChart(openServiceTickets, item => item.priority, priorityLabels, ['#10b981', '#60a5fa', '#f59e0b', '#ef4444']), [openServiceTickets]);
+  const serviceMonthDaysData = useMemo(() => monthDayBuckets.map(bucket => ({
+    ...bucket,
+    created: serviceCreatedThisMonth.filter(ticket => toDateKey(ticket.createdAt) === bucket.key).length,
+    closed: serviceClosedThisMonth.filter(ticket => toDateKey(ticket.closedAt || ticket.plannedDate) === bucket.key).length,
+  })), [monthDayBuckets, serviceClosedThisMonth, serviceCreatedThisMonth]);
+  const hasServiceMonthDays = serviceMonthDaysData.some(item => item.created > 0 || item.closed > 0);
   const mechanicWorkloadChartData = useMemo(() => {
     const source = adminMechanicRows.length > 0
-      ? adminMechanicRows.map(row => ({ label: row.name, value: row.openTickets }))
-      : groupCountChart(openServiceTickets, item => item.assignedMechanicName || item.assignedTo || 'Без механика').map(item => ({ label: item.label, value: item.value }));
+      ? adminMechanicRows.map(row => ({ label: row.name, value: serviceCreatedThisMonth.filter(ticket => ticket.assignedMechanicName === row.name || ticket.assignedTo === row.name).length }))
+      : groupCountChart(serviceCreatedThisMonth, item => item.assignedMechanicName || item.assignedTo || 'Без механика').map(item => ({ label: item.label, value: item.value }));
     return source.filter(item => item.value > 0).slice(0, 8).map((item, index) => ({ ...item, fill: DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length] }));
-  }, [adminMechanicRows, openServiceTickets]);
+  }, [adminMechanicRows, serviceCreatedThisMonth]);
   const serviceRiskItems: DashboardRisk[] = [
     unassignedServiceTickets.length > 0 && {
       id: 'service-unassigned',
@@ -1657,25 +1771,18 @@ export default function Dashboard() {
     },
   ].filter(Boolean) as DashboardRisk[];
   const paymentTrendData = useMemo(() => {
-    const now = new Date(today);
-    const months = Array.from({ length: 6 }, (_, index) => {
-      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
-      return { key: monthKey(date), label: MONTH_LABELS[date.getMonth()], value: 0 };
-    });
-    const monthMap = new Map(months.map(item => [item.key, item]));
-    payments.forEach(payment => {
-      const parsed = new Date(payment.paidDate || payment.dueDate || '');
-      if (Number.isNaN(parsed.getTime())) return;
-      const target = monthMap.get(monthKey(parsed));
+    const dayMap = new Map(monthDayBuckets.map(bucket => [bucket.key, { ...bucket, value: 0 }]));
+    monthlyPayments.forEach(payment => {
+      const target = dayMap.get(toDateKey(payment.paidDate || payment.dueDate));
       if (!target) return;
-      target.value += Number(payment.paidAmount || payment.amount || 0);
+      target.value += Number(payment.paidAmount || (payment.status === 'paid' ? payment.amount : 0) || 0);
     });
-    return months;
-  }, [payments, today]);
+    return [...dayMap.values()];
+  }, [monthDayBuckets, monthlyPayments]);
   const financeLoadData = [
-    { label: 'Дебиторка', value: totalDebt, fill: '#ef4444' },
-    { label: 'Просрочка', value: overduePayments.reduce((sum, row) => sum + row.outstanding, 0), fill: '#f59e0b' },
-    { label: 'Сегодня', value: todayPaymentRows.reduce((sum, row) => sum + row.outstanding, 0), fill: '#2563eb' },
+    { label: 'Начислено', value: monthlyRevenue, fill: '#2563eb' },
+    { label: 'Оплачено', value: monthlyPaidAmount, fill: '#10b981' },
+    { label: 'Долг месяца', value: monthlyDebtAmount, fill: '#f59e0b' },
   ];
   const moneyRiskItems: DashboardRisk[] = [
     debtCollectionSummary.overdueActions > 0 && {
@@ -1712,23 +1819,16 @@ export default function Dashboard() {
     },
   ].filter(Boolean) as DashboardRisk[];
   const documentStatusChartData = useMemo(() => groupCountChart(documents, item => item.status, documentStatusLabels), [documents]);
-  const documentTypeChartData = useMemo(() => groupCountChart(documents, item => item.type || item.documentType || 'other', documentTypeLabels).slice(0, 8), [documents]);
+  const documentTypeChartData = useMemo(() => groupCountChart(documentsCreatedThisMonth, item => item.type || item.documentType || 'other', documentTypeLabels).slice(0, 8), [documentsCreatedThisMonth]);
   const documentPeriodData = useMemo(() => {
-    const now = new Date(today);
-    const months = Array.from({ length: 6 }, (_, index) => {
-      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
-      return { key: monthKey(date), label: MONTH_LABELS[date.getMonth()], value: 0 };
-    });
-    const monthMap = new Map(months.map(item => [item.key, item]));
-    documents.forEach(document => {
-      const parsed = new Date(document.documentDate || document.date || document.createdAt || '');
-      if (Number.isNaN(parsed.getTime())) return;
-      const target = monthMap.get(monthKey(parsed));
+    const monthMap = new Map(monthDayBuckets.map(bucket => [bucket.key, { ...bucket, value: 0 }]));
+    documentsCreatedThisMonth.forEach(document => {
+      const target = monthMap.get(toDateKey(document.documentDate || document.date || document.createdAt));
       if (!target) return;
       target.value += 1;
     });
-    return months;
-  }, [documents, today]);
+    return [...monthMap.values()];
+  }, [documentsCreatedThisMonth, monthDayBuckets]);
   const documentNumberCounts = documents.reduce((map, document) => {
     const number = (document.documentNumber || document.number || '').trim();
     if (number) map.set(number, (map.get(number) || 0) + 1);
@@ -1771,10 +1871,13 @@ export default function Dashboard() {
       tone: 'info',
     },
   ].filter(Boolean) as DashboardRisk[];
-  const deliveryStatusChartData = useMemo(() => groupCountChart(deliveries, item => item.status, deliveryStatusLabels), [deliveries]);
-  const carrierWorkloadChartData = useMemo(() => groupCountChart(activeDeliveries, item => item.carrierName || 'Без перевозчика').slice(0, 8), [activeDeliveries]);
+  const deliveryStatusChartData = useMemo(() => groupCountChart(deliveriesThisMonth, item => item.status, deliveryStatusLabels), [deliveriesThisMonth]);
+  const carrierWorkloadChartData = useMemo(() => groupCountChart(deliveriesThisMonth, item => item.carrierName || 'Без перевозчика').slice(0, 8), [deliveriesThisMonth]);
   const tomorrowDeliveries = activeDeliveries.filter(delivery => toDateKey(delivery.transportDate || delivery.neededBy) === tomorrowStart.toISOString().slice(0, 10));
-  const completedDeliveriesThisMonth = deliveries.filter(delivery => delivery.status === 'completed' && new Date(delivery.completedAt || delivery.transportDate || delivery.updatedAt || '') >= monthStart);
+  const deliveryMonthDaysData = useMemo(() => monthDayBuckets.map(bucket => ({
+    ...bucket,
+    value: deliveriesThisMonth.filter(delivery => toDateKey(delivery.transportDate || delivery.neededBy || delivery.createdAt) === bucket.key).length,
+  })), [deliveriesThisMonth, monthDayBuckets]);
   const deliveriesWithoutAddress = activeDeliveries.filter(delivery => !(delivery.destination || delivery.objectAddress || '').trim());
   const deliveriesWithoutContact = activeDeliveries.filter(delivery => !(delivery.contactPhone || delivery.objectContactPhone || delivery.contactName || '').trim());
   const deliveryRiskItems: DashboardRisk[] = [
@@ -2250,6 +2353,9 @@ export default function Dashboard() {
             <p className="mt-2 text-sm text-muted-foreground">
               Обновлено: {new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
+            <p className="mt-1 text-sm font-semibold text-primary dark:text-primary">
+              Текущий месяц: {monthPeriodLabel} · {monthRangeLabel}
+            </p>
           </div>
         </div>
       </div>
@@ -2282,13 +2388,13 @@ export default function Dashboard() {
                 Операционная сводка компании
               </h2>
               <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-                Аренда, техника, сервис, документы и деньги в одном управленческом экране.
+                Аренда, техника, сервис, документы и деньги за текущий календарный месяц.
               </p>
             </div>
             <div className="rounded-2xl border border-border bg-card px-4 py-3 text-sm shadow-[0_18px_44px_-36px_rgba(15,23,42,0.38)] dark:shadow-none">
               <span className="text-muted-foreground">Период</span>
               <span className="ml-3 font-semibold text-foreground">
-                {today.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+                {monthPeriodLabel}
               </span>
             </div>
           </div>
@@ -2351,36 +2457,41 @@ export default function Dashboard() {
             <Card className="overflow-hidden border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-8">
               <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle className="app-shell-title text-xl font-extrabold">Динамика выручки</CardTitle>
-                  <CardDescription>Сумма аренд по датам начала за последние 6 месяцев.</CardDescription>
+                  <CardTitle className="app-shell-title text-xl font-extrabold">Динамика месяца</CardTitle>
+                  <CardDescription>Начисления и поступления по дням текущего месяца.</CardDescription>
                 </div>
                 <Badge variant="info" className="w-fit bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-                  {hasRevenueTrend ? formatCurrency(revenueTrendData.reduce((sum, item) => sum + item.revenue, 0)) : 'Нет данных'}
+                  {hasMonthCashflow ? `${formatCurrency(monthlyRevenue)} / ${formatCurrency(monthlyPaidAmount)}` : 'Нет данных'}
                 </Badge>
               </CardHeader>
               <CardContent className="h-[300px] px-4 pb-5 pt-2 sm:px-6">
-                {hasRevenueTrend ? (
+                {hasMonthCashflow ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={revenueTrendData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                    <AreaChart data={monthCashflowData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="dashboardRevenueGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#2563eb" stopOpacity={0.28} />
                           <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id="dashboardPaymentsGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#10b981" stopOpacity={0.22} />
+                          <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid stroke="currentColor" strokeDasharray="3 3" className="text-slate-200 dark:text-slate-800" vertical={false} />
                       <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" />
                       <YAxis axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" tickFormatter={formatCompactCurrency} width={48} />
                       <Tooltip
-                        formatter={(value) => [formatCurrency(Number(value)), 'Выручка']}
+                        formatter={(value, name) => [formatCurrency(Number(value)), name === 'payments' ? 'Оплачено' : 'Начислено']}
                         contentStyle={{ borderRadius: 14, borderColor: 'var(--border)', boxShadow: '0 18px 42px -28px rgba(15,23,42,.45)' }}
                       />
                       <Area type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} fill="url(#dashboardRevenueGradient)" dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Area type="monotone" dataKey="payments" stroke="#10b981" strokeWidth={3} fill="url(#dashboardPaymentsGradient)" dot={{ r: 3 }} activeDot={{ r: 5 }} />
                     </AreaChart>
                   </ResponsiveContainer>
                 ) : (
                   <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-center text-sm text-muted-foreground">
-                    Недостаточно данных по арендам для графика выручки.
+                    Нет начислений и оплат за текущий месяц.
                   </div>
                 )}
               </CardContent>
@@ -2499,24 +2610,25 @@ export default function Dashboard() {
 
             <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
               <CardHeader className="pb-2">
-                <CardTitle className="app-shell-title text-lg font-extrabold">Сервисные заявки</CardTitle>
-                <CardDescription>Открытые статусы и критичные обращения.</CardDescription>
+                <CardTitle className="app-shell-title text-lg font-extrabold">Операционные события месяца</CardTitle>
+                <CardDescription>Аренды, возвраты, сервис и документы по дням.</CardDescription>
               </CardHeader>
               <CardContent className="h-[270px]">
-                {hasServiceStatusData ? (
+                {hasMonthEvents ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={serviceStatusChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                    <BarChart data={monthEventsData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid stroke="currentColor" strokeDasharray="3 3" className="text-slate-200 dark:text-slate-800" vertical={false} />
                       <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" />
                       <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" width={32} />
-                      <Tooltip formatter={(value) => [Number(value).toLocaleString('ru-RU'), 'Заявки']} contentStyle={{ borderRadius: 14, borderColor: 'var(--border)' }} />
-                      <Bar dataKey="value" radius={[10, 10, 4, 4]}>
-                        {serviceStatusChartData.map(item => <Cell key={item.label} fill={item.fill} />)}
-                      </Bar>
+                      <Tooltip contentStyle={{ borderRadius: 14, borderColor: 'var(--border)' }} />
+                      <Bar dataKey="rentals" name="Аренды" stackId="events" fill="#2563eb" radius={[0, 0, 4, 4]} />
+                      <Bar dataKey="returns" name="Возвраты" stackId="events" fill="#8b5cf6" />
+                      <Bar dataKey="service" name="Сервис" stackId="events" fill="#f59e0b" />
+                      <Bar dataKey="documents" name="Документы" stackId="events" fill="#10b981" radius={[10, 10, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-sm text-muted-foreground">Открытых сервисных заявок нет.</div>
+                  <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-sm text-muted-foreground">Нет операционных событий за текущий месяц.</div>
                 )}
               </CardContent>
             </Card>
@@ -2527,28 +2639,29 @@ export default function Dashboard() {
       {activeDashboardTab === 'rentals' && (
         <section className="space-y-5">
           <DashboardKpiGrid cards={[
-            { id: 'rentals-active', label: 'Активные аренды', value: String(activeRentalsList.length), hint: `${rentedOrReservedEquipment} ед. техники задействовано`, icon: Calendar, tone: 'default', onClick: () => setSelectedKPI('activeRentals') },
-            { id: 'rentals-new', label: 'Новые / ожидают', value: String(reservedRentalsList.length), hint: 'Созданы или подтверждены к выдаче', icon: Clock, tone: 'info', href: '/rentals' },
+            { id: 'rentals-month-started', label: 'Стартовало за месяц', value: String(rentalsStartedThisMonth.length), hint: `Период: ${monthPeriodLabel}`, icon: Calendar, tone: 'default', href: '/rentals' },
+            { id: 'rentals-active', label: 'Активные сейчас', value: String(activeRentalsList.length), hint: `${rentalsIntersectingThisMonth.length} пересекают месяц`, icon: Activity, tone: 'info', onClick: () => setSelectedKPI('activeRentals') },
+            { id: 'rentals-closed-month', label: 'Закрыто за месяц', value: String(rentalsClosedThisMonth.length), hint: 'По дате возврата/закрытия', icon: CheckCircle, tone: 'success', href: '/rentals' },
+            { id: 'rentals-returns-month', label: 'Возвраты за месяц', value: String(rentalsReturningThisMonth.length), hint: 'По плановой дате возврата', icon: RefreshCw, tone: 'violet', href: '/rentals' },
             { id: 'rentals-today', label: 'Возвраты сегодня', value: String(rentalsEndingToday.length), hint: rentalsEndingToday.length > 0 ? 'Нужен контроль закрытия' : 'Пиков возврата нет', icon: RefreshCw, tone: rentalsEndingToday.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('returnsTodayTomorrow') },
-            { id: 'rentals-soon', label: 'Возвраты завтра', value: String(rentalsEndingTomorrow.length), hint: 'Ближайшая операционная нагрузка', icon: Calendar, tone: 'violet', onClick: () => setSelectedKPI('returnsTodayTomorrow') },
             { id: 'rentals-overdue', label: 'Просроченные возвраты', value: String(overdueRentalsList.length), hint: maxOverdueDays > 0 ? `Макс. ${maxOverdueDays} дн.` : 'Просрочек нет', icon: AlertTriangle, tone: overdueRentalsList.length > 0 ? 'danger' : 'success', onClick: () => setSelectedKPI('overdueReturns') },
-            { id: 'rentals-debt', label: 'Аренды с долгом', value: String(rentalsWithDebtCount), hint: canViewMoney ? formatCurrency(totalDebt) : 'Сумма скрыта правами', icon: DollarSign, tone: rentalsWithDebtCount > 0 ? 'warning' : 'success', href: '/finance' },
+            { id: 'rentals-debt', label: 'Долг по арендам месяца', value: String(rentalsWithDebtThisMonth.length), hint: canViewMoney ? formatCurrency(monthlyDebtAmount) : 'Сумма скрыта правами', icon: DollarSign, tone: rentalsWithDebtThisMonth.length > 0 ? 'warning' : 'success', href: '/finance' },
           ]} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-            <DashboardChartCard title="Аренды по статусам" description="Распределение текущего арендного портфеля." empty={rentalStatusChartData.length === 0} className="xl:col-span-4">
+            <DashboardChartCard title="Аренды по дням текущего месяца" description="Старт аренд по дням месяца." empty={!rentalDaysChartData.some(item => item.value > 0)} emptyText="Нет аренд, стартовавших за текущий месяц." className="xl:col-span-4">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={rentalStatusChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                <BarChart data={rentalDaysChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
                   <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
                   <Tooltip cursor={{ fill: 'rgba(37,99,235,0.08)' }} />
-                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{rentalStatusChartData.map(item => <Cell key={item.key} fill={item.fill} />)}</Bar>
+                  <Bar dataKey="value" fill="#2563eb" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </DashboardChartCard>
-            <DashboardChartCard title="Возвраты по дням" description="Нагрузка на ближайшие 10 дней." empty={!nextReturnBuckets.some(item => item.value > 0)} className="xl:col-span-4">
+            <DashboardChartCard title="Возвраты по дням" description="Текущий месяц и ближайшие 7 дней." empty={!monthReturnBuckets.some(item => item.value > 0)} emptyText="Нет возвратов за текущий месяц и ближайшие 7 дней." className="xl:col-span-4">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={nextReturnBuckets} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                <BarChart data={monthReturnBuckets} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
                   <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
@@ -2559,7 +2672,7 @@ export default function Dashboard() {
             </DashboardChartCard>
             <DashboardRiskPanel title="Риски аренды" description="Что может сорвать закрытие, оплату или документы." items={rentalsRiskItems} className="xl:col-span-4" />
           </div>
-          <DashboardChartCard title="Аренды по менеджерам" description="Активность в арендном портфеле по ответственным." empty={rentalManagerChartData.length === 0}>
+          <DashboardChartCard title="Аренды по менеджерам за месяц" description="Стартовавшие в текущем месяце аренды по ответственным." empty={rentalManagerChartData.length === 0} emptyText="Нет аренд по менеджерам за текущий месяц.">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={rentalManagerChartData} layout="vertical" margin={{ top: 8, right: 16, left: 24, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.24)" />
@@ -2577,10 +2690,11 @@ export default function Dashboard() {
         <section className="space-y-5">
           <DashboardKpiGrid cards={[
             { id: 'fleet-total', label: 'Всего техники', value: String(totalEquipment), hint: `${activeEquipment} ед. активного парка`, icon: Truck, tone: 'default' },
-            { id: 'fleet-available', label: 'Доступно', value: String(availableEquipment), hint: 'Готово к выдаче', icon: CheckCircle, tone: 'success' },
-            { id: 'fleet-rented', label: 'В аренде', value: String(rentedEquipment), hint: activeEquipment > 0 ? `${utilization}% загрузки` : 'Активный парк не сформирован', icon: TrendingUp, tone: 'info', onClick: () => setSelectedKPI('utilization') },
-            { id: 'fleet-service', label: 'В сервисе', value: String(equipmentInServiceList.length), hint: `Ср. ${averageServiceDays || 0} дн.`, icon: Wrench, tone: equipmentInServiceList.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('serviceInDays') },
-            { id: 'fleet-idle', label: 'Свободно / простой', value: String(idleEquipmentList.length), hint: 'Резерв и неактивные единицы', icon: PackageX, tone: idleEquipmentList.length > 0 ? 'violet' : 'success', onClick: () => setSelectedKPI('idleEquipment') },
+            { id: 'fleet-rented', label: 'В аренде сейчас', value: String(rentedEquipment), hint: activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован', icon: TrendingUp, tone: 'info', onClick: () => setSelectedKPI('utilization') },
+            { id: 'fleet-available', label: 'Свободна сейчас', value: String(availableEquipment), hint: 'Готово к выдаче на сегодня', icon: CheckCircle, tone: 'success' },
+            { id: 'fleet-service', label: 'В сервисе сейчас', value: String(equipmentInServiceList.length), hint: `Ср. ${averageServiceDays || 0} дн.`, icon: Wrench, tone: equipmentInServiceList.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('serviceInDays') },
+            { id: 'fleet-month-utilization', label: 'Загрузка месяца', value: activeEquipment > 0 ? `${currentMonthUtilization}%` : '—', hint: 'По арендам, пересекающим месяц', icon: Activity, tone: 'violet', onClick: () => setSelectedKPI('utilization') },
+            { id: 'fleet-idle', label: 'Простой сейчас', value: String(idleEquipmentList.length), hint: 'Текущий snapshot без динамики', icon: PackageX, tone: idleEquipmentList.length > 0 ? 'violet' : 'success', onClick: () => setSelectedKPI('idleEquipment') },
             { id: 'fleet-inactive', label: 'Неактивно', value: String(inactiveEquipment), hint: 'Списано/не в работе по статусу', icon: Ban, tone: inactiveEquipment > 0 ? 'warning' : 'success' },
           ]} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
@@ -2610,16 +2724,16 @@ export default function Dashboard() {
           <Card className="app-panel border-border/80 bg-card/95">
             <CardHeader>
               <CardTitle className="text-lg">Загрузка парка</CardTitle>
-              <CardDescription>Snapshot текущей загрузки без искусственной динамики.</CardDescription>
+            <CardDescription>Загрузка за текущий месяц по арендам, пересекающим период.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
                 <div className="flex items-end justify-between">
-                  <span className="text-4xl font-extrabold text-foreground">{activeEquipment === 0 ? '—' : `${utilization}%`}</span>
-                  <span className="text-sm text-muted-foreground">{rentedEquipment} из {activeEquipment} ед.</span>
+                  <span className="text-4xl font-extrabold text-foreground">{activeEquipment === 0 ? '—' : `${currentMonthUtilization}%`}</span>
+                  <span className="text-sm text-muted-foreground">{rentalsIntersectingThisMonth.length} аренд пересекают месяц</span>
                 </div>
                 <div className="h-3 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#2563eb,#8b5cf6)]" style={{ width: `${Math.min(100, Math.max(0, utilization))}%` }} />
+                  <div className="h-full rounded-full bg-[linear-gradient(90deg,#2563eb,#8b5cf6)]" style={{ width: `${Math.min(100, Math.max(0, currentMonthUtilization))}%` }} />
                 </div>
               </div>
             </CardContent>
@@ -2630,39 +2744,40 @@ export default function Dashboard() {
       {activeDashboardTab === 'service' && (
         <section className="space-y-5">
           <DashboardKpiGrid cards={[
-            { id: 'service-open', label: 'Открытые заявки', value: String(openServiceTickets.length), hint: `${criticalTickets.length} крит./высоких`, icon: Wrench, tone: openServiceTickets.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('openService') },
-            { id: 'service-work', label: 'В работе', value: String(openServiceTickets.filter(ticket => ticket.status === 'in_progress').length), hint: 'Активная сервисная очередь', icon: Activity, tone: 'info' },
-            { id: 'service-parts', label: 'Ждут запчасти', value: String(ticketsWaitingParts.length), hint: 'Зависит от снабжения', icon: Clock, tone: ticketsWaitingParts.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('waitingParts') },
-            { id: 'service-ready', label: 'Готово к закрытию', value: String(readyServiceTickets.length), hint: 'Можно финализировать', icon: CheckCircle, tone: 'success' },
-            { id: 'service-critical', label: 'Критичные', value: String(criticalTickets.length), hint: 'Высокий приоритет', icon: ShieldAlert, tone: criticalTickets.length > 0 ? 'danger' : 'success' },
-            { id: 'service-age', label: 'Средний возраст', value: `${averageServiceDays || 0} дн.`, hint: maxServiceDays > 0 ? `Макс. ${maxServiceDays} дн.` : 'Открытых заявок нет', icon: Calendar, tone: averageServiceDays > 7 ? 'warning' : 'default', onClick: () => setSelectedKPI('serviceInDays') },
+            { id: 'service-created-month', label: 'Создано за месяц', value: String(serviceCreatedThisMonth.length), hint: `Период: ${monthPeriodLabel}`, icon: Wrench, tone: 'default', href: '/service' },
+            { id: 'service-closed-month', label: 'Закрыто за месяц', value: String(serviceClosedThisMonth.length), hint: 'По дате закрытия', icon: CheckCircle, tone: 'success' },
+            { id: 'service-open', label: 'Открытые сейчас', value: String(openServiceTickets.length), hint: `${criticalTickets.length} крит./высоких`, icon: Wrench, tone: openServiceTickets.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('openService') },
+            { id: 'service-work', label: 'В работе сейчас', value: String(openServiceTickets.filter(ticket => ticket.status === 'in_progress').length), hint: 'Активная сервисная очередь', icon: Activity, tone: 'info' },
+            { id: 'service-parts', label: 'Ждут запчасти сейчас', value: String(ticketsWaitingParts.length), hint: 'Зависит от снабжения', icon: Clock, tone: ticketsWaitingParts.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('waitingParts') },
+            { id: 'service-critical', label: 'Критичные сейчас', value: String(criticalTickets.length), hint: 'Высокий приоритет', icon: ShieldAlert, tone: criticalTickets.length > 0 ? 'danger' : 'success' },
           ]} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-            <DashboardChartCard title="Заявки по статусам" description="Текущая сервисная воронка." empty={!hasServiceStatusData} className="xl:col-span-4">
+            <DashboardChartCard title="Заявки по дням текущего месяца" description="Созданные и закрытые заявки по дням." empty={!hasServiceMonthDays} emptyText="Нет сервисных заявок за текущий месяц." className="xl:col-span-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={serviceMonthDaysData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip cursor={{ fill: 'rgba(245,158,11,0.08)' }} />
+                  <Bar dataKey="created" name="Создано" fill="#f59e0b" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="closed" name="Закрыто" fill="#10b981" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </DashboardChartCard>
+            <DashboardChartCard title="Заявки по статусам сейчас" description="Текущая сервисная воронка." empty={!hasServiceStatusData} className="xl:col-span-4">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={serviceStatusChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
                   <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
-                  <Tooltip cursor={{ fill: 'rgba(245,158,11,0.08)' }} />
-                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{serviceStatusChartData.map(item => <Cell key={item.label} fill={item.fill} />)}</Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </DashboardChartCard>
-            <DashboardChartCard title="Заявки по приоритетам" description="Риск-профиль открытой очереди." empty={servicePriorityChartData.length === 0} className="xl:col-span-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={servicePriorityChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
-                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
-                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
                   <Tooltip cursor={{ fill: 'rgba(239,68,68,0.08)' }} />
-                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{servicePriorityChartData.map(item => <Cell key={item.key} fill={item.fill} />)}</Bar>
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>{serviceStatusChartData.map(item => <Cell key={item.label} fill={item.fill} />)}</Bar>
                 </BarChart>
               </ResponsiveContainer>
             </DashboardChartCard>
             <DashboardRiskPanel title="Сервисные риски" description="Что тормозит возврат техники в парк." items={serviceRiskItems} className="xl:col-span-4" />
           </div>
-          <DashboardChartCard title="Нагрузка по механикам" description="Открытые заявки по назначенным исполнителям." empty={mechanicWorkloadChartData.length === 0}>
+          <DashboardChartCard title="Нагрузка по механикам за месяц" description="Созданные за месяц заявки по назначенным исполнителям." empty={mechanicWorkloadChartData.length === 0} emptyText="Нет назначенных сервисных заявок за текущий месяц.">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={mechanicWorkloadChartData} layout="vertical" margin={{ top: 8, right: 16, left: 24, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.24)" />
@@ -2679,12 +2794,12 @@ export default function Dashboard() {
       {activeDashboardTab === 'money' && canViewMoney && (
         <section className="space-y-5">
           <DashboardKpiGrid cards={[
-            { id: 'money-payments', label: 'Платежи', value: formatCurrency(payments.reduce((sum, payment) => sum + (payment.paidAmount || 0), 0)), hint: `${payments.length} записей`, icon: CreditCard, tone: 'success', href: '/payments' },
-            { id: 'money-debt', label: 'Дебиторка', value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽', hint: `${clientDebtAgingRows.length} клиентов в aging`, icon: DollarSign, tone: totalDebt > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('totalDebt') },
-            { id: 'money-overdue', label: 'Просрочка', value: formatCurrency(overduePayments.reduce((sum, row) => sum + row.outstanding, 0)), hint: `${overduePayments.length} строк`, icon: AlertTriangle, tone: overduePayments.length > 0 ? 'danger' : 'success' },
+            { id: 'money-accrued-month', label: 'Начислено за месяц', value: monthlyRevenue > 0 ? formatCurrency(monthlyRevenue) : '0 ₽', hint: `${rentalsStartedThisMonth.length} аренд`, icon: TrendingUp, tone: monthlyRevenue > 0 ? 'success' : 'default', href: '/rentals' },
+            { id: 'money-payments', label: 'Оплачено за месяц', value: monthlyPaidAmount > 0 ? formatCurrency(monthlyPaidAmount) : '0 ₽', hint: `${monthlyPayments.length} платежей`, icon: CreditCard, tone: 'success', href: '/payments' },
+            { id: 'money-debt', label: 'Дебиторка на сегодня', value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽', hint: `${clientDebtAgingRows.length} клиентов в aging`, icon: DollarSign, tone: totalDebt > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('totalDebt') },
+            { id: 'money-overdue', label: 'Просрочка на сегодня', value: formatCurrency(overduePayments.reduce((sum, row) => sum + row.outstanding, 0)), hint: `${overduePayments.length} строк`, icon: AlertTriangle, tone: overduePayments.length > 0 ? 'danger' : 'success' },
             { id: 'money-actions', label: 'Планы взыскания', value: String(debtCollectionSummary.overdueActions), hint: `${debtCollectionSummary.promisedToday} обещаний сегодня`, icon: ListChecks, tone: debtCollectionSummary.overdueActions > 0 ? 'danger' : 'info', href: '/finance' },
             { id: 'money-today', label: 'К оплате сегодня', value: String(todayPaymentRows.length), hint: todayPaymentRows.length > 0 ? formatCurrency(todayPaymentRows.reduce((sum, row) => sum + row.outstanding, 0)) : 'Нет ожидаемых оплат', icon: Clock, tone: todayPaymentRows.length > 0 ? 'warning' : 'success' },
-            { id: 'money-month', label: 'Просрочка месяца', value: monthDebt > 0 ? formatCurrency(monthDebt) : '0 ₽', hint: `${monthOverduePayments.length} строк`, icon: TrendingUp, tone: monthDebt > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('monthDebt') },
           ]} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
             <DashboardChartCard title="Дебиторка по возрасту" description="Aging buckets без изменения финансовых расчётов." empty={!hasReceivablesAging} className="xl:col-span-4">
@@ -2698,7 +2813,7 @@ export default function Dashboard() {
                 </BarChart>
               </ResponsiveContainer>
             </DashboardChartCard>
-            <DashboardChartCard title="Финансовая нагрузка" description="Краткая сводка по уже доступным финансовым данным." empty={!financeLoadData.some(item => item.value > 0)} className="xl:col-span-4">
+            <DashboardChartCard title="Начислено vs оплачено" description="Месячный финансовый срез без смешивания с историей." empty={!financeLoadData.some(item => item.value > 0)} emptyText="Нет начислений и оплат за текущий месяц." className="xl:col-span-4">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={financeLoadData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
@@ -2711,7 +2826,7 @@ export default function Dashboard() {
             </DashboardChartCard>
             <DashboardRiskPanel title="Финансовые риски" description="Куда перейти для детальной работы в финансах." items={moneyRiskItems} className="xl:col-span-4" />
           </div>
-          <DashboardChartCard title="Платежи / поступления" description="Агрегация платежей по датам оплаты или срокам." empty={!paymentTrendData.some(item => item.value > 0)}>
+          <DashboardChartCard title="Оплаты по дням текущего месяца" description="Поступления клиентов по датам оплаты или срокам." empty={!paymentTrendData.some(item => item.value > 0)} emptyText="Нет платежей за текущий месяц.">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={paymentTrendData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                 <defs>
@@ -2734,15 +2849,15 @@ export default function Dashboard() {
       {activeDashboardTab === 'documents' && (
         <section className="space-y-5">
           <DashboardKpiGrid cards={[
-            { id: 'doc-total', label: 'Всего документов', value: String(documents.length), hint: 'Реестр документов', icon: FileText, tone: 'default', href: '/documents' },
-            { id: 'doc-number', label: 'Без номера', value: String(documentsWithoutNumber), hint: 'Требуют аккуратной нумерации', icon: ClipboardX, tone: documentsWithoutNumber > 0 ? 'warning' : 'success' },
-            { id: 'doc-duplicates', label: 'Дубли номеров', value: String(duplicateDocumentNumbers), hint: 'Нужно проверить реестр', icon: ShieldAlert, tone: duplicateDocumentNumbers > 0 ? 'danger' : 'success' },
-            { id: 'doc-unsigned', label: 'Неподписанные', value: String(documentControl.kpi.unsignedDocuments), hint: `${documentControl.kpi.overdueSignature} просрочено`, icon: Clock, tone: documentControl.kpi.unsignedDocuments > 0 ? 'warning' : 'success' },
-            { id: 'doc-signed', label: 'Подписанные', value: String(documents.filter(document => document.status === 'signed').length), hint: 'Закрытый документооборот', icon: CheckCircle, tone: 'success' },
-            { id: 'doc-month', label: 'За месяц', value: String(documents.filter(document => new Date(document.documentDate || document.date || document.createdAt || '') >= monthStart).length), hint: today.toLocaleDateString('ru-RU', { month: 'long' }), icon: Calendar, tone: 'violet' },
+            { id: 'doc-month', label: 'Создано за месяц', value: String(documentsCreatedThisMonth.length), hint: monthPeriodLabel, icon: FileText, tone: 'default', href: '/documents' },
+            { id: 'doc-signed-month', label: 'Подписано за месяц', value: String(documentsSignedThisMonth.length), hint: 'По дате подписи или документа', icon: CheckCircle, tone: 'success' },
+            { id: 'doc-unsigned', label: 'Неподписанные сейчас', value: String(documentControl.kpi.unsignedDocuments), hint: `${documentControl.kpi.overdueSignature} просрочено`, icon: Clock, tone: documentControl.kpi.unsignedDocuments > 0 ? 'warning' : 'success' },
+            { id: 'doc-number', label: 'Без номера сейчас', value: String(documentsWithoutNumber), hint: 'Требуют аккуратной нумерации', icon: ClipboardX, tone: documentsWithoutNumber > 0 ? 'warning' : 'success' },
+            { id: 'doc-duplicates', label: 'Дубли номеров сейчас', value: String(duplicateDocumentNumbers), hint: 'Нужно проверить реестр', icon: ShieldAlert, tone: duplicateDocumentNumbers > 0 ? 'danger' : 'success' },
+            { id: 'doc-acts', label: 'Акты/УПД за месяц', value: String(documentsCreatedThisMonth.filter(document => document.type === 'act' || document.type === 'upd' || document.documentType === 'act' || document.documentType === 'upd').length), hint: 'Закрывающие документы', icon: Calendar, tone: 'violet' },
           ]} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-            <DashboardChartCard title="Документы по статусам" description="Черновики, отправленные и подписанные документы." empty={documentStatusChartData.length === 0} className="xl:col-span-4">
+            <DashboardChartCard title="Документы по статусам сейчас" description="Snapshot текущего состояния реестра." empty={documentStatusChartData.length === 0} className="xl:col-span-4">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={documentStatusChartData} dataKey="value" nameKey="label" innerRadius="56%" outerRadius="82%" paddingAngle={4}>
@@ -2752,7 +2867,7 @@ export default function Dashboard() {
                 </PieChart>
               </ResponsiveContainer>
             </DashboardChartCard>
-            <DashboardChartCard title="Документы по типам" description="Структура реестра по типам." empty={documentTypeChartData.length === 0} className="xl:col-span-4">
+            <DashboardChartCard title="Документы по типам за месяц" description="Структура документов текущего месяца." empty={documentTypeChartData.length === 0} emptyText="Нет документов за текущий месяц." className="xl:col-span-4">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={documentTypeChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
@@ -2765,7 +2880,7 @@ export default function Dashboard() {
             </DashboardChartCard>
             <DashboardRiskPanel title="Документные риски" description="Что тормозит закрытие аренды и оплату." items={documentRiskItems} className="xl:col-span-4" />
           </div>
-          <DashboardChartCard title="Документы за период" description="Создание документов по месяцам." empty={!documentPeriodData.some(item => item.value > 0)}>
+          <DashboardChartCard title="Документы по дням текущего месяца" description="Создание документов по дням месяца." empty={!documentPeriodData.some(item => item.value > 0)} emptyText="Нет документов за текущий месяц.">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={documentPeriodData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                 <defs>
@@ -2788,15 +2903,16 @@ export default function Dashboard() {
       {activeDashboardTab === 'deliveries' && (
         <section className="space-y-5">
           <DashboardKpiGrid cards={[
-            { id: 'delivery-active', label: 'Активные доставки', value: String(activeDeliveries.length), hint: 'В работе сейчас', icon: Truck, tone: 'default', href: '/deliveries' },
+            { id: 'delivery-month', label: 'Доставок за месяц', value: String(deliveriesThisMonth.length), hint: monthPeriodLabel, icon: Truck, tone: 'default', href: '/deliveries' },
+            { id: 'delivery-done', label: 'Выполнено за месяц', value: String(completedDeliveriesThisMonth.length), hint: 'Закрытые перевозки', icon: CheckCircle, tone: 'success' },
+            { id: 'delivery-active', label: 'Активные сейчас', value: String(activeDeliveries.length), hint: 'В работе сейчас', icon: Truck, tone: 'default', href: '/deliveries' },
             { id: 'delivery-today', label: 'Сегодня', value: String(todayDeliveries.length), hint: 'План на текущий день', icon: Calendar, tone: todayDeliveries.length > 0 ? 'warning' : 'success' },
             { id: 'delivery-tomorrow', label: 'Завтра', value: String(tomorrowDeliveries.length), hint: 'Ближайшая нагрузка', icon: Clock, tone: 'info' },
             { id: 'delivery-overdue', label: 'Просрочено', value: String(overdueDeliveries.length), hint: overdueDeliveries.length > 0 ? 'Нужно вмешательство' : 'Просрочек нет', icon: AlertTriangle, tone: overdueDeliveries.length > 0 ? 'danger' : 'success' },
-            { id: 'delivery-done', label: 'Выполнено за месяц', value: String(completedDeliveriesThisMonth.length), hint: 'Закрытые перевозки', icon: CheckCircle, tone: 'success' },
             { id: 'delivery-carrier', label: 'Без перевозчика', value: String(unassignedDeliveries.length), hint: 'Нужна диспетчеризация', icon: User, tone: unassignedDeliveries.length > 0 ? 'warning' : 'success' },
           ]} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-            <DashboardChartCard title="Доставки по статусам" description="Текущий логистический поток." empty={deliveryStatusChartData.length === 0} className="xl:col-span-4">
+            <DashboardChartCard title="Доставки по статусам за месяц" description="Логистический поток текущего месяца." empty={deliveryStatusChartData.length === 0} emptyText="Нет доставок за текущий месяц." className="xl:col-span-4">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={deliveryStatusChartData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
@@ -2807,9 +2923,9 @@ export default function Dashboard() {
                 </BarChart>
               </ResponsiveContainer>
             </DashboardChartCard>
-            <DashboardChartCard title="Доставки по дням" description="Плановая нагрузка на ближайшие 10 дней." empty={!deliveryDayBuckets.some(item => item.value > 0)} className="xl:col-span-4">
+            <DashboardChartCard title="Доставки по дням текущего месяца" description="Плановая нагрузка по дням месяца." empty={!deliveryMonthDaysData.some(item => item.value > 0)} emptyText="Нет доставок за текущий месяц." className="xl:col-span-4">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={deliveryDayBuckets} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                <BarChart data={deliveryMonthDaysData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.24)" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
                   <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
@@ -2820,7 +2936,7 @@ export default function Dashboard() {
             </DashboardChartCard>
             <DashboardRiskPanel title="Логистические риски" description="Что может сорвать доставку или приёмку." items={deliveryRiskItems} className="xl:col-span-4" />
           </div>
-          <DashboardChartCard title="Нагрузка по перевозчикам" description="Активные доставки по назначенным перевозчикам." empty={carrierWorkloadChartData.length === 0}>
+          <DashboardChartCard title="Нагрузка по перевозчикам за месяц" description="Доставки текущего месяца по назначенным перевозчикам." empty={carrierWorkloadChartData.length === 0} emptyText="Нет назначенных перевозчиков за текущий месяц.">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={carrierWorkloadChartData} layout="vertical" margin={{ top: 8, right: 16, left: 24, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.24)" />

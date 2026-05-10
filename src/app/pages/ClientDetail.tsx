@@ -7,6 +7,14 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
+import {
   ArrowLeft, Edit, FileText, TrendingUp, Clock, Phone, Mail,
   Building2, MapPin, User, CreditCard, CheckCircle, XCircle,
   AlertTriangle, Download, Plus, Save, Trash2, Upload, X, Wrench,
@@ -36,6 +44,12 @@ import {
   debtCollectionStatusLabel,
   isDebtCollectionActionOverdue,
 } from '../lib/debtCollectionPlans.js';
+import {
+  appendClientContact,
+  appendClientNote,
+  validateClientContactDraft,
+  validateClientNoteDraft,
+} from '../lib/clientRailActions.js';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -132,6 +146,34 @@ type ClientDeleteBlockedRental = {
 type ClientDeleteHistoryLink = {
   collection: string;
   count: number;
+};
+
+type ClientContactDraft = {
+  name: string;
+  role: string;
+  phone: string;
+  email: string;
+  comment: string;
+};
+
+type ClientFileDraft = {
+  title: string;
+  comment: string;
+  file: File | null;
+};
+
+const emptyContactDraft: ClientContactDraft = {
+  name: '',
+  role: '',
+  phone: '',
+  email: '',
+  comment: '',
+};
+
+const emptyFileDraft: ClientFileDraft = {
+  title: '',
+  comment: '',
+  file: null,
 };
 
 function getClientDeleteConflict(error: unknown): { message: string; rentals: ClientDeleteBlockedRental[] } | null {
@@ -357,6 +399,16 @@ export default function ClientDetail() {
   const [editingObjectId, setEditingObjectId] = useState('');
   const [editObjectForm, setEditObjectForm] = useState({ name: '', address: '', contactName: '', contactPhone: '', notes: '' });
   const [contractForm, setContractForm] = useState({ number: '', date: '', title: '', objectId: '', notes: '' });
+  const [contactDialogOpen, setContactDialogOpen] = useState(false);
+  const [contactDraft, setContactDraft] = useState<ClientContactDraft>(emptyContactDraft);
+  const [contactErrors, setContactErrors] = useState<Record<string, string>>({});
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteError, setNoteError] = useState('');
+  const [fileDialogOpen, setFileDialogOpen] = useState(false);
+  const [fileDraft, setFileDraft] = useState<ClientFileDraft>(emptyFileDraft);
+  const [fileError, setFileError] = useState('');
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   // Related data via react-query
   const { data: rentals = [] } = useRentalsList({ enabled: canViewRentals });
@@ -586,6 +638,156 @@ export default function ClientDetail() {
     });
   };
 
+  function openContactDialog() {
+    if (!canEdit) return;
+    setContactDraft(emptyContactDraft);
+    setContactErrors({});
+    setContactDialogOpen(true);
+  }
+
+  function handleSaveContact() {
+    if (!client || !canEdit) return;
+    const validation = validateClientContactDraft(contactDraft);
+    if (!validation.ok) {
+      setContactErrors({ [validation.field || 'form']: validation.message || 'Проверьте данные контакта.' });
+      return;
+    }
+
+    const nextClient = appendAuditHistory(
+      appendClientContact(client, validation.value) as Client,
+      {
+        date: new Date().toISOString(),
+        text: `Добавлен контакт: ${validation.value.name}`,
+        author: user?.name || 'Система',
+        type: 'system',
+      },
+    );
+    const previousClient = client;
+    setClient(nextClient);
+    updateClient.mutate({ id: nextClient.id, data: nextClient }, {
+      onSuccess: (savedClient) => {
+        setClient(savedClient);
+        setContactDialogOpen(false);
+        setContactDraft(emptyContactDraft);
+        setContactErrors({});
+        toast.success('Контакт добавлен.');
+      },
+      onError: (error) => {
+        setClient(previousClient);
+        toast.error(error instanceof Error ? error.message : 'Не удалось добавить контакт.');
+      },
+    });
+  }
+
+  function openNoteDialog() {
+    if (!canEdit) return;
+    setNoteDraft('');
+    setNoteError('');
+    setNoteDialogOpen(true);
+  }
+
+  function handleSaveNote() {
+    if (!client || !canEdit) return;
+    const validation = validateClientNoteDraft(noteDraft);
+    if (!validation.ok) {
+      setNoteError(validation.message || 'Введите текст заметки.');
+      return;
+    }
+
+    const nextClient = appendAuditHistory(
+      appendClientNote(client, validation.value, {
+        author: user?.name || 'Система',
+        createdAt: new Date().toISOString(),
+      }) as Client,
+      {
+        date: new Date().toISOString(),
+        text: 'Добавлена заметка по клиенту',
+        author: user?.name || 'Система',
+        type: 'comment',
+      },
+    );
+    const previousClient = client;
+    setClient(nextClient);
+    updateClient.mutate({ id: nextClient.id, data: nextClient }, {
+      onSuccess: (savedClient) => {
+        setClient(savedClient);
+        setNoteDialogOpen(false);
+        setNoteDraft('');
+        setNoteError('');
+        toast.success('Заметка добавлена.');
+      },
+      onError: (error) => {
+        setClient(previousClient);
+        toast.error(error instanceof Error ? error.message : 'Не удалось добавить заметку.');
+      },
+    });
+  }
+
+  function openFileDialog() {
+    if (!canEdit) return;
+    setFileDraft(emptyFileDraft);
+    setFileError('');
+    setFileDialogOpen(true);
+  }
+
+  async function handleSaveFile() {
+    if (!client || !canEdit) return;
+    if (!fileDraft.file) {
+      setFileError('Выберите файл для прикрепления.');
+      return;
+    }
+
+    try {
+      const dataUrl = await fileToDataUrl(fileDraft.file);
+      const displayName = fileDraft.title.trim() || fileDraft.file.name;
+      const nextClient = appendAuditHistory(
+        {
+          ...client,
+          partnerCardFileName: displayName,
+          partnerCardMimeType: fileDraft.file.type || undefined,
+          partnerCardDataUrl: dataUrl,
+          partnerCardUploadedAt: new Date().toISOString(),
+          partnerCardUploadedBy: user?.name || 'Система',
+        },
+        {
+          date: new Date().toISOString(),
+          text: `Загружена карта партнёра: ${displayName}${fileDraft.comment.trim() ? ` (${fileDraft.comment.trim()})` : ''}`,
+          author: user?.name || 'Система',
+          type: 'system',
+        },
+      );
+      const previousClient = client;
+      setClient(nextClient);
+      updateClient.mutate({ id: nextClient.id, data: nextClient }, {
+        onSuccess: (savedClient) => {
+          setClient(savedClient);
+          setFileDialogOpen(false);
+          setFileDraft(emptyFileDraft);
+          setFileError('');
+          toast.success('Файл прикреплён к карточке клиента.');
+        },
+        onError: (error) => {
+          setClient(previousClient);
+          toast.error(error instanceof Error ? error.message : 'Не удалось прикрепить файл.');
+        },
+      });
+    } catch (error) {
+      console.error(error);
+      setFileError(error instanceof Error ? error.message : 'Не удалось прочитать файл.');
+    }
+  }
+
+  async function handleCopyClientLink() {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Ссылка на клиента скопирована.');
+    } catch {
+      toast.error('Не удалось скопировать ссылку.');
+    }
+    setMoreMenuOpen(false);
+  }
+
   async function handlePartnerCardUpload(event: React.ChangeEvent<HTMLInputElement>) {
     if (!client || !canEdit) return;
     const file = event.target.files?.[0];
@@ -764,6 +966,7 @@ export default function ClientDetail() {
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
+    <>
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <Button variant="ghost" className="w-fit text-gray-600 hover:text-gray-950 dark:text-gray-300 dark:hover:text-white" onClick={() => navigate('/clients')}>
@@ -773,10 +976,65 @@ export default function ClientDetail() {
         <div className="flex flex-wrap gap-2">
           {!editing ? (
             <>
-              <Button variant="secondary">
-                <MoreHorizontal className="h-4 w-4" />
-                Ещё
-              </Button>
+              <div className="relative">
+                <Button
+                  variant="secondary"
+                  aria-haspopup="menu"
+                  aria-expanded={moreMenuOpen}
+                  onClick={() => setMoreMenuOpen(open => !open)}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                  Ещё
+                </Button>
+                {moreMenuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 z-30 mt-2 w-64 overflow-hidden rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl shadow-gray-900/10 dark:border-gray-800 dark:bg-gray-950"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-900"
+                      onClick={handleCopyClientLink}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                      Скопировать ссылку на клиента
+                    </button>
+                    <Link
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-900"
+                      to={`/documents?clientId=${encodeURIComponent(client.id)}&clientName=${encodeURIComponent(client.company)}`}
+                      onClick={() => setMoreMenuOpen(false)}
+                    >
+                      <FileText className="h-4 w-4" />
+                      Открыть документы клиента
+                    </Link>
+                    {canViewPayments && (
+                      <Link
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-900"
+                        to={`/payments?clientId=${encodeURIComponent(client.id)}&clientName=${encodeURIComponent(client.company)}`}
+                        onClick={() => setMoreMenuOpen(false)}
+                      >
+                        <CreditCard className="h-4 w-4" />
+                        Открыть дебиторку клиента
+                      </Link>
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-900"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        window.print();
+                      }}
+                    >
+                      <Printer className="h-4 w-4" />
+                      Печать карточки
+                    </button>
+                  </div>
+                )}
+              </div>
               {canEdit && (
                 <Button variant="secondary" onClick={startEdit}>
                   <Edit className="h-4 w-4" />
@@ -1328,8 +1586,14 @@ export default function ClientDetail() {
                 Контакты
                 {editing && <Badge variant="info">Форма</Badge>}
               </CardTitle>
-              {!editing && (
-                <Button size="icon" variant="ghost" title="Добавить контакт">
+              {!editing && canEdit && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  title="Добавить контакт"
+                  aria-label="Добавить контакт"
+                  onClick={openContactDialog}
+                >
                   <Plus className="h-4 w-4" />
                 </Button>
               )}
@@ -1369,6 +1633,7 @@ export default function ClientDetail() {
                     </div>
                     {contact.phone && <a href={`tel:${contact.phone}`} className="mt-2 block text-sm text-gray-700 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-300">{contact.phone}</a>}
                     {contact.email && <a href={`mailto:${contact.email}`} className="mt-1 block break-all text-sm text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300">{contact.email}</a>}
+                    {contact.comment && <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{contact.comment}</p>}
                     <div className="mt-3 flex gap-2 text-gray-500 dark:text-gray-400">
                       {contact.phone && <Phone className="h-4 w-4" />}
                       {contact.email && <Mail className="h-4 w-4" />}
@@ -1386,8 +1651,14 @@ export default function ClientDetail() {
                 Заметки
                 {editing && <Badge variant="info">Редактируется</Badge>}
               </CardTitle>
-              {!editing && (
-                <Button size="icon" variant="ghost" title="Добавить заметку">
+              {!editing && canEdit && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  title="Добавить заметку"
+                  aria-label="Добавить заметку"
+                  onClick={openNoteDialog}
+                >
                   <Plus className="h-4 w-4" />
                 </Button>
               )}
@@ -1423,17 +1694,15 @@ export default function ClientDetail() {
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base font-semibold">Прикреплённые файлы</CardTitle>
               {canEdit ? (
-                <label title="Загрузить файл">
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
-                    onChange={handlePartnerCardUpload}
-                  />
-                  <span className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
-                    <Plus className="h-4 w-4" />
-                  </span>
-                </label>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  title="Добавить файл"
+                  aria-label="Добавить файл"
+                  onClick={openFileDialog}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
               ) : null}
             </CardHeader>
             <CardContent className="space-y-3">
@@ -2437,5 +2706,135 @@ export default function ClientDetail() {
         </div>
       </div>
     </div>
+    <Dialog open={contactDialogOpen} onOpenChange={setContactDialogOpen}>
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl rounded-2xl bg-white p-5 dark:bg-gray-950 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>Добавить контакт</DialogTitle>
+          <DialogDescription>Контакт сохранится в карточке клиента и появится в правом блоке.</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60vh] space-y-4 overflow-y-auto py-4 pr-1">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Имя / контактное лицо</span>
+              <Input
+                value={contactDraft.name}
+                onChange={event => setContactDraft(current => ({ ...current, name: event.target.value }))}
+                aria-invalid={Boolean(contactErrors.name)}
+              />
+              {contactErrors.name && <span className="text-xs text-red-600 dark:text-red-300">{contactErrors.name}</span>}
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Роль / должность</span>
+              <Input
+                value={contactDraft.role}
+                onChange={event => setContactDraft(current => ({ ...current, role: event.target.value }))}
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Телефон</span>
+              <Input
+                value={contactDraft.phone}
+                onChange={event => setContactDraft(current => ({ ...current, phone: event.target.value }))}
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Email</span>
+              <Input
+                type="email"
+                value={contactDraft.email}
+                onChange={event => setContactDraft(current => ({ ...current, email: event.target.value }))}
+                aria-invalid={Boolean(contactErrors.email)}
+              />
+              {contactErrors.email && <span className="text-xs text-red-600 dark:text-red-300">{contactErrors.email}</span>}
+            </label>
+          </div>
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Комментарий</span>
+            <Textarea
+              className="min-h-24"
+              value={contactDraft.comment}
+              onChange={event => setContactDraft(current => ({ ...current, comment: event.target.value }))}
+            />
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setContactDialogOpen(false)}>Отмена</Button>
+          <Button onClick={handleSaveContact} disabled={updateClient.isPending}>Добавить контакт</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-xl rounded-2xl bg-white p-5 dark:bg-gray-950 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>Добавить заметку</DialogTitle>
+          <DialogDescription>Заметка добавится к текущим примечаниям клиента с автором и датой.</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60vh] space-y-2 overflow-y-auto py-4 pr-1">
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Текст заметки</span>
+            <Textarea
+              className="min-h-36"
+              value={noteDraft}
+              onChange={event => {
+                setNoteDraft(event.target.value);
+                if (noteError) setNoteError('');
+              }}
+              aria-invalid={Boolean(noteError)}
+            />
+            {noteError && <span className="text-xs text-red-600 dark:text-red-300">{noteError}</span>}
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setNoteDialogOpen(false)}>Отмена</Button>
+          <Button onClick={handleSaveNote} disabled={updateClient.isPending}>Добавить заметку</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={fileDialogOpen} onOpenChange={setFileDialogOpen}>
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-xl rounded-2xl bg-white p-5 dark:bg-gray-950 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>Добавить файл</DialogTitle>
+          <DialogDescription>Сохранится файл карты партнёра в существующем поле карточки клиента.</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60vh] space-y-4 overflow-y-auto py-4 pr-1">
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Название файла</span>
+            <Input
+              value={fileDraft.title}
+              onChange={event => setFileDraft(current => ({ ...current, title: event.target.value }))}
+              placeholder={fileDraft.file?.name || 'Например: Карта партнёра'}
+            />
+          </label>
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Файл</span>
+            <Input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+              onChange={event => {
+                setFileDraft(current => ({ ...current, file: event.target.files?.[0] || null }));
+                setFileError('');
+              }}
+              aria-invalid={Boolean(fileError)}
+            />
+            {fileError && <span className="text-xs text-red-600 dark:text-red-300">{fileError}</span>}
+          </label>
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Комментарий</span>
+            <Textarea
+              className="min-h-24"
+              value={fileDraft.comment}
+              onChange={event => setFileDraft(current => ({ ...current, comment: event.target.value }))}
+            />
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setFileDialogOpen(false)}>Отмена</Button>
+          <Button onClick={handleSaveFile} disabled={updateClient.isPending}>Добавить файл</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

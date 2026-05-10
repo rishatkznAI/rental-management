@@ -491,6 +491,41 @@ test('/api/clients allows editing own INN and rejects changing to another client
   });
 });
 
+test('/api/clients allows office manager to save client rail contacts and partner card fields', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({
+      id: 'C-1',
+      company: 'ООО Альфа',
+      inn: '1655123456',
+      email: 'alpha@example.test',
+      debt: 0,
+      contacts: [{ id: 'old', name: 'Иван', phone: '+7900' }],
+    }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'office-token', {
+      contacts: [
+        { id: 'old', name: 'Иван', phone: '+7900' },
+        { id: 'new', name: 'Мария', role: 'Бухгалтер', phone: '+7901', email: 'maria@example.test', comment: 'Счета' },
+      ],
+      partnerCardFileName: 'Карта партнёра.pdf',
+      partnerCardMimeType: 'application/pdf',
+      partnerCardDataUrl: 'data:application/pdf;base64,JVBERi0x',
+      partnerCardUploadedAt: '2026-05-10T09:00:00.000Z',
+      partnerCardUploadedBy: 'Офис',
+      debt: 999999,
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.contacts.length, 2);
+    assert.equal(response.body.contacts[1].name, 'Мария');
+    assert.equal(response.body.partnerCardFileName, 'Карта партнёра.pdf');
+    assert.equal(response.body.debt, 0);
+  });
+});
+
 test('/api/clients rejects clearing INN on save', async () => {
   const { app, state } = createSecurityApp();
   state.clients = [

@@ -827,6 +827,7 @@ export interface ClientContactPerson {
   role?: string;
   phone?: string;
   email?: string;
+  comment?: string;
 }
 
 export interface Client {

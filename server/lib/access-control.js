@@ -154,7 +154,22 @@ const WARRANTY_CLAIM_MUTATION_FIELDS = new Set([
 ]);
 
 const NON_ADMIN_UPDATE_FIELDS = {
-  clients: new Set(['company', 'inn', 'email', 'address', 'contact', 'phone', 'paymentTerms', 'notes']),
+  clients: new Set([
+    'company',
+    'inn',
+    'email',
+    'address',
+    'contact',
+    'phone',
+    'contacts',
+    'paymentTerms',
+    'notes',
+    'partnerCardFileName',
+    'partnerCardMimeType',
+    'partnerCardDataUrl',
+    'partnerCardUploadedAt',
+    'partnerCardUploadedBy',
+  ]),
   client_objects: new Set(['clientId', 'name', 'address', 'contactName', 'contactPhone', 'contractId', 'contractNumber', 'notes', 'status']),
   client_contracts: new Set(['clientId', 'objectId', 'number', 'date', 'title', 'status', 'notes']),
   documents: new Set([

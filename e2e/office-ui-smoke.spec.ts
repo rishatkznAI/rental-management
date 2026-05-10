@@ -501,6 +501,25 @@ test('smoke-office can use permitted office UI without admin access or runtime e
     await expectHealthyScreen(page, detail.label);
   }
 
+  action = 'client detail rail actions';
+  await navigateInApp(page, `/clients/${seed.client.id}`);
+  await page.getByLabel('Добавить контакт').click();
+  await expect(page.getByRole('dialog', { name: 'Добавить контакт' })).toBeVisible();
+  await page.getByRole('button', { name: 'Отмена' }).click();
+  await expect(page.getByRole('dialog', { name: 'Добавить контакт' })).toBeHidden();
+  await page.getByLabel('Добавить заметку').click();
+  await expect(page.getByRole('dialog', { name: 'Добавить заметку' })).toBeVisible();
+  await page.getByRole('button', { name: 'Отмена' }).click();
+  await expect(page.getByRole('dialog', { name: 'Добавить заметку' })).toBeHidden();
+  await page.getByLabel('Добавить файл').click();
+  await expect(page.getByRole('dialog', { name: 'Добавить файл' })).toBeVisible();
+  await page.getByRole('button', { name: 'Отмена' }).click();
+  await expect(page.getByRole('dialog', { name: 'Добавить файл' })).toBeHidden();
+  await page.getByRole('button', { name: 'Ещё' }).click();
+  await expect(page.getByRole('menu').getByRole('menuitem', { name: /Открыть документы клиента/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Ещё' }).click();
+  await expectHealthyScreen(page, action);
+
   action = 'forbidden admin route';
   await navigateInApp(page, '/admin');
   await expect(page).not.toHaveURL(/#\/admin$/);

@@ -100,6 +100,8 @@ export interface GanttRentalData {
   updDate?: string;
   amount: number;
   expectedPaymentDate?: string;
+  downtimeDays?: number;
+  downtimeReason?: string;
   comments: RentalHistoryEntry[];
 }
 

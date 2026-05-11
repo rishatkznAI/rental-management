@@ -30,11 +30,21 @@ test('rentals workspace uses contextual actions per mode', () => {
 test('fleet planner persists equipment downtime and refreshes rows after save', () => {
   assert.match(rentalsSource, /queryKey:\s*RENTAL_KEYS\.downtimes/);
   assert.match(rentalsSource, /queryFn:\s*rentalsService\.getDowntimes/);
+  assert.match(rentalsSource, /findDowntimeRentalFlowTarget/);
+  assert.match(rentalsSource, /downtimeFlow\.flow === 'rental'[\s\S]*requestClassicRentalChange/);
+  assert.match(rentalsSource, /buildRentalDowntimePatch\(payload\)/);
   assert.match(rentalsSource, /rentalsService\.createDowntime\(payload\)/);
   assert.match(rentalsSource, /rentalsService\.updateDowntime\(data\.id,\s*payload\)/);
   assert.match(rentalsSource, /queryClient\.setQueryData<DowntimePeriod\[\]>\(RENTAL_KEYS\.downtimes/);
   assert.match(rentalsSource, /queryClient\.invalidateQueries\(\{\s*queryKey:\s*RENTAL_KEYS\.downtimes\s*\}\)/);
   assert.doesNotMatch(rentalsSource, /mockDowntimes/);
+});
+
+test('fleet planner shows rental downtime updates on rental bars', () => {
+  assert.match(rentalsSource, /downtimeDays:\s*rental\.downtimeDays/);
+  assert.match(rentalsSource, /setGanttRentals\(current => current\.map\(item => item\.id === currentGanttRental\.id/);
+  assert.match(rentalsSource, /data-payment-alert="downtime"/);
+  assert.match(rentalsSource, /Простой по аренде сохранён/);
 });
 
 test('downtime modal supports add edit close cancel and human validation', () => {

@@ -54,6 +54,12 @@ import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { buildClientReceivables, buildRentalDebtRows, getEffectivePaidAmount, mergeClientsWithFinancials } from '../lib/finance';
 import { buildRentalPaymentBar } from '../lib/rentalTimeline.js';
 import {
+  buildRentalDowntimeChangeReason,
+  buildRentalDowntimePatch,
+  downtimeSaveErrorMessage,
+  findDowntimeRentalFlowTarget,
+} from '../lib/rentalDowntimeFlow.js';
+import {
   appendRentalHistory,
   buildRentalCreationHistory,
   buildRentalUpdateHistory,
@@ -82,6 +88,7 @@ type ReturnDeliveryFilter = '' | 'planned' | 'missing';
 type ReturnServiceFilter = '' | 'yes' | 'no';
 type DebtDocsProblemFilter = '' | 'debt' | 'overdue' | 'partial' | 'missing_upd' | 'missing_contract' | 'unsigned';
 type DebtDocsDocumentFilter = '' | 'missing_upd' | 'missing_contract' | 'unsigned';
+type RentalChangeSuccessMessages = { pending?: string; applied?: string };
 type FleetMovementEntry = ShippingPhoto & {
   rental?: GanttRentalData;
   equipment?: Equipment;
@@ -345,6 +352,8 @@ function canonicalizeGanttRentalFromClassic(
     endDate: rental.plannedReturnDate || rentalWithEquipment.endDate || ganttRental.endDate,
     manager: rental.manager || ganttRental.manager,
     status: rental.status === 'closed' ? 'closed' : ganttRental.status,
+    downtimeDays: rental.downtimeDays ?? ganttRental.downtimeDays,
+    downtimeReason: rental.downtimeReason ?? ganttRental.downtimeReason,
   };
 }
 
@@ -1318,6 +1327,7 @@ export default function Rentals() {
     ganttRental: GanttRentalData,
     patch: Partial<Rental>,
     reason: string,
+    successMessages: RentalChangeSuccessMessages = {},
   ): Promise<boolean> => {
     try {
       const [classicRentals, freshGanttRentals] = await Promise.all([
@@ -1374,10 +1384,20 @@ export default function Rentals() {
         queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
       ]);
 
+      if (!summary?.pendingCount && ('downtimeDays' in patch || 'downtimeReason' in patch)) {
+        setGanttRentals(current => current.map(item => item.id === currentGanttRental.id
+          ? {
+              ...item,
+              downtimeDays: (saved as Rental).downtimeDays ?? patch.downtimeDays,
+              downtimeReason: (saved as Rental).downtimeReason ?? patch.downtimeReason,
+            }
+          : item));
+      }
+
       if (summary?.pendingCount) {
-        showToast('Изменения отправлены администратору на согласование');
+        showToast(successMessages.pending || 'Изменения отправлены администратору на согласование');
       } else {
-        showToast('Изменение аренды применено');
+        showToast(successMessages.applied || 'Изменение аренды применено');
       }
       return true;
     } catch (error) {
@@ -5132,12 +5152,12 @@ export default function Rentals() {
       />
 
       {/* ===== Modals ===== */}
-        <ReturnModal
-          open={showReturnModal}
-          rental={returnRental}
-          ganttRentals={ganttRentals}
-          onClose={() => { setShowReturnModal(false); setReturnRental(null); }}
-          onConfirm={async (data) => {
+      <ReturnModal
+        open={showReturnModal}
+        rental={returnRental}
+        ganttRentals={ganttRentals}
+        onClose={() => { setShowReturnModal(false); setReturnRental(null); }}
+        onConfirm={async (data) => {
           if (!canEditRentals) return;
           const ganttRentalId = data.ganttRentalId || data.rentalId;
           const rental = ganttRentals.find(r => r.id === ganttRentalId) ?? data.rental;
@@ -5146,10 +5166,26 @@ export default function Rentals() {
             return;
           }
           if (!isAdminRole) {
+            const returnPatch: Partial<Rental> = { actualReturnDate: data.returnDate };
+            if (data.result === 'downtime') {
+              Object.assign(returnPatch, buildRentalDowntimePatch({
+                equipmentId: rental.equipmentId,
+                equipmentInv: rental.equipmentInv,
+                startDate: data.returnDate,
+                endDate: data.returnDate,
+                reason: 'Простой после возврата',
+              }));
+            }
             const ok = await requestClassicRentalChange(
               rental,
-              { actualReturnDate: data.returnDate },
+              returnPatch,
               `Возврат техники из планировщика: ${rental.endDate} → ${data.returnDate}`,
+              data.result === 'downtime'
+                ? {
+                    pending: 'Возврат и простой отправлены администратору на согласование',
+                    applied: 'Возврат и простой сохранены',
+                  }
+                : undefined,
             );
             if (ok) {
               setShowReturnModal(false);
@@ -5158,17 +5194,46 @@ export default function Rentals() {
             return;
           }
           try {
-            await rentalsService.returnRental(ganttRentalId, {
+            const returnResult = await rentalsService.returnRental(ganttRentalId, {
               returnDate: data.returnDate,
               result: data.result,
               hasDamage: data.result === 'service',
             });
-            showToast(`Возврат оформлен: ${rental.equipmentInv ?? ganttRentalId}`);
+            let downtimeCreated = false;
+            if (data.result === 'downtime') {
+              const returnedEquipment = returnResult.equipment as Partial<Equipment> | undefined;
+              const downtimePayload: Omit<DowntimePeriod, 'id'> = {
+                equipmentId: String(returnedEquipment?.id || rental.equipmentId || ''),
+                equipmentInv: String(returnedEquipment?.inventoryNumber || rental.equipmentInv || ''),
+                startDate: data.returnDate,
+                reason: 'Простой после возврата',
+                comment: `Возврат из аренды ${rental.id}`,
+                status: 'active',
+              };
+              try {
+                const savedDowntime = await rentalsService.createDowntime(downtimePayload);
+                queryClient.setQueryData<DowntimePeriod[]>(RENTAL_KEYS.downtimes, current => {
+                  const list = Array.isArray(current) ? current : [];
+                  return list.some(item => item.id === savedDowntime.id)
+                    ? list.map(item => item.id === savedDowntime.id ? savedDowntime : item)
+                    : [...list, savedDowntime];
+                });
+                downtimeCreated = true;
+              } catch (downtimeError) {
+                showToast(`Возврат оформлен, но простой не добавлен: ${downtimeSaveErrorMessage(downtimeError)}`, 'error');
+              }
+            }
+            if (data.result !== 'downtime' || downtimeCreated) {
+              showToast(data.result === 'downtime'
+                ? `Возврат оформлен, простой добавлен: ${rental.equipmentInv ?? ganttRentalId}`
+                : `Возврат оформлен: ${rental.equipmentInv ?? ganttRentalId}`);
+            }
             setShowReturnModal(false);
             setReturnRental(null);
             void Promise.all([
               queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
               queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+              queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.downtimes }),
               queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
               queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
               queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
@@ -5186,16 +5251,42 @@ export default function Rentals() {
         onClose={() => { setShowDowntimeModal(false); setEditingDowntime(null); }}
         onConfirm={async (data) => {
           if (!canEditRentals) return;
+          const payload: Omit<DowntimePeriod, 'id'> = {
+            equipmentId: data.equipmentId,
+            equipmentInv: data.equipmentInv,
+            startDate: data.startDate,
+            endDate: data.endDate || undefined,
+            reason: data.reason,
+            comment: data.comment,
+            status: data.status,
+          };
+          const downtimeFlow = data.id
+            ? { flow: 'standalone' }
+            : findDowntimeRentalFlowTarget({ downtime: payload, rentals: ganttRentals });
+
+          if (downtimeFlow.flow === 'conflict') {
+            showToast(downtimeFlow.message || 'Найдено несколько аренд для выбранного простоя.', 'error');
+            return;
+          }
+
+          if (downtimeFlow.flow === 'rental' && downtimeFlow.rental) {
+            const ok = await requestClassicRentalChange(
+              downtimeFlow.rental,
+              buildRentalDowntimePatch(payload) as Partial<Rental>,
+              buildRentalDowntimeChangeReason(payload, downtimeFlow.rental),
+              {
+                pending: 'Простой отправлен администратору на согласование',
+                applied: 'Простой по аренде сохранён',
+              },
+            );
+            if (ok) {
+              setShowDowntimeModal(false);
+              setEditingDowntime(null);
+            }
+            return;
+          }
+
           try {
-            const payload: Omit<DowntimePeriod, 'id'> = {
-              equipmentId: data.equipmentId,
-              equipmentInv: data.equipmentInv,
-              startDate: data.startDate,
-              endDate: data.endDate || undefined,
-              reason: data.reason,
-              comment: data.comment,
-              status: data.status,
-            };
             const saved = data.id
               ? await rentalsService.updateDowntime(data.id, payload)
               : await rentalsService.createDowntime(payload);
@@ -5219,7 +5310,7 @@ export default function Rentals() {
             setShowDowntimeModal(false);
             setEditingDowntime(null);
           } catch (error) {
-            showToast(error instanceof Error ? error.message : 'Не удалось сохранить простой', 'error');
+            showToast(downtimeSaveErrorMessage(error), 'error');
           }
         }}
       />
@@ -5753,6 +5844,11 @@ function EquipmentRow({
           const updBadgeTone = getRentalUpdBadgeTone(rental);
           const updBadge = RENTAL_UPD_BADGE_STYLES[updBadgeTone];
           const UpdBadgeIcon = updBadge.icon;
+          const rentalDowntimeDays = Math.max(0, Number(rental.downtimeDays) || 0);
+          const hasRentalDowntime = rentalDowntimeDays > 0 || Boolean(rental.downtimeReason);
+          const rentalDowntimeTitle = rentalDowntimeDays > 0
+            ? `Простой аренды: ${rentalDowntimeDays} дн.${rental.downtimeReason ? ` · ${rental.downtimeReason}` : ''}`
+            : `Простой аренды${rental.downtimeReason ? `: ${rental.downtimeReason}` : ''}`;
           // Stack bars vertically if there are overlaps (simple: use index-based offset)
           const overlapping = rentals.filter((r2, j) => {
             if (j >= rIdx) return false;
@@ -5790,6 +5886,8 @@ function EquipmentRow({
             financeBar.paidAmount ? ` · оплачено ${formatCurrency(financeBar.paidAmount)}` : ''
           }${
             financeBar.outstanding ? ` · остаток ${formatCurrency(financeBar.outstanding)}` : ''
+          }${
+            hasRentalDowntime ? ` · ${rentalDowntimeTitle}` : ''
           } · оплачено до: ${financeBar.paidThroughDate ? safeRentalCompactDate(financeBar.paidThroughDate) : 'нет данных'} · просрочка с: ${financeBar.overdueSince ? safeRentalCompactDate(financeBar.overdueSince) : 'нет просрочки'} · ${paymentBadge.tooltip} · ${updBadge.tooltip}${
             rental.updDate ? ` (${safeRentalCompactDate(rental.updDate)})` : ''
           }${
@@ -5813,7 +5911,7 @@ function EquipmentRow({
                 height: barHeight,
               }}
               title={tooltip}
-              aria-label={`${rental.client || 'Аренда'}: ${statusLabel}, ${paymentBadge.label}, ${updBadge.label}`}
+              aria-label={`${rental.client || 'Аренда'}: ${statusLabel}, ${paymentBadge.label}, ${updBadge.label}${hasRentalDowntime ? ', есть простой' : ''}`}
             >
               <span className="pointer-events-none absolute inset-0 bg-slate-500 dark:bg-slate-600" />
               {financeBar.segments.map((segment, segmentIndex) => {
@@ -5858,7 +5956,7 @@ function EquipmentRow({
               {barWidth > 110 && (
                 <span
                   className="pointer-events-none relative z-[1] min-w-0 truncate px-2 leading-none"
-                  style={{ paddingRight: showOverdueAlert ? 'clamp(124px,12vw,320px)' : 'clamp(96px,9vw,260px)' }}
+                  style={{ paddingRight: showOverdueAlert || hasRentalDowntime ? 'clamp(124px,12vw,320px)' : 'clamp(96px,9vw,260px)' }}
                 >
                   <span className="mr-1 rounded bg-black/16 px-1 py-0.5 text-[clamp(8px,0.48vw,10px)] uppercase tracking-[0.08em] text-white/85">
                     {statusLabel}
@@ -5904,6 +6002,25 @@ function EquipmentRow({
                 className="pointer-events-none absolute right-1 top-1/2 z-[4] flex -translate-y-1/2 items-center"
                 style={{ gap: 'clamp(2px,0.18vw,4px)' }}
               >
+                {hasRentalDowntime && (
+                  <span
+                    data-payment-alert="downtime"
+                    className="inline-flex items-center rounded-full bg-amber-100 font-semibold text-amber-800 shadow-sm ring-1 ring-amber-900/10 dark:bg-amber-900/80 dark:text-amber-100 dark:ring-amber-100/10"
+                    title={rentalDowntimeTitle}
+                    style={{
+                      display: 'inline-flex',
+                      flex: '0 0 auto',
+                      width: 'auto',
+                      height: 'clamp(17px,1.05vw,24px)',
+                      padding: showBadgeText ? '0 clamp(6px,0.42vw,9px)' : '0 clamp(4px,0.32vw,7px)',
+                      fontSize: 'clamp(9px,0.52vw,12px)',
+                      gap: 'clamp(3px,0.25vw,5px)',
+                    }}
+                  >
+                    <PauseCircle style={{ width: 'clamp(12px,0.72vw,18px)', height: 'clamp(12px,0.72vw,18px)' }} />
+                    {showBadgeText && <span>{rentalDowntimeDays > 0 ? `${rentalDowntimeDays} дн` : 'Простой'}</span>}
+                  </span>
+                )}
                 <span
                   data-payment-alert="payment"
                   className={`inline-flex items-center rounded-full font-semibold shadow-sm ring-1 ${paymentBadge.className}`}

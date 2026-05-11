@@ -415,6 +415,8 @@ export interface Rental {
   manager: string;
   status: RentalStatus;
   risk?: string;
+  downtimeDays?: number;
+  downtimeReason?: string;
   documents?: string[];
   comments?: string;
   history?: AuditEntry[];

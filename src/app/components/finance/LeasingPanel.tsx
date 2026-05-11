@@ -3,11 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   CalendarDays,
+  CheckCircle2,
   Edit3,
   Eye,
+  PauseCircle,
+  PlayCircle,
   Plus,
   Search,
-  Trash2,
   WalletCards,
 } from 'lucide-react';
 import { Badge } from '../ui/badge';
@@ -119,6 +121,24 @@ function statusVariant(status: LeasingContractStatus) {
   if (status === 'overdue') return 'danger';
   if (status === 'paused') return 'warning';
   return 'default';
+}
+
+function isFinanciallyActiveStatus(status: LeasingContractStatus) {
+  return status === 'active' || status === 'overdue';
+}
+
+function upcomingLeasingAmount(contracts: LeasingContract[], daysAhead: number, today = todayKey()) {
+  const todayTime = new Date(`${today}T00:00:00`).getTime();
+  return contracts
+    .filter(contract => isFinanciallyActiveStatus(contract.status))
+    .flatMap(contract => contract.schedule || [])
+    .filter(row => row.status !== 'paid' && row.status !== 'skipped' && (row.outstanding || row.amount || 0) > 0)
+    .filter(row => {
+      const dueTime = new Date(`${row.dueDate}T00:00:00`).getTime();
+      const diffDays = Math.floor((dueTime - todayTime) / (24 * 60 * 60 * 1000));
+      return diffDays >= 0 && diffDays <= daysAhead;
+    })
+    .reduce((sum, row) => sum + (row.outstanding ?? row.amount ?? 0), 0);
 }
 
 function parseAmount(value: string) {
@@ -312,14 +332,20 @@ export function LeasingPanel({ canManageFinance, canDeleteFinance }: { canManage
     await deleteContract.mutateAsync(contract.id);
   };
 
+  const updateStatus = async (contract: LeasingContract, status: LeasingContractStatus) => {
+    await updateContract.mutateAsync({ id: contract.id, data: { status } });
+  };
+
+  const upcoming7Amount = upcomingLeasingAmount(summary.contracts || [], 7);
+  const upcoming30Amount = upcomingLeasingAmount(summary.contracts || [], 30);
+
   const kpis = [
-    { id: 'active', label: 'Активных договоров', value: String(summary.activeContracts), icon: WalletCards, tone: 'blue' },
-    { id: 'paused', label: 'На паузе', value: String(summary.pausedContracts ?? 0), icon: WalletCards, tone: 'amber' },
-    { id: 'current-month', label: 'Платёж в этом месяце', value: formatCurrency(summary.currentMonthAmount), icon: CalendarDays, tone: 'emerald' },
-    { id: 'next-month', label: 'Платёж в следующем месяце', value: formatCurrency(summary.nextMonthAmount), icon: CalendarDays, tone: 'amber' },
+    { id: 'active', label: 'Активные договоры', value: String(summary.activeContracts), icon: WalletCards, tone: 'blue' },
+    { id: 'current-month', label: 'Платежи в этом месяце', value: formatCurrency(summary.currentMonthAmount), icon: CalendarDays, tone: 'emerald' },
     { id: 'overdue', label: 'Просрочено', value: formatCurrency(summary.overdueAmount), icon: AlertTriangle, tone: 'red' },
     { id: 'remaining', label: 'Остаток обязательств', value: formatCurrency(summary.remainingAmount), icon: WalletCards, tone: 'gray' },
-    { id: 'average', label: 'Средняя нагрузка', value: formatCurrency(summary.averageMonthlyLoad), icon: WalletCards, tone: 'blue' },
+    { id: 'upcoming-7', label: 'Ближайшие 7 дней', value: formatCurrency(upcoming7Amount), icon: CalendarDays, tone: 'amber' },
+    { id: 'upcoming-30', label: 'Ближайшие 30 дней', value: formatCurrency(upcoming30Amount), icon: CalendarDays, tone: 'amber' },
   ];
 
   return (
@@ -334,7 +360,7 @@ export function LeasingPanel({ canManageFinance, canDeleteFinance }: { canManage
         {canManageFinance && (
           <Button onClick={openCreateDialog} className="h-10 rounded-xl px-4">
             <Plus className="h-4 w-4" />
-            Добавить договор
+            Создать договор
           </Button>
         )}
       </div>
@@ -375,16 +401,16 @@ export function LeasingPanel({ canManageFinance, canDeleteFinance }: { canManage
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Договор</TableHead>
-                <TableHead>Лизинговая компания</TableHead>
-                <TableHead>Техника</TableHead>
+                <TableHead>Договор лизинга</TableHead>
+                <TableHead>Техника/предмет</TableHead>
+                <TableHead>Лизингодатель</TableHead>
+                <TableHead>Дата начала</TableHead>
                 <TableHead>Срок</TableHead>
                 <TableHead>Ежемесячный платёж</TableHead>
                 <TableHead>Следующий платёж</TableHead>
-                <TableHead>Осталось</TableHead>
                 <TableHead>Остаток</TableHead>
                 <TableHead>Статус</TableHead>
-                <TableHead className="w-[160px]">Действия</TableHead>
+                <TableHead className="min-w-[240px]">Действия</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -405,8 +431,9 @@ export function LeasingPanel({ canManageFinance, canDeleteFinance }: { canManage
                         {formatDate(contract.startDate)} — {formatDate(contract.endDate)}
                       </p>
                     </TableCell>
-                    <TableCell>{contract.leasingCompany}</TableCell>
                     <TableCell>{contract.equipmentName || equipmentLabel(equipment) || '—'}</TableCell>
+                    <TableCell>{contract.leasingCompany}</TableCell>
+                    <TableCell>{formatDate(contract.startDate)}</TableCell>
                     <TableCell>{contract.termMonths} мес.</TableCell>
                     <TableCell className="font-semibold">{formatCurrency(contract.monthlyPayment)}</TableCell>
                     <TableCell>
@@ -417,23 +444,33 @@ export function LeasingPanel({ canManageFinance, canDeleteFinance }: { canManage
                         </p>
                       </div>
                     </TableCell>
-                    <TableCell>{contract.remainingPayments ?? 0}</TableCell>
                     <TableCell className="font-semibold">{formatCurrency(contract.remainingAmount || 0)}</TableCell>
                     <TableCell><Badge variant={statusVariant(contract.status)}>{LEASING_STATUS_LABELS[contract.status]}</Badge></TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-2">
-                        <Button size="icon" variant="outline" title="Открыть карточку" onClick={() => setSelectedContract(contract)}>
+                        <Button size="icon" variant="outline" title="Открыть график платежей" aria-label="Открыть график платежей" onClick={() => setSelectedContract(contract)}>
                           <Eye className="h-4 w-4" />
                         </Button>
                         {canManageFinance && (
-                          <Button size="icon" variant="outline" title="Редактировать" onClick={() => openEditDialog(contract)}>
-                            <Edit3 className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {canDeleteFinance && (
-                          <Button size="icon" variant="outline" title="Удалить" onClick={() => void handleDelete(contract)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <>
+                            <Button size="icon" variant="outline" title="Редактировать" aria-label="Редактировать договор" onClick={() => openEditDialog(contract)}>
+                              <Edit3 className="h-4 w-4" />
+                            </Button>
+                            {contract.status === 'paused' ? (
+                              <Button size="icon" variant="outline" title="Возобновить" aria-label="Возобновить договор" onClick={() => void updateStatus(contract, 'active')}>
+                                <PlayCircle className="h-4 w-4" />
+                              </Button>
+                            ) : contract.status !== 'closed' && contract.status !== 'archived' ? (
+                              <Button size="icon" variant="outline" title="Поставить на паузу" aria-label="Поставить договор на паузу" onClick={() => void updateStatus(contract, 'paused')}>
+                                <PauseCircle className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                            {contract.status !== 'closed' && contract.status !== 'archived' && (
+                              <Button size="icon" variant="outline" title="Закрыть" aria-label="Закрыть договор" onClick={() => void updateStatus(contract, 'closed')}>
+                                <CheckCircle2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </>
                         )}
                       </div>
                     </TableCell>

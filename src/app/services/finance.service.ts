@@ -1,5 +1,7 @@
 import { api } from '../lib/api';
 import type {
+  FinanceAccount,
+  FinanceOperation,
   ManagerBreakdownResponse,
   ReceivableCollectionAction,
   ReceivablePaymentPlanItem,
@@ -7,6 +9,42 @@ import type {
 } from '../types';
 
 export const financeService = {
+  getAccounts: (): Promise<FinanceAccount[]> =>
+    api.get<FinanceAccount[]>('/api/finance/accounts'),
+  createAccount: (
+    data: Omit<FinanceAccount, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<FinanceAccount> =>
+    api.post<FinanceAccount>('/api/finance/accounts', data),
+  updateAccount: (
+    id: string,
+    data: Partial<FinanceAccount> & { forceArchive?: boolean },
+  ): Promise<FinanceAccount> =>
+    api.patch<FinanceAccount>(`/api/finance/accounts/${id}`, data),
+  transferBetweenAccounts: (data: {
+    accountFrom: string;
+    accountTo: string;
+    amount: number;
+    date: string;
+    description?: string;
+    comment?: string;
+  }): Promise<{ from: FinanceAccount; to: FinanceAccount; operation: FinanceOperation }> =>
+    api.post<{ from: FinanceAccount; to: FinanceAccount; operation: FinanceOperation }>('/api/finance/accounts/transfer', data),
+  getOperations: (from?: string, to?: string): Promise<FinanceOperation[]> => {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return api.get<FinanceOperation[]>(`/api/finance/operations${suffix}`);
+  },
+  createOperation: (
+    data: Omit<FinanceOperation, 'id' | 'createdAt' | 'updatedAt' | 'source'>,
+  ): Promise<FinanceOperation> =>
+    api.post<FinanceOperation>('/api/finance/operations', data),
+  updateOperation: (
+    id: string,
+    data: Partial<FinanceOperation>,
+  ): Promise<FinanceOperation> =>
+    api.patch<FinanceOperation>(`/api/finance/operations/${id}`, data),
   getManagerBreakdown: (manager: string, today?: string): Promise<ManagerBreakdownResponse> => {
     const params = new URLSearchParams({ manager });
     if (today) params.set('today', today);

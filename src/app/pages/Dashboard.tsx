@@ -651,7 +651,7 @@ export default function Dashboard() {
   } = useQuery<ManagerBreakdownResponse>({
     queryKey: ['finance', 'manager-breakdown', managerBreakdownName, todayKey],
     queryFn: () => financeService.getManagerBreakdown(managerBreakdownName || '', todayKey),
-    enabled: canViewMoney && !!managerBreakdownName,
+    enabled: canViewFinance && !!managerBreakdownName,
     staleTime: 1000 * 60,
   });
 

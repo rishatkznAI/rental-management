@@ -3,16 +3,31 @@ import { Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
+  ArrowDownRight,
+  ArrowUpRight,
+  Banknote,
   CalendarDays,
   CheckCircle2,
+  Download,
   Edit3,
+  History,
   PauseCircle,
   Plus,
   ReceiptText,
   Search,
   Trash2,
+  TrendingUp,
   WalletCards,
 } from 'lucide-react';
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -50,11 +65,20 @@ import {
 } from '../lib/adminConfig';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { COMPANY_EXPENSE_KEYS, companyExpensesService } from '../services/company-expenses.service';
+import { financeService } from '../services/finance.service';
 import { LEASING_KEYS, leasingService } from '../services/leasing.service';
+import { paymentsService } from '../services/payments.service';
 import type {
   CompanyExpense,
   CompanyExpenseFrequency,
   CompanyExpenseStatus,
+  FinanceAccount,
+  FinanceAccountStatus,
+  FinanceAccountType,
+  FinanceOperation,
+  FinanceOperationType,
+  LeasingPaymentScheduleItem,
+  Payment,
 } from '../types';
 
 const FREQUENCY_LABELS: Record<CompanyExpenseFrequency, string> = {
@@ -83,6 +107,147 @@ type ExpenseFormState = {
   customFields: Record<string, string>;
 };
 
+type FinanceOperationRow = {
+  id: string;
+  date: string;
+  type: FinanceOperationType;
+  category: string;
+  description: string;
+  counterparty: string;
+  amount: number;
+  account: string;
+  relatedEntity: string;
+  status: string;
+  source: 'payments' | 'expenses' | 'leasing' | 'manual';
+  manual?: FinanceOperation;
+};
+
+type FlowBucket = {
+  key: string;
+  label: string;
+  income: number;
+  expenses: number;
+  profit: number;
+};
+
+type Grouping = 'day' | 'week' | 'month';
+
+type OperationFormState = {
+  type: FinanceOperationType;
+  date: string;
+  amount: string;
+  category: string;
+  description: string;
+  counterparty: string;
+  account: string;
+  accountFrom: string;
+  accountTo: string;
+  relatedEntityType: NonNullable<FinanceOperation['relatedEntityType']>;
+  relatedEntityId: string;
+  relatedEntityLabel: string;
+  comment: string;
+};
+
+type AccountFormState = {
+  name: string;
+  type: FinanceAccountType;
+  currency: string;
+  balance: string;
+  actualAt: string;
+  comment: string;
+  status: FinanceAccountStatus;
+};
+
+type TransferFormState = {
+  accountFrom: string;
+  accountTo: string;
+  amount: string;
+  date: string;
+  comment: string;
+};
+
+const EXPENSE_CATEGORY_LABELS: Record<string, string> = {
+  transport: 'Транспорт',
+  salary: 'Зарплата',
+  payroll: 'Зарплата',
+  service: 'Сервис и запчасти',
+  parts: 'Сервис и запчасти',
+  rent: 'Аренда и коммунальные',
+  utilities: 'Аренда и коммунальные',
+  insurance: 'Страхование',
+  leasing: 'Лизинг',
+  other: 'Прочее',
+};
+
+const MANAGER_EXPENSE_CATEGORIES = [
+  'Транспорт',
+  'Зарплата',
+  'Сервис и запчасти',
+  'Аренда и коммунальные',
+  'Страхование',
+  'Лизинг',
+  'Прочее',
+];
+
+const OPERATION_TYPE_LABELS: Record<FinanceOperationType, string> = {
+  income: 'Доход',
+  expense: 'Расход',
+  transfer: 'Перевод',
+};
+
+const ACCOUNT_TYPE_LABELS: Record<FinanceAccountType, string> = {
+  bank_account: 'Расчётный счёт',
+  cash: 'Касса',
+  card: 'Карта',
+  deposit: 'Депозит',
+  other: 'Прочее',
+};
+
+const ACCOUNT_STATUS_LABELS: Record<FinanceAccountStatus, string> = {
+  active: 'Активен',
+  archived: 'Архив',
+};
+
+function createEmptyAccountForm(defaultDate = dateKey(new Date())): AccountFormState {
+  return {
+    name: '',
+    type: 'bank_account',
+    currency: 'RUB',
+    balance: '',
+    actualAt: defaultDate,
+    comment: '',
+    status: 'active',
+  };
+}
+
+function createEmptyTransferForm(defaultDate = dateKey(new Date())): TransferFormState {
+  return {
+    accountFrom: '',
+    accountTo: '',
+    amount: '',
+    date: defaultDate,
+    comment: '',
+  };
+}
+
+function createEmptyOperationForm(defaultDate = dateKey(new Date())): OperationFormState {
+  return {
+    type: 'expense',
+    date: defaultDate,
+    amount: '',
+    category: '',
+    description: '',
+    counterparty: '',
+    account: '',
+    accountFrom: '',
+    accountTo: '',
+    relatedEntityType: '',
+    relatedEntityId: '',
+    relatedEntityLabel: '',
+    comment: '',
+  };
+}
+
 function createEmptyForm(defaults?: Partial<Pick<ExpenseFormState, 'category' | 'frequency' | 'status'>>): ExpenseFormState {
   return {
     name: '',
@@ -97,6 +262,205 @@ function createEmptyForm(defaults?: Partial<Pick<ExpenseFormState, 'category' | 
     comment: '',
     customFields: {},
   };
+}
+
+function dateKey(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function monthStartKey(value = new Date()): string {
+  return dateKey(new Date(value.getFullYear(), value.getMonth(), 1));
+}
+
+function monthEndKey(value = new Date()): string {
+  return dateKey(new Date(value.getFullYear(), value.getMonth() + 1, 0));
+}
+
+function isDateInRange(date: string | undefined, from: string, to: string): boolean {
+  if (!date) return false;
+  return date >= from && date <= to;
+}
+
+function getPaymentDate(payment: Payment): string {
+  return payment.paidDate || payment.dueDate || '';
+}
+
+function getPaymentIncome(payment: Payment): number {
+  const amount = payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0);
+  const numeric = Number(amount);
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+}
+
+function normalizeExpenseCategory(category: string): string {
+  const key = String(category || '').trim().toLowerCase();
+  if (!key) return 'Прочее';
+  if (key.includes('лизинг')) return 'Лизинг';
+  if (key.includes('зарп') || key.includes('фот') || key.includes('оклад')) return 'Зарплата';
+  if (key.includes('транспорт') || key.includes('достав')) return 'Транспорт';
+  if (key.includes('сервис') || key.includes('запчаст') || key.includes('ремонт')) return 'Сервис и запчасти';
+  if (key.includes('аренд') || key.includes('коммун')) return 'Аренда и коммунальные';
+  if (key.includes('страх')) return 'Страхование';
+  return EXPENSE_CATEGORY_LABELS[key] || category || 'Прочее';
+}
+
+function expenseDueDate(expense: CompanyExpense, from: string, to: string): string {
+  if (expense.nextPaymentDate && isDateInRange(expense.nextPaymentDate, from, to)) return expense.nextPaymentDate;
+  if (!expense.paymentDay) return from;
+  const base = new Date(`${from}T00:00:00`);
+  const day = Math.min(31, Math.max(1, expense.paymentDay));
+  const due = new Date(base.getFullYear(), base.getMonth(), day);
+  const key = dateKey(due);
+  return isDateInRange(key, from, to) ? key : from;
+}
+
+function buildExpenseOperations(expenses: CompanyExpense[], from: string, to: string): FinanceOperationRow[] {
+  return expenses
+    .filter(expense => expense.status === 'active')
+    .map(expense => ({
+      id: `expense-${expense.id}`,
+      date: expenseDueDate(expense, from, to),
+      type: 'expense' as const,
+      category: normalizeExpenseCategory(expense.category),
+      description: expense.name,
+      counterparty: expense.counterparty || '—',
+      amount: monthlyEquivalent(expense),
+      account: expense.account || '—',
+      relatedEntity: 'Постоянный расход',
+      status: STATUS_LABELS[expense.status] || expense.status,
+      source: 'expenses' as const,
+    }))
+    .filter(operation => isDateInRange(operation.date, from, to) && operation.amount > 0);
+}
+
+function buildLeasingOperations(schedule: LeasingPaymentScheduleItem[] | undefined, from: string, to: string): FinanceOperationRow[] {
+  return (schedule || [])
+    .filter(row => row.status !== 'paid' && row.status !== 'skipped' && isDateInRange(row.dueDate, from, to))
+    .map(row => ({
+      id: `leasing-${row.id}`,
+      date: row.dueDate,
+      type: 'expense' as const,
+      category: 'Лизинг',
+      description: row.comment || 'Лизинговый платёж',
+      counterparty: 'Лизинг',
+      amount: Number(row.outstanding ?? row.amount ?? 0),
+      account: '—',
+      relatedEntity: row.leasingContractId || 'Лизинг',
+      status: row.status === 'overdue' ? 'Просрочено' : row.status === 'paid' ? 'Оплачено' : 'План',
+      source: 'leasing' as const,
+    }))
+    .filter(operation => operation.amount > 0);
+}
+
+function buildPaymentOperations(payments: Payment[], from: string, to: string): FinanceOperationRow[] {
+  return payments
+    .map(payment => ({
+      id: `payment-${payment.id}`,
+      date: getPaymentDate(payment),
+      type: 'income' as const,
+      category: 'Оплата клиента',
+      description: payment.invoiceNumber || 'Платёж',
+      counterparty: payment.client || '—',
+      amount: getPaymentIncome(payment),
+      account: '—',
+      relatedEntity: payment.rentalId ? `Аренда ${payment.rentalId}` : payment.clientId ? `Клиент ${payment.clientId}` : '—',
+      status: payment.status === 'paid' ? 'Оплачено' : payment.status === 'partial' ? 'Частично' : payment.status === 'overdue' ? 'Просрочено' : 'Ожидает',
+      source: 'payments' as const,
+    }))
+    .filter(operation => operation.amount > 0 && isDateInRange(operation.date, from, to));
+}
+
+function weekKey(value: string): string {
+  const date = new Date(`${value}T00:00:00`);
+  const first = new Date(date.getFullYear(), 0, 1);
+  const days = Math.floor((date.getTime() - first.getTime()) / 86400000);
+  return `${date.getFullYear()}-W${String(Math.ceil((days + first.getDay() + 1) / 7)).padStart(2, '0')}`;
+}
+
+function groupOperationDate(date: string, grouping: Grouping): string {
+  if (grouping === 'month') return date.slice(0, 7);
+  if (grouping === 'week') return weekKey(date);
+  return date;
+}
+
+function buildManualOperationRow(operation: FinanceOperation): FinanceOperationRow {
+  const relatedEntity = [
+    operation.relatedEntityType ? {
+      rental: 'Аренда',
+      client: 'Клиент',
+      document: 'Документ',
+      equipment: 'Техника',
+      leasing: 'Лизинг',
+      other: 'Другое',
+      '': '',
+    }[operation.relatedEntityType] : '',
+    operation.relatedEntityLabel || operation.relatedEntityId || '',
+  ].filter(Boolean).join(': ');
+  return {
+    id: `manual-${operation.id}`,
+    date: operation.date,
+    type: operation.type,
+    category: operation.category,
+    description: operation.description || 'Финансовая операция',
+    counterparty: operation.counterparty || '—',
+    amount: operation.amount,
+    account: operation.type === 'transfer'
+      ? [operation.accountFrom, operation.accountTo].filter(Boolean).join(' → ') || '—'
+      : operation.account || '—',
+    relatedEntity: relatedEntity || '—',
+    status: operation.status === 'archived' ? 'Архив' : 'Активна',
+    source: 'manual',
+    manual: operation,
+  };
+}
+
+function buildFlowBuckets(operations: FinanceOperationRow[], from: string, to: string, grouping: Grouping): FlowBucket[] {
+  const map = new Map<string, FlowBucket>();
+  const seed = (key: string) => {
+    if (!map.has(key)) map.set(key, { key, label: key, income: 0, expenses: 0, profit: 0 });
+    return map.get(key)!;
+  };
+  if (grouping === 'day') {
+    const cursor = new Date(`${from}T00:00:00`);
+    const end = new Date(`${to}T00:00:00`);
+    while (cursor <= end) {
+      seed(dateKey(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  }
+  operations.forEach(operation => {
+    const bucket = seed(groupOperationDate(operation.date, grouping));
+    if (operation.type === 'income') bucket.income += operation.amount;
+    if (operation.type === 'expense') bucket.expenses += operation.amount;
+    bucket.profit = bucket.income - bucket.expenses;
+  });
+  return Array.from(map.values())
+    .map(item => ({ ...item, profit: item.income - item.expenses }))
+    .sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function exportOperationsCsv(operations: FinanceOperationRow[], from: string, to: string) {
+  const rows = [
+    ['Дата', 'Тип', 'Категория', 'Описание', 'Контрагент', 'Сумма'],
+    ...operations.map(item => [
+      item.date,
+      item.type === 'income' ? 'Доход' : item.type === 'expense' ? 'Расход' : 'Перевод',
+      item.category,
+      item.description,
+      item.counterparty,
+      String(item.amount),
+    ]),
+  ];
+  const csv = rows.map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(';')).join('\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `finance-operations-${from}-${to}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function parseDateOnly(value?: string): Date | null {
@@ -142,13 +506,38 @@ function getNextPaymentLabel(expense: CompanyExpense): string {
   return getDayLabel(expense.paymentDay);
 }
 
-function isUpcoming(expense: CompanyExpense): boolean {
-  const date = parseDateOnly(expense.nextPaymentDate);
-  if (!date) return false;
+function resolveExpenseDueDate(expense: CompanyExpense): string {
+  if (expense.nextPaymentDate) return expense.nextPaymentDate;
+  if (!expense.paymentDay) return '';
+  const today = new Date();
+  const day = Math.min(31, Math.max(1, expense.paymentDay));
+  return dateKey(new Date(today.getFullYear(), today.getMonth(), day));
+}
+
+function getDaysUntil(dateValue: string): number | null {
+  const date = parseDateOnly(dateValue);
+  if (!date) return null;
   const today = parseDateOnly(new Date().toISOString().slice(0, 10));
-  if (!today) return false;
-  const diff = date.getTime() - today.getTime();
-  return diff >= 0 && diff <= 14 * 24 * 60 * 60 * 1000;
+  if (!today) return null;
+  return Math.round((date.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function isExpenseOverdue(expense: CompanyExpense): boolean {
+  if (expense.status !== 'active') return false;
+  const days = getDaysUntil(resolveExpenseDueDate(expense));
+  return days != null && days < 0;
+}
+
+function isUpcoming(expense: CompanyExpense, daysAhead = 7): boolean {
+  if (expense.status !== 'active') return false;
+  const days = getDaysUntil(resolveExpenseDueDate(expense));
+  return days != null && days >= 0 && days <= daysAhead;
+}
+
+function getExpenseDisplayStatus(expense: CompanyExpense): { label: string; status: CompanyExpenseStatus; overdue: boolean } {
+  const overdue = isExpenseOverdue(expense);
+  if (overdue) return { label: 'Просрочен', status: 'active', overdue };
+  return { label: STATUS_LABELS[expense.status], status: expense.status, overdue };
 }
 
 function sortExpenses(left: CompanyExpense, right: CompanyExpense): number {
@@ -172,6 +561,43 @@ function FieldLabel({ children, required = false }: { children: React.ReactNode;
   );
 }
 
+function FinanceKpiCard({
+  title,
+  value,
+  hint,
+  tone = 'default',
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  hint?: string;
+  tone?: 'default' | 'success' | 'danger' | 'warning';
+  icon: React.ElementType;
+}) {
+  const toneClass = {
+    default: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+    success: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/35 dark:text-emerald-300',
+    danger: 'bg-red-100 text-red-700 dark:bg-red-900/35 dark:text-red-300',
+    warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/35 dark:text-amber-300',
+  }[tone];
+  return (
+    <Card className="min-w-0">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
+            <p className="mt-2 truncate text-2xl font-semibold text-gray-900 dark:text-white">{value}</p>
+            {hint && <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{hint}</p>}
+          </div>
+          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${toneClass}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function optionValues(options: AdminListOption[]) {
   return options.map(option => option.value);
 }
@@ -188,6 +614,28 @@ export default function Finance() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const { appSettings } = useAdminSettings();
+  const canViewFinance = can('view', 'finance');
+  const [dateFrom, setDateFrom] = React.useState(() => monthStartKey());
+  const [dateTo, setDateTo] = React.useState(() => monthEndKey());
+  const [flowGrouping, setFlowGrouping] = React.useState<Grouping>('day');
+  const [operationFilter, setOperationFilter] = React.useState<'all' | 'income' | 'expense' | 'transfer'>('all');
+  const [operationCategoryFilter, setOperationCategoryFilter] = React.useState('all');
+  const [operationAccountFilter, setOperationAccountFilter] = React.useState('all');
+  const [operationStatusFilter, setOperationStatusFilter] = React.useState('all');
+  const [operationCounterpartyFilter, setOperationCounterpartyFilter] = React.useState('');
+  const [operationAmountFrom, setOperationAmountFrom] = React.useState('');
+  const [operationAmountTo, setOperationAmountTo] = React.useState('');
+  const [operationDialogOpen, setOperationDialogOpen] = React.useState(false);
+  const [editingOperation, setEditingOperation] = React.useState<FinanceOperation | null>(null);
+  const [operationForm, setOperationForm] = React.useState<OperationFormState>(() => createEmptyOperationForm());
+  const [operationFormError, setOperationFormError] = React.useState('');
+  const [accountDialogOpen, setAccountDialogOpen] = React.useState(false);
+  const [editingAccount, setEditingAccount] = React.useState<FinanceAccount | null>(null);
+  const [accountForm, setAccountForm] = React.useState<AccountFormState>(() => createEmptyAccountForm());
+  const [accountFormError, setAccountFormError] = React.useState('');
+  const [transferDialogOpen, setTransferDialogOpen] = React.useState(false);
+  const [transferForm, setTransferForm] = React.useState<TransferFormState>(() => createEmptyTransferForm());
+  const [transferFormError, setTransferFormError] = React.useState('');
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<'current' | CompanyExpenseStatus | 'all'>('current');
   const [categoryFilter, setCategoryFilter] = React.useState('all');
@@ -195,6 +643,7 @@ export default function Finance() {
   const [showFilters, setShowFilters] = React.useState(false);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editingExpense, setEditingExpense] = React.useState<CompanyExpense | null>(null);
+  const [historyExpense, setHistoryExpense] = React.useState<CompanyExpense | null>(null);
   const [form, setForm] = React.useState<ExpenseFormState>(() => createEmptyForm());
   const [formError, setFormError] = React.useState('');
 
@@ -202,11 +651,31 @@ export default function Finance() {
     queryKey: COMPANY_EXPENSE_KEYS.all,
     queryFn: companyExpensesService.getAll,
     staleTime: 1000 * 60 * 2,
+    enabled: canViewFinance,
   });
   const { data: leasingSummary } = useQuery({
     queryKey: LEASING_KEYS.summary,
     queryFn: leasingService.getSummary,
     staleTime: 1000 * 60 * 2,
+    enabled: canViewFinance,
+  });
+  const { data: payments = [] } = useQuery({
+    queryKey: ['payments'],
+    queryFn: paymentsService.getAll,
+    staleTime: 1000 * 60 * 2,
+    enabled: canViewFinance,
+  });
+  const { data: manualOperations = [] } = useQuery({
+    queryKey: ['finance', 'operations', dateFrom, dateTo],
+    queryFn: () => financeService.getOperations(dateFrom, dateTo),
+    staleTime: 1000 * 60,
+    enabled: canViewFinance,
+  });
+  const { data: financeAccounts = [] } = useQuery({
+    queryKey: ['finance', 'accounts'],
+    queryFn: financeService.getAccounts,
+    staleTime: 1000 * 60,
+    enabled: canViewFinance,
   });
 
   const createExpense = useMutation({
@@ -226,6 +695,36 @@ export default function Finance() {
   const deleteExpense = useMutation({
     mutationFn: (id: string) => companyExpensesService.delete(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: COMPANY_EXPENSE_KEYS.all }),
+  });
+
+  const createOperation = useMutation({
+    mutationFn: financeService.createOperation,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['finance', 'operations'] }),
+  });
+
+  const updateOperation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<FinanceOperation> }) =>
+      financeService.updateOperation(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['finance', 'operations'] }),
+  });
+
+  const createAccount = useMutation({
+    mutationFn: financeService.createAccount,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['finance', 'accounts'] }),
+  });
+
+  const updateAccount = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<FinanceAccount> & { forceArchive?: boolean } }) =>
+      financeService.updateAccount(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['finance', 'accounts'] }),
+  });
+
+  const transferAccount = useMutation({
+    mutationFn: financeService.transferBetweenAccounts,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['finance', 'accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['finance', 'operations'] });
+    },
   });
 
   const expenseFormFields = React.useMemo(
@@ -317,7 +816,86 @@ export default function Finance() {
   const expenseMonthlyLoad = Math.round(activeExpenses.reduce((sum, item) => sum + monthlyEquivalent(item), 0));
   const leasingMonthlyLoad = Math.round(leasingSummary?.currentMonthAmount || 0);
   const monthlyLoad = expenseMonthlyLoad + leasingMonthlyLoad;
-  const upcomingExpenses = activeExpenses.filter(isUpcoming).sort(sortExpenses);
+  const periodLeasingSchedule = React.useMemo(
+    () => (leasingSummary?.contracts || []).flatMap(contract => contract.schedule || []),
+    [leasingSummary],
+  );
+  const periodOperations = React.useMemo(() => [
+    ...manualOperations.filter(operation => operation.status !== 'archived').map(buildManualOperationRow),
+    ...buildPaymentOperations(payments, dateFrom, dateTo),
+    ...buildExpenseOperations(expenses, dateFrom, dateTo),
+    ...buildLeasingOperations(periodLeasingSchedule, dateFrom, dateTo),
+  ].sort((left, right) => right.date.localeCompare(left.date)), [dateFrom, dateTo, expenses, manualOperations, payments, periodLeasingSchedule]);
+  const incomeTotal = periodOperations
+    .filter(operation => operation.type === 'income')
+    .reduce((sum, operation) => sum + operation.amount, 0);
+  const expenseTotal = periodOperations
+    .filter(operation => operation.type === 'expense')
+    .reduce((sum, operation) => sum + operation.amount, 0);
+  const profitTotal = incomeTotal - expenseTotal;
+  const cashflowTotal = incomeTotal - expenseTotal;
+  const activeFinanceAccounts = React.useMemo(
+    () => financeAccounts.filter(account => account.status !== 'archived'),
+    [financeAccounts],
+  );
+  const accountsBalance: number | null = activeFinanceAccounts.length
+    ? activeFinanceAccounts.reduce((sum, account) => sum + Number(account.balance || 0), 0)
+    : null;
+  const flowData = React.useMemo(
+    () => buildFlowBuckets(periodOperations, dateFrom, dateTo, flowGrouping),
+    [dateFrom, dateTo, flowGrouping, periodOperations],
+  );
+  const expenseStructure = React.useMemo(() => {
+    const map = new Map(MANAGER_EXPENSE_CATEGORIES.map(category => [category, 0]));
+    periodOperations
+      .filter(operation => operation.type === 'expense')
+      .forEach(operation => {
+        const category = MANAGER_EXPENSE_CATEGORIES.includes(operation.category) ? operation.category : 'Прочее';
+        map.set(category, (map.get(category) || 0) + operation.amount);
+      });
+    return Array.from(map.entries())
+      .map(([category, amount]) => ({
+        category,
+        amount,
+        percent: expenseTotal > 0 ? Math.round((amount / expenseTotal) * 100) : 0,
+      }))
+      .filter(item => item.amount > 0 || expenseTotal === 0);
+  }, [expenseTotal, periodOperations]);
+  const operationCategories = React.useMemo(
+    () => Array.from(new Set(periodOperations.map(operation => operation.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')),
+    [periodOperations],
+  );
+  const operationAccounts = React.useMemo(
+    () => Array.from(new Set(periodOperations.map(operation => operation.account).filter(value => value && value !== '—'))).sort((a, b) => a.localeCompare(b, 'ru')),
+    [periodOperations],
+  );
+  const filteredOperations = React.useMemo(() => {
+    const min = operationAmountFrom ? Number(operationAmountFrom) : null;
+    const max = operationAmountTo ? Number(operationAmountTo) : null;
+    const counterparty = operationCounterpartyFilter.trim().toLowerCase();
+    return periodOperations.filter(operation => {
+      if (operationFilter !== 'all' && operation.type !== operationFilter) return false;
+      if (operationCategoryFilter !== 'all' && operation.category !== operationCategoryFilter) return false;
+      if (operationAccountFilter !== 'all' && operation.account !== operationAccountFilter) return false;
+      if (operationStatusFilter !== 'all' && operation.status !== operationStatusFilter) return false;
+      if (counterparty && !operation.counterparty.toLowerCase().includes(counterparty)) return false;
+      if (min != null && Number.isFinite(min) && operation.amount < min) return false;
+      if (max != null && Number.isFinite(max) && operation.amount > max) return false;
+      return true;
+    });
+  }, [
+    operationAccountFilter,
+    operationAmountFrom,
+    operationAmountTo,
+    operationCategoryFilter,
+    operationCounterpartyFilter,
+    operationFilter,
+    operationStatusFilter,
+    periodOperations,
+  ]);
+  const latestOperations = filteredOperations.slice(0, 12);
+  const upcomingExpenses = activeExpenses.filter(expense => isUpcoming(expense, 7)).sort(sortExpenses);
+  const overdueExpenses = activeExpenses.filter(isExpenseOverdue).sort(sortExpenses);
   const pausedCount = expenses.filter(item => item.status === 'paused').length;
   const archivedCount = expenses.filter(item => item.status === 'archived').length;
   const activeFilterCount = [
@@ -328,8 +906,10 @@ export default function Finance() {
   ].filter(Boolean).length;
   const canManageFinance = can('create', 'finance') || can('edit', 'finance');
   const isSaving = createExpense.isPending || updateExpense.isPending;
+  const isAccountSaving = createAccount.isPending || updateAccount.isPending;
+  const isTransferSaving = transferAccount.isPending;
 
-  if (!can('view', 'finance')) {
+  if (!canViewFinance) {
     return <Navigate to="/" replace />;
   }
 
@@ -443,35 +1023,639 @@ export default function Finance() {
     await deleteExpense.mutateAsync(expense.id);
   };
 
+  const setOperationField = <K extends keyof OperationFormState>(key: K, value: OperationFormState[K]) => {
+    setOperationForm(current => ({ ...current, [key]: value }));
+    setOperationFormError('');
+  };
+
+  const openCreateOperationDialog = () => {
+    setEditingOperation(null);
+    setOperationForm(createEmptyOperationForm(dateFrom || dateKey(new Date())));
+    setOperationFormError('');
+    setOperationDialogOpen(true);
+  };
+
+  const openEditOperationDialog = (operation: FinanceOperation) => {
+    setEditingOperation(operation);
+    setOperationForm({
+      type: operation.type,
+      date: operation.date,
+      amount: String(operation.amount || ''),
+      category: operation.category || '',
+      description: operation.description || '',
+      counterparty: operation.counterparty || '',
+      account: operation.account || '',
+      accountFrom: operation.accountFrom || '',
+      accountTo: operation.accountTo || '',
+      relatedEntityType: operation.relatedEntityType || '',
+      relatedEntityId: operation.relatedEntityId || '',
+      relatedEntityLabel: operation.relatedEntityLabel || '',
+      comment: operation.comment || '',
+    });
+    setOperationFormError('');
+    setOperationDialogOpen(true);
+  };
+
+  const buildOperationPayload = () => {
+    const amount = Number(operationForm.amount);
+    if (!operationForm.date || Number.isNaN(new Date(`${operationForm.date}T00:00:00`).getTime())) {
+      setOperationFormError('Укажите корректную дату.');
+      return null;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setOperationFormError('Сумма операции должна быть больше нуля.');
+      return null;
+    }
+    if (!operationForm.category.trim()) {
+      setOperationFormError('Укажите категорию операции.');
+      return null;
+    }
+    if (operationForm.type === 'transfer') {
+      if (!operationForm.accountFrom.trim() || !operationForm.accountTo.trim()) {
+        setOperationFormError('Для перевода укажите счёт-источник и счёт-получатель.');
+        return null;
+      }
+      if (operationForm.accountFrom.trim().toLowerCase() === operationForm.accountTo.trim().toLowerCase()) {
+        setOperationFormError('Нельзя перевести деньги на тот же счёт.');
+        return null;
+      }
+    }
+    return {
+      type: operationForm.type,
+      date: operationForm.date,
+      amount,
+      category: operationForm.category.trim(),
+      description: operationForm.description.trim() || undefined,
+      counterparty: operationForm.counterparty.trim() || undefined,
+      account: operationForm.type === 'transfer' ? undefined : operationForm.account.trim() || undefined,
+      accountFrom: operationForm.type === 'transfer' ? operationForm.accountFrom.trim() : undefined,
+      accountTo: operationForm.type === 'transfer' ? operationForm.accountTo.trim() : undefined,
+      relatedEntityType: operationForm.relatedEntityType || undefined,
+      relatedEntityId: operationForm.relatedEntityId.trim() || undefined,
+      relatedEntityLabel: operationForm.relatedEntityLabel.trim() || undefined,
+      status: editingOperation?.status || 'active',
+      comment: operationForm.comment.trim() || undefined,
+    };
+  };
+
+  const handleOperationSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const payload = buildOperationPayload();
+    if (!payload) return;
+    try {
+      if (editingOperation) {
+        await updateOperation.mutateAsync({ id: editingOperation.id, data: payload });
+      } else {
+        await createOperation.mutateAsync(payload);
+      }
+      setOperationDialogOpen(false);
+      setEditingOperation(null);
+      setOperationForm(createEmptyOperationForm(dateFrom || dateKey(new Date())));
+    } catch (error) {
+      setOperationFormError(error instanceof Error ? error.message : 'Не удалось сохранить операцию.');
+    }
+  };
+
+  const archiveOperation = async (operation: FinanceOperation) => {
+    const confirmed = window.confirm(`Архивировать операцию «${operation.description || operation.category}»?`);
+    if (!confirmed) return;
+    await updateOperation.mutateAsync({ id: operation.id, data: { status: 'archived' } });
+  };
+
+  const setAccountField = <K extends keyof AccountFormState>(key: K, value: AccountFormState[K]) => {
+    setAccountForm(current => ({ ...current, [key]: value }));
+    setAccountFormError('');
+  };
+
+  const setTransferField = <K extends keyof TransferFormState>(key: K, value: TransferFormState[K]) => {
+    setTransferForm(current => ({ ...current, [key]: value }));
+    setTransferFormError('');
+  };
+
+  const openCreateAccountDialog = () => {
+    setEditingAccount(null);
+    setAccountForm(createEmptyAccountForm(dateKey(new Date())));
+    setAccountFormError('');
+    setAccountDialogOpen(true);
+  };
+
+  const openEditAccountDialog = (account: FinanceAccount) => {
+    setEditingAccount(account);
+    setAccountForm({
+      name: account.name || '',
+      type: account.type || 'bank_account',
+      currency: account.currency || 'RUB',
+      balance: String(account.balance ?? ''),
+      actualAt: account.actualAt || dateKey(new Date()),
+      comment: account.comment || '',
+      status: account.status || 'active',
+    });
+    setAccountFormError('');
+    setAccountDialogOpen(true);
+  };
+
+  const buildAccountPayload = () => {
+    const balance = Number(accountForm.balance);
+    if (!accountForm.name.trim()) {
+      setAccountFormError('Укажите название счёта или кассы.');
+      return null;
+    }
+    if (!Number.isFinite(balance)) {
+      setAccountFormError('Остаток должен быть числом.');
+      return null;
+    }
+    if (!accountForm.actualAt || Number.isNaN(new Date(`${accountForm.actualAt}T00:00:00`).getTime())) {
+      setAccountFormError('Укажите корректную дату актуальности.');
+      return null;
+    }
+    return {
+      name: accountForm.name.trim(),
+      type: accountForm.type,
+      currency: (accountForm.currency.trim() || 'RUB').toUpperCase(),
+      balance,
+      actualAt: accountForm.actualAt,
+      comment: accountForm.comment.trim() || undefined,
+      status: accountForm.status,
+    };
+  };
+
+  const handleAccountSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const payload = buildAccountPayload();
+    if (!payload) return;
+    try {
+      if (editingAccount) {
+        await updateAccount.mutateAsync({ id: editingAccount.id, data: payload });
+      } else {
+        await createAccount.mutateAsync(payload);
+      }
+      setAccountDialogOpen(false);
+      setEditingAccount(null);
+      setAccountForm(createEmptyAccountForm(dateKey(new Date())));
+    } catch (error) {
+      setAccountFormError(error instanceof Error ? error.message : 'Не удалось сохранить счёт.');
+    }
+  };
+
+  const openTransferDialog = (account?: FinanceAccount) => {
+    setTransferForm({
+      ...createEmptyTransferForm(dateKey(new Date())),
+      accountFrom: account?.id || '',
+    });
+    setTransferFormError('');
+    setTransferDialogOpen(true);
+  };
+
+  const handleTransferSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const amount = Number(transferForm.amount);
+    if (!transferForm.accountFrom || !transferForm.accountTo) {
+      setTransferFormError('Выберите счёт-источник и счёт-получатель.');
+      return;
+    }
+    if (transferForm.accountFrom === transferForm.accountTo) {
+      setTransferFormError('Нельзя переводить на тот же счёт.');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTransferFormError('Сумма перевода должна быть больше нуля.');
+      return;
+    }
+    if (!transferForm.date || Number.isNaN(new Date(`${transferForm.date}T00:00:00`).getTime())) {
+      setTransferFormError('Укажите корректную дату перевода.');
+      return;
+    }
+    try {
+      await transferAccount.mutateAsync({
+        accountFrom: transferForm.accountFrom,
+        accountTo: transferForm.accountTo,
+        amount,
+        date: transferForm.date,
+        comment: transferForm.comment.trim() || undefined,
+      });
+      setTransferDialogOpen(false);
+      setTransferForm(createEmptyTransferForm(dateKey(new Date())));
+    } catch (error) {
+      setTransferFormError(error instanceof Error ? error.message : 'Не удалось выполнить перевод.');
+    }
+  };
+
+  const archiveAccount = async (account: FinanceAccount) => {
+    const confirmed = window.confirm(`Архивировать счёт «${account.name}»? Проверьте активные связи перед архивированием.`);
+    if (!confirmed) return;
+    await updateAccount.mutateAsync({ id: account.id, data: { status: 'archived', forceArchive: true } });
+  };
+
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Финансы</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Постоянные расходы компании: аренда, зарплата, налоги, лизинг и другие обязательства.
+            Контроль финансовых потоков компании
           </p>
         </div>
-        {can('create', 'finance') && (
-          <Button onClick={openCreateDialog} className="h-10 rounded-xl px-4">
-            <Plus className="h-4 w-4" />
-            Добавить расход
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+            className="h-10 w-[150px]"
+            aria-label="Начало периода"
+          />
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+            className="h-10 w-[150px]"
+            aria-label="Конец периода"
+          />
+          <Button variant="secondary" onClick={() => exportOperationsCsv(periodOperations, dateFrom, dateTo)}>
+            <Download className="h-4 w-4" />
+            Экспорт
           </Button>
-        )}
+          <Button onClick={openCreateOperationDialog} disabled={!canManageFinance}>
+            <Plus className="h-4 w-4" />
+            Добавить операцию
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="overview" className="gap-4">
         <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
           <TabsTrigger value="overview">Обзор</TabsTrigger>
+          <TabsTrigger value="operations">Операции</TabsTrigger>
+          <TabsTrigger value="expenses">Постоянные расходы</TabsTrigger>
           <TabsTrigger value="receivables">Дебиторка</TabsTrigger>
           <TabsTrigger value="leasing">Лизинг</TabsTrigger>
+          <TabsTrigger value="accounts">Счета и кассы</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <FinanceKpiCard
+              title="Доходы"
+              value={incomeTotal > 0 ? formatCurrency(incomeTotal) : '—'}
+              hint="Фактические входящие оплаты"
+              icon={ArrowDownRight}
+              tone="success"
+            />
+            <FinanceKpiCard
+              title="Расходы"
+              value={expenseTotal > 0 ? formatCurrency(expenseTotal) : '—'}
+              hint="Постоянные расходы и лизинг"
+              icon={ArrowUpRight}
+              tone="danger"
+            />
+            <FinanceKpiCard
+              title="Прибыль"
+              value={periodOperations.length > 0 ? formatCurrency(profitTotal) : '—'}
+              icon={TrendingUp}
+              tone={profitTotal >= 0 ? 'success' : 'danger'}
+            />
+            <FinanceKpiCard
+              title="Денежный поток"
+              value={periodOperations.length > 0 ? formatCurrency(cashflowTotal) : '—'}
+              hint="Факт: входящие минус исходящие"
+              icon={WalletCards}
+              tone={cashflowTotal >= 0 ? 'success' : 'warning'}
+            />
+            <FinanceKpiCard
+              title="Остаток на счетах"
+              value={accountsBalance == null ? '—' : formatCurrency(accountsBalance)}
+              hint="Нет данных по счетам"
+              icon={Banknote}
+            />
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
+            <Card>
+              <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle>Динамика денежных потоков</CardTitle>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Доходы, расходы и прибыль за выбранный период.</p>
+                </div>
+                <Select value={flowGrouping} onValueChange={(value) => setFlowGrouping(value as Grouping)}>
+                  <SelectTrigger className="w-full sm:w-[150px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="day">По дням</SelectItem>
+                    <SelectItem value="week">По неделям</SelectItem>
+                    <SelectItem value="month">По месяцам</SelectItem>
+                  </SelectContent>
+                </Select>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={flowData} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="financeIncome" x1="0" x2="0" y1="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.28} />
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id="financeExpenses" x1="0" x2="0" y1="0" y2="1">
+                          <stop offset="5%" stopColor="#ef4444" stopOpacity={0.22} />
+                          <stop offset="95%" stopColor="#ef4444" stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.28)" />
+                      <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                      <YAxis tickFormatter={(value) => formatCurrency(Number(value)).replace(',00', '')} tickLine={false} axisLine={false} fontSize={12} width={88} />
+                      <Tooltip formatter={(value, name) => [formatCurrency(Number(value)), name === 'income' ? 'Доходы' : name === 'expenses' ? 'Расходы' : 'Прибыль']} />
+                      <Area type="monotone" dataKey="income" stroke="#10b981" fill="url(#financeIncome)" strokeWidth={2} name="income" />
+                      <Area type="monotone" dataKey="expenses" stroke="#ef4444" fill="url(#financeExpenses)" strokeWidth={2} name="expenses" />
+                      <Area type="monotone" dataKey="profit" stroke="#2563eb" fill="transparent" strokeWidth={2} name="profit" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Структура расходов</CardTitle>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Категории управленческих расходов за период.</p>
+              </CardHeader>
+              <CardContent>
+                {expenseTotal <= 0 ? (
+                  <div className="rounded-lg border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    Расходы за период не найдены.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {expenseStructure.map(item => (
+                      <div key={item.category}>
+                        <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
+                          <span className="font-medium text-gray-700 dark:text-gray-200">{item.category}</span>
+                          <span className="text-gray-500 dark:text-gray-400">{formatCurrency(item.amount)} · {item.percent}%</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                          <div className="h-full rounded-full bg-blue-600" style={{ width: `${Math.max(3, item.percent)}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.8fr)]">
+            <Card>
+              <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle>Последние операции</CardTitle>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Лента из оплат, постоянных расходов и лизинга.</p>
+                </div>
+                <Select value={operationFilter} onValueChange={(value) => setOperationFilter(value as typeof operationFilter)}>
+                  <SelectTrigger className="w-full sm:w-[150px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все</SelectItem>
+                    <SelectItem value="income">Доходы</SelectItem>
+                    <SelectItem value="expense">Расходы</SelectItem>
+                    <SelectItem value="transfer">Переводы</SelectItem>
+                  </SelectContent>
+                </Select>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Дата</TableHead>
+                        <TableHead>Тип</TableHead>
+                        <TableHead>Категория</TableHead>
+                        <TableHead>Описание</TableHead>
+                        <TableHead>Контрагент</TableHead>
+                        <TableHead className="text-right">Сумма</TableHead>
+                        <TableHead>Действия</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {latestOperations.map(operation => (
+                        <TableRow key={operation.id}>
+                          <TableCell>{formatDate(operation.date)}</TableCell>
+                          <TableCell>
+                            <Badge variant={operation.type === 'income' ? 'success' : operation.type === 'expense' ? 'danger' : 'default'}>
+                              {operation.type === 'income' ? 'Доход' : operation.type === 'expense' ? 'Расход' : 'Перевод'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{operation.category}</TableCell>
+                          <TableCell>{operation.description}</TableCell>
+                          <TableCell>{operation.counterparty || '—'}</TableCell>
+                          <TableCell className={`text-right font-semibold ${operation.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : operation.type === 'expense' ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                            {operation.type === 'income' ? '+' : operation.type === 'expense' ? '-' : ''}
+                            {formatCurrency(operation.amount)}
+                          </TableCell>
+                          <TableCell className="text-sm text-gray-400 dark:text-gray-500">—</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {latestOperations.length === 0 && (
+                  <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">Операции за период не найдены.</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Счета и кассы</CardTitle>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Остатки появятся после добавления модели счетов.</p>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-lg border border-dashed border-gray-300 px-4 py-10 text-center dark:border-gray-700">
+                  <Banknote className="mx-auto h-8 w-8 text-gray-400 dark:text-gray-500" />
+                  <p className="mt-3 text-sm font-medium text-gray-900 dark:text-white">Нет данных по счетам и кассам</p>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Банковские номера и остатки не подставляются искусственно.</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="operations" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle>Операции</CardTitle>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Ручные операции, оплаты клиентов, постоянные расходы и лизинговые платежи за выбранный период.
+                  </p>
+                </div>
+                {canManageFinance && (
+                  <Button onClick={openCreateOperationDialog}>
+                    <Plus className="h-4 w-4" />
+                    Добавить операцию
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                <Select value={operationFilter} onValueChange={(value) => setOperationFilter(value as typeof operationFilter)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все типы</SelectItem>
+                    <SelectItem value="income">Доходы</SelectItem>
+                    <SelectItem value="expense">Расходы</SelectItem>
+                    <SelectItem value="transfer">Переводы</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={operationCategoryFilter} onValueChange={setOperationCategoryFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Категория" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все категории</SelectItem>
+                    {operationCategories.map(category => (
+                      <SelectItem key={category} value={category}>{category}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={operationAccountFilter} onValueChange={setOperationAccountFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Счёт" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все счета</SelectItem>
+                    {operationAccounts.map(account => (
+                      <SelectItem key={account} value={account}>{account}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={operationStatusFilter} onValueChange={setOperationStatusFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Статус" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все статусы</SelectItem>
+                    {Array.from(new Set(periodOperations.map(operation => operation.status))).map(status => (
+                      <SelectItem key={status} value={status}>{status}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  value={operationCounterpartyFilter}
+                  onChange={(event) => setOperationCounterpartyFilter(event.target.value)}
+                  placeholder="Контрагент"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    value={operationAmountFrom}
+                    onChange={(event) => setOperationAmountFrom(event.target.value)}
+                    type="number"
+                    min="0"
+                    placeholder="От"
+                  />
+                  <Input
+                    value={operationAmountTo}
+                    onChange={(event) => setOperationAmountTo(event.target.value)}
+                    type="number"
+                    min="0"
+                    placeholder="До"
+                  />
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Дата</TableHead>
+                      <TableHead>Тип</TableHead>
+                      <TableHead>Категория</TableHead>
+                      <TableHead>Описание</TableHead>
+                      <TableHead>Контрагент</TableHead>
+                      <TableHead>Счёт/касса</TableHead>
+                      <TableHead>Связь</TableHead>
+                      <TableHead>Статус</TableHead>
+                      <TableHead className="text-right">Сумма</TableHead>
+                      <TableHead>Действия</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredOperations.map(operation => (
+                      <TableRow key={`operations-${operation.id}`}>
+                        <TableCell>{formatDate(operation.date)}</TableCell>
+                        <TableCell>
+                          <Badge variant={operation.type === 'income' ? 'success' : operation.type === 'expense' ? 'danger' : 'default'}>
+                            {OPERATION_TYPE_LABELS[operation.type]}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{operation.category}</TableCell>
+                        <TableCell>{operation.description}</TableCell>
+                        <TableCell>{operation.counterparty || '—'}</TableCell>
+                        <TableCell>{operation.account || '—'}</TableCell>
+                        <TableCell>{operation.relatedEntity || '—'}</TableCell>
+                        <TableCell>{operation.status || '—'}</TableCell>
+                        <TableCell className={`text-right font-semibold ${operation.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : operation.type === 'expense' ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                          {operation.type === 'income' ? '+' : operation.type === 'expense' ? '-' : ''}
+                          {formatCurrency(operation.amount)}
+                        </TableCell>
+                        <TableCell>
+                          {operation.manual && canManageFinance ? (
+                            <div className="flex gap-2">
+                              <Button size="icon" variant="outline" title="Редактировать" onClick={() => openEditOperationDialog(operation.manual!)}>
+                                <Edit3 className="h-4 w-4" />
+                              </Button>
+                              <Button size="icon" variant="outline" title="Архивировать" onClick={() => void archiveOperation(operation.manual!)}>
+                                <Archive className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {filteredOperations.length === 0 && (
+                <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">Операции за период не найдены.</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="expenses" className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Постоянные расходы</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Аренда, налоги, обслуживание, лизинг и другие обязательства.</p>
+            </div>
+            {can('create', 'finance') && (
+              <Button onClick={openCreateDialog} className="h-10 rounded-xl px-4">
+                <Plus className="h-4 w-4" />
+                Добавить расход
+              </Button>
+            )}
+          </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Месячная нагрузка</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Активные расходы</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
+                <CheckCircle2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{activeExpenses.length}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Сумма в месяц</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-3">
@@ -489,20 +1673,7 @@ export default function Finance() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Активные расходы</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
-                <CheckCircle2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{activeExpenses.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Ближайшие оплаты</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Ближайшие 7 дней</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-3">
@@ -515,15 +1686,31 @@ export default function Finance() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Пауза / архив</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Просрочено</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+                <ReceiptText className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{overdueExpenses.length}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">На паузе</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
                 <PauseCircle className="h-5 w-5 text-gray-600 dark:text-gray-300" />
               </div>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{pausedCount} / {archivedCount}</p>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white">{pausedCount}</p>
             </div>
+            {archivedCount > 0 && (
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Архив: {archivedCount}</p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -547,86 +1734,96 @@ export default function Finance() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Расход</TableHead>
+                  <TableHead>Название расхода</TableHead>
+                  <TableHead>Категория</TableHead>
                   <TableHead>Сумма</TableHead>
-                  <TableHead>Период</TableHead>
-                  <TableHead>Оплата</TableHead>
-                  <TableHead>Контрагент</TableHead>
+                  <TableHead>Периодичность</TableHead>
+                  <TableHead>День оплаты</TableHead>
+                  <TableHead>Ближайшая дата оплаты</TableHead>
+                  <TableHead>Источник/счёт</TableHead>
                   <TableHead>Статус</TableHead>
-                  <TableHead className="w-[180px]">Действия</TableHead>
+                  <TableHead className="w-[220px]">Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredExpenses.map((expense) => (
-                  <TableRow key={expense.id} className={expense.status === 'archived' ? 'opacity-60' : ''}>
-                    <TableCell>
-                      <div>
+                {filteredExpenses.map((expense) => {
+                  const displayStatus = getExpenseDisplayStatus(expense);
+                  return (
+                    <TableRow key={expense.id} className={expense.status === 'archived' ? 'opacity-60' : ''}>
+                      <TableCell>
                         <p className="font-medium text-gray-900 dark:text-white">{expense.name}</p>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                          {getAdminListLabel(appSettings, 'finance_expense_categories', expense.category)}
-                        </p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
+                        {expense.counterparty && (
+                          <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{expense.counterparty}</p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-700 dark:text-gray-300">
+                        {getAdminListLabel(appSettings, 'finance_expense_categories', expense.category)}
+                      </TableCell>
+                      <TableCell>
                         <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(expense.amount)}</p>
                         {expense.frequency !== 'monthly' && (
                           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             {formatCurrency(Math.round(monthlyEquivalent(expense)))} / мес.
                           </p>
                         )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-700 dark:text-gray-300">
-                      {getAdminListLabel(appSettings, 'finance_expense_frequency', expense.frequency) || FREQUENCY_LABELS[expense.frequency]}
-                    </TableCell>
-                    <TableCell>
-                      <div className="text-sm text-gray-700 dark:text-gray-300">
-                        <p>{getNextPaymentLabel(expense)}</p>
-                        {isUpcoming(expense) && <p className="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400">скоро</p>}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="max-w-[180px]">
-                        <p className="truncate text-sm text-gray-700 dark:text-gray-300">{expense.counterparty || '—'}</p>
-                        {expense.account && <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{expense.account}</p>}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {getStatusBadge(expense.status, getAdminListLabel(appSettings, 'finance_expense_statuses', expense.status) || STATUS_LABELS[expense.status])}
-                    </TableCell>
-                    <TableCell>
-                      {canManageFinance ? (
-                        <div className="flex flex-wrap gap-2">
-                          <Button size="icon" variant="outline" title="Редактировать" onClick={() => openEditDialog(expense)}>
-                            <Edit3 className="h-4 w-4" />
-                          </Button>
-                          {expense.status === 'active' ? (
-                            <Button size="icon" variant="outline" title="Поставить на паузу" onClick={() => void updateStatus(expense, 'paused')}>
-                              <PauseCircle className="h-4 w-4" />
-                            </Button>
-                          ) : (
-                            <Button size="icon" variant="outline" title="Сделать активным" onClick={() => void updateStatus(expense, 'active')}>
-                              <CheckCircle2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {expense.status !== 'archived' && (
-                            <Button size="icon" variant="outline" title="В архив" onClick={() => void updateStatus(expense, 'archived')}>
-                              <Archive className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {can('delete', 'finance') && (
-                            <Button size="icon" variant="outline" title="Удалить" onClick={() => void handleDelete(expense)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-700 dark:text-gray-300">
+                        {getAdminListLabel(appSettings, 'finance_expense_frequency', expense.frequency) || FREQUENCY_LABELS[expense.frequency]}
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-700 dark:text-gray-300">
+                        {getDayLabel(expense.paymentDay)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm text-gray-700 dark:text-gray-300">
+                          <p>{getNextPaymentLabel(expense)}</p>
+                          {displayStatus.overdue && <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">просрочено</p>}
+                          {!displayStatus.overdue && isUpcoming(expense, 7) && <p className="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400">в ближайшие 7 дней</p>}
                         </div>
-                      ) : (
-                        <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell>
+                        <p className="max-w-[160px] truncate text-sm text-gray-700 dark:text-gray-300">{expense.account || '—'}</p>
+                      </TableCell>
+                      <TableCell>
+                        {displayStatus.overdue
+                          ? <Badge variant="error">{displayStatus.label}</Badge>
+                          : getStatusBadge(displayStatus.status, getAdminListLabel(appSettings, 'finance_expense_statuses', expense.status) || displayStatus.label)}
+                      </TableCell>
+                      <TableCell>
+                        {canManageFinance ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button size="icon" variant="outline" title="Редактировать" aria-label="Редактировать расход" onClick={() => openEditDialog(expense)}>
+                              <Edit3 className="h-4 w-4" />
+                            </Button>
+                            {expense.status === 'active' ? (
+                              <Button size="icon" variant="outline" title="Поставить на паузу" aria-label="Поставить расход на паузу" onClick={() => void updateStatus(expense, 'paused')}>
+                                <PauseCircle className="h-4 w-4" />
+                              </Button>
+                            ) : (
+                              <Button size="icon" variant="outline" title="Возобновить" aria-label="Возобновить расход" onClick={() => void updateStatus(expense, 'active')}>
+                                <CheckCircle2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {expense.status !== 'archived' && (
+                              <Button size="icon" variant="outline" title="Архивировать" aria-label="Архивировать расход" onClick={() => void updateStatus(expense, 'archived')}>
+                                <Archive className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button size="icon" variant="outline" title="Открыть историю" aria-label="Открыть историю расхода" onClick={() => setHistoryExpense(expense)}>
+                              <History className="h-4 w-4" />
+                            </Button>
+                            {can('delete', 'finance') && (
+                              <Button size="icon" variant="outline" title="Удалить" aria-label="Удалить расход" onClick={() => void handleDelete(expense)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -658,10 +1855,18 @@ export default function Finance() {
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-gray-900 dark:text-white">Ближайшие платежи</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Активные расходы на 14 дней вперёд</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Активные расходы на 7 дней вперёд</p>
             </div>
             <Badge variant="warning">{upcomingExpenses.length}</Badge>
           </div>
+          {overdueExpenses.length > 0 && (
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-800 dark:bg-red-900/20">
+              <p className="text-sm font-medium text-red-700 dark:text-red-300">Просрочено: {overdueExpenses.length}</p>
+              <p className="mt-1 text-xs text-red-600 dark:text-red-300">
+                Проверьте даты оплаты по активным постоянным расходам.
+              </p>
+            </div>
+          )}
           {upcomingExpenses.length === 0 ? (
             <div className="rounded-lg border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
               Срочных оплат по постоянным расходам нет.
@@ -693,6 +1898,117 @@ export default function Finance() {
 
         <TabsContent value="receivables">
           <ReceivablesPanel canManageFinance={canManageFinance} />
+        </TabsContent>
+
+        <TabsContent value="accounts">
+          <Card>
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle>Счета и кассы</CardTitle>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Реальные остатки по расчётным счетам, кассам, картам и депозитам. Банковские номера не подставляются искусственно.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={() => openTransferDialog()} disabled={!canManageFinance || activeFinanceAccounts.length < 2}>
+                  <ArrowUpRight className="h-4 w-4" />
+                  Перевод между счетами
+                </Button>
+                <Button onClick={openCreateAccountDialog} disabled={!canManageFinance}>
+                  <Plus className="h-4 w-4" />
+                  Добавить счёт
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {financeAccounts.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-300 px-4 py-12 text-center dark:border-gray-700">
+                  <Banknote className="mx-auto h-9 w-9 text-gray-400 dark:text-gray-500" />
+                  <p className="mt-3 text-sm font-medium text-gray-900 dark:text-white">Счета и кассы пока не заведены</p>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Добавьте расчётный счёт, кассу, карту или депозит. Остатки не будут придуманы автоматически.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <KpiCard
+                      title="Активных счетов"
+                      value={String(activeFinanceAccounts.length)}
+                      hint={`Всего заведено: ${financeAccounts.length}`}
+                      icon={WalletCards}
+                    />
+                    <KpiCard
+                      title="Остаток"
+                      value={formatCurrency(accountsBalance || 0)}
+                      hint="Сумма по активным счетам"
+                      icon={Banknote}
+                      tone="success"
+                    />
+                    <KpiCard
+                      title="Архив"
+                      value={String(financeAccounts.filter(account => account.status === 'archived').length)}
+                      hint="Счета не входят в остаток"
+                      icon={Archive}
+                    />
+                  </div>
+                  <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Название</TableHead>
+                          <TableHead>Тип</TableHead>
+                          <TableHead>Валюта</TableHead>
+                          <TableHead>Остаток</TableHead>
+                          <TableHead>Дата актуальности</TableHead>
+                          <TableHead>Комментарий</TableHead>
+                          <TableHead>Статус</TableHead>
+                          <TableHead className="text-right">Действия</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {financeAccounts.map(account => (
+                          <TableRow key={account.id}>
+                            <TableCell className="font-medium text-gray-900 dark:text-white">{account.name}</TableCell>
+                            <TableCell>{ACCOUNT_TYPE_LABELS[account.type] || 'Прочее'}</TableCell>
+                            <TableCell>{account.currency || 'RUB'}</TableCell>
+                            <TableCell className="font-semibold">{formatCurrency(account.balance || 0)}</TableCell>
+                            <TableCell>{formatDate(account.actualAt)}</TableCell>
+                            <TableCell className="max-w-[260px] truncate text-gray-500 dark:text-gray-400">
+                              {account.comment || '—'}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={account.status === 'active' ? 'success' : 'default'}>
+                                {ACCOUNT_STATUS_LABELS[account.status] || account.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" variant="secondary" onClick={() => openEditAccountDialog(account)} disabled={!canManageFinance}>
+                                  <Edit3 className="h-4 w-4" />
+                                  Изменить остаток
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => openTransferDialog(account)} disabled={!canManageFinance || account.status !== 'active' || activeFinanceAccounts.length < 2}>
+                                  <ArrowUpRight className="h-4 w-4" />
+                                  Перевод
+                                </Button>
+                                {account.status !== 'archived' && (
+                                  <Button size="sm" variant="secondary" onClick={() => archiveAccount(account)} disabled={!canManageFinance}>
+                                    <Archive className="h-4 w-4" />
+                                    Архивировать
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
@@ -738,6 +2054,356 @@ export default function Finance() {
           </FilterField>
         </div>
       </FilterDialog>
+
+      <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingAccount ? 'Изменить счёт или кассу' : 'Добавить счёт или кассу'}</DialogTitle>
+            <DialogDescription>
+              Укажите фактический остаток и дату актуальности. Реальные банковские реквизиты здесь не требуются.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={handleAccountSubmit}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Название</label>
+                <Input value={accountForm.name} onChange={(event) => setAccountField('name', event.target.value)} placeholder="Расчётный счёт, касса офиса..." />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Тип</label>
+                <Select value={accountForm.type} onValueChange={(value) => setAccountField('type', value as FinanceAccountType)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Валюта</label>
+                <Input value={accountForm.currency} onChange={(event) => setAccountField('currency', event.target.value)} placeholder="RUB" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Остаток</label>
+                <Input type="number" value={accountForm.balance} onChange={(event) => setAccountField('balance', event.target.value)} placeholder="0" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Дата актуальности</label>
+                <Input type="date" value={accountForm.actualAt} onChange={(event) => setAccountField('actualAt', event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Статус</label>
+                <Select value={accountForm.status} onValueChange={(value) => setAccountField('status', value as FinanceAccountStatus)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ACCOUNT_STATUS_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Комментарий</label>
+                <Textarea value={accountForm.comment} onChange={(event) => setAccountField('comment', event.target.value)} rows={3} />
+              </div>
+            </div>
+            {accountFormError && <p className="text-sm text-red-600 dark:text-red-400">{accountFormError}</p>}
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setAccountDialogOpen(false)}>Отмена</Button>
+              <Button type="submit" disabled={isAccountSaving}>{isAccountSaving ? 'Сохранение...' : 'Сохранить'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={transferDialogOpen} onOpenChange={setTransferDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Перевод между счетами</DialogTitle>
+            <DialogDescription>
+              Перевод меняет остатки двух активных счетов и добавляет операцию типа «Перевод».
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={handleTransferSubmit}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Счёт-источник</label>
+                <Select value={transferForm.accountFrom} onValueChange={(value) => setTransferField('accountFrom', value)}>
+                  <SelectTrigger><SelectValue placeholder="Выберите счёт" /></SelectTrigger>
+                  <SelectContent>
+                    {activeFinanceAccounts.map(account => (
+                      <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Счёт-получатель</label>
+                <Select value={transferForm.accountTo} onValueChange={(value) => setTransferField('accountTo', value)}>
+                  <SelectTrigger><SelectValue placeholder="Выберите счёт" /></SelectTrigger>
+                  <SelectContent>
+                    {activeFinanceAccounts.map(account => (
+                      <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Сумма</label>
+                <Input type="number" value={transferForm.amount} onChange={(event) => setTransferField('amount', event.target.value)} placeholder="0" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Дата</label>
+                <Input type="date" value={transferForm.date} onChange={(event) => setTransferField('date', event.target.value)} />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Комментарий</label>
+                <Textarea value={transferForm.comment} onChange={(event) => setTransferField('comment', event.target.value)} rows={3} />
+              </div>
+            </div>
+            {transferFormError && <p className="text-sm text-red-600 dark:text-red-400">{transferFormError}</p>}
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setTransferDialogOpen(false)}>Отмена</Button>
+              <Button type="submit" disabled={isTransferSaving}>{isTransferSaving ? 'Перевод...' : 'Выполнить перевод'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(historyExpense)} onOpenChange={(open) => !open && setHistoryExpense(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>История расхода</DialogTitle>
+            <DialogDescription>
+              Служебная история записи постоянного расхода без создания отдельной коллекции.
+            </DialogDescription>
+          </DialogHeader>
+          {historyExpense && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                <p className="text-sm text-gray-500 dark:text-gray-400">Расход</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{historyExpense.name}</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Категория</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {getAdminListLabel(appSettings, 'finance_expense_categories', historyExpense.category)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Сумма</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{formatCurrency(historyExpense.amount)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Статус</p>
+                    <div className="mt-1">
+                      {getStatusBadge(historyExpense.status, STATUS_LABELS[historyExpense.status])}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Следующая оплата</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{getNextPaymentLabel(historyExpense)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">События</h3>
+                <div className="space-y-2">
+                  <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">Создан расход</p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {historyExpense.createdAt ? formatDate(historyExpense.createdAt) : '—'}
+                      {historyExpense.createdBy ? ` · ${historyExpense.createdBy}` : ''}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">Последнее изменение</p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {historyExpense.updatedAt ? formatDate(historyExpense.updatedAt) : '—'}
+                      {historyExpense.updatedBy ? ` · ${historyExpense.updatedBy}` : ''}
+                    </p>
+                  </div>
+                  {historyExpense.comment && (
+                    <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">Комментарий</p>
+                      <p className="mt-1 whitespace-pre-line text-sm text-gray-600 dark:text-gray-300">{historyExpense.comment}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setHistoryExpense(null)}>
+              Закрыть
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={operationDialogOpen} onOpenChange={setOperationDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{editingOperation ? 'Редактировать операцию' : 'Добавить операцию'}</DialogTitle>
+            <DialogDescription>
+              Ручная операция попадёт в финансовую ленту и управленческие KPI выбранного периода.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={handleOperationSubmit}>
+            {operationFormError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                {operationFormError}
+              </div>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <FieldLabel required>Тип</FieldLabel>
+                <Select value={operationForm.type} onValueChange={(value) => setOperationField('type', value as FinanceOperationType)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="income">Доход</SelectItem>
+                    <SelectItem value="expense">Расход</SelectItem>
+                    <SelectItem value="transfer">Перевод</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <FieldLabel required>Дата</FieldLabel>
+                <Input
+                  type="date"
+                  value={operationForm.date}
+                  onChange={(event) => setOperationField('date', event.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <FieldLabel required>Сумма</FieldLabel>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={operationForm.amount}
+                  onChange={(event) => setOperationField('amount', event.target.value)}
+                  placeholder="0"
+                  required
+                />
+              </div>
+              <div>
+                <FieldLabel required>Категория</FieldLabel>
+                <Input
+                  value={operationForm.category}
+                  onChange={(event) => setOperationField('category', event.target.value)}
+                  placeholder="Например: транспорт"
+                  required
+                />
+              </div>
+              <div className="md:col-span-2">
+                <FieldLabel>Описание</FieldLabel>
+                <Input
+                  value={operationForm.description}
+                  onChange={(event) => setOperationField('description', event.target.value)}
+                  placeholder="Краткое описание операции"
+                />
+              </div>
+              <div>
+                <FieldLabel>Контрагент</FieldLabel>
+                <Input
+                  value={operationForm.counterparty}
+                  onChange={(event) => setOperationField('counterparty', event.target.value)}
+                  placeholder="Клиент, поставщик или получатель"
+                />
+              </div>
+              {operationForm.type === 'transfer' ? (
+                <>
+                  <div>
+                    <FieldLabel required>Счёт-источник</FieldLabel>
+                    <Input
+                      value={operationForm.accountFrom}
+                      onChange={(event) => setOperationField('accountFrom', event.target.value)}
+                      placeholder="Касса"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel required>Счёт-получатель</FieldLabel>
+                    <Input
+                      value={operationForm.accountTo}
+                      onChange={(event) => setOperationField('accountTo', event.target.value)}
+                      placeholder="Расчётный счёт"
+                      required
+                    />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <FieldLabel>Счёт/касса</FieldLabel>
+                  <Input
+                    value={operationForm.account}
+                    onChange={(event) => setOperationField('account', event.target.value)}
+                    placeholder="Расчётный счёт, касса"
+                  />
+                </div>
+              )}
+              <div>
+                <FieldLabel>Связанная сущность</FieldLabel>
+                <Select value={operationForm.relatedEntityType || 'none'} onValueChange={(value) => setOperationField('relatedEntityType', value === 'none' ? '' : value as OperationFormState['relatedEntityType'])}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Не указана</SelectItem>
+                    <SelectItem value="rental">Аренда</SelectItem>
+                    <SelectItem value="client">Клиент</SelectItem>
+                    <SelectItem value="document">Документ</SelectItem>
+                    <SelectItem value="equipment">Техника</SelectItem>
+                    <SelectItem value="leasing">Лизинг</SelectItem>
+                    <SelectItem value="other">Другое</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <FieldLabel>ID связи</FieldLabel>
+                <Input
+                  value={operationForm.relatedEntityId}
+                  onChange={(event) => setOperationField('relatedEntityId', event.target.value)}
+                  placeholder="ID аренды, клиента, документа..."
+                />
+              </div>
+              <div className="md:col-span-2">
+                <FieldLabel>Название связи</FieldLabel>
+                <Input
+                  value={operationForm.relatedEntityLabel}
+                  onChange={(event) => setOperationField('relatedEntityLabel', event.target.value)}
+                  placeholder="Например: ООО Альфа / AR-2026-0123"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <FieldLabel>Комментарий</FieldLabel>
+                <Textarea
+                  value={operationForm.comment}
+                  onChange={(event) => setOperationField('comment', event.target.value)}
+                  placeholder="Внутренний комментарий"
+                  rows={3}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setOperationDialogOpen(false)}>
+                Отмена
+              </Button>
+              <Button type="submit" disabled={createOperation.isPending || updateOperation.isPending}>
+                {createOperation.isPending || updateOperation.isPending ? 'Сохраняем...' : 'Сохранить'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">

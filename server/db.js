@@ -38,6 +38,8 @@ const JSON_COLLECTIONS = [
   'debt_collection_plans',
   'debt_collection_actions',
   'receivable_payment_plans',
+  'finance_accounts',
+  'finance_operations',
   'company_expenses',
   'leasing_contracts',
   'leasing_payment_schedule',

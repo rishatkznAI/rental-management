@@ -4,7 +4,7 @@ export const LEASING_STATUS_LABELS: Record<LeasingContract['status'], string> = 
   active: 'Активен',
   closed: 'Закрыт',
   paused: 'Пауза',
-  overdue: 'Просрочка',
+  overdue: 'Просрочен',
   archived: 'Архив',
 };
 

@@ -80,6 +80,8 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'documents',
   'debt_collection_plans',
   'debt_collection_actions',
+  'finance_accounts',
+  'finance_operations',
   'receivable_payment_plans',
   'equipment',
   'gantt_rentals',
@@ -276,6 +278,31 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'amount',
     'status',
     'comment',
+  ]),
+  finance_operations: new Set([
+    'type',
+    'date',
+    'amount',
+    'category',
+    'description',
+    'counterparty',
+    'account',
+    'accountFrom',
+    'accountTo',
+    'relatedEntityType',
+    'relatedEntityId',
+    'relatedEntityLabel',
+    'status',
+    'comment',
+  ]),
+  finance_accounts: new Set([
+    'name',
+    'type',
+    'currency',
+    'balance',
+    'actualAt',
+    'comment',
+    'status',
   ]),
   company_expenses: new Set([
     'name',
@@ -1055,6 +1082,8 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'delivery_carriers':
       return false;
     case 'company_expenses':
+    case 'finance_accounts':
+    case 'finance_operations':
       return isOfficeManager(user);
     case 'planner_items':
       if (isOfficeManager(user)) return true;
@@ -1084,6 +1113,12 @@ function canMutateEntity(collection, entity, user, readData) {
     return isOfficeManager(user);
   }
   if (collection === 'company_expenses') {
+    return isOfficeManager(user);
+  }
+  if (collection === 'finance_accounts') {
+    return isOfficeManager(user);
+  }
+  if (collection === 'finance_operations') {
     return isOfficeManager(user);
   }
   if (collection === 'client_objects' || collection === 'client_contracts') {
@@ -1284,6 +1319,12 @@ function assertCanCreateCollection(collection, user, input = {}, readData) {
   }
   if (collection === 'company_expenses' && !(isAdmin(user) || isOfficeManager(user))) {
     throw forbidden('Расходы доступны только администратору или офис-менеджеру.');
+  }
+  if (collection === 'finance_accounts' && !(isAdmin(user) || isOfficeManager(user))) {
+    throw forbidden('Счета и кассы доступны только администратору или офис-менеджеру.');
+  }
+  if (collection === 'finance_operations' && !(isAdmin(user) || isOfficeManager(user))) {
+    throw forbidden('Финансовые операции доступны только администратору или офис-менеджеру.');
   }
   if ((collection === 'leasing_contracts' || collection === 'leasing_payment_schedule') && !(isAdmin(user) || isOfficeManager(user))) {
     throw forbidden('Лизинг доступен только администратору или офис-менеджеру.');

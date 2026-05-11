@@ -67,6 +67,168 @@ function registerFinanceRoutes(router, deps) {
     return Array.isArray(readData(name)) ? readData(name) : [];
   }
 
+  function dateOnly(value) {
+    const text = String(value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+    const parsed = new Date(`${text}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) ? '' : text;
+  }
+
+  function text(value) {
+    return String(value ?? '').trim();
+  }
+
+  function money(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.round(numeric) : NaN;
+  }
+
+  function normalizeFinanceOperation(input = {}, previous = null, req) {
+    const type = text(input.type ?? previous?.type ?? 'expense');
+    if (!['income', 'expense', 'transfer'].includes(type)) {
+      const error = new Error('Некорректный тип операции.');
+      error.status = 400;
+      throw error;
+    }
+    const date = dateOnly(input.date ?? previous?.date);
+    if (!date) {
+      const error = new Error('Укажите корректную дату операции.');
+      error.status = 400;
+      throw error;
+    }
+    const amount = money(input.amount ?? previous?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      const error = new Error('Сумма операции должна быть больше нуля.');
+      error.status = 400;
+      throw error;
+    }
+    const category = text(input.category ?? previous?.category);
+    if (!category) {
+      const error = new Error('Укажите категорию операции.');
+      error.status = 400;
+      throw error;
+    }
+    const account = text(input.account ?? previous?.account);
+    const accountFrom = text(input.accountFrom ?? previous?.accountFrom);
+    const accountTo = text(input.accountTo ?? previous?.accountTo);
+    if (type === 'transfer') {
+      if (!accountFrom || !accountTo) {
+        const error = new Error('Для перевода укажите счёт-источник и счёт-получатель.');
+        error.status = 400;
+        throw error;
+      }
+      if (accountFrom.toLowerCase() === accountTo.toLowerCase()) {
+        const error = new Error('Нельзя перевести деньги на тот же счёт.');
+        error.status = 400;
+        throw error;
+      }
+    }
+    const status = text(input.status ?? previous?.status ?? 'active') || 'active';
+    if (!['active', 'archived'].includes(status)) {
+      const error = new Error('Некорректный статус операции.');
+      error.status = 400;
+      throw error;
+    }
+    const now = nowIso();
+    return {
+      ...(previous || {}),
+      id: previous?.id || text(input.id) || generateId(idPrefixes.finance_operations || 'FO'),
+      type,
+      date,
+      amount,
+      category,
+      description: text(input.description ?? previous?.description) || undefined,
+      counterparty: text(input.counterparty ?? previous?.counterparty) || undefined,
+      account: type === 'transfer' ? undefined : (account || undefined),
+      accountFrom: type === 'transfer' ? accountFrom : undefined,
+      accountTo: type === 'transfer' ? accountTo : undefined,
+      relatedEntityType: text(input.relatedEntityType ?? previous?.relatedEntityType) || undefined,
+      relatedEntityId: text(input.relatedEntityId ?? previous?.relatedEntityId) || undefined,
+      relatedEntityLabel: text(input.relatedEntityLabel ?? previous?.relatedEntityLabel) || undefined,
+      status,
+      comment: text(input.comment ?? previous?.comment) || undefined,
+      source: 'manual',
+      createdAt: previous?.createdAt || now,
+      createdBy: previous?.createdBy || userName(req.user) || undefined,
+      createdByUserId: previous?.createdByUserId || req.user?.userId || req.user?.id || undefined,
+      updatedAt: now,
+      updatedBy: userName(req.user) || undefined,
+      updatedByUserId: req.user?.userId || req.user?.id || undefined,
+    };
+  }
+
+  function normalizeFinanceAccount(input = {}, previous = null, req) {
+    const name = text(input.name ?? previous?.name);
+    if (!name) {
+      const error = new Error('Укажите название счёта или кассы.');
+      error.status = 400;
+      throw error;
+    }
+    const type = text(input.type ?? previous?.type ?? 'bank_account');
+    if (!['bank_account', 'cash', 'card', 'deposit', 'other'].includes(type)) {
+      const error = new Error('Некорректный тип счёта.');
+      error.status = 400;
+      throw error;
+    }
+    const balance = money(input.balance ?? previous?.balance ?? 0);
+    if (!Number.isFinite(balance)) {
+      const error = new Error('Остаток должен быть числом.');
+      error.status = 400;
+      throw error;
+    }
+    const actualAt = dateOnly(input.actualAt ?? previous?.actualAt ?? nowIso().slice(0, 10));
+    if (!actualAt) {
+      const error = new Error('Укажите корректную дату актуальности.');
+      error.status = 400;
+      throw error;
+    }
+    const status = text(input.status ?? previous?.status ?? 'active') || 'active';
+    if (!['active', 'archived'].includes(status)) {
+      const error = new Error('Некорректный статус счёта.');
+      error.status = 400;
+      throw error;
+    }
+    const now = nowIso();
+    return {
+      ...(previous || {}),
+      id: previous?.id || text(input.id) || generateId(idPrefixes.finance_accounts || 'FA'),
+      name,
+      type,
+      currency: (text(input.currency ?? previous?.currency ?? 'RUB') || 'RUB').toUpperCase(),
+      balance,
+      actualAt,
+      comment: text(input.comment ?? previous?.comment) || undefined,
+      status,
+      createdAt: previous?.createdAt || now,
+      createdBy: previous?.createdBy || userName(req.user) || undefined,
+      createdByUserId: previous?.createdByUserId || req.user?.userId || req.user?.id || undefined,
+      updatedAt: now,
+      updatedBy: userName(req.user) || undefined,
+      updatedByUserId: req.user?.userId || req.user?.id || undefined,
+    };
+  }
+
+  function findAccount(accounts, value) {
+    const needle = text(value).toLowerCase();
+    if (!needle) return null;
+    return accounts.find(account =>
+      text(account.id).toLowerCase() === needle || text(account.name).toLowerCase() === needle
+    ) || null;
+  }
+
+  function accountHasActiveLinks(account) {
+    const id = text(account?.id).toLowerCase();
+    const name = text(account?.name).toLowerCase();
+    if (!id && !name) return false;
+    return collectionList('finance_operations').some(operation => {
+      if (operation?.status === 'archived') return false;
+      const values = [operation.account, operation.accountFrom, operation.accountTo]
+        .map(value => text(value).toLowerCase())
+        .filter(Boolean);
+      return values.includes(id) || values.includes(name);
+    });
+  }
+
   function findIndexById(items, id) {
     const needle = String(id || '').trim();
     return items.findIndex(item => String(item?.id || '').trim() === needle);
@@ -180,35 +342,204 @@ function registerFinanceRoutes(router, deps) {
     return buildReceivables({ clients, rentals, payments, documents, actions, paymentPlans }, today);
   }
 
-  router.get('/finance/debt-rows', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/accounts', requireAuth, requireRead('finance_accounts'), (req, res) => {
+    const rows = accessControl
+      .filterCollectionByScope('finance_accounts', collectionList('finance_accounts'), req.user)
+      .sort((left, right) => {
+        if (left.status !== right.status) return left.status === 'active' ? -1 : 1;
+        return String(left.name || '').localeCompare(String(right.name || ''), 'ru');
+      });
+    return res.json(rows);
+  });
+
+  router.post('/finance/accounts', requireAuth, requireWrite('finance_accounts'), (req, res) => {
+    try {
+      accessControl.assertCanCreateCollection('finance_accounts', req.user, req.body);
+      const accounts = collectionList('finance_accounts');
+      const next = normalizeFinanceAccount(req.body, null, req);
+      accounts.push(next);
+      writeData('finance_accounts', accounts);
+      audit(req, 'finance_accounts.create', 'finance_accounts', null, next);
+      return res.status(201).json(next);
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось создать счёт' });
+    }
+  });
+
+  router.post('/finance/accounts/transfer', requireAuth, requireWrite('finance_accounts'), (req, res) => {
+    try {
+      const accounts = collectionList('finance_accounts');
+      const from = findAccount(accounts, req.body.accountFrom);
+      const to = findAccount(accounts, req.body.accountTo);
+      if (!from || !to) {
+        const error = new Error('Укажите существующие счёт-источник и счёт-получатель.');
+        error.status = 400;
+        throw error;
+      }
+      if (String(from.id) === String(to.id)) {
+        const error = new Error('Нельзя перевести деньги на тот же счёт.');
+        error.status = 400;
+        throw error;
+      }
+      if (from.status === 'archived' || to.status === 'archived') {
+        const error = new Error('Переводы доступны только между активными счетами.');
+        error.status = 400;
+        throw error;
+      }
+      const amount = money(req.body.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        const error = new Error('Сумма перевода должна быть больше нуля.');
+        error.status = 400;
+        throw error;
+      }
+      const date = dateOnly(req.body.date || nowIso().slice(0, 10));
+      if (!date) {
+        const error = new Error('Укажите корректную дату перевода.');
+        error.status = 400;
+        throw error;
+      }
+
+      const previousFrom = { ...from };
+      const previousTo = { ...to };
+      const now = nowIso();
+      from.balance = money(Number(from.balance || 0) - amount);
+      from.actualAt = date;
+      from.updatedAt = now;
+      from.updatedBy = userName(req.user) || undefined;
+      from.updatedByUserId = req.user?.userId || req.user?.id || undefined;
+      to.balance = money(Number(to.balance || 0) + amount);
+      to.actualAt = date;
+      to.updatedAt = now;
+      to.updatedBy = userName(req.user) || undefined;
+      to.updatedByUserId = req.user?.userId || req.user?.id || undefined;
+
+      const operations = collectionList('finance_operations');
+      const operation = normalizeFinanceOperation({
+        type: 'transfer',
+        date,
+        amount,
+        category: 'Перевод между счетами',
+        description: text(req.body.description) || `Перевод: ${from.name} → ${to.name}`,
+        accountFrom: from.name,
+        accountTo: to.name,
+        comment: req.body.comment,
+      }, null, req);
+      operations.push(operation);
+
+      writeData('finance_accounts', accounts);
+      writeData('finance_operations', operations);
+      audit(req, 'finance_accounts.transfer.from', 'finance_accounts', previousFrom, from);
+      audit(req, 'finance_accounts.transfer.to', 'finance_accounts', previousTo, to);
+      audit(req, 'finance_operations.create', 'finance_operations', null, operation);
+      return res.status(201).json({ from, to, operation });
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось выполнить перевод' });
+    }
+  });
+
+  router.patch('/finance/accounts/:id', requireAuth, requireWrite('finance_accounts'), (req, res) => {
+    try {
+      const accounts = collectionList('finance_accounts');
+      const index = findIndexById(accounts, req.params.id);
+      if (index < 0) return res.status(404).json({ ok: false, error: 'Счёт не найден' });
+      accessControl.assertCanUpdateEntity('finance_accounts', accounts[index], req.user);
+      const previous = accounts[index];
+      if (
+        previous.status !== 'archived'
+        && text(req.body.status) === 'archived'
+        && accountHasActiveLinks(previous)
+        && !req.body.forceArchive
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error: 'У счёта есть активные операции. Подтвердите архивирование.',
+          code: 'ACCOUNT_HAS_ACTIVE_LINKS',
+        });
+      }
+      const next = normalizeFinanceAccount(req.body, previous, req);
+      accounts[index] = next;
+      writeData('finance_accounts', accounts);
+      audit(req, 'finance_accounts.update', 'finance_accounts', previous, next);
+      return res.json(next);
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось обновить счёт' });
+    }
+  });
+
+  router.get('/finance/operations', requireAuth, requireRead('finance_operations'), (req, res) => {
+    const from = dateOnly(req.query.from);
+    const to = dateOnly(req.query.to);
+    const rows = accessControl
+      .filterCollectionByScope('finance_operations', collectionList('finance_operations'), req.user)
+      .filter(item => {
+        if (from && String(item.date || '') < from) return false;
+        if (to && String(item.date || '') > to) return false;
+        return true;
+      })
+      .sort((left, right) => String(right.date || '').localeCompare(String(left.date || '')));
+    return res.json(rows);
+  });
+
+  router.post('/finance/operations', requireAuth, requireWrite('finance_operations'), (req, res) => {
+    try {
+      accessControl.assertCanCreateCollection('finance_operations', req.user, req.body);
+      const operations = collectionList('finance_operations');
+      const next = normalizeFinanceOperation(req.body, null, req);
+      operations.push(next);
+      writeData('finance_operations', operations);
+      audit(req, 'finance_operations.create', 'finance_operations', null, next);
+      return res.status(201).json(next);
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось создать операцию' });
+    }
+  });
+
+  router.patch('/finance/operations/:id', requireAuth, requireWrite('finance_operations'), (req, res) => {
+    try {
+      const operations = collectionList('finance_operations');
+      const index = findIndexById(operations, req.params.id);
+      if (index < 0) return res.status(404).json({ ok: false, error: 'Операция не найдена' });
+      accessControl.assertCanUpdateEntity('finance_operations', operations[index], req.user);
+      const previous = operations[index];
+      const next = normalizeFinanceOperation(req.body, previous, req);
+      operations[index] = next;
+      writeData('finance_operations', operations);
+      audit(req, 'finance_operations.update', 'finance_operations', previous, next);
+      return res.json(next);
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось обновить операцию' });
+    }
+  });
+
+  router.get('/finance/debt-rows', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildRentalDebtRows(rentals, payments, today);
     res.json(rows);
   });
 
-  router.get('/finance/clients', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/clients', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { clients, rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildClientReceivables(clients, buildRentalDebtRows(rentals, payments), today);
     res.json(rows);
   });
 
-  router.get('/finance/client-snapshots', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/client-snapshots', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { clients, rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildClientFinancialSnapshots(clients, rentals, payments, today);
     res.json(rows);
   });
 
-  router.get('/finance/managers', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/managers', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { clients, rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildManagerReceivables(buildRentalDebtRows(rentals, payments), today, clients);
     res.json(rows);
   });
 
-  router.get('/finance/manager-breakdown', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/manager-breakdown', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { clients, rentals, payments } = getFinanceCollections(req.user);
     const documents = accessControl.filterCollectionByScope('documents', readData('documents') || [], req.user);
     const manager = String(req.query.manager || '').trim();
@@ -331,30 +662,30 @@ function registerFinanceRoutes(router, deps) {
     });
   });
 
-  router.get('/finance/aging', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/aging', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { rentals, payments } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     const rows = buildOverdueBuckets(buildRentalDebtRows(rentals, payments), today);
     res.json(rows);
   });
 
-  router.get('/finance/report', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/report', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { clients, rentals, payments, clientObjects, leasingContracts, leasingPaymentSchedule } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     res.json(buildFinanceReport({ clients, rentals, payments, clientObjects, leasingContracts, leasingPaymentSchedule }, today));
   });
 
-  router.get('/finance/receivables', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/receivables', requireAuth, requireRead('finance_operations'), (req, res) => {
     const result = receivablesResponse(req);
     res.json(result);
   });
 
-  router.get('/finance/receivables/summary', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/receivables/summary', requireAuth, requireRead('finance_operations'), (req, res) => {
     const result = receivablesResponse(req);
     res.json(result.summary);
   });
 
-  router.get('/finance/receivables/:clientId', requireAuth, requireRead('payments'), (req, res) => {
+  router.get('/finance/receivables/:clientId', requireAuth, requireRead('finance_operations'), (req, res) => {
     const result = receivablesResponse(req);
     const clientId = String(req.params.clientId || '').trim();
     const row = result.rows.find(item => String(item.clientId || '') === clientId);

@@ -56,6 +56,7 @@ function createApp() {
     next();
   };
   const requireRead = collection => (req, res, next) => {
+    if (collection === 'finance_operations' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
     if (collection === 'payments' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   };

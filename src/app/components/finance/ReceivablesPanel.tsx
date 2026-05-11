@@ -2,11 +2,8 @@ import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarClock,
-  CheckCircle2,
+  ExternalLink,
   FileText,
-  MessageSquare,
-  Phone,
-  Scale,
 } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -238,6 +235,20 @@ function compareDate(left?: string, right?: string) {
   return String(left || '9999-12-31').localeCompare(String(right || '9999-12-31'));
 }
 
+function lastPaymentDate(row: ReceivableRow): string {
+  return (row.payments || [])
+    .map(payment => payment.paidDate)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || '';
+}
+
+function primaryRental(row: ReceivableRow) {
+  return (row.rentals || [])
+    .slice()
+    .sort((left, right) => (right.outstanding || 0) - (left.outstanding || 0) || (right.overdueDays || 0) - (left.overdueDays || 0))[0];
+}
+
 function KpiCard({ title, value }: { title: string; value: React.ReactNode }) {
   return (
     <Card>
@@ -270,7 +281,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
   const [age, setAge] = React.useState<AgeFilter>('all');
   const [status, setStatus] = React.useState<'all' | ReceivableCollectionStatus>('all');
   const [stage, setStage] = React.useState<'all' | ReceivableCollectionStage>('all');
-  const [onlyOverdue, setOnlyOverdue] = React.useState(true);
+  const [onlyOverdue, setOnlyOverdue] = React.useState(false);
   const [onlyNoNext, setOnlyNoNext] = React.useState(false);
   const [onlyPromised, setOnlyPromised] = React.useState(false);
   const [onlyBrokenPromise, setOnlyBrokenPromise] = React.useState(false);
@@ -366,6 +377,10 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
     setWorkflowForm(defaultWorkflowForm(type, nextStage));
   };
 
+  const openPath = (path: string) => {
+    window.location.assign(path);
+  };
+
   const submitAction = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!actionRow) return;
@@ -437,22 +452,13 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <KpiCard title="Общая дебиторка" value={formatCurrency(summary?.totalDebt || 0)} />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <KpiCard title="Общий долг" value={formatCurrency(summary?.totalDebt || 0)} />
         <KpiCard title="Просрочено" value={formatCurrency(summary?.overdueDebt || 0)} />
-        <KpiCard title="0-7 дней" value={formatCurrency(summary?.age0_7 || 0)} />
-        <KpiCard title="8-30 дней" value={formatCurrency(summary?.age8_30 || 0)} />
-        <KpiCard title="31-60 дней" value={formatCurrency(summary?.age31_60 || 0)} />
-        <KpiCard title="60+ дней" value={formatCurrency(summary?.age60Plus || 0)} />
-        <KpiCard title="Клиентов с долгом" value={summary?.clientsWithDebt || 0} />
-        <KpiCard title="Без следующего действия" value={summary?.withoutNextAction || 0} />
-        <KpiCard title="Обещано оплатить" value={formatCurrency(summary?.promisedAmount || 0)} />
-        <KpiCard title="На плане погашения" value={formatCurrency(summary?.paymentPlanAmount || 0)} />
-        <KpiCard title="Без уведомления" value={summary?.withoutNotification || 0} />
-        <KpiCard title="Уведомление просрочено" value={summary?.notificationOverdue || 0} />
-        <KpiCard title="Претензия просрочена" value={summary?.pretrialOverdue || 0} />
-        <KpiCard title="Суд 7 дней" value={summary?.courtNext7Days || 0} />
-        <KpiCard title="Лист без исполнения" value={summary?.writNotEnforced || 0} />
+        <KpiCard title="Долг 0–7 дней" value={formatCurrency(summary?.age0_7 || 0)} />
+        <KpiCard title="Долг 8–30 дней" value={formatCurrency(summary?.age8_30 || 0)} />
+        <KpiCard title="Долг 31–60 дней" value={formatCurrency(summary?.age31_60 || 0)} />
+        <KpiCard title="Долг 60+ дней" value={formatCurrency(summary?.age60Plus || 0)} />
       </div>
 
       <Card>
@@ -460,7 +466,9 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
           <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <CardTitle>Дебиторка</CardTitle>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Клиенты, просрочки, действия взыскания и обещания оплаты.</p>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Расчёт использует проверенную формулу: начислено по аренде минус фактически полученные оплаты.
+              </p>
             </div>
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               <Input placeholder="Клиент, ИНН, менеджер" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -530,104 +538,97 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                 <TableRow>
                   <TableHead>Клиент</TableHead>
                   <TableHead>Менеджер</TableHead>
-                  <TableHead className="text-right">Долг</TableHead>
-                  <TableHead className="text-right">Просрочено</TableHead>
-                  <TableHead>Аренды / УПД</TableHead>
-                  <TableHead>Контакт</TableHead>
-                  <TableHead>Следующее действие</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead>Этап взыскания</TableHead>
-                  <TableHead>Уведомление</TableHead>
-                  <TableHead>Претензия</TableHead>
-                  <TableHead>Суд</TableHead>
-                  <TableHead>Исп. лист</TableHead>
-                  <TableHead>Обещание</TableHead>
-                  <TableHead className="min-w-[220px]">Действия</TableHead>
+                  <TableHead className="text-right">Сумма долга</TableHead>
+                  <TableHead className="text-right">Просрочено дней</TableHead>
+                  <TableHead>Последняя оплата</TableHead>
+                  <TableHead>Связанная аренда</TableHead>
+                  <TableHead>Статус взыскания</TableHead>
+                  <TableHead className="min-w-[260px]">Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRows.map(row => (
-                  <TableRow
-                    key={row.clientId || row.client}
-                    className={row.collectionStatus === 'overdue_promise' || row.noNextAction ? 'bg-red-50/60 dark:bg-red-950/20' : undefined}
-                    onClick={() => setSelectedRow(row)}
-                  >
-                    <TableCell>
-                      <div className="min-w-44">
-                        <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{row.inn ? `ИНН ${row.inn}` : 'ИНН не указан'}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>{row.manager}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatCurrency(row.totalDebt)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="font-medium">{formatCurrency(row.overdueDebt)}</div>
-                      <div className="text-xs text-gray-500">{row.oldestOverdueDays} дн.</div>
-                    </TableCell>
-                    <TableCell>{row.rentals.length} / {row.documents.length}</TableCell>
-                    <TableCell>{row.lastContactDate ? formatDate(row.lastContactDate) : '—'}</TableCell>
-                    <TableCell>
-                      <div>{row.nextActionType ? ACTION_LABELS[row.nextActionType] : '—'}</div>
-                      <div className={row.noNextAction ? 'text-xs font-medium text-red-600' : 'text-xs text-gray-500'}>{row.nextActionDate ? formatDate(row.nextActionDate) : 'нет даты'}</div>
-                    </TableCell>
-                    <TableCell><Badge variant={statusVariant(row.collectionStatus)}>{STATUS_LABELS[row.collectionStatus]}</Badge></TableCell>
-                    <TableCell>
-                      <div className="min-w-44">
-                        <Badge variant={row.collectionStage === 'written_off' ? 'danger' : row.collectionStage === 'recovered' ? 'success' : 'info'}>
-                          {STAGE_LABELS[row.collectionStage || 'new_debt']}
-                        </Badge>
-                        <div className="mt-1 text-xs text-gray-500">{row.lastWorkflowActionDate ? formatDate(row.lastWorkflowActionDate) : 'без действий'}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>{row.notificationSentDate ? formatDate(row.notificationSentDate) : '—'}</div>
-                      {row.notificationDueDate ? <div className="text-xs text-gray-500">до {formatDate(row.notificationDueDate)}</div> : null}
-                    </TableCell>
-                    <TableCell>
-                      <div>{row.pretrialClaimSentDate ? formatDate(row.pretrialClaimSentDate) : '—'}</div>
-                      {row.pretrialClaimDueDate ? <div className="text-xs text-gray-500">до {formatDate(row.pretrialClaimDueDate)}</div> : null}
-                    </TableCell>
-                    <TableCell>
-                      <div>{row.courtDate ? formatDate(row.courtDate) : row.nextCourtDate ? formatDate(row.nextCourtDate) : '—'}</div>
-                      {row.caseNumber ? <div className="text-xs text-gray-500">№ {row.caseNumber}</div> : null}
-                    </TableCell>
-                    <TableCell>
-                      <div>{row.writNumber || '—'}</div>
-                      {row.writDate ? <div className="text-xs text-gray-500">{formatDate(row.writDate)}</div> : null}
-                    </TableCell>
-                    <TableCell>
-                      {row.promisedPaymentDate ? (
-                        <div>
-                          <div>{formatDate(row.promisedPaymentDate)}</div>
-                          <div className="text-xs text-gray-500">{formatCurrency(row.promisedAmount || 0)}</div>
+                {filteredRows.map(row => {
+                  const rental = primaryRental(row);
+                  const noticeAction = nextWorkflowActions(row.collectionStage || 'new_debt').find(item => item.type === 'generate_notification');
+                  const claimAction = nextWorkflowActions(row.collectionStage || 'new_debt').find(item => item.type === 'generate_pretrial_claim');
+                  const writeOffAction = nextWorkflowActions(row.collectionStage || 'new_debt').find(item => item.type === 'write_off');
+                  return (
+                    <TableRow
+                      key={row.clientId || row.client}
+                      className={row.collectionStatus === 'overdue_promise' || row.noNextAction ? 'bg-red-50/60 dark:bg-red-950/20' : undefined}
+                      onClick={() => setSelectedRow(row)}
+                    >
+                      <TableCell>
+                        <div className="min-w-44">
+                          <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{row.inn ? `ИНН ${row.inn}` : 'ИНН не указан'}</p>
                         </div>
-                      ) : '—'}
-                    </TableCell>
-                    <TableCell onClick={(event) => event.stopPropagation()}>
-                      {canManageFinance ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          <Button size="icon" variant="outline" title="Запланировать звонок" onClick={() => openAction(row, 'call')}><Phone className="h-4 w-4" /></Button>
-                          <Button size="icon" variant="outline" title="Зафиксировать контакт" onClick={() => openAction(row, 'message')}><MessageSquare className="h-4 w-4" /></Button>
-                          <Button size="icon" variant="outline" title="Клиент обещал оплату" onClick={() => openAction(row, 'payment_promise')}><CheckCircle2 className="h-4 w-4" /></Button>
-                          <Button size="icon" variant="outline" title="Создать план погашения" onClick={() => setPlanRow(row)}><CalendarClock className="h-4 w-4" /></Button>
-                          <Button size="icon" variant="outline" title="Передать на эскалацию" onClick={() => openAction(row, 'escalation')}><Scale className="h-4 w-4" /></Button>
-                          <Button size="icon" variant="outline" title="Добавить комментарий" onClick={() => openAction(row, 'comment')}><FileText className="h-4 w-4" /></Button>
-                          {nextWorkflowActions(row.collectionStage || 'new_debt').slice(0, 2).map(item => (
-                            <Button
-                              key={`${item.type}:${item.stage}`}
-                              size="sm"
-                              variant="secondary"
-                              title={ACTION_LABELS[item.type]}
-                              onClick={() => openWorkflow(row, item.type, item.stage)}
-                            >
-                              {ACTION_LABELS[item.type]}
+                      </TableCell>
+                      <TableCell>{row.manager}</TableCell>
+                      <TableCell className="text-right font-semibold">{formatCurrency(row.totalDebt)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="font-medium">{row.oldestOverdueDays} дн.</div>
+                        <div className="text-xs text-gray-500">{formatCurrency(row.overdueDebt)}</div>
+                      </TableCell>
+                      <TableCell>{lastPaymentDate(row) ? formatDate(lastPaymentDate(row)) : '—'}</TableCell>
+                      <TableCell>
+                        {rental ? (
+                          <div className="min-w-40">
+                            <p className="font-medium text-gray-900 dark:text-white">{rental.rentalId}</p>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              {rental.equipmentInv || 'техника не указана'} · {formatCurrency(rental.outstanding)}
+                            </p>
+                          </div>
+                        ) : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="min-w-44">
+                          <Badge variant={statusVariant(row.collectionStatus)}>{STATUS_LABELS[row.collectionStatus]}</Badge>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            {STAGE_LABELS[row.collectionStage || 'new_debt']}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell onClick={(event) => event.stopPropagation()}>
+                        {canManageFinance ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {row.clientId && (
+                              <Button size="icon" variant="outline" title="Открыть клиента" aria-label="Открыть клиента" onClick={() => openPath(`/clients/${row.clientId}`)}>
+                                <ExternalLink className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {rental?.rentalId && (
+                              <Button size="icon" variant="outline" title="Открыть аренду" aria-label="Открыть аренду" onClick={() => openPath(`/rentals/${rental.rentalId}`)}>
+                                <CalendarClock className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {noticeAction && (
+                              <Button size="sm" variant="secondary" title="Создать уведомление" onClick={() => openWorkflow(row, noticeAction.type, noticeAction.stage)}>
+                                Уведомление
+                              </Button>
+                            )}
+                            {claimAction && (
+                              <Button size="sm" variant="secondary" title="Создать претензию" onClick={() => openWorkflow(row, claimAction.type, claimAction.stage)}>
+                                Претензия
+                              </Button>
+                            )}
+                            <Button size="sm" variant="outline" title="Отметить спор" onClick={() => openAction(row, 'legal_notice')}>
+                              Спор
                             </Button>
-                          ))}
-                        </div>
-                      ) : '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                            {writeOffAction && (
+                              <Button size="sm" variant="outline" title="Закрыть/списать" onClick={() => openWorkflow(row, writeOffAction.type, writeOffAction.stage)}>
+                                Списать
+                              </Button>
+                            )}
+                            <Button size="icon" variant="outline" title="Добавить комментарий" onClick={() => openAction(row, 'comment')}>
+                              <FileText className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : '—'}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

@@ -1043,6 +1043,54 @@ export interface CompanyExpense {
   updatedBy?: string;
 }
 
+export type FinanceOperationType = 'income' | 'expense' | 'transfer';
+export type FinanceOperationStatus = 'active' | 'archived';
+export type FinanceOperationSource = 'manual' | 'payments' | 'expenses' | 'leasing';
+export type FinanceAccountType = 'bank_account' | 'cash' | 'card' | 'deposit' | 'other';
+export type FinanceAccountStatus = 'active' | 'archived';
+
+export interface FinanceOperation {
+  id: string;
+  type: FinanceOperationType;
+  date: string;
+  amount: number;
+  category: string;
+  description?: string;
+  counterparty?: string;
+  account?: string;
+  accountFrom?: string;
+  accountTo?: string;
+  relatedEntityType?: 'rental' | 'client' | 'document' | 'equipment' | 'leasing' | 'other' | '';
+  relatedEntityId?: string;
+  relatedEntityLabel?: string;
+  status: FinanceOperationStatus;
+  comment?: string;
+  source?: FinanceOperationSource;
+  createdAt?: string;
+  createdBy?: string;
+  createdByUserId?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  updatedByUserId?: string;
+}
+
+export interface FinanceAccount {
+  id: string;
+  name: string;
+  type: FinanceAccountType;
+  currency: string;
+  balance: number;
+  actualAt: string;
+  comment?: string;
+  status: FinanceAccountStatus;
+  createdAt?: string;
+  createdBy?: string;
+  createdByUserId?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  updatedByUserId?: string;
+}
+
 export type LeasingContractStatus = 'active' | 'closed' | 'paused' | 'overdue' | 'archived';
 export type LeasingPaymentStatus = 'planned' | 'paid' | 'overdue' | 'skipped';
 

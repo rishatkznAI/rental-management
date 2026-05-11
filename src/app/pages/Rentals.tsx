@@ -4,7 +4,8 @@ import { Link } from 'react-router-dom';
 import {
   Plus, ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightSmall, SlidersHorizontal, RotateCcw, CirclePause as PauseCircle,
   Search, CircleCheck, CircleAlert, CreditCard,
-  AlertTriangle, Archive, CalendarCheck, ClipboardCheck, Clock, FileText, HelpCircle, MoreHorizontal, PackageCheck, Truck, Wrench
+  AlertTriangle, Archive, CalendarCheck, ClipboardCheck, Clock, FileText, FileWarning, HelpCircle, MoreHorizontal, PackageCheck, Truck, Wallet, Wrench,
+  type LucideIcon,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import {
@@ -661,6 +662,245 @@ function formatCompactRub(value: unknown) {
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млн ₽`;
   if (amount >= 1_000) return `${Math.round(amount / 1_000).toLocaleString('ru-RU')} тыс ₽`;
   return `${Math.round(amount).toLocaleString('ru-RU')} ₽`;
+}
+
+type RentalKpiTone = 'info' | 'success' | 'warning' | 'danger' | 'document' | 'delivery' | 'neutral';
+
+type RentalKpiCardConfig = {
+  id: string;
+  title: string;
+  value: React.ReactNode;
+  subtitle?: string;
+  icon: LucideIcon;
+  tone?: RentalKpiTone;
+  statusLabel?: string;
+  sparkline?: number[];
+  sparklineFallback?: string;
+  progress?: number;
+  progressLabel?: string;
+};
+
+const RENTAL_KPI_TONE_STYLES: Record<RentalKpiTone, {
+  card: string;
+  icon: string;
+  value: string;
+  sparkline: string;
+  line: string;
+  progress: string;
+}> = {
+  info: {
+    card: 'border-blue-200/80 bg-blue-50/45 dark:border-blue-900/55 dark:bg-blue-950/18',
+    icon: 'bg-blue-100 text-blue-700 ring-blue-500/10 dark:bg-blue-500/14 dark:text-blue-300 dark:ring-blue-300/10',
+    value: 'text-blue-950 dark:text-blue-50',
+    sparkline: 'text-blue-500 dark:text-blue-300',
+    line: '#2563eb',
+    progress: 'bg-blue-500 dark:bg-blue-400',
+  },
+  success: {
+    card: 'border-emerald-200/80 bg-emerald-50/45 dark:border-emerald-900/55 dark:bg-emerald-950/18',
+    icon: 'bg-emerald-100 text-emerald-700 ring-emerald-500/10 dark:bg-emerald-500/14 dark:text-emerald-300 dark:ring-emerald-300/10',
+    value: 'text-emerald-950 dark:text-emerald-50',
+    sparkline: 'text-emerald-500 dark:text-emerald-300',
+    line: '#10b981',
+    progress: 'bg-emerald-500 dark:bg-emerald-400',
+  },
+  warning: {
+    card: 'border-amber-200/85 bg-amber-50/45 dark:border-amber-900/55 dark:bg-amber-950/18',
+    icon: 'bg-amber-100 text-amber-700 ring-amber-500/10 dark:bg-amber-500/14 dark:text-amber-300 dark:ring-amber-300/10',
+    value: 'text-amber-950 dark:text-amber-50',
+    sparkline: 'text-amber-500 dark:text-amber-300',
+    line: '#f59e0b',
+    progress: 'bg-amber-500 dark:bg-amber-400',
+  },
+  danger: {
+    card: 'border-red-200/85 bg-red-50/45 dark:border-red-900/55 dark:bg-red-950/18',
+    icon: 'bg-red-100 text-red-700 ring-red-500/10 dark:bg-red-500/14 dark:text-red-300 dark:ring-red-300/10',
+    value: 'text-red-950 dark:text-red-50',
+    sparkline: 'text-red-500 dark:text-red-300',
+    line: '#ef4444',
+    progress: 'bg-red-500 dark:bg-red-400',
+  },
+  document: {
+    card: 'border-violet-200/80 bg-violet-50/42 dark:border-violet-900/55 dark:bg-violet-950/18',
+    icon: 'bg-violet-100 text-violet-700 ring-violet-500/10 dark:bg-violet-500/14 dark:text-violet-300 dark:ring-violet-300/10',
+    value: 'text-violet-950 dark:text-violet-50',
+    sparkline: 'text-violet-500 dark:text-violet-300',
+    line: '#8b5cf6',
+    progress: 'bg-violet-500 dark:bg-violet-400',
+  },
+  delivery: {
+    card: 'border-sky-200/85 bg-sky-50/45 dark:border-sky-900/55 dark:bg-sky-950/18',
+    icon: 'bg-sky-100 text-sky-700 ring-sky-500/10 dark:bg-sky-500/14 dark:text-sky-300 dark:ring-sky-300/10',
+    value: 'text-sky-950 dark:text-sky-50',
+    sparkline: 'text-sky-500 dark:text-sky-300',
+    line: '#0ea5e9',
+    progress: 'bg-sky-500 dark:bg-sky-400',
+  },
+  neutral: {
+    card: 'border-slate-200/90 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/28',
+    icon: 'bg-slate-100 text-slate-600 ring-slate-500/10 dark:bg-slate-700/55 dark:text-slate-300 dark:ring-slate-300/10',
+    value: 'text-slate-950 dark:text-slate-50',
+    sparkline: 'text-slate-500 dark:text-slate-300',
+    line: '#64748b',
+    progress: 'bg-slate-500 dark:bg-slate-400',
+  },
+};
+
+function formatCountLabel(value: number, one: string, few: string, many: string) {
+  const abs = Math.abs(value);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+function formatSignedDelta(value: number, label: string) {
+  if (value > 0) return `+${value} ${label}`;
+  if (value < 0) return `${value} ${label}`;
+  return `без изменения ${label}`;
+}
+
+function RentalKpiSparkline({
+  values,
+  color,
+  emptyLabel = 'нет динамики',
+}: {
+  values?: number[];
+  color: string;
+  emptyLabel?: string;
+}) {
+  const normalizedValues = (values || []).map(value => Number(value)).filter(Number.isFinite);
+  const hasDrawableData = normalizedValues.length >= 2 && normalizedValues.some(value => value > 0);
+
+  if (!hasDrawableData) {
+    return (
+      <div className="flex h-10 min-w-[96px] flex-col justify-end gap-1 text-[10px] font-medium text-muted-foreground">
+        <div className="h-px w-full rounded-full bg-border" />
+        <span className="truncate">{emptyLabel}</span>
+      </div>
+    );
+  }
+
+  const width = 116;
+  const height = 40;
+  const padding = 3;
+  const min = Math.min(...normalizedValues);
+  const max = Math.max(...normalizedValues);
+  const range = max - min || 1;
+  const points = normalizedValues
+    .map((value, index) => {
+      const x = padding + (index / Math.max(normalizedValues.length - 1, 1)) * (width - padding * 2);
+      const y = height - padding - ((value - min) / range) * (height - padding * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  const lastPoint = points.split(' ').at(-1) || `${width - padding},${height / 2}`;
+
+  return (
+    <svg className="h-10 w-[116px] overflow-visible" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="2.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx={Number(lastPoint.split(',')[0])} cy={Number(lastPoint.split(',')[1])} r="2.5" fill={color} />
+    </svg>
+  );
+}
+
+function RentalKpiProgress({
+  value,
+  tone,
+  label,
+}: {
+  value?: number;
+  tone: RentalKpiTone;
+  label?: string;
+}) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return label ? <span className="text-[10px] font-medium text-muted-foreground">{label}</span> : null;
+  }
+
+  const width = Math.max(0, Math.min(100, Math.round(value)));
+  const toneStyle = RENTAL_KPI_TONE_STYLES[tone];
+
+  return (
+    <div className="min-w-[104px] space-y-1">
+      <div className="h-1.5 overflow-hidden rounded-full bg-border/70">
+        <div className={cn('h-full rounded-full', toneStyle.progress)} style={{ width: `${width}%` }} />
+      </div>
+      {label && <div className="truncate text-[10px] font-medium text-muted-foreground">{label}</div>}
+    </div>
+  );
+}
+
+function RentalKpiCard({
+  title,
+  value,
+  subtitle,
+  icon: Icon,
+  tone = 'neutral',
+  statusLabel,
+  sparkline,
+  sparklineFallback,
+  progress,
+  progressLabel,
+}: {
+  title: string;
+  value: React.ReactNode;
+  subtitle?: string;
+  icon: LucideIcon;
+  tone?: RentalKpiTone;
+  statusLabel?: string;
+  sparkline?: number[];
+  sparklineFallback?: string;
+  progress?: number;
+  progressLabel?: string;
+}) {
+  const toneStyle = RENTAL_KPI_TONE_STYLES[tone];
+
+  return (
+    <div className={cn(
+      'group relative flex min-h-[148px] min-w-0 flex-col justify-between overflow-hidden rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md',
+      'bg-card',
+      toneStyle.card,
+    )}>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className={cn('inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1', toneStyle.icon)}>
+            <Icon className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold text-muted-foreground">{title}</div>
+            {statusLabel && (
+              <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                {statusLabel}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 min-w-0">
+        <div className={cn('truncate text-2xl font-extrabold tracking-normal', toneStyle.value)}>{value}</div>
+      </div>
+
+      <div className="mt-3 flex min-w-0 items-end justify-between gap-3">
+        <div className="min-w-0 text-xs font-medium leading-snug text-muted-foreground">
+          {subtitle || 'по выбранным фильтрам'}
+        </div>
+        {sparkline ? (
+          <RentalKpiSparkline values={sparkline} color={toneStyle.line} emptyLabel={sparklineFallback} />
+        ) : (
+          <RentalKpiProgress value={progress} tone={tone} label={progressLabel} />
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ========== Helpers ==========
@@ -2049,11 +2289,15 @@ export default function Rentals() {
     const tomorrowKey = format(addDays(today, 1), 'yyyy-MM-dd');
     const activeRows = rentalDealRows.filter(row => row.isActive);
     const deliveryToday = movementEntries.filter(entry => entry.type === 'shipping' && String(entry.date || '').slice(0, 10) === todayKey).length;
+    const returnsToday = activeRows.filter(row => row.rental.endDate === todayKey).length;
+    const returnsTomorrow = activeRows.filter(row => row.rental.endDate === tomorrowKey).length;
     return {
       activeRentals: activeRows.filter(row => row.rental.status === 'active').length,
       newDrafts: rentalDealRows.filter(row => row.rental.status === 'created').length,
       onDelivery: activeRows.filter(row => row.hasShippingDelivery && !row.hasReturnDelivery).length || deliveryToday,
-      returnsTodayTomorrow: activeRows.filter(row => row.rental.endDate === todayKey || row.rental.endDate === tomorrowKey).length,
+      returnsToday,
+      returnsTomorrow,
+      returnsTodayTomorrow: returnsToday + returnsTomorrow,
       overdueReturns: activeRows.filter(row => row.rental.endDate < todayKey).length,
       rentalDebt: activeRows.reduce((sum, row) => sum + row.debtAmount, 0),
       missingDocs: activeRows.filter(row => !row.rental.updSigned || !row.sourceRentalId).length,
@@ -2216,6 +2460,119 @@ export default function Rentals() {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([, value]) => value);
   }, [rentalMovementChart, rentalMovementScale]);
+
+  const rentalMovementSparkValues = useMemo(() => ({
+    active: rentalMovementChart.map(point => Number(point.activeCount) || 0),
+    returns: rentalMovementChart.map(point => Number(point.returnsCount) || 0),
+    overdueReturns: rentalMovementChart.map(point => Number(point.overdueCount) || 0),
+    deliveries: rentalMovementChart.map(point => Number(point.deliveriesCount) || 0),
+    overdueDebt: rentalMovementChart.map(point => Number(point.overdueDebt) || 0),
+  }), [rentalMovementChart]);
+
+  const rentalWorkspaceKpiCards = useMemo<RentalKpiCardConfig[]>(() => {
+    const activeTrendDelta = (rentalMovementSparkValues.active[6] || 0) - (rentalMovementSparkValues.active[0] || 0);
+    const activeRows = rentalDealRows.filter(row => row.isActive);
+    const debtRows = activeRows.filter(row => row.debtAmount > 0);
+    const debtClientCount = new Set(debtRows.map(row => row.rental.clientId || row.rental.client).filter(Boolean)).size;
+    const missingDocsShare = activeRows.length > 0
+      ? (rentalWorkspaceKpis.missingDocs / activeRows.length) * 100
+      : 0;
+    const debtShare = activeRows.length > 0
+      ? (debtRows.length / activeRows.length) * 100
+      : 0;
+
+    return [
+      {
+        id: 'active-rentals',
+        title: 'Активные аренды',
+        value: rentalWorkspaceKpis.activeRentals,
+        subtitle: `${formatSignedDelta(activeTrendDelta, 'за неделю')} · в работе сейчас`,
+        icon: CalendarCheck,
+        tone: 'success' as RentalKpiTone,
+        statusLabel: 'сейчас',
+        sparkline: rentalMovementSparkValues.active,
+        sparklineFallback: 'нет активных в периоде',
+      },
+      {
+        id: 'returns',
+        title: 'Возвраты',
+        value: rentalWorkspaceKpis.returnsTodayTomorrow,
+        subtitle: `${rentalWorkspaceKpis.returnsToday} сегодня / ${rentalWorkspaceKpis.returnsTomorrow} завтра`,
+        icon: RotateCcw,
+        tone: 'warning' as RentalKpiTone,
+        statusLabel: 'ближайшие',
+        sparkline: rentalMovementSparkValues.returns,
+        sparklineFallback: 'нет возвратов в графике',
+      },
+      {
+        id: 'overdue-returns',
+        title: 'Просроченные возвраты',
+        value: rentalWorkspaceKpis.overdueReturns,
+        subtitle: rentalWorkspaceKpis.overdueReturns > 0 ? 'требуют реакции' : 'без просрочек',
+        icon: AlertTriangle,
+        tone: rentalWorkspaceKpis.overdueReturns > 0 ? 'danger' as RentalKpiTone : 'neutral' as RentalKpiTone,
+        statusLabel: 'риск',
+        sparkline: rentalMovementSparkValues.overdueReturns,
+        sparklineFallback: 'просрочек нет',
+      },
+      {
+        id: 'rental-debt',
+        title: 'Долг по арендам',
+        value: canViewPayments ? formatCurrency(rentalWorkspaceKpis.rentalDebt) : 'Скрыто',
+        subtitle: canViewPayments
+          ? debtClientCount > 0
+            ? `${debtClientCount} ${formatCountLabel(debtClientCount, 'клиент', 'клиента', 'клиентов')} · по активным арендам`
+            : 'по активным арендам'
+          : 'нет доступа к финансам',
+        icon: Wallet,
+        tone: canViewPayments && rentalWorkspaceKpis.rentalDebt > 0 ? 'danger' as RentalKpiTone : 'neutral' as RentalKpiTone,
+        statusLabel: canViewPayments ? 'финансы' : 'доступ',
+        sparkline: canViewPayments ? rentalMovementSparkValues.overdueDebt : undefined,
+        sparklineFallback: canViewPayments ? 'долга в графике нет' : 'сумма скрыта',
+        progress: canViewPayments ? debtShare : undefined,
+        progressLabel: canViewPayments ? `${debtRows.length} с долгом` : 'сумма скрыта',
+      },
+      {
+        id: 'missing-docs',
+        title: 'Без УПД / договора',
+        value: rentalWorkspaceKpis.missingDocs,
+        subtitle: rentalWorkspaceKpis.missingDocs > 0 ? 'требуют оформления' : 'документы в порядке',
+        icon: FileWarning,
+        tone: rentalWorkspaceKpis.missingDocs > 0 ? 'document' as RentalKpiTone : 'neutral' as RentalKpiTone,
+        statusLabel: 'документы',
+        progress: missingDocsShare,
+        progressLabel: activeRows.length > 0 ? `${Math.round(missingDocsShare)}% активных` : 'нет активных аренд',
+      },
+      {
+        id: 'delivery-today',
+        title: 'Доставка сегодня',
+        value: rentalWorkspaceKpis.deliveryToday,
+        subtitle: `${rentalWorkspaceKpis.deliveryToday} запланировано сегодня / ${rentalWorkspaceKpis.onDelivery} в пути`,
+        icon: Truck,
+        tone: 'delivery' as RentalKpiTone,
+        statusLabel: 'логистика',
+        sparkline: rentalMovementSparkValues.deliveries,
+        sparklineFallback: 'доставок в графике нет',
+      },
+    ];
+  }, [
+    canViewPayments,
+    rentalDealRows,
+    rentalMovementSparkValues.active,
+    rentalMovementSparkValues.deliveries,
+    rentalMovementSparkValues.overdueDebt,
+    rentalMovementSparkValues.overdueReturns,
+    rentalMovementSparkValues.returns,
+    rentalWorkspaceKpis.activeRentals,
+    rentalWorkspaceKpis.deliveryToday,
+    rentalWorkspaceKpis.missingDocs,
+    rentalWorkspaceKpis.onDelivery,
+    rentalWorkspaceKpis.overdueReturns,
+    rentalWorkspaceKpis.rentalDebt,
+    rentalWorkspaceKpis.returnsToday,
+    rentalWorkspaceKpis.returnsTodayTomorrow,
+    rentalWorkspaceKpis.returnsTomorrow,
+  ]);
 
   const fleetPlanKpis = useMemo(() => {
     const todayKey = format(today, 'yyyy-MM-dd');
@@ -3977,19 +4334,21 @@ export default function Rentals() {
             </section>
 
             {activeWorkspaceTab === 'list' && (
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-                {[
-                  { label: 'Активные аренды', value: rentalWorkspaceKpis.activeRentals, tone: 'border-emerald-200 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300' },
-                  { label: 'Новые / черновики', value: rentalWorkspaceKpis.newDrafts, tone: 'border-slate-200 bg-slate-50/70 text-slate-700 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-300' },
-                  { label: 'На доставке', value: rentalWorkspaceKpis.onDelivery, tone: 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300' },
-                  { label: 'Просрочки', value: rentalWorkspaceKpis.overdueReturns, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
-                  { label: 'Долг', value: canViewPayments ? formatCurrency(rentalWorkspaceKpis.rentalDebt) : 'Скрыто', tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
-                  { label: 'Без УПД / договора', value: rentalWorkspaceKpis.missingDocs, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
-                ].map(item => (
-                  <div key={item.label} className={cn('flex min-h-[92px] flex-col justify-between rounded-2xl border p-4 shadow-sm', item.tone)}>
-                    <p className="text-xs font-semibold opacity-80">{item.label}</p>
-                    <p className="mt-2 text-2xl font-bold">{item.value}</p>
-                  </div>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+                {rentalWorkspaceKpiCards.map(item => (
+                  <RentalKpiCard
+                    key={item.id}
+                    title={item.title}
+                    value={item.value}
+                    subtitle={item.subtitle}
+                    icon={item.icon}
+                    tone={item.tone}
+                    statusLabel={item.statusLabel}
+                    sparkline={item.sparkline}
+                    sparklineFallback={item.sparklineFallback}
+                    progress={item.progress}
+                    progressLabel={item.progressLabel}
+                  />
                 ))}
               </div>
             )}

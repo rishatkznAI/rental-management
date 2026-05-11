@@ -44,3 +44,20 @@ test('money and documents workspace keeps payment visibility guarded', () => {
   assert.match(rentalsSource, /canViewPayments \? formatCurrency\(row\.debtAmount\) : 'Скрыто'/);
   assert.match(rentalsSource, /Нет проблем по оплатам и документам\./);
 });
+
+test('rentals workspace KPI cards have icons and honest compact trends', () => {
+  assert.match(rentalsSource, /function RentalKpiCard/);
+  assert.match(rentalsSource, /function RentalKpiSparkline/);
+  assert.match(rentalsSource, /const rentalWorkspaceKpiCards = useMemo<RentalKpiCardConfig\[\]>/);
+
+  assert.match(rentalsSource, /title: 'Активные аренды'[\s\S]*icon: CalendarCheck[\s\S]*sparkline: rentalMovementSparkValues\.active/);
+  assert.match(rentalsSource, /title: 'Возвраты'[\s\S]*icon: RotateCcw[\s\S]*sparkline: rentalMovementSparkValues\.returns/);
+  assert.match(rentalsSource, /title: 'Просроченные возвраты'[\s\S]*icon: AlertTriangle[\s\S]*sparkline: rentalMovementSparkValues\.overdueReturns/);
+  assert.match(rentalsSource, /title: 'Долг по арендам'[\s\S]*icon: Wallet[\s\S]*sparkline: canViewPayments \? rentalMovementSparkValues\.overdueDebt : undefined/);
+  assert.match(rentalsSource, /title: 'Без УПД \/ договора'[\s\S]*icon: FileWarning[\s\S]*progress: missingDocsShare/);
+  assert.match(rentalsSource, /title: 'Доставка сегодня'[\s\S]*icon: Truck[\s\S]*sparkline: rentalMovementSparkValues\.deliveries/);
+
+  assert.match(rentalsSource, /const hasDrawableData = normalizedValues\.length >= 2 && normalizedValues\.some\(value => value > 0\)/);
+  assert.match(rentalsSource, /sparklineFallback: 'доставок в графике нет'/);
+  assert.doesNotMatch(rentalsSource, /Math\.random|fake|mock trend|mockTrend/i);
+});

@@ -33,6 +33,7 @@ test('fleet planner persists equipment downtime and refreshes rows after save', 
   assert.match(rentalsSource, /findDowntimeRentalFlowTarget/);
   assert.match(rentalsSource, /downtimeFlow\.flow === 'rental'[\s\S]*requestClassicRentalChange/);
   assert.match(rentalsSource, /buildRentalDowntimePatch\(payload\)/);
+  assert.doesNotMatch(rentalsSource, /data\.id\s*\?\s*\{\s*flow:\s*'standalone'\s*\}/);
   assert.match(rentalsSource, /rentalsService\.createDowntime\(payload\)/);
   assert.match(rentalsSource, /rentalsService\.updateDowntime\(data\.id,\s*payload\)/);
   assert.match(rentalsSource, /queryClient\.setQueryData<DowntimePeriod\[\]>\(RENTAL_KEYS\.downtimes/);

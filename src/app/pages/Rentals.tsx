@@ -5260,9 +5260,7 @@ export default function Rentals() {
             comment: data.comment,
             status: data.status,
           };
-          const downtimeFlow = data.id
-            ? { flow: 'standalone' }
-            : findDowntimeRentalFlowTarget({ downtime: payload, rentals: ganttRentals });
+          const downtimeFlow = findDowntimeRentalFlowTarget({ downtime: payload, rentals: ganttRentals });
 
           if (downtimeFlow.flow === 'conflict') {
             showToast(downtimeFlow.message || 'Найдено несколько аренд для выбранного простоя.', 'error');

@@ -53,6 +53,65 @@ test('active rental downtime is not classified as standalone downtime', () => {
   assert.notEqual(target.flow, 'standalone');
 });
 
+test('duplicate gantt rows for same rental do not block downtime rental-flow', () => {
+  const target = findDowntimeRentalFlowTarget({
+    downtime: {
+      equipmentId: 'EQ-1',
+      equipmentInv: '083',
+      startDate: '2026-05-11',
+      endDate: '2026-05-12',
+      reason: 'Простой',
+    },
+    rentals: [
+      { ...activeRental, id: 'GR-created', status: 'created' },
+      { ...activeRental, id: 'GR-active', status: 'active' },
+    ],
+  });
+
+  assert.equal(target.flow, 'rental');
+  assert.equal(target.rental.id, 'GR-active');
+  assert.notEqual(target.flow, 'standalone');
+  assert.equal(target.matches.length, 2);
+});
+
+test('duplicate gantt rows choose active before created for downtime rental-flow', () => {
+  const target = findDowntimeRentalFlowTarget({
+    downtime: {
+      equipmentId: 'EQ-1',
+      equipmentInv: '083',
+      startDate: '2026-05-11',
+      endDate: '2026-05-12',
+      reason: 'Простой',
+    },
+    rentals: [
+      { ...activeRental, id: 'GR-created', rentalId: 'R-1', status: 'created' },
+      { ...activeRental, id: 'GR-active', rentalId: 'R-1', status: 'active' },
+    ],
+  });
+
+  assert.equal(target.flow, 'rental');
+  assert.equal(target.rental.id, 'GR-active');
+});
+
+test('duplicate gantt rows dedupe by source and original rental ids', () => {
+  const target = findDowntimeRentalFlowTarget({
+    downtime: {
+      equipmentId: 'EQ-1',
+      equipmentInv: '083',
+      startDate: '2026-05-11',
+      endDate: '2026-05-12',
+      reason: 'Простой',
+    },
+    rentals: [
+      { ...activeRental, id: 'GR-created', rentalId: '', sourceRentalId: 'R-source', status: 'created' },
+      { ...activeRental, id: 'GR-active', rentalId: '', originalRentalId: 'R-source', status: 'active' },
+    ],
+  });
+
+  assert.equal(target.flow, 'rental');
+  assert.equal(target.rental.id, 'GR-active');
+});
+
 test('free equipment downtime stays on standalone equipment downtime flow', () => {
   const target = findDowntimeRentalFlowTarget({
     downtime: {
@@ -68,7 +127,7 @@ test('free equipment downtime stays on standalone equipment downtime flow', () =
   assert.equal(target.flow, 'standalone');
 });
 
-test('ambiguous active rental downtime is explicit conflict', () => {
+test('different rental ids in one period stay an explicit downtime conflict', () => {
   const target = findDowntimeRentalFlowTarget({
     downtime: {
       equipmentId: 'EQ-1',
@@ -84,7 +143,7 @@ test('ambiguous active rental downtime is explicit conflict', () => {
   });
 
   assert.equal(target.flow, 'conflict');
-  assert.match(target.message, /несколько аренд/);
+  assert.match(target.message, /несколько разных аренд/);
 });
 
 test('standalone equipment downtime still rejects active rental overlap', () => {

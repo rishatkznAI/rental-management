@@ -1,4 +1,10 @@
 const CLOSED_RENTAL_STATUSES = new Set(['closed', 'returned', 'completed', 'cancelled', 'canceled']);
+const RENTAL_FLOW_STATUS_PRIORITY = {
+  active: 5,
+  confirmed: 4,
+  delivery: 3,
+  created: 2,
+};
 
 function text(value) {
   return String(value ?? '').trim();
@@ -48,6 +54,36 @@ export function rentalMatchesDowntimeEquipment(rental, downtime) {
   return false;
 }
 
+export function canonicalDowntimeRentalId(rental) {
+  return text(rental?.rentalId)
+    || text(rental?.sourceRentalId)
+    || text(rental?.originalRentalId)
+    || text(rental?.id);
+}
+
+function rentalFlowStatusPriority(rental) {
+  const status = text(rental?.status).toLowerCase();
+  return RENTAL_FLOW_STATUS_PRIORITY[status] || 1;
+}
+
+export function chooseBestDowntimeRentalMatch(matches) {
+  return [...(Array.isArray(matches) ? matches : [])].sort((left, right) =>
+    rentalFlowStatusPriority(right) - rentalFlowStatusPriority(left),
+  )[0] || null;
+}
+
+function groupMatchesByCanonicalRental(matches) {
+  const groups = new Map();
+  for (const rental of matches) {
+    const key = canonicalDowntimeRentalId(rental);
+    if (!key) continue;
+    const group = groups.get(key) ?? [];
+    group.push(rental);
+    groups.set(key, group);
+  }
+  return groups;
+}
+
 export function findDowntimeRentalFlowTarget({ downtime, rentals }) {
   const matches = (Array.isArray(rentals) ? rentals : [])
     .filter(rental => isOpenRentalForDowntime(rental))
@@ -62,11 +98,22 @@ export function findDowntimeRentalFlowTarget({ downtime, rentals }) {
   if (matches.length === 1) {
     return { flow: 'rental', rental: matches[0], matches };
   }
+
+  const matchGroups = groupMatchesByCanonicalRental(matches);
+
+  if (matchGroups.size === 1) {
+    const groupedMatches = [...matchGroups.values()][0];
+    return {
+      flow: 'rental',
+      rental: chooseBestDowntimeRentalMatch(groupedMatches),
+      matches,
+    };
+  }
   if (matches.length > 1) {
     return {
       flow: 'conflict',
       matches,
-      message: 'Найдено несколько аренд в выбранном периоде. Откройте нужную аренду и скорректируйте простой там.',
+      message: 'Найдено несколько разных аренд в выбранном периоде. Откройте нужную аренду и скорректируйте простой там.',
     };
   }
   return { flow: 'standalone', rental: null, matches: [] };

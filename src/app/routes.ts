@@ -66,6 +66,7 @@ export const router = createHashRouter([
       { path: 'documents', lazy: lazyPage('./pages/Documents') },
       { path: 'payments', lazy: lazyPage('./pages/Payments') },
       { path: 'finance', lazy: lazyPage('./pages/Finance') },
+      { path: 'payroll', lazy: lazyPage('./pages/Payroll') },
       { path: 'approvals', lazy: lazyPage('./pages/Approvals') },
       { path: 'bots', lazy: lazyPage('./pages/Bots') },
       { path: 'bots/:botId', lazy: lazyPage('./pages/BotDetail') },

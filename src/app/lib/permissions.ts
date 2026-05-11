@@ -35,6 +35,7 @@ export type Section =
   | 'documents'
   | 'payments'
   | 'finance'
+  | 'payroll'
   | 'approvals'
   | 'bots'
   | 'reports'
@@ -72,6 +73,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     documents:        ALL,
     payments:         ALL,
     finance:          ALL,
+    payroll:          ALL,
     approvals:        ALL,
     bots:             VIEW,
     reports:          ALL,
@@ -229,6 +231,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname.startsWith('/documents'))      return 'documents';
   if (pathname.startsWith('/payments'))       return 'payments';
   if (pathname.startsWith('/finance'))        return 'finance';
+  if (pathname.startsWith('/payroll'))        return 'payroll';
   if (pathname.startsWith('/approvals'))      return 'approvals';
   if (pathname.startsWith('/bots'))           return 'bots';
   if (pathname.startsWith('/reports'))        return 'reports';
@@ -255,6 +258,7 @@ const SECTION_PATHS: Array<[Section, string]> = [
   ['documents',  '/documents'],
   ['payments',   '/payments'],
   ['finance',    '/finance'],
+  ['payroll',    '/payroll'],
   ['approvals',  '/approvals'],
   ['bots',       '/bots'],
   ['reports',    '/reports'],

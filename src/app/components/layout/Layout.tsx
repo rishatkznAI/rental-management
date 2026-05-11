@@ -79,6 +79,7 @@ export function Layout() {
       documents: 'Документы',
       payments: 'Платежи',
       finance: 'Финансы',
+      payroll: 'Зарплата',
       bots: 'Бот',
       reports: 'Отчёты',
       settings: 'Личные настройки',

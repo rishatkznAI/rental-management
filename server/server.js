@@ -128,6 +128,7 @@ const { registerDocumentRoutes } = require('./routes/documents');
 const { registerFinanceRoutes } = require('./routes/finance');
 const { registerGsmRoutes } = require('./routes/gsm');
 const { registerLeasingRoutes } = require('./routes/leasing');
+const { registerPayrollRoutes } = require('./routes/payroll');
 const { registerPlannerRoutes } = require('./routes/planner');
 const { registerRentalChangeRequestRoutes } = require('./routes/rental-change-requests');
 const { registerRentalRoutes } = require('./routes/rentals');
@@ -481,6 +482,11 @@ const WRITE_PERMISSIONS = {
   company_expenses: ['Администратор', 'Офис-менеджер'],
   leasing_contracts: ['Администратор', 'Офис-менеджер'],
   leasing_payment_schedule: ['Администратор', 'Офис-менеджер'],
+  payroll_profiles: ['Администратор'],
+  payroll_periods: ['Администратор'],
+  payroll_records: ['Администратор'],
+  payroll_adjustments: ['Администратор'],
+  payroll_audit_events: ['Администратор'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
   shipping_photos:['Администратор', ...MECHANIC_ROLES, 'Менеджер по аренде'],
@@ -527,6 +533,11 @@ const READ_PERMISSIONS = {
   company_expenses: ['Администратор', 'Офис-менеджер'],
   leasing_contracts: ['Администратор', 'Офис-менеджер'],
   leasing_payment_schedule: ['Администратор', 'Офис-менеджер'],
+  payroll_profiles: ['Администратор'],
+  payroll_periods: ['Администратор'],
+  payroll_records: ['Администратор'],
+  payroll_adjustments: ['Администратор'],
+  payroll_audit_events: ['Администратор'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
   shipping_photos:['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
@@ -900,6 +911,11 @@ const ID_PREFIXES = {
   company_expenses: 'CE',
   leasing_contracts: 'LC',
   leasing_payment_schedule: 'LPS',
+  payroll_profiles: 'PP',
+  payroll_periods: 'PPRD',
+  payroll_records: 'PR',
+  payroll_adjustments: 'PADJ',
+  payroll_audit_events: 'PAE',
   crm_deals:      'CRM',
   deliveries:     'DL',
   delivery_carriers: 'DC',
@@ -1354,6 +1370,16 @@ registerDocumentRoutes(apiRouter, {
   nowIso,
   auditLog,
   normalizeRecordClientLink,
+});
+
+registerPayrollRoutes(apiRouter, {
+  readData,
+  writeData,
+  requireAuth,
+  generateId,
+  idPrefixes: ID_PREFIXES,
+  nowIso,
+  auditLog,
 });
 
 apiRouter.use(registerCrudRoutes({

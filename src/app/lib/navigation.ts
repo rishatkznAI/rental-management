@@ -13,7 +13,7 @@ export const SIDEBAR_NAV_GROUP_SETTING_KEY = 'sidebar_navigation_groups';
 export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   { id: 'main', title: 'Главное', items: ['dashboard', 'tasks_center', 'equipment', 'gsm', 'knowledge_base', 'sales', 'deliveries', 'rentals'] },
   { id: 'operations', title: 'Операции', items: ['planner', 'service', 'service_vehicles'] },
-  { id: 'data', title: 'Данные', items: ['clients', 'documents', 'payments', 'finance', 'approvals'] },
+  { id: 'data', title: 'Данные', items: ['clients', 'documents', 'payments', 'finance', 'payroll', 'approvals'] },
   { id: 'other', title: 'Прочее', items: ['bots', 'reports', 'admin_panel'] },
   { id: 'profile', title: 'Профиль', items: ['profile_settings'] },
 ];
@@ -72,6 +72,7 @@ export const SIDEBAR_SECTION_LABELS: Record<Section, string> = {
   documents: 'Документы',
   payments: 'Платежи',
   finance: 'Финансы',
+  payroll: 'Зарплата',
   approvals: 'Согласования',
   bots: 'Бот',
   reports: 'Отчёты',

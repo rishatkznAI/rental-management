@@ -1597,6 +1597,154 @@ export interface AppSetting {
   updatedAt: string;
 }
 
+// ── Зарплата ─────────────────────────────────────────────────────────────────
+
+export type PayrollKpiSchemeType =
+  | 'none'
+  | 'manual'
+  | 'rental_manager'
+  | 'sales_manager'
+  | 'service_mechanic'
+  | 'office_manager'
+  | 'custom';
+
+export type PayrollPeriodStatus = 'draft' | 'calculated' | 'approved' | 'paid' | 'closed';
+export type PayrollRecordStatus = 'draft' | 'approved' | 'paid';
+export type PayrollAdjustmentType = 'bonus' | 'deduction' | 'advance' | 'compensation' | 'manual_kpi';
+
+export interface PayrollProfile {
+  id: string;
+  userId: string;
+  employeeName: string;
+  role: string;
+  baseSalary: number;
+  currency: 'RUB';
+  kpiSchemeType: PayrollKpiSchemeType;
+  kpiPercent?: number;
+  kpiFixedAmount?: number;
+  kpiDescription?: string;
+  isActive: boolean;
+  startedAt?: string;
+  endedAt?: string | null;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PayrollPeriod {
+  id: string;
+  month: string;
+  status: PayrollPeriodStatus;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt?: string;
+  paidAt?: string;
+  closedAt?: string;
+  notes?: string;
+}
+
+export interface PayrollCalculationDetail {
+  label: string;
+  amount: number;
+  type: 'base' | 'kpi' | 'bonus' | 'deduction' | 'advance' | 'compensation' | 'info';
+  comment?: string;
+}
+
+export interface PayrollRecord {
+  id: string;
+  periodId: string;
+  month: string;
+  userId: string;
+  employeeName: string;
+  role: string;
+  baseSalary: number;
+  kpiSchemeType: PayrollKpiSchemeType | string;
+  kpiPercent?: number;
+  kpiBaseAmount?: number;
+  kpiAmount: number;
+  bonusAmount: number;
+  deductionAmount: number;
+  advanceAmount: number;
+  compensationAmount: number;
+  grossAmount: number;
+  netAmount: number;
+  calculationDetails: PayrollCalculationDetail[];
+  status: PayrollRecordStatus;
+  adminComment?: string;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt?: string;
+  paidAt?: string;
+}
+
+export interface PayrollAdjustment {
+  id: string;
+  payrollRecordId: string;
+  type: PayrollAdjustmentType;
+  amount: number;
+  reason: string;
+  createdByUserId: string;
+  createdByName: string;
+  createdAt: string;
+  month?: string;
+  employeeName?: string;
+  userId?: string;
+}
+
+export interface PayrollAuditEvent {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  userId: string;
+  userName: string;
+  before: unknown | null;
+  after: unknown | null;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface PayrollKpiSettings {
+  rentalManager: {
+    percentFromProfitWithoutVat: number;
+    paidOnly: boolean;
+    closedRentalsOnly: boolean;
+    minimumPlan: number;
+    manualBaseAmount: number;
+    comment: string;
+  };
+  salesManager: {
+    percentFromMargin: number;
+    fixedBonusPerSoldEquipment: number;
+    paidSalesOnly: boolean;
+    manualMarginAmount: number;
+    soldEquipmentCount: number;
+    comment: string;
+  };
+  serviceMechanic: {
+    bonusPerClosedTicket: number;
+    bonusPerFieldTrip: number;
+    manualBonus: number;
+    manualClosedTickets: number;
+    manualFieldTrips: number;
+    comment: string;
+  };
+  officeManager: {
+    fixedBonus: number;
+    manualBonus: number;
+    comment: string;
+  };
+  customSchemes: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    manualBaseAmount?: number;
+    percent?: number;
+    fixedBonus?: number;
+    isActive: boolean;
+  }>;
+}
+
 // ── Боты ──────────────────────────────────────────────────────────────────────
 
 export type BotStatus = 'online' | 'offline';

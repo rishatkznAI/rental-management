@@ -91,6 +91,11 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'knowledge_base_progress',
   'leasing_contracts',
   'leasing_payment_schedule',
+  'payroll_profiles',
+  'payroll_periods',
+  'payroll_records',
+  'payroll_adjustments',
+  'payroll_audit_events',
   'mechanic_documents',
   'mechanics',
   'owners',
@@ -111,6 +116,27 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'users',
   'vehicle_trips',
   'warranty_claims',
+]);
+
+const PAYROLL_COLLECTIONS = new Set([
+  'payroll_profiles',
+  'payroll_periods',
+  'payroll_records',
+  'payroll_adjustments',
+  'payroll_audit_events',
+]);
+
+const ADMIN_ONLY_READ_COLLECTIONS = new Set([
+  'app_settings',
+  ...PAYROLL_COLLECTIONS,
+]);
+
+const ADMIN_ONLY_MUTATE_COLLECTIONS = new Set([
+  'app_settings',
+  'users',
+  'owners',
+  'delivery_carriers',
+  ...PAYROLL_COLLECTIONS,
 ]);
 
 const SERVICE_MECHANIC_UPDATE_FIELDS = new Set([
@@ -978,7 +1004,7 @@ function canAccessEntity(collection, entity, user, readData) {
   if (!entity || !user) return false;
   if (!isKnownRole(user) || !isKnownCollection(collection)) return false;
   if (isAdmin(user)) return true;
-  if (collection === 'app_settings') return false;
+  if (ADMIN_ONLY_READ_COLLECTIONS.has(collection)) return false;
 
   switch (collection) {
     case 'users':
@@ -1106,7 +1132,7 @@ function canMutateEntity(collection, entity, user, readData) {
   if (!user) return false;
   if (!isKnownRole(user) || !isKnownCollection(collection)) return false;
   if (isAdmin(user)) return true;
-  if (collection === 'app_settings' || collection === 'users' || collection === 'owners' || collection === 'delivery_carriers') {
+  if (ADMIN_ONLY_MUTATE_COLLECTIONS.has(collection)) {
     return false;
   }
   if (collection === 'payments') {
@@ -1172,7 +1198,7 @@ function filterCollectionByScope(collection, list, user, readData) {
   const data = Array.isArray(list) ? list : [];
   if (!isKnownRole(user) || !isKnownCollection(collection)) return [];
   if (isAdmin(user)) return data;
-  if (collection === 'app_settings') return [];
+  if (ADMIN_ONLY_READ_COLLECTIONS.has(collection)) return [];
   return data.filter(item => canAccessEntity(collection, item, user, readData));
 }
 
@@ -1299,7 +1325,7 @@ function assertCanReadCollection(collection, user) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
   }
-  if (collection === 'app_settings' && !isAdmin(user)) {
+  if (ADMIN_ONLY_READ_COLLECTIONS.has(collection) && !isAdmin(user)) {
     throw forbidden();
   }
 }
@@ -1329,7 +1355,7 @@ function assertCanCreateCollection(collection, user, input = {}, readData) {
   if ((collection === 'leasing_contracts' || collection === 'leasing_payment_schedule') && !(isAdmin(user) || isOfficeManager(user))) {
     throw forbidden('Лизинг доступен только администратору или офис-менеджеру.');
   }
-  if (collection === 'app_settings' && !isAdmin(user)) {
+  if (ADMIN_ONLY_MUTATE_COLLECTIONS.has(collection) && !isAdmin(user)) {
     throw forbidden();
   }
   if (

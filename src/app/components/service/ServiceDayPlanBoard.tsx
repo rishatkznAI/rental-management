@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, CalendarDays, Clock, ExternalLink, RefreshCw, UserRound, Wrench } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Clock, ExternalLink, Plus, RefreshCw, UserRound, Wrench } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge, getServicePriorityBadge, getServiceStatusBadge } from '../ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, type AuthUser } from '../../contexts/AuthContext';
 import { isMechanicRole } from '../../lib/userStorage';
 import { buildServiceDayPlan, localDateKey } from '../../lib/serviceDayPlan.js';
 import type { Mechanic, ServiceTicket } from '../../types';
@@ -17,6 +17,8 @@ type DayPlanFilter =
   | 'high'
   | 'waiting_parts'
   | 'ready';
+
+type DayPlanTask = ReturnType<typeof buildServiceDayPlan>['tasks'][number];
 
 const FILTERS: Array<{ value: DayPlanFilter; label: string }> = [
   { value: 'all', label: 'Все' },
@@ -52,7 +54,22 @@ function compactText(value: string, max = 96) {
   return `${normalized.slice(0, max).trimEnd()}...`;
 }
 
-function taskMatchesFilter(task: ReturnType<typeof buildServiceDayPlan>['tasks'][number], filter: DayPlanFilter) {
+function normalizeIdentity(value: unknown) {
+  return String(value ?? '').trim().toLowerCase().replaceAll('ё', 'е');
+}
+
+function dayPlanTaskMatchesCurrentUser(task: DayPlanTask, user: AuthUser | null) {
+  if (!user) return false;
+  const userKeys = [user.id, user.name, user.email]
+    .map(normalizeIdentity)
+    .filter(Boolean);
+  const taskKeys = [task.mechanicId, task.mechanicName]
+    .map(normalizeIdentity)
+    .filter(Boolean);
+  return taskKeys.some(taskKey => userKeys.includes(taskKey));
+}
+
+function taskMatchesFilter(task: DayPlanTask, filter: DayPlanFilter) {
   if (filter === 'all' || filter === 'mine') return true;
   if (filter === 'unassigned') return task.unassigned;
   if (filter === 'overdue') return task.isOverdue;
@@ -63,16 +80,29 @@ function taskMatchesFilter(task: ReturnType<typeof buildServiceDayPlan>['tasks']
 }
 
 function MetricCard({ label, value, tone }: { label: string; value: number; tone: string }) {
+  const safeValue = Number.isFinite(value) ? value : 0;
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-white/10 dark:bg-white/[0.03]">
       <div className="text-xs font-bold uppercase text-gray-500 dark:text-gray-500">{label}</div>
-      <div className={`mt-2 text-3xl font-black leading-none ${tone}`}>{value}</div>
+      <div className={`mt-2 text-3xl font-black leading-none ${tone}`}>{safeValue}</div>
     </div>
   );
 }
 
-function TaskRow({ task }: { task: ReturnType<typeof buildServiceDayPlan>['tasks'][number] }) {
+function TaskRow({
+  task,
+  canEditService,
+  canManageDayPlan,
+  currentUser,
+}: {
+  task: DayPlanTask;
+  canEditService: boolean;
+  canManageDayPlan: boolean;
+  currentUser: AuthUser | null;
+}) {
   const dateLabel = task.dueDate || task.planDate || '';
+  const canUseAssignedWorkflow = canEditService && (canManageDayPlan || dayPlanTaskMatchesCurrentUser(task, currentUser));
+  const canReschedule = canEditService && canManageDayPlan;
   return (
     <div className="border-b border-gray-100 px-3 py-3 last:border-b-0 dark:border-white/8">
       <div className="flex min-w-0 items-start justify-between gap-3">
@@ -103,6 +133,30 @@ function TaskRow({ task }: { task: ReturnType<typeof buildServiceDayPlan>['tasks
         {task.location && <span>Объект: {compactText(task.location, 44)}</span>}
         <span>{task.waitingParts ? 'Запчасти ожидаются' : task.hasParts ? 'Запчасти указаны' : 'Запчасти не указаны'}</span>
       </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Link to={`/service/${task.id}`}>
+          <Button size="sm" variant="secondary">Открыть</Button>
+        </Link>
+        {(canUseAssignedWorkflow || canReschedule) && (
+          <>
+            {canUseAssignedWorkflow && (
+              <Link to={`/service/${task.id}`}>
+                <Button size="sm" variant="outline">Добавить работу</Button>
+              </Link>
+            )}
+            {canUseAssignedWorkflow && (task.status === 'in_progress' || task.status === 'needs_revision') ? (
+              <Link to={`/service/${task.id}`}>
+                <Button size="sm" variant="outline">Завершить</Button>
+              </Link>
+            ) : null}
+            {canReschedule && (
+              <Link to={`/service/${task.id}`}>
+                <Button size="sm" variant="outline">Перенести</Button>
+              </Link>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -112,11 +166,17 @@ function ProblemList({
   items,
   empty,
   icon,
+  canEditService,
+  canManageDayPlan,
+  currentUser,
 }: {
   title: string;
-  items: ReturnType<typeof buildServiceDayPlan>['tasks'];
+  items: DayPlanTask[];
   empty: string;
   icon: React.ReactNode;
+  canEditService: boolean;
+  canManageDayPlan: boolean;
+  currentUser: AuthUser | null;
 }) {
   return (
     <section className="rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
@@ -129,7 +189,15 @@ function ProblemList({
         <div className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400">{empty}</div>
       ) : (
         <div className="max-h-72 overflow-y-auto">
-          {items.slice(0, 12).map(task => <TaskRow key={`${title}-${task.id}`} task={task} />)}
+          {items.slice(0, 12).map(task => (
+            <TaskRow
+              key={`${title}-${task.id}`}
+              task={task}
+              canEditService={canEditService}
+              canManageDayPlan={canManageDayPlan}
+              currentUser={currentUser}
+            />
+          ))}
         </div>
       )}
     </section>
@@ -141,16 +209,23 @@ export function ServiceDayPlanBoard({
   mechanics,
   isLoading = false,
   onRefresh,
+  canCreateService = false,
+  canEditService = false,
+  canManageDayPlan = false,
 }: {
   tickets: ServiceTicket[];
   mechanics: Mechanic[];
   isLoading?: boolean;
   onRefresh: () => void;
+  canCreateService?: boolean;
+  canEditService?: boolean;
+  canManageDayPlan?: boolean;
 }) {
   const { user } = useAuth();
   const today = React.useMemo(() => localDateKey(new Date()), []);
   const [dateMode, setDateMode] = React.useState<'today' | 'tomorrow'>('today');
   const [filter, setFilter] = React.useState<DayPlanFilter>(() => isMineDefault(user?.role) ? 'mine' : 'all');
+  const [statusFilter, setStatusFilter] = React.useState<DayPlanFilter>('all');
   const [mechanicFilter, setMechanicFilter] = React.useState('all');
   const targetDate = React.useMemo(() => {
     if (dateMode === 'today') return today;
@@ -170,17 +245,20 @@ export function ServiceDayPlanBoard({
   const filteredMechanics = React.useMemo(() => plan.mechanics
     .map(mechanic => ({
       ...mechanic,
-      tasks: mechanic.tasks.filter(task => taskMatchesFilter(task, filter)),
+      tasks: mechanic.tasks.filter(task => taskMatchesFilter(task, filter) && taskMatchesFilter(task, statusFilter)),
     }))
     .filter(mechanic => mechanicFilter === 'all' || mechanic.key === mechanicFilter)
-    .filter(mechanic => filter === 'all' || filter === 'mine' || mechanic.tasks.length > 0 || mechanic.workloadStatus === 'free'), [filter, mechanicFilter, plan.mechanics]);
+    .filter(mechanic => {
+      const hasRestrictiveFilter = !['all', 'mine'].includes(filter) || statusFilter !== 'all';
+      return !hasRestrictiveFilter || mechanic.tasks.length > 0 || mechanic.workloadStatus === 'free';
+    }), [filter, mechanicFilter, plan.mechanics, statusFilter]);
 
   const problemTasks = React.useMemo(() => ({
-    unassigned: plan.problems.unassigned.filter(task => taskMatchesFilter(task, filter)),
-    overdue: plan.problems.overdue.filter(task => taskMatchesFilter(task, filter)),
-    waitingParts: plan.problems.waitingParts.filter(task => taskMatchesFilter(task, filter)),
-    readyToClose: plan.problems.readyToClose.filter(task => taskMatchesFilter(task, filter)),
-  }), [filter, plan.problems]);
+    unassigned: plan.problems.unassigned.filter(task => taskMatchesFilter(task, filter) && taskMatchesFilter(task, statusFilter)),
+    overdue: plan.problems.overdue.filter(task => taskMatchesFilter(task, filter) && taskMatchesFilter(task, statusFilter)),
+    waitingParts: plan.problems.waitingParts.filter(task => taskMatchesFilter(task, filter) && taskMatchesFilter(task, statusFilter)),
+    readyToClose: plan.problems.readyToClose.filter(task => taskMatchesFilter(task, filter) && taskMatchesFilter(task, statusFilter)),
+  }), [filter, plan.problems, statusFilter]);
 
   return (
     <div className="space-y-5">
@@ -210,6 +288,27 @@ export function ServiceDayPlanBoard({
                 ))}
               </SelectContent>
             </Select>
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as DayPlanFilter)}>
+              <SelectTrigger className="h-10 w-full rounded-lg sm:w-[220px]">
+                <SelectValue placeholder="По статусу" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все статусы</SelectItem>
+                <SelectItem value="unassigned">Без механика</SelectItem>
+                <SelectItem value="overdue">Просроченные</SelectItem>
+                <SelectItem value="waiting_parts">Ожидание запчастей</SelectItem>
+                <SelectItem value="ready">Готово к закрытию</SelectItem>
+                <SelectItem value="high">Высокий приоритет</SelectItem>
+              </SelectContent>
+            </Select>
+            {canCreateService && (
+              <Link to="/service/new">
+                <Button type="button" className="h-10 w-full sm:w-auto">
+                  <Plus className="h-4 w-4" />
+                  Создать заявку
+                </Button>
+              </Link>
+            )}
             <Button type="button" variant="secondary" onClick={onRefresh} disabled={isLoading} className="h-10">
               <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
               Обновить
@@ -233,15 +332,11 @@ export function ServiceDayPlanBoard({
       </section>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label="Всего задач" value={plan.metrics.total} tone="text-gray-900 dark:text-white" />
+        <MetricCard label="Задач на сегодня" value={plan.metrics.total} tone="text-gray-900 dark:text-white" />
         <MetricCard label="В работе" value={plan.metrics.inProgress} tone="text-blue-500" />
-        <MetricCard label="Новые" value={plan.metrics.new} tone="text-gray-500" />
         <MetricCard label="Просроченные" value={plan.metrics.overdue} tone="text-red-500" />
         <MetricCard label="Без механика" value={plan.metrics.unassigned} tone="text-amber-500" />
-        <MetricCard label="Ожидание запчастей" value={plan.metrics.waitingParts} tone="text-orange-500" />
         <MetricCard label="Готово к закрытию" value={plan.metrics.readyToClose} tone="text-emerald-500" />
-        <MetricCard label="Свободные механики" value={plan.metrics.freeMechanics} tone="text-emerald-500" />
-        <MetricCard label="Перегруженные" value={plan.metrics.overloadedMechanics} tone="text-red-500" />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -267,8 +362,10 @@ export function ServiceDayPlanBoard({
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
                   <div className="rounded-lg bg-gray-50 p-2 dark:bg-white/[0.04]"><b className="block text-base text-gray-900 dark:text-white">{mechanic.tasksCount}</b>задач</div>
+                  <div className="rounded-lg bg-blue-50 p-2 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"><b className="block text-base">{mechanic.tasks.filter(task => ['in_progress', 'needs_revision'].includes(task.status)).length}</b>в работе</div>
+                  <div className="rounded-lg bg-orange-50 p-2 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300"><b className="block text-base">{mechanic.tasks.filter(task => task.waitingParts).length}</b>запчасти</div>
                   <div className="rounded-lg bg-red-50 p-2 text-red-700 dark:bg-red-500/10 dark:text-red-300"><b className="block text-base">{mechanic.overdueCount}</b>проср.</div>
-                  <div className="rounded-lg bg-amber-50 p-2 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><b className="block text-base">{mechanic.criticalCount}</b>крит.</div>
+                  <div className="rounded-lg bg-emerald-50 p-2 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"><b className="block text-base">{mechanic.tasks.filter(task => task.readyToClose).length}</b>готово</div>
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
@@ -277,7 +374,15 @@ export function ServiceDayPlanBoard({
                     <Wrench className="mb-2 h-8 w-8 text-emerald-500" />
                     Свободен на выбранный день
                   </div>
-                ) : mechanic.tasks.map(task => <TaskRow key={task.id} task={task} />)}
+                ) : mechanic.tasks.map(task => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    canEditService={canEditService}
+                    canManageDayPlan={canManageDayPlan}
+                    currentUser={user}
+                  />
+                ))}
               </div>
             </article>
           ))}
@@ -288,10 +393,10 @@ export function ServiceDayPlanBoard({
             <AlertTriangle className="h-5 w-5 text-red-500" />
             <h2 className="text-lg font-black text-gray-900 dark:text-white">Проблемы дня</h2>
           </div>
-          <ProblemList title="Без механика" items={problemTasks.unassigned} empty="Все задачи назначены." icon={<UserRound className="h-4 w-4 text-amber-500" />} />
-          <ProblemList title="Просроченные" items={problemTasks.overdue} empty="Просрочек нет." icon={<Clock className="h-4 w-4 text-red-500" />} />
-          <ProblemList title="Ожидают запчасти" items={problemTasks.waitingParts} empty="Нет задач в ожидании запчастей." icon={<Wrench className="h-4 w-4 text-orange-500" />} />
-          <ProblemList title="Готово к закрытию" items={problemTasks.readyToClose} empty="Нет заявок, готовых к закрытию." icon={<ExternalLink className="h-4 w-4 text-emerald-500" />} />
+          <ProblemList title="Без механика" items={problemTasks.unassigned} empty="Все задачи назначены." icon={<UserRound className="h-4 w-4 text-amber-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} />
+          <ProblemList title="Просроченные" items={problemTasks.overdue} empty="Просрочек нет." icon={<Clock className="h-4 w-4 text-red-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} />
+          <ProblemList title="Ожидают запчасти" items={problemTasks.waitingParts} empty="Нет задач в ожидании запчастей." icon={<Wrench className="h-4 w-4 text-orange-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} />
+          <ProblemList title="Готово к закрытию" items={problemTasks.readyToClose} empty="Нет заявок, готовых к закрытию." icon={<ExternalLink className="h-4 w-4 text-emerald-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} />
         </aside>
       </div>
     </div>

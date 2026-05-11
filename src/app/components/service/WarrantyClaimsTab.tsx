@@ -172,6 +172,36 @@ function getClaimSearchText(claim: WarrantyClaim) {
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
+function getClaimClient(claim: WarrantyClaim, ticketById: Map<string, ServiceTicket>) {
+  const ticket = claim.serviceTicketId ? ticketById.get(claim.serviceTicketId) : undefined;
+  return ticket?.client || '—';
+}
+
+function getClaimResponsible(claim: WarrantyClaim) {
+  return claim.createdByUserName || claim.createdByUserId || '—';
+}
+
+function getClaimDueTone(claim: WarrantyClaim) {
+  if (FINAL_STATUSES.includes(claim.status)) return 'text-emerald-700 dark:text-emerald-300';
+  if (isResponseOverdue(claim)) return 'font-semibold text-red-600 dark:text-red-300';
+  if (claim.status === 'factory_review' || claim.status === 'parts_shipping') return 'font-semibold text-orange-600 dark:text-orange-300';
+  return 'text-gray-600 dark:text-gray-300';
+}
+
+function claimMatchesPeriod(claim: WarrantyClaim, period: string) {
+  if (period === 'all') return true;
+  const createdKey = (claim.createdAt || '').slice(0, 10);
+  if (!createdKey) return false;
+  const today = new Date();
+  const todayKey = today.toISOString().slice(0, 10);
+  if (period === 'today') return createdKey === todayKey;
+  const start = new Date(today);
+  if (period === 'last7') start.setDate(start.getDate() - 6);
+  if (period === 'month') start.setDate(1);
+  const startKey = start.toISOString().slice(0, 10);
+  return createdKey >= startKey && createdKey <= todayKey;
+}
+
 function isResponseOverdue(claim: WarrantyClaim) {
   if (!claim.responseDueDate || FINAL_STATUSES.includes(claim.status)) return false;
   return claim.responseDueDate.slice(0, 10) < new Date().toISOString().slice(0, 10);
@@ -200,9 +230,10 @@ type WarrantyClaimsTabProps = {
   tickets: ServiceTicket[];
   canEdit: boolean;
   canDelete: boolean;
+  canCreateDocuments?: boolean;
 };
 
-export function WarrantyClaimsTab({ tickets, canEdit, canDelete }: WarrantyClaimsTabProps) {
+export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocuments = false }: WarrantyClaimsTabProps) {
   const { user } = useAuth();
   const { data: claims = [], isLoading } = useWarrantyClaimsList();
   const { data: equipmentList = [] } = useEquipmentList();
@@ -215,21 +246,39 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete }: WarrantyClaim
   const [search, setSearch] = React.useState('');
   const [selectedClaimId, setSelectedClaimId] = React.useState<string | null>(null);
   const [editForm, setEditForm] = React.useState<ClaimEditState | null>(null);
+  const [equipmentFilter, setEquipmentFilter] = React.useState('all');
+  const [clientFilter, setClientFilter] = React.useState('all');
+  const [factoryFilter, setFactoryFilter] = React.useState('all');
+  const [responsibleFilter, setResponsibleFilter] = React.useState('all');
+  const [periodFilter, setPeriodFilter] = React.useState('all');
+  const [panelTab, setPanelTab] = React.useState<'overview' | 'works' | 'documents' | 'history' | 'decision'>('overview');
 
   const equipmentById = React.useMemo(() => new Map(equipmentList.map(item => [item.id, item])), [equipmentList]);
   const ticketById = React.useMemo(() => new Map(tickets.map(ticket => [ticket.id, ticket])), [tickets]);
+
+  const filterOptions = React.useMemo(() => ({
+    equipment: Array.from(new Set(claims.map(claim => claim.equipmentLabel).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'ru')),
+    clients: Array.from(new Set(claims.map(claim => getClaimClient(claim, ticketById)).filter(value => value && value !== '—'))).sort((left, right) => left.localeCompare(right, 'ru')),
+    factories: Array.from(new Set(claims.map(claim => claim.factoryName).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'ru')),
+    responsible: Array.from(new Set(claims.map(getClaimResponsible).filter(value => value && value !== '—'))).sort((left, right) => left.localeCompare(right, 'ru')),
+  }), [claims, ticketById]);
 
   const filteredClaims = React.useMemo(() => {
     const query = search.trim().toLowerCase();
     return claims
       .filter(claim => statusFilter === 'all' || claim.status === statusFilter)
+      .filter(claim => equipmentFilter === 'all' || claim.equipmentLabel === equipmentFilter)
+      .filter(claim => clientFilter === 'all' || getClaimClient(claim, ticketById) === clientFilter)
+      .filter(claim => factoryFilter === 'all' || claim.factoryName === factoryFilter)
+      .filter(claim => responsibleFilter === 'all' || getClaimResponsible(claim) === responsibleFilter)
+      .filter(claim => claimMatchesPeriod(claim, periodFilter))
       .filter(claim => !query || getClaimSearchText(claim).includes(query))
       .sort((left, right) => {
         const leftTime = new Date(left.updatedAt || left.createdAt).getTime();
         const rightTime = new Date(right.updatedAt || right.createdAt).getTime();
         return rightTime - leftTime;
       });
-  }, [claims, search, statusFilter]);
+  }, [claims, clientFilter, equipmentFilter, factoryFilter, periodFilter, responsibleFilter, search, statusFilter, ticketById]);
 
   const selectedClaim = React.useMemo(() => {
     if (!filteredClaims.length) return null;
@@ -242,6 +291,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete }: WarrantyClaim
       return;
     }
     setSelectedClaimId(selectedClaim.id);
+    setPanelTab('overview');
     setEditForm({
       status: selectedClaim.status,
       factoryCaseNumber: selectedClaim.factoryCaseNumber ?? '',
@@ -261,8 +311,10 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete }: WarrantyClaim
 
   const metrics = React.useMemo(() => ({
     total: claims.length,
-    factoryActive: claims.filter(claim => FACTORY_ACTIVE_STATUSES.includes(claim.status)).length,
-    answered: claims.filter(claim => ['answer_received', 'approved', 'rejected'].includes(claim.status)).length,
+    new: claims.filter(claim => claim.status === 'draft').length,
+    inWork: claims.filter(claim => FACTORY_ACTIVE_STATUSES.includes(claim.status) || claim.status === 'parts_shipping').length,
+    waitingDecision: claims.filter(claim => claim.status === 'factory_review' || claim.status === 'answer_received').length,
+    closed: claims.filter(claim => FINAL_STATUSES.includes(claim.status)).length,
     overdue: claims.filter(isResponseOverdue).length,
   }), [claims]);
 
@@ -430,25 +482,35 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete }: WarrantyClaim
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Всего</p>
-          <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{metrics.total}</p>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Гарантийных обращений</p>
+          <p className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Всего рекламаций</p>
+          <p className="mt-2 text-3xl font-black text-gray-900 dark:text-white">{metrics.total}</p>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">В журнале</p>
         </div>
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
-          <p className="text-xs font-medium uppercase tracking-wide text-blue-700 dark:text-blue-300">На заводе</p>
-          <p className="mt-2 text-2xl font-bold text-blue-900 dark:text-blue-100">{metrics.factoryActive}</p>
-          <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">Отправлены или на проверке</p>
+          <p className="text-xs font-bold uppercase text-blue-700 dark:text-blue-300">Новые</p>
+          <p className="mt-2 text-3xl font-black text-blue-900 dark:text-blue-100">{metrics.new}</p>
+          <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">Черновики</p>
+        </div>
+        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-900/50 dark:bg-orange-950/20">
+          <p className="text-xs font-bold uppercase text-orange-700 dark:text-orange-300">В работе</p>
+          <p className="mt-2 text-3xl font-black text-orange-900 dark:text-orange-100">{metrics.inWork}</p>
+          <p className="mt-1 text-xs text-orange-700/80 dark:text-orange-300/80">Завод / запчасти</p>
+        </div>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <p className="text-xs font-bold uppercase text-amber-700 dark:text-amber-300">Ожидают решения</p>
+          <p className="mt-2 text-3xl font-black text-amber-900 dark:text-amber-100">{metrics.waitingDecision}</p>
+          <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-300/80">Ответ или решение</p>
         </div>
         <div className="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-900/50 dark:bg-green-950/20">
-          <p className="text-xs font-medium uppercase tracking-wide text-green-700 dark:text-green-300">С ответом</p>
-          <p className="mt-2 text-2xl font-bold text-green-900 dark:text-green-100">{metrics.answered}</p>
-          <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">Получено решение или отказ</p>
+          <p className="text-xs font-bold uppercase text-green-700 dark:text-green-300">Закрыты</p>
+          <p className="mt-2 text-3xl font-black text-green-900 dark:text-green-100">{metrics.closed}</p>
+          <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">Финальные статусы</p>
         </div>
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-950/20">
-          <p className="text-xs font-medium uppercase tracking-wide text-red-700 dark:text-red-300">Просрочено</p>
-          <p className="mt-2 text-2xl font-bold text-red-900 dark:text-red-100">{metrics.overdue}</p>
+          <p className="text-xs font-bold uppercase text-red-700 dark:text-red-300">Просрочены</p>
+          <p className="mt-2 text-3xl font-black text-red-900 dark:text-red-100">{metrics.overdue}</p>
           <p className="mt-1 text-xs text-red-700/80 dark:text-red-300/80">Нужен повторный запрос</p>
         </div>
       </div>
@@ -625,14 +687,87 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete }: WarrantyClaim
               <CardDescription>Поиск по технике, номеру обращения, серийному номеру или описанию.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Поиск по рекламациям..."
-                  className="pl-10"
-                />
+              <div className="grid gap-3 lg:grid-cols-[minmax(220px,1.4fr)_repeat(5,minmax(130px,1fr))]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="№, техника, клиент, проблема..."
+                    className="pl-10"
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as WarrantyClaimStatus | 'all')}>
+                  <SelectTrigger><SelectValue placeholder="Статус" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все статусы</SelectItem>
+                    {PROCESS_STEPS.map(status => (
+                      <SelectItem key={status} value={status}>{STATUS_META[status].label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={equipmentFilter} onValueChange={setEquipmentFilter}>
+                  <SelectTrigger><SelectValue placeholder="Техника" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Вся техника</SelectItem>
+                    {filterOptions.equipment.map(equipment => (
+                      <SelectItem key={equipment} value={equipment}>{equipment}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={clientFilter} onValueChange={setClientFilter}>
+                  <SelectTrigger><SelectValue placeholder="Клиент" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все клиенты</SelectItem>
+                    {filterOptions.clients.map(client => (
+                      <SelectItem key={client} value={client}>{client}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={factoryFilter} onValueChange={setFactoryFilter}>
+                  <SelectTrigger><SelectValue placeholder="Поставщик" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все поставщики</SelectItem>
+                    {filterOptions.factories.map(factory => (
+                      <SelectItem key={factory} value={factory}>{factory}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={periodFilter} onValueChange={setPeriodFilter}>
+                  <SelectTrigger><SelectValue placeholder="Период" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все даты</SelectItem>
+                    <SelectItem value="today">Сегодня</SelectItem>
+                    <SelectItem value="last7">7 дней</SelectItem>
+                    <SelectItem value="month">Этот месяц</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Select value={responsibleFilter} onValueChange={setResponsibleFilter}>
+                  <SelectTrigger className="w-full sm:w-[220px]"><SelectValue placeholder="Ответственный" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все ответственные</SelectItem>
+                    {filterOptions.responsible.map(responsible => (
+                      <SelectItem key={responsible} value={responsible}>{responsible}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setSearch('');
+                    setStatusFilter('all');
+                    setEquipmentFilter('all');
+                    setClientFilter('all');
+                    setFactoryFilter('all');
+                    setResponsibleFilter('all');
+                    setPeriodFilter('all');
+                  }}
+                >
+                  Сбросить
+                </Button>
               </div>
 
               <div className="space-y-2">
@@ -645,44 +780,53 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete }: WarrantyClaim
                     Рекламации не найдены.
                   </div>
                 ) : (
-                  filteredClaims.map(claim => (
-                    <button
-                      key={claim.id}
-                      type="button"
-                      onClick={() => setSelectedClaimId(claim.id)}
-                      className={cn(
-                        'w-full rounded-lg border p-4 text-left transition-colors',
-                        selectedClaim?.id === claim.id
-                          ? 'border-[--color-primary] bg-[--color-primary]/10'
-                          : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-gray-600',
-                      )}
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                    <div className="hidden grid-cols-[minmax(110px,0.7fr)_100px_minmax(170px,1fr)_minmax(130px,0.8fr)_minmax(190px,1.2fr)_120px_minmax(130px,0.8fr)_95px_minmax(150px,0.9fr)] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-gray-700 dark:bg-gray-900/50 xl:grid">
+                      <div>№ рекламации</div>
+                      <div>Дата</div>
+                      <div>Техника</div>
+                      <div>Клиент</div>
+                      <div>Проблема</div>
+                      <div>Статус</div>
+                      <div>Ответственный</div>
+                      <div>Срок</div>
+                      <div>Решение</div>
+                    </div>
+                    {filteredClaims.map(claim => (
+                      <button
+                        key={claim.id}
+                        type="button"
+                        onClick={() => setSelectedClaimId(claim.id)}
+                        className={cn(
+                          'grid w-full gap-3 border-b border-gray-100 px-4 py-3 text-left transition-colors last:border-b-0 dark:border-gray-800 xl:grid-cols-[minmax(110px,0.7fr)_100px_minmax(170px,1fr)_minmax(130px,0.8fr)_minmax(190px,1.2fr)_120px_minmax(130px,0.8fr)_95px_minmax(150px,0.9fr)] xl:items-center',
+                          selectedClaim?.id === claim.id
+                            ? 'bg-[--color-primary]/10'
+                            : 'bg-white hover:bg-gray-50 dark:bg-gray-900/40 dark:hover:bg-gray-900',
+                        )}
+                      >
+                        <div className="font-mono text-sm font-bold text-[--color-primary]">{claim.id}</div>
+                        <div className="text-sm text-gray-600 dark:text-gray-300">{formatDateSafe(claim.createdAt)}</div>
                         <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-semibold text-[--color-primary]">{claim.id}</span>
-                            {getStatusBadge(claim.status)}
-                            {isResponseOverdue(claim) && (
-                              <Badge variant="error" className="gap-1">
-                                <AlertTriangle className="h-3 w-3" />
-                                Просрочено
-                              </Badge>
-                            )}
+                          <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{claim.equipmentLabel || '—'}</div>
+                          <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
+                            INV: {claim.inventoryNumber || '—'} · SN: {claim.serialNumber || '—'}
                           </div>
-                          <p className="mt-2 truncate text-sm font-medium text-gray-900 dark:text-white">
-                            {claim.equipmentLabel}
-                          </p>
-                          <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
-                            {claim.failureDescription}
-                          </p>
                         </div>
-                        <div className="shrink-0 text-right text-xs text-gray-500 dark:text-gray-400">
-                          <p>{getPriorityLabel(claim.priority)}</p>
-                          <p className="mt-1">Ответ до: {formatDateSafe(claim.responseDueDate)}</p>
+                        <div className="truncate text-sm text-gray-700 dark:text-gray-200">{getClaimClient(claim, ticketById)}</div>
+                        <div className="min-w-0">
+                          <div className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-white">{claim.failureDescription || '—'}</div>
+                          <div className="mt-0.5 truncate text-xs text-gray-500">{claim.factoryName || 'Поставщик не указан'}</div>
                         </div>
-                      </div>
-                    </button>
-                  ))
+                        <div className="flex flex-wrap gap-1">
+                          {getStatusBadge(claim.status)}
+                          {isResponseOverdue(claim) && <Badge variant="error">Просрочено</Badge>}
+                        </div>
+                        <div className="truncate text-sm text-gray-700 dark:text-gray-200">{getClaimResponsible(claim)}</div>
+                        <div className={`text-sm ${getClaimDueTone(claim)}`}>{formatDateSafe(claim.responseDueDate)}</div>
+                        <div className="line-clamp-2 text-sm text-gray-600 dark:text-gray-300">{claim.decision || claim.factoryResponse || '—'}</div>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             </CardContent>
@@ -738,115 +882,120 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete }: WarrantyClaim
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                  <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Статус</span>
-                    <Select
-                      value={editForm.status}
-                      onValueChange={(value) => setEditForm(prev => prev ? ({ ...prev, status: value as WarrantyClaimStatus }) : prev)}
-                      disabled={!canEdit}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PROCESS_STEPS.map(status => (
-                          <SelectItem key={status} value={status}>
-                            {STATUS_META[status].label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-
-                  <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Номер дела завода</span>
-                    <Input
-                      value={editForm.factoryCaseNumber}
-                      onChange={(event) => setEditForm(prev => prev ? ({ ...prev, factoryCaseNumber: event.target.value }) : prev)}
-                      disabled={!canEdit}
-                    />
-                  </label>
-
-                  <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Срок ответа</span>
-                    <Input
-                      type="date"
-                      value={editForm.responseDueDate}
-                      onChange={(event) => setEditForm(prev => prev ? ({ ...prev, responseDueDate: event.target.value }) : prev)}
-                      disabled={!canEdit}
-                    />
-                  </label>
-
-                  <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                    <p className="font-medium text-gray-900 dark:text-white">Ключевые даты</p>
-                    <p className="mt-1">Отправлено: {formatDateSafe(selectedClaim.sentAt)}</p>
-                    <p>Закрыто: {formatDateSafe(selectedClaim.closedAt)}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Неисправность</span>
-                  <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200">
-                    {selectedClaim.failureDescription}
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Запрашиваемое решение</span>
-                  <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200">
-                    {selectedClaim.requestedResolution}
-                  </div>
-                </div>
-
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Ответ завода</span>
-                  <Textarea
-                    value={editForm.factoryResponse}
-                    onChange={(event) => setEditForm(prev => prev ? ({ ...prev, factoryResponse: event.target.value }) : prev)}
-                    rows={4}
-                    disabled={!canEdit}
-                    placeholder="Что ответил завод, какие уточнения запросил..."
-                  />
-                </label>
-
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Итоговое решение</span>
-                  <Textarea
-                    value={editForm.decision}
-                    onChange={(event) => setEditForm(prev => prev ? ({ ...prev, decision: event.target.value }) : prev)}
-                    rows={3}
-                    disabled={!canEdit}
-                    placeholder="Что делаем дальше: ремонт по гарантии, заказ запчастей, отказ..."
-                  />
-                </label>
-
-                <div className="flex flex-wrap justify-between gap-2">
-                  {canDelete && (
-                    <Button
+                <div className="flex gap-1 overflow-x-auto border-b border-gray-200 pb-2 dark:border-gray-700">
+                  {[
+                    { id: 'overview', label: 'Обзор' },
+                    { id: 'works', label: 'Работы' },
+                    { id: 'documents', label: 'Документы' },
+                    { id: 'history', label: 'История' },
+                    { id: 'decision', label: 'Решение' },
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
                       type="button"
-                      variant="destructive"
-                      onClick={handleDeleteClaim}
-                      disabled={deleteClaim.isPending}
+                      onClick={() => setPanelTab(tab.id as typeof panelTab)}
+                      className="app-filter-chip whitespace-nowrap"
+                      data-active={String(panelTab === tab.id)}
                     >
-                      <Trash2 className="h-4 w-4" />
-                      Удалить
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    onClick={handleSaveClaim}
-                    disabled={!canEdit || updateClaim.isPending}
-                    className="ml-auto"
-                  >
-                    <MessageSquareReply className="h-4 w-4" />
-                    {updateClaim.isPending ? 'Сохраняем...' : 'Сохранить'}
-                  </Button>
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
 
-                <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
-                  <p className="mb-3 text-sm font-medium text-gray-900 dark:text-white">История</p>
+                {panelTab === 'overview' && (
+                  <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                      <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
+                        <p className="font-medium text-gray-900 dark:text-white">Клиент</p>
+                        <p className="mt-1">{getClaimClient(selectedClaim, ticketById)}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
+                        <p className="font-medium text-gray-900 dark:text-white">Ответственный</p>
+                        <p className="mt-1">{getClaimResponsible(selectedClaim)}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
+                        <p className="font-medium text-gray-900 dark:text-white">Ключевые даты</p>
+                        <p className="mt-1">Ответ до: {formatDateSafe(selectedClaim.responseDueDate)}</p>
+                        <p>Отправлено: {formatDateSafe(selectedClaim.sentAt)}</p>
+                        <p>Закрыто: {formatDateSafe(selectedClaim.closedAt)}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
+                        <p className="font-medium text-gray-900 dark:text-white">Завод / дело</p>
+                        <p className="mt-1">{selectedClaim.factoryName || '—'}</p>
+                        <p>{selectedClaim.factoryCaseNumber || 'Номер дела не указан'}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Неисправность</span>
+                      <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200">
+                        {selectedClaim.failureDescription || '—'}
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Запрашиваемое решение</span>
+                      <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200">
+                        {selectedClaim.requestedResolution || '—'}
+                      </div>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {canEdit && <Button type="button" variant="secondary" onClick={() => setPanelTab('decision')}>Изменить рекламацию</Button>}
+                      {canEdit && <Button type="button" variant="secondary" onClick={() => setPanelTab('history')}>Добавить комментарий</Button>}
+                      {canCreateDocuments && selectedClaim.serviceTicketId && (
+                        <Link to={`/service/${selectedClaim.serviceTicketId}`}>
+                          <Button type="button" variant="outline" className="w-full">Создать документ</Button>
+                        </Link>
+                      )}
+                      {canEdit && !FINAL_STATUSES.includes(selectedClaim.status) && (
+                        <Button
+                          type="button"
+                          onClick={() => {
+                            setEditForm(prev => prev ? ({ ...prev, status: 'closed' }) : prev);
+                            setPanelTab('decision');
+                          }}
+                        >
+                          Закрыть рекламацию
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {panelTab === 'works' && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+                    Работы по рекламации ведутся в связанной сервисной заявке.
+                    {selectedClaim.serviceTicketId && (
+                      <Link to={`/service/${selectedClaim.serviceTicketId}`} className="mt-2 block font-medium text-[--color-primary] hover:underline">
+                        Открыть работы в заявке {selectedClaim.serviceTicketId}
+                      </Link>
+                    )}
+                  </div>
+                )}
+
+                {panelTab === 'documents' && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+                    Документы и заводская переписка остаются связанными с рекламацией и сервисной заявкой.
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {selectedClaim.serviceTicketId && (
+                        <Link to={`/service/${selectedClaim.serviceTicketId}`}>
+                          <Button size="sm" variant="secondary">Открыть документы заявки</Button>
+                        </Link>
+                      )}
+                      {canCreateDocuments && selectedClaim.serviceTicketId && (
+                        <Link to={`/service/${selectedClaim.serviceTicketId}`}>
+                          <Button size="sm" variant="outline">Создать документ</Button>
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {panelTab === 'history' && (
                   <div className="space-y-3">
+                    {canEdit && (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+                        Комментарии добавляются при сохранении ответа завода или решения.
+                      </div>
+                    )}
                     {(selectedClaim.history || []).length === 0 ? (
                       <p className="text-sm text-gray-500 dark:text-gray-400">История пока пустая.</p>
                     ) : (
@@ -861,7 +1010,57 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete }: WarrantyClaim
                       ))
                     )}
                   </div>
-                </div>
+                )}
+
+                {panelTab === 'decision' && (
+                  <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Статус</span>
+                        <Select
+                          value={editForm.status}
+                          onValueChange={(value) => setEditForm(prev => prev ? ({ ...prev, status: value as WarrantyClaimStatus }) : prev)}
+                          disabled={!canEdit}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {PROCESS_STEPS.map(status => (
+                              <SelectItem key={status} value={status}>{STATUS_META[status].label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Номер дела завода</span>
+                        <Input value={editForm.factoryCaseNumber} onChange={(event) => setEditForm(prev => prev ? ({ ...prev, factoryCaseNumber: event.target.value }) : prev)} disabled={!canEdit} />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Срок ответа</span>
+                        <Input type="date" value={editForm.responseDueDate} onChange={(event) => setEditForm(prev => prev ? ({ ...prev, responseDueDate: event.target.value }) : prev)} disabled={!canEdit} />
+                      </label>
+                    </div>
+                    <label className="space-y-1.5">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Ответ завода</span>
+                      <Textarea value={editForm.factoryResponse} onChange={(event) => setEditForm(prev => prev ? ({ ...prev, factoryResponse: event.target.value }) : prev)} rows={4} disabled={!canEdit} placeholder="Что ответил завод, какие уточнения запросил..." />
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Итоговое решение</span>
+                      <Textarea value={editForm.decision} onChange={(event) => setEditForm(prev => prev ? ({ ...prev, decision: event.target.value }) : prev)} rows={3} disabled={!canEdit} placeholder="Что делаем дальше: ремонт по гарантии, заказ запчастей, отказ..." />
+                    </label>
+                    <div className="flex flex-wrap justify-between gap-2">
+                      {canDelete && (
+                        <Button type="button" variant="destructive" onClick={handleDeleteClaim} disabled={deleteClaim.isPending}>
+                          <Trash2 className="h-4 w-4" />
+                          Удалить
+                        </Button>
+                      )}
+                      <Button type="button" onClick={handleSaveClaim} disabled={!canEdit || updateClaim.isPending} className="ml-auto">
+                        <MessageSquareReply className="h-4 w-4" />
+                        {updateClaim.isPending ? 'Сохраняем...' : 'Сохранить'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

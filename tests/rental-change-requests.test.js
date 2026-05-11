@@ -1573,6 +1573,10 @@ test('PATCH /api/rentals/:id saves downtime for orphan gantt rental with stale p
     const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1776324984409', 'admin-token', {
       downtimeDays: 2,
       downtimeReason: 'Ожидание клиента (период 2026-04-10 → 2026-04-11)',
+      downtimeStartDate: '2026-04-10',
+      downtimeEndDate: '2026-04-11',
+      downtimeComment: 'Акт от клиента',
+      downtimeStatus: 'active',
       ganttRentalId: 'GR-1776324984409',
       __linkedGanttRentalId: 'GR-1776324984409',
       __ganttSnapshot: {
@@ -1591,10 +1595,18 @@ test('PATCH /api/rentals/:id saves downtime for orphan gantt rental with stale p
       newValues: {
         downtimeDays: 2,
         downtimeReason: 'Ожидание клиента (период 2026-04-10 → 2026-04-11)',
+        downtimeStartDate: '2026-04-10',
+        downtimeEndDate: '2026-04-11',
+        downtimeComment: 'Акт от клиента',
+        downtimeStatus: 'active',
       },
       changes: [
         { field: 'downtimeDays', newValue: 2 },
         { field: 'downtimeReason', newValue: 'Ожидание клиента (период 2026-04-10 → 2026-04-11)' },
+        { field: 'downtimeStartDate', newValue: '2026-04-10' },
+        { field: 'downtimeEndDate', newValue: '2026-04-11' },
+        { field: 'downtimeComment', newValue: 'Акт от клиента' },
+        { field: 'downtimeStatus', newValue: 'active' },
       ],
       __changeReason: 'Простой техники SN-032: 2026-04-10 → 2026-04-11. Ожидание клиента',
     });
@@ -1603,6 +1615,10 @@ test('PATCH /api/rentals/:id saves downtime for orphan gantt rental with stale p
     assert.match(update.body.id, /^R-/);
     assert.equal(update.body.downtimeDays, 2);
     assert.equal(update.body.downtimeReason, 'Ожидание клиента (период 2026-04-10 → 2026-04-11)');
+    assert.equal(update.body.downtimeStartDate, '2026-04-10');
+    assert.equal(update.body.downtimeEndDate, '2026-04-11');
+    assert.equal(update.body.downtimeComment, 'Акт от клиента');
+    assert.equal(update.body.downtimeStatus, 'active');
     assert.equal(update.body.equipmentId, 'EQ-032');
     assert.equal(update.body.equipmentInv, '03291436');
     assert.deepEqual(update.body.equipment, ['03291436']);
@@ -1616,6 +1632,10 @@ test('PATCH /api/rentals/:id saves downtime for orphan gantt rental with stale p
     assert.equal(repairedGantt.serialNumber, 'SN-032');
     assert.equal(repairedGantt.downtimeDays, 2);
     assert.equal(repairedGantt.downtimeReason, 'Ожидание клиента (период 2026-04-10 → 2026-04-11)');
+    assert.equal(repairedGantt.downtimeStartDate, '2026-04-10');
+    assert.equal(repairedGantt.downtimeEndDate, '2026-04-11');
+    assert.equal(repairedGantt.downtimeComment, 'Акт от клиента');
+    assert.equal(repairedGantt.downtimeStatus, 'active');
     assert.equal(state.rental_change_requests.length, 0);
   });
 });
@@ -1648,6 +1668,10 @@ test('PATCH /api/rentals/:id saves downtime for subrental equipment without inve
     const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-subrent-orphan', 'admin-token', {
       downtimeDays: 1,
       downtimeReason: 'Ожидание клиента',
+      downtimeStartDate: '2026-04-10',
+      downtimeEndDate: '2026-04-10',
+      downtimeComment: 'Субарендная техника',
+      downtimeStatus: 'active',
       ganttRentalId: 'GR-subrent-orphan',
       __linkedGanttRentalId: 'GR-subrent-orphan',
       __ganttSnapshot: {
@@ -1663,10 +1687,21 @@ test('PATCH /api/rentals/:id saves downtime for subrental equipment without inve
       entityType: 'rental',
       actionType: 'gantt_rental_update',
       oldValues: {},
-      newValues: { downtimeDays: 1, downtimeReason: 'Ожидание клиента' },
+      newValues: {
+        downtimeDays: 1,
+        downtimeReason: 'Ожидание клиента',
+        downtimeStartDate: '2026-04-10',
+        downtimeEndDate: '2026-04-10',
+        downtimeComment: 'Субарендная техника',
+        downtimeStatus: 'active',
+      },
       changes: [
         { field: 'downtimeDays', newValue: 1 },
         { field: 'downtimeReason', newValue: 'Ожидание клиента' },
+        { field: 'downtimeStartDate', newValue: '2026-04-10' },
+        { field: 'downtimeEndDate', newValue: '2026-04-10' },
+        { field: 'downtimeComment', newValue: 'Субарендная техника' },
+        { field: 'downtimeStatus', newValue: 'active' },
       ],
       __changeReason: 'Простой техники SN-SUBRENT-1',
     });
@@ -1678,6 +1713,10 @@ test('PATCH /api/rentals/:id saves downtime for subrental equipment without inve
     assert.equal(update.body.serialNumber, 'SN-SUBRENT-1');
     assert.deepEqual(update.body.equipment, ['SN-SUBRENT-1']);
     assert.equal(update.body.downtimeDays, 1);
+    assert.equal(update.body.downtimeStartDate, '2026-04-10');
+    assert.equal(update.body.downtimeEndDate, '2026-04-10');
+    assert.equal(update.body.downtimeComment, 'Субарендная техника');
+    assert.equal(update.body.downtimeStatus, 'active');
 
     const repairedGantt = state.gantt_rentals.find(item => item.id === 'GR-subrent-orphan');
     assert.equal(repairedGantt.rentalId, update.body.id);
@@ -1687,6 +1726,10 @@ test('PATCH /api/rentals/:id saves downtime for subrental equipment without inve
     assert.equal(repairedGantt.serialNumber, 'SN-SUBRENT-1');
     assert.deepEqual(repairedGantt.equipment, ['SN-SUBRENT-1']);
     assert.equal(repairedGantt.downtimeDays, 1);
+    assert.equal(repairedGantt.downtimeStartDate, '2026-04-10');
+    assert.equal(repairedGantt.downtimeEndDate, '2026-04-10');
+    assert.equal(repairedGantt.downtimeComment, 'Субарендная техника');
+    assert.equal(repairedGantt.downtimeStatus, 'active');
   });
 });
 

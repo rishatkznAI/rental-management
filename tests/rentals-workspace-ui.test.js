@@ -43,6 +43,12 @@ test('fleet planner persists equipment downtime and refreshes rows after save', 
 
 test('fleet planner shows rental downtime updates on rental bars', () => {
   assert.match(rentalsSource, /downtimeDays:\s*rental\.downtimeDays/);
+  assert.match(rentalsSource, /downtimeStartDate:\s*rental\.downtimeStartDate/);
+  assert.match(rentalsSource, /RENTAL_DOWNTIME_ID_PREFIX/);
+  assert.match(rentalsSource, /rentalDowntimePeriodFromRental/);
+  assert.match(rentalsSource, /getRentalDowntimesForEquipment/);
+  assert.match(rentalsSource, /mergeDowntimeLists\(getDowntimesForEquipment\(eq\),\s*getRentalDowntimesForEquipment\(eq\)\)/);
+  assert.match(rentalsSource, /data\.id\?\.startsWith\(RENTAL_DOWNTIME_ID_PREFIX\)/);
   assert.match(rentalsSource, /setGanttRentals\(current => current\.map\(item => item\.id === currentGanttRental\.id/);
   assert.match(rentalsSource, /data-payment-alert="downtime"/);
   assert.match(rentalsSource, /Простой по аренде сохранён/);

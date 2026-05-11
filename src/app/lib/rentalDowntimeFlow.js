@@ -142,13 +142,18 @@ export function buildRentalDowntimePatch(downtime) {
   const reason = text(downtime?.reason) || 'Простой техники';
   const comment = text(downtime?.comment);
   const period = formatDowntimePeriod(downtime?.startDate, downtime?.endDate);
+  const status = text(downtime?.status) || 'active';
   const details = [
     period ? `период ${period}` : '',
     comment,
   ].filter(Boolean).join('; ');
   return {
-    downtimeDays: getDowntimeRentalDays(downtime?.startDate, downtime?.endDate),
+    downtimeDays: status === 'cancelled' ? 0 : getDowntimeRentalDays(downtime?.startDate, downtime?.endDate),
     downtimeReason: details ? `${reason} (${details})` : reason,
+    downtimeStartDate: dateKey(downtime?.startDate),
+    downtimeEndDate: dateKey(downtime?.endDate) || dateKey(downtime?.startDate),
+    downtimeComment: comment,
+    downtimeStatus: status,
   };
 }
 

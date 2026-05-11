@@ -417,6 +417,10 @@ export interface Rental {
   risk?: string;
   downtimeDays?: number;
   downtimeReason?: string;
+  downtimeStartDate?: string;
+  downtimeEndDate?: string;
+  downtimeComment?: string;
+  downtimeStatus?: 'active' | 'closed' | 'cancelled';
   documents?: string[];
   comments?: string;
   history?: AuditEntry[];

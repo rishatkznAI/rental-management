@@ -35,7 +35,26 @@ test('active rental downtime is routed to rental-flow patch', () => {
   assert.deepEqual(buildRentalDowntimePatch(downtime), {
     downtimeDays: 2,
     downtimeReason: 'Ожидание клиента (период 2026-05-11 → 2026-05-12; Акт от клиента)',
+    downtimeStartDate: '2026-05-11',
+    downtimeEndDate: '2026-05-12',
+    downtimeComment: 'Акт от клиента',
+    downtimeStatus: 'active',
   });
+});
+
+test('cancelled active rental downtime keeps rental-flow fields explicit', () => {
+  const patch = buildRentalDowntimePatch({
+    equipmentId: 'EQ-1',
+    startDate: '2026-05-11',
+    endDate: '2026-05-12',
+    reason: 'Ожидание клиента',
+    status: 'cancelled',
+  });
+
+  assert.equal(patch.downtimeDays, 0);
+  assert.equal(patch.downtimeStartDate, '2026-05-11');
+  assert.equal(patch.downtimeEndDate, '2026-05-12');
+  assert.equal(patch.downtimeStatus, 'cancelled');
 });
 
 test('active rental downtime is not classified as standalone downtime', () => {

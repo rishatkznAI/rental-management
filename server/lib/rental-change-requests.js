@@ -29,6 +29,10 @@ const RENTAL_CHANGE_FIELD_LABELS = {
   attachments: 'Вложения',
   downtimeDays: 'Простой техники',
   downtimeReason: 'Причина простоя',
+  downtimeStartDate: 'Начало простоя',
+  downtimeEndDate: 'Окончание простоя',
+  downtimeComment: 'Комментарий простоя',
+  downtimeStatus: 'Статус простоя',
   writeOffDays: 'Списание дней аренды',
   waivedDays: 'Списание дней аренды',
 };
@@ -1549,6 +1553,10 @@ function applyRentalFieldToGantt(ganttRental, field, value) {
   if (field === 'price') return { ...ganttRental, amount: Number(value) || 0 };
   if (field === 'downtimeDays') return { ...ganttRental, downtimeDays: value };
   if (field === 'downtimeReason') return { ...ganttRental, downtimeReason: value };
+  if (field === 'downtimeStartDate') return { ...ganttRental, downtimeStartDate: value };
+  if (field === 'downtimeEndDate') return { ...ganttRental, downtimeEndDate: value };
+  if (field === 'downtimeComment') return { ...ganttRental, downtimeComment: value };
+  if (field === 'downtimeStatus') return { ...ganttRental, downtimeStatus: value };
   return ganttRental;
 }
 

@@ -733,6 +733,12 @@ function registerRentalRoutes(deps) {
         status: ganttRental.status === 'closed' || ganttRental.status === 'returned' ? ganttRental.status : 'active',
         expectedPaymentDate: ganttRental.expectedPaymentDate || '',
         paymentStatus: ganttRental.paymentStatus || '',
+        downtimeDays: ganttRental.downtimeDays,
+        downtimeReason: ganttRental.downtimeReason,
+        downtimeStartDate: ganttRental.downtimeStartDate,
+        downtimeEndDate: ganttRental.downtimeEndDate,
+        downtimeComment: ganttRental.downtimeComment,
+        downtimeStatus: ganttRental.downtimeStatus,
         documents: Array.isArray(ganttRental.documents) ? ganttRental.documents : [],
         comments: '',
         history: [{

@@ -101,6 +101,7 @@ type FleetMovementEntry = ShippingPhoto & {
 const RENTALS_COMPACT_VIEW_STORAGE_KEY = 'rentals_compact_view';
 const RENTALS_COLLAPSED_GROUPS_STORAGE_KEY = 'rentals_collapsed_groups';
 const RENTALS_DENSITY_MODE_STORAGE_KEY = 'rentals_density_mode';
+const RENTAL_DOWNTIME_ID_PREFIX = 'rental-downtime:';
 
 const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
   week: { dayWidth: 120, label: 'Неделя' },
@@ -354,6 +355,10 @@ function canonicalizeGanttRentalFromClassic(
     status: rental.status === 'closed' ? 'closed' : ganttRental.status,
     downtimeDays: rental.downtimeDays ?? ganttRental.downtimeDays,
     downtimeReason: rental.downtimeReason ?? ganttRental.downtimeReason,
+    downtimeStartDate: rental.downtimeStartDate ?? ganttRental.downtimeStartDate,
+    downtimeEndDate: rental.downtimeEndDate ?? ganttRental.downtimeEndDate,
+    downtimeComment: rental.downtimeComment ?? ganttRental.downtimeComment,
+    downtimeStatus: rental.downtimeStatus ?? ganttRental.downtimeStatus,
   };
 }
 
@@ -1004,6 +1009,43 @@ function downtimeIntersectsRange(downtime: DowntimePeriod, rangeStart: Date, ran
   return downtimeStart < rangeEnd && downtimeEndExclusive > rangeStart;
 }
 
+function extractDowntimePeriodFromReason(reason?: string) {
+  const match = String(reason || '').match(/период\s+(\d{4}-\d{2}-\d{2})(?:\s*(?:→|->|-)\s*(\d{4}-\d{2}-\d{2}))?/i);
+  return {
+    startDate: match?.[1] || '',
+    endDate: match?.[2] || match?.[1] || '',
+  };
+}
+
+function rentalDowntimePeriodFromRental(rental: GanttRentalData): DowntimePeriod | null {
+  if (rental.downtimeStatus === 'cancelled') return null;
+  const periodFromReason = extractDowntimePeriodFromReason(rental.downtimeReason);
+  const startDate = normalizeMatchRef(rental.downtimeStartDate || periodFromReason.startDate);
+  const endDate = normalizeMatchRef(rental.downtimeEndDate || rental.downtimeStartDate || periodFromReason.endDate);
+  const days = Math.max(0, Number(rental.downtimeDays) || 0);
+  if (!startDate || (!days && !rental.downtimeReason)) return null;
+  return {
+    id: `${RENTAL_DOWNTIME_ID_PREFIX}${rental.id}`,
+    equipmentId: rental.equipmentId,
+    equipmentInv: rental.equipmentInv,
+    serialNumber: rental.serialNumber,
+    startDate,
+    endDate,
+    reason: rental.downtimeReason || 'Простой аренды',
+    comment: rental.downtimeComment || '',
+    status: rental.downtimeStatus || 'active',
+  };
+}
+
+function mergeDowntimeLists(...lists: DowntimePeriod[][]): DowntimePeriod[] {
+  const merged = new Map<string, DowntimePeriod>();
+  lists.flat().forEach(item => {
+    const key = item.id || `${item.equipmentId || item.serialNumber || item.equipmentInv}:${item.startDate}:${item.endDate}:${item.reason}`;
+    if (!merged.has(key)) merged.set(key, item);
+  });
+  return [...merged.values()];
+}
+
 function rentalMatchesEquipment(
   rental: Pick<GanttRentalData, 'equipmentId' | 'equipmentInv'>,
   equipment: Pick<Equipment, 'id' | 'inventoryNumber'>,
@@ -1394,12 +1436,23 @@ export default function Rentals() {
         queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
       ]);
 
-      if (!summary?.pendingCount && ('downtimeDays' in patch || 'downtimeReason' in patch)) {
+      if (!summary?.pendingCount && (
+        'downtimeDays' in patch ||
+        'downtimeReason' in patch ||
+        'downtimeStartDate' in patch ||
+        'downtimeEndDate' in patch ||
+        'downtimeComment' in patch ||
+        'downtimeStatus' in patch
+      )) {
         setGanttRentals(current => current.map(item => item.id === currentGanttRental.id
           ? {
               ...item,
               downtimeDays: (saved as Rental).downtimeDays ?? patch.downtimeDays,
               downtimeReason: (saved as Rental).downtimeReason ?? patch.downtimeReason,
+              downtimeStartDate: (saved as Rental).downtimeStartDate ?? patch.downtimeStartDate,
+              downtimeEndDate: (saved as Rental).downtimeEndDate ?? patch.downtimeEndDate,
+              downtimeComment: (saved as Rental).downtimeComment ?? patch.downtimeComment,
+              downtimeStatus: (saved as Rental).downtimeStatus ?? patch.downtimeStatus,
             }
           : item));
       }
@@ -1947,6 +2000,12 @@ export default function Rentals() {
       : filteredRentalsByInventory.get(equipment.inventoryNumber) ?? EMPTY_GANTT_RENTALS;
     return mergeGanttRentalLists(byId, bySerial, byInventory);
   }, [ambiguousInventoryNumbers, canonicalEquipmentIdByInventory, filteredRentalsByEquipmentId, filteredRentalsByInventory, filteredRentalsBySerial]);
+
+  const getRentalDowntimesForEquipment = useCallback((equipment: Equipment) => (
+    getFilteredRentalsForEquipment(equipment)
+      .map(rentalDowntimePeriodFromRental)
+      .filter(Boolean) as DowntimePeriod[]
+  ), [getFilteredRentalsForEquipment]);
 
   const servicePeriodsByEquipmentId = useMemo(() => {
     const map = new Map<string, ServicePeriod[]>();
@@ -2676,7 +2735,10 @@ export default function Rentals() {
     }, { available: 0, rented: 0, reserved: 0, inService: 0 });
     const activeRows = rentalDealRows.filter(row => row.isActive);
     const downtimeCount = filteredEquipment.reduce(
-      (sum, equipment) => sum + getDowntimesForEquipment(equipment).length,
+      (sum, equipment) => sum + mergeDowntimeLists(
+        getDowntimesForEquipment(equipment),
+        getRentalDowntimesForEquipment(equipment),
+      ).length,
       0,
     );
     return {
@@ -2693,7 +2755,7 @@ export default function Rentals() {
       overdueReturns: activeRows.filter(row => row.rental.endDate < todayKey).length,
       downtime: downtimeCount,
     };
-  }, [filteredEquipment, ganttRentals, getDowntimesForEquipment, matchesEquipmentRow, movementEntries, rentalDealRows, today, viewEnd, viewStart]);
+  }, [filteredEquipment, ganttRentals, getDowntimesForEquipment, getRentalDowntimesForEquipment, matchesEquipmentRow, movementEntries, rentalDealRows, today, viewEnd, viewStart]);
 
   const mobileEquipmentCards = useMemo(() => {
     if (isDesktopViewport) return [];
@@ -2701,7 +2763,10 @@ export default function Rentals() {
     return filteredEquipment.map(equipment => {
       const rentalsForEquipment = [...getFilteredRentalsForEquipment(equipment)]
         .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-      const downtimesForEquipment = getDowntimesForEquipment(equipment);
+      const downtimesForEquipment = mergeDowntimeLists(
+        getDowntimesForEquipment(equipment),
+        getRentalDowntimesForEquipment(equipment),
+      );
       const serviceForEquipment = getServicePeriodsForEquipment(equipment);
       const activeRental = rentalsForEquipment.find(rental => rental.status === 'active');
       const reservedRental = rentalsForEquipment.find(rental => rental.status === 'created');
@@ -2719,7 +2784,7 @@ export default function Rentals() {
         conflictCount: conflictSets.get(equipment.id)?.size ?? 0,
       };
     });
-  }, [conflictSets, filteredEquipment, getDowntimesForEquipment, getFilteredRentalsForEquipment, getServicePeriodsForEquipment, isDesktopViewport, today, viewEnd, viewStart]);
+  }, [conflictSets, filteredEquipment, getDowntimesForEquipment, getFilteredRentalsForEquipment, getRentalDowntimesForEquipment, getServicePeriodsForEquipment, isDesktopViewport, today, viewEnd, viewStart]);
 
   // ===== New handlers for RentalDrawer =====
 
@@ -4138,7 +4203,9 @@ export default function Rentals() {
                     rowIndex={idx}
                     equipment={eq}
                     rentals={getFilteredRentalsForEquipment(eq)}
-                    downtimes={fleetLayers.downtime ? getDowntimesForEquipment(eq) : []}
+                    downtimes={fleetLayers.downtime
+                      ? mergeDowntimeLists(getDowntimesForEquipment(eq), getRentalDowntimesForEquipment(eq))
+                      : []}
                     servicePeriods={fleetLayers.service ? getServicePeriodsForEquipment(eq) : []}
                     movements={getMovementsForEquipment(eq)}
                     conflictIds={conflictSets.get(eq.id) || new Set()}
@@ -5309,6 +5376,11 @@ export default function Rentals() {
               setShowDowntimeModal(false);
               setEditingDowntime(null);
             }
+            return;
+          }
+
+          if (data.id?.startsWith(RENTAL_DOWNTIME_ID_PREFIX)) {
+            showToast('Этот простой относится к аренде. Период простоя должен пересекаться с этой арендой.', 'error');
             return;
           }
 

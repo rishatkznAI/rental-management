@@ -37,7 +37,7 @@ import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, isMechani
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
-import type { Client, Equipment, EquipmentType, EquipmentStatus, Payment, Rental, RentalChangeRequest, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
+import type { Client, Document, Equipment, EquipmentType, EquipmentStatus, Payment, Rental, RentalChangeRequest, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
@@ -50,6 +50,7 @@ import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
+import { useDocumentsList } from '../hooks/useDocuments';
 import { canEquipmentParticipateInRentals, compareEquipmentByPriority } from '../lib/equipmentClassification';
 import { resolveRentalEquipment } from '../lib/rentalEquipment';
 import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
@@ -77,6 +78,17 @@ type CompactView = 'cards' | 'timeline';
 type DensityMode = 'comfortable' | 'compact';
 type RentalWorkspaceTab = 'list' | 'planner' | 'returns' | 'debt_docs';
 type RentalMovementScale = 'days' | 'weeks' | 'months';
+type FleetLayerKey = 'returns' | 'deliveries' | 'service' | 'downtime';
+type FleetEquipmentStatusFilter = '' | 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive';
+type FleetMovementEntry = ShippingPhoto & {
+  rental?: GanttRentalData;
+  equipment?: Equipment;
+  equipmentLabel?: string;
+  serialNumber?: string;
+  clientLabel?: string;
+  typeLabel?: string;
+  typeBadgeClassName?: string;
+};
 const RENTALS_COMPACT_VIEW_STORAGE_KEY = 'rentals_compact_view';
 const RENTALS_COLLAPSED_GROUPS_STORAGE_KEY = 'rentals_collapsed_groups';
 const RENTALS_DENSITY_MODE_STORAGE_KEY = 'rentals_density_mode';
@@ -550,6 +562,15 @@ const RENTAL_STATUS_FILTERS = [
   { value: 'closed', label: 'Закрыта' },
 ];
 
+const FLEET_EQUIPMENT_STATUS_FILTERS: Array<{ value: FleetEquipmentStatusFilter; label: string }> = [
+  { value: '', label: 'Все статусы' },
+  { value: 'available', label: 'Свободна' },
+  { value: 'rented', label: 'В аренде' },
+  { value: 'reserved', label: 'Бронь' },
+  { value: 'in_service', label: 'В сервисе' },
+  { value: 'inactive', label: 'Неактивна' },
+];
+
 function getPlannerSortHeight(equipment: Equipment) {
   return equipment.workingHeight ?? equipment.liftHeight ?? 0;
 }
@@ -727,6 +748,23 @@ function rentalMatchesEquipment(
     : rental.equipmentInv === equipment.inventoryNumber;
 }
 
+function documentBelongsToRental(doc: Pick<Document, 'rentalId' | 'rental'>, rentalIds: Array<string | undefined>) {
+  const ids = new Set(rentalIds.filter(Boolean).map(String));
+  if (ids.size === 0) return false;
+  return ids.has(String(doc.rentalId || '')) || ids.has(String(doc.rental || ''));
+}
+
+function getDocumentStatusLabel(status?: string) {
+  if (status === 'signed') return 'подписан';
+  if (status === 'sent') return 'отправлен';
+  if (status === 'draft') return 'черновик';
+  return 'нет статуса';
+}
+
+function getClassicRentalStatus(rental?: Rental) {
+  return String((rental as Rental & { status?: string } | undefined)?.status || '');
+}
+
 /**
  * Единый источник истины для статуса техники.
  * Вычисляет статус на основе активных аренд (не из поля equipment.status).
@@ -771,6 +809,7 @@ const EMPTY_GANTT_RENTALS: GanttRentalData[] = [];
 const EMPTY_RENTALS: Rental[] = [];
 const EMPTY_EQUIPMENT: Equipment[] = [];
 const EMPTY_PAYMENTS: Payment[] = [];
+const EMPTY_DOCUMENTS: Document[] = [];
 const EMPTY_SHIPPING_PHOTOS: ShippingPhoto[] = [];
 const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
 const EMPTY_SERVICE_PERIODS: ServicePeriod[] = [];
@@ -839,6 +878,7 @@ export default function Rentals() {
     queryFn: paymentsService.getAll,
     enabled: canViewPayments,
   });
+  const { data: documentsData = EMPTY_DOCUMENTS } = useDocumentsList({ enabled: canViewDocuments });
   const { data: shippingPhotos = EMPTY_SHIPPING_PHOTOS } = useQuery<ShippingPhoto[]>({
     queryKey: ['shippingPhotos', 'all'],
     queryFn: equipmentService.getAllShippingPhotos,
@@ -1181,7 +1221,14 @@ export default function Rentals() {
   const [filterUpd, setFilterUpd] = useState('');
   const [filterPayment, setFilterPayment] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterEquipmentStatus, setFilterEquipmentStatus] = useState<FleetEquipmentStatusFilter>('');
   const [rentalPreset, setRentalPreset] = useState<'all' | 'returns_today' | 'overdue' | 'unpaid' | 'with_service'>('all');
+  const [fleetLayers, setFleetLayers] = useState<Record<FleetLayerKey, boolean>>({
+    returns: true,
+    deliveries: true,
+    service: true,
+    downtime: true,
+  });
   const [showFiltersDialog, setShowFiltersDialog] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({
     scissor: false,
@@ -1191,8 +1238,8 @@ export default function Rentals() {
   });
 
   // Derived: any filter is currently active
-  const hasActiveFilters = !!(filterModel || filterManager || filterOwner || filterClient || filterUpd || filterPayment || filterStatus || rentalPreset !== 'all');
-  const hasAdvancedFilters = !!(filterModel || filterManager || filterOwner || filterClient || filterUpd || filterPayment || filterStatus || rentalPreset !== 'all');
+  const hasActiveFilters = !!(filterModel || filterManager || filterOwner || filterClient || filterUpd || filterPayment || filterStatus || filterEquipmentStatus || rentalPreset !== 'all');
+  const hasAdvancedFilters = !!(filterModel || filterManager || filterOwner || filterClient || filterUpd || filterPayment || filterStatus || filterEquipmentStatus || rentalPreset !== 'all');
   const activeFilterCount = [
     filterModel,
     filterManager,
@@ -1201,6 +1248,7 @@ export default function Rentals() {
     filterUpd,
     filterPayment,
     filterStatus,
+    filterEquipmentStatus,
     rentalPreset !== 'all' ? rentalPreset : '',
   ].filter(Boolean).length;
 
@@ -1350,10 +1398,38 @@ export default function Rentals() {
   // ── Filter rentals (always live, no gate) ────────────────────────────────────
   const filteredRentals = useMemo(() => {
     let rentals = [...ganttRentals];
+    const query = filterModel.trim().toLowerCase();
+    const classicBySourceId = new Map(classicRentalData.map(item => [item.id, item]));
+    const equipmentByIdForSearch = new Map(equipmentList.map(item => [item.id, item]));
     const inventoryCounts = equipmentList.reduce<Map<string, number>>((map, item) => {
       map.set(item.inventoryNumber, (map.get(item.inventoryNumber) || 0) + 1);
       return map;
     }, new Map());
+    if (query) {
+      rentals = rentals.filter(rental => {
+        const sourceRentalId = getGanttRentalSourceId(rental);
+        const classicRental = sourceRentalId ? classicBySourceId.get(sourceRentalId) : undefined;
+        const equipment = rental.equipmentId
+          ? equipmentByIdForSearch.get(rental.equipmentId)
+          : equipmentList.find(item => item.inventoryNumber === rental.equipmentInv);
+        return [
+          rental.id,
+          sourceRentalId,
+          rental.client,
+          rental.clientId,
+          rental.equipmentInv,
+          rental.manager,
+          classicRental?.contractId,
+          classicRental?.contact,
+          equipment?.manufacturer,
+          equipment?.model,
+          equipment?.inventoryNumber,
+          equipment?.serialNumber,
+          equipment?.owner,
+          equipment?.ownerName,
+        ].filter(Boolean).join(' ').toLowerCase().includes(query);
+      });
+    }
     if (filterManager) rentals = rentals.filter(r => r.manager === filterManager);
     if (filterClient)  rentals = rentals.filter(r => (r.client || '').toLowerCase().includes(filterClient.toLowerCase()));
     if (filterUpd === 'yes') rentals = rentals.filter(r => r.updSigned);
@@ -1386,7 +1462,7 @@ export default function Rentals() {
       });
     }
     return rentals;
-  }, [equipmentList, filterManager, filterClient, filterPayment, filterStatus, filterUpd, ganttRentals, rentalPreset, serviceTickets, today]);
+  }, [classicRentalData, equipmentList, filterManager, filterClient, filterModel, filterPayment, filterStatus, filterUpd, ganttRentals, rentalPreset, serviceTickets, today]);
 
   const visibleFilteredRentals = useMemo(
     () => filteredRentals.filter(r => rentalIntersectsRange(r, viewStart, viewEnd)),
@@ -1474,7 +1550,8 @@ export default function Rentals() {
       eq = eq.filter(e =>
         (e.model || '').toLowerCase().includes(q) ||
         (e.inventoryNumber || '').toLowerCase().includes(q) ||
-        (e.serialNumber || '').toLowerCase().includes(q)
+        (e.serialNumber || '').toLowerCase().includes(q) ||
+        visibleFilteredRentals.some(r => matchesEquipmentRow(r, e))
       );
     }
     const hasRentalFilter = !!(
@@ -1493,8 +1570,14 @@ export default function Rentals() {
         return computeEffectiveStatus(e, rentalsForEquipment, today, { start: viewStart, end: viewEnd }) === 'available';
       });
     }
+    if (filterEquipmentStatus) {
+      eq = eq.filter(e => {
+        const rentalsForEquipment = ganttRentals.filter(r => matchesEquipmentRow(r, e));
+        return computeEffectiveStatus(e, rentalsForEquipment, today, { start: viewStart, end: viewEnd }) === filterEquipmentStatus;
+      });
+    }
     return [...eq].sort(compareEquipmentForPlanner);
-  }, [equipmentList, filterModel, visibleFilteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus, ganttRentals, matchesEquipmentRow, today, viewEnd, viewStart]);
+  }, [equipmentList, filterModel, visibleFilteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus, filterEquipmentStatus, ganttRentals, matchesEquipmentRow, today, viewEnd, viewStart]);
 
   const filteredEquipmentGroups = useMemo(() => {
     const grouped = new Map<EquipmentType, Equipment[]>();
@@ -1674,8 +1757,16 @@ export default function Rentals() {
     setFilterUpd('');
     setFilterPayment('');
     setFilterStatus('');
+    setFilterEquipmentStatus('');
     setRentalPreset('all');
   };
+
+  const toggleFleetLayer = useCallback((layer: FleetLayerKey) => {
+    setFleetLayers(current => ({
+      ...current,
+      [layer]: !current[layer],
+    }));
+  }, []);
 
   const toggleRentalPreset = useCallback((preset: 'overdue' | 'unpaid') => {
     setRentalPreset(current => current === preset ? 'all' : preset);
@@ -1758,6 +1849,17 @@ export default function Rentals() {
       });
   }, [equipmentList, ganttRentals, shippingPhotos]);
 
+  const getMovementsForEquipment = useCallback((equipment: Equipment) => {
+    return movementEntries.filter(entry =>
+      entry.equipment?.id === equipment.id ||
+      entry.equipmentId === equipment.id ||
+      (!!equipment.inventoryNumber && (
+        entry.inventoryNumber === equipment.inventoryNumber ||
+        entry.rental?.equipmentInv === equipment.inventoryNumber
+      ))
+    );
+  }, [movementEntries]);
+
   const filteredMovementEntries = useMemo(
     () => movementEntries.filter(entry => movementFilter === 'all' || entry.type === movementFilter),
     [movementEntries, movementFilter],
@@ -1775,6 +1877,7 @@ export default function Rentals() {
 
   const rentalDealRows = useMemo(() => {
     const todayKey = format(today, 'yyyy-MM-dd');
+    const tomorrowKey = format(addDays(today, 1), 'yyyy-MM-dd');
     const nextThirtyDays = addDays(today, 30);
     const query = filterModel.trim().toLowerCase();
 
@@ -1792,11 +1895,49 @@ export default function Rentals() {
         const paidAmount = linkedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
         const amount = rental.amount || classicRental?.price || 0;
         const debtAmount = Math.max(0, amount - paidAmount);
+        const dueDate = rental.expectedPaymentDate || rental.endDate;
+        const isOverdueDebt = debtAmount > 0 && !!dueDate && dueDate < todayKey;
+        const isPartialPayment = debtAmount > 0 && paidAmount > 0;
         const daysLeft = differenceInDays(startOfDay(new Date(rental.endDate)), today);
         const isActive = rental.status !== 'returned' && rental.status !== 'closed';
         const isReturnToday = rental.endDate === todayKey && isActive;
-        const isReturnTomorrow = rental.endDate === format(addDays(today, 1), 'yyyy-MM-dd') && isActive;
+        const isReturnTomorrow = rental.endDate === tomorrowKey && isActive;
         const isOverdueReturn = rental.endDate < todayKey && isActive;
+        const returnDateInView = rental.endDate >= format(viewStart, 'yyyy-MM-dd') && rental.endDate < format(viewEnd, 'yyyy-MM-dd');
+        const relatedMovements = movementEntries.filter(entry =>
+          entry.rental?.id === rental.id ||
+          entry.rentalId === rental.id ||
+          (!!sourceRentalId && entry.rentalId === sourceRentalId)
+        );
+        const hasReturnDelivery = relatedMovements.some(entry => entry.type === 'receiving');
+        const hasShippingDelivery = relatedMovements.some(entry => entry.type === 'shipping');
+        const hasDamageOnReturn = relatedMovements.some(entry =>
+          entry.type === 'receiving' && (
+            !!entry.damageDescription ||
+            String((entry as ShippingPhoto & { serviceRequired?: unknown }).serviceRequired || '').toLowerCase() === 'true'
+          )
+        );
+        const hasOpenService = !!equipment && hasOpenServiceTicketForEquipment(serviceTickets, equipment);
+        const needsReturnService = hasDamageOnReturn || hasOpenService;
+        const classicStatus = getClassicRentalStatus(classicRental);
+        const isReturnPlanned = isActive && (
+          classicStatus === 'return_planned' ||
+          (returnDateInView && !isReturnToday && !isReturnTomorrow && !isOverdueReturn)
+        );
+        const isAwaitingAcceptance = rental.status === 'returned' && !hasReturnDelivery;
+        const isReturnedNotClosed = rental.status === 'returned';
+        const relatedDocuments = canViewDocuments
+          ? documentsData.filter(doc => documentBelongsToRental(doc, [rental.id, sourceRentalId]))
+          : [];
+        const hasContractDocument = relatedDocuments.some(doc => (doc.documentType || doc.type) === 'contract');
+        const hasUpdDocument = relatedDocuments.some(doc => (doc.documentType || doc.type) === 'upd');
+        const unsignedDocuments = relatedDocuments.filter(doc => doc.status !== 'signed');
+        const missingContract = !sourceRentalId && !classicRental?.contractId && !hasContractDocument;
+        const missingUpd = !rental.updSigned && !hasUpdDocument;
+        const hasUnsignedDocuments = unsignedDocuments.length > 0 || (!!rental.updDate && !rental.updSigned);
+        const hasMoneyProblem = debtAmount > 0 || isOverdueDebt || isPartialPayment || rental.paymentStatus === 'partial';
+        const hasDocumentProblem = missingUpd || missingContract || hasUnsignedDocuments;
+        const isReturnRelevant = isReturnToday || isReturnTomorrow || isOverdueReturn || isReturnPlanned || isAwaitingAcceptance || isReturnedNotClosed || needsReturnService;
         const searchText = [
           rental.id,
           sourceRentalId,
@@ -1820,11 +1961,30 @@ export default function Rentals() {
           amount,
           paidAmount,
           debtAmount,
+          dueDate,
           daysLeft,
           isActive,
           isReturnToday,
           isReturnTomorrow,
           isOverdueReturn,
+          isReturnPlanned,
+          isAwaitingAcceptance,
+          isReturnedNotClosed,
+          hasReturnDelivery,
+          hasShippingDelivery,
+          hasDamageOnReturn,
+          hasOpenService,
+          needsReturnService,
+          relatedDocuments,
+          unsignedDocuments,
+          missingUpd,
+          missingContract,
+          hasUnsignedDocuments,
+          isOverdueDebt,
+          isPartialPayment,
+          hasMoneyProblem,
+          hasDocumentProblem,
+          isReturnRelevant,
           isVisibleInThirtyDays: rentalIntersectsRange(rental, today, nextThirtyDays),
           matchesQuery: !query || searchText.includes(query),
         };
@@ -1836,15 +1996,6 @@ export default function Rentals() {
       .filter(row => !filterUpd || (filterUpd === 'yes' ? row.rental.updSigned : !row.rental.updSigned))
       .filter(row => !filterPayment || row.rental.paymentStatus === filterPayment)
       .filter(row => !filterStatus || filterStatus === AVAILABLE_EQUIPMENT_STATUS_FILTER || row.rental.status === filterStatus)
-      .filter(row => {
-        if (activeWorkspaceTab === 'returns') {
-          return row.isReturnToday || row.isReturnTomorrow || row.isOverdueReturn || row.rental.status === 'returned';
-        }
-        if (activeWorkspaceTab === 'debt_docs') {
-          return (canViewPayments && row.debtAmount > 0) || !row.rental.updSigned || !row.sourceRentalId;
-        }
-        return true;
-      })
       .sort((a, b) => {
         if (a.isOverdueReturn !== b.isOverdueReturn) return a.isOverdueReturn ? -1 : 1;
         if (a.rental.status === 'active' && b.rental.status !== 'active') return -1;
@@ -1852,9 +2003,9 @@ export default function Rentals() {
         return a.rental.endDate.localeCompare(b.rental.endDate);
       });
   }, [
-    activeWorkspaceTab,
-    canViewPayments,
+    canViewDocuments,
     classicRentalsById,
+    documentsData,
     equipmentById,
     equipmentList,
     filterClient,
@@ -1865,8 +2016,12 @@ export default function Rentals() {
     filterStatus,
     filterUpd,
     ganttRentals,
+    movementEntries,
     payments,
+    serviceTickets,
     today,
+    viewEnd,
+    viewStart,
   ]);
 
   const rentalWorkspaceKpis = useMemo(() => {
@@ -1884,30 +2039,51 @@ export default function Rentals() {
     };
   }, [movementEntries, rentalDealRows, today]);
 
+  const returnsWorkspaceRows = useMemo(
+    () => rentalDealRows.filter(row => row.isReturnRelevant),
+    [rentalDealRows],
+  );
+
+  const debtDocsWorkspaceRows = useMemo(
+    () => rentalDealRows.filter(row =>
+      (canViewPayments && row.hasMoneyProblem) ||
+      (canViewDocuments && row.hasDocumentProblem)
+    ),
+    [canViewDocuments, canViewPayments, rentalDealRows],
+  );
+
+  const workspaceTableRows = useMemo(() => {
+    if (activeWorkspaceTab === 'returns') return returnsWorkspaceRows;
+    if (activeWorkspaceTab === 'debt_docs') return debtDocsWorkspaceRows;
+    return rentalDealRows;
+  }, [activeWorkspaceTab, debtDocsWorkspaceRows, rentalDealRows, returnsWorkspaceRows]);
+
   const returnsTabSummary = useMemo(() => {
     const todayKey = format(today, 'yyyy-MM-dd');
     const tomorrowKey = format(addDays(today, 1), 'yyyy-MM-dd');
     return {
-      today: rentalDealRows.filter(row => row.isActive && row.rental.endDate === todayKey).length,
-      tomorrow: rentalDealRows.filter(row => row.isActive && row.rental.endDate === tomorrowKey).length,
-      overdue: rentalDealRows.filter(row => row.isOverdueReturn).length,
-      withDelivery: rentalDealRows.filter(row =>
-        movementEntries.some(entry => entry.rental?.id === row.rental.id && entry.type === 'shipping'),
-      ).length,
+      today: returnsWorkspaceRows.filter(row => row.isActive && row.rental.endDate === todayKey).length,
+      tomorrow: returnsWorkspaceRows.filter(row => row.isActive && row.rental.endDate === tomorrowKey).length,
+      overdue: returnsWorkspaceRows.filter(row => row.isOverdueReturn).length,
+      planned: returnsWorkspaceRows.filter(row => row.isReturnPlanned).length,
+      awaitingAcceptance: returnsWorkspaceRows.filter(row => row.isAwaitingAcceptance).length,
+      needsService: returnsWorkspaceRows.filter(row => row.needsReturnService).length,
     };
-  }, [movementEntries, rentalDealRows, today]);
+  }, [returnsWorkspaceRows, today]);
 
   const debtDocsTabSummary = useMemo(() => {
-    const rows = rentalDealRows.filter(row => row.isActive);
+    const rows = debtDocsWorkspaceRows;
     const debtRows = rows.filter(row => row.debtAmount > 0);
     return {
       debtCount: debtRows.length,
-      overduePaymentCount: rows.filter(row => row.debtAmount > 0 && row.rental.endDate < format(today, 'yyyy-MM-dd')).length,
-      missingUpd: rows.filter(row => !row.rental.updSigned).length,
-      missingContract: rows.filter(row => !row.sourceRentalId).length,
+      overduePaymentCount: rows.filter(row => row.isOverdueDebt).length,
+      partialPaymentCount: rows.filter(row => row.isPartialPayment || row.rental.paymentStatus === 'partial').length,
+      missingUpd: rows.filter(row => row.missingUpd).length,
+      missingContract: rows.filter(row => row.missingContract).length,
+      unsignedDocuments: rows.filter(row => row.hasUnsignedDocuments).length,
       debtAmount: debtRows.reduce((sum, row) => sum + row.debtAmount, 0),
     };
-  }, [rentalDealRows, today]);
+  }, [debtDocsWorkspaceRows]);
 
   const rentalMovementChart = useMemo(() => {
     return Array.from({ length: 30 }).map((_, index) => {
@@ -2047,6 +2223,32 @@ export default function Rentals() {
 
     return { cards, hasEvents };
   }, [plannerCriticalSummary]);
+
+  const fleetPlanKpis = useMemo(() => {
+    const todayKey = format(today, 'yyyy-MM-dd');
+    const tomorrowKey = format(addDays(today, 1), 'yyyy-MM-dd');
+    const counts = filteredEquipment.reduce((acc, equipment) => {
+      const rentalsForEquipment = ganttRentals.filter(rental => matchesEquipmentRow(rental, equipment));
+      const status = computeEffectiveStatus(equipment, rentalsForEquipment, today, { start: viewStart, end: viewEnd });
+      if (status === 'available') acc.available += 1;
+      if (status === 'rented') acc.rented += 1;
+      if (status === 'in_service') acc.inService += 1;
+      return acc;
+    }, { available: 0, rented: 0, inService: 0 });
+    const activeRows = rentalDealRows.filter(row => row.isActive);
+    return {
+      totalEquipment: filteredEquipment.length,
+      available: counts.available,
+      rented: counts.rented,
+      inService: counts.inService,
+      returnsTodayTomorrow: activeRows.filter(row => row.rental.endDate === todayKey || row.rental.endDate === tomorrowKey).length,
+      shipmentsTodayTomorrow: movementEntries.filter(entry =>
+        entry.type === 'shipping' &&
+        [todayKey, tomorrowKey].includes(String(entry.date || '').slice(0, 10)),
+      ).length,
+      overdueReturns: activeRows.filter(row => row.rental.endDate < todayKey).length,
+    };
+  }, [filteredEquipment, ganttRentals, matchesEquipmentRow, movementEntries, rentalDealRows, today, viewEnd, viewStart]);
 
   const mobileEquipmentCards = useMemo(() => {
     if (isDesktopViewport) return [];
@@ -2506,11 +2708,11 @@ export default function Rentals() {
           <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
             {[
               { id: 'list' as const, label: 'Список аренд', badge: 0, badgeTone: '' },
-              { id: 'planner' as const, label: 'Планировщик', badge: 0, badgeTone: '' },
+              { id: 'planner' as const, label: 'План парка', badge: 0, badgeTone: '' },
               { id: 'returns' as const, label: 'Возвраты', badge: rentalWorkspaceKpis.overdueReturns, badgeTone: 'bg-red-500 text-white' },
               {
                 id: 'debt_docs' as const,
-                label: canViewPayments ? 'Долги и документы' : 'Документы',
+                label: canViewPayments ? 'Деньги и документы' : 'Документы',
                 badge: rentalWorkspaceKpis.rentalDebt > 0 || rentalWorkspaceKpis.missingDocs > 0 ? rentalWorkspaceKpis.missingDocs + (rentalWorkspaceKpis.rentalDebt > 0 ? 1 : 0) : 0,
                 badgeTone: 'bg-amber-500 text-white',
               },
@@ -2598,7 +2800,7 @@ export default function Rentals() {
         </div>
       </div>
 
-      {activeWorkspaceTab === 'planner' ? (
+      {false ? (
         <div className="relative z-10 flex-1 overflow-auto px-4 py-4">
           <div className="mx-auto flex max-w-[1500px] flex-col gap-4">
             <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -2613,7 +2815,7 @@ export default function Rentals() {
                   <Link to="/planner">
                     <Button className="app-button-primary rounded-xl">
                       <CalendarCheck className="h-4 w-4" />
-                      Открыть полный планировщик
+                      Открыть общий планировщик
                     </Button>
                   </Link>
                 )}
@@ -2667,7 +2869,7 @@ export default function Rentals() {
             </section>
           </div>
         </div>
-      ) : false ? (
+      ) : activeWorkspaceTab === 'planner' ? (
       <>
       <div className="hidden items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800 sm:flex lg:hidden">
         <div>
@@ -2706,6 +2908,22 @@ export default function Rentals() {
       <div className="relative z-10 border-b border-border/80 bg-card/70 backdrop-blur-xl">
         <div className="px-4 py-2">
           <div className="rounded-[24px] border border-border bg-card/80 px-4 py-3 shadow-[0_24px_50px_-38px_rgba(15,23,42,0.9)]">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-foreground">План парка</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Загрузка техники по дням: аренды, свободные окна, возвраты, доставки, сервис и простой.
+                </p>
+              </div>
+              {canViewPlanner && (
+                <div className="text-right">
+                  <Link to="/planner">
+                    <Button size="sm" variant="secondary" className="rounded-xl">Открыть общий планировщик</Button>
+                  </Link>
+                  <p className="mt-1 text-[11px] text-muted-foreground">Другой раздел: подготовка, сервис и задачи.</p>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setShowFiltersDialog(true)}
@@ -2736,6 +2954,23 @@ export default function Rentals() {
                 Настроить
               </div>
             </button>
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+              {[
+                { label: 'Всего техники', value: fleetPlanKpis.totalEquipment, tone: 'border-slate-200 bg-slate-50/70 text-slate-700 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-300' },
+                { label: 'Свободно', value: fleetPlanKpis.available, tone: 'border-emerald-200 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300' },
+                { label: 'В аренде', value: fleetPlanKpis.rented, tone: 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300' },
+                { label: 'В сервисе', value: fleetPlanKpis.inService, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
+                { label: 'Возвраты 2 дня', value: fleetPlanKpis.returnsTodayTomorrow, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
+                { label: 'Отгрузки 2 дня', value: fleetPlanKpis.shipmentsTodayTomorrow, tone: 'border-cyan-200 bg-cyan-50/70 text-cyan-700 dark:border-cyan-900/50 dark:bg-cyan-950/20 dark:text-cyan-300' },
+                { label: 'Просрочено', value: fleetPlanKpis.overdueReturns, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
+              ].map(item => (
+                <div key={item.label} className={cn('min-h-[76px] rounded-xl border px-3 py-2.5 shadow-sm', item.tone)}>
+                  <div className="text-[11px] font-semibold opacity-80">{item.label}</div>
+                  <div className="mt-1 text-2xl font-bold">{item.value}</div>
+                </div>
+              ))}
+            </div>
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100/90 pt-3 text-xs dark:border-white/8">
               <div className="flex flex-wrap items-center gap-3 text-gray-500 dark:text-gray-400">
@@ -2790,6 +3025,16 @@ export default function Rentals() {
                 {filterStatus && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                     Статус: {RENTAL_STATUS_FILTERS.find(item => item.value === filterStatus)?.label || filterStatus}
+                  </span>
+                )}
+                {filterEquipmentStatus && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                    Техника: {FLEET_EQUIPMENT_STATUS_FILTERS.find(item => item.value === filterEquipmentStatus)?.label || filterEquipmentStatus}
+                  </span>
+                )}
+                {(!fleetLayers.returns || !fleetLayers.deliveries || !fleetLayers.service || !fleetLayers.downtime) && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                    Слои настроены
                   </span>
                 )}
               </div>
@@ -2897,12 +3142,12 @@ export default function Rentals() {
             </div>
 
             <div>
-              <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Поиск по технике</div>
+              <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Поиск по технике, клиенту или договору</div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Модель / INV / SN"
+                  placeholder="Модель, INV, SN, клиент, договор"
                   value={filterModel}
                   onChange={e => setFilterModel(e.target.value)}
                   className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
@@ -2931,6 +3176,33 @@ export default function Rentals() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Статус техники</div>
+                <select
+                  value={filterEquipmentStatus}
+                  onChange={e => setFilterEquipmentStatus(e.target.value as FleetEquipmentStatusFilter)}
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                >
+                  {FLEET_EQUIPMENT_STATUS_FILTERS.map(item => (
+                    <option key={item.value || 'all'} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Собственник</div>
+                <select
+                  value={filterOwner}
+                  onChange={e => setFilterOwner(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
+                >
+                  <option value="">Все собственники</option>
+                  {ownerOptions.map(owner => (
+                    <option key={owner} value={owner}>{owner}</option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Менеджер</div>
                 <select
@@ -2983,6 +3255,32 @@ export default function Rentals() {
                     <option key={f.value} value={f.value}>{f.label}</option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Слои на плане</div>
+              <div className="grid gap-2 sm:grid-cols-4">
+                {[
+                  { key: 'returns' as const, label: 'Возвраты' },
+                  { key: 'deliveries' as const, label: 'Доставки' },
+                  { key: 'service' as const, label: 'Сервис' },
+                  { key: 'downtime' as const, label: 'Простой' },
+                ].map(item => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => toggleFleetLayer(item.key)}
+                    className={cn(
+                      'rounded-xl border px-3 py-2 text-sm font-semibold transition-colors',
+                      fleetLayers[item.key]
+                        ? 'border-[--color-primary] bg-[--color-primary] text-white'
+                        : 'border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300',
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -3373,9 +3671,12 @@ export default function Rentals() {
                     rowIndex={idx}
                     equipment={eq}
                     rentals={getFilteredRentalsForEquipment(eq)}
-                    downtimes={downtimesByInventory.get(eq.inventoryNumber) ?? []}
-                    servicePeriods={getServicePeriodsForEquipment(eq)}
+                    downtimes={fleetLayers.downtime ? downtimesByInventory.get(eq.inventoryNumber) ?? [] : []}
+                    servicePeriods={fleetLayers.service ? getServicePeriodsForEquipment(eq) : []}
+                    movements={getMovementsForEquipment(eq)}
                     conflictIds={conflictSets.get(eq.id) || new Set()}
+                    showReturns={fleetLayers.returns}
+                    showDeliveries={fleetLayers.deliveries}
                     viewStart={viewStart}
                     totalDays={totalDays}
                     dayWidth={dayWidth}
@@ -3609,9 +3910,12 @@ export default function Rentals() {
                     <p className="text-xs text-muted-foreground">Короткая сводка без полного Gantt.</p>
                   </div>
                   {canViewPlanner && (
-                    <Link to="/planner">
-                      <Button size="sm" variant="secondary" className="rounded-xl">Открыть планировщик</Button>
-                    </Link>
+                    <div className="flex flex-col items-start gap-1 sm:items-end">
+                      <Link to="/planner">
+                        <Button size="sm" variant="secondary" className="rounded-xl">Открыть общий планировщик</Button>
+                      </Link>
+                      <span className="text-[11px] text-muted-foreground">Отдельный раздел подготовки, сервиса и задач.</span>
+                    </div>
                   )}
                 </div>
                 {!plannerCriticalCards.hasEvents && (
@@ -3641,7 +3945,7 @@ export default function Rentals() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className="text-base font-bold text-foreground">Возвраты — рабочий список</h2>
-                      <p className="text-xs text-muted-foreground">Сегодня, завтра и просроченные возвраты по текущим фильтрам.</p>
+                      <p className="text-xs text-muted-foreground">Только аренды, где возврат уже требует внимания или запланирован в выбранном периоде.</p>
                     </div>
                     {canEditRentals && (
                       <Button size="sm" variant="secondary" className="rounded-xl" onClick={() => handleOpenReturn()}>
@@ -3650,12 +3954,14 @@ export default function Rentals() {
                       </Button>
                     )}
                   </div>
-                  <div className="mt-3 grid gap-3 md:grid-cols-4">
+                  <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
                     {[
                       { label: 'Сегодня', value: returnsTabSummary.today, tone: 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300' },
                       { label: 'Завтра', value: returnsTabSummary.tomorrow, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
                       { label: 'Просрочено', value: returnsTabSummary.overdue, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
-                      { label: 'С доставкой', value: returnsTabSummary.withDelivery, tone: 'border-slate-200 bg-slate-50/70 text-slate-700 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-300' },
+                      { label: 'Запланировано', value: returnsTabSummary.planned, tone: 'border-slate-200 bg-slate-50/70 text-slate-700 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-300' },
+                      { label: 'Ожидает приёмки', value: returnsTabSummary.awaitingAcceptance, tone: 'border-violet-200 bg-violet-50/70 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/20 dark:text-violet-300' },
+                      { label: 'Нужен сервис', value: returnsTabSummary.needsService, tone: 'border-orange-200 bg-orange-50/70 text-orange-700 dark:border-orange-900/50 dark:bg-orange-950/20 dark:text-orange-300' },
                     ].map(item => (
                       <div key={item.label} className={cn('rounded-xl border px-3 py-2.5', item.tone)}>
                         <div className="text-xs font-semibold opacity-80">{item.label}</div>
@@ -3670,10 +3976,10 @@ export default function Rentals() {
                 <section className="rounded-2xl border border-border bg-card p-4 shadow-sm xl:col-span-2">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-base font-bold text-foreground">{canViewPayments ? 'Долги и документы' : 'Документы по арендам'}</h2>
+                      <h2 className="text-base font-bold text-foreground">Деньги и документы</h2>
                       <p className="text-xs text-muted-foreground">
                         {canViewPayments
-                          ? 'Проблемные аренды по оплатам, УПД и договорным связям.'
+                          ? 'Только аренды с долгом, просрочкой, частичной оплатой или проблемами документов.'
                           : 'Финансовые суммы скрыты для вашей роли; показаны только документные проблемы.'}
                       </p>
                     </div>
@@ -3700,9 +4006,11 @@ export default function Rentals() {
                         { label: 'Аренд с долгом', value: debtDocsTabSummary.debtCount, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
                         { label: 'Долг всего', value: formatCurrency(debtDocsTabSummary.debtAmount), tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
                         { label: 'Просроченные платежи', value: debtDocsTabSummary.overduePaymentCount, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
+                        { label: 'Частичная оплата', value: debtDocsTabSummary.partialPaymentCount, tone: 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300' },
                       ] : []),
                       { label: 'Без УПД', value: debtDocsTabSummary.missingUpd, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
                       { label: 'Без договора', value: debtDocsTabSummary.missingContract, tone: 'border-slate-200 bg-slate-50/70 text-slate-700 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-300' },
+                      { label: 'Не подписаны', value: debtDocsTabSummary.unsignedDocuments, tone: 'border-violet-200 bg-violet-50/70 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/20 dark:text-violet-300' },
                     ].map(item => (
                       <div key={item.label} className={cn('rounded-xl border px-3 py-2.5', item.tone)}>
                         <div className="text-xs font-semibold opacity-80">{item.label}</div>
@@ -3721,41 +4029,70 @@ export default function Rentals() {
                     {activeWorkspaceTab === 'returns'
                       ? 'Возвраты'
                       : activeWorkspaceTab === 'debt_docs'
-                        ? (canViewPayments ? 'Проблемные аренды' : 'Документы по арендам')
+                        ? 'Проблемы по деньгам и документам'
                         : 'Таблица аренд'}
                   </h2>
-                  <p className="text-xs text-muted-foreground">{rentalDealRows.length} записей по текущим фильтрам</p>
+                  <p className="text-xs text-muted-foreground">{workspaceTableRows.length} записей по текущим фильтрам</p>
                 </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-[1180px] w-full text-left text-sm">
                   <thead className="bg-secondary/60 text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                    <tr>
-                      <th className="w-10 px-4 py-3"><input type="checkbox" aria-label="Выбрать все аренды" /></th>
-                      <th className="px-4 py-3">Аренда / договор</th>
-                      <th className="px-4 py-3">Клиент</th>
-                      <th className="px-4 py-3">Техника</th>
-                      <th className="px-4 py-3">Период / остаток</th>
-                      <th className="px-4 py-3">Сумма</th>
-                      <th className="px-4 py-3">Статус</th>
-                      <th className="px-4 py-3">Документы</th>
-                      <th className="px-4 py-3">Доставка / возврат</th>
-                      <th className="px-4 py-3">Менеджер</th>
-                      <th className="px-4 py-3"></th>
-                    </tr>
+                    {activeWorkspaceTab === 'returns' ? (
+                      <tr>
+                        <th className="px-4 py-3">Аренда / договор</th>
+                        <th className="px-4 py-3">Клиент</th>
+                        <th className="px-4 py-3">Техника</th>
+                        <th className="px-4 py-3">Дата возврата</th>
+                        <th className="px-4 py-3">Состояние</th>
+                        <th className="px-4 py-3">Доставка</th>
+                        <th className="px-4 py-3">Приёмка / сервис</th>
+                        <th className="px-4 py-3">Менеджер</th>
+                        <th className="px-4 py-3">Действия</th>
+                      </tr>
+                    ) : activeWorkspaceTab === 'debt_docs' ? (
+                      <tr>
+                        <th className="px-4 py-3">Аренда / договор</th>
+                        <th className="px-4 py-3">Клиент</th>
+                        <th className="px-4 py-3">Техника</th>
+                        <th className="px-4 py-3">Менеджер</th>
+                        <th className="px-4 py-3">Сумма</th>
+                        <th className="px-4 py-3">Оплачено</th>
+                        <th className="px-4 py-3">Долг</th>
+                        <th className="px-4 py-3">Просрочка</th>
+                        <th className="px-4 py-3">УПД</th>
+                        <th className="px-4 py-3">Договор</th>
+                        <th className="px-4 py-3">Следующий платёж</th>
+                        <th className="px-4 py-3">Действия</th>
+                      </tr>
+                    ) : (
+                      <tr>
+                        <th className="w-10 px-4 py-3"><input type="checkbox" aria-label="Выбрать все аренды" /></th>
+                        <th className="px-4 py-3">Аренда / договор</th>
+                        <th className="px-4 py-3">Клиент</th>
+                        <th className="px-4 py-3">Техника</th>
+                        <th className="px-4 py-3">Период / остаток</th>
+                        <th className="px-4 py-3">Сумма</th>
+                        <th className="px-4 py-3">Статус</th>
+                        <th className="px-4 py-3">Документы</th>
+                        <th className="px-4 py-3">Доставка / возврат</th>
+                        <th className="px-4 py-3">Менеджер</th>
+                        <th className="px-4 py-3"></th>
+                      </tr>
+                    )}
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {rentalDealRows.length === 0 ? (
+                    {workspaceTableRows.length === 0 ? (
                       <tr>
-                        <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
+                        <td colSpan={activeWorkspaceTab === 'debt_docs' ? 12 : activeWorkspaceTab === 'returns' ? 9 : 11} className="px-4 py-12 text-center text-muted-foreground">
                           {activeWorkspaceTab === 'returns'
-                            ? 'Нет возвратов по выбранным фильтрам'
+                            ? 'Нет актуальных возвратов за выбранный период.'
                             : activeWorkspaceTab === 'debt_docs'
-                              ? 'Нет проблемных аренд по деньгам и документам'
+                              ? 'Нет проблем по оплатам и документам.'
                               : 'Нет аренд по выбранным фильтрам'}
                         </td>
                       </tr>
-                    ) : rentalDealRows.map(row => {
+                    ) : workspaceTableRows.map(row => {
                       const isSelected = selectedRental?.id === row.rental.id;
                       const statusClass = row.rental.status === 'active'
                         ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
@@ -3764,6 +4101,40 @@ export default function Rentals() {
                           : row.rental.status === 'returned'
                             ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
                             : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300';
+                      const returnLabel = row.isOverdueReturn
+                        ? 'Просрочен'
+                        : row.isReturnToday
+                          ? 'Сегодня'
+                          : row.isReturnTomorrow
+                            ? 'Завтра'
+                            : row.isAwaitingAcceptance
+                              ? 'Ожидает приёмки'
+                              : row.isReturnedNotClosed
+                                ? 'Возвращено, не закрыто'
+                                : row.needsReturnService
+                                  ? 'Нужен сервис'
+                                  : 'Запланирован';
+                      const returnTone = row.isOverdueReturn
+                        ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                        : row.needsReturnService
+                          ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300'
+                          : row.isAwaitingAcceptance || row.isReturnedNotClosed
+                            ? 'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300'
+                            : row.isReturnToday || row.isReturnTomorrow
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+                      const updLabel = row.missingUpd
+                        ? 'Нет УПД'
+                        : row.rental.updSigned || row.relatedDocuments.some(doc => (doc.documentType || doc.type) === 'upd' && doc.status === 'signed')
+                          ? 'Подписан'
+                          : row.hasUnsignedDocuments
+                            ? 'Не подписан'
+                            : 'Есть';
+                      const contractLabel = row.missingContract
+                        ? 'Нет договора'
+                        : row.sourceRentalId || row.classicRental?.contractId || row.relatedDocuments.some(doc => (doc.documentType || doc.type) === 'contract' && doc.status === 'signed')
+                          ? 'Есть'
+                          : 'Не подписан';
                       return (
                         <tr
                           key={row.rental.id}
@@ -3779,61 +4150,138 @@ export default function Rentals() {
                           )}
                           onClick={() => setSelectedRental(row.rental)}
                         >
-                          <td className="px-4 py-3" onClick={event => event.stopPropagation()}><input type="checkbox" aria-label={`Выбрать ${row.rental.id}`} /></td>
-                          <td className="px-4 py-3">
-                            <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
-                            <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="max-w-[210px] truncate font-medium text-foreground" title={row.rental.client || 'Без клиента'}>{row.rental.client || 'Без клиента'}</div>
-                            <div className="max-w-[210px] truncate text-xs text-muted-foreground" title={row.rental.clientId || 'ID не указан'}>{row.rental.clientId || 'ID не указан'}</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="max-w-[210px] truncate font-medium text-foreground" title={getEquipmentMovementLabel(row.equipment)}>{getEquipmentMovementLabel(row.equipment)}</div>
-                            <div className="max-w-[210px] truncate text-xs text-muted-foreground" title={row.equipment?.ownerName || row.equipment?.owner || 'Собственник не указан'}>{row.equipment?.ownerName || row.equipment?.owner || 'Собственник не указан'}</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div>{safeRentalDateRangeLabel(row.rental.startDate, row.rental.endDate)}</div>
-                            <div className={cn('text-xs', row.isOverdueReturn ? 'font-semibold text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
-                              {row.isOverdueReturn ? `Просрочено на ${Math.abs(row.daysLeft)} дн.` : row.daysLeft >= 0 ? `Осталось ${row.daysLeft} дн.` : 'Период завершён'}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            {canViewPayments ? (
-                              <>
-                                <div className="font-semibold text-foreground">{formatCurrency(row.amount)}</div>
-                                <div className="text-xs text-muted-foreground">Оплачено {formatCurrency(row.paidAmount)}</div>
-                                <div className={cn('text-xs font-semibold', row.debtAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>Долг {formatCurrency(row.debtAmount)}</div>
-                              </>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">Суммы скрыты</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3"><span className={cn('rounded-full px-2.5 py-1 text-xs font-semibold', statusClass)}>{RENTAL_STATUS_LABEL[row.rental.status]}</span></td>
-                          <td className="px-4 py-3">
-                            <div className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold', row.rental.updSigned ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300')}>
-                              {row.rental.updSigned ? 'УПД подписан' : 'Без УПД'}
-                            </div>
-                            <div className="mt-1 text-xs text-muted-foreground">{row.sourceRentalId ? 'Договор есть' : 'Договор не найден'}</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className={cn(
-                              'inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold',
-                              row.isOverdueReturn
-                                ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
-                                : row.isReturnToday || row.isReturnTomorrow
-                                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
-                                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
-                            )}>
-                              <RotateCcw className="h-3.5 w-3.5" />
-                              {row.isReturnToday ? 'Возврат сегодня' : row.isReturnTomorrow ? 'Возврат завтра' : row.isOverdueReturn ? 'Возврат просрочен' : 'По графику'}
-                            </div>
-                            <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
-                              <Truck className="h-3.5 w-3.5" />
-                              {movementEntries.some(entry => entry.rental?.id === row.rental.id && entry.type === 'shipping') ? 'Доставка есть' : 'Доставка —'}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">{row.rental.manager || '—'}</td>
+                          {activeWorkspaceTab === 'returns' ? (
+                            <>
+                              <td className="px-4 py-3">
+                                <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
+                                <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="max-w-[210px] truncate font-medium text-foreground" title={row.rental.client || 'Без клиента'}>{row.rental.client || 'Без клиента'}</div>
+                                <div className="max-w-[210px] truncate text-xs text-muted-foreground" title={row.rental.clientId || 'ID не указан'}>{row.rental.clientId || 'ID не указан'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="max-w-[210px] truncate font-medium text-foreground" title={getEquipmentMovementLabel(row.equipment)}>{getEquipmentMovementLabel(row.equipment)}</div>
+                                <div className="max-w-[210px] truncate text-xs text-muted-foreground" title={row.equipment?.ownerName || row.equipment?.owner || 'Собственник не указан'}>{row.equipment?.ownerName || row.equipment?.owner || 'Собственник не указан'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-foreground">{safeRentalDateLabel(row.rental.endDate)}</div>
+                                <div className={cn('text-xs', row.isOverdueReturn ? 'font-semibold text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
+                                  {row.isOverdueReturn ? `Просрочено на ${Math.abs(row.daysLeft)} дн.` : row.daysLeft >= 0 ? `Осталось ${row.daysLeft} дн.` : 'Период завершён'}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold', returnTone)}>{returnLabel}</span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                                  <Truck className="h-3.5 w-3.5" />
+                                  {row.hasReturnDelivery ? 'Возвратная доставка есть' : row.hasShippingDelivery ? 'Была отгрузка' : 'Не запланирована'}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold', row.needsReturnService ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300' : row.isAwaitingAcceptance ? 'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300')}>
+                                  {row.needsReturnService ? <Wrench className="h-3.5 w-3.5" /> : <PackageCheck className="h-3.5 w-3.5" />}
+                                  {row.needsReturnService ? 'Нужен сервис' : row.isAwaitingAcceptance ? 'Ждёт приёмки' : row.hasReturnDelivery ? 'Принято' : 'Без замечаний'}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">{row.rental.manager || '—'}</td>
+                            </>
+                          ) : activeWorkspaceTab === 'debt_docs' ? (
+                            <>
+                              <td className="px-4 py-3">
+                                <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
+                                <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="max-w-[210px] truncate font-medium text-foreground" title={row.rental.client || 'Без клиента'}>{row.rental.client || 'Без клиента'}</div>
+                                <div className="max-w-[210px] truncate text-xs text-muted-foreground" title={row.rental.clientId || 'ID не указан'}>{row.rental.clientId || 'ID не указан'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="max-w-[210px] truncate font-medium text-foreground" title={getEquipmentMovementLabel(row.equipment)}>{getEquipmentMovementLabel(row.equipment)}</div>
+                                <div className="max-w-[210px] truncate text-xs text-muted-foreground" title={row.equipment?.ownerName || row.equipment?.owner || 'Собственник не указан'}>{row.equipment?.ownerName || row.equipment?.owner || 'Собственник не указан'}</div>
+                              </td>
+                              <td className="px-4 py-3">{row.rental.manager || '—'}</td>
+                              <td className="px-4 py-3 font-semibold text-foreground">{canViewPayments ? formatCurrency(row.amount) : 'Скрыто'}</td>
+                              <td className="px-4 py-3">{canViewPayments ? formatCurrency(row.paidAmount) : 'Скрыто'}</td>
+                              <td className={cn('px-4 py-3 font-semibold', canViewPayments && row.debtAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>{canViewPayments ? formatCurrency(row.debtAmount) : 'Скрыто'}</td>
+                              <td className="px-4 py-3">
+                                {canViewPayments ? (
+                                  row.isOverdueDebt
+                                    ? <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">Просрочено</span>
+                                    : <span className="text-xs text-muted-foreground">Нет</span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">Скрыто</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={cn('rounded-full px-2 py-1 text-xs font-semibold', row.missingUpd || updLabel === 'Не подписан' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300')}>{updLabel}</span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={cn('rounded-full px-2 py-1 text-xs font-semibold', row.missingContract || contractLabel === 'Не подписан' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300')}>{contractLabel}</span>
+                                {row.unsignedDocuments.length > 0 && (
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {row.unsignedDocuments.length} док. не подписано
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div>{row.dueDate ? safeRentalDateLabel(row.dueDate) : '—'}</div>
+                                {canViewPayments && row.isPartialPayment && <div className="text-xs font-semibold text-blue-600 dark:text-blue-300">частичная оплата</div>}
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-4 py-3" onClick={event => event.stopPropagation()}><input type="checkbox" aria-label={`Выбрать ${row.rental.id}`} /></td>
+                              <td className="px-4 py-3">
+                                <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
+                                <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="max-w-[210px] truncate font-medium text-foreground" title={row.rental.client || 'Без клиента'}>{row.rental.client || 'Без клиента'}</div>
+                                <div className="max-w-[210px] truncate text-xs text-muted-foreground" title={row.rental.clientId || 'ID не указан'}>{row.rental.clientId || 'ID не указан'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="max-w-[210px] truncate font-medium text-foreground" title={getEquipmentMovementLabel(row.equipment)}>{getEquipmentMovementLabel(row.equipment)}</div>
+                                <div className="max-w-[210px] truncate text-xs text-muted-foreground" title={row.equipment?.ownerName || row.equipment?.owner || 'Собственник не указан'}>{row.equipment?.ownerName || row.equipment?.owner || 'Собственник не указан'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div>{safeRentalDateRangeLabel(row.rental.startDate, row.rental.endDate)}</div>
+                                <div className={cn('text-xs', row.isOverdueReturn ? 'font-semibold text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
+                                  {row.isOverdueReturn ? `Просрочено на ${Math.abs(row.daysLeft)} дн.` : row.daysLeft >= 0 ? `Осталось ${row.daysLeft} дн.` : 'Период завершён'}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                {canViewPayments ? (
+                                  <>
+                                    <div className="font-semibold text-foreground">{formatCurrency(row.amount)}</div>
+                                    <div className="text-xs text-muted-foreground">Оплачено {formatCurrency(row.paidAmount)}</div>
+                                    <div className={cn('text-xs font-semibold', row.debtAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>Долг {formatCurrency(row.debtAmount)}</div>
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">Суммы скрыты</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3"><span className={cn('rounded-full px-2.5 py-1 text-xs font-semibold', statusClass)}>{RENTAL_STATUS_LABEL[row.rental.status]}</span></td>
+                              <td className="px-4 py-3">
+                                <div className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold', row.rental.updSigned ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300')}>
+                                  {row.rental.updSigned ? 'УПД подписан' : 'Без УПД'}
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">{row.sourceRentalId ? 'Договор есть' : 'Договор не найден'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold', returnTone)}>
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                  {row.isReturnToday ? 'Возврат сегодня' : row.isReturnTomorrow ? 'Возврат завтра' : row.isOverdueReturn ? 'Возврат просрочен' : 'По графику'}
+                                </div>
+                                <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                                  <Truck className="h-3.5 w-3.5" />
+                                  {row.hasShippingDelivery ? 'Доставка есть' : 'Доставка —'}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">{row.rental.manager || '—'}</td>
+                            </>
+                          )}
                           <td className="px-4 py-3 text-right" onClick={event => event.stopPropagation()}>
                             <div className="flex justify-end gap-1.5">
                               {activeWorkspaceTab === 'returns' && canEditRentals && (
@@ -3842,11 +4290,16 @@ export default function Rentals() {
                                 </Button>
                               )}
                               {activeWorkspaceTab === 'returns' && canCreateDeliveries && (
-                                <Link to="/deliveries/new" title="Создать доставку">
+                                <Link to="/deliveries/new" title="Создать возвратную доставку">
                                   <Button size="sm" variant="ghost" className="rounded-xl px-2">
                                     <Truck className="h-4 w-4" />
                                   </Button>
                                 </Link>
+                              )}
+                              {activeWorkspaceTab === 'returns' && canEditRentals && (
+                                <Button size="sm" variant="ghost" className="rounded-xl px-2" title="Подтвердить возврат" onClick={() => handleOpenReturn(row.rental)}>
+                                  <CircleCheck className="h-4 w-4" />
+                                </Button>
                               )}
                               {activeWorkspaceTab === 'returns' && canCreateService && (
                                 <Link to="/service/new" title="Создать сервисную заявку">
@@ -4373,7 +4826,10 @@ interface EquipmentRowProps {
   rentals: GanttRentalData[];
   downtimes: DowntimePeriod[];
   servicePeriods: ServicePeriod[];
+  movements: FleetMovementEntry[];
   conflictIds: Set<string>;
+  showReturns: boolean;
+  showDeliveries: boolean;
   viewStart: Date;
   totalDays: number;
   dayWidth: number;
@@ -4393,7 +4849,7 @@ interface EquipmentRowProps {
 
 function EquipmentRow({
   rowIndex,
-  equipment, rentals, downtimes, servicePeriods, conflictIds,
+  equipment, rentals, downtimes, servicePeriods, movements, conflictIds, showReturns, showDeliveries,
   viewStart, totalDays, dayWidth, densityMode, rowHeight, todayOffset, viewEnd, scale, days, today,
   onBarClick, onNewRental, onReturn, onDowntime, rentalDebtRowsById,
 }: EquipmentRowProps) {
@@ -4541,6 +4997,57 @@ function EquipmentRow({
             <div className="absolute -left-1 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500 dark:bg-red-400 ring-2 ring-red-200 dark:ring-red-800" />
           </div>
         )}
+
+        {/* Return markers */}
+        {showReturns && rentals
+          .filter(rental => rental.status === 'active' || rental.status === 'created')
+          .map(rental => {
+            const pos = barPosition(new Date(rental.endDate), addDays(new Date(rental.endDate), 1), viewStart, totalDays, dayWidth);
+            if (!pos) return null;
+            const isOverdue = rental.status === 'active' && rental.endDate < todayStr;
+            return (
+              <button
+                key={`return-${rental.id}`}
+                type="button"
+                onClick={() => onReturn(withEquipmentRowContext(rental, equipment))}
+                className={cn(
+                  'absolute top-1 z-[12] flex h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border bg-white shadow-sm transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-primary/60 dark:bg-slate-900',
+                  isOverdue
+                    ? 'border-red-300 text-red-600 dark:border-red-700 dark:text-red-300'
+                    : 'border-amber-300 text-amber-600 dark:border-amber-700 dark:text-amber-300',
+                )}
+                style={{ left: pos.left }}
+                title={`Возврат: ${rental.client || 'без клиента'} · ${safeRentalDateLabel(rental.endDate)}`}
+                aria-label="Оформить возврат"
+              >
+                <RotateCcw className="h-3 w-3" />
+              </button>
+            );
+          })}
+
+        {/* Delivery markers */}
+        {showDeliveries && movements.map(entry => {
+          const dateKey = String(entry.date || '').slice(0, 10);
+          if (!dateKey) return null;
+          const pos = barPosition(new Date(dateKey), addDays(new Date(dateKey), 1), viewStart, totalDays, dayWidth);
+          if (!pos) return null;
+          const isReceiving = entry.type === 'receiving';
+          return (
+            <div
+              key={`movement-${entry.id}`}
+              className={cn(
+                'absolute bottom-1 z-[12] flex h-5 min-w-5 -translate-x-1/2 items-center justify-center rounded-full border bg-white px-1 shadow-sm dark:bg-slate-900',
+                isReceiving
+                  ? 'border-emerald-300 text-emerald-600 dark:border-emerald-700 dark:text-emerald-300'
+                  : 'border-blue-300 text-blue-600 dark:border-blue-700 dark:text-blue-300',
+              )}
+              style={{ left: pos.left }}
+              title={`${entry.typeLabel || (isReceiving ? 'Приёмка' : 'Отгрузка')}: ${entry.clientLabel || 'без клиента'} · ${safeMovementDateLabel(entry.date)}`}
+            >
+              <Truck className="h-3 w-3" />
+            </div>
+          );
+        })}
 
         {/* Service bars */}
         {servicePeriods.map(sp => {

@@ -155,9 +155,12 @@ test('frontend warranty pages do not prefetch forbidden operational collections'
 
 test('rentals workspace active tabs keep readable contrast in light and dark themes', () => {
   assert.match(rentalsPageSource, /label:\s*'Список аренд'/);
-  assert.match(rentalsPageSource, /label:\s*'Планировщик'/);
+  assert.match(rentalsPageSource, /label:\s*'План парка'/);
   assert.match(rentalsPageSource, /label:\s*'Возвраты'/);
-  assert.match(rentalsPageSource, /label:\s*canViewPayments \? 'Долги и документы' : 'Документы'/);
+  assert.match(rentalsPageSource, /label:\s*canViewPayments \? 'Деньги и документы' : 'Документы'/);
+  assert.match(rentalsPageSource, /canViewPayments \? formatCurrency\(row\.amount\) : 'Скрыто'/);
+  assert.match(rentalsPageSource, /canViewPayments \? formatCurrency\(row\.paidAmount\) : 'Скрыто'/);
+  assert.match(rentalsPageSource, /canViewPayments \? formatCurrency\(row\.debtAmount\) : 'Скрыто'/);
 
   assert.match(rentalsPageSource, /rentals-workspace-tab-active shadow-sm/);
   assert.match(rentalsPageSource, /rentals-workspace-tab-badge-active/);

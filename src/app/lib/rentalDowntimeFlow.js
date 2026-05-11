@@ -10,6 +10,11 @@ function text(value) {
   return String(value ?? '').trim();
 }
 
+function isSafeEquipmentInventoryRef(value) {
+  const normalized = text(value);
+  return Boolean(normalized && normalized !== '0' && normalized !== '-' && normalized !== '—');
+}
+
 function dateKey(value) {
   const raw = text(value).slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
@@ -43,10 +48,13 @@ export function isOpenRentalForDowntime(rental) {
 
 export function rentalMatchesDowntimeEquipment(rental, downtime) {
   const downtimeEquipmentId = text(downtime?.equipmentId);
-  const downtimeEquipmentInv = text(downtime?.equipmentInv || downtime?.inventoryNumber);
   const rentalEquipmentId = text(rental?.equipmentId);
+  if (downtimeEquipmentId && rentalEquipmentId) return downtimeEquipmentId === rentalEquipmentId;
+
+  const downtimeEquipmentInv = text(downtime?.equipmentInv || downtime?.inventoryNumber);
   const rentalEquipmentInv = text(rental?.equipmentInv || rental?.inventoryNumber);
-  if (downtimeEquipmentId && rentalEquipmentId && downtimeEquipmentId === rentalEquipmentId) return true;
+  if (!isSafeEquipmentInventoryRef(downtimeEquipmentInv)) return false;
+  if (rentalEquipmentInv && !isSafeEquipmentInventoryRef(rentalEquipmentInv)) return false;
   if (downtimeEquipmentInv && rentalEquipmentInv && downtimeEquipmentInv === rentalEquipmentInv) return true;
   if (downtimeEquipmentInv && Array.isArray(rental?.equipment)) {
     return rental.equipment.map(text).includes(downtimeEquipmentInv);

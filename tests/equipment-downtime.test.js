@@ -76,6 +76,31 @@ test('equipment downtime validation blocks active rental overlaps', () => {
   assert.match(result.error, /активной арендой GR-1/);
 });
 
+test('equipment downtime validation prefers equipment id over placeholder inventory matches', () => {
+  const result = validateEquipmentDowntimePayload({
+    equipmentId: 'EQ-1',
+    equipmentInv: '0',
+    startDate: '2026-05-11',
+    endDate: '2026-05-12',
+    reason: 'Нет спроса',
+  }, {
+    equipment: [
+      { id: 'EQ-1', inventoryNumber: '0' },
+      { id: 'EQ-2', inventoryNumber: '0' },
+    ],
+    ganttRentals: [{
+      id: 'GR-2',
+      equipmentId: 'EQ-2',
+      equipmentInv: '0',
+      startDate: '2026-05-10',
+      endDate: '2026-05-15',
+      status: 'active',
+    }],
+  });
+
+  assert.equal(result.ok, true);
+});
+
 test('equipment downtime validation blocks overlaps with another downtime', () => {
   const result = validateEquipmentDowntimePayload({
     id: 'EDT-2',

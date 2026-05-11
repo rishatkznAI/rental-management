@@ -112,6 +112,40 @@ test('duplicate gantt rows dedupe by source and original rental ids', () => {
   assert.equal(target.rental.id, 'GR-active');
 });
 
+test('exact equipment id prevents false downtime conflict from duplicate placeholder inventory', () => {
+  const target = findDowntimeRentalFlowTarget({
+    downtime: {
+      equipmentId: 'EQ-target',
+      equipmentInv: '0',
+      startDate: '2026-04-10',
+      endDate: '2026-04-11',
+      reason: 'Ожидание клиента',
+    },
+    rentals: [
+      {
+        id: 'GR-target',
+        equipmentId: 'EQ-target',
+        equipmentInv: '0',
+        startDate: '2026-04-01',
+        endDate: '2026-04-20',
+        status: 'active',
+      },
+      {
+        id: 'GR-other',
+        equipmentId: 'EQ-other',
+        equipmentInv: '0',
+        startDate: '2026-04-01',
+        endDate: '2026-04-20',
+        status: 'active',
+      },
+    ],
+  });
+
+  assert.equal(target.flow, 'rental');
+  assert.equal(target.rental.id, 'GR-target');
+  assert.equal(target.matches.length, 1);
+});
+
 test('free equipment downtime stays on standalone equipment downtime flow', () => {
   const target = findDowntimeRentalFlowTarget({
     downtime: {

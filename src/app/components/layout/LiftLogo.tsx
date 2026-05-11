@@ -7,6 +7,8 @@ type LiftLogoProps = {
 export function LiftLogo({ className }: LiftLogoProps) {
   return (
     <svg
+      width="36"
+      height="36"
       viewBox="0 0 96 96"
       role="img"
       aria-label="Скайтех"

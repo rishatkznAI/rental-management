@@ -1870,6 +1870,7 @@ export interface Delivery {
   carrierPhone?: string | null;
   carrierChatId?: number | null;
   carrierUserId?: number | null;
+  rentalId?: string | null;
   ganttRentalId?: string | null;
   classicRentalId?: string | null;
   equipmentId?: string | null;

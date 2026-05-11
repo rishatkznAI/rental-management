@@ -1,4 +1,5 @@
 import { api } from '../lib/api';
+import { normalizeDeliveriesResponse, normalizeDeliveryRecord } from '../lib/deliveries-view.js';
 import type { Delivery, DeliveryCarrier } from '../types';
 
 export type CreateDeliveryPayload = Omit<Delivery, 'id' | 'createdAt' | 'updatedAt' | 'createdBy' | 'botSentAt' | 'botSendError'>;
@@ -10,19 +11,19 @@ export type UpdateDeliveryPayload = Partial<CreateDeliveryPayload> & {
 
 export const deliveriesService = {
   getAll: (): Promise<Delivery[]> =>
-    api.get<Delivery[]>('/api/deliveries'),
+    api.get<unknown>('/api/deliveries').then((response) => normalizeDeliveriesResponse(response) as Delivery[]),
 
   getById: (id: string): Promise<Delivery> =>
-    api.get<Delivery>(`/api/deliveries/${id}`),
+    api.get<unknown>(`/api/deliveries/${id}`).then((response) => normalizeDeliveryRecord(response) as Delivery),
 
   create: (payload: CreateDeliveryPayload): Promise<Delivery> =>
-    api.post<Delivery>('/api/deliveries', payload),
+    api.post<unknown>('/api/deliveries', payload).then((response) => normalizeDeliveryRecord(response) as Delivery),
 
   update: (id: string, payload: UpdateDeliveryPayload): Promise<Delivery> =>
-    api.patch<Delivery>(`/api/deliveries/${id}`, payload),
+    api.patch<unknown>(`/api/deliveries/${id}`, payload).then((response) => normalizeDeliveryRecord(response) as Delivery),
 
   resendToCarrier: (id: string): Promise<Delivery> =>
-    api.post<Delivery>(`/api/deliveries/${id}/send`, {}),
+    api.post<unknown>(`/api/deliveries/${id}/send`, {}).then((response) => normalizeDeliveryRecord(response) as Delivery),
 
   delete: (id: string): Promise<{ ok: boolean }> =>
     api.del<{ ok: boolean }>(`/api/deliveries/${id}`),

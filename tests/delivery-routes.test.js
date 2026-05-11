@@ -253,6 +253,26 @@ test('frontend-enabled carrier reads only own active deliveries as sanitized ope
   });
 });
 
+test('admin reads every delivery including completed and cancelled records', async () => {
+  const { app, state } = createDeliveryApp({
+    id: 'DL-active',
+    status: 'sent',
+    carrierId: 'carrier-1',
+    carrierKey: 'carrier-1',
+  });
+  state.deliveries.push(
+    makeDelivery({ id: 'DL-completed', status: 'completed', carrierId: 'carrier-1', carrierKey: 'carrier-1' }),
+    makeDelivery({ id: 'DL-cancelled', status: 'cancelled', carrierId: 'carrier-2', carrierKey: 'carrier-2' }),
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const list = await request(baseUrl, 'GET', '/api/deliveries');
+
+    assert.equal(list.status, 200);
+    assert.deepEqual(new Set(list.body.map(item => item.id)), new Set(['DL-active', 'DL-completed', 'DL-cancelled']));
+  });
+});
+
 test('updating a delivery with a carrier sends the previously unsent request to MAX', async () => {
   const { app, state, messages } = createDeliveryApp({
     comment: 'Забрать у охраны пропуск и комплект документов.',

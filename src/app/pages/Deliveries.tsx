@@ -16,7 +16,6 @@ import {
   Route,
   Search,
   Truck,
-  UserRound,
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -40,6 +39,19 @@ import type { GanttRentalData } from '../mock-data';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { normalizeUserRole } from '../lib/userStorage';
+import {
+  ACTIVE_DELIVERY_STATUSES,
+  CLOSED_DELIVERY_STATUSES,
+  filterDeliveriesForView,
+  getDeliveryEmptyState,
+  getDeliveryErrorMessage,
+  isDeliveryInPeriod,
+  isDeliveryOverdue,
+  isDeliveryToday,
+  isUnassignedDelivery,
+  normalizeDeliveriesResponse,
+  todayIso,
+} from '../lib/deliveries-view.js';
 
 const DELIVERY_KEYS = {
   all: ['deliveries'] as const,
@@ -50,7 +62,7 @@ const STATUS_LABELS: Record<DeliveryStatus, string> = {
   new: 'Новая',
   sent: 'Отправлена',
   accepted: 'Принята',
-  in_transit: 'Выехал',
+  in_transit: 'В пути',
   completed: 'Выполнена',
   cancelled: 'Отменена',
 };
@@ -121,58 +133,11 @@ type RentalOption = {
   contactPhone: string;
 };
 
-type DeliveryWorkspaceTab = 'all' | 'in_transit' | 'planned' | 'completed' | 'overdue' | 'cancelled';
+type DeliveryWorkspaceTab = 'all' | 'active' | 'in_transit' | 'planned' | 'completed' | 'overdue' | 'cancelled';
 type DeliveryViewMode = 'list' | 'compact';
 type DeliveryDetailTab = 'overview' | 'route' | 'equipment' | 'documents' | 'history';
 type DeliveryPeriodFilter = 'today' | 'tomorrow' | 'week' | 'all';
 type DeliveryStatusFilter = '' | 'in_transit' | 'planned' | 'completed' | 'overdue' | 'unassigned' | 'cancelled';
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDaysIso(dateKey: string, days: number) {
-  const date = new Date(`${dateKey}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function getDeliveryDateKey(delivery: Delivery) {
-  return String(delivery.transportDate || delivery.neededBy || '').slice(0, 10);
-}
-
-function isDeliveryOverdue(delivery: Delivery, todayKey = todayIso()) {
-  const dateKey = getDeliveryDateKey(delivery);
-  return Boolean(dateKey && dateKey < todayKey && !['completed', 'cancelled'].includes(delivery.status));
-}
-
-function isDeliveryToday(delivery: Delivery, todayKey = todayIso()) {
-  return getDeliveryDateKey(delivery) === todayKey;
-}
-
-function isDeliveryInPeriod(delivery: Delivery, period: DeliveryPeriodFilter, todayKey = todayIso()) {
-  const dateKey = getDeliveryDateKey(delivery);
-  if (!dateKey || period === 'all') return true;
-  if (period === 'today') return dateKey === todayKey;
-  if (period === 'tomorrow') return dateKey === addDaysIso(todayKey, 1);
-  if (period === 'week') return dateKey >= todayKey && dateKey <= addDaysIso(todayKey, 6);
-  return true;
-}
-
-function isUnassignedDelivery(delivery: Delivery) {
-  return !delivery.carrierId && !delivery.carrierKey && !delivery.carrierName;
-}
-
-function matchesDeliveryStatusFilter(delivery: Delivery, filter: DeliveryStatusFilter, todayKey = todayIso()) {
-  if (!filter) return true;
-  if (filter === 'in_transit') return delivery.status === 'in_transit';
-  if (filter === 'planned') return ['new', 'sent', 'accepted'].includes(delivery.status);
-  if (filter === 'completed') return delivery.status === 'completed';
-  if (filter === 'overdue') return isDeliveryOverdue(delivery, todayKey);
-  if (filter === 'unassigned') return isUnassignedDelivery(delivery) && !['completed', 'cancelled'].includes(delivery.status);
-  if (filter === 'cancelled') return delivery.status === 'cancelled';
-  return true;
-}
 
 function getDeliveryStatusMeta(delivery: Delivery, todayKey = todayIso()) {
   if (delivery.status === 'cancelled') return { label: 'Отменена', className: OPERATIONAL_STATUS_CLASSES.cancelled };
@@ -237,6 +202,12 @@ function formatDateTime(date?: string | null) {
 function safeText(value: unknown, fallback = '—') {
   const text = String(value ?? '').trim();
   return text || fallback;
+}
+
+function formatDeliveryCost(value: unknown) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return '—';
+  return `${amount.toLocaleString('ru-RU')} ₽`;
 }
 
 function buildFormFromDelivery(delivery: Delivery): DeliveryFormState {
@@ -533,10 +504,14 @@ export default function Deliveries() {
     [normalizedRole, user?.id],
   );
 
-  const { data: deliveries = [], isLoading, refetch } = useQuery({
+  const { data: deliveriesResponse = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: deliveryListQueryKey,
     queryFn: deliveriesService.getAll,
   });
+  const deliveries = useMemo(
+    () => normalizeDeliveriesResponse(deliveriesResponse) as Delivery[],
+    [deliveriesResponse],
+  );
   const { data: carriers = [] } = useQuery({
     queryKey: DELIVERY_KEYS.carriers,
     queryFn: deliveriesService.getCarriers,
@@ -564,7 +539,7 @@ export default function Deliveries() {
   });
 
   const [search, setSearch] = useState('');
-  const [periodFilter, setPeriodFilter] = useState<DeliveryPeriodFilter>('today');
+  const [periodFilter, setPeriodFilter] = useState<DeliveryPeriodFilter>('all');
   const [statusFilter, setStatusFilter] = useState<DeliveryStatusFilter>('');
   const [typeFilter, setTypeFilter] = useState<DeliveryType | ''>('');
   const [carrierFilter, setCarrierFilter] = useState('');
@@ -639,68 +614,59 @@ export default function Deliveries() {
 
   const todayKey = todayIso();
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return deliveries.filter((item) => {
-      if (!isDeliveryInPeriod(item, periodFilter, todayKey)) return false;
-      if (!matchesDeliveryStatusFilter(item, statusFilter, todayKey)) return false;
-      if (typeFilter && item.type !== typeFilter) return false;
-      if (carrierFilter && ![item.carrierName, item.carrierKey, item.carrierId].some((value) => value === carrierFilter)) return false;
-      if (activeTab === 'in_transit' && item.status !== 'in_transit') return false;
-      if (activeTab === 'planned' && !['new', 'sent', 'accepted'].includes(item.status)) return false;
-      if (activeTab === 'completed' && item.status !== 'completed') return false;
-      if (activeTab === 'overdue' && !isDeliveryOverdue(item, todayKey)) return false;
-      if (activeTab === 'cancelled' && item.status !== 'cancelled') return false;
-      if (!q) return true;
-      return [
-        item.id,
-        item.client,
-        item.cargo,
-        item.origin,
-        item.destination,
-        item.contactName,
-        item.contactPhone,
-        item.carrierName,
-        item.manager,
-        item.equipmentInv,
-        item.equipmentLabel,
-      ].some((value) => String(value || '').toLowerCase().includes(q));
-    });
-  }, [activeTab, carrierFilter, deliveries, periodFilter, search, statusFilter, todayKey, typeFilter]);
+  const filtered = useMemo(
+    () => filterDeliveriesForView(deliveries, {
+      activeTab,
+      carrierFilter,
+      periodFilter,
+      search,
+      statusFilter,
+      typeFilter,
+    }, todayKey) as Delivery[],
+    [activeTab, carrierFilter, deliveries, periodFilter, search, statusFilter, todayKey, typeFilter],
+  );
 
   const kpis = useMemo(() => ({
     total: deliveries.length,
+    active: deliveries.filter((item) => ACTIVE_DELIVERY_STATUSES.includes(item.status)).length,
     needInvoice: deliveries.filter((item) => item.status === 'completed' && !item.carrierInvoiceReceived).length,
     unpaidByClient: deliveries.filter((item) => item.status === 'completed' && !item.clientPaymentVerified).length,
     sentToCarrier: deliveries.filter((item) => Boolean(item.botSentAt)).length,
     today: deliveries.filter((item) => isDeliveryToday(item, todayKey)).length,
     inTransit: deliveries.filter((item) => item.status === 'in_transit').length,
-    completedToday: deliveries.filter((item) => item.status === 'completed' && isDeliveryToday(item, todayKey)).length,
+    completedPeriod: deliveries.filter((item) => item.status === 'completed' && isDeliveryInPeriod(item, periodFilter, todayKey)).length,
     overdue: deliveries.filter((item) => isDeliveryOverdue(item, todayKey)).length,
-    unassigned: deliveries.filter((item) => isUnassignedDelivery(item) && !['completed', 'cancelled'].includes(item.status)).length,
-  }), [deliveries, todayKey]);
+    unassigned: deliveries.filter((item) => isUnassignedDelivery(item) && !CLOSED_DELIVERY_STATUSES.includes(item.status)).length,
+    risks: deliveries.filter((item) => isDeliveryOverdue(item, todayKey) || (isUnassignedDelivery(item) && !CLOSED_DELIVERY_STATUSES.includes(item.status))).length,
+  }), [deliveries, periodFilter, todayKey]);
   const kpiCards = isCarrierView
     ? [
         { label: 'Мои активные доставки', value: kpis.total, icon: Truck, tone: 'text-slate-900 dark:text-white', hint: 'Только назначенные вам активные заявки', card: 'border-slate-200 bg-white dark:border-gray-800 dark:bg-gray-900' },
       ]
     : [
-        { label: 'Доставки сегодня', value: kpis.today, icon: CalendarDays, tone: 'text-slate-950 dark:text-white', hint: 'Отгрузки и возвраты на сегодня', card: 'border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20' },
+        { label: 'Активные', value: kpis.active, icon: Truck, tone: 'text-slate-950 dark:text-white', hint: 'Новые, отправленные, принятые и в пути', card: 'border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20' },
+        { label: 'Сегодня', value: kpis.today, icon: CalendarDays, tone: 'text-slate-950 dark:text-white', hint: 'Отгрузки и возвраты на сегодня', card: 'border-blue-200 bg-white dark:border-blue-900/50 dark:bg-gray-900' },
         { label: 'В пути', value: kpis.inTransit, icon: Navigation, tone: 'text-blue-700 dark:text-blue-300', hint: 'Перевозчик уже выехал', card: 'border-blue-200 bg-white dark:border-blue-900/50 dark:bg-gray-900' },
-        { label: 'Завершено сегодня', value: kpis.completedToday, icon: CircleCheck, tone: 'text-emerald-700 dark:text-emerald-300', hint: 'Закрытые перевозки дня', card: 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/20' },
-        { label: 'Просрочено', value: kpis.overdue, icon: AlertTriangle, tone: 'text-red-700 dark:text-red-300', hint: 'Дата прошла, доставка не закрыта', card: 'border-red-200 bg-red-50/70 dark:border-red-900/50 dark:bg-red-950/20' },
-        { label: 'Ожидают назначения', value: kpis.unassigned, icon: UserRound, tone: 'text-amber-700 dark:text-amber-300', hint: 'Нет водителя или перевозчика', card: 'border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20' },
+        { label: 'Риски', value: kpis.risks, icon: AlertTriangle, tone: 'text-red-700 dark:text-red-300', hint: 'Просрочено или нет перевозчика', card: 'border-red-200 bg-red-50/70 dark:border-red-900/50 dark:bg-red-950/20' },
+        { label: 'Выполнено', value: kpis.completedPeriod, icon: CircleCheck, tone: 'text-emerald-700 dark:text-emerald-300', hint: 'Закрытые перевозки за выбранный период', card: 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/20' },
       ];
 
   const selectedDelivery = useMemo(
     () => deliveries.find((item) => item.id === selectedDeliveryId) || null,
     [deliveries, selectedDeliveryId],
   );
+  const emptyState = useMemo(
+    () => getDeliveryEmptyState({ totalCount: deliveries.length, isCarrierView }),
+    [deliveries.length, isCarrierView],
+  );
+  const errorMessage = getDeliveryErrorMessage(error);
 
   const tabItems = useMemo(() => [
     { id: 'all' as const, label: 'Все доставки', count: deliveries.length },
+    { id: 'active' as const, label: 'Активные', count: deliveries.filter((item) => ACTIVE_DELIVERY_STATUSES.includes(item.status)).length },
     { id: 'in_transit' as const, label: 'В пути', count: deliveries.filter((item) => item.status === 'in_transit').length },
     { id: 'planned' as const, label: 'Запланированы', count: deliveries.filter((item) => ['new', 'sent', 'accepted'].includes(item.status)).length },
-    { id: 'completed' as const, label: 'Выполнены', count: deliveries.filter((item) => item.status === 'completed').length },
+    { id: 'completed' as const, label: 'Завершённые', count: deliveries.filter((item) => CLOSED_DELIVERY_STATUSES.includes(item.status)).length },
     { id: 'overdue' as const, label: 'Просрочены', count: deliveries.filter((item) => isDeliveryOverdue(item, todayKey)).length },
     { id: 'cancelled' as const, label: 'Отменены', count: deliveries.filter((item) => item.status === 'cancelled').length },
   ], [deliveries, todayKey]);
@@ -840,7 +806,7 @@ export default function Deliveries() {
 
   function resetFilters() {
     setSearch('');
-    setPeriodFilter('today');
+    setPeriodFilter('all');
     setStatusFilter('');
     setTypeFilter('');
     setCarrierFilter('');
@@ -871,7 +837,7 @@ export default function Deliveries() {
     const inventoryNumber = delivery.equipmentInv || '';
     const driverName = delivery.carrierName || (delivery.carrierPhone ? 'Водитель' : '');
     const canShareGeo = Boolean((delivery.carrierName || delivery.carrierPhone) && delivery.destination);
-    const canCancelDelivery = canEdit && !['completed', 'cancelled'].includes(delivery.status);
+    const canCancelDelivery = canEdit && !CLOSED_DELIVERY_STATUSES.includes(delivery.status);
 
     return (
       <>
@@ -1154,11 +1120,15 @@ export default function Deliveries() {
               key={card.label}
               type="button"
               onClick={() => {
-                if (card.label === 'В пути') setActiveTab('in_transit');
-                if (card.label === 'Просрочено') setActiveTab('overdue');
-                if (card.label === 'Завершено сегодня') {
-                  setActiveTab('completed');
+                if (card.label === 'Активные') setActiveTab('active');
+                if (card.label === 'Сегодня') {
+                  setActiveTab('all');
                   setPeriodFilter('today');
+                }
+                if (card.label === 'В пути') setActiveTab('in_transit');
+                if (card.label === 'Риски') setActiveTab('overdue');
+                if (card.label === 'Выполнено') {
+                  setActiveTab('completed');
                 }
               }}
               className={`min-h-[112px] rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${card.card}`}
@@ -1188,10 +1158,10 @@ export default function Deliveries() {
             />
           </div>
           <select value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value as DeliveryPeriodFilter)} className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-white">
+            <option value="all">Все даты</option>
             <option value="today">Сегодня</option>
             <option value="tomorrow">Завтра</option>
             <option value="week">Неделя</option>
-            <option value="all">Все даты</option>
           </select>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as DeliveryStatusFilter)} className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-white">
             <option value="">Все статусы</option>
@@ -1273,13 +1243,33 @@ export default function Deliveries() {
             <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
             Загружаю доставки…
           </div>
+        ) : isError ? (
+          <div className="flex h-60 flex-col items-center justify-center px-4 text-center text-gray-500 dark:text-gray-400">
+            <AlertTriangle className="mb-3 h-10 w-10 text-red-500" />
+            <p className="text-base font-semibold text-gray-900 dark:text-white">Не удалось загрузить доставки</p>
+            <p className="mt-1 max-w-md text-sm">{errorMessage}</p>
+            <Button variant="secondary" className="mt-4" onClick={() => void refetch()}>
+              <RefreshCw className="h-4 w-4" />
+              Повторить
+            </Button>
+          </div>
         ) : filtered.length === 0 ? (
-          <div className="flex h-56 flex-col items-center justify-center px-4 text-center text-gray-500 dark:text-gray-400">
+          <div className="flex h-60 flex-col items-center justify-center px-4 text-center text-gray-500 dark:text-gray-400">
             <Truck className="mb-3 h-10 w-10 opacity-40" />
-            <p className="text-base font-semibold text-gray-900 dark:text-white">Доставок по выбранным фильтрам нет</p>
-            <p className="mt-1 max-w-md text-sm">
-              {isCarrierView ? 'Активных заявок для вашей компании сейчас нет.' : 'Сбросьте фильтры или создайте новую доставку.'}
-            </p>
+            <p className="text-base font-semibold text-gray-900 dark:text-white">{emptyState.title}</p>
+            <p className="mt-1 max-w-md text-sm">{emptyState.description}</p>
+            {canCreate && deliveries.length === 0 && (
+              <Button className="mt-4" onClick={openCreateDialog}>
+                <Plus className="h-4 w-4" />
+                Создать доставку
+              </Button>
+            )}
+            {deliveries.length > 0 && (
+              <Button variant="secondary" className="mt-4" onClick={resetFilters}>
+                <XCircle className="h-4 w-4" />
+                Сбросить фильтры
+              </Button>
+            )}
           </div>
         ) : viewMode === 'compact' ? (
           <div className="grid gap-3 p-3 md:grid-cols-2 xl:grid-cols-3">
@@ -1300,7 +1290,7 @@ export default function Deliveries() {
                     <div className="text-sm font-semibold text-gray-950 dark:text-white">{delivery.id}</div>
                     <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDate(delivery.transportDate)} · {delivery.pickupTime || 'время не указано'}</div>
                   </div>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_CLASSES[delivery.status]}`}>{STATUS_LABELS[delivery.status]}</span>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_CLASSES[delivery.status] || STATUS_CLASSES.new}`}>{STATUS_LABELS[delivery.status] || delivery.status || 'Новая'}</span>
                 </div>
                 <div className="mt-3 text-sm font-medium text-gray-900 dark:text-white">{safeText(delivery.client)}</div>
                 <div className="mt-1 truncate text-sm text-gray-600 dark:text-gray-300">{safeText(delivery.cargo)}</div>
@@ -1313,7 +1303,7 @@ export default function Deliveries() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1160px] text-sm">
+            <table className="w-full min-w-[1360px] text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/70 text-left text-xs uppercase tracking-[0.12em] text-gray-500 dark:border-gray-800 dark:bg-gray-950/60 dark:text-gray-400">
                   <th className="px-4 py-3"><input type="checkbox" aria-label="Выбрать все доставки" /></th>
@@ -1325,6 +1315,8 @@ export default function Deliveries() {
                   <th className="px-4 py-3 font-semibold">Маршрут / адрес</th>
                   <th className="px-4 py-3 font-semibold">Время</th>
                   {!isCarrierView && <th className="px-4 py-3 font-semibold">Водитель</th>}
+                  <th className="px-4 py-3 font-semibold">Контакт</th>
+                  {!isCarrierView && <th className="px-4 py-3 font-semibold">Стоимость</th>}
                   <th className="px-4 py-3 font-semibold">Действия</th>
                 </tr>
               </thead>
@@ -1390,7 +1382,7 @@ export default function Deliveries() {
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.className}`}>{statusMeta.label}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${TYPE_CLASSES[delivery.type]}`}>{delivery.type === 'shipping' ? 'Доставка' : 'Возврат'}</span>
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${TYPE_CLASSES[delivery.type] || TYPE_CLASSES.shipping}`}>{delivery.type === 'shipping' ? 'Доставка' : 'Возврат'}</span>
                       </td>
                       {!isCarrierView && (
                         <td className="px-4 py-3">
@@ -1440,6 +1432,19 @@ export default function Deliveries() {
                           </div>
                         </td>
                       )}
+                      <td className="px-4 py-3">
+                        <div className="max-w-[190px] truncate font-medium text-gray-950 dark:text-white" title={delivery.contactName || undefined}>
+                          {safeText(delivery.contactName)}
+                        </div>
+                        <div className="mt-1 max-w-[190px] truncate font-mono text-xs text-gray-500 dark:text-gray-400" title={delivery.contactPhone || undefined}>
+                          {safeText(delivery.contactPhone)}
+                        </div>
+                      </td>
+                      {!isCarrierView && (
+                        <td className="px-4 py-3 font-semibold text-gray-950 dark:text-white">
+                          {formatDeliveryCost(delivery.cost)}
+                        </td>
+                      )}
                       <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
                         <DropdownMenu.Root>
                           <DropdownMenu.Trigger asChild>
@@ -1470,12 +1475,52 @@ export default function Deliveries() {
                                   Изменить доставку
                                 </DropdownMenu.Item>
                               )}
-                              {canEdit && !['completed', 'cancelled'].includes(delivery.status) && (
+                              {canEdit && !CLOSED_DELIVERY_STATUSES.includes(delivery.status) && delivery.status !== 'accepted' && (
+                                <DropdownMenu.Item
+                                  onSelect={() => void toggleField(delivery, { status: 'accepted' })}
+                                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                                >
+                                  Принять
+                                </DropdownMenu.Item>
+                              )}
+                              {canEdit && !CLOSED_DELIVERY_STATUSES.includes(delivery.status) && delivery.status !== 'in_transit' && (
+                                <DropdownMenu.Item
+                                  onSelect={() => void toggleField(delivery, { status: 'in_transit' })}
+                                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                                >
+                                  В пути
+                                </DropdownMenu.Item>
+                              )}
+                              {canEdit && delivery.status !== 'completed' && (
+                                <DropdownMenu.Item
+                                  onSelect={() => void toggleField(delivery, { status: 'completed' })}
+                                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                                >
+                                  Выполнить
+                                </DropdownMenu.Item>
+                              )}
+                              {canEdit && !CLOSED_DELIVERY_STATUSES.includes(delivery.status) && (
+                                <DropdownMenu.Item
+                                  onSelect={() => void cancelDelivery(delivery)}
+                                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-600 outline-none hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
+                                >
+                                  Отменить
+                                </DropdownMenu.Item>
+                              )}
+                              {canEdit && !CLOSED_DELIVERY_STATUSES.includes(delivery.status) && (
                                 <DropdownMenu.Item
                                   onSelect={() => resendToCarrier(delivery)}
                                   className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
                                 >
                                   Отправить в MAX
+                                </DropdownMenu.Item>
+                              )}
+                              {canDelete && (
+                                <DropdownMenu.Item
+                                  onSelect={() => void removeDelivery(delivery)}
+                                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-600 outline-none hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
+                                >
+                                  Удалить
                                 </DropdownMenu.Item>
                               )}
                             </DropdownMenu.Content>

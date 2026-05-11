@@ -83,6 +83,48 @@ test('commercial offers use KP numbering and quote aliases normalize to commerci
   assert.equal(quoteAlias.document.number, 'KP-2026-0002');
 });
 
+test('rental and supply contracts keep CONTRACT numbering separate from commercial offers', () => {
+  const rentalContract = prepareDocumentCreate({
+    type: 'contract',
+    contractKind: 'rental',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    rentalId: 'R-1',
+    date: '2026-05-09',
+    status: 'draft',
+  }, { documents: [], settings: [], nowIso, generateId, idPrefix: 'D', user });
+
+  assert.equal(rentalContract.document.type, 'contract');
+  assert.equal(rentalContract.document.documentType, 'contract');
+  assert.equal(rentalContract.document.contractKind, 'rental');
+  assert.equal(rentalContract.document.number, 'CONTRACT-2026-0001');
+
+  const supplyContract = prepareDocumentCreate({
+    type: 'contract',
+    contractKind: 'supply',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    date: '2026-05-10',
+    status: 'draft',
+  }, { documents: [rentalContract.document], settings: rentalContract.settings, nowIso, generateId, idPrefix: 'D', user });
+
+  assert.equal(supplyContract.document.type, 'contract');
+  assert.equal(supplyContract.document.documentType, 'contract');
+  assert.equal(supplyContract.document.contractKind, 'supply');
+  assert.equal(supplyContract.document.number, 'CONTRACT-2026-0002');
+
+  const offer = prepareDocumentCreate({
+    type: 'commercial_offer',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    date: '2026-05-11',
+    status: 'draft',
+  }, { documents: [rentalContract.document, supplyContract.document], settings: supplyContract.settings, nowIso, generateId, idPrefix: 'D', user });
+
+  assert.equal(offer.document.type, 'commercial_offer');
+  assert.equal(offer.document.number, 'KP-2026-0001');
+});
+
 test('document numbering rejects duplicate manual number and records history', () => {
   const created = prepareDocumentCreate({
     type: 'contract',

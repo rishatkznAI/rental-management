@@ -1,7 +1,8 @@
 import React from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Tag } from 'lucide-react';
+import { toast } from 'sonner';
+import { ChevronRight, Plus, Search, Tag } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -26,88 +27,19 @@ import { getSaleOperationHistory, isSaleModeEquipment, saleConditionKind, saleCo
 import { formatCurrency } from '../lib/utils';
 import { deriveSignalState } from '../lib/gsm';
 import { normalizeUserRole } from '../lib/userStorage';
+import {
+  DEFAULT_SALES_SETTINGS,
+  SALES_SETTINGS_KEY,
+  SALES_SETTINGS_META,
+  type QuoteTemplateSection,
+  type SalesPriceChangeReason,
+  type SalesSectionSettings,
+  type SalesSettingId,
+  normalizeSalesSettings,
+} from '../lib/salesSettings';
 import { appSettingsService } from '../services/app-settings.service';
 import { equipmentService } from '../services/equipment.service';
 import type { AppSetting, Equipment, EquipmentSalePdiStatus, EquipmentSaleReceiptStatus } from '../types';
-
-const SALES_SETTINGS_KEY = 'sales_section_settings';
-
-type SalesSettingId =
-  | 'quoteTemplates'
-  | 'paymentTerms'
-  | 'deliveryTerms'
-  | 'warrantyTerms'
-  | 'pricingRules'
-  | 'priceChangeReasons'
-  | 'kitCommentTemplate';
-
-type SalesSectionSettings = Record<SalesSettingId, string>;
-
-const SALES_SETTINGS_META: Array<{ id: SalesSettingId; title: string; description: string; placeholder: string }> = [
-  {
-    id: 'quoteTemplates',
-    title: 'Шаблоны КП',
-    description: 'Текстовые блоки и структура коммерческого предложения для продажной техники.',
-    placeholder: 'Например: срок действия КП, состав предложения, блок характеристик и комплектации.',
-  },
-  {
-    id: 'paymentTerms',
-    title: 'Условия оплаты по умолчанию',
-    description: 'Базовые условия оплаты, которые используются при подготовке КП.',
-    placeholder: 'Например: 100% предоплата или 50/50 по согласованию.',
-  },
-  {
-    id: 'deliveryTerms',
-    title: 'Условия доставки по умолчанию',
-    description: 'Стандартные условия доставки и отгрузки продажной техники.',
-    placeholder: 'Например: самовывоз со склада или доставка отдельным счётом.',
-  },
-  {
-    id: 'warrantyTerms',
-    title: 'Гарантийные условия',
-    description: 'Типовые гарантийные условия для новой и б/у техники.',
-    placeholder: 'Например: гарантия 12 месяцев на новую технику, индивидуально для б/у.',
-  },
-  {
-    id: 'pricingRules',
-    title: 'Правила расчёта цены',
-    description: 'Правила маржи, минимальной цены и факторов корректировки стоимости.',
-    placeholder: 'Например: учитывать год выпуска, наработку, АКБ, PDI и комплект документов.',
-  },
-  {
-    id: 'priceChangeReasons',
-    title: 'Причины изменения цены',
-    description: 'Справочник причин, который используется при фиксации истории изменения цены.',
-    placeholder: 'Например: корректировка по рынку; срочная продажа; состояние АКБ; комплектность.',
-  },
-  {
-    id: 'kitCommentTemplate',
-    title: 'Шаблон комментария по комплектации',
-    description: 'Шаблон для описания комплектации и замечаний в продажной карточке.',
-    placeholder: 'Например: АКБ, зарядное устройство, поручни, документы, ключи.',
-  },
-];
-
-const DEFAULT_SALES_SETTINGS: SalesSectionSettings = {
-  quoteTemplates: 'КП включает модель, фото, характеристики, цену, НДС, срок действия предложения, условия оплаты, доставки, гарантию, комплектацию и доступные документы.',
-  paymentTerms: 'Условия оплаты согласуются в КП. По умолчанию: предоплата до отгрузки.',
-  deliveryTerms: 'Самовывоз со склада или доставка по отдельному согласованию.',
-  warrantyTerms: 'Гарантийные условия указываются в КП с учётом состояния техники.',
-  pricingRules: 'Цена зависит от года выпуска, наработки, состояния, АКБ, комплектации, PDI, документов и срочности продажи.',
-  priceChangeReasons: 'Корректировка по рынку\nСрочная продажа\nСостояние АКБ\nКомплектация\nPDI или документы',
-  kitCommentTemplate: 'Комплектация проверена. Укажите АКБ, зарядное устройство, поручни, документы, ключи и замечания.',
-};
-
-function normalizeSalesSettings(value: unknown): SalesSectionSettings {
-  const source = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Partial<Record<SalesSettingId, unknown>>
-    : {};
-  return SALES_SETTINGS_META.reduce((acc, item) => {
-    const raw = source[item.id];
-    acc[item.id] = typeof raw === 'string' ? raw : DEFAULT_SALES_SETTINGS[item.id];
-    return acc;
-  }, { ...DEFAULT_SALES_SETTINGS });
-}
 
 function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
   const variants: Record<EquipmentSalePdiStatus, 'default' | 'warning' | 'success' | 'error'> = {
@@ -206,8 +138,10 @@ export default function Sales() {
   const [quickFilter, setQuickFilter] = React.useState<'all' | 'pdi_ready' | 'pdi_in_progress' | 'no_price' | 'available_only'>('all');
   const [activeSalesTab, setActiveSalesTab] = React.useState('showcase');
   const [editingSettingId, setEditingSettingId] = React.useState<SalesSettingId | null>(null);
-  const [settingDraft, setSettingDraft] = React.useState('');
+  const [settingsDraft, setSettingsDraft] = React.useState<SalesSectionSettings | null>(null);
+  const [quotePreviewOpen, setQuotePreviewOpen] = React.useState(false);
   const [settingsMessage, setSettingsMessage] = React.useState<string | null>(null);
+  const [settingsError, setSettingsError] = React.useState<string | null>(null);
   const [showFilters, setShowFilters] = React.useState(false);
   const appSettingsQuery = useQuery<AppSetting[]>({
     queryKey: ['app-settings'],
@@ -238,13 +172,21 @@ export default function Sales() {
         ? appSettingsService.update(existing.id, payload)
         : appSettingsService.create(payload);
     },
+    onMutate: () => {
+      setSettingsError(null);
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['app-settings'] });
-      setSettingsMessage('Настройки продаж сохранены.');
+      const message = 'Настройки продаж сохранены.';
+      setSettingsMessage(message);
+      setSettingsError(null);
       setEditingSettingId(null);
+      toast.success(message);
     },
     onError: (error) => {
-      setSettingsMessage(apiErrorMessage(error, 'Не удалось сохранить настройки продаж.'));
+      const message = apiErrorMessage(error, 'Не удалось сохранить настройки продаж.');
+      setSettingsError(message);
+      toast.error(message);
     },
   });
 
@@ -267,6 +209,10 @@ export default function Sales() {
     () => normalizeSalesSettings(salesSettingsRecord?.value),
     [salesSettingsRecord?.value],
   );
+  const activePriceChangeReasons = React.useMemo(
+    () => salesSettings.priceChangeReasons.filter(reason => reason.isActive && reason.name.trim()),
+    [salesSettings.priceChangeReasons],
+  );
   const editingSetting = SALES_SETTINGS_META.find(item => item.id === editingSettingId) ?? null;
 
   React.useEffect(() => {
@@ -277,9 +223,166 @@ export default function Sales() {
 
   React.useEffect(() => {
     if (!editingSettingId) return;
-    setSettingDraft(salesSettings[editingSettingId]);
+    setSettingsDraft(salesSettings);
+    setQuotePreviewOpen(false);
     setSettingsMessage(null);
+    setSettingsError(null);
   }, [editingSettingId, salesSettings]);
+
+  function updateSettingsDraft(updater: (current: SalesSectionSettings) => SalesSectionSettings) {
+    setSettingsDraft(current => updater(current ?? salesSettings));
+  }
+
+  function updatePriceReason(index: number, patch: Partial<SalesPriceChangeReason>) {
+    updateSettingsDraft(current => ({
+      ...current,
+      priceChangeReasons: current.priceChangeReasons.map((reason, reasonIndex) => (
+        reasonIndex === index ? { ...reason, ...patch } : reason
+      )),
+    }));
+  }
+
+  function addPriceReason() {
+    updateSettingsDraft(current => ({
+      ...current,
+      priceChangeReasons: [
+        ...current.priceChangeReasons,
+        {
+          id: `reason-${Date.now()}`,
+          name: '',
+          isActive: true,
+        },
+      ],
+    }));
+  }
+
+  function archivePriceReason(index: number) {
+    updatePriceReason(index, { isActive: false });
+  }
+
+  function settingsSummary(id: SalesSettingId) {
+    const settings = salesSettings;
+    if (id === 'quoteTemplate') {
+      return `${settings.quoteTemplate.templateName}; срок ${settings.quoteTemplate.validityDays} дн.; НДС ${settings.quoteTemplate.showVat ? 'показывается' : 'не выводится'}`;
+    }
+    if (id === 'defaultPaymentTerms') {
+      return `Предоплата ${settings.defaultPaymentTerms.prepaymentPercent}%, оплата в течение ${settings.defaultPaymentTerms.invoiceDueDays} дней, НДС ${settings.defaultPaymentTerms.vatIncluded ? 'включён' : 'не включён'}`;
+    }
+    if (id === 'defaultDeliveryTerms') {
+      const method = settings.defaultDeliveryTerms.mode === 'pickup' ? 'Самовывоз' : settings.defaultDeliveryTerms.mode === 'company_delivery' ? 'Доставка силами компании' : 'По договорённости';
+      const paidBy = settings.defaultDeliveryTerms.paidBy === 'buyer' ? 'оплачивает покупатель' : settings.defaultDeliveryTerms.paidBy === 'seller' ? 'оплачивает продавец' : 'оплата по договорённости';
+      return `${method}, ${paidBy}, готовность ${settings.defaultDeliveryTerms.readinessDays} дн.`;
+    }
+    if (id === 'warrantyTerms') {
+      return `Новая техника: ${settings.warrantyTerms.warrantyMonthsNew} мес., б/у: ${settings.warrantyTerms.warrantyMonthsUsed} мес.`;
+    }
+    if (id === 'pricingRules') {
+      return `Наценка ${settings.pricingRules.defaultMarkupPercent}%, минимальная маржа ${settings.pricingRules.minimumMarginPercent}%.`;
+    }
+    if (id === 'priceChangeReasons') {
+      return `Активных причин: ${settings.priceChangeReasons.filter(reason => reason.isActive).length} из ${settings.priceChangeReasons.length}`;
+    }
+    return settings.packageCommentTemplate.text;
+  }
+
+  function isSettingConfigured(id: SalesSettingId) {
+    const settings = salesSettings;
+    if (id === 'quoteTemplate') {
+      return Boolean(settings.quoteTemplate.templateName.trim() && settings.quoteTemplate.title.trim() && settings.quoteTemplate.sectionsOrder.length > 0);
+    }
+    if (id === 'defaultPaymentTerms') {
+      return Boolean(settings.defaultPaymentTerms.paymentText.trim());
+    }
+    if (id === 'defaultDeliveryTerms') {
+      return Boolean(settings.defaultDeliveryTerms.deliveryText.trim());
+    }
+    if (id === 'warrantyTerms') {
+      return Boolean(settings.warrantyTerms.warrantyText.trim());
+    }
+    if (id === 'pricingRules') {
+      return Boolean(settings.pricingRules.rulesText.trim());
+    }
+    if (id === 'priceChangeReasons') {
+      return settings.priceChangeReasons.some(reason => reason.isActive && reason.name.trim());
+    }
+    return Boolean(settings.packageCommentTemplate.text.trim());
+  }
+
+  const quoteSectionLabels: Record<QuoteTemplateSection, string> = {
+    intro: 'Вступительный текст',
+    equipment: 'Техника',
+    price: 'Цена',
+    payment: 'Условия оплаты',
+    delivery: 'Условия доставки',
+    warranty: 'Гарантия',
+    package: 'Комплектация',
+    packageComment: 'Комментарий по комплектации',
+    footer: 'Нижний комментарий',
+  };
+
+  const quoteVariableExamples = {
+    equipmentModel: saleEquipment[0] ? `${saleEquipment[0].manufacturer} ${saleEquipment[0].model}`.trim() : 'JLG 1932R',
+    inventoryNumber: saleEquipment[0]?.inventoryNumber || 'ST-1932R-00156',
+    serialNumber: saleEquipment[0]?.serialNumber || '2100123456',
+    salePrice: saleEquipment[0]?.salePrice1 ? formatCurrency(saleEquipment[0].salePrice1) : '1 850 000 ₽',
+    validUntil: '24.06.2026',
+    paymentTerms: salesSettings.defaultPaymentTerms.paymentText,
+    deliveryTerms: salesSettings.defaultDeliveryTerms.deliveryText,
+    warrantyTerms: salesSettings.warrantyTerms.warrantyText,
+    packageComment: salesSettings.packageCommentTemplate.text,
+  };
+
+  function moveQuoteSection(index: number, direction: -1 | 1) {
+    updateSettingsDraft(current => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= current.quoteTemplate.sectionsOrder.length) return current;
+      const sectionsOrder = [...current.quoteTemplate.sectionsOrder];
+      const [section] = sectionsOrder.splice(index, 1);
+      sectionsOrder.splice(nextIndex, 0, section);
+      return {
+        ...current,
+        quoteTemplate: {
+          ...current.quoteTemplate,
+          sectionsOrder,
+        },
+      };
+    });
+  }
+
+  function renderTemplateText(text: string) {
+    return Object.entries(quoteVariableExamples).reduce(
+      (result, [key, value]) => result.replaceAll(`{${key}}`, String(value)),
+      text,
+    );
+  }
+
+  function quoteSectionEnabled(section: QuoteTemplateSection, settings: SalesSectionSettings) {
+    const quote = settings.quoteTemplate;
+    if (section === 'payment') return quote.showPaymentTerms;
+    if (section === 'delivery') return quote.showDeliveryTerms;
+    if (section === 'warranty') return quote.showWarrantyTerms;
+    if (section === 'package') return quote.showEquipmentPackage;
+    if (section === 'packageComment') return quote.showPackageComment;
+    return true;
+  }
+
+  function quoteSectionPreview(section: QuoteTemplateSection, settings: SalesSectionSettings) {
+    const quote = settings.quoteTemplate;
+    if (section === 'intro') return renderTemplateText(quote.introText);
+    if (section === 'equipment') {
+      const details = [`Модель: ${quoteVariableExamples.equipmentModel}`];
+      if (quote.showEquipmentSpecs) details.push(`Инв. № ${quoteVariableExamples.inventoryNumber}`, `SN ${quoteVariableExamples.serialNumber}`);
+      if (quote.showEquipmentPhoto) details.push('Фото техники будет включено');
+      return details.join('\n');
+    }
+    if (section === 'price') return `${quoteVariableExamples.salePrice}${quote.showVat ? '\nНДС показывается в КП' : ''}`;
+    if (section === 'payment') return renderTemplateText(settings.defaultPaymentTerms.paymentText);
+    if (section === 'delivery') return `${renderTemplateText(settings.defaultDeliveryTerms.deliveryText)}\nГотовность к отгрузке: ${settings.defaultDeliveryTerms.readinessDays} дн.`;
+    if (section === 'warranty') return renderTemplateText(settings.warrantyTerms.warrantyText);
+    if (section === 'package') return 'АКБ, зарядное устройство, поручни, документы, ключи';
+    if (section === 'packageComment') return renderTemplateText(settings.packageCommentTemplate.text);
+    return renderTemplateText(quote.footerText);
+  }
 
   const filteredEquipment = React.useMemo(
     () => saleEquipment.filter((equipment) => {
@@ -369,6 +472,399 @@ export default function Sales() {
 
     return Array.from(rows.values()).sort((a, b) => a.model.localeCompare(b.model, 'ru'));
   }, [saleEquipment]);
+
+  const settingsDraftValue = settingsDraft ?? salesSettings;
+
+  function renderBooleanToggle(label: string, checked: boolean, onChange: (checked: boolean) => void) {
+    return (
+      <label className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:text-gray-200">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+        />
+        {label}
+      </label>
+    );
+  }
+
+  function renderSettingsEditor() {
+    if (!editingSettingId) return null;
+    if (editingSettingId === 'quoteTemplate') {
+      const quote = settingsDraftValue.quoteTemplate;
+      return (
+        <div className="grid gap-4">
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Название шаблона</span>
+            <Input value={quote.templateName} onChange={(event) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, templateName: event.target.value } }))} />
+          </label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Заголовок КП</span>
+              <Input value={quote.title} onChange={(event) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, title: event.target.value } }))} />
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Срок действия, дней</span>
+              <Input type="number" min="1" value={quote.validityDays} onChange={(event) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, validityDays: Number(event.target.value) || 1 } }))} />
+            </label>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {renderBooleanToggle('Показывать фото техники', quote.showEquipmentPhoto, (checked) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, showEquipmentPhoto: checked } })))}
+            {renderBooleanToggle('Показывать характеристики', quote.showEquipmentSpecs, (checked) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, showEquipmentSpecs: checked } })))}
+            {renderBooleanToggle('Показывать комплектацию', quote.showEquipmentPackage, (checked) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, showEquipmentPackage: checked } })))}
+            {renderBooleanToggle('Показывать оплату', quote.showPaymentTerms, (checked) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, showPaymentTerms: checked } })))}
+            {renderBooleanToggle('Показывать доставку', quote.showDeliveryTerms, (checked) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, showDeliveryTerms: checked } })))}
+            {renderBooleanToggle('Показывать гарантию', quote.showWarrantyTerms, (checked) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, showWarrantyTerms: checked } })))}
+            {renderBooleanToggle('Показывать НДС', quote.showVat, (checked) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, showVat: checked } })))}
+            {renderBooleanToggle('Показывать комментарий по комплектации', quote.showPackageComment, (checked) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, showPackageComment: checked } })))}
+          </div>
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Вступительный текст</span>
+            <Textarea rows={4} value={quote.introText} onChange={(event) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, introText: event.target.value } }))} />
+          </label>
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Порядок секций</span>
+            <div className="grid gap-2">
+              {quote.sectionsOrder.map((section, index) => (
+                <div key={`${section}-${index}`} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
+                  <span className="font-medium text-gray-800 dark:text-gray-100">{quoteSectionLabels[section]}</span>
+                  <span className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="h-8 rounded-lg px-3"
+                      disabled={index === 0}
+                      onClick={() => moveQuoteSection(index, -1)}
+                    >
+                      Вверх
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="h-8 rounded-lg px-3"
+                      disabled={index === quote.sectionsOrder.length - 1}
+                      onClick={() => moveQuoteSection(index, 1)}
+                    >
+                      Вниз
+                    </Button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </label>
+          <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-100">
+            <p className="font-semibold">Переменные шаблона</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {[
+                '{equipmentModel}',
+                '{inventoryNumber}',
+                '{serialNumber}',
+                '{salePrice}',
+                '{validUntil}',
+                '{paymentTerms}',
+                '{deliveryTerms}',
+                '{warrantyTerms}',
+                '{packageComment}',
+              ].map(variable => (
+                <code key={variable} className="rounded-lg bg-white/70 px-2 py-1 text-xs text-blue-950 dark:bg-blue-950/60 dark:text-blue-100">
+                  {variable}
+                </code>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-3">
+            <Button type="button" variant="secondary" className="rounded-xl" onClick={() => setQuotePreviewOpen(open => !open)}>
+              Предпросмотр КП
+            </Button>
+            {quotePreviewOpen ? (
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-950">
+                <div className="border-b border-gray-100 pb-3 dark:border-gray-800">
+                  <p className="text-lg font-semibold text-gray-900 dark:text-white">{renderTemplateText(quote.title)}</p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Демо-предпросмотр. Срок действия до {quoteVariableExamples.validUntil}</p>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {quote.sectionsOrder.map(section => {
+                    const enabled = quoteSectionEnabled(section, settingsDraftValue);
+                    return (
+                      <div key={`preview-${section}`} className={`rounded-xl border p-3 ${enabled ? 'border-gray-200 dark:border-gray-700' : 'border-gray-100 bg-gray-50 opacity-60 dark:border-gray-800 dark:bg-gray-900/50'}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-semibold text-gray-900 dark:text-white">{quoteSectionLabels[section]}</p>
+                          <Badge variant={enabled ? 'success' : 'default'}>{enabled ? 'Будет включён' : 'Скрыт'}</Badge>
+                        </div>
+                        {enabled ? (
+                          <p className="mt-2 whitespace-pre-line text-gray-600 dark:text-gray-300">{quoteSectionPreview(section, settingsDraftValue)}</p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Финальный текст</span>
+            <Textarea rows={3} value={quote.footerText} onChange={(event) => updateSettingsDraft(current => ({ ...current, quoteTemplate: { ...current.quoteTemplate, footerText: event.target.value } }))} />
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-fit rounded-xl"
+            onClick={() => updateSettingsDraft(current => ({
+              ...current,
+              quoteTemplate: {
+                ...DEFAULT_SALES_SETTINGS.quoteTemplate,
+                sectionsOrder: [...DEFAULT_SALES_SETTINGS.quoteTemplate.sectionsOrder],
+              },
+            }))}
+          >
+            Сбросить к стандартным
+          </Button>
+        </div>
+      );
+    }
+
+    if (editingSettingId === 'defaultPaymentTerms') {
+      const payment = settingsDraftValue.defaultPaymentTerms;
+      return (
+        <div className="grid gap-4">
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Текст условий оплаты для КП</span>
+            <Textarea rows={5} value={payment.paymentText} onChange={(event) => updateSettingsDraft(current => ({ ...current, defaultPaymentTerms: { ...current.defaultPaymentTerms, paymentText: event.target.value } }))} />
+          </label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Предоплата, %</span>
+              <Input type="number" min="0" max="100" value={payment.prepaymentPercent} onChange={(event) => updateSettingsDraft(current => ({ ...current, defaultPaymentTerms: { ...current.defaultPaymentTerms, prepaymentPercent: Number(event.target.value) || 0 } }))} />
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Срок оплаты счёта, дней</span>
+              <Input type="number" min="0" value={payment.invoiceDueDays} onChange={(event) => updateSettingsDraft(current => ({ ...current, defaultPaymentTerms: { ...current.defaultPaymentTerms, invoiceDueDays: Number(event.target.value) || 0 } }))} />
+            </label>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {renderBooleanToggle('НДС включён', payment.vatIncluded, (checked) => updateSettingsDraft(current => ({ ...current, defaultPaymentTerms: { ...current.defaultPaymentTerms, vatIncluded: checked } })))}
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-fit rounded-xl"
+            onClick={() => updateSettingsDraft(current => ({
+              ...current,
+              defaultPaymentTerms: { ...DEFAULT_SALES_SETTINGS.defaultPaymentTerms },
+            }))}
+          >
+            Сбросить к стандартным
+          </Button>
+        </div>
+      );
+    }
+
+    if (editingSettingId === 'defaultDeliveryTerms') {
+      const delivery = settingsDraftValue.defaultDeliveryTerms;
+      return (
+        <div className="grid gap-4">
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Текст условий доставки для КП</span>
+            <Textarea rows={5} value={delivery.deliveryText} onChange={(event) => updateSettingsDraft(current => ({ ...current, defaultDeliveryTerms: { ...current.defaultDeliveryTerms, deliveryText: event.target.value } }))} />
+          </label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Способ доставки</span>
+              <select
+                value={delivery.mode}
+                onChange={(event) => updateSettingsDraft(current => ({ ...current, defaultDeliveryTerms: { ...current.defaultDeliveryTerms, mode: event.target.value as SalesSectionSettings['defaultDeliveryTerms']['mode'] } }))}
+                className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-950"
+              >
+                <option value="negotiable">По договорённости</option>
+                <option value="pickup">Самовывоз</option>
+                <option value="company_delivery">Доставка силами компании</option>
+              </select>
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Кто оплачивает доставку</span>
+              <select
+                value={delivery.paidBy}
+                onChange={(event) => updateSettingsDraft(current => ({ ...current, defaultDeliveryTerms: { ...current.defaultDeliveryTerms, paidBy: event.target.value as SalesSectionSettings['defaultDeliveryTerms']['paidBy'] } }))}
+                className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-950"
+              >
+                <option value="negotiable">По договорённости</option>
+                <option value="buyer">Покупатель</option>
+                <option value="seller">Продавец</option>
+              </select>
+            </label>
+          </div>
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Готовность к отгрузке, дней</span>
+            <Input type="number" min="0" value={delivery.readinessDays} onChange={(event) => updateSettingsDraft(current => ({ ...current, defaultDeliveryTerms: { ...current.defaultDeliveryTerms, readinessDays: Number(event.target.value) || 0 } }))} />
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-fit rounded-xl"
+            onClick={() => updateSettingsDraft(current => ({
+              ...current,
+              defaultDeliveryTerms: { ...DEFAULT_SALES_SETTINGS.defaultDeliveryTerms },
+            }))}
+          >
+            Сбросить к стандартным
+          </Button>
+        </div>
+      );
+    }
+
+    if (editingSettingId === 'warrantyTerms') {
+      const warranty = settingsDraftValue.warrantyTerms;
+      return (
+        <div className="grid gap-4">
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Основной текст гарантии</span>
+            <Textarea rows={4} value={warranty.warrantyText} onChange={(event) => updateSettingsDraft(current => ({ ...current, warrantyTerms: { ...current.warrantyTerms, warrantyText: event.target.value } }))} />
+          </label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Гарантия для новой техники, месяцев</span>
+              <Input type="number" min="0" value={warranty.warrantyMonthsNew} onChange={(event) => updateSettingsDraft(current => ({ ...current, warrantyTerms: { ...current.warrantyTerms, warrantyMonthsNew: Number(event.target.value) || 0 } }))} />
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Гарантия для б/у техники, месяцев</span>
+              <Input type="number" min="0" value={warranty.warrantyMonthsUsed} onChange={(event) => updateSettingsDraft(current => ({ ...current, warrantyTerms: { ...current.warrantyTerms, warrantyMonthsUsed: Number(event.target.value) || 0 } }))} />
+            </label>
+          </div>
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Исключения из гарантии</span>
+            <Textarea rows={3} value={warranty.exclusionsText} onChange={(event) => updateSettingsDraft(current => ({ ...current, warrantyTerms: { ...current.warrantyTerms, exclusionsText: event.target.value } }))} />
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-fit rounded-xl"
+            onClick={() => updateSettingsDraft(current => ({
+              ...current,
+              warrantyTerms: { ...DEFAULT_SALES_SETTINGS.warrantyTerms },
+            }))}
+          >
+            Сбросить к стандартным
+          </Button>
+        </div>
+      );
+    }
+
+    if (editingSettingId === 'pricingRules') {
+      const pricing = settingsDraftValue.pricingRules;
+      return (
+        <div className="grid gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Базовая наценка, %</span>
+              <Input type="number" min="0" value={pricing.defaultMarkupPercent} onChange={(event) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, defaultMarkupPercent: Number(event.target.value) || 0 } }))} />
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Минимальная маржа, %</span>
+              <Input type="number" min="0" value={pricing.minimumMarginPercent} onChange={(event) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, minimumMarginPercent: Number(event.target.value) || 0 } }))} />
+            </label>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {renderBooleanToggle('Разрешить цену ниже минимальной', pricing.allowBelowMinimumPrice, (checked) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, allowBelowMinimumPrice: checked } })))}
+            {renderBooleanToggle('Учитывать состояние новой/б/у', pricing.useConditionAdjustment, (checked) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, useConditionAdjustment: checked } })))}
+            {renderBooleanToggle('Учитывать год выпуска', pricing.useYearAdjustment, (checked) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, useYearAdjustment: checked } })))}
+            {renderBooleanToggle('Учитывать наработку', pricing.useHoursAdjustment, (checked) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, useHoursAdjustment: checked } })))}
+            {renderBooleanToggle('Учитывать PDI', pricing.usePdiAdjustment, (checked) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, usePdiAdjustment: checked } })))}
+            {renderBooleanToggle('Учитывать комплектацию', pricing.usePackageAdjustment, (checked) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, usePackageAdjustment: checked } })))}
+            {renderBooleanToggle('Учитывать документы', pricing.useDocumentsAdjustment, (checked) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, useDocumentsAdjustment: checked } })))}
+          </div>
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Текстовое описание правил</span>
+            <Textarea
+              rows={6}
+              value={pricing.rulesText}
+              onChange={(event) => updateSettingsDraft(current => ({ ...current, pricingRules: { ...current.pricingRules, rulesText: event.target.value } }))}
+            />
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-fit rounded-xl"
+            onClick={() => updateSettingsDraft(current => ({
+              ...current,
+              pricingRules: { ...DEFAULT_SALES_SETTINGS.pricingRules },
+            }))}
+          >
+            Сбросить к стандартным
+          </Button>
+        </div>
+      );
+    }
+
+    if (editingSettingId === 'priceChangeReasons') {
+      const activeReasons = settingsDraftValue.priceChangeReasons.filter(reason => reason.isActive && reason.name.trim());
+      return (
+        <div className="grid gap-3">
+          <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
+            <p className="text-sm font-medium text-blue-950 dark:text-blue-100">Активные причины</p>
+            {activeReasons.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {activeReasons.map(reason => (
+                  <Badge key={reason.id} variant="default">{reason.name}</Badge>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-blue-700 dark:text-blue-200">Активных причин пока нет.</p>
+            )}
+          </div>
+          {settingsDraftValue.priceChangeReasons.map((reason, index) => (
+            <div key={reason.id} className="grid gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+              <Input value={reason.name} onChange={(event) => updatePriceReason(index, { name: event.target.value })} placeholder="Причина изменения цены" />
+              <div className="flex flex-wrap gap-2">
+                {renderBooleanToggle('Активна', reason.isActive, (checked) => updatePriceReason(index, { isActive: checked }))}
+                <Button type="button" variant="secondary" className="rounded-xl" onClick={() => archivePriceReason(index)}>
+                  Отключить / архивировать
+                </Button>
+              </div>
+            </div>
+          ))}
+          <Button type="button" variant="secondary" className="w-fit rounded-xl" onClick={addPriceReason}>
+            Добавить причину
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-fit rounded-xl"
+            onClick={() => updateSettingsDraft(current => ({
+              ...current,
+              priceChangeReasons: DEFAULT_SALES_SETTINGS.priceChangeReasons.map(reason => ({ ...reason })),
+            }))}
+          >
+            Сбросить к стандартным
+          </Button>
+        </div>
+      );
+    }
+
+    const kit = settingsDraftValue.packageCommentTemplate;
+    return (
+      <div className="grid gap-4">
+        <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-sm text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-100">
+          Этот текст используется при формировании КП, если в шаблоне включён блок комментария по комплектации.
+        </div>
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Шаблон комментария</span>
+          <Textarea rows={6} value={kit.text} onChange={(event) => updateSettingsDraft(current => ({ ...current, packageCommentTemplate: { ...current.packageCommentTemplate, text: event.target.value } }))} />
+        </label>
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-fit rounded-xl"
+          onClick={() => updateSettingsDraft(current => ({
+            ...current,
+            packageCommentTemplate: { ...DEFAULT_SALES_SETTINGS.packageCommentTemplate },
+          }))}
+        >
+          Сбросить к стандартному
+        </Button>
+      </div>
+    );
+  }
 
   if (!can('view', 'sales')) {
     return <Navigate to="/" replace />;
@@ -815,7 +1311,19 @@ export default function Sales() {
                   дата и причина изменения должны фиксироваться в истории карточки техники.
                 </p>
                 <div className="rounded-xl border border-dashed border-gray-300 p-4 dark:border-gray-700">
-                  24.04.2026 — 1 900 000 ₽ → 1 850 000 ₽ · Причина: корректировка по рынку.
+                  24.04.2026 — 1 900 000 ₽ → 1 850 000 ₽ · Причина: {activePriceChangeReasons[0]?.name ?? 'корректировка по рынку'}.
+                </div>
+                <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                  <p className="font-medium text-gray-900 dark:text-white">Доступные причины изменения цены</p>
+                  {activePriceChangeReasons.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {activePriceChangeReasons.map(reason => (
+                        <Badge key={reason.id} variant="default">{reason.name}</Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Причины не настроены.</p>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -902,64 +1410,88 @@ export default function Sales() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="settings" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Настройки продаж</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {SALES_SETTINGS_META.map(item => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setEditingSettingId(item.id)}
-                  className="rounded-xl border border-gray-200 p-4 text-left text-sm transition hover:border-primary/40 hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary/30 dark:border-gray-700 dark:hover:border-primary/60"
-                >
-                  <p className="font-semibold text-gray-900 dark:text-white">{item.title}</p>
-                  <p className="mt-1 text-gray-500 dark:text-gray-400">{item.description}</p>
-                  <p className="mt-3 line-clamp-3 text-xs text-gray-500 dark:text-gray-400">
-                    {salesSettings[item.id] || 'Не заполнено'}
-                  </p>
-                </button>
-              ))}
-              {appSettingsQuery.error ? (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-200">
-                  {apiErrorMessage(appSettingsQuery.error, 'Не удалось загрузить настройки продаж.')}
-                </div>
-              ) : null}
-              {settingsMessage ? (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200">
-                  {settingsMessage}
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        {isAdmin ? (
+          <TabsContent value="settings" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Настройки продаж</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {SALES_SETTINGS_META.map(item => {
+                  const configured = isSettingConfigured(item.id);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setEditingSettingId(item.id)}
+                      className="group flex min-h-[172px] cursor-pointer flex-col justify-between rounded-xl border border-gray-200 p-4 text-left text-sm transition hover:border-primary/40 hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary/30 dark:border-gray-700 dark:hover:border-primary/60"
+                    >
+                      <span className="space-y-3">
+                        <span className="flex items-start justify-between gap-3">
+                          <span className="font-semibold text-gray-900 dark:text-white">{item.title}</span>
+                          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-400 transition group-hover:translate-x-0.5 group-hover:text-primary" />
+                        </span>
+                        <Badge variant={configured ? 'success' : 'warning'}>
+                          {configured ? 'Настроено' : 'Не настроено'}
+                        </Badge>
+                        <span className="block line-clamp-3 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                          {settingsSummary(item.id)}
+                        </span>
+                      </span>
+                      <span className="mt-4 inline-flex h-9 w-fit items-center rounded-xl border border-gray-200 px-3 text-sm font-medium text-primary transition group-hover:border-primary/40 group-hover:bg-white dark:border-gray-700 dark:group-hover:bg-gray-900">
+                        Настроить
+                      </span>
+                    </button>
+                  );
+                })}
+                {appSettingsQuery.error ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-200">
+                    {apiErrorMessage(appSettingsQuery.error, 'Не удалось загрузить настройки продаж.')}
+                  </div>
+                ) : null}
+                {settingsMessage ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200">
+                    {settingsMessage}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        ) : null}
       </Tabs>
 
-      <Dialog open={Boolean(editingSetting)} onOpenChange={(open) => !open && setEditingSettingId(null)}>
+      {isAdmin ? (
+      <Dialog
+        open={Boolean(editingSetting)}
+        onOpenChange={(open) => {
+          if (!open && !saveSettingsMutation.isPending) setEditingSettingId(null);
+        }}
+      >
         <DialogContent className="rounded-2xl sm:max-w-[720px]">
           <DialogHeader>
             <DialogTitle>{editingSetting?.title}</DialogTitle>
             <DialogDescription>{editingSetting?.description}</DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 overflow-y-auto py-4">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-200" htmlFor="sales-setting-value">
-              Значение настройки
-            </label>
-            <Textarea
-              id="sales-setting-value"
-              value={settingDraft}
-              onChange={(event) => setSettingDraft(event.target.value)}
-              placeholder={editingSetting?.placeholder}
-              className="mt-2 min-h-[220px] resize-y rounded-xl"
-            />
+          <div className="max-h-[65vh] min-h-0 overflow-y-auto py-4 pr-1">
+            <fieldset disabled={saveSettingsMutation.isPending} className="contents">
+              {renderSettingsEditor()}
+            </fieldset>
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              Сохраняется в административных app settings и будет использоваться как базовая настройка продажного раздела.
+              Сохраняется в app settings и используется как административная настройка продажного раздела и КП.
             </p>
+            {settingsError ? (
+              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-200">
+                {settingsError}
+              </div>
+            ) : null}
           </div>
           <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => setEditingSettingId(null)}>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={saveSettingsMutation.isPending}
+              onClick={() => setEditingSettingId(null)}
+            >
               Отмена
             </Button>
             <Button
@@ -967,10 +1499,10 @@ export default function Sales() {
               className="app-button-primary"
               disabled={!editingSettingId || saveSettingsMutation.isPending}
               onClick={() => {
-                if (!editingSettingId) return;
+                if (!editingSettingId || !settingsDraft) return;
                 saveSettingsMutation.mutate({
-                  ...salesSettings,
-                  [editingSettingId]: settingDraft.trim(),
+                  ...settingsDraft,
+                  priceChangeReasons: settingsDraft.priceChangeReasons.filter(reason => reason.name.trim()),
                 });
               }}
             >
@@ -979,6 +1511,7 @@ export default function Sales() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      ) : null}
     </div>
   );
 }

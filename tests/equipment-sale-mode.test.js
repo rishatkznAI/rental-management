@@ -288,6 +288,7 @@ test('sale quote actions create commercial offer documents instead of contracts'
   const documentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf8');
   const typesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/types.ts'), 'utf8');
   const documentsCoreSource = fs.readFileSync(path.join(process.cwd(), 'server/lib/documents-core.js'), 'utf8');
+  const systemRoutesSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/system.js'), 'utf8');
 
   assert.match(detailSource, /action=create&type=commercial_offer/);
   assert.doesNotMatch(detailSource, /action=create&type=quote/);
@@ -300,6 +301,32 @@ test('sale quote actions create commercial offer documents instead of contracts'
   assert.match(documentsSource, /documentType: 'commercial_offer'/);
   assert.match(documentsSource, /Коммерческое предложение/);
   assert.match(documentsSource, /handleCreateCommercialOffer/);
+  assert.match(documentsSource, /openCommercialOfferCreate/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.title/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.introText/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.footerText/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.sectionsOrder/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.showEquipmentPhoto/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.showEquipmentSpecs/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.showEquipmentPackage/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.showVat/);
+  assert.match(documentsSource, /salesSettings\.defaultPaymentTerms\.paymentText/);
+  assert.match(documentsSource, /salesSettings\.defaultDeliveryTerms\.deliveryText/);
+  assert.match(documentsSource, /salesSettings\.packageCommentTemplate\.text/);
+  assert.match(documentsSource, /sectionsOrder: QuoteTemplateSection\[\]/);
+  assert.match(documentsSource, /sectionHtml: Record<QuoteTemplateSection, string>/);
+  assert.match(systemRoutesSource, /sales_section_settings/);
+  assert.doesNotMatch(documentsSource, /type: 'contract'[\s\S]{0,300}handleCreateCommercialOffer/);
+  assert.doesNotMatch(documentsSource, /documentType: 'contract'[\s\S]{0,300}handleCreateCommercialOffer/);
+  assert.doesNotMatch(documentsSource, /salePrice2/);
+  assert.doesNotMatch(documentsSource, /salePrice3/);
+  assert.match(documentsSource, /function openContractCreate\(kind: DocumentContractKind/);
+  assert.match(documentsSource, /function handleCreateContract/);
+  assert.match(documentsSource, /openContractCreate\('rental'\)/);
+  assert.match(documentsSource, /openContractCreate\('supply'\)/);
+  assert.match(documentsSource, /type: 'contract'/);
+  assert.match(documentsSource, /contractKind: createContractKind/);
+  assert.match(documentsSource, /Создать договор/);
 });
 
 test('active section separates sales equipment detail from common equipment detail', () => {
@@ -424,18 +451,181 @@ test('sales section is a commercial tool without publications crm or analytics t
 
 test('sales settings tab is admin-only and persists editable app settings', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
+  const settingsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/salesSettings.ts'), 'utf8');
+  const documentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf8');
 
-  assert.match(source, /const SALES_SETTINGS_KEY = 'sales_section_settings'/);
+  assert.match(settingsSource, /export const SALES_SETTINGS_KEY = 'sales_section_settings'/);
+  assert.match(settingsSource, /quoteTemplate: \{/);
+  for (const field of [
+    'templateName',
+    'validityDays',
+    'showEquipmentPhoto',
+    'showEquipmentSpecs',
+    'showEquipmentPackage',
+    'showPaymentTerms',
+    'showDeliveryTerms',
+    'showWarrantyTerms',
+    'showVat',
+    'showPackageComment',
+    'sectionsOrder',
+  ]) {
+    assert.match(settingsSource, new RegExp(`${field}:`));
+  }
+  assert.match(settingsSource, /defaultPaymentTerms: \{/);
+  assert.match(settingsSource, /invoiceDueDays:/);
+  assert.match(settingsSource, /paymentText:/);
+  assert.match(settingsSource, /Оплата 100% по счёту\. Цена указана с НДС 20%\./);
+  assert.match(source, /Предоплата \$\{settings\.defaultPaymentTerms\.prepaymentPercent\}%, оплата в течение \$\{settings\.defaultPaymentTerms\.invoiceDueDays\} дней, НДС/);
+  assert.match(source, /НДС включён/);
+  assert.match(settingsSource, /defaultDeliveryTerms: \{/);
+  assert.match(settingsSource, /mode: 'pickup' \| 'company_delivery' \| 'negotiable'/);
+  assert.match(settingsSource, /readinessDays:/);
+  assert.match(settingsSource, /deliveryText:/);
+  assert.match(settingsSource, /Самовывоз со склада или доставка по отдельному согласованию\./);
+  assert.match(source, /Способ доставки/);
+  assert.match(source, /Доставка силами компании/);
+  assert.match(source, /По договорённости/);
+  assert.match(source, /оплачивает покупатель/);
+  assert.match(settingsSource, /warrantyTerms: \{/);
+  assert.match(settingsSource, /warrantyMonthsNew:/);
+  assert.match(settingsSource, /warrantyMonthsUsed:/);
+  assert.match(settingsSource, /exclusionsText:/);
+  assert.match(settingsSource, /Гарантия предоставляется при соблюдении условий эксплуатации\./);
+  assert.match(settingsSource, /Гарантия не распространяется на расходные материалы, естественный износ и повреждения вследствие неправильной эксплуатации\./);
+  assert.match(source, /Гарантия для новой техники, месяцев/);
+  assert.match(source, /Гарантия для б\/у техники, месяцев/);
+  assert.match(source, /Исключения из гарантии/);
+  assert.match(settingsSource, /pricingRules: \{/);
+  assert.match(settingsSource, /defaultMarkupPercent:/);
+  assert.match(settingsSource, /minimumMarginPercent:/);
+  assert.match(settingsSource, /allowBelowMinimumPrice:/);
+  assert.match(settingsSource, /rulesText:/);
+  assert.match(source, /Базовая наценка, %/);
+  assert.match(source, /Разрешить цену ниже минимальной/);
+  assert.match(source, /Учитывать состояние новой\/б\/у/);
+  assert.match(source, /Текстовое описание правил/);
+  assert.match(source, /Сбросить к стандартным/);
+  assert.match(source, /DEFAULT_SALES_SETTINGS\.pricingRules/);
+  assert.match(settingsSource, /priceChangeReasons: \[/);
+  for (const reason of [
+    'Корректировка по рынку',
+    'Срочная продажа',
+    'Скидка клиенту',
+    'Изменение состояния техники',
+    'Состояние АКБ',
+    'Комплектация',
+    'PDI или документы',
+    'Ошибка в цене',
+    'Решение руководителя',
+    'Другое',
+  ]) {
+    assert.match(settingsSource, new RegExp(reason));
+  }
+  assert.match(source, /activePriceChangeReasons/);
+  assert.match(source, /Доступные причины изменения цены/);
+  assert.match(source, /Активные причины/);
+  assert.match(source, /archivePriceReason/);
+  assert.match(source, /Отключить \/ архивировать/);
+  assert.doesNotMatch(source, /filter\(\(_, reasonIndex\) => reasonIndex !== index\)/);
+  assert.match(settingsSource, /packageCommentTemplate: \{/);
+  assert.match(settingsSource, /text: string/);
+  assert.match(settingsSource, /Комплектация указана по состоянию на дату формирования КП\. Перед отгрузкой проводится контрольная проверка\./);
+  assert.match(source, /Этот текст используется при формировании КП, если в шаблоне включён блок комментария по комплектации\./);
+  assert.match(source, /Сбросить к стандартному/);
+  assert.match(source, /DEFAULT_SALES_SETTINGS\.packageCommentTemplate/);
+  assert.match(settingsSource, /export function normalizeSalesSettings/);
   assert.match(source, /const isAdmin = normalizeUserRole\(user\?\.role\) === 'Администратор'/);
   assert.match(source, /\.\.\.\(isAdmin \? \[\{ value: 'settings', label: 'Настройки продаж' \}\] : \[\]\)/);
+  assert.match(source, /if \(!isAdmin && activeSalesTab === 'settings'\)/);
+  assert.match(source, /setActiveSalesTab\('showcase'\)/);
   assert.match(source, /appSettingsService\.getAll/);
   assert.match(source, /enabled: isAdmin/);
   assert.match(source, /appSettingsService\.update\(existing\.id, payload\)/);
   assert.match(source, /appSettingsService\.create\(payload\)/);
+  assert.match(source, /value: nextSettings/);
+  assert.match(source, /toast\.success\(message\)/);
+  assert.match(source, /toast\.error\(message\)/);
+  assert.match(source, /settingsError/);
+  assert.match(source, /<fieldset disabled=\{saveSettingsMutation\.isPending\}/);
+  assert.match(source, /disabled=\{saveSettingsMutation\.isPending\}/);
   assert.match(source, /onClick=\{\(\) => setEditingSettingId\(item\.id\)\}/);
-  assert.match(source, /<Dialog open=\{Boolean\(editingSetting\)\}/);
-  assert.match(source, /<Textarea/);
+  assert.match(source, /cursor-pointer/);
+  assert.match(source, /hover:border-primary/);
+  assert.match(source, /settingsSummary\(item\.id\)/);
+  assert.match(source, /Настроить/);
+  assert.match(source, /\{isAdmin \? \(\s*<TabsContent value="settings"/);
+  assert.match(source, /<Dialog[\s\S]*open=\{Boolean\(editingSetting\)\}/);
+  assert.match(source, /renderSettingsEditor/);
+  for (const editorId of [
+    'quoteTemplate',
+    'defaultPaymentTerms',
+    'defaultDeliveryTerms',
+    'warrantyTerms',
+    'pricingRules',
+    'priceChangeReasons',
+  ]) {
+    assert.match(source, new RegExp(`editingSettingId === '${editorId}'`));
+  }
+  assert.match(source, /settingsDraftValue\.packageCommentTemplate/);
+  assert.match(source, /Название шаблона/);
+  assert.match(source, /Срок действия, дней/);
+  assert.match(source, /Заголовок КП/);
+  assert.match(source, /Вступительный текст/);
+  assert.match(source, /Показывать фото техники/);
+  assert.match(source, /Показывать характеристики/);
+  assert.match(source, /Показывать комплектацию/);
+  assert.match(source, /Показывать оплату/);
+  assert.match(source, /Показывать доставку/);
+  assert.match(source, /Показывать гарантию/);
+  assert.match(source, /Показывать НДС/);
+  assert.match(source, /Показывать комментарий по комплектации/);
+  assert.match(source, /Финальный текст/);
+  assert.match(source, /moveQuoteSection/);
+  assert.match(source, /Предпросмотр КП/);
+  assert.match(source, /\{equipmentModel\}/);
+  assert.match(source, /\{packageComment\}/);
+  assert.match(source, /Текст условий оплаты для КП/);
+  assert.match(source, /Текст условий доставки для КП/);
+  assert.match(source, /Основной текст гарантии/);
+  assert.match(source, /Базовая наценка, %/);
+  assert.match(source, /Текстовое описание правил/);
+  assert.match(source, /Причина изменения цены/);
+  assert.match(source, /Шаблон комментария/);
+  assert.match(source, /packageCommentTemplate: \{ \.\.\.current\.packageCommentTemplate, text: event\.target\.value \}/);
+  assert.match(source, /quoteTemplate: \{ \.\.\.current\.quoteTemplate/);
+  assert.match(source, /defaultPaymentTerms: \{ \.\.\.current\.defaultPaymentTerms/);
+  assert.match(source, /defaultDeliveryTerms: \{ \.\.\.current\.defaultDeliveryTerms/);
+  assert.match(source, /warrantyTerms: \{ \.\.\.current\.warrantyTerms/);
+  assert.match(source, /pricingRules: \{ \.\.\.current\.pricingRules/);
+  assert.match(source, /priceChangeReasons: current\.priceChangeReasons\.map/);
+  assert.match(source, /addPriceReason/);
   assert.match(source, /Сохранить/);
+  assert.match(source, /Сохранение…/);
+  assert.match(source, /Сбросить к стандартным/);
+  assert.match(source, /DEFAULT_SALES_SETTINGS\.quoteTemplate/);
+  assert.match(source, /DEFAULT_SALES_SETTINGS\.defaultPaymentTerms/);
+  assert.match(source, /DEFAULT_SALES_SETTINGS\.defaultDeliveryTerms/);
+  assert.match(source, /DEFAULT_SALES_SETTINGS\.warrantyTerms/);
+  assert.match(source, /DEFAULT_SALES_SETTINGS\.priceChangeReasons/);
+  assert.doesNotMatch(source, /Название карточки/);
+  assert.doesNotMatch(source, /Описание карточки/);
+  assert.doesNotMatch(source, /setSettingDraft/);
+  assert.match(documentsSource, /SALES_SETTINGS_KEY/);
+  assert.match(documentsSource, /normalizeSalesSettings/);
+  assert.doesNotMatch(documentsSource, /enabled: isAdmin/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.validityDays/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.title/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.introText/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.showVat/);
+  assert.match(documentsSource, /salesSettings\.quoteTemplate\.footerText/);
+  assert.match(documentsSource, /salesSettings\.defaultPaymentTerms\.paymentText/);
+  assert.match(documentsSource, /salesSettings\.defaultDeliveryTerms\.deliveryText/);
+  assert.match(documentsSource, /salesSettings\.warrantyTerms/);
+  assert.match(documentsSource, /saleConditionKind\(equipmentItem\) === 'new'/);
+  assert.match(documentsSource, /warrantyMonthsNew/);
+  assert.match(documentsSource, /warrantyMonthsUsed/);
+  assert.match(documentsSource, /salesSettings\.packageCommentTemplate\.text/);
+  assert.doesNotMatch(documentsSource, /equipmentItem\?\.notes \|\| salesSettings\.packageCommentTemplate\.text/);
 });
 
 test('reports contain sales stock analytics outside the sales section', () => {

@@ -476,7 +476,7 @@ function registerSystemRoutes(app, deps) {
 
   function getSafePublicSettings() {
     const allowedKeys = new Set(
-      String(process.env.PUBLIC_APP_SETTING_KEYS || 'crm_archive_state,equipment_type_settings,theme')
+      String(process.env.PUBLIC_APP_SETTING_KEYS || 'crm_archive_state,equipment_type_settings,theme,sales_section_settings')
         .split(',')
         .map(key => key.trim())
         .filter(Boolean),

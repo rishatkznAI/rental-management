@@ -54,9 +54,18 @@ import {
   normalizeContextName,
 } from '../lib/quickActionContext.js';
 import { downloadPrintableHtml, openPrintableHtml } from '../lib/serviceWorkOrder';
+import { saleConditionKind } from '../lib/equipmentSaleMode.js';
+import {
+  SALES_SETTINGS_KEY,
+  DEFAULT_SALES_SETTINGS,
+  type QuoteTemplateSection,
+  normalizeSalesSettings,
+} from '../lib/salesSettings';
+import { absoluteMediaUrl, photoSource } from '../lib/media';
 import { formatDate, formatCurrency, formatDateTime } from '../lib/utils';
 import { mechanicsService } from '../services/mechanics.service';
 import { mechanicDocumentsService } from '../services/mechanic-documents.service';
+import { appSettingsService } from '../services/app-settings.service';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { normalizeUserRole } from '../lib/userStorage';
@@ -110,8 +119,8 @@ type CommercialOfferFormState = {
   date: string;
   price: string;
   validUntil: string;
-  paymentTerms: string;
-  deliveryTerms: string;
+  defaultPaymentTerms: string;
+  defaultDeliveryTerms: string;
   warrantyTerms: string;
   kitComment: string;
   comment: string;
@@ -252,6 +261,7 @@ function nextContractNumber(documents: Doc[], kind: DocumentContractKind, date: 
 function buildContractDraftHtml(params: {
   kind: DocumentContractKind;
   number: string;
+  title: string;
   client: string;
   date: string;
   signatoryName: string;
@@ -352,34 +362,86 @@ function buildContractDraftHtml(params: {
 
 function buildCommercialOfferHtml(params: {
   number: string;
+  title: string;
   client: string;
   date: string;
   validUntil: string;
   equipmentLabel: string;
   inventoryNumber: string;
   serialNumber: string;
+  equipmentPhoto: string;
+  equipmentSpecs: Array<{ label: string; value: string }>;
+  equipmentPackage: string;
   price: string;
-  paymentTerms: string;
-  deliveryTerms: string;
+  introText: string;
+  footerText: string;
+  showVat: boolean;
+  showEquipmentPhoto: boolean;
+  showEquipmentSpecs: boolean;
+  showEquipmentPackage: boolean;
+  showPaymentTerms: boolean;
+  showDeliveryTerms: boolean;
+  showWarrantyTerms: boolean;
+  showPackageComment: boolean;
+  sectionsOrder: QuoteTemplateSection[];
+  defaultPaymentTerms: string;
+  defaultDeliveryTerms: string;
   warrantyTerms: string;
   kitComment: string;
   comment?: string;
 }) {
   const {
     number,
+    title,
     client,
     date,
     validUntil,
     equipmentLabel,
     inventoryNumber,
     serialNumber,
+    equipmentPhoto,
+    equipmentSpecs,
+    equipmentPackage,
     price,
-    paymentTerms,
-    deliveryTerms,
+    introText,
+    footerText,
+    showVat,
+    showEquipmentPhoto,
+    showEquipmentSpecs,
+    showEquipmentPackage,
+    showPaymentTerms,
+    showDeliveryTerms,
+    showWarrantyTerms,
+    showPackageComment,
+    sectionsOrder,
+    defaultPaymentTerms,
+    defaultDeliveryTerms,
     warrantyTerms,
     kitComment,
     comment,
   } = params;
+  const sectionHtml: Record<QuoteTemplateSection, string> = {
+    intro: introText ? `<p>${escapeHtml(introText).replaceAll('\n', '<br />')}</p>` : '',
+    equipment: `
+      <h2>Техника</h2>
+      <div class="grid">
+        ${showEquipmentPhoto && equipmentPhoto ? `<div class="box media"><img src="${escapeHtml(equipmentPhoto)}" alt="${escapeHtml(equipmentLabel)}" /></div>` : ''}
+        <div class="box"><div class="label">Модель</div><div>${escapeHtml(equipmentLabel)}</div></div>
+        <div class="box"><div class="label">Идентификация</div><div>Инв. № ${escapeHtml(inventoryNumber)} · SN ${escapeHtml(serialNumber)}</div></div>
+        ${showEquipmentSpecs ? equipmentSpecs.map(spec => `
+          <div class="box"><div class="label">${escapeHtml(spec.label)}</div><div>${escapeHtml(spec.value)}</div></div>
+        `).join('') : ''}
+      </div>
+    `,
+    price: `<h2>Цена</h2><div class="box"><div class="label">Цена продажи</div><div class="price">${escapeHtml(price)}</div>${showVat ? '<div class="muted">НДС включён, если не указано иное.</div>' : '<div class="muted">НДС не включён.</div>'}</div>`,
+    payment: showPaymentTerms ? `<h2>Условия оплаты</h2><p>${escapeHtml(defaultPaymentTerms).replaceAll('\n', '<br />')}</p>` : '',
+    delivery: showDeliveryTerms ? `<h2>Условия доставки</h2><p>${escapeHtml(defaultDeliveryTerms).replaceAll('\n', '<br />')}</p>` : '',
+    warranty: showWarrantyTerms ? `<h2>Гарантийные условия</h2><p>${escapeHtml(warrantyTerms).replaceAll('\n', '<br />')}</p>` : '',
+    package: showEquipmentPackage ? `<h2>Комплектация</h2><p>${escapeHtml(equipmentPackage).replaceAll('\n', '<br />')}</p>` : '',
+    packageComment: showPackageComment ? `<h2>Комментарий по комплектации</h2><p>${escapeHtml(kitComment).replaceAll('\n', '<br />')}</p>` : '',
+    footer: footerText ? `<h2>Примечание</h2><p>${escapeHtml(footerText).replaceAll('\n', '<br />')}</p>` : '',
+  };
+  const orderedSections = sectionsOrder.length > 0 ? sectionsOrder : DEFAULT_SALES_SETTINGS.quoteTemplate.sectionsOrder;
   return `
     <!doctype html>
     <html lang="ru">
@@ -397,24 +459,19 @@ function buildCommercialOfferHtml(params: {
           .box { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; background: #f9fafb; }
           .label { margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #6b7280; }
           .price { font-size: 24px; font-weight: 700; color: #0f172a; }
+          .muted { margin-top: 6px; font-size: 12px; color: #6b7280; }
+          .media { grid-column: 1 / -1; padding: 0; overflow: hidden; background: #fff; }
+          .media img { display: block; width: 100%; max-height: 260px; object-fit: contain; }
         </style>
       </head>
       <body>
         <div class="sheet">
-          <h1>Коммерческое предложение</h1>
+          <h1>${escapeHtml(title)}</h1>
           <p><strong>Номер:</strong> ${escapeHtml(number)}</p>
           <p><strong>Дата:</strong> ${escapeHtml(formatDate(date))}</p>
           <p><strong>Действует до:</strong> ${escapeHtml(formatDate(validUntil))}</p>
           <p><strong>Клиент:</strong> ${escapeHtml(client)}</p>
-          <div class="grid">
-            <div class="box"><div class="label">Техника</div><div>${escapeHtml(equipmentLabel)}</div></div>
-            <div class="box"><div class="label">Идентификация</div><div>Инв. № ${escapeHtml(inventoryNumber)} · SN ${escapeHtml(serialNumber)}</div></div>
-            <div class="box"><div class="label">Цена продажи</div><div class="price">${escapeHtml(price)}</div></div>
-            <div class="box"><div class="label">Комплектация</div><div>${escapeHtml(kitComment).replaceAll('\n', '<br />')}</div></div>
-          </div>
-          <h2>Условия оплаты</h2><p>${escapeHtml(paymentTerms).replaceAll('\n', '<br />')}</p>
-          <h2>Условия доставки</h2><p>${escapeHtml(deliveryTerms).replaceAll('\n', '<br />')}</p>
-          <h2>Гарантийные условия</h2><p>${escapeHtml(warrantyTerms).replaceAll('\n', '<br />')}</p>
+          ${orderedSections.map(section => sectionHtml[section]).filter(Boolean).join('\n')}
           ${comment ? `<h2>Комментарий</h2><p>${escapeHtml(comment).replaceAll('\n', '<br />')}</p>` : ''}
         </div>
       </body>
@@ -429,8 +486,9 @@ export default function Documents() {
   const { can } = usePermissions();
   const canManageDocuments = can('create', 'documents') || can('edit', 'documents');
   const normalizedRole = normalizeUserRole(user?.role || user?.normalizedRole || user?.rawRole);
+  const isAdmin = normalizedRole === 'Администратор';
   const canReadMechanics =
-    normalizedRole === 'Администратор' ||
+    isAdmin ||
     normalizedRole === 'Офис-менеджер' ||
     normalizedRole.includes('Механик');
   const { data: documentList = [] } = useDocumentsList();
@@ -450,6 +508,10 @@ export default function Documents() {
   const { data: mechanicDocsData = EMPTY_MECHANIC_DOCUMENTS } = useQuery<MechanicDocument[]>({
     queryKey: ['mechanic-documents'],
     queryFn: mechanicDocumentsService.getAll,
+  });
+  const { data: appSettings = [] } = useQuery({
+    queryKey: ['app-settings', 'documents-commercial-offer'],
+    queryFn: isAdmin ? appSettingsService.getAll : appSettingsService.getPublic,
   });
 
   const [search, setSearch] = React.useState('');
@@ -496,10 +558,10 @@ export default function Documents() {
     date: new Date().toISOString().slice(0, 10),
     price: '',
     validUntil: '',
-    paymentTerms: 'Предоплата до отгрузки.',
-    deliveryTerms: 'Самовывоз со склада или доставка по отдельному согласованию.',
-    warrantyTerms: 'Гарантийные условия указываются с учётом состояния техники.',
-    kitComment: 'Комплектация проверена. Подробности уточняются при подготовке к отгрузке.',
+    defaultPaymentTerms: DEFAULT_SALES_SETTINGS.defaultPaymentTerms.paymentText,
+    defaultDeliveryTerms: DEFAULT_SALES_SETTINGS.defaultDeliveryTerms.deliveryText,
+    warrantyTerms: DEFAULT_SALES_SETTINGS.warrantyTerms.warrantyText,
+    kitComment: DEFAULT_SALES_SETTINGS.packageCommentTemplate.text,
     comment: '',
   });
 
@@ -509,6 +571,10 @@ export default function Documents() {
   const [signedScanTargetDoc, setSignedScanTargetDoc] = React.useState<Doc | null>(null);
   const documents = Array.isArray(documentList) ? documentList : [];
   const mechanicList = Array.isArray(mechanics) ? mechanics : [];
+  const salesSettings = React.useMemo(() => {
+    const record = appSettings.find(item => item.key === SALES_SETTINGS_KEY);
+    return normalizeSalesSettings(record?.value);
+  }, [appSettings]);
   const quickActionContext = React.useMemo(() => buildQuickActionContext(searchParams), [searchParams]);
   const hasQuickClientContext = hasClientContext(quickActionContext);
 
@@ -847,7 +913,7 @@ export default function Documents() {
   function openCommercialOfferCreate(initial: Partial<CommercialOfferFormState> = {}) {
     const equipmentItem = initial.equipmentId ? equipmentById.get(initial.equipmentId) : undefined;
     const validUntil = new Date();
-    validUntil.setDate(validUntil.getDate() + 14);
+    validUntil.setDate(validUntil.getDate() + Math.max(1, salesSettings.quoteTemplate.validityDays));
     setCommercialOfferForm({
       clientId: '',
       client: '',
@@ -855,10 +921,15 @@ export default function Documents() {
       date: new Date().toISOString().slice(0, 10),
       price: equipmentItem?.salePrice1 ? String(equipmentItem.salePrice1) : '',
       validUntil: validUntil.toISOString().slice(0, 10),
-      paymentTerms: 'Предоплата до отгрузки.',
-      deliveryTerms: 'Самовывоз со склада или доставка по отдельному согласованию.',
-      warrantyTerms: 'Гарантийные условия указываются с учётом состояния техники.',
-      kitComment: equipmentItem?.notes || 'Комплектация проверена. Подробности уточняются при подготовке к отгрузке.',
+      defaultPaymentTerms: salesSettings.defaultPaymentTerms.paymentText,
+      defaultDeliveryTerms: [
+        salesSettings.defaultDeliveryTerms.deliveryText,
+        `Готовность к отгрузке: ${salesSettings.defaultDeliveryTerms.readinessDays} дн.`,
+      ].filter(Boolean).join('\n'),
+      warrantyTerms: saleConditionKind(equipmentItem) === 'new'
+        ? `${salesSettings.warrantyTerms.warrantyText}\nГарантия: ${salesSettings.warrantyTerms.warrantyMonthsNew} мес.\n${salesSettings.warrantyTerms.exclusionsText}`
+        : `${salesSettings.warrantyTerms.warrantyText}\nГарантия: ${salesSettings.warrantyTerms.warrantyMonthsUsed} мес.\n${salesSettings.warrantyTerms.exclusionsText}`,
+      kitComment: salesSettings.packageCommentTemplate.text,
       comment: '',
       ...initial,
     });
@@ -940,6 +1011,14 @@ export default function Documents() {
 
     const equipmentItem = equipmentById.get(commercialOfferForm.equipmentId);
     const clientName = commercialOfferForm.client.trim() || 'Потенциальный клиент';
+    const equipmentSpecs = equipmentItem ? [
+      { label: 'Тип', value: equipmentItem.type || '—' },
+      { label: 'Год выпуска', value: equipmentItem.year ? String(equipmentItem.year) : '—' },
+      { label: 'Наработка', value: equipmentItem.hours ? `${equipmentItem.hours} м/ч` : '—' },
+      { label: 'Рабочая высота', value: equipmentItem.workingHeight ? `${equipmentItem.workingHeight} м` : equipmentItem.liftHeight ? `${equipmentItem.liftHeight} м` : '—' },
+      { label: 'Грузоподъёмность', value: equipmentItem.loadCapacity ? `${equipmentItem.loadCapacity} кг` : '—' },
+      { label: 'Привод', value: equipmentItem.drive || '—' },
+    ] : [];
     const payload: Omit<Doc, 'id'> = {
       type: 'commercial_offer',
       documentType: 'commercial_offer',
@@ -963,15 +1042,30 @@ export default function Documents() {
       data: {
         contentHtml: buildCommercialOfferHtml({
           number: getDocumentNumber(created),
+          title: salesSettings.quoteTemplate.title,
           client: clientName,
           date: commercialOfferForm.date,
           validUntil: commercialOfferForm.validUntil || commercialOfferForm.date,
           equipmentLabel: equipmentItem ? `${equipmentItem.manufacturer} ${equipmentItem.model}` : 'Техника',
           inventoryNumber: equipmentItem?.inventoryNumber || '—',
           serialNumber: equipmentItem?.serialNumber || '—',
+          equipmentPhoto: equipmentItem?.photo ? absoluteMediaUrl(photoSource(equipmentItem.photo)) : '',
+          equipmentSpecs,
+          equipmentPackage: 'Комплектация указывается по данным карточки техники и предпродажной проверки.',
           price: commercialOfferForm.price ? formatCurrency(Number(commercialOfferForm.price)) : 'По запросу',
-          paymentTerms: commercialOfferForm.paymentTerms,
-          deliveryTerms: commercialOfferForm.deliveryTerms,
+          introText: salesSettings.quoteTemplate.introText,
+          footerText: salesSettings.quoteTemplate.footerText,
+          showVat: salesSettings.quoteTemplate.showVat,
+          showEquipmentPhoto: salesSettings.quoteTemplate.showEquipmentPhoto,
+          showEquipmentSpecs: salesSettings.quoteTemplate.showEquipmentSpecs,
+          showEquipmentPackage: salesSettings.quoteTemplate.showEquipmentPackage,
+          showPaymentTerms: salesSettings.quoteTemplate.showPaymentTerms,
+          showDeliveryTerms: salesSettings.quoteTemplate.showDeliveryTerms,
+          showWarrantyTerms: salesSettings.quoteTemplate.showWarrantyTerms,
+          showPackageComment: salesSettings.quoteTemplate.showPackageComment,
+          sectionsOrder: salesSettings.quoteTemplate.sectionsOrder,
+          defaultPaymentTerms: commercialOfferForm.defaultPaymentTerms,
+          defaultDeliveryTerms: commercialOfferForm.defaultDeliveryTerms,
           warrantyTerms: commercialOfferForm.warrantyTerms,
           kitComment: commercialOfferForm.kitComment,
           comment: commercialOfferForm.comment.trim() || undefined,
@@ -1620,7 +1714,7 @@ export default function Documents() {
                           ...current,
                           equipmentId: value === 'none' ? '' : value,
                           price: equipmentItem?.salePrice1 ? String(equipmentItem.salePrice1) : current.price,
-                          kitComment: equipmentItem?.notes || current.kitComment,
+                          kitComment: salesSettings.packageCommentTemplate.text,
                         }));
                       }}
                     >
@@ -1667,8 +1761,8 @@ export default function Documents() {
                 </div>
 
                 {[
-                  ['paymentTerms', 'Условия оплаты'],
-                  ['deliveryTerms', 'Условия доставки'],
+                  ['defaultPaymentTerms', 'Условия оплаты'],
+                  ['defaultDeliveryTerms', 'Условия доставки'],
                   ['warrantyTerms', 'Гарантийные условия'],
                   ['kitComment', 'Комплектация'],
                   ['comment', 'Комментарий'],

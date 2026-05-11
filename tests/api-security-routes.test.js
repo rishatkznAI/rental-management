@@ -1086,6 +1086,14 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal((await request(baseUrl, 'PATCH', '/api/equipment/EQ-own', 'investor-token', { notes: 'bypass' })).status, 403);
     assert.equal((await request(baseUrl, 'POST', '/api/payments', 'investor-token', { rentalId: 'R-own', amount: 1 })).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/app_settings', 'manager-token')).status, 403);
+    assert.equal((await request(baseUrl, 'POST', '/api/app_settings', 'manager-token', {
+      key: 'sales_section_settings',
+      value: { quoteTemplate: { title: 'Bypass' } },
+    })).status, 403);
+    assert.equal((await request(baseUrl, 'PATCH', '/api/app_settings/AS-1', 'manager-token', {
+      key: 'sales_section_settings',
+      value: { quoteTemplate: { title: 'Bypass' } },
+    })).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/unknown_collection/X-1', 'admin-token')).status, 403);
     assert.equal((await request(baseUrl, 'PUT', '/api/payments', 'manager-token', [{ id: 'P-1', amount: 1 }])).status, 403);
     assert.equal((await request(baseUrl, 'PUT', '/api/app_settings', 'office-token', [{ id: 'AS-1', key: 'secret' }])).status, 403);

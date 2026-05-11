@@ -188,11 +188,13 @@ test('equipment registry filters combine active tab with field filters', () => {
 
 test('equipment normalization uses activeInFleet as canonical rental fleet field', () => {
   assert.match(equipmentClassificationSource, /export function normalizeEquipmentActiveInFleet/);
+  assert.match(equipmentClassificationSource, /'fleet'/);
   assert.match(equipmentClassificationSource, /'rentalFleet'/);
   assert.match(equipmentClassificationSource, /'isRentalFleet'/);
   assert.match(equipmentClassificationSource, /'availableForRent'/);
   assert.match(equipmentClassificationSource, /activeInFleet: normalizeEquipmentActiveInFleet/);
   assert.match(equipmentClassificationSource, /hasActiveInFleet \? \{ activeInFleet: normalizeEquipmentActiveInFleet/);
+  assert.match(equipmentClassificationSource, /fleet: _fleet/);
   assert.match(equipmentClassificationSource, /isRentalFleet: _isRentalFleet/);
 });
 

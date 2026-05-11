@@ -234,6 +234,9 @@ test('equipment detail editor saves the card through PATCH and keeps modal state
   const modalStart = detailSource.indexOf('function EditEquipmentModal');
   const modalEnd = detailSource.indexOf('export {', modalStart);
   const modalSource = detailSource.slice(modalStart, modalEnd > modalStart ? modalEnd : undefined);
+  const fieldSelectStart = detailSource.indexOf('function FieldSelect');
+  const fieldSelectEnd = detailSource.indexOf('function getSalePdiBadge', fieldSelectStart);
+  const fieldSelectSource = detailSource.slice(fieldSelectStart, fieldSelectEnd);
 
   assert.match(detailSource, /buildEquipmentEditPatch\(equipment, normalizedUpdated\)/);
   assert.match(detailSource, /equipmentService\.update\(equipment\.id, patchWithHistory\)/);
@@ -242,7 +245,8 @@ test('equipment detail editor saves the card through PATCH and keeps modal state
   assert.doesNotMatch(detailSource, /void persistEquipment\(list\)/);
   assert.match(modalSource, /previousOpenRef/);
   assert.doesNotMatch(modalSource, /if \(open\) setForm\(equipment\);\s*\n\s*}, \[open, equipment\]\);/);
-  assert.match(detailSource, /<SelectContent className="z-\[70\]">/);
+  assert.match(fieldSelectSource, /<select[\s\S]*onChange=\{event => onValueChange\(event\.target\.value\)\}/);
+  assert.doesNotMatch(fieldSelectSource, /<SelectContent/);
 });
 
 test('sale deal quick action renders only with a safe configured route', () => {

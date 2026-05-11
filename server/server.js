@@ -137,6 +137,7 @@ const { registerStaffRoutes } = require('./routes/staff');
 const { registerSystemRoutes } = require('./routes/system');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
 const { normalizeServiceTicketList } = require('./lib/service-dto');
+const { normalizeEquipmentStorageRecord } = require('./lib/equipment-classification');
 const {
   DB_PATH,
   cloneCollectionIfMissing,
@@ -663,9 +664,7 @@ function requirePermission(collection, action = 'read') {
 
 function normalizeEquipmentForDiagnostics(equipment = {}) {
   return {
-    ...equipment,
-    category: equipment.category ?? 'own',
-    activeInFleet: equipment.activeInFleet ?? true,
+    ...normalizeEquipmentStorageRecord(equipment),
     isForSale: equipment.isForSale ?? false,
     salePdiStatus: equipment.salePdiStatus ?? 'not_started',
   };

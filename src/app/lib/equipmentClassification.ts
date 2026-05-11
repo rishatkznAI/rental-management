@@ -16,6 +16,7 @@ export const ACTIVE_FLEET_LABELS = {
 
 const ACTIVE_IN_FLEET_ALIAS_KEYS = [
   'activeInFleet',
+  'fleet',
   'rentalFleet',
   'isRentalFleet',
   'inRentalFleet',
@@ -105,6 +106,7 @@ export function normalizeEquipmentPatch<T extends Partial<Equipment>>(equipment:
   const saleCondition = normalizeEquipmentSaleCondition(equipment) as EquipmentSaleCondition | undefined;
   const hasActiveInFleet = ACTIVE_IN_FLEET_ALIAS_KEYS.some(key => hasOwn(source, key));
   const {
+    fleet: _fleet,
     rentalFleet: _rentalFleet,
     isRentalFleet: _isRentalFleet,
     inRentalFleet: _inRentalFleet,

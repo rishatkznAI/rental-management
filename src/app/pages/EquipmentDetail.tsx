@@ -4570,19 +4570,20 @@ function FieldSelect({
   disabledReason?: string;
 }) {
   return (
-    <Select value={value || ''} onValueChange={onValueChange} disabled={disabled}>
-      <SelectTrigger
-        title={disabled ? disabledReason : undefined}
-        className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-      >
-        <SelectValue placeholder={placeholder || 'Выберите...'} />
-      </SelectTrigger>
-      <SelectContent className="z-[70]">
-        {options.map(opt => (
-          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <select
+      value={value || ''}
+      onChange={event => onValueChange(event.target.value)}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
+      className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[--color-primary] disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+    >
+      {placeholder && !value ? (
+        <option value="" disabled>{placeholder}</option>
+      ) : null}
+      {options.map(opt => (
+        <option key={opt.value} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
   );
 }
 

@@ -182,6 +182,31 @@ test('PATCH equipment persists activeInFleet as boolean through office update', 
   });
 });
 
+test('PATCH equipment accepts rental fleet legacy aliases before RBAC sanitizing', async () => {
+  const state = createState();
+  state.equipment[0] = {
+    ...state.equipment[0],
+    activeInFleet: true,
+    category: 'own',
+  };
+  const office = { userId: 'U-office', userName: 'Офис', userRole: 'Офис-менеджер' };
+  await withServer(createCrudApp(state, office), async baseUrl => {
+    const response = await request(baseUrl, 'PATCH', '/api/equipment/EQ-1', {
+      fleet: 'sale',
+      rentalFleet: 'yes',
+      availableForRent: 'no',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.activeInFleet, false);
+    assert.equal(typeof response.body.activeInFleet, 'boolean');
+    assert.equal(Object.prototype.hasOwnProperty.call(response.body, 'fleet'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(response.body, 'rentalFleet'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(response.body, 'availableForRent'), false);
+    assert.equal(state.equipment[0].activeInFleet, false);
+  });
+});
+
 test('partial equipment PATCH keeps sale receipt and sale mode fields intact', async () => {
   const state = createState();
   const receiptHistory = [{ date: '2026-05-02T08:00:00.000Z', oldStatus: 'acceptance_in_progress', newStatus: 'accepted' }];

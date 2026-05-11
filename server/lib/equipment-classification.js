@@ -1,5 +1,6 @@
 const ACTIVE_IN_FLEET_ALIAS_KEYS = [
   'activeInFleet',
+  'fleet',
   'rentalFleet',
   'isRentalFleet',
   'inRentalFleet',

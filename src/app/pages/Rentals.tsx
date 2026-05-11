@@ -2520,17 +2520,19 @@ export default function Rentals() {
                 type="button"
                 onClick={() => setActiveWorkspaceTab(tab.id)}
                 className={cn(
-                  'rounded-xl px-3 py-2 text-sm font-semibold transition-colors',
+                  'rounded-xl border px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                   activeWorkspaceTab === tab.id
-                    ? 'bg-[--color-primary] text-white shadow-sm'
-                    : 'border border-border bg-card text-muted-foreground hover:bg-secondary hover:text-foreground',
+                    ? 'rentals-workspace-tab-active shadow-sm'
+                    : 'border-border bg-card text-muted-foreground hover:bg-secondary hover:text-foreground',
                 )}
               >
                 <span>{tab.label}</span>
                 {tab.badge > 0 && (
                   <span className={cn(
                     'ml-2 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold',
-                    activeWorkspaceTab === tab.id ? 'bg-white/20 text-white' : tab.badgeTone,
+                    activeWorkspaceTab === tab.id
+                      ? 'rentals-workspace-tab-badge-active'
+                      : tab.badgeTone,
                   )}>
                     {tab.badge}
                   </span>

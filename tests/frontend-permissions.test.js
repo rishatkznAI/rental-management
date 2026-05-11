@@ -18,6 +18,7 @@ const serviceTicketsHookSource = readFileSync(new URL('../src/app/hooks/useServi
 const serviceDetailSource = readFileSync(new URL('../src/app/pages/ServiceDetail.tsx', import.meta.url), 'utf8');
 const apiSource = readFileSync(new URL('../src/app/lib/api.ts', import.meta.url), 'utf8');
 const salesPageSource = readFileSync(new URL('../src/app/pages/Sales.tsx', import.meta.url), 'utf8');
+const themeSource = readFileSync(new URL('../src/styles/theme.css', import.meta.url), 'utf8');
 
 function warrantyPermissionBlock() {
   const match = permissionsSource.match(/\[WARRANTY_MECHANIC_ROLE\]:\s*\{(?<body>[\s\S]*?)\n\s*\},/);
@@ -150,6 +151,22 @@ test('frontend warranty pages do not prefetch forbidden operational collections'
   assert.match(equipmentDetailSource, /enabled: !!id && canViewShippingPhotos/);
 
   assert.match(rentalApprovalHistorySheetSource, /useClientsList\(\{ enabled: open \}\)/);
+});
+
+test('rentals workspace active tabs keep readable contrast in light and dark themes', () => {
+  assert.match(rentalsPageSource, /label:\s*'Список аренд'/);
+  assert.match(rentalsPageSource, /label:\s*'Планировщик'/);
+  assert.match(rentalsPageSource, /label:\s*'Возвраты'/);
+  assert.match(rentalsPageSource, /label:\s*canViewPayments \? 'Долги и документы' : 'Документы'/);
+
+  assert.match(rentalsPageSource, /rentals-workspace-tab-active shadow-sm/);
+  assert.match(rentalsPageSource, /rentals-workspace-tab-badge-active/);
+  assert.match(themeSource, /\.rentals-workspace-tab-active\s*\{[\s\S]*background-color: var\(--accent\);[\s\S]*color: var\(--primary\);/);
+  assert.match(themeSource, /\.dark \.rentals-workspace-tab-active\s*\{[\s\S]*background-color: var\(--primary\);[\s\S]*color: var\(--primary-foreground\);/);
+  assert.match(themeSource, /\.rentals-workspace-tab-badge-active\s*\{[\s\S]*color: var\(--primary\);/);
+  assert.match(themeSource, /\.dark \.rentals-workspace-tab-badge-active\s*\{[\s\S]*color: var\(--primary-foreground\);/);
+  assert.doesNotMatch(rentalsPageSource, /activeWorkspaceTab === tab\.id\s*\?\s*'bg-\[--color-primary\] text-white shadow-sm'/);
+  assert.doesNotMatch(rentalsPageSource, /activeWorkspaceTab === tab\.id \? 'bg-white\/20 text-white' : tab\.badgeTone/);
 });
 
 test('frontend investor rental surfaces avoid forbidden background reads', () => {

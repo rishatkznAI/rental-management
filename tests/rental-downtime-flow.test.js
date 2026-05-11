@@ -146,6 +146,40 @@ test('exact equipment id prevents false downtime conflict from duplicate placeho
   assert.equal(target.matches.length, 1);
 });
 
+test('serial number is preferred before inventory fallback for downtime matching', () => {
+  const target = findDowntimeRentalFlowTarget({
+    downtime: {
+      equipmentInv: '0',
+      serialNumber: 'SN-target',
+      startDate: '2026-04-10',
+      endDate: '2026-04-11',
+      reason: 'Ожидание клиента',
+    },
+    rentals: [
+      {
+        id: 'GR-target',
+        equipmentInv: '0',
+        serialNumber: 'SN-target',
+        startDate: '2026-04-01',
+        endDate: '2026-04-20',
+        status: 'active',
+      },
+      {
+        id: 'GR-other',
+        equipmentInv: '0',
+        serialNumber: 'SN-other',
+        startDate: '2026-04-01',
+        endDate: '2026-04-20',
+        status: 'active',
+      },
+    ],
+  });
+
+  assert.equal(target.flow, 'rental');
+  assert.equal(target.rental.id, 'GR-target');
+  assert.equal(target.matches.length, 1);
+});
+
 test('free equipment downtime stays on standalone equipment downtime flow', () => {
   const target = findDowntimeRentalFlowTarget({
     downtime: {

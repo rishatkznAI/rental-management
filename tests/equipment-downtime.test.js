@@ -101,6 +101,31 @@ test('equipment downtime validation prefers equipment id over placeholder invent
   assert.equal(result.ok, true);
 });
 
+test('equipment downtime validation prefers serial number before inventory fallback', () => {
+  const result = validateEquipmentDowntimePayload({
+    equipmentInv: '0',
+    serialNumber: 'SN-1',
+    startDate: '2026-05-11',
+    endDate: '2026-05-12',
+    reason: 'Нет спроса',
+  }, {
+    equipment: [
+      { id: 'EQ-1', inventoryNumber: '0', serialNumber: 'SN-1' },
+      { id: 'EQ-2', inventoryNumber: '0', serialNumber: 'SN-2' },
+    ],
+    ganttRentals: [{
+      id: 'GR-2',
+      equipmentInv: '0',
+      serialNumber: 'SN-2',
+      startDate: '2026-05-10',
+      endDate: '2026-05-15',
+      status: 'active',
+    }],
+  });
+
+  assert.equal(result.ok, true);
+});
+
 test('equipment downtime validation blocks overlaps with another downtime', () => {
   const result = validateEquipmentDowntimePayload({
     id: 'EDT-2',

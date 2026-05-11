@@ -45,6 +45,12 @@ function equipmentInventoryById(equipmentList, equipmentId) {
   return text(equipment?.inventoryNumber);
 }
 
+function equipmentSerialById(equipmentList, equipmentId) {
+  if (!equipmentId) return '';
+  const equipment = (equipmentList || []).find(item => text(item?.id) === text(equipmentId));
+  return text(equipment?.serialNumber);
+}
+
 function normalizeEquipmentDowntimeRecord(input = {}, previous = null, context = {}) {
   const nowIso = typeof context.nowIso === 'function' ? context.nowIso : () => new Date().toISOString();
   const user = context.user || {};
@@ -55,6 +61,7 @@ function normalizeEquipmentDowntimeRecord(input = {}, previous = null, context =
     ...next,
     equipmentId: text(next.equipmentId || previousRecord.equipmentId),
     equipmentInv: text(next.equipmentInv || next.inventoryNumber || previousRecord.equipmentInv || previousRecord.inventoryNumber),
+    serialNumber: text(next.serialNumber || previousRecord.serialNumber),
     startDate: dateKey(next.startDate || previousRecord.startDate),
     endDate: dateKey(next.endDate),
     reason: text(next.reason || previousRecord.reason),
@@ -78,8 +85,10 @@ function downtimeEquipmentRefs(downtime, equipmentList = []) {
   const equipmentId = text(downtime?.equipmentId);
   const equipmentInv = text(downtime?.equipmentInv);
   const inventoryFromId = equipmentInventoryById(equipmentList, equipmentId);
+  const serialFromId = equipmentSerialById(equipmentList, equipmentId);
   return {
     equipmentId,
+    serialNumber: text(downtime?.serialNumber) || serialFromId,
     equipmentInv: equipmentInv || inventoryFromId,
   };
 }
@@ -87,8 +96,10 @@ function downtimeEquipmentRefs(downtime, equipmentList = []) {
 function rentalMatchesDowntime(rental, downtime, equipmentList = []) {
   const refs = downtimeEquipmentRefs(downtime, equipmentList);
   const rentalEquipmentId = text(rental?.equipmentId);
+  const rentalSerialNumber = text(rental?.serialNumber);
   const rentalEquipmentInv = text(rental?.equipmentInv || rental?.inventoryNumber);
   if (refs.equipmentId && rentalEquipmentId) return refs.equipmentId === rentalEquipmentId;
+  if (refs.serialNumber && rentalSerialNumber) return refs.serialNumber === rentalSerialNumber;
   if (!isSafeEquipmentInventoryRef(refs.equipmentInv)) return false;
   if (rentalEquipmentInv && !isSafeEquipmentInventoryRef(rentalEquipmentInv)) return false;
   if (refs.equipmentInv && rentalEquipmentInv && refs.equipmentInv === rentalEquipmentInv) return true;
@@ -105,6 +116,7 @@ function downtimeMatchesDowntime(left, right, equipmentList = []) {
   const leftRefs = downtimeEquipmentRefs(left, equipmentList);
   const rightRefs = downtimeEquipmentRefs(right, equipmentList);
   if (leftRefs.equipmentId && rightRefs.equipmentId) return leftRefs.equipmentId === rightRefs.equipmentId;
+  if (leftRefs.serialNumber && rightRefs.serialNumber) return leftRefs.serialNumber === rightRefs.serialNumber;
   if (!isSafeEquipmentInventoryRef(leftRefs.equipmentInv) || !isSafeEquipmentInventoryRef(rightRefs.equipmentInv)) return false;
   return Boolean(leftRefs.equipmentInv && rightRefs.equipmentInv && leftRefs.equipmentInv === rightRefs.equipmentInv);
 }
@@ -141,7 +153,7 @@ function validateEquipmentDowntimePayload(input, context = {}) {
   const downtime = normalizeEquipmentDowntimeRecord(input, null, context);
   const refs = downtimeEquipmentRefs(downtime, equipment);
 
-  if (!refs.equipmentId && !refs.equipmentInv) {
+  if (!refs.equipmentId && !refs.serialNumber && !refs.equipmentInv) {
     return { ok: false, status: 400, error: 'Выберите технику для простоя.' };
   }
   if (!downtime.startDate) {

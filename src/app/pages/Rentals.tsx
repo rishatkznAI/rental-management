@@ -362,6 +362,7 @@ function withEquipmentRowContext(rental: GanttRentalData, equipment: Equipment):
     ...rental,
     equipmentId: rental.equipmentId || equipment.id,
     equipmentInv: rental.equipmentInv || equipment.inventoryNumber,
+    serialNumber: rental.serialNumber || equipment.serialNumber,
   };
 }
 
@@ -1081,6 +1082,15 @@ const EMPTY_DOWNTIMES: DowntimePeriod[] = [];
 const EMPTY_STAFF_OPTIONS: StaffOption[] = [];
 const EMPTY_CLIENTS: Client[] = [];
 const EMPTY_RENTAL_CHANGE_REQUESTS: RentalChangeRequest[] = [];
+
+function mergeGanttRentalLists(...lists: GanttRentalData[][]): GanttRentalData[] {
+  const merged = new Map<string, GanttRentalData>();
+  lists.flat().forEach(item => {
+    const key = item.id || `${item.equipmentId || item.serialNumber || item.equipmentInv}:${item.startDate}:${item.endDate}:${item.client}`;
+    if (!merged.has(key)) merged.set(key, item);
+  });
+  return [...merged.values()];
+}
 
 function hasOpenServiceTicketForEquipment(serviceTickets: ServiceTicket[], equipment: Equipment) {
   const inventoryIsUnique = serviceTickets.filter(ticket => ticket.inventoryNumber === equipment.inventoryNumber).length <= 1;
@@ -1904,23 +1914,39 @@ export default function Rentals() {
   const filteredRentalsByInventory = useMemo(() => {
     const map = new Map<string, GanttRentalData[]>();
     filteredRentals.forEach(rental => {
-      if (!rental.equipmentInv || (rental.equipmentId && !ambiguousInventoryNumbers.has(rental.equipmentInv))) return;
+      if (!rental.equipmentInv || rental.equipmentId || rental.serialNumber) return;
       const bucket = map.get(rental.equipmentInv) ?? [];
       bucket.push(rental);
       map.set(rental.equipmentInv, bucket);
     });
     return map;
-  }, [ambiguousInventoryNumbers, filteredRentals]);
+  }, [filteredRentals]);
+
+  const filteredRentalsBySerial = useMemo(() => {
+    const map = new Map<string, GanttRentalData[]>();
+    filteredRentals.forEach(rental => {
+      const serialNumber = normalizeMatchRef(rental.serialNumber);
+      if (!serialNumber || rental.equipmentId) return;
+      const bucket = map.get(serialNumber) ?? [];
+      bucket.push(rental);
+      map.set(serialNumber, bucket);
+    });
+    return map;
+  }, [filteredRentals]);
 
   const getFilteredRentalsForEquipment = useCallback((equipment: Equipment) => {
     const byId = filteredRentalsByEquipmentId.get(equipment.id) ?? EMPTY_GANTT_RENTALS;
+    const equipmentSerialNumber = normalizeMatchRef(equipment.serialNumber);
+    const bySerial = equipmentSerialNumber
+      ? filteredRentalsBySerial.get(equipmentSerialNumber) ?? EMPTY_GANTT_RENTALS
+      : EMPTY_GANTT_RENTALS;
     const byInventory = ambiguousInventoryNumbers.has(equipment.inventoryNumber)
       ? (canonicalEquipmentIdByInventory.get(equipment.inventoryNumber) === equipment.id
           ? filteredRentalsByInventory.get(equipment.inventoryNumber) ?? EMPTY_GANTT_RENTALS
           : EMPTY_GANTT_RENTALS)
       : filteredRentalsByInventory.get(equipment.inventoryNumber) ?? EMPTY_GANTT_RENTALS;
-    return byInventory.length > 0 ? [...byId, ...byInventory] : byId;
-  }, [ambiguousInventoryNumbers, canonicalEquipmentIdByInventory, filteredRentalsByEquipmentId, filteredRentalsByInventory]);
+    return mergeGanttRentalLists(byId, bySerial, byInventory);
+  }, [ambiguousInventoryNumbers, canonicalEquipmentIdByInventory, filteredRentalsByEquipmentId, filteredRentalsByInventory, filteredRentalsBySerial]);
 
   const servicePeriodsByEquipmentId = useMemo(() => {
     const map = new Map<string, ServicePeriod[]>();
@@ -5205,6 +5231,7 @@ export default function Rentals() {
               const downtimePayload: Omit<DowntimePeriod, 'id'> = {
                 equipmentId: String(returnedEquipment?.id || rental.equipmentId || ''),
                 equipmentInv: String(returnedEquipment?.inventoryNumber || rental.equipmentInv || ''),
+                serialNumber: String(returnedEquipment?.serialNumber || rental.serialNumber || ''),
                 startDate: data.returnDate,
                 reason: 'Простой после возврата',
                 comment: `Возврат из аренды ${rental.id}`,
@@ -5254,6 +5281,7 @@ export default function Rentals() {
           const payload: Omit<DowntimePeriod, 'id'> = {
             equipmentId: data.equipmentId,
             equipmentInv: data.equipmentInv,
+            serialNumber: data.serialNumber,
             startDate: data.startDate,
             endDate: data.endDate || undefined,
             reason: data.reason,

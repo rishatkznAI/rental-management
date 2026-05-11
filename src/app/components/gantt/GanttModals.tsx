@@ -76,7 +76,7 @@ function equipmentOptionLabel(eq: Equipment): string {
   const loc  = LOCATION_LABELS[eq.location] ?? eq.location ?? '—';
   const stat = STATUS_LABELS[eq.status] ?? eq.status;
   const sn   = eq.serialNumber ? `SN ${eq.serialNumber}` : 'SN не указан';
-  return `${eq.manufacturer} ${eq.model} · INV ${eq.inventoryNumber} · ${sn} — ${type} — ${loc} — ${stat}`;
+  return `${eq.manufacturer} ${eq.model} · ${sn} · INV ${eq.inventoryNumber || 'не указан'} — ${type} — ${loc} — ${stat}`;
 }
 
 // ─── selectClass — единый стиль для нативных <select> ──────────────────────
@@ -313,6 +313,7 @@ interface DowntimeModalProps {
     id?: string;
     equipmentId: string;
     equipmentInv: string;
+    serialNumber?: string;
     startDate: string;
     endDate?: string;
     reason: string;
@@ -386,8 +387,9 @@ export function DowntimeModal({
       ? (startDate && today < startDate ? startDate : today)
       : endDate;
     const equipmentInv = selectedEquipment?.inventoryNumber || downtime?.equipmentInv || preselectedEquipmentInv || '';
+    const serialNumber = selectedEquipment?.serialNumber || downtime?.serialNumber || '';
 
-    if (!equipmentId && !equipmentInv) {
+    if (!equipmentId && !serialNumber && !equipmentInv) {
       setFormError('Выберите технику для простоя.');
       return;
     }
@@ -405,6 +407,7 @@ export function DowntimeModal({
       id: downtime?.id,
       equipmentId,
       equipmentInv,
+      serialNumber,
       startDate,
       endDate: nextEndDate,
       reason,

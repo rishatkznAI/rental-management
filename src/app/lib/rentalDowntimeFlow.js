@@ -51,6 +51,10 @@ export function rentalMatchesDowntimeEquipment(rental, downtime) {
   const rentalEquipmentId = text(rental?.equipmentId);
   if (downtimeEquipmentId && rentalEquipmentId) return downtimeEquipmentId === rentalEquipmentId;
 
+  const downtimeSerialNumber = text(downtime?.serialNumber);
+  const rentalSerialNumber = text(rental?.serialNumber);
+  if (downtimeSerialNumber && rentalSerialNumber) return downtimeSerialNumber === rentalSerialNumber;
+
   const downtimeEquipmentInv = text(downtime?.equipmentInv || downtime?.inventoryNumber);
   const rentalEquipmentInv = text(rental?.equipmentInv || rental?.inventoryNumber);
   if (!isSafeEquipmentInventoryRef(downtimeEquipmentInv)) return false;
@@ -149,7 +153,7 @@ export function buildRentalDowntimePatch(downtime) {
 }
 
 export function buildRentalDowntimeChangeReason(downtime, rental) {
-  const equipment = text(downtime?.equipmentInv || rental?.equipmentInv || rental?.equipment?.[0]);
+  const equipment = text(downtime?.serialNumber || rental?.serialNumber || downtime?.equipmentInv || rental?.equipmentInv || rental?.equipment?.[0]);
   const period = formatDowntimePeriod(downtime?.startDate, downtime?.endDate);
   const reason = text(downtime?.reason) || 'причина не указана';
   const comment = text(downtime?.comment);

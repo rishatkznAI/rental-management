@@ -90,6 +90,7 @@ export interface GanttRentalData {
   clientShort: string;
   equipmentId?: string;
   equipmentInv: string;
+  serialNumber?: string;
   startDate: string;
   endDate: string;
   manager: string;
@@ -116,6 +117,7 @@ export interface DowntimePeriod {
   id: string;
   equipmentId?: string;
   equipmentInv: string;
+  serialNumber?: string;
   startDate: string;
   endDate?: string;
   reason: string;

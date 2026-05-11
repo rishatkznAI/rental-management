@@ -48,8 +48,17 @@ test('fleet planner shows rental downtime updates on rental bars', () => {
   assert.match(rentalsSource, /Простой по аренде сохранён/);
 });
 
+test('fleet planner keeps equipment-id rentals out of inventory fallback buckets', () => {
+  assert.match(rentalsSource, /const filteredRentalsByEquipmentId = useMemo/);
+  assert.match(rentalsSource, /const filteredRentalsBySerial = useMemo/);
+  assert.match(rentalsSource, /const filteredRentalsByInventory = useMemo/);
+  assert.match(rentalsSource, /if \(!rental\.equipmentInv \|\| rental\.equipmentId \|\| rental\.serialNumber\) return;/);
+  assert.match(rentalsSource, /mergeGanttRentalLists\(byId, bySerial, byInventory\)/);
+});
+
 test('downtime modal supports add edit close cancel and human validation', () => {
   assert.match(ganttModalsSource, /isEditing \? 'Изменить простой' : 'Добавить простой'/);
+  assert.match(ganttModalsSource, /serialNumber/);
   assert.match(ganttModalsSource, /Комментарий/);
   assert.match(ganttModalsSource, /Закрыть простой/);
   assert.match(ganttModalsSource, /Отменить простой/);

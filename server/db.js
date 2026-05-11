@@ -19,6 +19,7 @@ const JSON_COLLECTIONS = [
   // IMPORTANT: app_data records are schemaless JSON and older rows may not have newly
   // introduced fields. Keep readers/writers backward compatible.
   'equipment',
+  'equipment_downtimes',
   'rentals',
   'gantt_rentals',
   'rental_change_requests',

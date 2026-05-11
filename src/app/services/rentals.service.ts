@@ -1,6 +1,6 @@
 import { api } from '../lib/api';
 import type { Rental } from '../types';
-import type { GanttRentalData } from '../mock-data';
+import type { DowntimePeriod, GanttRentalData } from '../mock-data';
 
 export type RentalExtensionConflict = {
   date: string;
@@ -65,6 +65,9 @@ export const rentalsService = {
   getGanttData: (): Promise<GanttRentalData[]> =>
     api.get<GanttRentalData[]>('/api/gantt_rentals'),
 
+  getDowntimes: (): Promise<DowntimePeriod[]> =>
+    api.get<DowntimePeriod[]>('/api/equipment_downtimes'),
+
   create: (data: Omit<Rental, 'id'>): Promise<Rental> =>
     api.post<Rental>('/api/rentals', data),
 
@@ -105,4 +108,10 @@ export const rentalsService = {
 
   bulkReplaceGantt: (list: GanttRentalData[]): Promise<void> =>
     api.put('/api/gantt_rentals', list),
+
+  createDowntime: (data: Omit<DowntimePeriod, 'id'>): Promise<DowntimePeriod> =>
+    api.post<DowntimePeriod>('/api/equipment_downtimes', data),
+
+  updateDowntime: (id: string, data: Partial<DowntimePeriod>): Promise<DowntimePeriod> =>
+    api.patch<DowntimePeriod>(`/api/equipment_downtimes/${id}`, data),
 };

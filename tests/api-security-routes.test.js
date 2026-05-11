@@ -28,6 +28,7 @@ const READ_PERMISSIONS = {
   client_contracts: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   documents: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   equipment: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  equipment_downtimes: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   gantt_rentals: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
@@ -52,6 +53,7 @@ const WRITE_PERMISSIONS = {
   client_contracts: ['Администратор', 'Офис-менеджер'],
   documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   equipment: ['Администратор', 'Офис-менеджер'],
+  equipment_downtimes: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   payments: ['Администратор', 'Офис-менеджер'],
   crm_deals: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   repair_work_items: ['Администратор'],
@@ -94,6 +96,7 @@ function createState() {
       { id: 'EQ-own', inventoryNumber: '100', ownerId: 'OW-1', notes: 'own', salePrice1: 1000000, salePrice2: 1100000, salePrice3: 1200000, subleasePrice: 10000, plannedMonthlyRevenue: 300000 },
       { id: 'EQ-other', inventoryNumber: '200', ownerId: 'OW-2', notes: 'other', salePrice1: 2000000, salePrice2: 2100000, salePrice3: 2200000, subleasePrice: 20000, plannedMonthlyRevenue: 400000 },
     ],
+    equipment_downtimes: [],
     mechanics: [{ id: 'M-1', name: 'Петров', userId: 'U-mechanic' }],
     service: [
       { id: 'S-own', assignedMechanicId: 'M-1', assignedMechanicName: 'Петров', status: 'new' },
@@ -263,8 +266,9 @@ function createSecurityApp(state = createState()) {
   }));
   apiRouter.use(registerCrudRoutes({
     collections: [
-      'equipment',
-      'service',
+	      'equipment',
+	      'equipment_downtimes',
+	      'service',
       'warranty_claims',
       'app_settings',
       'payments',
@@ -283,8 +287,9 @@ function createSecurityApp(state = createState()) {
       'unknown_collection',
     ],
     idPrefixes: {
-      equipment: 'EQ',
-      service: 'S',
+	      equipment: 'EQ',
+	      equipment_downtimes: 'EDT',
+	      service: 'S',
       warranty_claims: 'WC',
       payments: 'P',
       users: 'U',
@@ -960,6 +965,47 @@ test('/api/documents preserves stable rental, equipment and client links', async
     const list = await request(baseUrl, 'GET', '/api/documents', 'office-token');
     assert.equal(list.status, 200);
     assert.equal(list.body.some(item => item.rentalId === 'R-own' && item.equipmentId === 'EQ-own'), true);
+  });
+});
+
+test('equipment downtime CRUD supports rental roles and rejects unrelated roles', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const created = await request(baseUrl, 'POST', '/api/equipment_downtimes', 'manager-token', {
+      equipmentId: 'EQ-own',
+      equipmentInv: '100',
+      startDate: '2026-05-01',
+      endDate: '2026-05-03',
+      reason: 'Нет спроса',
+      comment: 'Окно согласовано',
+    });
+
+    assert.equal(created.status, 201);
+    assert.equal(created.body.status, 'active');
+    assert.equal(created.body.equipmentId, 'EQ-own');
+    assert.equal(created.body.reason, 'Нет спроса');
+
+    const updated = await request(baseUrl, 'PATCH', `/api/equipment_downtimes/${created.body.id}`, 'office-token', {
+      endDate: '2026-05-04',
+      reason: 'Ожидание клиента',
+      comment: 'Перенесли выезд',
+    });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.endDate, '2026-05-04');
+    assert.equal(updated.body.reason, 'Ожидание клиента');
+    assert.equal(state.equipment_downtimes[0].comment, 'Перенесли выезд');
+
+    const managerList = await request(baseUrl, 'GET', '/api/equipment_downtimes', 'manager-token');
+    assert.equal(managerList.status, 200);
+    assert.equal(managerList.body.length, 1);
+
+    assert.equal((await request(baseUrl, 'POST', '/api/equipment_downtimes', 'mechanic-token', {
+      equipmentId: 'EQ-own',
+      equipmentInv: '100',
+      startDate: '2026-05-10',
+    })).status, 403);
+    assert.equal((await request(baseUrl, 'GET', '/api/equipment_downtimes', 'investor-token')).status, 403);
   });
 });
 

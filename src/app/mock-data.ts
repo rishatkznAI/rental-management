@@ -112,10 +112,15 @@ export interface RentalHistoryEntry {
 
 export interface DowntimePeriod {
   id: string;
+  equipmentId?: string;
   equipmentInv: string;
   startDate: string;
-  endDate: string;
+  endDate?: string;
   reason: string;
+  comment?: string;
+  status?: 'active' | 'closed' | 'cancelled';
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ServicePeriod {

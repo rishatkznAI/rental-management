@@ -30,10 +30,6 @@ import {
 import { RentalDrawer } from '../components/gantt/RentalDrawer';
 import { ReturnModal, DowntimeModal, NewRentalModal } from '../components/gantt/GanttModals';
 import { RentalApprovalHistorySheet } from '../components/gantt/RentalApprovalHistorySheet';
-import {
-  mockDowntimes,
-  mockServicePeriods,
-} from '../mock-data';
 import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, isMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
@@ -984,6 +980,20 @@ function rentalIntersectsRange(
   return rentalStart < rangeEnd && rentalEndExclusive > rangeStart;
 }
 
+function downtimeDisplayEndDate(downtime: DowntimePeriod, viewEnd: Date, today: Date) {
+  if (downtime.endDate) return downtime.endDate;
+  const start = startOfDay(new Date(downtime.startDate));
+  const visibleEnd = dateMin([viewEnd, addDays(dateMax([start, today]), 1)]);
+  return format(visibleEnd, 'yyyy-MM-dd');
+}
+
+function downtimeIntersectsRange(downtime: DowntimePeriod, rangeStart: Date, rangeEnd: Date, today: Date) {
+  if (!downtime.startDate || downtime.status === 'cancelled') return false;
+  const downtimeStart = startOfDay(new Date(downtime.startDate));
+  const downtimeEndExclusive = addDays(startOfDay(new Date(downtimeDisplayEndDate(downtime, rangeEnd, today))), 1);
+  return downtimeStart < rangeEnd && downtimeEndExclusive > rangeStart;
+}
+
 function rentalMatchesEquipment(
   rental: Pick<GanttRentalData, 'equipmentId' | 'equipmentInv'>,
   equipment: Pick<Equipment, 'id' | 'inventoryNumber'>,
@@ -1058,6 +1068,7 @@ const EMPTY_DOCUMENTS: Document[] = [];
 const EMPTY_SHIPPING_PHOTOS: ShippingPhoto[] = [];
 const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
 const EMPTY_SERVICE_PERIODS: ServicePeriod[] = [];
+const EMPTY_DOWNTIMES: DowntimePeriod[] = [];
 const EMPTY_STAFF_OPTIONS: StaffOption[] = [];
 const EMPTY_CLIENTS: Client[] = [];
 const EMPTY_RENTAL_CHANGE_REQUESTS: RentalChangeRequest[] = [];
@@ -1097,6 +1108,7 @@ export default function Rentals() {
   const canEditRentalDates = canEditRentals;
   const canRestoreRentals = isAdminRole;
   const normalizedRole = normalizeUserRole(user?.role);
+  const canViewDowntimes = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole);
   const canViewStaffOptions = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'].includes(normalizedRole);
   const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
     || isMechanicRole(normalizedRole);
@@ -1117,6 +1129,11 @@ export default function Rentals() {
   const { data: equipmentData = EMPTY_EQUIPMENT } = useQuery({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
+  });
+  const { data: downtimeData = EMPTY_DOWNTIMES } = useQuery({
+    queryKey: RENTAL_KEYS.downtimes,
+    queryFn: rentalsService.getDowntimes,
+    enabled: canViewDowntimes,
   });
   const { data: paymentData = EMPTY_PAYMENTS } = useQuery({
     queryKey: PAYMENT_KEYS.all,
@@ -1438,6 +1455,7 @@ export default function Rentals() {
   const [preselectedEquipmentInv, setPreselectedEquipmentInv] = useState('');
   const [preselectedEquipmentId, setPreselectedEquipmentId] = useState('');
   const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
+  const [editingDowntime, setEditingDowntime] = useState<DowntimePeriod | null>(null);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<RentalWorkspaceTab>('list');
   const [compactView, setCompactView] = useState<CompactView>('cards');
   const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
@@ -1911,15 +1929,37 @@ export default function Rentals() {
     ...(servicePeriodsByInventory.get(equipment.inventoryNumber) ?? EMPTY_SERVICE_PERIODS),
   ], [servicePeriodsByEquipmentId, servicePeriodsByInventory]);
 
+  const visibleDowntimes = useMemo(
+    () => downtimeData.filter(item => downtimeIntersectsRange(item, viewStart, viewEnd, today)),
+    [downtimeData, today, viewEnd, viewStart],
+  );
+
+  const downtimesByEquipmentId = useMemo(() => {
+    const map = new Map<string, DowntimePeriod[]>();
+    visibleDowntimes.forEach(item => {
+      if (!item.equipmentId) return;
+      const bucket = map.get(item.equipmentId) ?? [];
+      bucket.push(item);
+      map.set(item.equipmentId, bucket);
+    });
+    return map;
+  }, [visibleDowntimes]);
+
   const downtimesByInventory = useMemo(() => {
-    const map = new Map<string, typeof mockDowntimes>();
-    mockDowntimes.forEach(item => {
+    const map = new Map<string, DowntimePeriod[]>();
+    visibleDowntimes.forEach(item => {
+      if (!item.equipmentInv || item.equipmentId || ambiguousInventoryNumbers.has(item.equipmentInv)) return;
       const bucket = map.get(item.equipmentInv) ?? [];
       bucket.push(item);
       map.set(item.equipmentInv, bucket);
     });
     return map;
-  }, []);
+  }, [ambiguousInventoryNumbers, visibleDowntimes]);
+
+  const getDowntimesForEquipment = useCallback((equipment: Equipment) => [
+    ...(downtimesByEquipmentId.get(equipment.id) ?? EMPTY_DOWNTIMES),
+    ...(downtimesByInventory.get(equipment.inventoryNumber) ?? EMPTY_DOWNTIMES),
+  ], [downtimesByEquipmentId, downtimesByInventory]);
 
   // Conflict detection for all equipment
   const conflictSets = useMemo(() => {
@@ -2045,9 +2085,11 @@ export default function Rentals() {
     setShowReturnModal(true);
   };
 
-  const handleOpenDowntime = (equipmentInv?: string) => {
+  const handleOpenDowntime = (equipment?: Equipment, downtime?: DowntimePeriod) => {
     if (!canEditRentals) return;
-    setPreselectedEquipmentInv(equipmentInv || '');
+    setEditingDowntime(downtime || null);
+    setPreselectedEquipmentId(downtime?.equipmentId || equipment?.id || '');
+    setPreselectedEquipmentInv(downtime?.equipmentInv || equipment?.inventoryNumber || '');
     setShowDowntimeModal(true);
   };
 
@@ -2588,7 +2630,7 @@ export default function Rentals() {
     }, { available: 0, rented: 0, reserved: 0, inService: 0 });
     const activeRows = rentalDealRows.filter(row => row.isActive);
     const downtimeCount = filteredEquipment.reduce(
-      (sum, equipment) => sum + (downtimesByInventory.get(equipment.inventoryNumber) ?? []).length,
+      (sum, equipment) => sum + getDowntimesForEquipment(equipment).length,
       0,
     );
     return {
@@ -2605,7 +2647,7 @@ export default function Rentals() {
       overdueReturns: activeRows.filter(row => row.rental.endDate < todayKey).length,
       downtime: downtimeCount,
     };
-  }, [downtimesByInventory, filteredEquipment, ganttRentals, matchesEquipmentRow, movementEntries, rentalDealRows, today, viewEnd, viewStart]);
+  }, [filteredEquipment, ganttRentals, getDowntimesForEquipment, matchesEquipmentRow, movementEntries, rentalDealRows, today, viewEnd, viewStart]);
 
   const mobileEquipmentCards = useMemo(() => {
     if (isDesktopViewport) return [];
@@ -2613,7 +2655,7 @@ export default function Rentals() {
     return filteredEquipment.map(equipment => {
       const rentalsForEquipment = [...getFilteredRentalsForEquipment(equipment)]
         .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-      const downtimesForEquipment = downtimesByInventory.get(equipment.inventoryNumber) ?? [];
+      const downtimesForEquipment = getDowntimesForEquipment(equipment);
       const serviceForEquipment = getServicePeriodsForEquipment(equipment);
       const activeRental = rentalsForEquipment.find(rental => rental.status === 'active');
       const reservedRental = rentalsForEquipment.find(rental => rental.status === 'created');
@@ -2631,7 +2673,7 @@ export default function Rentals() {
         conflictCount: conflictSets.get(equipment.id)?.size ?? 0,
       };
     });
-  }, [conflictSets, downtimesByInventory, filteredEquipment, getFilteredRentalsForEquipment, getServicePeriodsForEquipment, isDesktopViewport, today, viewEnd, viewStart]);
+  }, [conflictSets, filteredEquipment, getDowntimesForEquipment, getFilteredRentalsForEquipment, getServicePeriodsForEquipment, isDesktopViewport, today, viewEnd, viewStart]);
 
   // ===== New handlers for RentalDrawer =====
 
@@ -3189,7 +3231,7 @@ export default function Rentals() {
                 {canEditRentals && (
                   <Button size="sm" variant="secondary" className="app-button-ghost h-9 rounded-xl px-3" onClick={() => handleOpenDowntime()}>
                     <PauseCircle className="h-4 w-4" />
-                    Отметить простой
+                    Добавить простой
                   </Button>
                 )}
               </>
@@ -4050,7 +4092,7 @@ export default function Rentals() {
                     rowIndex={idx}
                     equipment={eq}
                     rentals={getFilteredRentalsForEquipment(eq)}
-                    downtimes={fleetLayers.downtime ? downtimesByInventory.get(eq.inventoryNumber) ?? [] : []}
+                    downtimes={fleetLayers.downtime ? getDowntimesForEquipment(eq) : []}
                     servicePeriods={fleetLayers.service ? getServicePeriodsForEquipment(eq) : []}
                     movements={getMovementsForEquipment(eq)}
                     conflictIds={conflictSets.get(eq.id) || new Set()}
@@ -4070,7 +4112,7 @@ export default function Rentals() {
                     onBarClick={(rental) => setSelectedRental(withEquipmentRowContext(rental, eq))}
                     onNewRental={() => handleOpenNewRental(eq.id)}
                     onReturn={(rental) => handleOpenReturn(rental)}
-                    onDowntime={() => handleOpenDowntime(eq.inventoryNumber)}
+                    onDowntime={(downtime) => handleOpenDowntime(eq, downtime)}
                   />
                 ))}
               </React.Fragment>
@@ -5136,47 +5178,52 @@ export default function Rentals() {
           }
         }}
       />
-        <DowntimeModal
-          open={showDowntimeModal}
-          preselectedEquipment={preselectedEquipmentInv}
-          onClose={() => setShowDowntimeModal(false)}
+      <DowntimeModal
+        open={showDowntimeModal}
+        downtime={editingDowntime}
+        preselectedEquipmentId={preselectedEquipmentId}
+        preselectedEquipmentInv={preselectedEquipmentInv}
+        onClose={() => { setShowDowntimeModal(false); setEditingDowntime(null); }}
         onConfirm={async (data) => {
           if (!canEditRentals) return;
-          const affectedRentals = ganttRentals.filter(rental =>
-            rental.equipmentInv === data.equipmentInv &&
-            rental.status !== 'returned' &&
-            rental.status !== 'closed' &&
-            dateRangesOverlap(rental.startDate, rental.endDate, data.startDate, data.endDate)
-          );
-          if (affectedRentals.length !== 1) {
-            showToast(
-              affectedRentals.length > 1
-                ? 'Найдено несколько аренд для простоя. Откройте нужную аренду и повторите действие.'
-                : 'Не найдена аренда для простоя в выбранный период.',
-              'error',
-            );
-            return;
-          }
+          try {
+            const payload: Omit<DowntimePeriod, 'id'> = {
+              equipmentId: data.equipmentId,
+              equipmentInv: data.equipmentInv,
+              startDate: data.startDate,
+              endDate: data.endDate || undefined,
+              reason: data.reason,
+              comment: data.comment,
+              status: data.status,
+            };
+            const saved = data.id
+              ? await rentalsService.updateDowntime(data.id, payload)
+              : await rentalsService.createDowntime(payload);
 
-          if (!isAdminRole) {
-            const downtimeDays = getRentalDays(data.startDate, data.endDate);
-            const ok = await requestClassicRentalChange(
-              affectedRentals[0],
-              {
-                downtimeDays,
-                downtimeReason: data.reason,
-              } as Partial<Rental>,
-              `Простой техники ${data.equipmentInv}: ${data.startDate} → ${data.endDate}. ${data.reason}`,
-            );
-            if (ok) setShowDowntimeModal(false);
-            return;
+            queryClient.setQueryData<DowntimePeriod[]>(RENTAL_KEYS.downtimes, current => {
+              const list = Array.isArray(current) ? current : [];
+              const exists = list.some(item => item.id === saved.id);
+              return exists
+                ? list.map(item => item.id === saved.id ? saved : item)
+                : [...list, saved];
+            });
+            await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.downtimes });
+            const message = data.status === 'cancelled'
+              ? 'Простой отменён'
+              : data.status === 'closed'
+                ? 'Простой закрыт'
+                : data.id
+                  ? 'Простой обновлён'
+                  : 'Простой добавлен';
+            showToast(message, 'success');
+            setShowDowntimeModal(false);
+            setEditingDowntime(null);
+          } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Не удалось сохранить простой', 'error');
           }
-
-          showToast('Простой зафиксирован');
-          setShowDowntimeModal(false);
         }}
       />
-        <NewRentalModal
+      <NewRentalModal
           open={showNewRentalModal}
           preselectedEquipmentId={preselectedEquipmentId}
           ganttRentals={ganttRentals}
@@ -5416,7 +5463,7 @@ interface EquipmentRowProps {
   onBarClick: (rental: GanttRentalData) => void;
   onNewRental: () => void;
   onReturn: (rental: GanttRentalData) => void;
-  onDowntime: () => void;
+  onDowntime: (downtime?: DowntimePeriod) => void;
 }
 
 function EquipmentRow({
@@ -5525,9 +5572,10 @@ function EquipmentRow({
             </button>
           )}
           <button
-            onClick={onDowntime}
+            onClick={() => onDowntime()}
             className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/30 dark:hover:text-amber-400"
-            title="Отметить простой"
+            title="Добавить простой"
+            aria-label="Добавить простой"
           >
             <PauseCircle className="h-3 w-3" />
           </button>
@@ -5654,12 +5702,19 @@ function EquipmentRow({
 
         {/* Downtime bars */}
         {downtimes.map(dt => {
-          const pos = barPosition(new Date(dt.startDate), new Date(dt.endDate), viewStart, totalDays, dayWidth);
+          const displayEndDate = downtimeDisplayEndDate(dt, viewEnd, today);
+          const pos = barPosition(new Date(dt.startDate), new Date(displayEndDate), viewStart, totalDays, dayWidth);
           if (!pos) return null;
+          const downtimeStatus = dt.status || 'active';
           return (
-            <div
+            <button
+              type="button"
               key={dt.id}
-              className="absolute z-[7] flex items-center overflow-hidden rounded-md px-1.5 text-[10px] font-medium text-amber-800 shadow-sm dark:text-amber-200"
+              onClick={() => onDowntime(dt)}
+              className={cn(
+                'absolute z-[7] flex items-center overflow-hidden rounded-md px-1.5 text-left text-[10px] font-medium text-amber-800 shadow-sm transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-amber-400/60 dark:text-amber-200',
+                downtimeStatus === 'closed' && 'opacity-80',
+              )}
               style={{
                 left: pos.left + 2,
                 width: pos.width,
@@ -5669,7 +5724,8 @@ function EquipmentRow({
                 border: '1px solid rgba(217,119,6,0.24)',
                 boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)',
               }}
-              title={`Простой: ${dt.reason}`}
+              title={`Изменить простой: ${dt.reason || 'без причины'} · ${safeRentalDateRangeLabel(dt.startDate, dt.endDate || displayEndDate)}`}
+              aria-label="Изменить простой"
             >
               <div className="absolute inset-y-0 left-0 w-1 bg-amber-500/85 dark:bg-amber-400/85" />
               <PauseCircle className="mr-1 ml-1 h-3 w-3 shrink-0" />
@@ -5679,7 +5735,7 @@ function EquipmentRow({
                   {dt.reason || 'без причины'}
                 </span>
               )}
-            </div>
+            </button>
           );
         })}
 

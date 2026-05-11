@@ -80,6 +80,7 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'documents',
   'debt_collection_plans',
   'debt_collection_actions',
+  'equipment_downtimes',
   'finance_accounts',
   'finance_operations',
   'receivable_payment_plans',
@@ -379,6 +380,16 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'gsmDeviceId',
     'gsmProtocol',
     'gsmSimNumber',
+  ]),
+  equipment_downtimes: new Set([
+    'equipmentId',
+    'equipmentInv',
+    'inventoryNumber',
+    'startDate',
+    'endDate',
+    'reason',
+    'comment',
+    'status',
   ]),
   knowledge_base_progress: new Set(['moduleId', 'status', 'progress', 'answers', 'score', 'completedAt', 'startedAt']),
   knowledge_base_modules: new Set([
@@ -1020,6 +1031,8 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user);
       if (isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isMechanic(user) || isWarrantyMechanic(user)) return true;
       return false;
+    case 'equipment_downtimes':
+      return isOfficeManager(user) || isRentalManager(user);
     case 'owners':
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user) || getOwnerKeys(user).some(key => sameText(key, entity.id) || sameText(key, entity.name));
       return false;
@@ -1161,6 +1174,9 @@ function canMutateEntity(collection, entity, user, readData) {
   }
   if (collection === 'equipment') {
     return isOfficeManager(user) || isSalesManager(user) || isMechanic(user);
+  }
+  if (collection === 'equipment_downtimes') {
+    return isOfficeManager(user) || isRentalManager(user);
   }
   if (collection === 'rentals' || collection === 'gantt_rentals') {
     if (isOfficeManager(user)) return true;

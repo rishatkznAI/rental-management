@@ -30,6 +30,10 @@ const {
   normalizeEquipmentReceiptPatch,
   shouldCreateReceiptServiceTicket,
 } = require('../lib/equipment-receipt');
+const {
+  normalizeEquipmentDowntimeRecord,
+  validateEquipmentDowntimePayload,
+} = require('../lib/equipment-downtime');
 
 function registerCrudRoutes(deps) {
   const {
@@ -108,6 +112,16 @@ function registerCrudRoutes(deps) {
     const currentGanttRentals = readData('gantt_rentals') || [];
     const nextGanttRentals = syncGanttRentalPaymentStatuses(currentGanttRentals, payments);
     writeData('gantt_rentals', nextGanttRentals);
+  }
+
+  function validateEquipmentDowntimeRecord(record, existingDowntimes, excludeId = '') {
+    return validateEquipmentDowntimePayload(record, {
+      equipment: readData('equipment') || [],
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      downtimes: existingDowntimes || [],
+      excludeId,
+    });
   }
 
   function createReceiptServiceTicket(previousItem, nextItem, authorName) {
@@ -860,6 +874,13 @@ function registerCrudRoutes(deps) {
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
         newItem = normalizeClientDomainRecord(collection, newItem);
+        if (collection === 'equipment_downtimes') {
+          newItem = normalizeEquipmentDowntimeRecord(newItem, null, { user: req.user, nowIso });
+          const validation = validateEquipmentDowntimeRecord(newItem, data);
+          if (!validation.ok) {
+            return res.status(validation.status).json({ ok: false, error: validation.error });
+          }
+        }
         if (collection === 'clients') {
           assertClientInnUnique(data, newItem);
         }
@@ -1022,6 +1043,18 @@ function registerCrudRoutes(deps) {
           if (!validation.ok) {
             return res.status(validation.status).json({ ok: false, error: validation.error });
           }
+        }
+        if (collection === 'equipment_downtimes') {
+          const nextDowntime = normalizeEquipmentDowntimeRecord(
+            { ...data[idx], ...safePatch, id: data[idx].id },
+            data[idx],
+            { user: req.user, nowIso },
+          );
+          const validation = validateEquipmentDowntimeRecord(nextDowntime, data, data[idx].id);
+          if (!validation.ok) {
+            return res.status(validation.status).json({ ok: false, error: validation.error });
+          }
+          safePatch = nextDowntime;
         }
         if (collection === 'users') {
           validateUserSafetyChange(req, data, data[idx], { ...data[idx], ...safePatch, id: data[idx].id }, 'update', req.body);
@@ -1319,7 +1352,7 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
       }
       const body = req.body;
-      const list = Array.isArray(body) ? body : body.data;
+      let list = Array.isArray(body) ? body : body.data;
       if (!Array.isArray(list)) {
         return res.status(400).json({ ok: false, error: 'Expected array' });
       }
@@ -1332,6 +1365,15 @@ function registerCrudRoutes(deps) {
       if (collection === 'rentals' || collection === 'gantt_rentals') {
         for (const item of list) {
           const validation = validateRentalPayload(collection, item, list, item.id);
+          if (!validation.ok) {
+            return res.status(validation.status).json({ ok: false, error: validation.error });
+          }
+        }
+      }
+      if (collection === 'equipment_downtimes') {
+        list = list.map(item => normalizeEquipmentDowntimeRecord(item, null, { user: req.user, nowIso }));
+        for (const item of list) {
+          const validation = validateEquipmentDowntimeRecord(item, list, item.id);
           if (!validation.ok) {
             return res.status(validation.status).json({ ok: false, error: validation.error });
           }

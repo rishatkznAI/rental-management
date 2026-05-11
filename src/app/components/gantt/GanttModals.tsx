@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { X, RotateCcw, CirclePause as PauseCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import type { GanttRentalData } from '../../mock-data';
+import { Textarea } from '../ui/textarea';
+import type { DowntimePeriod, GanttRentalData } from '../../mock-data';
 import { filterRentalManagerUsers } from '../../lib/userStorage';
 import type { Client, Equipment } from '../../types';
 import { equipmentService } from '../../services/equipment.service';
@@ -304,21 +305,44 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
 // ========== Downtime Modal ===================================================
 interface DowntimeModalProps {
   open: boolean;
-  preselectedEquipment?: string;
+  downtime?: DowntimePeriod | null;
+  preselectedEquipmentId?: string;
+  preselectedEquipmentInv?: string;
   onClose: () => void;
-  onConfirm: (data: { equipmentInv: string; startDate: string; endDate: string; reason: string }) => void;
+  onConfirm: (data: {
+    id?: string;
+    equipmentId: string;
+    equipmentInv: string;
+    startDate: string;
+    endDate?: string;
+    reason: string;
+    comment?: string;
+    status: 'active' | 'closed' | 'cancelled';
+  }) => void;
 }
 
-export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }: DowntimeModalProps) {
+export function DowntimeModal({
+  open,
+  downtime,
+  preselectedEquipmentId,
+  preselectedEquipmentInv,
+  onClose,
+  onConfirm,
+}: DowntimeModalProps) {
   const presence = useAnimatedPresence(open, animationDurations.base);
-  const [equipmentInv, setEquipmentInv] = useState(preselectedEquipment || '');
+  const today = new Date().toISOString().split('T')[0];
+  const [equipmentId, setEquipmentId] = useState(preselectedEquipmentId || '');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate,   setEndDate]   = useState('');
   const [reason, setReason]       = useState('');
+  const [comment, setComment]     = useState('');
+  const [status, setStatus]       = useState<'active' | 'closed' | 'cancelled'>('active');
+  const [formError, setFormError] = useState('');
 
   const { data: equipmentData = [] } = useQuery({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
+    enabled: open,
   });
 
   // Подгружаем реестр техники (всё, кроме списанного)
@@ -326,9 +350,24 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
     equipmentData.filter(e => e.status !== 'inactive'),
   [equipmentData]);
 
+  const selectedEquipment = useMemo(
+    () => allEquipment.find(item => item.id === equipmentId) ?? null,
+    [allEquipment, equipmentId],
+  );
+
   React.useEffect(() => {
-    if (preselectedEquipment) setEquipmentInv(preselectedEquipment);
-  }, [preselectedEquipment]);
+    if (!open) return;
+    const fallbackEquipmentId = preselectedEquipmentInv
+      ? allEquipment.find(item => item.inventoryNumber === preselectedEquipmentInv)?.id || ''
+      : '';
+    setEquipmentId(downtime?.equipmentId || preselectedEquipmentId || fallbackEquipmentId || '');
+    setStartDate(downtime?.startDate || today);
+    setEndDate(downtime?.endDate || '');
+    setReason(downtime?.reason || '');
+    setComment(downtime?.comment || '');
+    setStatus(downtime?.status || 'active');
+    setFormError('');
+  }, [allEquipment, downtime, open, preselectedEquipmentId, preselectedEquipmentInv, today]);
 
   React.useEffect(() => {
     if (!open) return undefined;
@@ -341,6 +380,39 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
 
   if (!presence.shouldRender) return null;
 
+  const isEditing = Boolean(downtime?.id);
+  const submit = (nextStatus: 'active' | 'closed' | 'cancelled' = status) => {
+    const nextEndDate = nextStatus === 'closed' && !endDate
+      ? (startDate && today < startDate ? startDate : today)
+      : endDate;
+    const equipmentInv = selectedEquipment?.inventoryNumber || downtime?.equipmentInv || preselectedEquipmentInv || '';
+
+    if (!equipmentId && !equipmentInv) {
+      setFormError('Выберите технику для простоя.');
+      return;
+    }
+    if (!startDate) {
+      setFormError('Укажите дату начала простоя.');
+      return;
+    }
+    if (nextEndDate && nextEndDate < startDate) {
+      setFormError('Дата окончания простоя не может быть раньше даты начала.');
+      return;
+    }
+
+    setFormError('');
+    onConfirm({
+      id: downtime?.id,
+      equipmentId,
+      equipmentInv,
+      startDate,
+      endDate: nextEndDate,
+      reason,
+      comment,
+      status: nextStatus,
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div data-state={presence.dataState} className={modalOverlayClass} onClick={onClose} />
@@ -351,8 +423,8 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
               <PauseCircle className="h-5 w-5" />
             </span>
             <div>
-              <h3 className="text-xl font-semibold text-slate-950 dark:text-white">Отметить простой</h3>
-              <p className="mt-0.5 text-sm text-slate-500 dark:text-gray-400">Укажите технику, период и причину простоя.</p>
+              <h3 className="text-xl font-semibold text-slate-950 dark:text-white">{isEditing ? 'Изменить простой' : 'Добавить простой'}</h3>
+              <p className="mt-0.5 text-sm text-slate-500 dark:text-gray-400">Укажите технику, период, причину и комментарий.</p>
             </div>
           </div>
           <button onClick={onClose} className={modalCloseClass}>
@@ -370,9 +442,9 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
             ) : (
               <EquipmentCombobox
                 equipment={allEquipment}
-                value={equipmentInv}
-                valueKey="inventoryNumber"
-                onChange={setEquipmentInv}
+                value={equipmentId}
+                valueKey="id"
+                onChange={setEquipmentId}
               />
             )}
           </div>
@@ -393,14 +465,50 @@ export function DowntimeModal({ open, preselectedEquipment, onClose, onConfirm }
             </select>
           </div>
 
+          <div>
+            <label className="mb-1.5 block text-sm text-gray-700 dark:text-gray-300">Комментарий</label>
+            <Textarea
+              rows={3}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Что важно знать по этому простою"
+            />
+          </div>
+
+          {isEditing && (
+            <div>
+              <label className="mb-1.5 block text-sm text-gray-700 dark:text-gray-300">Статус</label>
+              <select value={status} onChange={(e) => setStatus(e.target.value as 'active' | 'closed' | 'cancelled')} className={selectClass}>
+                <option value="active">Активен</option>
+                <option value="closed">Закрыт</option>
+                <option value="cancelled">Отменён</option>
+              </select>
+            </div>
+          )}
+
+          {formError && (
+            <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+              {formError}
+            </p>
+          )}
         </div>
 
-          <div className={modalFooterClass}>
-            <Button variant="secondary" onClick={onClose}>Отмена</Button>
-            <Button onClick={() => onConfirm({ equipmentInv, startDate, endDate, reason })}>
-              Сохранить простой
+        <div className={modalFooterClass}>
+          <Button variant="secondary" onClick={onClose}>Отмена</Button>
+          {isEditing && status !== 'cancelled' && (
+            <Button variant="secondary" onClick={() => submit('cancelled')}>
+              Отменить простой
             </Button>
-          </div>
+          )}
+          {isEditing && status === 'active' && (
+            <Button variant="secondary" onClick={() => submit('closed')}>
+              Закрыть простой
+            </Button>
+          )}
+          <Button onClick={() => submit(status)}>
+            {isEditing ? 'Сохранить изменения' : 'Добавить простой'}
+          </Button>
+        </div>
       </div>
     </div>
   );

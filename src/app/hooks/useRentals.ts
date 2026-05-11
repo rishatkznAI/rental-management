@@ -7,6 +7,7 @@ export const RENTAL_KEYS = {
   detail: (id: string) => ['rentals', id] as const,
   audit: (id: string) => ['rentals', id, 'audit'] as const,
   gantt: ['rentals', 'gantt'] as const,
+  downtimes: ['rentals', 'equipment-downtimes'] as const,
 };
 
 type QueryOptions = {

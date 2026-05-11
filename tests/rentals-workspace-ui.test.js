@@ -5,6 +5,8 @@ import path from 'node:path';
 
 const rentalsPagePath = path.join(process.cwd(), 'src/app/pages/Rentals.tsx');
 const rentalsSource = fs.readFileSync(rentalsPagePath, 'utf8');
+const ganttModalsPath = path.join(process.cwd(), 'src/app/components/gantt/GanttModals.tsx');
+const ganttModalsSource = fs.readFileSync(ganttModalsPath, 'utf8');
 
 test('rentals workspace tabs have clear active state and mode descriptions', () => {
   assert.match(rentalsSource, /aria-pressed=\{active\}/);
@@ -20,9 +22,29 @@ test('rentals workspace tabs have clear active state and mode descriptions', () 
 });
 
 test('rentals workspace uses contextual actions per mode', () => {
-  assert.match(rentalsSource, /activeWorkspaceTab === 'planner'[\s\S]*Отметить простой/);
+  assert.match(rentalsSource, /activeWorkspaceTab === 'planner'[\s\S]*Добавить простой/);
   assert.match(rentalsSource, /activeWorkspaceTab === 'returns'[\s\S]*Создать возвратную доставку/);
   assert.match(rentalsSource, /activeWorkspaceTab === 'debt_docs'[\s\S]*Открыть платежи/);
+});
+
+test('fleet planner persists equipment downtime and refreshes rows after save', () => {
+  assert.match(rentalsSource, /queryKey:\s*RENTAL_KEYS\.downtimes/);
+  assert.match(rentalsSource, /queryFn:\s*rentalsService\.getDowntimes/);
+  assert.match(rentalsSource, /rentalsService\.createDowntime\(payload\)/);
+  assert.match(rentalsSource, /rentalsService\.updateDowntime\(data\.id,\s*payload\)/);
+  assert.match(rentalsSource, /queryClient\.setQueryData<DowntimePeriod\[\]>\(RENTAL_KEYS\.downtimes/);
+  assert.match(rentalsSource, /queryClient\.invalidateQueries\(\{\s*queryKey:\s*RENTAL_KEYS\.downtimes\s*\}\)/);
+  assert.doesNotMatch(rentalsSource, /mockDowntimes/);
+});
+
+test('downtime modal supports add edit close cancel and human validation', () => {
+  assert.match(ganttModalsSource, /isEditing \? 'Изменить простой' : 'Добавить простой'/);
+  assert.match(ganttModalsSource, /Комментарий/);
+  assert.match(ganttModalsSource, /Закрыть простой/);
+  assert.match(ganttModalsSource, /Отменить простой/);
+  assert.match(ganttModalsSource, /Выберите технику для простоя/);
+  assert.match(ganttModalsSource, /Укажите дату начала простоя/);
+  assert.match(ganttModalsSource, /Дата окончания простоя не может быть раньше даты начала/);
 });
 
 test('planner and returns are not ordinary rentals table variants', () => {

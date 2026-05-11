@@ -1105,6 +1105,9 @@ function registerCrudRoutes(deps) {
             }
             nextItem = normalizeUserPasswordForWrite(nextItem, data[idx]);
           }
+          if (collection === 'equipment') {
+            nextItem = normalizeEquipmentStorageRecord(nextItem);
+          }
           data[idx] = collection === 'clients' || collection === 'equipment'
             ? mergeEntityHistory(collection, data[idx], nextItem, req.user.userName)
             : (collection === 'knowledge_base_progress' && !isKnowledgeBaseReviewer(req)

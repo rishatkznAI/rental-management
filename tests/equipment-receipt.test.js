@@ -207,6 +207,34 @@ test('PATCH equipment accepts rental fleet legacy aliases before RBAC sanitizing
   });
 });
 
+test('PATCH equipment removes stale rental fleet aliases from existing records', async () => {
+  const state = createState();
+  state.equipment[0] = {
+    ...state.equipment[0],
+    activeInFleet: true,
+    fleet: 'rental',
+    rentalFleet: true,
+    isRentalFleet: true,
+    availableForRent: true,
+    category: 'own',
+  };
+  await withServer(createCrudApp(state), async baseUrl => {
+    const response = await request(baseUrl, 'PATCH', '/api/equipment/EQ-1', {
+      activeInFleet: false,
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.activeInFleet, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(response.body, 'fleet'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(response.body, 'rentalFleet'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(response.body, 'isRentalFleet'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(response.body, 'availableForRent'), false);
+    assert.equal(state.equipment[0].activeInFleet, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(state.equipment[0], 'fleet'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(state.equipment[0], 'rentalFleet'), false);
+  });
+});
+
 test('partial equipment PATCH keeps sale receipt and sale mode fields intact', async () => {
   const state = createState();
   const receiptHistory = [{ date: '2026-05-02T08:00:00.000Z', oldStatus: 'acceptance_in_progress', newStatus: 'accepted' }];

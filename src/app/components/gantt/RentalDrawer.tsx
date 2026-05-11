@@ -103,7 +103,7 @@ const serviceAlertStyles: Record<RentalServiceAlertSeverity, {
 };
 
 const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
-type RentalDrawerTab = 'overview' | 'payments' | 'documents' | 'delivery' | 'history';
+type RentalDrawerTab = 'overview' | 'terms' | 'payments' | 'documents' | 'delivery' | 'history';
 
 export function RentalDrawer({
   rental: rentalProp, equipment, allRentals, payments, serviceTickets = EMPTY_SERVICE_TICKETS,
@@ -229,6 +229,23 @@ export function RentalDrawer({
       : daysLeft >= 0
         ? `Осталось ${daysLeft} дн.`
         : '—';
+  const actualReturnDate = (rental as GanttRentalData & { actualReturnDate?: string; returnDate?: string }).actualReturnDate
+    || (rental as GanttRentalData & { actualReturnDate?: string; returnDate?: string }).returnDate
+    || '';
+  const isRentalFinished = rental.status === 'closed' || rental.status === 'returned';
+  const canExtendRentalTerm = canEditRentalDates && (rental.status === 'active' || rental.status === 'created') && !isRentalFinished;
+  const canShowExtendShortcut = canEditRentalDates && rental.status === 'active' && !isRentalFinished;
+  const canManageRentalReturn = canEditRentals && rental.status === 'active' && !isRentalFinished;
+  const termStatusLabel = isRentalFinished
+    ? rental.status === 'closed' ? 'Закрыта' : 'Возврат оформлен'
+    : isReturnOverdue
+      ? `Просрочено ${overdueDays} ${overdueDays === 1 ? 'день' : overdueDays < 5 ? 'дня' : 'дней'}`
+      : 'Активна';
+  const termStatusClass = isRentalFinished
+    ? 'text-slate-950 dark:text-white'
+    : isReturnOverdue
+      ? 'text-red-600 dark:text-red-400'
+      : 'text-green-700 dark:text-green-300';
   const contractLabel = rental.contractId || rentalDetailId || 'Не привязан';
   const equipmentLabel = [
     currentEquipment?.manufacturer,
@@ -411,6 +428,7 @@ export function RentalDrawer({
           <div className="flex gap-1 overflow-x-auto">
             {([
               ['overview', 'Обзор'],
+              ['terms', 'Сроки и возврат'],
               ['payments', 'Платежи'],
               ['documents', 'Документы'],
               ['delivery', 'Доставка'],
@@ -434,22 +452,6 @@ export function RentalDrawer({
 
         {/* Content */}
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-slate-50/40 p-6 dark:bg-gray-950">
-          {isReturnOverdue && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm dark:border-amber-800 dark:bg-amber-900/20">
-              <div className="flex items-start gap-2">
-                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <div>
-                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-                    Срок аренды истёк, но возврат не оформлен
-                  </p>
-                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                    Просрочка {overdueDays} {overdueDays === 1 ? 'день' : overdueDays < 5 ? 'дня' : 'дней'}. Эту аренду нужно либо продлить, либо оформить возврат техники.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
           {activeTab === 'overview' && (
             <section className="space-y-4">
               <div className="grid gap-2 sm:grid-cols-2">
@@ -512,9 +514,9 @@ export function RentalDrawer({
                     </Button>
                   )}
                   {canEditRentals && (
-                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" onClick={() => onReturn(rental)}>
-                      <RotateCcw className="h-4 w-4" />
-                      Запланировать возврат
+                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" onClick={() => setActiveTab('terms')}>
+                      <CalendarClock className="h-4 w-4" />
+                      Сроки и возврат
                     </Button>
                   )}
                   {canCreateDocuments && (
@@ -654,6 +656,186 @@ export function RentalDrawer({
                 </div>
               </div>
             </div>
+          )}
+
+          {activeTab === 'terms' && (
+            <section className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/70">
+                <div className="mb-3 flex items-center gap-2">
+                  <CalendarClock className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <div>
+                    <div className="text-sm font-semibold text-slate-950 dark:text-white">Сроки и возврат</div>
+                    <div className="text-xs text-slate-500 dark:text-gray-400">Период аренды, плановый и фактический возврат техники.</div>
+                  </div>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950/60">
+                    <div className="text-xs font-medium text-slate-500 dark:text-gray-400">Текущий период аренды</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{formatDate(rental.startDate)} — {formatDate(rental.endDate)}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950/60">
+                    <div className="text-xs font-medium text-slate-500 dark:text-gray-400">Статус срока</div>
+                    <div className={`mt-1 text-sm font-semibold ${termStatusClass}`}>{termStatusLabel}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950/60">
+                    <div className="text-xs font-medium text-slate-500 dark:text-gray-400">Дата начала аренды</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{formatDate(rental.startDate)}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950/60">
+                    <div className="text-xs font-medium text-slate-500 dark:text-gray-400">Плановая дата окончания</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{formatDate(rental.endDate)}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950/60">
+                    <div className="text-xs font-medium text-slate-500 dark:text-gray-400">Плановый возврат</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{formatDate(rental.endDate)}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950/60">
+                    <div className="text-xs font-medium text-slate-500 dark:text-gray-400">Фактический возврат</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">
+                      {actualReturnDate ? formatDate(actualReturnDate) : isRentalFinished ? 'Оформлен' : 'Не оформлен'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {isReturnOverdue && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm dark:border-amber-800 dark:bg-amber-900/20">
+                  <div className="flex items-start gap-2">
+                    <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                        Срок аренды истёк. Нужно продлить аренду или оформить возврат техники.
+                      </p>
+                      <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                        Просрочка {overdueDays} {overdueDays === 1 ? 'день' : overdueDays < 5 ? 'дня' : 'дней'}.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {!isRentalFinished && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/70">
+                  <div className="mb-3 text-sm font-semibold text-slate-950 dark:text-white">Действия со сроком</div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {canExtendRentalTerm && (
+                      <button
+                        onClick={() => setShowExtend(v => !v)}
+                        className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-gray-700 dark:bg-gray-950/60 dark:text-gray-300 dark:hover:bg-gray-800"
+                      >
+                        <span className="flex items-center gap-2">
+                          <CalendarClock className="h-4 w-4 text-blue-500" />
+                          Продлить аренду
+                        </span>
+                        {showExtend ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                      </button>
+                    )}
+                    {canManageRentalReturn && (
+                      <Button size="sm" variant="secondary" className="justify-start rounded-xl" onClick={() => onReturn(rental)}>
+                        <RotateCcw className="h-4 w-4" />
+                        Оформить возврат техники
+                      </Button>
+                    )}
+                    {canManageRentalReturn && (
+                      <button
+                        onClick={() => setShowEarlyReturn(v => !v)}
+                        className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-gray-700 dark:bg-gray-950/60 dark:text-gray-300 dark:hover:bg-gray-800"
+                      >
+                        <span className="flex items-center gap-2">
+                          <LogOut className="h-4 w-4 text-red-500" />
+                          Досрочный возврат
+                        </span>
+                        {showEarlyReturn ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                      </button>
+                    )}
+                    {canCreateService && (
+                      <Button size="sm" variant="secondary" className="justify-start rounded-xl" asChild>
+                        <Link to="/service/new">
+                          <Wrench className="h-4 w-4" />
+                          Создать сервисную заявку при повреждении
+                        </Link>
+                      </Button>
+                    )}
+                  </div>
+
+                  {!canExtendRentalTerm && !canManageRentalReturn && !canCreateService && (
+                    <p className="text-sm text-slate-500 dark:text-gray-400">Для вашей роли нет доступных действий по срокам этой аренды.</p>
+                  )}
+                </div>
+              )}
+
+              {isRentalFinished && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm dark:border-gray-800 dark:bg-gray-900/70 dark:text-gray-300">
+                  Активные действия скрыты, потому что возврат уже оформлен или аренда закрыта.
+                </div>
+              )}
+
+              {activeTab === 'terms' && canExtendRentalTerm && showExtend && (
+                <section>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                    <div className="mb-2 text-xs text-amber-700 dark:text-amber-400">
+                      Текущая дата возврата: <strong>{formatDate(rental.endDate)}</strong>
+                    </div>
+                    <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                      Продление выполняется в карточке аренды: там проверяются конфликты техники, сумма продления, долг клиента и согласование с клиентом.
+                    </p>
+                    <div className="mt-3 flex justify-end">
+                      {rentalDetailId ? (
+                        <Button size="sm" asChild>
+                          <Link to={`/rentals/${encodeURIComponent(rentalDetailId)}`}>
+                            Открыть карточку
+                          </Link>
+                        </Button>
+                      ) : (
+                        <Button size="sm" disabled>Карточка недоступна</Button>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {activeTab === 'terms' && canManageRentalReturn && showEarlyReturn && (
+                <section>
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+                    <div className="mb-2 text-xs text-red-700 dark:text-red-400">
+                      Техника будет помечена как возвращённая, аренда закроется.
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                      <div className="flex-1">
+                        <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Фактическая дата возврата *</label>
+                        <input
+                          type="date"
+                          value={earlyReturnDate}
+                          max={rental.endDate}
+                          onChange={e => { setEarlyReturnDate(e.target.value); setEarlyReturnConfirm(false); }}
+                          className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                        />
+                      </div>
+                      {!earlyReturnConfirm ? (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={handleEarlyReturnSubmit}
+                        >
+                          Оформить
+                        </Button>
+                      ) : (
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="destructive" onClick={handleEarlyReturnConfirm}>Подтвердить</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEarlyReturnConfirm(false)}>Отмена</Button>
+                        </div>
+                      )}
+                    </div>
+                    {earlyReturnConfirm && (
+                      <p className="mt-1.5 text-xs text-red-700 dark:text-red-400">
+                        Подтвердить досрочный возврат {formatDate(earlyReturnDate)}?
+                      </p>
+                    )}
+                  </div>
+                </section>
+              )}
+            </section>
           )}
 
           {/* Payment Block */}
@@ -858,16 +1040,24 @@ export function RentalDrawer({
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/70">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-slate-950 dark:text-white">Доставка и возврат</div>
-                  <div className="text-xs text-slate-500 dark:text-gray-400">Операционная информация по выдаче и возврату техники.</div>
+                  <div className="text-sm font-semibold text-slate-950 dark:text-white">Логистика аренды</div>
+                  <div className="text-xs text-slate-500 dark:text-gray-400">Выдача, возвратная доставка и перевозчик.</div>
                 </div>
                 {canCreateDeliveries && (
-                  <Button size="sm" variant="secondary" className="rounded-xl" asChild>
-                    <Link to="/deliveries/new">
-                      <Truck className="h-4 w-4" />
-                      Создать доставку
-                    </Link>
-                  </Button>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button size="sm" variant="secondary" className="rounded-xl" asChild>
+                      <Link to="/deliveries/new">
+                        <Truck className="h-4 w-4" />
+                        Создать доставку
+                      </Link>
+                    </Button>
+                    <Button size="sm" variant="secondary" className="rounded-xl" asChild>
+                      <Link to="/deliveries/new">
+                        <RotateCcw className="h-4 w-4" />
+                        Создать возвратную доставку
+                      </Link>
+                    </Button>
+                  </div>
                 )}
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -888,109 +1078,16 @@ export function RentalDrawer({
                   <div className={`mt-1 text-sm font-semibold ${isReturnOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-950 dark:text-white'}`}>{daysLeftLabel}</div>
                 </div>
               </div>
-              {canCreateService && (
-                <div className="mt-3">
-                  <Button size="sm" variant="secondary" className="rounded-xl" asChild>
-                    <Link to="/service/new">
-                      <Wrench className="h-4 w-4" />
-                      Создать сервисную заявку при повреждении
-                    </Link>
-                  </Button>
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Extend Rental — only through the canonical rental card operation */}
-          {activeTab === 'delivery' && canEditRentalDates && (rental.status === 'active' || rental.status === 'created') && (
-            <section>
-              <button
-                onClick={() => setShowExtend(v => !v)}
-                className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300 dark:hover:bg-gray-700/50"
-              >
-                <div className="flex items-center gap-2">
-                  <CalendarClock className="h-4 w-4 text-gray-400" />
-                  <span>Продлить аренду</span>
-                </div>
-                {showExtend ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
-              </button>
-
-              {showExtend && (
-                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
-                  <div className="mb-2 text-xs text-amber-700 dark:text-amber-400">
-                    Текущая дата возврата: <strong>{formatDate(rental.endDate)}</strong>
-                  </div>
-                  <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">
-                    Продление выполняется в карточке аренды: там проверяются конфликты техники, сумма продления, долг клиента и согласование с клиентом.
-                  </p>
-                  <div className="mt-3 flex justify-end">
-                    {rentalDetailId ? (
-                      <Button size="sm" asChild>
-                        <Link to={`/rentals/${encodeURIComponent(rentalDetailId)}`}>
-                          Открыть карточку
-                        </Link>
-                      </Button>
-                    ) : (
-                      <Button size="sm" disabled>Карточка недоступна</Button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Early Return — only for active */}
-          {activeTab === 'delivery' && canEditRentalDates && rental.status === 'active' && (
-            <section>
-              <button
-                onClick={() => setShowEarlyReturn(v => !v)}
-                className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300 dark:hover:bg-gray-700/50"
-              >
-                <div className="flex items-center gap-2">
-                  <LogOut className="h-4 w-4 text-gray-400" />
-                  <span>Досрочный возврат</span>
-                </div>
-                {showEarlyReturn ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
-              </button>
-
-              {showEarlyReturn && (
-                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
-                  <div className="mb-2 text-xs text-red-700 dark:text-red-400">
-                    Техника будет помечена как возвращённая, аренда закроется.
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1">
-                      <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Фактическая дата возврата *</label>
-                      <input
-                        type="date"
-                        value={earlyReturnDate}
-                        max={rental.endDate}
-                        onChange={e => { setEarlyReturnDate(e.target.value); setEarlyReturnConfirm(false); }}
-                        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                      />
-                    </div>
-                    {!earlyReturnConfirm ? (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={handleEarlyReturnSubmit}
-                      >
-                        Оформить
-                      </Button>
-                    ) : (
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="destructive" onClick={handleEarlyReturnConfirm}>Подтвердить</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEarlyReturnConfirm(false)}>Отмена</Button>
-                      </div>
-                    )}
-                  </div>
-                  {earlyReturnConfirm && (
-                    <p className="mt-1.5 text-xs text-red-700 dark:text-red-400">
-                      Подтвердить досрочный возврат {formatDate(earlyReturnDate)}?
-                    </p>
-                  )}
-                </div>
-              )}
+              <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center dark:border-gray-800 dark:bg-gray-950/60">
+                <Truck className="mx-auto h-5 w-5 text-slate-400 dark:text-gray-500" />
+                <div className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">По этой аренде доставка ещё не создана</div>
+                <p className="mt-1 text-xs text-slate-500 dark:text-gray-400">
+                  Создайте доставку или возвратную доставку.
+                </p>
+              </div>
+              <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300">
+                Чтобы изменить срок аренды, перейдите во вкладку «Сроки и возврат».
+              </div>
             </section>
           )}
 
@@ -1243,10 +1340,22 @@ export function RentalDrawer({
               Активировать аренду
             </Button>
           )}
-          {canEditRentals && rental.status === 'active' && (
-            <Button size="sm" onClick={() => onReturn(rental)}>
+          {canShowExtendShortcut && (
+            <Button
+              size="sm"
+              onClick={() => {
+                setActiveTab('terms');
+                setShowExtend(true);
+              }}
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
+              Продлить аренду
+            </Button>
+          )}
+          {canManageRentalReturn && (
+            <Button size="sm" variant="secondary" onClick={() => onReturn(rental)}>
               <RotateCcw className="h-3.5 w-3.5" />
-              Возврат техники
+              Оформить возврат
             </Button>
           )}
           {canEditRentals && rental.status === 'returned' && (

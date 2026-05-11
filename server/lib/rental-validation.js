@@ -3,15 +3,11 @@ const {
   isUniqueInventoryNumber,
   rentalMatchesEquipment,
 } = require('./equipment-matching');
+const { normalizeEquipmentStorageRecord } = require('./equipment-classification');
 
 function normalizeEquipmentRecord(equipment) {
   if (!equipment) return equipment;
-  return {
-    ...equipment,
-    category: equipment.category || 'own',
-    activeInFleet: equipment.activeInFleet !== false,
-    priority: equipment.priority || 'medium',
-  };
+  return normalizeEquipmentStorageRecord(equipment);
 }
 
 function canEquipmentParticipateInRentals(equipment) {

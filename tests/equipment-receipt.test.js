@@ -159,6 +159,66 @@ test('PATCH saleReceiptStatus preserves saleCondition and records receipt histor
   });
 });
 
+test('PATCH equipment persists activeInFleet as boolean through office update', async () => {
+  const state = createState();
+  state.equipment[0] = {
+    ...state.equipment[0],
+    activeInFleet: true,
+    category: 'own',
+    location: 'Склад',
+  };
+  const office = { userId: 'U-office', userName: 'Офис', userRole: 'Офис-менеджер' };
+  await withServer(createCrudApp(state, office), async baseUrl => {
+    const response = await request(baseUrl, 'PATCH', '/api/equipment/EQ-1', {
+      activeInFleet: 'false',
+      location: 'Казань',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.activeInFleet, false);
+    assert.equal(typeof response.body.activeInFleet, 'boolean');
+    assert.equal(response.body.location, 'Казань');
+    assert.equal(state.equipment[0].activeInFleet, false);
+  });
+});
+
+test('partial equipment PATCH keeps sale receipt and sale mode fields intact', async () => {
+  const state = createState();
+  const receiptHistory = [{ date: '2026-05-02T08:00:00.000Z', oldStatus: 'acceptance_in_progress', newStatus: 'accepted' }];
+  state.equipment[0] = {
+    ...state.equipment[0],
+    activeInFleet: true,
+    saleMode: true,
+    saleCondition: 'used',
+    salePdiStatus: 'ready',
+    saleReceiptStatus: 'accepted',
+    actualArrivalDate: '2026-05-01',
+    acceptedAt: '2026-05-02T08:00:00.000Z',
+    acceptedByUserId: 'U-mech',
+    acceptedByName: 'Механик',
+    acceptanceChecklist: REQUIRED_CHECKLIST,
+    acceptancePhotos: REQUIRED_PHOTOS,
+    receiptHistory,
+  };
+
+  await withServer(createCrudApp(state), async baseUrl => {
+    const response = await request(baseUrl, 'PATCH', '/api/equipment/EQ-1', {
+      activeInFleet: false,
+      location: 'Новый склад',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.activeInFleet, false);
+    assert.equal(response.body.saleMode, true);
+    assert.equal(response.body.saleCondition, 'used');
+    assert.equal(response.body.salePdiStatus, 'ready');
+    assert.equal(response.body.saleReceiptStatus, 'accepted');
+    assert.deepEqual(response.body.acceptanceChecklist, REQUIRED_CHECKLIST);
+    assert.deepEqual(response.body.acceptancePhotos, REQUIRED_PHOTOS);
+    assert.deepEqual(response.body.receiptHistory, receiptHistory);
+  });
+});
+
 test('mechanic can start acceptance but cannot change sale financial fields', async () => {
   const state = createState();
   state.equipment[0].saleReceiptStatus = 'arrived_waiting_acceptance';

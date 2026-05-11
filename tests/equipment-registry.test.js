@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   buildActiveRentalIndex,
   buildEquipmentTabCounts,
@@ -21,6 +23,8 @@ import {
   rentalMatchesEquipment,
   serviceTicketMatchesEquipment,
 } from '../src/app/pages/equipment/equipment.helpers.ts';
+
+const equipmentClassificationSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/equipmentClassification.ts'), 'utf8');
 
 const canRentOwnOrPartner = (equipment = {}) => (
   equipment.activeInFleet !== false
@@ -180,6 +184,16 @@ test('equipment registry filters combine active tab with field filters', () => {
   assert.deepEqual(equipmentFilterReasons(equipment, filters), []);
   assert.deepEqual(equipmentFilterReasons({ ...equipment, status: 'rented' }, filters), ['status', 'tab:available']);
   assert.deepEqual(equipmentFilterReasons(equipment, { ...filters, activeTab: 'rented', statusFilter: 'all' }), ['tab:rented']);
+});
+
+test('equipment normalization uses activeInFleet as canonical rental fleet field', () => {
+  assert.match(equipmentClassificationSource, /export function normalizeEquipmentActiveInFleet/);
+  assert.match(equipmentClassificationSource, /'rentalFleet'/);
+  assert.match(equipmentClassificationSource, /'isRentalFleet'/);
+  assert.match(equipmentClassificationSource, /'availableForRent'/);
+  assert.match(equipmentClassificationSource, /activeInFleet: normalizeEquipmentActiveInFleet/);
+  assert.match(equipmentClassificationSource, /hasActiveInFleet \? \{ activeInFleet: normalizeEquipmentActiveInFleet/);
+  assert.match(equipmentClassificationSource, /isRentalFleet: _isRentalFleet/);
 });
 
 test('equipment registry tab counts preserve sale and fleet classification', () => {

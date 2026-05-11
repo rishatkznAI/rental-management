@@ -14,6 +14,15 @@ export const ACTIVE_FLEET_LABELS = {
   no: 'Нет',
 } as const;
 
+const ACTIVE_IN_FLEET_ALIAS_KEYS = [
+  'activeInFleet',
+  'rentalFleet',
+  'isRentalFleet',
+  'inRentalFleet',
+  'availableForRent',
+  'isRental',
+] as const;
+
 export const EQUIPMENT_PRIORITY_LABELS: Record<EquipmentPriority, string> = {
   low: 'Низкий',
   medium: 'Средний',
@@ -47,12 +56,39 @@ export const EQUIPMENT_SALE_RECEIPT_LABELS: Record<EquipmentSaleReceiptStatus, s
 export const EQUIPMENT_SALE_RECEIPT_OPTIONS = Object.entries(EQUIPMENT_SALE_RECEIPT_LABELS)
   .map(([value, label]) => ({ value: value as EquipmentSaleReceiptStatus, label }));
 
+function hasOwn(source: object, key: string) {
+  return Object.prototype.hasOwnProperty.call(source, key);
+}
+
+function coerceBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', 'да', 'активна', 'active', 'rental', 'rent', 'fleet', 'rental_fleet'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'n', 'нет', 'неактивна', 'inactive', 'sale', 'sales', 'sold', 'client', 'archive', 'archived'].includes(normalized)) return false;
+  }
+  return undefined;
+}
+
+export function normalizeEquipmentActiveInFleet(equipment: Partial<Equipment> & Record<string, unknown>, fallback = true): boolean {
+  for (const key of ACTIVE_IN_FLEET_ALIAS_KEYS) {
+    if (!hasOwn(equipment, key)) continue;
+    const normalized = coerceBoolean(equipment[key]);
+    if (normalized !== undefined) return normalized;
+  }
+  return fallback;
+}
+
 export function normalizeEquipment<T extends Partial<Equipment>>(equipment: T): T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority' | 'isForSale' | 'salePdiStatus'> {
   const saleCondition = normalizeEquipmentSaleCondition(equipment) as EquipmentSaleCondition | undefined;
   return {
     ...equipment,
     category: equipment.category ?? 'own',
-    activeInFleet: equipment.activeInFleet ?? true,
+    activeInFleet: normalizeEquipmentActiveInFleet(equipment as T & Record<string, unknown>, true),
     priority: equipment.priority ?? 'medium',
     isForSale: equipment.isForSale ?? false,
     ...(saleCondition ? { saleCondition } : {}),
@@ -65,9 +101,20 @@ export function normalizeEquipmentList<T extends Partial<Equipment>>(list: T[]):
 }
 
 export function normalizeEquipmentPatch<T extends Partial<Equipment>>(equipment: T): T {
+  const source = equipment as T & Record<string, unknown>;
   const saleCondition = normalizeEquipmentSaleCondition(equipment) as EquipmentSaleCondition | undefined;
+  const hasActiveInFleet = ACTIVE_IN_FLEET_ALIAS_KEYS.some(key => hasOwn(source, key));
+  const {
+    rentalFleet: _rentalFleet,
+    isRentalFleet: _isRentalFleet,
+    inRentalFleet: _inRentalFleet,
+    availableForRent: _availableForRent,
+    isRental: _isRental,
+    ...rest
+  } = source;
   return {
-    ...equipment,
+    ...(rest as T),
+    ...(hasActiveInFleet ? { activeInFleet: normalizeEquipmentActiveInFleet(source, true) } : {}),
     ...(saleCondition ? { saleCondition } : {}),
   };
 }

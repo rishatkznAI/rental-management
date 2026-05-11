@@ -34,6 +34,10 @@ const {
   normalizeEquipmentDowntimeRecord,
   validateEquipmentDowntimePayload,
 } = require('../lib/equipment-downtime');
+const {
+  normalizeEquipmentStoragePatch,
+  normalizeEquipmentStorageRecord,
+} = require('../lib/equipment-classification');
 
 function registerCrudRoutes(deps) {
   const {
@@ -847,6 +851,7 @@ function registerCrudRoutes(deps) {
             user: req.user,
             nowIso,
           });
+          input = normalizeEquipmentStorageRecord(input);
         }
         if (collection === 'rentals' || collection === 'gantt_rentals') {
           const validation = validateRentalPayload(collection, input, readData(collection) || []);
@@ -1025,6 +1030,7 @@ function registerCrudRoutes(deps) {
             user: req.user,
             nowIso,
           });
+          safePatch = normalizeEquipmentStoragePatch(safePatch);
         }
         const previousItem = { ...data[idx] };
         if (collection === 'payments') {

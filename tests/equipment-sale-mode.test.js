@@ -229,6 +229,22 @@ test('equipment update uses patch normalizer so sale condition changes do not re
   assert.match(serviceSource, /api\.patch<Equipment>\(`\/api\/equipment\/\$\{id\}`, normalizeEquipmentPatch\(data\)\)/);
 });
 
+test('equipment detail editor saves the card through PATCH and keeps modal state stable', () => {
+  const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+  const modalStart = detailSource.indexOf('function EditEquipmentModal');
+  const modalEnd = detailSource.indexOf('export {', modalStart);
+  const modalSource = detailSource.slice(modalStart, modalEnd > modalStart ? modalEnd : undefined);
+
+  assert.match(detailSource, /buildEquipmentEditPatch\(equipment, normalizedUpdated\)/);
+  assert.match(detailSource, /equipmentService\.update\(equipment\.id, patchWithHistory\)/);
+  assert.match(detailSource, /queryClient\.setQueryData<Equipment\[\] \| undefined>\(EQUIPMENT_KEYS\.all/);
+  assert.doesNotMatch(detailSource, /const list = allEquipment\.map\(e => e\.id === normalizedUpdated\.id \? withHistory : e\)/);
+  assert.doesNotMatch(detailSource, /void persistEquipment\(list\)/);
+  assert.match(modalSource, /previousOpenRef/);
+  assert.doesNotMatch(modalSource, /if \(open\) setForm\(equipment\);\s*\n\s*}, \[open, equipment\]\);/);
+  assert.match(detailSource, /<SelectContent className="z-\[70\]">/);
+});
+
 test('sale deal quick action renders only with a safe configured route', () => {
   const withoutRoute = buildEquipmentQuickActions({
     equipment: { id: 'EQ-sale', inventoryNumber: 'INV-sale', status: 'available', saleMode: true },

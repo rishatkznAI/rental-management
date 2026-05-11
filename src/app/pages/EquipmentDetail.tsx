@@ -24,7 +24,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../components/ui/select';
 import type { Equipment, EquipmentOwnerType, EquipmentSalePdiStatus, EquipmentSaleReceiptStatus, RepairEventType } from '../types';
-import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS, EQUIPMENT_SALE_RECEIPT_OPTIONS } from '../lib/equipmentClassification';
+import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS, EQUIPMENT_SALE_RECEIPT_OPTIONS, normalizeEquipment } from '../lib/equipmentClassification';
 import type { GanttRentalData } from '../mock-data';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -64,6 +64,50 @@ const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
   investor: 'Техника инвестора',
   sublease: 'Субаренда',
+};
+
+const EQUIPMENT_EDIT_FIELD_LABELS: Record<string, string> = {
+  inventoryNumber: 'инвентарный номер',
+  serialNumber: 'серийный номер',
+  manufacturer: 'производитель',
+  model: 'модель',
+  type: 'тип',
+  drive: 'привод',
+  year: 'год выпуска',
+  hours: 'моточасы',
+  liftHeight: 'высота подъёма',
+  workingHeight: 'рабочая высота',
+  loadCapacity: 'грузоподъёмность',
+  weight: 'масса',
+  dimensions: 'габариты',
+  owner: 'собственник',
+  category: 'категория',
+  priority: 'приоритет',
+  activeInFleet: 'активный парк',
+  isForSale: 'на продаже',
+  saleCondition: 'тип продажной техники',
+  salePdiStatus: 'статус PDI',
+  saleReceiptStatus: 'статус поступления',
+  plannedArrivalDate: 'плановая дата поступления',
+  actualArrivalDate: 'фактическая дата поступления',
+  acceptedAt: 'дата приёмки',
+  acceptedByName: 'принял',
+  acceptanceComment: 'комментарий приёмки',
+  salePrice1: 'цена 1',
+  salePrice2: 'цена 2',
+  salePrice3: 'цена 3',
+  subleasePrice: 'стоимость субаренды',
+  location: 'локация',
+  status: 'статус',
+  plannedMonthlyRevenue: 'плановый доход',
+  nextMaintenance: 'следующее ТО',
+  maintenanceCHTO: 'дата ЧТО',
+  maintenancePTO: 'дата ПТО',
+  gsmImei: 'GSM IMEI',
+  gsmDeviceId: 'Device ID',
+  gsmProtocol: 'GSM протокол',
+  gsmSimNumber: 'SIM-карта',
+  notes: 'примечание',
 };
 
 const repairTypeLabels: Record<RepairEventType, string> = {
@@ -152,6 +196,26 @@ function hasGsmData(equipment: Equipment) {
     || equipment.gsmLastSeenAt
     || equipment.gsmLastSignalAt
   );
+}
+
+function valuesEqual(left: unknown, right: unknown) {
+  if (Object.is(left, right)) return true;
+  if (left == null && right == null) return true;
+  if (left === undefined && right === '') return true;
+  if (left === '' && right === undefined) return true;
+  if (left === null && right === '') return true;
+  if (left === '' && right === null) return true;
+  return false;
+}
+
+function buildEquipmentEditPatch(previous: Equipment, updated: Equipment): Partial<Equipment> {
+  return (Object.keys(EQUIPMENT_EDIT_FIELD_LABELS) as Array<keyof Equipment>).reduce<Partial<Equipment>>((patch, field) => {
+    const nextValue = updated[field];
+    if (!valuesEqual(previous[field], nextValue)) {
+      (patch as Record<keyof Equipment, unknown>)[field] = nextValue;
+    }
+    return patch;
+  }, {});
 }
 
 function getGsmDisplayValue(equipment: Equipment) {
@@ -797,6 +861,9 @@ export default function EquipmentDetail() {
     context: routeContext,
   });
   const canEditCurrentEquipment = saleMode ? (canEditEquipment || canEditSales) : canEditEquipment;
+  const canEditAdminOnlyEquipmentFields = normalizedRole === 'Администратор';
+  const canEditOperationalEquipmentFields = canEditAdminOnlyEquipmentFields || normalizedRole === 'Офис-менеджер';
+  const canEditSaleEquipmentFields = canEditOperationalEquipmentFields || normalizedRole === 'Менеджер по продажам';
 
   // ── Related data (all from localStorage) ──
   const ganttRentals = useMemo(
@@ -1314,6 +1381,8 @@ export default function EquipmentDetail() {
 
   // ── Modal state ──
   const [showEditModal, setShowEditModal] = useState(false);
+  const [isSavingEquipment, setIsSavingEquipment] = useState(false);
+  const [equipmentSaveError, setEquipmentSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (openEditFromRoute && canEditCurrentEquipment) {
@@ -4103,9 +4172,17 @@ export default function EquipmentDetail() {
         open={showEditModal}
         equipment={equipment}
         canViewFinance={canViewFinance}
-        onOpenChange={setShowEditModal}
-        onSave={(updated) => {
-          const normalizedUpdated = {
+        canEditOperationalFields={canEditOperationalEquipmentFields}
+        canEditSaleFields={canEditSaleEquipmentFields}
+        canEditAdminOnlyFields={canEditAdminOnlyEquipmentFields}
+        isSaving={isSavingEquipment}
+        saveError={equipmentSaveError}
+        onOpenChange={(nextOpen) => {
+          setShowEditModal(nextOpen);
+          if (nextOpen) setEquipmentSaveError(null);
+        }}
+        onSave={async (updated) => {
+          const normalizedUpdated: Equipment = {
             ...updated,
             gsmImei: updated.gsmImei || null,
             gsmDeviceId: updated.gsmDeviceId || null,
@@ -4113,59 +4190,46 @@ export default function EquipmentDetail() {
             gsmSimNumber: updated.gsmSimNumber || null,
             gsmStatus: updated.gsmStatus || 'unknown',
           };
+          const patch = buildEquipmentEditPatch(equipment, normalizedUpdated);
           const historyEntries = buildFieldDiffHistory(
             equipment,
-            normalizedUpdated,
-            {
-              inventoryNumber: 'инвентарный номер',
-              serialNumber: 'серийный номер',
-              manufacturer: 'производитель',
-              model: 'модель',
-              type: 'тип',
-              drive: 'привод',
-              year: 'год выпуска',
-              hours: 'моточасы',
-              liftHeight: 'высота подъёма',
-              workingHeight: 'рабочая высота',
-              loadCapacity: 'грузоподъёмность',
-              weight: 'масса',
-              dimensions: 'габариты',
-              owner: 'собственник',
-              category: 'категория',
-              priority: 'приоритет',
-              activeInFleet: 'активный парк',
-              isForSale: 'на продаже',
-              saleCondition: 'тип продажной техники',
-              salePdiStatus: 'статус PDI',
-              saleReceiptStatus: 'статус поступления',
-              plannedArrivalDate: 'плановая дата поступления',
-              actualArrivalDate: 'фактическая дата поступления',
-              acceptedAt: 'дата приёмки',
-              acceptedByName: 'принял',
-              acceptanceComment: 'комментарий приёмки',
-              salePrice1: 'цена 1',
-              salePrice2: 'цена 2',
-              salePrice3: 'цена 3',
-              subleasePrice: 'стоимость субаренды',
-              location: 'локация',
-              status: 'статус',
-              plannedMonthlyRevenue: 'плановый доход',
-              nextMaintenance: 'следующее ТО',
-              maintenanceCHTO: 'дата ЧТО',
-              maintenancePTO: 'дата ПТО',
-              gsmImei: 'GSM IMEI',
-              gsmDeviceId: 'Device ID',
-              gsmProtocol: 'GSM протокол',
-              gsmSimNumber: 'SIM-карта',
-              notes: 'примечание',
-            },
+            { ...equipment, ...patch },
+            EQUIPMENT_EDIT_FIELD_LABELS,
             user?.name || 'Система',
             'Обновлена карточка техники',
           );
-          const withHistory = appendAuditHistory(normalizedUpdated, ...historyEntries);
-          const list = allEquipment.map(e => e.id === normalizedUpdated.id ? withHistory : e);
-          void persistEquipment(list);
-          setShowEditModal(false);
+          const patchWithHistory = historyEntries.length > 0
+            ? {
+                ...patch,
+                history: appendAuditHistory({ ...equipment, ...patch }, ...historyEntries).history,
+              }
+            : patch;
+
+          if (Object.keys(patchWithHistory).length === 0) {
+            toast.message('Изменений в карточке нет');
+            setShowEditModal(false);
+            return;
+          }
+
+          setIsSavingEquipment(true);
+          setEquipmentSaveError(null);
+          try {
+            const saved = await equipmentService.update(equipment.id, patchWithHistory);
+            setAllEquipment(prev => prev.map(item => item.id === saved.id ? saved : item));
+            queryClient.setQueryData<Equipment[] | undefined>(EQUIPMENT_KEYS.all, current =>
+              Array.isArray(current) ? current.map(item => item.id === saved.id ? saved : item) : current,
+            );
+            await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
+            toast.success('Карточка техники сохранена');
+            setShowEditModal(false);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Не удалось сохранить карточку техники';
+            console.error('Failed to update equipment card', error);
+            setEquipmentSaveError(message);
+            toast.error(message);
+          } finally {
+            setIsSavingEquipment(false);
+          }
         }}
       />
       <Dialog.Root open={!!previewImage} onOpenChange={(open) => { if (!open) setPreviewImage(null); }}>
@@ -4473,38 +4537,47 @@ function FormSection({
 }
 
 function FieldInput({
-  value, onChange, type = 'text', placeholder,
+  value, onChange, type = 'text', placeholder, disabled, disabledReason,
 }: {
   value: string;
   onChange: (v: string) => void;
   type?: string;
   placeholder?: string;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
   return (
     <input
       type={type}
       value={value}
       placeholder={placeholder}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
       onChange={e => onChange(e.target.value)}
-      className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+      className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
     />
   );
 }
 
 function FieldSelect({
-  value, onValueChange, options, placeholder,
+  value, onValueChange, options, placeholder, disabled, disabledReason,
 }: {
   value: string;
   onValueChange: (v: string) => void;
   options: { value: string; label: string }[];
   placeholder?: string;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
   return (
-    <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+    <Select value={value || ''} onValueChange={onValueChange} disabled={disabled}>
+      <SelectTrigger
+        title={disabled ? disabledReason : undefined}
+        className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+      >
         <SelectValue placeholder={placeholder || 'Выберите...'} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="z-[70]">
         {options.map(opt => (
           <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
         ))}
@@ -4536,29 +4609,63 @@ function getSaleReceiptBadge(status?: EquipmentSaleReceiptStatus) {
   return <Badge variant={variants[status]}>{EQUIPMENT_SALE_RECEIPT_LABELS[status]}</Badge>;
 }
 
+function createEquipmentEditForm(equipment: Equipment): Equipment {
+  const normalized = normalizeEquipment(equipment);
+  return {
+    ...normalized,
+    inventoryNumber: normalized.inventoryNumber || '',
+    manufacturer: normalized.manufacturer || '',
+    model: normalized.model || '',
+    type: normalized.type || '',
+    drive: normalized.drive || 'electric',
+    serialNumber: normalized.serialNumber || '',
+    year: Number.isFinite(Number(normalized.year)) ? Number(normalized.year) : new Date().getFullYear(),
+    hours: Number.isFinite(Number(normalized.hours)) ? Number(normalized.hours) : 0,
+    liftHeight: Number.isFinite(Number(normalized.liftHeight)) ? Number(normalized.liftHeight) : 0,
+    location: normalized.location || '',
+    status: normalized.status || 'available',
+    owner: normalized.owner || 'own',
+    plannedMonthlyRevenue: Number.isFinite(Number(normalized.plannedMonthlyRevenue)) ? Number(normalized.plannedMonthlyRevenue) : 0,
+    nextMaintenance: normalized.nextMaintenance || '',
+  };
+}
+
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 function EditEquipmentModal({
-  open, equipment, canViewFinance, onOpenChange, onSave,
+  open, equipment, canViewFinance, canEditOperationalFields, canEditSaleFields, canEditAdminOnlyFields, isSaving, saveError, onOpenChange, onSave,
 }: {
   open: boolean;
   equipment: Equipment;
   canViewFinance: boolean;
+  canEditOperationalFields: boolean;
+  canEditSaleFields: boolean;
+  canEditAdminOnlyFields: boolean;
+  isSaving: boolean;
+  saveError: string | null;
   onOpenChange: (v: boolean) => void;
-  onSave: (updated: Equipment) => void;
+  onSave: (updated: Equipment) => void | Promise<void>;
 }) {
-  const [form, setForm] = useState(equipment);
+  const [form, setForm] = useState(() => createEquipmentEditForm(equipment));
   const equipmentTypeOptions = useEquipmentTypeCatalog();
+  const previousOpenRef = React.useRef(open);
 
   useEffect(() => {
-    if (open) setForm(equipment);
-  }, [open, equipment]);
+    const wasOpen = previousOpenRef.current;
+    previousOpenRef.current = open;
+    if (open && (!wasOpen || form.id !== equipment.id)) {
+      setForm(createEquipmentEditForm(equipment));
+    }
+  }, [equipment, form.id, open]);
 
   const set = (field: keyof Equipment, value: string | number | boolean | undefined) =>
     setForm(prev => ({ ...prev, [field]: value }));
 
   const setStr = (field: keyof Equipment) => (v: string) => set(field, v);
   const setNum = (field: keyof Equipment) => (v: string) => set(field, v === '' ? undefined : Number(v));
+  const operationalDisabledReason = canEditOperationalFields ? undefined : 'Это поле доступно администратору или офис-менеджеру.';
+  const saleDisabledReason = canEditSaleFields ? undefined : 'Продажные поля доступны администратору, офис-менеджеру или менеджеру продаж.';
+  const adminOnlyDisabledReason = canEditAdminOnlyFields ? undefined : 'Это поле может изменить только администратор.';
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -4588,9 +4695,11 @@ function EditEquipmentModal({
                   required
                 >
                   <FieldInput
-                    value={form.inventoryNumber}
+                    value={form.inventoryNumber || ''}
                     onChange={setStr('inventoryNumber')}
                     placeholder="Например: 044, ПП-12"
+                    disabled={!canEditAdminOnlyFields}
+                    disabledReason={adminOnlyDisabledReason}
                   />
                 </FormField>
 
@@ -4599,9 +4708,11 @@ function EditEquipmentModal({
                   hint="Номер с шильдика или паспорта техники"
                 >
                   <FieldInput
-                    value={form.serialNumber}
+                    value={form.serialNumber || ''}
                     onChange={setStr('serialNumber')}
                     placeholder="Например: B200063919"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4611,9 +4722,11 @@ function EditEquipmentModal({
                   required
                 >
                   <FieldInput
-                    value={form.manufacturer}
+                    value={form.manufacturer || ''}
                     onChange={setStr('manufacturer')}
                     placeholder="Например: JLG"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4623,9 +4736,11 @@ function EditEquipmentModal({
                   required
                 >
                   <FieldInput
-                    value={form.model}
+                    value={form.model || ''}
                     onChange={setStr('model')}
                     placeholder="Например: 1932R"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
               </FormSection>
@@ -4636,9 +4751,11 @@ function EditEquipmentModal({
               <FormSection title="Технические характеристики" icon={<Wrench className="h-3.5 w-3.5" />}>
                 <FormField label="Тип техники" hint="Выбор из справочника">
                   <FieldSelect
-                    value={form.type}
+                    value={form.type || ''}
                     onValueChange={setStr('type')}
                     options={equipmentTypeOptions}
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4650,6 +4767,8 @@ function EditEquipmentModal({
                       { value: 'diesel',   label: '⛽ Дизельный' },
                       { value: 'electric', label: '⚡ Электрический' },
                     ]}
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4659,9 +4778,11 @@ function EditEquipmentModal({
                 >
                   <FieldInput
                     type="number"
-                    value={String(form.year)}
+                    value={String(form.year ?? '')}
                     onChange={setNum('year')}
                     placeholder="Например: 2022"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4672,9 +4793,11 @@ function EditEquipmentModal({
                 >
                   <FieldInput
                     type="number"
-                    value={String(form.hours)}
+                    value={String(form.hours ?? '')}
                     onChange={setNum('hours')}
                     placeholder="Например: 1250"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4685,9 +4808,11 @@ function EditEquipmentModal({
                 >
                   <FieldInput
                     type="number"
-                    value={String(form.liftHeight)}
+                    value={String(form.liftHeight ?? '')}
                     onChange={setNum('liftHeight')}
                     placeholder="Например: 8"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4698,9 +4823,11 @@ function EditEquipmentModal({
                 >
                   <FieldInput
                     type="number"
-                    value={String(form.workingHeight || '')}
+                    value={String(form.workingHeight ?? '')}
                     onChange={setNum('workingHeight')}
                     placeholder="Обычно = высота подъёма + 2 м"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4711,9 +4838,11 @@ function EditEquipmentModal({
                 >
                   <FieldInput
                     type="number"
-                    value={String(form.loadCapacity || '')}
+                    value={String(form.loadCapacity ?? '')}
                     onChange={setNum('loadCapacity')}
                     placeholder="Например: 230"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4724,9 +4853,11 @@ function EditEquipmentModal({
                 >
                   <FieldInput
                     type="number"
-                    value={String(form.weight || '')}
+                    value={String(form.weight ?? '')}
                     onChange={setNum('weight')}
                     placeholder="Например: 1800"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4739,6 +4870,8 @@ function EditEquipmentModal({
                     value={form.dimensions || ''}
                     onChange={setStr('dimensions')}
                     placeholder="Например: 2.44 × 0.81 × 1.97 м"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
               </FormSection>
@@ -4756,6 +4889,8 @@ function EditEquipmentModal({
                       { value: 'investor', label: '👤 Техника инвестора' },
                       { value: 'sublease', label: '🔄 Субаренда' },
                     ]}
+                    disabled={!canEditAdminOnlyFields}
+                    disabledReason={adminOnlyDisabledReason}
                   />
                 </FormField>
 
@@ -4769,6 +4904,8 @@ function EditEquipmentModal({
                       { value: 'client', label: EQUIPMENT_CATEGORY_LABELS.client },
                       { value: 'partner', label: EQUIPMENT_CATEGORY_LABELS.partner },
                     ]}
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4782,6 +4919,8 @@ function EditEquipmentModal({
                       { value: 'medium', label: EQUIPMENT_PRIORITY_LABELS.medium },
                       { value: 'low', label: EQUIPMENT_PRIORITY_LABELS.low },
                     ]}
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4793,6 +4932,8 @@ function EditEquipmentModal({
                       { value: 'yes', label: 'Да' },
                       { value: 'no', label: 'Нет' },
                     ]}
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4804,9 +4945,11 @@ function EditEquipmentModal({
                   >
                     <FieldInput
                       type="number"
-                      value={String(form.subleasePrice || '')}
+                      value={String(form.subleasePrice ?? '')}
                       onChange={setNum('subleasePrice')}
                       placeholder="Например: 50000"
+                      disabled={!canEditAdminOnlyFields}
+                      disabledReason={adminOnlyDisabledReason}
                     />
                   </FormField>
                 )}
@@ -4816,9 +4959,11 @@ function EditEquipmentModal({
                   hint="Текущее место хранения или размещения техники"
                 >
                   <FieldInput
-                    value={form.location}
+                    value={form.location || ''}
                     onChange={setStr('location')}
                     placeholder="Например: Казань, склад 1"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
               </FormSection>
@@ -4831,6 +4976,8 @@ function EditEquipmentModal({
                     value={form.gsmImei || ''}
                     onChange={setStr('gsmImei')}
                     placeholder="866123456789012"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4839,6 +4986,8 @@ function EditEquipmentModal({
                     value={form.gsmDeviceId || ''}
                     onChange={setStr('gsmDeviceId')}
                     placeholder="TRACKER-001"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4847,6 +4996,8 @@ function EditEquipmentModal({
                     value={form.gsmSimNumber || ''}
                     onChange={setStr('gsmSimNumber')}
                     placeholder="+7 999 000-00-00"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -4855,6 +5006,8 @@ function EditEquipmentModal({
                     value={form.gsmProtocol || ''}
                     onChange={setStr('gsmProtocol')}
                     placeholder="GT06 / Teltonika / Wialon IPS"
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
               </FormSection>
@@ -4870,6 +5023,8 @@ function EditEquipmentModal({
                       { value: 'no', label: 'Нет' },
                       { value: 'yes', label: 'Да' },
                     ]}
+                    disabled={!canEditSaleFields}
+                    disabledReason={saleDisabledReason}
                   />
                 </FormField>
 
@@ -4883,6 +5038,8 @@ function EditEquipmentModal({
                           { value: 'new', label: 'Новая' },
                           { value: 'used', label: 'Б/у из арендного парка' },
                         ]}
+                        disabled={!canEditSaleFields}
+                        disabledReason={saleDisabledReason}
                       />
                     </FormField>
 
@@ -4896,6 +5053,8 @@ function EditEquipmentModal({
                           { value: 'issues', label: EQUIPMENT_SALE_PDI_LABELS.issues },
                           { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
                         ]}
+                        disabled={!canEditSaleFields}
+                        disabledReason={saleDisabledReason}
                       />
                     </FormField>
 
@@ -4906,6 +5065,8 @@ function EditEquipmentModal({
                             value={form.saleReceiptStatus || 'planned_arrival'}
                             onValueChange={setStr('saleReceiptStatus')}
                             options={EQUIPMENT_SALE_RECEIPT_OPTIONS}
+                            disabled={!canEditSaleFields}
+                            disabledReason={saleDisabledReason}
                           />
                         </FormField>
                         <FormField label="Плановая дата поступления">
@@ -4913,6 +5074,8 @@ function EditEquipmentModal({
                             type="date"
                             value={String(form.plannedArrivalDate || '')}
                             onChange={setStr('plannedArrivalDate')}
+                            disabled={!canEditSaleFields}
+                            disabledReason={saleDisabledReason}
                           />
                         </FormField>
                         <FormField label="Фактическая дата поступления">
@@ -4920,14 +5083,18 @@ function EditEquipmentModal({
                             type="date"
                             value={String(form.actualArrivalDate || '')}
                             onChange={setStr('actualArrivalDate')}
+                            disabled={!canEditSaleFields}
+                            disabledReason={saleDisabledReason}
                           />
                         </FormField>
                         <FormField label="Комментарий приёмки">
                           <textarea
-                            className="min-h-[80px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                            className="min-h-[80px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                             value={form.acceptanceComment || ''}
                             onChange={event => set('acceptanceComment', event.target.value)}
                             placeholder="Что важно знать менеджеру продаж или PDI"
+                            disabled={!canEditSaleFields}
+                            title={!canEditSaleFields ? saleDisabledReason : undefined}
                           />
                         </FormField>
                       </>
@@ -4938,27 +5105,33 @@ function EditEquipmentModal({
                         <FormField label="Цена 1" unit="₽" hint="Основная прайс-лист цена">
                           <FieldInput
                             type="number"
-                            value={String(form.salePrice1 || '')}
+                            value={String(form.salePrice1 ?? '')}
                             onChange={setNum('salePrice1')}
                             placeholder="Например: 4950000"
+                            disabled={!canEditAdminOnlyFields}
+                            disabledReason={adminOnlyDisabledReason}
                           />
                         </FormField>
 
                         <FormField label="Цена 2" unit="₽" hint="Цена для переговоров">
                           <FieldInput
                             type="number"
-                            value={String(form.salePrice2 || '')}
+                            value={String(form.salePrice2 ?? '')}
                             onChange={setNum('salePrice2')}
                             placeholder="Например: 4750000"
+                            disabled={!canEditAdminOnlyFields}
+                            disabledReason={adminOnlyDisabledReason}
                           />
                         </FormField>
 
                         <FormField label="Цена 3" unit="₽" hint="Минимально допустимая цена">
                           <FieldInput
                             type="number"
-                            value={String(form.salePrice3 || '')}
+                            value={String(form.salePrice3 ?? '')}
                             onChange={setNum('salePrice3')}
                             placeholder="Например: 4550000"
+                            disabled={!canEditAdminOnlyFields}
+                            disabledReason={adminOnlyDisabledReason}
                           />
                         </FormField>
                       </>
@@ -4983,9 +5156,11 @@ function EditEquipmentModal({
                   >
                     <FieldInput
                       type="number"
-                      value={String(form.plannedMonthlyRevenue)}
+                      value={String(form.plannedMonthlyRevenue ?? '')}
                       onChange={setNum('plannedMonthlyRevenue')}
                       placeholder="Например: 80000"
+                      disabled={!canEditAdminOnlyFields}
+                      disabledReason={adminOnlyDisabledReason}
                     />
                   </FormField>
                 )}
@@ -4996,8 +5171,10 @@ function EditEquipmentModal({
                 >
                   <FieldInput
                     type="date"
-                    value={form.nextMaintenance}
+                    value={form.nextMaintenance || ''}
                     onChange={setStr('nextMaintenance')}
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -5009,6 +5186,8 @@ function EditEquipmentModal({
                     type="date"
                     value={form.maintenanceCHTO || ''}
                     onChange={setStr('maintenanceCHTO')}
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
 
@@ -5020,6 +5199,8 @@ function EditEquipmentModal({
                     type="date"
                     value={form.maintenancePTO || ''}
                     onChange={setStr('maintenancePTO')}
+                    disabled={!canEditOperationalFields}
+                    disabledReason={operationalDisabledReason}
                   />
                 </FormField>
               </FormSection>
@@ -5043,7 +5224,9 @@ function EditEquipmentModal({
                     onChange={e => setStr('notes')(e.target.value)}
                     placeholder="Введите произвольный комментарий..."
                     rows={3}
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+                    disabled={!canEditOperationalFields}
+                    title={!canEditOperationalFields ? operationalDisabledReason : undefined}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary] disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
                   />
                 </FormField>
               </div>
@@ -5052,13 +5235,20 @@ function EditEquipmentModal({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between border-t border-slate-100 bg-white/95 px-6 py-4 dark:border-gray-800 dark:bg-gray-950/95">
-            <p className="text-xs text-gray-400 dark:text-gray-500">
-              Поля, отмеченные <span className="text-red-500">*</span>, обязательны
-            </p>
+          <div className="flex items-center justify-between gap-4 border-t border-slate-100 bg-white/95 px-6 py-4 dark:border-gray-800 dark:bg-gray-950/95">
+            <div>
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                Поля, отмеченные <span className="text-red-500">*</span>, обязательны
+              </p>
+              {saveError && (
+                <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">{saveError}</p>
+              )}
+            </div>
             <div className="flex gap-3">
-              <Button variant="secondary" onClick={() => onOpenChange(false)}>Отмена</Button>
-              <Button onClick={() => onSave(form)}>Сохранить изменения</Button>
+              <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={isSaving}>Отмена</Button>
+              <Button onClick={() => void onSave(form)} disabled={isSaving || (!canEditOperationalFields && !canEditSaleFields && !canEditAdminOnlyFields)}>
+                {isSaving ? 'Сохранение...' : 'Сохранить изменения'}
+              </Button>
             </div>
           </div>
 

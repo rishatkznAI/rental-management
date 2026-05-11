@@ -1,88 +1,119 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { MoreVertical, Plus, Search } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import {
+  Archive,
+  BadgeDollarSign,
+  Boxes,
+  CalendarPlus,
+  CheckCircle2,
+  ClipboardList,
+  FileText,
+  History,
+  PenLine,
+  Plus,
+  RotateCcw,
+  Search,
+  Truck,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
-import { isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
+import { getInvestorBinding, isInvestorUser, isMechanicRole, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { useEquipmentList } from '../hooks/useEquipment';
-import { useGanttData } from '../hooks/useRentals';
+import { useGanttData, useRentalsList } from '../hooks/useRentals';
+import { useDocumentsList } from '../hooks/useDocuments';
+import { useServiceTicketsList } from '../hooks/useServiceTickets';
+import { equipmentService } from '../services/equipment.service';
 import {
   ACTIVE_FLEET_LABELS,
   compareEquipmentByPriority,
-  EQUIPMENT_CATEGORY_LABELS,
+  canEquipmentParticipateInRentals,
   EQUIPMENT_SALE_PDI_LABELS,
   normalizeEquipmentList,
 } from '../lib/equipmentClassification';
-import { findEquipmentTypeLabel, mergeEquipmentTypesWithExistingEquipment, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
-import { formatCurrency, formatDate } from '../lib/utils';
+import {
+  buildEquipmentTabCounts,
+  buildActiveRentalIndex,
+  cleanText,
+  documentMatchesEquipmentOrRentals,
+  equipmentFilterReasons,
+  equipmentMatchesInvestorBinding,
+  enrichEquipment,
+  formatPreviewDate,
+  formatPreviewNumber,
+  ganttRentalMatchesEquipment,
+  getEquipmentCategoryLabel,
+  getEquipmentDriveLabel,
+  getEquipmentGsmDisplay,
+  getEquipmentTypeGroup,
+  getCurrentClassicRental,
+  getCurrentGanttRental,
+  getGanttRentalRouteId,
+  getRegistryOwnerLabel,
+  getRegistryPercent,
+  getRegistryStatusKind,
+  getOwnerLabel,
+  getRentalStableIds,
+  isEquipmentInventoryUnique,
+  isOpenServiceTicket,
+  isSaleRegistryEquipment,
+  isSoldEquipment,
+  lowerText,
+  matchesDriveFilter,
+  matchesEquipmentSearch,
+  matchesEquipmentTypeFilter,
+  matchesOwnerFilter,
+  matchesStatusFilter,
+  matchesTabType,
+  rentalMatchesEquipment,
+  serviceTicketMatchesEquipment,
+} from './equipment/equipment.helpers';
+import {
+  DEFAULT_EQUIPMENT_PAGE_SIZE,
+  EQUIPMENT_DRIVE_FILTER_OPTIONS,
+  EQUIPMENT_EMPTY_STATE_COPY,
+  EQUIPMENT_PAGE_SIZE_OPTIONS,
+  EQUIPMENT_STATUS_BADGE_STYLES,
+  EQUIPMENT_STATUS_FILTER_OPTIONS,
+  EQUIPMENT_TABS,
+  STANDARD_EQUIPMENT_TYPE_FILTER_OPTIONS,
+} from './equipment/equipment.constants';
+import { clampEquipmentPage, getEquipmentPageItems, getEquipmentPageRange } from './equipment/equipment.pagination';
 import type {
+  ActiveRentalIndex,
+  EquipmentEmptyStateConfig,
+  EquipmentPreviewQuickAction,
+  EquipmentPreviewTab,
+  EquipmentQuickViewPanelData,
+  EquipmentRegistryStatusKind,
+  EquipmentTab,
+} from './equipment/equipment.types';
+import { EquipmentFilters } from './equipment/EquipmentFilters';
+import { EquipmentKpiCards, type EquipmentKpiCardConfig } from './equipment/EquipmentKpiCards';
+import { EquipmentMobileCards } from './equipment/EquipmentMobileCards';
+import { EquipmentQuickViewPanel } from './equipment/EquipmentQuickViewPanel';
+import { EquipmentRegistryTable } from './equipment/EquipmentRegistryTable';
+import { EquipmentStatusTabs } from './equipment/EquipmentStatusTabs';
+import { findEquipmentTypeLabel, mergeEquipmentTypesWithExistingEquipment, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
+import { photoSource } from '../lib/media';
+import { buildEquipmentQuickActions } from '../lib/quickActions.js';
+import type {
+  Document,
   Equipment as EquipmentEntity,
-  EquipmentDrive,
-  EquipmentOwnerType,
   EquipmentSalePdiStatus,
-  EquipmentStatus,
+  PhotoReference,
+  Rental,
+  ServiceTicket,
+  ShippingPhoto,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
-type EquipmentTab = 'all' | 'rental_fleet' | 'sale' | 'client' | 'partner' | 'service' | 'archive';
+type PermissionCan = ReturnType<typeof usePermissions>['can'];
 
-function enrichEquipment(eqList: EquipmentEntity[], ganttRentals: GanttRentalData[]): EquipmentEntity[] {
-  const inventoryCounts = new Map<string, number>();
-  eqList.forEach((eq) => {
-    inventoryCounts.set(eq.inventoryNumber, (inventoryCounts.get(eq.inventoryNumber) ?? 0) + 1);
-  });
-
-  const activeById = new Map<string, GanttRentalData>();
-  const activeByUniqueInv = new Map<string, GanttRentalData>();
-  for (const rental of ganttRentals) {
-    if (rental.status === 'active' || rental.status === 'created') {
-      if (rental.equipmentId) {
-        const existing = activeById.get(rental.equipmentId);
-        if (!existing || rental.status === 'active') {
-          activeById.set(rental.equipmentId, rental);
-        }
-        continue;
-      }
-
-      if ((inventoryCounts.get(rental.equipmentInv) ?? 0) === 1) {
-        const existing = activeByUniqueInv.get(rental.equipmentInv);
-        if (!existing || rental.status === 'active') {
-          activeByUniqueInv.set(rental.equipmentInv, rental);
-        }
-      }
-    }
-  }
-
-  return eqList.map((eq) => {
-    const active = activeById.get(eq.id) ?? activeByUniqueInv.get(eq.inventoryNumber);
-    if (!active) return eq;
-    return {
-      ...eq,
-      currentClient: eq.currentClient || active.client || eq.currentClient,
-      returnDate: eq.returnDate || active.endDate || eq.returnDate,
-    };
-  });
-}
-
-function getOwnerLabel(owner: EquipmentOwnerType): string {
-  const labels: Record<EquipmentOwnerType, string> = {
-    own: 'Собственная',
-    investor: 'Инвестор',
-    sublease: 'Субаренда',
-  };
-  return labels[owner];
-}
-
-function getEquipmentDriveLabel(drive: EquipmentDrive): string {
-  const labels: Record<EquipmentDrive, string> = {
-    diesel: 'Дизель',
-    electric: 'Электро',
-  };
-  return labels[drive];
-}
+const EQUIPMENT_REGISTRY_MATCH_OPTIONS = { canEquipmentParticipateInRentals };
 
 function getPriorityAppearance(priority: EquipmentEntity['priority']) {
   if (priority === 'critical' || priority === 'high') {
@@ -104,25 +135,6 @@ function getPriorityLabel(priority: EquipmentEntity['priority']) {
   return labels[priority];
 }
 
-function getStatusAppearance(status: EquipmentStatus) {
-  if (status === 'rented') return 'bg-blue-500/12 text-blue-300';
-  if (status === 'available') return 'bg-emerald-500/12 text-emerald-300';
-  if (status === 'reserved') return 'bg-yellow-500/12 text-yellow-300';
-  if (status === 'in_service') return 'bg-orange-500/12 text-orange-300';
-  return 'bg-muted text-muted-foreground';
-}
-
-function getStatusLabel(status: EquipmentStatus) {
-  const labels: Record<EquipmentStatus, string> = {
-    available: 'Свободен',
-    rented: 'В аренде',
-    reserved: 'Бронь',
-    in_service: 'В сервисе',
-    inactive: 'Списан',
-  };
-  return labels[status];
-}
-
 function getSalePdiAppearance(status: EquipmentSalePdiStatus = 'not_started') {
   if (status === 'ready') return 'bg-emerald-500/12 text-emerald-300';
   if (status === 'in_progress') return 'bg-orange-500/12 text-orange-300';
@@ -130,136 +142,530 @@ function getSalePdiAppearance(status: EquipmentSalePdiStatus = 'not_started') {
   return 'bg-secondary text-muted-foreground';
 }
 
-function isSaleRegistryEquipment(equipment: EquipmentEntity) {
-  return Boolean(
-    equipment.isForSale
-    || equipment.salePdiStatus
-    || equipment.saleReceiptStatus
-    || equipment.salePrice1
-    || equipment.salePrice2
-    || equipment.salePrice3
-    || equipment.category === 'sold',
-  );
+function getEquipmentDetailPath(equipment: EquipmentEntity) {
+  return isSaleRegistryEquipment(equipment)
+    ? `/sales/equipment/${equipment.id}`
+    : `/equipment/${equipment.id}`;
 }
 
-function matchesTabType(equipment: EquipmentEntity, activeTab: EquipmentTab) {
-  if (activeTab === 'all') return true;
-  if (activeTab === 'rental_fleet') {
-    return equipment.activeInFleet
-      && (equipment.category === 'own' || equipment.category === 'partner')
-      && equipment.category !== 'sold'
-      && equipment.status !== 'inactive'
-      && !isSaleRegistryEquipment(equipment);
+function getRegistryStatusLabel(equipment: EquipmentEntity, activeRentalIndex?: ActiveRentalIndex) {
+  return EQUIPMENT_STATUS_BADGE_STYLES[getRegistryStatusKind(equipment, activeRentalIndex) as EquipmentRegistryStatusKind].label;
+}
+
+function getRegistryStatusAppearance(equipment: EquipmentEntity, activeRentalIndex?: ActiveRentalIndex) {
+  return EQUIPMENT_STATUS_BADGE_STYLES[getRegistryStatusKind(equipment, activeRentalIndex) as EquipmentRegistryStatusKind].className;
+}
+
+function getPriorityDotClass(priority: EquipmentEntity['priority']) {
+  if (priority === 'critical' || priority === 'high') return 'bg-red-500';
+  if (priority === 'medium') return 'bg-blue-500';
+  return 'bg-emerald-500';
+}
+
+function buildEquipmentContextPath(
+  path: string,
+  equipment: EquipmentEntity,
+  extra?: Record<string, string | number | boolean | null | undefined>,
+) {
+  const params = new URLSearchParams();
+  params.set('equipmentId', equipment.id);
+  if (equipment.inventoryNumber) params.set('equipmentInv', equipment.inventoryNumber);
+  Object.entries(extra || {}).forEach(([key, value]) => {
+    const text = cleanText(value);
+    if (text) params.set(key, text);
+  });
+  return `${path}?${params.toString()}`;
+}
+
+function getDocumentTypeLabel(document: Document) {
+  const type = document.documentType || document.type;
+  const labels: Record<string, string> = {
+    contract: document.contractKind === 'supply' ? 'Договор поставки' : 'Договор аренды',
+    commercial_offer: 'Коммерческое предложение',
+    act: 'Акт',
+    upd: 'УПД',
+    invoice: 'Счёт',
+    service_act: 'Акт сервиса',
+    work_order: 'Наряд',
+    debt_notification: 'Уведомление о долге',
+    pretrial_claim: 'Претензия',
+    court_document: 'Судебный документ',
+    court_decision: 'Решение суда',
+    enforcement_writ: 'Исполнительный лист',
+    other: 'Документ',
+  };
+  return labels[type] || type || 'Документ';
+}
+
+function getDocumentNumber(document: Document) {
+  return cleanText(document.documentNumber || document.number) || 'Без номера';
+}
+
+function getDocumentDate(document: Document) {
+  return document.documentDate || document.date || document.createdAt || '';
+}
+
+function documentSearchText(document: Document) {
+  return [
+    document.type,
+    document.documentType,
+    document.contractKind,
+    document.number,
+    document.documentNumber,
+    document.fileName,
+    document.comment,
+    document.equipment,
+    document.serviceTicket,
+    getDocumentTypeLabel(document),
+  ].map(lowerText).join(' ');
+}
+
+function documentSlotCount(documents: Document[], slot: 'passport' | 'certificate' | 'commissioning' | 'sale') {
+  return documents.filter((document) => {
+    const text = documentSearchText(document);
+    if (slot === 'passport') return text.includes('паспорт');
+    if (slot === 'certificate') return text.includes('сертификат') || text.includes('certificate');
+    if (slot === 'commissioning') return text.includes('акт ввода') || text.includes('ввод в эксплуатац');
+    return text.includes('продаж') || text.includes('поставк') || text.includes('коммерческ') || text.includes('кп')
+      || document.documentType === 'commercial_offer'
+      || document.type === 'commercial_offer'
+      || document.contractKind === 'supply';
+  }).length;
+}
+
+function getGanttRentalStatusLabel(status: GanttRentalData['status']) {
+  if (status === 'active') return 'Активна';
+  if (status === 'created') return 'Бронь';
+  if (status === 'returned') return 'Возвращена';
+  if (status === 'closed') return 'Закрыта';
+  return status;
+}
+
+function getClassicRentalStatusLabel(status: Rental['status']) {
+  const labels: Record<Rental['status'], string> = {
+    new: 'Новая',
+    confirmed: 'Подтверждена',
+    delivery: 'Доставка',
+    active: 'Активна',
+    return_planned: 'Возврат',
+    closed: 'Закрыта',
+  };
+  return labels[status] || status;
+}
+
+function getServiceStatusLabel(status: ServiceTicket['status']) {
+  const value = lowerText(status);
+  if (value === 'new') return 'Новая';
+  if (value === 'assigned') return 'Назначена';
+  if (value === 'in_progress') return 'В работе';
+  if (value === 'waiting_parts') return 'Ожидание запчастей';
+  if (value === 'needs_revision') return 'На доработке';
+  if (value === 'ready') return 'Готово';
+  if (value === 'closed') return 'Закрыта';
+  return cleanText(status) || 'Без статуса';
+}
+
+type EquipmentPreviewPhoto = {
+  id: string;
+  label: string;
+  src: string;
+  caption?: string;
+  date?: string;
+};
+
+function collectEquipmentPreviewPhotos(
+  equipment: EquipmentEntity,
+  shippingPhotos: ShippingPhoto[],
+  serviceTickets: ServiceTicket[],
+) {
+  const result: EquipmentPreviewPhoto[] = [];
+  const seen = new Set<string>();
+
+  const pushPhoto = (photo: PhotoReference | null | undefined, label: string, caption?: string, date?: string) => {
+    const src = photoSource(photo);
+    if (!src || seen.has(src)) return;
+    seen.add(src);
+    result.push({ id: `${label}:${result.length}`, label, caption, date, src });
+  };
+
+  pushPhoto(equipment.photo, 'Фото техники', `${equipment.manufacturer} ${equipment.model}`);
+
+  Object.entries(equipment.acceptancePhotos || {}).forEach(([category, photos]) => {
+    (Array.isArray(photos) ? photos : []).forEach(photo => pushPhoto(photo, 'Фото приёмки', category));
+  });
+
+  shippingPhotos.forEach((event) => {
+    const label = event.type === 'receiving' ? 'Фото возврата' : 'Фото отгрузки';
+    (event.photos || []).forEach(photo => pushPhoto(photo, label, event.damageDescription || event.comment, event.date));
+    Object.entries(event.photoCategories || {}).forEach(([category, photos]) => {
+      (Array.isArray(photos) ? photos : []).forEach(photo => pushPhoto(photo, label, category, event.date));
+    });
+  });
+
+  serviceTickets.forEach((ticket) => {
+    (ticket.repairPhotos?.before || []).forEach(photo => pushPhoto(photo, 'Фото дефектов', ticket.reason, ticket.createdAt));
+    (ticket.repairPhotos?.after || []).forEach(photo => pushPhoto(photo, 'Фото после ремонта', ticket.reason, ticket.closedAt || ticket.completedAt));
+  });
+
+  return result;
+}
+
+type EquipmentTimelineItem = {
+  id: string;
+  date: string;
+  title: string;
+  description: string;
+};
+
+function buildEquipmentTimeline({
+  equipment,
+  documents,
+  ganttRentals,
+  rentals,
+  serviceTickets,
+}: {
+  equipment: EquipmentEntity;
+  documents: Document[];
+  ganttRentals: GanttRentalData[];
+  rentals: Rental[];
+  serviceTickets: ServiceTicket[];
+}) {
+  const items: EquipmentTimelineItem[] = [];
+
+  ganttRentals.forEach((rental) => {
+    items.push({
+      id: `gantt:${rental.id}`,
+      date: rental.startDate,
+      title: `Аренда: ${getGanttRentalStatusLabel(rental.status)}`,
+      description: `${rental.client || 'Клиент не указан'} · ${formatPreviewDate(rental.startDate)} — ${formatPreviewDate(rental.endDate)}`,
+    });
+  });
+
+  rentals.forEach((rental) => {
+    items.push({
+      id: `rental:${rental.id}`,
+      date: rental.startDate,
+      title: `Аренда: ${getClassicRentalStatusLabel(rental.status)}`,
+      description: `${rental.client || 'Клиент не указан'} · ${formatPreviewDate(rental.startDate)} — ${formatPreviewDate(rental.actualReturnDate || rental.plannedReturnDate)}`,
+    });
+  });
+
+  serviceTickets.forEach((ticket) => {
+    items.push({
+      id: `service:${ticket.id}`,
+      date: ticket.createdAt || ticket.plannedDate || ticket.closedAt || '',
+      title: `Сервис: ${getServiceStatusLabel(ticket.status)}`,
+      description: ticket.reason || ticket.description || 'Сервисная заявка',
+    });
+  });
+
+  documents.forEach((document) => {
+    items.push({
+      id: `document:${document.id}`,
+      date: getDocumentDate(document),
+      title: `Документ: ${getDocumentTypeLabel(document)}`,
+      description: getDocumentNumber(document),
+    });
+  });
+
+  (equipment.history || []).forEach((entry, index) => {
+    items.push({
+      id: `history:${index}`,
+      date: entry.date,
+      title: entry.type === 'system' ? 'Изменение статуса' : 'Комментарий',
+      description: [entry.text, entry.author].filter(Boolean).join(' · '),
+    });
+  });
+
+  (equipment.receiptHistory || []).forEach((entry, index) => {
+    items.push({
+      id: `sale:${index}`,
+      date: entry.date,
+      title: 'Продажное событие',
+      description: [entry.oldStatusLabel, entry.newStatusLabel].filter(Boolean).join(' → ') || entry.comment || 'Изменение статуса продажи',
+    });
+  });
+
+  if (isSaleRegistryEquipment(equipment)) {
+    items.push({
+      id: 'sale:current',
+      date: equipment.acceptedAt || equipment.actualArrivalDate || equipment.plannedArrivalDate || '',
+      title: 'Продажный статус',
+      description: getRegistryStatusLabel(equipment),
+    });
   }
-  if (activeTab === 'sale') return isSaleRegistryEquipment(equipment) && equipment.category !== 'sold';
-  if (activeTab === 'client') return equipment.category === 'client';
-  if (activeTab === 'partner') return equipment.category === 'partner' || equipment.owner === 'investor' || equipment.owner === 'sublease';
-  if (activeTab === 'service') return equipment.status === 'in_service';
-  if (activeTab === 'archive') return equipment.category === 'sold' || equipment.status === 'inactive';
-  return true;
+
+  return items
+    .filter(item => item.date || item.description)
+    .sort((left, right) => new Date(right.date || 0).getTime() - new Date(left.date || 0).getTime())
+    .slice(0, 18);
+}
+
+function canPerform(
+  can: PermissionCan,
+  action: Parameters<PermissionCan>[0],
+  section: Parameters<PermissionCan>[1],
+) {
+  return typeof can === 'function' && Boolean(can(action, section));
+}
+
+function getSourceQuickAction(
+  actions: Array<{ id?: string; to?: string; disabled?: boolean; reason?: string }>,
+  id: string,
+) {
+  return actions.find(action => action?.id === id);
+}
+
+function buildEquipmentPreviewQuickActions({
+  equipment,
+  activeRentalIndex,
+  can,
+  canViewDocuments,
+  canViewRentals,
+  canViewService,
+  currentRentalId,
+  openServiceTicket,
+  onShowHistory,
+}: {
+  equipment: EquipmentEntity;
+  activeRentalIndex: ActiveRentalIndex;
+  can: PermissionCan;
+  canViewDocuments: boolean;
+  canViewRentals: boolean;
+  canViewService: boolean;
+  currentRentalId: string;
+  openServiceTicket: ServiceTicket | null;
+  onShowHistory: () => void;
+}) {
+  const statusKind = getRegistryStatusKind(equipment, activeRentalIndex);
+  const saleRegistry = isSaleRegistryEquipment(equipment);
+  const quickActionSource = buildEquipmentQuickActions({
+    equipment: { ...equipment, saleMode: saleRegistry },
+    can,
+    currentRental: currentRentalId ? { id: currentRentalId } : undefined,
+  }) as Array<{ id?: string; to?: string; disabled?: boolean; reason?: string }>;
+  const actions: EquipmentPreviewQuickAction[] = [];
+  const detailPath = getEquipmentDetailPath(equipment);
+  const editPath = `${detailPath}?action=edit`;
+  const documentsPath = buildEquipmentContextPath('/documents', equipment);
+  const serviceNewPath = buildEquipmentContextPath('/service/new', equipment);
+  const salePath = `/sales/equipment/${encodeURIComponent(equipment.id)}`;
+  const saleEditPath = `${salePath}?action=edit`;
+  const createRentalAction = getSourceQuickAction(quickActionSource, 'equipment-create-rental');
+  const createServiceAction = getSourceQuickAction(quickActionSource, 'equipment-create-service');
+  const salePdiAction = getSourceQuickAction(quickActionSource, 'equipment-sale-pdi');
+  const canViewSales = canPerform(can, 'view', 'sales');
+  const canCreateSales = canPerform(can, 'create', 'sales');
+  const canEditSales = canPerform(can, 'edit', 'sales');
+  const canEditEquipment = canPerform(can, 'edit', 'equipment');
+  const canCreateDocuments = canPerform(can, 'create', 'documents');
+  const canManageSaleEquipment = canEditSales || canEditEquipment;
+
+  const addDocumentsAction = (label = 'Документы') => {
+    if (!canViewDocuments) return;
+    actions.push({ id: 'documents', label, icon: FileText, to: documentsPath });
+  };
+
+  const addCreateServiceAction = () => {
+    if (!canPerform(can, 'create', 'service')) return;
+    actions.push({
+      id: 'create-service',
+      label: 'Создать сервисную заявку',
+      icon: Wrench,
+      to: createServiceAction?.to || serviceNewPath,
+      tone: statusKind === 'service' ? 'default' : 'primary',
+    });
+  };
+
+  if (statusKind === 'sold') {
+    if (canViewSales) {
+      actions.push({ id: 'open-sale', label: 'Открыть сделку/продажу', icon: BadgeDollarSign, to: salePath, tone: 'primary' });
+    }
+    addDocumentsAction('Документы продажи');
+    actions.push({ id: 'history', label: 'История', icon: History, onClick: onShowHistory });
+    if (canManageSaleEquipment && getSourceQuickAction(quickActionSource, 'equipment-sale-return')) {
+      actions.push({
+        id: 'return-to-sale',
+        label: 'Вернуть в продажу',
+        icon: RotateCcw,
+        disabled: true,
+        reason: 'Оформляется в полной карточке продажи',
+      });
+    }
+    return actions;
+  }
+
+  if (statusKind === 'for_sale') {
+    if (canViewSales) {
+      actions.push({ id: 'open-sale', label: 'Открыть карточку продажи', icon: BadgeDollarSign, to: salePath, tone: 'primary' });
+    }
+    if (canViewSales && canCreateSales && canCreateDocuments) {
+      actions.push({
+        id: 'create-quote',
+        label: 'Создать КП',
+        icon: FileText,
+        to: buildEquipmentContextPath('/documents', equipment, { action: 'create', type: 'commercial_offer' }),
+      });
+    }
+    if (canManageSaleEquipment) {
+      actions.push({
+        id: 'edit-price',
+        label: 'Редактировать цену',
+        icon: PenLine,
+        to: saleEditPath,
+      });
+      actions.push({
+        id: 'remove-from-sale',
+        label: 'Снять с продажи',
+        icon: RotateCcw,
+        disabled: true,
+        reason: 'Статус продажи меняется в полной карточке продажи',
+        tone: 'danger',
+      });
+    }
+    if (canViewSales && canPerform(can, 'create', 'service')) {
+      actions.push({
+        id: 'create-pdi',
+        label: 'Создать PDI',
+        icon: Wrench,
+        to: buildEquipmentContextPath('/service/new', equipment, { mode: 'sales_pdi' }),
+        disabled: Boolean(salePdiAction?.disabled),
+        reason: salePdiAction?.reason,
+      });
+    }
+    addDocumentsAction();
+    return actions;
+  }
+
+  if (statusKind === 'rented') {
+    if (canViewRentals && currentRentalId) {
+      actions.push({
+        id: 'open-rental',
+        label: 'Открыть аренду',
+        icon: Truck,
+        to: `/rentals/${encodeURIComponent(currentRentalId)}`,
+        tone: 'primary',
+      });
+    }
+    if (canPerform(can, 'edit', 'rentals') && currentRentalId) {
+      actions.push({
+        id: 'plan-return',
+        label: 'Запланировать возврат',
+        icon: RotateCcw,
+        disabled: true,
+        reason: 'Возврат планируется в карточке аренды',
+      });
+    }
+    addCreateServiceAction();
+    addDocumentsAction();
+    return actions;
+  }
+
+  if (statusKind === 'service') {
+    if (canViewService && openServiceTicket) {
+      actions.push({
+        id: 'open-service-ticket',
+        label: 'Открыть заявку',
+        icon: ClipboardList,
+        to: `/service/${encodeURIComponent(openServiceTicket.id)}`,
+        tone: 'primary',
+      });
+    }
+    if (canPerform(can, 'edit', 'service') && openServiceTicket) {
+      actions.push({
+        id: 'assign-mechanic',
+        label: 'Назначить механика',
+        icon: PenLine,
+        disabled: true,
+        reason: 'Назначение выполняется в карточке заявки',
+      });
+    }
+    if (canViewService) {
+      actions.push({ id: 'repair-history', label: 'История ремонта', icon: History, onClick: onShowHistory });
+    }
+    addDocumentsAction();
+    return actions;
+  }
+
+  if (statusKind === 'available') {
+    if (canEditEquipment) {
+      actions.push({ id: 'edit', label: 'Редактировать', icon: PenLine, to: editPath });
+    }
+    if (createRentalAction && canPerform(can, 'create', 'rentals')) {
+      actions.push({
+        id: 'create-rental',
+        label: 'Создать аренду',
+        icon: CalendarPlus,
+        to: createRentalAction.to || buildEquipmentContextPath('/rentals/new', equipment),
+        disabled: Boolean(createRentalAction.disabled),
+        reason: createRentalAction.reason,
+        tone: 'primary',
+      });
+    }
+    addCreateServiceAction();
+    if (canManageSaleEquipment) {
+      actions.push({
+        id: 'put-for-sale',
+        label: 'Выставить на продажу',
+        icon: BadgeDollarSign,
+        disabled: true,
+        reason: 'Перевод в продажу выполняется в полной карточке техники',
+      });
+    }
+    addDocumentsAction();
+    return actions;
+  }
+
+  if (statusKind === 'reserved') {
+    if (canViewRentals && currentRentalId) {
+      actions.push({
+        id: 'open-reservation',
+        label: 'Открыть бронь',
+        icon: Truck,
+        to: `/rentals/${encodeURIComponent(currentRentalId)}`,
+        tone: 'primary',
+      });
+    }
+    addCreateServiceAction();
+    addDocumentsAction();
+    return actions;
+  }
+
+  if (canPerform(can, 'edit', 'equipment')) {
+    actions.push({ id: 'edit', label: 'Редактировать', icon: PenLine, to: editPath });
+  }
+  if (canViewRentals) {
+    actions.push({ id: 'rental-history', label: 'История аренд', icon: History, onClick: onShowHistory });
+  }
+  addDocumentsAction();
+  return actions;
 }
 
 function shouldLogWarrantyDebug() {
   return import.meta.env.DEV || window.localStorage.getItem('warrantyDebug') === '1';
 }
 
-function equipmentFilterReasons(
-  equipment: EquipmentEntity,
-  filters: {
-    activeTab: EquipmentTab;
-    search: string;
-    statusFilter: string;
-    typeFilter: string;
-    driveFilter: string;
-    categoryFilter: string;
-    fleetFilter: string;
-    ownerFilter: string;
-    locationFilter: string;
-  },
-) {
-  const query = filters.search.toLowerCase().trim();
-  const reasons: string[] = [];
-  const matchesSearch = query === ''
-    || equipment.inventoryNumber.toLowerCase().includes(query)
-    || equipment.model.toLowerCase().includes(query)
-    || equipment.manufacturer.toLowerCase().includes(query)
-    || equipment.serialNumber.toLowerCase().includes(query)
-    || equipment.currentClient?.toLowerCase().includes(query)
-    || equipment.location?.toLowerCase().includes(query);
-  if (!matchesSearch) reasons.push('search');
-  if (filters.statusFilter !== 'all' && equipment.status !== filters.statusFilter) reasons.push('status');
-  if (filters.typeFilter !== 'all' && equipment.type !== filters.typeFilter) reasons.push('type');
-  if (filters.driveFilter !== 'all' && equipment.drive !== filters.driveFilter) reasons.push('drive');
-  if (filters.categoryFilter !== 'all' && equipment.category !== filters.categoryFilter) reasons.push('category');
-  if (filters.fleetFilter !== 'all' && String(equipment.activeInFleet) !== filters.fleetFilter) reasons.push('activeInFleet');
-  if (filters.ownerFilter !== 'all' && equipment.owner !== filters.ownerFilter) reasons.push('owner');
-  if (filters.locationFilter !== 'all' && equipment.location !== filters.locationFilter) reasons.push('location');
-  if (!matchesTabType(equipment, filters.activeTab)) reasons.push(`tab:${filters.activeTab}`);
-  return reasons;
-}
-
-function EquipmentMobileCard({
-  equipment,
-  isSaleTab,
-  equipmentTypeLabel,
+function EmptyState({
+  title,
+  description,
+  icon: Icon = Search,
+  action,
 }: {
-  equipment: EquipmentEntity;
-  isSaleTab: boolean;
-  equipmentTypeLabel: string;
+  title: string;
+  description?: string;
+  icon?: LucideIcon;
+  action?: React.ReactNode;
 }) {
-  const detailPath = isSaleTab ? `/sales/equipment/${equipment.id}` : `/equipment/${equipment.id}`;
   return (
-    <div className="rounded-2xl border border-border bg-card/95 p-4 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)]">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <Link to={detailPath} className="app-shell-title text-base font-extrabold text-foreground hover:text-primary">
-            {equipment.manufacturer} {equipment.model}
-          </Link>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || 'не указан'}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${getStatusAppearance(equipment.status)}`}>
-              {getStatusLabel(equipment.status)}
-            </span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${getPriorityAppearance(equipment.priority)}`}>
-              {getPriorityLabel(equipment.priority)}
-            </span>
-            {equipment.isForSale ? (
-              <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${getSalePdiAppearance(equipment.salePdiStatus)}`}>
-                {EQUIPMENT_SALE_PDI_LABELS[equipment.salePdiStatus ?? 'not_started']}
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-        <div>Тип: <span className="text-foreground">{equipmentTypeLabel}</span></div>
-        <div>Привод: <span className="text-foreground">{getEquipmentDriveLabel(equipment.drive)}</span></div>
-        <div>Локация: <span className="text-foreground">{equipment.location || '—'}</span></div>
-        <div>След. ТО: <span className={new Date(equipment.nextMaintenance) < new Date() ? 'text-red-300' : 'text-foreground'}>{formatDate(equipment.nextMaintenance)}</span></div>
-        {isSaleTab ? (
-          <div className="col-span-2">
-            Цена 1: <span className="text-foreground">{formatCurrency(equipment.salePrice1 ?? 0)}</span>
-          </div>
-        ) : (
-          <>
-            <div className="col-span-2">Клиент: <span className="text-foreground">{equipment.currentClient || '—'}</span></div>
-            <div className="col-span-2">Возврат: <span className="text-foreground">{equipment.returnDate ? formatDate(equipment.returnDate) : '—'}</span></div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-border bg-card/95 py-12 text-center shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)]">
-      <Search className="mb-3 h-8 w-8 text-muted-foreground" />
-      <h3 className="app-shell-title text-base font-extrabold text-foreground">Техника не найдена</h3>
-      <p className="mt-1 text-sm text-muted-foreground">Попробуйте изменить фильтры</p>
+    <div className="flex min-h-[260px] flex-col items-center justify-center rounded-2xl border border-border bg-card/95 px-4 py-12 text-center shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)]">
+      <Icon className="mb-3 h-8 w-8 text-muted-foreground" />
+      <h3 className="app-shell-title max-w-md text-base font-extrabold text-foreground">{title}</h3>
+      {description ? (
+        <p className="mt-1 max-w-md text-sm text-muted-foreground">{description}</p>
+      ) : null}
+      {action ? (
+        <div className="mt-4 flex flex-wrap justify-center gap-2">{action}</div>
+      ) : null}
     </div>
   );
 }
@@ -274,10 +680,24 @@ function apiErrorMessage(error: unknown, fallback: string) {
 export default function Equipment() {
   const { user } = useAuth();
   const { can, canView } = usePermissions();
+  const canViewRentals = canView('rentals');
+  const canViewService = canView('service');
+  const canViewDocuments = canView('documents');
+  const canViewSales = canView('sales');
+  const canCreateEquipment = can('create', 'equipment');
+  const normalizedRole = normalizeUserRole(user?.role);
+  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
+    || isMechanicRole(normalizedRole);
   const equipmentQuery = useEquipmentList();
-  const ganttQuery = useGanttData({ enabled: canView('rentals') });
+  const ganttQuery = useGanttData({ enabled: canViewRentals });
+  const rentalsQuery = useRentalsList({ enabled: canViewRentals });
+  const documentsQuery = useDocumentsList({ enabled: canViewDocuments });
+  const serviceTicketsQuery = useServiceTicketsList({ enabled: canViewService });
   const equipmentList = equipmentQuery.data ?? [];
   const ganttRentals = ganttQuery.data ?? [];
+  const rentals = rentalsQuery.data ?? [];
+  const documents = documentsQuery.data ?? [];
+  const serviceTickets = serviceTicketsQuery.data ?? [];
   const equipmentTypeCatalog = useEquipmentTypeCatalog();
   const [search, setSearch] = React.useState('');
   const [activeTab, setActiveTab] = React.useState<EquipmentTab>('all');
@@ -289,11 +709,59 @@ export default function Equipment() {
   const [ownerFilter, setOwnerFilter] = React.useState<string>('all');
   const [locationFilter, setLocationFilter] = React.useState<string>('all');
   const [showFilters, setShowFilters] = React.useState(false);
+  const [pageSize, setPageSize] = React.useState(DEFAULT_EQUIPMENT_PAGE_SIZE);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [selectedEquipmentId, setSelectedEquipmentId] = React.useState<string | null>(null);
+  const [activeQuickViewTab, setActiveQuickViewTab] = React.useState<EquipmentPreviewTab>('overview');
+  const investorBinding = React.useMemo(() => getInvestorBinding({
+    role: normalizedRole,
+    status: 'Активен',
+    ownerId: user?.ownerId,
+    ownerName: user?.ownerName,
+    name: user?.name,
+  }), [normalizedRole, user?.name, user?.ownerId, user?.ownerName]);
+  const isInvestorScope = isInvestorUser({
+    role: normalizedRole,
+    status: 'Активен',
+    ownerId: user?.ownerId,
+    ownerName: user?.ownerName,
+    name: user?.name,
+  });
+  const scopedEquipmentList = React.useMemo(
+    () => isInvestorScope && investorBinding
+      ? equipmentList.filter(item => equipmentMatchesInvestorBinding(item, investorBinding))
+      : equipmentList,
+    [equipmentList, investorBinding, isInvestorScope],
+  );
 
   const enrichedEquipmentList = React.useMemo(
-    () => normalizeEquipmentList(enrichEquipment(equipmentList, ganttRentals)),
-    [equipmentList, ganttRentals],
+    () => normalizeEquipmentList(enrichEquipment(scopedEquipmentList, ganttRentals)),
+    [scopedEquipmentList, ganttRentals],
   );
+  const activeRentalIndex = React.useMemo(
+    () => buildActiveRentalIndex(enrichedEquipmentList, ganttRentals),
+    [enrichedEquipmentList, ganttRentals],
+  );
+  const selectedEquipment = React.useMemo(
+    () => enrichedEquipmentList.find(equipment => equipment.id === selectedEquipmentId) ?? null,
+    [enrichedEquipmentList, selectedEquipmentId],
+  );
+  const shippingPhotosQuery = useQuery({
+    queryKey: ['shippingPhotos', selectedEquipment?.id],
+    queryFn: () => equipmentService.getShippingPhotos(String(selectedEquipment?.id ?? '')),
+    enabled: Boolean(selectedEquipment?.id && canViewShippingPhotos),
+  });
+  const selectedShippingPhotos = shippingPhotosQuery.data ?? [];
+
+  React.useEffect(() => {
+    if (selectedEquipmentId && !selectedEquipment) {
+      setSelectedEquipmentId(null);
+    }
+  }, [selectedEquipment, selectedEquipmentId]);
+
+  React.useEffect(() => {
+    setActiveQuickViewTab('overview');
+  }, [selectedEquipmentId]);
 
   const locationOptions = React.useMemo(
     () => Array.from(new Set(enrichedEquipmentList.map((eq) => eq.location).filter(Boolean))).sort(),
@@ -303,25 +771,199 @@ export default function Equipment() {
     () => mergeEquipmentTypesWithExistingEquipment(equipmentTypeCatalog, enrichedEquipmentList),
     [enrichedEquipmentList, equipmentTypeCatalog],
   );
+  const categoryOptions = React.useMemo(() => {
+    const base = ['own', 'client', 'partner', 'sold'];
+    const values = new Set<string>(base);
+    enrichedEquipmentList.forEach((equipment) => {
+      const value = String(equipment.category ?? '').trim();
+      if (value) values.add(value);
+    });
+    return Array.from(values).map((value) => ({ value, label: getEquipmentCategoryLabel(value) }));
+  }, [enrichedEquipmentList]);
+  const typeFilterOptions = React.useMemo(() => {
+    const result = [...STANDARD_EQUIPMENT_TYPE_FILTER_OPTIONS];
+    const existingValues = new Set(result.map((option) => option.value));
+    for (const item of equipmentTypeOptions) {
+      if (getEquipmentTypeGroup(item.value, equipmentTypeOptions) !== 'other') continue;
+      const value = `exact:${item.value}`;
+      if (existingValues.has(value)) continue;
+      existingValues.add(value);
+      result.push({ value, label: item.label });
+    }
+    return result;
+  }, [equipmentTypeOptions]);
+  const ownerOptions = React.useMemo(() => {
+    const base = [
+      { value: 'own', label: 'Собственная' },
+      { value: 'investor', label: 'Инвестор' },
+      { value: 'sublease', label: 'Субаренда' },
+    ];
+    const seen = new Set(base.map((option) => option.value));
+    const result = [...base];
+
+    for (const equipment of enrichedEquipmentList) {
+      const owner = String(equipment.owner ?? '').trim();
+      if (owner && !seen.has(owner)) {
+        seen.add(owner);
+        result.push({ value: owner, label: getOwnerLabel(owner) });
+      }
+
+      const ownerName = String(equipment.ownerName ?? '').trim();
+      if (!ownerName) continue;
+      const value = `ownerName:${ownerName}`;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      result.push({ value, label: ownerName });
+    }
+
+    return result;
+  }, [enrichedEquipmentList]);
+
+  const quickViewPanelData = React.useMemo<EquipmentQuickViewPanelData | null>(() => {
+    if (!selectedEquipment) return null;
+
+    const inventoryIsUnique = isEquipmentInventoryUnique(selectedEquipment, enrichedEquipmentList);
+    const relatedGanttRentals = canViewRentals
+      ? ganttRentals.filter(rental => ganttRentalMatchesEquipment(rental, selectedEquipment, inventoryIsUnique))
+      : [];
+    const relatedRentals = canViewRentals
+      ? rentals.filter(rental => rentalMatchesEquipment(rental, selectedEquipment, inventoryIsUnique))
+      : [];
+    const rentalIds = getRentalStableIds(relatedRentals, relatedGanttRentals);
+    const relatedDocuments = canViewDocuments
+      ? documents
+        .filter(document => documentMatchesEquipmentOrRentals(document, selectedEquipment, inventoryIsUnique, rentalIds))
+        .sort((left, right) => getDocumentDate(right).localeCompare(getDocumentDate(left)))
+      : [];
+    const relatedServiceTickets = canViewService
+      ? serviceTickets
+        .filter(ticket => serviceTicketMatchesEquipment(ticket, selectedEquipment, inventoryIsUnique))
+        .sort((left, right) => cleanText(right.createdAt || right.plannedDate).localeCompare(cleanText(left.createdAt || left.plannedDate)))
+      : [];
+    const currentGanttRental = getCurrentGanttRental(relatedGanttRentals);
+    const currentClassicRental = getCurrentClassicRental(relatedRentals);
+    const currentRentalId = getGanttRentalRouteId(currentGanttRental) || cleanText(currentClassicRental?.id);
+    const openServiceTicket = relatedServiceTickets.find(isOpenServiceTicket) ?? null;
+    const title = [selectedEquipment.manufacturer, selectedEquipment.model].filter(Boolean).join(' ') || 'Без модели';
+    const equipmentPhotoSrc = photoSource(selectedEquipment.photo);
+    const previewPhotos = canViewShippingPhotos
+      ? collectEquipmentPreviewPhotos(selectedEquipment, selectedShippingPhotos, relatedServiceTickets)
+      : equipmentPhotoSrc
+        ? [{ id: 'main-photo', label: 'Фото техники', src: equipmentPhotoSrc, caption: title }]
+        : [];
+    const timeline = buildEquipmentTimeline({
+      equipment: selectedEquipment,
+      documents: relatedDocuments,
+      ganttRentals: relatedGanttRentals,
+      rentals: relatedRentals,
+      serviceTickets: relatedServiceTickets,
+    });
+    const detailPath = getEquipmentDetailPath(selectedEquipment);
+    const mainPhoto = previewPhotos[0]?.src || equipmentPhotoSrc;
+    const gsmDisplay = getEquipmentGsmDisplay(selectedEquipment);
+    const statusLabel = getRegistryStatusLabel(selectedEquipment, activeRentalIndex);
+    const equipmentTypeLabel = findEquipmentTypeLabel(selectedEquipment.type, equipmentTypeOptions);
+    const driveLabel = getEquipmentDriveLabel(selectedEquipment.drive);
+    const docsPath = `/documents?equipmentId=${encodeURIComponent(selectedEquipment.id)}&equipmentInv=${encodeURIComponent(selectedEquipment.inventoryNumber || '')}`;
+    const saleDocumentsCount = isSoldEquipment(selectedEquipment) || isSaleRegistryEquipment(selectedEquipment)
+      ? documentSlotCount(relatedDocuments, 'sale')
+      : null;
+    const quickActions = buildEquipmentPreviewQuickActions({
+      equipment: selectedEquipment,
+      activeRentalIndex,
+      can,
+      canViewDocuments,
+      canViewRentals,
+      canViewService,
+      currentRentalId,
+      openServiceTicket,
+      onShowHistory: () => setActiveQuickViewTab('history'),
+    });
+
+    return {
+      title,
+      detailPath,
+      mainPhoto,
+      statusLabel,
+      statusClassName: getRegistryStatusAppearance(selectedEquipment, activeRentalIndex),
+      inventoryNumber: selectedEquipment.inventoryNumber,
+      serialNumber: selectedEquipment.serialNumber,
+      quickActions,
+      overviewFields: [
+        { label: 'Статус', value: statusLabel },
+        { label: 'Категория', value: getEquipmentCategoryLabel(selectedEquipment.category) },
+        { label: 'Тип / привод', value: `${equipmentTypeLabel} · ${driveLabel}` },
+        { label: 'Собственник', value: getRegistryOwnerLabel(selectedEquipment) },
+        { label: 'Локация', value: selectedEquipment.location || '—' },
+        { label: 'GSM', value: gsmDisplay.label },
+        { label: 'Приоритет', value: getPriorityLabel(selectedEquipment.priority) },
+        { label: 'Наработка', value: formatPreviewNumber(selectedEquipment.hours, ' м/ч') },
+      ],
+      specFields: [
+        { label: 'Рабочая высота', value: formatPreviewNumber(selectedEquipment.workingHeight, ' м') },
+        { label: 'Высота платформы', value: formatPreviewNumber(selectedEquipment.liftHeight, ' м') },
+        { label: 'Грузоподъёмность', value: formatPreviewNumber(selectedEquipment.loadCapacity, ' кг') },
+        { label: 'Масса', value: formatPreviewNumber(selectedEquipment.weight, ' кг') },
+        { label: 'Габариты', value: selectedEquipment.dimensions || '—' },
+        { label: 'Год выпуска', value: selectedEquipment.year || '—' },
+        { label: 'Наработка', value: formatPreviewNumber(selectedEquipment.hours, ' м/ч') },
+        { label: 'Питание', value: driveLabel },
+      ],
+      canViewDocuments,
+      documentSlots: [
+        { label: 'Паспорт', count: documentSlotCount(relatedDocuments, 'passport') },
+        { label: 'Сертификат', count: documentSlotCount(relatedDocuments, 'certificate') },
+        { label: 'Акт ввода', count: documentSlotCount(relatedDocuments, 'commissioning') },
+        ...(saleDocumentsCount === null ? [] : [{ label: 'Договор / документы продажи', count: saleDocumentsCount }]),
+      ],
+      documents: relatedDocuments.map(document => ({
+        id: document.id,
+        typeLabel: getDocumentTypeLabel(document),
+        number: getDocumentNumber(document),
+        dateLabel: formatPreviewDate(getDocumentDate(document)),
+      })),
+      docsPath,
+      canViewPhotos: canViewShippingPhotos,
+      photos: previewPhotos.map(photo => ({
+        id: photo.id,
+        label: photo.label,
+        src: photo.src,
+        metaLabel: [photo.caption, formatPreviewDate(photo.date)].filter(value => value && value !== '—').join(' · ') || '—',
+      })),
+      timeline: timeline.map(item => ({
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        dateLabel: formatPreviewDate(item.date),
+      })),
+    };
+  }, [
+    activeRentalIndex,
+    can,
+    canViewDocuments,
+    canViewRentals,
+    canViewService,
+    canViewShippingPhotos,
+    documents,
+    enrichedEquipmentList,
+    equipmentTypeOptions,
+    ganttRentals,
+    rentals,
+    selectedEquipment,
+    selectedShippingPhotos,
+    serviceTickets,
+  ]);
 
   const filteredEquipment = React.useMemo(() => (
     enrichedEquipmentList
       .filter((equipment) => {
-        const query = search.toLowerCase().trim();
-        const matchesSearch = query === ''
-          || equipment.inventoryNumber.toLowerCase().includes(query)
-          || equipment.model.toLowerCase().includes(query)
-          || equipment.manufacturer.toLowerCase().includes(query)
-          || equipment.serialNumber.toLowerCase().includes(query)
-          || equipment.currentClient?.toLowerCase().includes(query)
-          || equipment.location?.toLowerCase().includes(query);
-
-        const matchesStatus = statusFilter === 'all' || equipment.status === statusFilter;
-        const matchesType = typeFilter === 'all' || equipment.type === typeFilter;
-        const matchesDrive = driveFilter === 'all' || equipment.drive === driveFilter;
+        const matchesSearch = matchesEquipmentSearch(equipment, search);
+        const matchesStatus = matchesStatusFilter(equipment, statusFilter, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS);
+        const matchesType = matchesEquipmentTypeFilter(equipment, typeFilter, equipmentTypeOptions);
+        const matchesDrive = matchesDriveFilter(equipment, driveFilter);
         const matchesCategory = categoryFilter === 'all' || equipment.category === categoryFilter;
         const matchesFleet = fleetFilter === 'all' || String(equipment.activeInFleet) === fleetFilter;
-        const matchesOwner = ownerFilter === 'all' || equipment.owner === ownerFilter;
+        const matchesOwner = matchesOwnerFilter(equipment, ownerFilter);
         const matchesLocation = locationFilter === 'all' || equipment.location === locationFilter;
 
         return matchesSearch
@@ -332,14 +974,16 @@ export default function Equipment() {
           && matchesFleet
           && matchesOwner
           && matchesLocation
-          && matchesTabType(equipment, activeTab);
+          && matchesTabType(equipment, activeTab, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS);
       })
       .sort(compareEquipmentByPriority)
   ), [
     activeTab,
+    activeRentalIndex,
     categoryFilter,
     driveFilter,
     enrichedEquipmentList,
+    equipmentTypeOptions,
     fleetFilter,
     locationFilter,
     ownerFilter,
@@ -350,16 +994,26 @@ export default function Equipment() {
 
   React.useEffect(() => {
     if (!shouldLogWarrantyDebug() || !isWarrantyMechanicRole(user?.role)) return;
-    const byTab = {
-      all: enrichedEquipmentList.length,
-      rental_fleet: enrichedEquipmentList.filter((item) => matchesTabType(item, 'rental_fleet')).length,
-      sale: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sale')).length,
-      client: enrichedEquipmentList.filter((item) => matchesTabType(item, 'client')).length,
-      partner: enrichedEquipmentList.filter((item) => matchesTabType(item, 'partner')).length,
-      service: enrichedEquipmentList.filter((item) => matchesTabType(item, 'service')).length,
-      archive: enrichedEquipmentList.filter((item) => matchesTabType(item, 'archive')).length,
+    const byTab = Object.fromEntries(
+      EQUIPMENT_TABS.map((tab) => [
+        tab.key,
+        enrichedEquipmentList.filter((item) => matchesTabType(item, tab.key, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS)).length,
+      ]),
+    );
+    const filters = {
+      activeTab,
+      search,
+      categoryFilter,
+      fleetFilter,
+      statusFilter,
+      typeFilter,
+      ownerFilter,
+      driveFilter,
+      locationFilter,
+      activeRentalIndex,
+      equipmentTypeOptions,
+      registryOptions: EQUIPMENT_REGISTRY_MATCH_OPTIONS,
     };
-    const filters = { activeTab, search, categoryFilter, fleetFilter, statusFilter, typeFilter, ownerFilter, driveFilter, locationFilter };
     const excluded = enrichedEquipmentList
       .map(item => ({ id: item.id, inventoryNumber: item.inventoryNumber, reasons: equipmentFilterReasons(item, filters) }))
       .filter(item => item.reasons.length > 0)
@@ -376,9 +1030,11 @@ export default function Equipment() {
     });
   }, [
     activeTab,
+    activeRentalIndex,
     categoryFilter,
     driveFilter,
     enrichedEquipmentList,
+    equipmentTypeOptions,
     filteredEquipment.length,
     fleetFilter,
     locationFilter,
@@ -390,15 +1046,60 @@ export default function Equipment() {
     user?.role,
   ]);
 
-  const tabCounts = React.useMemo(() => ({
-    all: enrichedEquipmentList.length,
-    rental_fleet: enrichedEquipmentList.filter((item) => matchesTabType(item, 'rental_fleet')).length,
-    sale: enrichedEquipmentList.filter((item) => matchesTabType(item, 'sale')).length,
-    client: enrichedEquipmentList.filter((item) => matchesTabType(item, 'client')).length,
-    partner: enrichedEquipmentList.filter((item) => matchesTabType(item, 'partner')).length,
-    service: enrichedEquipmentList.filter((item) => matchesTabType(item, 'service')).length,
-    archive: enrichedEquipmentList.filter((item) => matchesTabType(item, 'archive')).length,
-  }), [enrichedEquipmentList]);
+  const tabCounts = React.useMemo(() => (
+    buildEquipmentTabCounts(enrichedEquipmentList, EQUIPMENT_TABS, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS)
+  ), [activeRentalIndex, enrichedEquipmentList]);
+  const totalPark = tabCounts.all ?? 0;
+  const activeTabTotal = tabCounts[activeTab] ?? 0;
+  const kpiCards = React.useMemo<EquipmentKpiCardConfig[]>(() => [
+    {
+      title: 'Всего техники',
+      value: totalPark,
+      caption: 'Единиц в реестре',
+      icon: Boxes,
+      tone: 'neutral',
+    },
+    {
+      title: 'Свободна',
+      value: tabCounts.available ?? 0,
+      caption: 'Доля от общего парка',
+      icon: CheckCircle2,
+      tone: 'available',
+      percent: getRegistryPercent(tabCounts.available ?? 0, totalPark),
+    },
+    {
+      title: 'В аренде',
+      value: tabCounts.rented ?? 0,
+      caption: 'Доля от общего парка',
+      icon: Truck,
+      tone: 'rented',
+      percent: getRegistryPercent(tabCounts.rented ?? 0, totalPark),
+    },
+    {
+      title: 'В сервисе',
+      value: tabCounts.service ?? 0,
+      caption: 'Доля от общего парка',
+      icon: Wrench,
+      tone: 'service',
+      percent: getRegistryPercent(tabCounts.service ?? 0, totalPark),
+    },
+    {
+      title: 'На продажу',
+      value: tabCounts.for_sale ?? 0,
+      caption: 'Доля от общего парка',
+      icon: BadgeDollarSign,
+      tone: 'sale',
+      percent: getRegistryPercent(tabCounts.for_sale ?? 0, totalPark),
+    },
+    {
+      title: 'Проданная',
+      value: tabCounts.sold ?? 0,
+      caption: 'Доля от общего парка',
+      icon: Archive,
+      tone: 'sold',
+      percent: getRegistryPercent(tabCounts.sold ?? 0, totalPark),
+    },
+  ], [tabCounts, totalPark]);
   const activeFilterCount = [
     search.trim() !== '',
     categoryFilter !== 'all',
@@ -421,10 +1122,89 @@ export default function Equipment() {
     setLocationFilter('all');
   };
 
-  const isSaleTab = activeTab === 'sale';
+  const isEquipmentLoading = equipmentQuery.isLoading || (canViewRentals && ganttQuery.isLoading);
+  const emptyState: EquipmentEmptyStateConfig = (() => {
+    if (isEquipmentLoading && totalPark === 0) {
+      return {
+        ...EQUIPMENT_EMPTY_STATE_COPY.loading,
+        icon: Boxes,
+      };
+    }
+
+    if (totalPark === 0) {
+      return {
+        ...EQUIPMENT_EMPTY_STATE_COPY.emptyRegistry,
+        icon: Boxes,
+        action: canCreateEquipment ? (
+          <Link to="/equipment/new">
+            <Button className="app-button-primary rounded-xl px-4">
+              <Plus className="h-4 w-4" />
+              Добавить технику
+            </Button>
+          </Link>
+        ) : undefined,
+      };
+    }
+
+    if (activeTab === 'for_sale' && activeTabTotal === 0) {
+      return {
+        ...EQUIPMENT_EMPTY_STATE_COPY.forSaleEmpty,
+        icon: BadgeDollarSign,
+        action: canViewSales ? (
+          <Link to="/sales">
+            <Button variant="outline" className="rounded-xl px-4">
+              <BadgeDollarSign className="h-4 w-4" />
+              Перейти к продажам
+            </Button>
+          </Link>
+        ) : undefined,
+      };
+    }
+
+    if (activeTab === 'sold' && activeTabTotal === 0) {
+      return {
+        ...EQUIPMENT_EMPTY_STATE_COPY.soldEmpty,
+        icon: Archive,
+      };
+    }
+
+    return {
+      ...EQUIPMENT_EMPTY_STATE_COPY.noResults,
+      icon: Search,
+      action: activeFilterCount > 0 ? (
+        <Button type="button" variant="outline" className="rounded-xl px-4" onClick={resetFilters}>
+          <RotateCcw className="h-4 w-4" />
+          Сбросить фильтры
+        </Button>
+      ) : undefined,
+    };
+  })();
+
+  const isSaleTab = activeTab === 'for_sale' || activeTab === 'sold';
   const totalVisible = filteredEquipment.length;
-  const defaultRowColumns = '2.5fr 1.1fr .95fr .95fr 1fr 1fr 1.1fr 1.3fr 1.1fr 36px';
-  const saleRowColumns = '2.6fr 1fr 1fr 1fr 1fr 1fr 1fr 36px';
+  const { totalPages, visibleCurrentPage, pageStart, pageEnd } = getEquipmentPageRange(totalVisible, currentPage, pageSize);
+  const paginatedEquipment = React.useMemo(
+    () => getEquipmentPageItems(filteredEquipment, visibleCurrentPage, pageSize),
+    [filteredEquipment, pageSize, visibleCurrentPage],
+  );
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    activeTab,
+    categoryFilter,
+    driveFilter,
+    fleetFilter,
+    locationFilter,
+    ownerFilter,
+    search,
+    statusFilter,
+    typeFilter,
+  ]);
+
+  React.useEffect(() => {
+    setCurrentPage((page) => clampEquipmentPage(page, totalPages));
+  }, [totalPages]);
 
   return (
     <div className="space-y-5 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -435,7 +1215,7 @@ export default function Equipment() {
               <h1 className="app-shell-title text-3xl font-extrabold text-foreground">Техника</h1>
               <p className="mt-2 text-sm text-muted-foreground">Единый реестр физических единиц техники</p>
             </div>
-            {can('create', 'equipment') && (
+            {canCreateEquipment && (
               <Link to="/equipment/new">
                 <Button size="sm" className="app-button-primary rounded-xl px-4">
                   <Plus className="h-4 w-4" />
@@ -445,45 +1225,45 @@ export default function Equipment() {
             )}
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            {[
-              { key: 'all', label: 'Вся техника' },
-              { key: 'rental_fleet', label: 'Арендный парк' },
-              { key: 'sale', label: 'На продаже' },
-              { key: 'client', label: 'Клиентская техника' },
-              { key: 'partner', label: 'Партнёрская техника' },
-              { key: 'service', label: 'В сервисе' },
-              { key: 'archive', label: 'Списанная / архив' },
-            ].map((tab) => {
-              const count = tabCounts[tab.key as EquipmentTab];
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key as EquipmentTab)}
-                  className={`rounded-xl border px-4 py-2 text-sm transition-colors ${
-                    activeTab === tab.key
-                      ? 'border-primary/30 bg-accent text-foreground'
-                      : 'border-transparent bg-transparent text-muted-foreground hover:bg-secondary hover:text-foreground'
-                  }`}
-                >
-                  {tab.label}
-                  <span className={`ml-2 rounded-full px-2 py-0.5 text-[11px] ${
-                    activeTab === tab.key ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'
-                  }`}>
-                    {count > 99 ? '99+' : count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <EquipmentStatusTabs
+            activeTab={activeTab}
+            tabs={EQUIPMENT_TABS}
+            counts={tabCounts}
+            onTabChange={setActiveTab}
+          />
+
+          <EquipmentKpiCards cards={kpiCards} />
         </div>
 
-        <div className="px-5 py-4 sm:px-6">
-          <div className="flex justify-end">
-            <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
-          </div>
-        </div>
+        <EquipmentFilters
+          search={search}
+          onSearchChange={setSearch}
+          activeFilterCount={activeFilterCount}
+          open={showFilters}
+          onOpenChange={setShowFilters}
+          onReset={resetFilters}
+          categoryFilter={categoryFilter}
+          onCategoryFilterChange={setCategoryFilter}
+          fleetFilter={fleetFilter}
+          onFleetFilterChange={setFleetFilter}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
+          typeFilter={typeFilter}
+          onTypeFilterChange={setTypeFilter}
+          ownerFilter={ownerFilter}
+          onOwnerFilterChange={setOwnerFilter}
+          driveFilter={driveFilter}
+          onDriveFilterChange={setDriveFilter}
+          locationFilter={locationFilter}
+          onLocationFilterChange={setLocationFilter}
+          categoryOptions={categoryOptions}
+          statusOptions={EQUIPMENT_STATUS_FILTER_OPTIONS}
+          typeOptions={typeFilterOptions}
+          ownerOptions={ownerOptions}
+          driveOptions={EQUIPMENT_DRIVE_FILTER_OPTIONS}
+          locationOptions={locationOptions}
+          activeFleetLabels={ACTIVE_FLEET_LABELS}
+        />
       </section>
 
       {(equipmentQuery.error || ganttQuery.error) && (
@@ -500,288 +1280,106 @@ export default function Equipment() {
         </section>
       )}
 
-      <FilterDialog
-        open={showFilters}
-        onOpenChange={setShowFilters}
-        title="Фильтры техники"
-        description="Настрой выборку парка по поиску, статусу, типу, собственнику и локации."
-        onReset={resetFilters}
-      >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <FilterField label="Поиск" className="md:col-span-2 xl:col-span-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                placeholder={isSaleTab ? 'Поиск по модели, инв. №, SN, локации…' : 'Поиск по инв. №, модели, SN, клиенту…'}
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                className="app-filter-input pl-10"
-              />
-            </div>
-          </FilterField>
-          <FilterField label="Категория">
-            <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="app-filter-input">
-              <option value="all">Все категории</option>
-              <option value="own">{EQUIPMENT_CATEGORY_LABELS.own}</option>
-              <option value="sold">{EQUIPMENT_CATEGORY_LABELS.sold}</option>
-              <option value="client">{EQUIPMENT_CATEGORY_LABELS.client}</option>
-              <option value="partner">{EQUIPMENT_CATEGORY_LABELS.partner}</option>
-            </select>
-          </FilterField>
-          <FilterField label="Активный парк">
-            <select value={fleetFilter} onChange={(event) => setFleetFilter(event.target.value)} className="app-filter-input">
-              <option value="all">Любое участие в парке</option>
-              <option value="true">{`Активный парк — ${ACTIVE_FLEET_LABELS.yes}`}</option>
-              <option value="false">{`Активный парк — ${ACTIVE_FLEET_LABELS.no}`}</option>
-            </select>
-          </FilterField>
-          <FilterField label="Статус">
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="app-filter-input">
-              <option value="all">Все статусы</option>
-              <option value="available">Свободен</option>
-              <option value="rented">В аренде</option>
-              <option value="reserved">Бронь</option>
-              <option value="in_service">В сервисе</option>
-              <option value="inactive">Списан</option>
-            </select>
-          </FilterField>
-          <FilterField label="Тип">
-            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="app-filter-input">
-              <option value="all">Все типы</option>
-              {equipmentTypeOptions.map(type => (
-                <option key={type.value} value={type.value}>{type.label}</option>
-              ))}
-            </select>
-          </FilterField>
-          <FilterField label="Собственник">
-            <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} className="app-filter-input">
-              <option value="all">Все собственники</option>
-              <option value="own">Собственная</option>
-              <option value="investor">Инвестор</option>
-              <option value="sublease">Субаренда</option>
-            </select>
-          </FilterField>
-          <FilterField label="Привод">
-            <select value={driveFilter} onChange={(event) => setDriveFilter(event.target.value)} className="app-filter-input">
-              <option value="all">Все приводы</option>
-              <option value="diesel">Дизель</option>
-              <option value="electric">Электро</option>
-            </select>
-          </FilterField>
-          <FilterField label="Локация">
-            <select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)} className="app-filter-input">
-              <option value="all">Все локации</option>
-              {locationOptions.map((location) => (
-                <option key={location} value={location}>{location}</option>
-              ))}
-            </select>
-          </FilterField>
-        </div>
-      </FilterDialog>
-
       <div className="space-y-3 sm:hidden">
-        {totalVisible === 0 ? <EmptyState /> : filteredEquipment.map((equipment) => (
-          <EquipmentMobileCard
-            key={equipment.id}
-            equipment={equipment}
+        {totalVisible === 0 ? (
+          <EmptyState {...emptyState} />
+        ) : (
+          <EquipmentMobileCards
+            equipmentItems={paginatedEquipment}
             isSaleTab={isSaleTab}
-            equipmentTypeLabel={findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
+            activeRentalIndex={activeRentalIndex}
+            getEquipmentDetailPath={getEquipmentDetailPath}
+            getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
+            getEquipmentDriveLabel={getEquipmentDriveLabel}
+            getRegistryStatusLabel={getRegistryStatusLabel}
+            getRegistryStatusAppearance={getRegistryStatusAppearance}
+            getPriorityLabel={getPriorityLabel}
+            getPriorityAppearance={getPriorityAppearance}
+            getSalePdiAppearance={getSalePdiAppearance}
+            isSaleRegistryEquipment={isSaleRegistryEquipment}
+            salePdiLabels={EQUIPMENT_SALE_PDI_LABELS}
           />
-        ))}
+        )}
       </div>
 
       <section className="hidden overflow-hidden rounded-2xl border border-border bg-card/95 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)] sm:block">
-        {isSaleTab ? (
-          <>
-            <div className="overflow-x-auto">
-              <div className="min-w-[1080px]">
-                <div className="border-b border-border bg-secondary/70 px-5 py-3">
-                  <div className="grid gap-3 text-[10px] uppercase tracking-[0.16em] text-muted-foreground" style={{ gridTemplateColumns: saleRowColumns }}>
-                    <div>Модель / Инв. № / Серийный №</div>
-                    <div>PDI</div>
-                    <div>Статус</div>
-                    <div>Локация</div>
-                    <div>Цена 1</div>
-                    <div>Цена 2</div>
-                    <div>Цена 3</div>
-                    <div></div>
-                  </div>
-                </div>
-
-                {totalVisible === 0 ? (
-                  <div className="p-6"><EmptyState /></div>
-                ) : (
-                  filteredEquipment.map((equipment) => (
-                    <div key={equipment.id} className="border-b border-border/80 px-5 py-4 transition-colors hover:bg-secondary/60">
-                      <div className="grid items-center gap-3" style={{ gridTemplateColumns: saleRowColumns }}>
-                        <div className="min-w-0">
-                          <Link to={`/sales/equipment/${equipment.id}`} className="app-shell-title text-[15px] font-extrabold text-foreground hover:text-primary">
-                            {equipment.manufacturer} {equipment.model}
-                          </Link>
-                          <div className="mt-1 text-xs text-muted-foreground">Инв. № {equipment.inventoryNumber || '—'}</div>
-                          <div className="text-xs text-muted-foreground">SN {equipment.serialNumber || 'не указан'}</div>
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            <span className="rounded-md bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
-                              {findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
-                            </span>
-                            <span className="rounded-md bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
-                              {getEquipmentDriveLabel(equipment.drive)}
-                            </span>
-                          </div>
-                        </div>
-                        <div>
-                          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${getSalePdiAppearance(equipment.salePdiStatus)}`}>
-                            {EQUIPMENT_SALE_PDI_LABELS[equipment.salePdiStatus ?? 'not_started']}
-                          </span>
-                        </div>
-                        <div>
-                          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${getStatusAppearance(equipment.status)}`}>
-                            {getStatusLabel(equipment.status)}
-                          </span>
-                        </div>
-                        <div className="text-sm text-muted-foreground">{equipment.location || '—'}</div>
-                        <div className="text-sm font-medium text-foreground">{formatCurrency(equipment.salePrice1 ?? 0)}</div>
-                        <div className="text-sm font-medium text-foreground">{formatCurrency(equipment.salePrice2 ?? 0)}</div>
-                        <div className="text-sm font-medium text-foreground">{formatCurrency(equipment.salePrice3 ?? 0)}</div>
-                        <div>
-                          <DropdownMenu.Root>
-                            <DropdownMenu.Trigger asChild>
-                              <button className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-secondary hover:text-foreground">
-                                <MoreVertical className="h-4 w-4" />
-                              </button>
-                            </DropdownMenu.Trigger>
-                            <DropdownMenu.Portal>
-                              <DropdownMenu.Content
-                                className="min-w-[180px] rounded-xl border border-border bg-popover p-1 shadow-xl"
-                                sideOffset={5}
-                                align="end"
-                              >
-                                <DropdownMenu.Item asChild className="cursor-pointer rounded-lg px-3 py-2 text-sm text-foreground outline-none hover:bg-accent">
-                                  <Link to={`/sales/equipment/${equipment.id}`}>Открыть карточку</Link>
-                                </DropdownMenu.Item>
-                              </DropdownMenu.Content>
-                            </DropdownMenu.Portal>
-                          </DropdownMenu.Root>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </>
+        {totalVisible === 0 ? (
+          <div className="p-6"><EmptyState {...emptyState} /></div>
         ) : (
-          <div className="overflow-x-auto">
-            <div className="min-w-[1320px]">
-              <div className="border-b border-border bg-secondary/70 px-5 py-3">
-                <div className="grid gap-3 text-[10px] uppercase tracking-[0.16em] text-muted-foreground" style={{ gridTemplateColumns: defaultRowColumns }}>
-                  <div>Модель / Инв. № / Серийный №</div>
-                  <div>Тип</div>
-                  <div>Приоритет</div>
-                  <div>Привод</div>
-                  <div>Статус</div>
-                  <div>Локация</div>
-                  <div>След. ТО</div>
-                  <div>Текущий клиент</div>
-                  <div>Дата возврата</div>
-                  <div></div>
-                </div>
-              </div>
-
-              {totalVisible === 0 ? (
-                <div className="p-6"><EmptyState /></div>
-              ) : (
-                filteredEquipment.map((equipment) => {
-                  const isOverdueMaintenance = new Date(equipment.nextMaintenance) < new Date();
-                  return (
-                    <div key={equipment.id} className="border-b border-border/80 px-5 py-4 transition-colors hover:bg-secondary/60">
-                      <div className="grid items-center gap-3" style={{ gridTemplateColumns: defaultRowColumns }}>
-                        <div className="min-w-0">
-                          <Link to={`/equipment/${equipment.id}`} className="app-shell-title text-[15px] font-extrabold text-foreground hover:text-primary">
-                            {equipment.manufacturer} {equipment.model}
-                          </Link>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            Инв. № {equipment.inventoryNumber || '—'}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            SN {equipment.serialNumber || 'не указан'}
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            <span className="rounded-md bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
-                              {getOwnerLabel(equipment.owner)}
-                            </span>
-                            <span className="rounded-md bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
-                              Активный парк: {equipment.activeInFleet ? 'Да' : 'Нет'}
-                            </span>
-                            {equipment.isForSale ? (
-                              <span className="rounded-md bg-orange-500/10 px-2 py-0.5 text-[10px] text-orange-300">
-                                На продажу
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="text-sm text-muted-foreground">{findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}</div>
-                        <div>
-                          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${getPriorityAppearance(equipment.priority)}`}>
-                            {getPriorityLabel(equipment.priority)}
-                          </span>
-                        </div>
-                        <div className="text-sm text-muted-foreground">{getEquipmentDriveLabel(equipment.drive)}</div>
-                        <div>
-                          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${getStatusAppearance(equipment.status)}`}>
-                            {getStatusLabel(equipment.status)}
-                          </span>
-                        </div>
-                        <div className="text-sm text-muted-foreground">{equipment.location || '—'}</div>
-                        <div className={`text-sm ${isOverdueMaintenance ? 'text-red-300' : 'text-muted-foreground'}`}>
-                          {formatDate(equipment.nextMaintenance)}
-                        </div>
-                        <div className="truncate text-sm text-foreground">{equipment.currentClient || '—'}</div>
-                        <div className="text-sm text-muted-foreground">{equipment.returnDate ? formatDate(equipment.returnDate) : '—'}</div>
-                        <div>
-                          <DropdownMenu.Root>
-                            <DropdownMenu.Trigger asChild>
-                              <button className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-secondary hover:text-foreground">
-                                <MoreVertical className="h-4 w-4" />
-                              </button>
-                            </DropdownMenu.Trigger>
-                            <DropdownMenu.Portal>
-                              <DropdownMenu.Content
-                                className="min-w-[180px] rounded-xl border border-border bg-popover p-1 shadow-xl"
-                                sideOffset={5}
-                                align="end"
-                              >
-                                <DropdownMenu.Item asChild className="cursor-pointer rounded-lg px-3 py-2 text-sm text-foreground outline-none hover:bg-accent">
-                                  <Link to={`/equipment/${equipment.id}`}>Открыть</Link>
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Item className="cursor-pointer rounded-lg px-3 py-2 text-sm text-foreground outline-none hover:bg-accent">
-                                  Сдать в аренду
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Item className="cursor-pointer rounded-lg px-3 py-2 text-sm text-foreground outline-none hover:bg-accent">
-                                  Вернуть
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Item className="cursor-pointer rounded-lg px-3 py-2 text-sm text-foreground outline-none hover:bg-accent">
-                                  Создать заявку
-                                </DropdownMenu.Item>
-                              </DropdownMenu.Content>
-                            </DropdownMenu.Portal>
-                          </DropdownMenu.Root>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
+          <EquipmentRegistryTable
+            equipmentItems={paginatedEquipment}
+            activeRentalIndex={activeRentalIndex}
+            selectedEquipmentId={selectedEquipmentId}
+            onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
+            getEquipmentDetailPath={getEquipmentDetailPath}
+            getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
+            getEquipmentDriveLabel={getEquipmentDriveLabel}
+            getRegistryStatusLabel={getRegistryStatusLabel}
+            getRegistryStatusAppearance={getRegistryStatusAppearance}
+            getEquipmentCategoryLabel={getEquipmentCategoryLabel}
+            getRegistryOwnerLabel={getRegistryOwnerLabel}
+            getPriorityLabel={getPriorityLabel}
+            getPriorityDotClass={getPriorityDotClass}
+            getEquipmentGsmDisplay={getEquipmentGsmDisplay}
+          />
         )}
       </section>
 
-      {totalVisible > 0 ? (
-        <div className="text-sm text-muted-foreground">
-          Показано {totalVisible} из {equipmentList.length} единиц техники
-        </div>
+      {quickViewPanelData ? (
+        <EquipmentQuickViewPanel
+          selectedEquipment={selectedEquipment}
+          activeTab={activeQuickViewTab}
+          onTabChange={setActiveQuickViewTab}
+          onClose={() => setSelectedEquipmentId(null)}
+          {...quickViewPanelData}
+        />
       ) : null}
+
+      <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          {totalVisible > 0
+            ? `Показано ${pageStart}–${pageEnd} из ${totalVisible} найденных, всего в базе ${scopedEquipmentList.length}`
+            : `Найдено 0 из ${scopedEquipmentList.length} единиц техники`}
+        </div>
+        {totalVisible > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span>Строк на странице</span>
+            <select
+              value={pageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setCurrentPage(1);
+              }}
+              className="h-9 rounded-lg border border-border bg-secondary px-2 text-sm text-foreground outline-none transition focus:border-primary"
+            >
+              {EQUIPMENT_PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>{size}</option>
+              ))}
+            </select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={visibleCurrentPage <= 1}
+              onClick={() => setCurrentPage((page) => clampEquipmentPage(page - 1, totalPages))}
+            >
+              Назад
+            </Button>
+            <span className="min-w-[72px] text-center tabular-nums text-foreground">
+              {visibleCurrentPage} / {totalPages}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={visibleCurrentPage >= totalPages}
+              onClick={() => setCurrentPage((page) => clampEquipmentPage(page + 1, totalPages))}
+            >
+              Вперёд
+            </Button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

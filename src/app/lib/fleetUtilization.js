@@ -1,3 +1,5 @@
+import { saleStatusKind } from './equipmentSaleMode.js';
+
 const RENTAL_FLEET_CATEGORIES = new Set(['own', 'partner']);
 const INACTIVE_EQUIPMENT_STATUSES = new Set([
   'inactive',
@@ -31,7 +33,8 @@ export function isActiveRentalFleetEquipment(equipment = {}) {
   const category = equipment.category ?? 'own';
   const status = normalizeText(equipment.status).toLowerCase();
 
-  return equipment.activeInFleet !== false
+  return saleStatusKind(equipment) !== 'sold'
+    && equipment.activeInFleet !== false
     && RENTAL_FLEET_CATEGORIES.has(category)
     && !INACTIVE_EQUIPMENT_STATUSES.has(status);
 }

@@ -24,6 +24,8 @@ test('active rental fleet denominator includes only active own and partner fleet
   assert.equal(isActiveRentalFleetEquipment(equipment({ category: 'own', activeInFleet: true })), true);
   assert.equal(isActiveRentalFleetEquipment(equipment({ category: 'partner', activeInFleet: true })), true);
   assert.equal(isActiveRentalFleetEquipment(equipment({ category: 'sold', activeInFleet: true })), false);
+  assert.equal(isActiveRentalFleetEquipment(equipment({ category: 'own', activeInFleet: true, saleStatus: 'Продана' })), false);
+  assert.equal(isActiveRentalFleetEquipment(equipment({ category: 'own', activeInFleet: true, isForSale: true, saleStatus: 'На продаже' })), true);
   assert.equal(isActiveRentalFleetEquipment(equipment({ category: 'client', activeInFleet: true })), false);
   assert.equal(isActiveRentalFleetEquipment(equipment({ category: 'own', activeInFleet: false })), false);
 });

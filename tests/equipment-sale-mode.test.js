@@ -15,9 +15,22 @@ import {
 import { buildEquipmentQuickActions } from '../src/app/lib/quickActions.js';
 
 const allowAll = () => true;
+const equipmentConstantsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/equipment.constants.ts'), 'utf8');
+const equipmentHelpersSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/equipment.helpers.ts'), 'utf8');
+const equipmentPaginationSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/equipment.pagination.ts'), 'utf8');
+const equipmentTypesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/equipment.types.ts'), 'utf8');
+const equipmentKpiCardsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/EquipmentKpiCards.tsx'), 'utf8');
+const equipmentStatusTabsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/EquipmentStatusTabs.tsx'), 'utf8');
+const equipmentFiltersSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/EquipmentFilters.tsx'), 'utf8');
+const equipmentRegistryTableSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/EquipmentRegistryTable.tsx'), 'utf8');
+const equipmentMobileCardsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/EquipmentMobileCards.tsx'), 'utf8');
+const equipmentQuickActionsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/EquipmentQuickActions.tsx'), 'utf8');
+const equipmentQuickViewPanelSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/EquipmentQuickViewPanel.tsx'), 'utf8');
 
 test('sale mode turns on from sales route context and explicit sale fields', () => {
   assert.equal(isSaleModeEquipment({ id: 'EQ-1', status: 'available' }, { salesContext: true }), true);
+  assert.equal(isSaleModeEquipment({ id: 'EQ-sale-mode', status: 'available', saleMode: true }), true);
+  assert.equal(isSaleModeEquipment({ id: 'EQ-sale-string', status: 'available', saleMode: 'on_sale' }), true);
   assert.equal(isSaleModeEquipment({ id: 'EQ-2', isForSale: true }), true);
   assert.equal(isSaleModeEquipment({ id: 'EQ-3', saleStatus: 'reserved' }), true);
   assert.equal(isSaleModeEquipment({ id: 'EQ-4', saleStatus: 'На продаже' }), true);
@@ -114,6 +127,25 @@ test('sale status patches keep returned sold equipment out of rental fleet', () 
   assert.equal(removed.isForSale, false);
   assert.equal(removed.activeInFleet, false);
   assert.equal(removed.status, 'inactive');
+});
+
+test('rental eligibility excludes sold sale records but not active on-sale fleet units', () => {
+  const classificationSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/equipmentClassification.ts'), 'utf8');
+  const equipmentSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const rentalNewSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/RentalNew.tsx'), 'utf8');
+
+  assert.match(classificationSource, /import \{ normalizeEquipmentSaleCondition, saleStatusKind \} from '\.\/equipmentSaleMode\.js';/);
+  assert.match(classificationSource, /export function canEquipmentParticipateInRentals/);
+  assert.match(classificationSource, /saleStatusKind\(normalized\) !== 'sold'/);
+  assert.match(classificationSource, /normalized\.activeInFleet/);
+  assert.match(classificationSource, /normalized\.category === 'own' \|\| normalized\.category === 'partner'/);
+  assert.doesNotMatch(classificationSource, /normalized\.isForSale.*false/);
+
+  assert.match(rentalNewSource, /rawEq\.filter\(e => canEquipmentParticipateInRentals\(e\) && e\.status !== 'inactive' && e\.status !== 'in_service'\)/);
+  assert.match(equipmentHelpersSource, /activeTab === 'available'[\s\S]*registryOptions\.canEquipmentParticipateInRentals\(equipment\)[\s\S]*!hasCurrentRental\(equipment, activeRentalIndex\)/);
+  assert.match(equipmentHelpersSource, /activeTab === 'reserved'[\s\S]*registryOptions\.canEquipmentParticipateInRentals\(equipment\)/);
+  assert.match(equipmentSource, /const EQUIPMENT_REGISTRY_MATCH_OPTIONS = \{ canEquipmentParticipateInRentals \}/);
+  assert.match(equipmentSource, /matchesTabType\(equipment, activeTab, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS\)/);
 });
 
 test('sale condition auto-detects new equipment when no operation history exists', () => {
@@ -411,25 +443,383 @@ test('normal equipment detail is asset-centric instead of rental-centric', () =>
 
 test('equipment registry uses asset-centric tabs for one equipment entity', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const tabSource = `${source}\n${equipmentConstantsSource}`;
 
   for (const label of [
     'Вся техника',
-    'Арендный парк',
-    'На продаже',
-    'Клиентская техника',
-    'Партнёрская техника',
+    'Свободная',
+    'В аренде',
     'В сервисе',
-    'Списанная / архив',
+    'Бронь',
+    'Списанная',
+    'На продажу',
+    'Проданная',
   ]) {
-    assert.match(source, new RegExp(label.replace('/', '\\/')));
+    assert.match(tabSource, new RegExp(label.replace('/', '\\/')));
   }
 
-  assert.match(source, /type EquipmentTab = 'all' \| 'rental_fleet' \| 'sale' \| 'client' \| 'partner' \| 'service' \| 'archive'/);
-  assert.match(source, /function isSaleRegistryEquipment/);
-  assert.match(source, /activeTab === 'sale'/);
-  assert.match(source, /to=\{`\/sales\/equipment\/\$\{equipment\.id\}`\}/);
+  assert.match(equipmentTypesSource, /export type EquipmentTab = 'all' \| 'available' \| 'rented' \| 'service' \| 'reserved' \| 'written_off' \| 'for_sale' \| 'sold'/);
+  assert.match(source, /EquipmentTab,[\s\S]*from '\.\/equipment\/equipment\.types';/);
+  assert.match(source, /EQUIPMENT_TABS[\s\S]*from '\.\/equipment\/equipment\.constants';/);
+  assert.match(source, /import \{ EquipmentStatusTabs \} from '\.\/equipment\/EquipmentStatusTabs';/);
+  assert.match(source, /<EquipmentStatusTabs[\s\S]*activeTab=\{activeTab\}[\s\S]*tabs=\{EQUIPMENT_TABS\}[\s\S]*counts=\{tabCounts\}[\s\S]*onTabChange=\{setActiveTab\}/);
+  assert.match(equipmentStatusTabsSource, /export function EquipmentStatusTabs/);
+  assert.match(equipmentStatusTabsSource, /activeTab === tab\.key[\s\S]*'border-primary\/30 bg-accent text-foreground'/);
+  assert.match(equipmentHelpersSource, /export function isSaleRegistryEquipment/);
+  assert.match(equipmentHelpersSource, /export function hasExplicitSaleMode/);
+  assert.match(equipmentHelpersSource, /saleMode === true/);
+  assert.match(equipmentHelpersSource, /export function isForSaleEquipment/);
+  assert.match(equipmentHelpersSource, /export function isSoldEquipment/);
+  assert.match(equipmentHelpersSource, /getEquipmentSaleKind\(equipment\) === 'sold'/);
+  assert.match(source, /activeTab === 'for_sale' \|\| activeTab === 'sold'/);
+  assert.match(source, /function getEquipmentDetailPath/);
+  assert.match(source, /\/sales\/equipment\/\$\{equipment\.id\}/);
   assert.doesNotMatch(source, /Активный парк'/);
   assert.doesNotMatch(source, /Сервисная \/ клиентская техника/);
+});
+
+test('equipment registry KPI cards use real counts and percentages without fake trends', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const kpiUiSource = `${source}\n${equipmentKpiCardsSource}`;
+
+  for (const label of ['Всего техники', 'Свободна', 'В аренде', 'В сервисе', 'На продажу', 'Проданная']) {
+    assert.match(source, new RegExp(label));
+  }
+
+  assert.match(source, /import \{ EquipmentKpiCards, type EquipmentKpiCardConfig \} from '\.\/equipment\/EquipmentKpiCards';/);
+  assert.match(source, /<EquipmentKpiCards cards=\{kpiCards\} \/>/);
+  assert.match(equipmentKpiCardsSource, /function EquipmentKpiCard/);
+  assert.match(equipmentHelpersSource, /export function getRegistryPercent/);
+  assert.match(equipmentHelpersSource, /export function buildEquipmentTabCounts/);
+  assert.match(source, /buildEquipmentTabCounts\(enrichedEquipmentList, EQUIPMENT_TABS, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS\)/);
+  assert.match(source, /value: tabCounts\.available/);
+  assert.match(source, /value: tabCounts\.rented/);
+  assert.match(source, /value: tabCounts\.service/);
+  assert.match(source, /value: tabCounts\.for_sale/);
+  assert.match(source, /value: tabCounts\.sold/);
+  assert.match(source, /Доля от общего парка/);
+  assert.match(source, /CheckCircle2/);
+  assert.match(source, /Truck/);
+  assert.match(source, /Wrench/);
+  assert.match(source, /BadgeDollarSign/);
+  assert.match(equipmentKpiCardsSource, /border-violet-200\/80 bg-violet-50\/45/);
+  assert.match(equipmentKpiCardsSource, /border-slate-200\/85 bg-slate-50\/60/);
+  assert.doesNotMatch(kpiUiSource, /sparkline|Sparkline|trend|Тренд|динамик/i);
+  assert.doesNotMatch(kpiUiSource, /Math\.random|mockTrend|fakeTrend|fakeKpi/i);
+});
+
+test('equipment registry filters are tab-aware and cover status sale type drive owner and location', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const filterUiSource = `${source}\n${equipmentConstantsSource}\n${equipmentFiltersSource}`;
+
+  for (const label of [
+    'Модель, инв. №, SN, собственник, локация',
+    'Свободна',
+    'В аренде',
+    'Бронь',
+    'В сервисе',
+    'Списана',
+    'На продажу',
+    'Продана',
+    'Ножничный подъёмник',
+    'Коленчатый подъёмник',
+    'Телескопический подъёмник',
+    'Погрузчик',
+    'Дизель 4x4',
+    'Другое',
+    'Собственник',
+    'Локация',
+  ]) {
+    assert.match(filterUiSource, new RegExp(label.replace('№', '№')));
+  }
+
+  assert.match(source, /import \{ EquipmentFilters \} from '\.\/equipment\/EquipmentFilters';/);
+  assert.match(source, /<EquipmentFilters[\s\S]*search=\{search\}[\s\S]*onSearchChange=\{setSearch\}/);
+  assert.match(source, /categoryOptions=\{categoryOptions\}/);
+  assert.match(source, /statusOptions=\{EQUIPMENT_STATUS_FILTER_OPTIONS\}/);
+  assert.match(equipmentConstantsSource, /export const EQUIPMENT_STATUS_FILTER_OPTIONS/);
+  assert.match(equipmentConstantsSource, /export const STANDARD_EQUIPMENT_TYPE_FILTER_OPTIONS/);
+  assert.match(equipmentConstantsSource, /export const EQUIPMENT_DRIVE_FILTER_OPTIONS/);
+  assert.match(source, /typeOptions=\{typeFilterOptions\}/);
+  assert.match(source, /ownerOptions=\{ownerOptions\}/);
+  assert.match(source, /locationOptions=\{locationOptions\}/);
+  assert.match(equipmentFiltersSource, /export function EquipmentFilters/);
+  assert.match(equipmentFiltersSource, /<FilterButton activeCount=\{activeFilterCount\}/);
+  assert.match(equipmentFiltersSource, /<FilterDialog[\s\S]*title="Фильтры техники"[\s\S]*onReset=\{onReset\}/);
+  assert.match(equipmentHelpersSource, /export function matchesEquipmentSearch/);
+  assert.match(equipmentHelpersSource, /export function getEquipmentCategoryLabel/);
+  assert.match(source, /\['own', 'client', 'partner', 'sold'\]/);
+  assert.match(equipmentHelpersSource, /export function matchesStatusFilter/);
+  assert.match(equipmentHelpersSource, /export function matchesEquipmentTypeFilter/);
+  assert.match(equipmentHelpersSource, /export function matchesDriveFilter/);
+  assert.match(equipmentHelpersSource, /export function matchesOwnerFilter/);
+  assert.match(source, /matchesTabType\(equipment, activeTab, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS\)/);
+  assert.match(source, /matchesStatusFilter\(equipment, statusFilter, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS\)/);
+  assert.match(source, /matchesEquipmentTypeFilter\(equipment, typeFilter, equipmentTypeOptions\)/);
+});
+
+test('equipment registry tab search and filter logic covers sale sold and availability behavior', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+
+  assert.match(equipmentHelpersSource, /export function matchesEquipmentSearch/);
+  assert.match(equipmentHelpersSource, /const fields = \[[\s\S]*equipment\.model,[\s\S]*equipment\.manufacturer,[\s\S]*equipment\.inventoryNumber,[\s\S]*equipment\.serialNumber,/);
+  assert.match(equipmentHelpersSource, /fields\.some\(\(value\) => String\(value \?\? ''\)\.toLowerCase\(\)\.includes\(normalized\)\)/);
+
+  assert.match(equipmentHelpersSource, /if \(activeTab === 'for_sale'\) return isForSaleEquipment\(equipment\);/);
+  assert.match(equipmentHelpersSource, /if \(activeTab === 'sold'\) return isSoldEquipment\(equipment\);/);
+  assert.match(equipmentHelpersSource, /if \(activeTab === 'available'\) \{[\s\S]*equipment\.status === 'available'[\s\S]*registryOptions\.canEquipmentParticipateInRentals\(equipment\)[\s\S]*!hasCurrentRental\(equipment, activeRentalIndex\)/);
+  assert.match(equipmentHelpersSource, /if \(activeTab === 'rented'\) return !isSoldEquipment\(equipment\)/);
+  assert.match(equipmentHelpersSource, /if \(isSoldEquipment\(equipment\)\) return 'sold';[\s\S]*if \(isForSaleEquipment\(equipment\)\) return 'for_sale';/);
+
+  assert.match(equipmentHelpersSource, /if \(statusFilter === 'for_sale'\) return matchesTabType\(equipment, 'for_sale', activeRentalIndex, options\);/);
+  assert.match(equipmentHelpersSource, /if \(statusFilter === 'sold'\) return matchesTabType\(equipment, 'sold', activeRentalIndex, options\);/);
+  assert.match(source, /const filteredEquipment = React\.useMemo\(\(\) => \([\s\S]*matchesSearch[\s\S]*matchesStatus[\s\S]*matchesType[\s\S]*matchesDrive[\s\S]*matchesCategory[\s\S]*matchesOwner[\s\S]*matchesLocation[\s\S]*matchesTabType\(equipment, activeTab, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS\)/);
+});
+
+test('equipment registry table is compact paginated and includes photo gsm owner category and actions', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const registryListSource = `${source}\n${equipmentRegistryTableSource}\n${equipmentMobileCardsSource}`;
+
+  for (const label of [
+    'Фото',
+    'Инв. номер',
+    'Модель',
+    'Тип / Привод',
+    'Статус',
+    'Категория',
+    'Собственник',
+    'Локация',
+    'Приоритет',
+    'GSM',
+    'Действия',
+    'Строк на странице',
+  ]) {
+    assert.match(registryListSource, new RegExp(label.replace('/', '\\/')));
+  }
+
+  assert.match(source, /import \{ EquipmentRegistryTable \} from '\.\/equipment\/EquipmentRegistryTable';/);
+  assert.match(source, /import \{ EquipmentMobileCards \} from '\.\/equipment\/EquipmentMobileCards';/);
+  assert.match(source, /<EquipmentMobileCards[\s\S]*equipmentItems=\{paginatedEquipment\}[\s\S]*isSaleTab=\{isSaleTab\}[\s\S]*activeRentalIndex=\{activeRentalIndex\}/);
+  assert.match(source, /<EquipmentRegistryTable[\s\S]*equipmentItems=\{paginatedEquipment\}[\s\S]*selectedEquipmentId=\{selectedEquipmentId\}[\s\S]*onSelectEquipment=\{\(equipment\) => setSelectedEquipmentId\(equipment\.id\)\}/);
+  assert.match(equipmentRegistryTableSource, /export function EquipmentRegistryTable/);
+  assert.match(equipmentRegistryTableSource, /<table className=/);
+  assert.match(equipmentRegistryTableSource, /photoSource\(equipment\.photo\)/);
+  assert.match(equipmentRegistryTableSource, /title="Нет фото"/);
+  assert.match(equipmentRegistryTableSource, /onClick=\{\(\) => onSelectEquipment\(equipment\)\}/);
+  assert.match(equipmentRegistryTableSource, /SN \{equipment\.serialNumber \|\| 'не указан'\}/);
+  assert.match(equipmentMobileCardsSource, /export function EquipmentMobileCards/);
+  assert.match(equipmentMobileCardsSource, /Инв\. № \{equipment\.inventoryNumber \|\| '—'\} · SN \{equipment\.serialNumber \|\| 'не указан'\}/);
+  assert.match(equipmentHelpersSource, /export function getEquipmentGsmDisplay/);
+  assert.match(equipmentHelpersSource, /label: 'Онлайн'/);
+  assert.match(equipmentHelpersSource, /label: 'Офлайн'/);
+  assert.match(equipmentHelpersSource, /label: 'Нет связи'/);
+  assert.match(equipmentHelpersSource, /label: 'Нет данных'/);
+  assert.match(equipmentConstantsSource, /export const DEFAULT_EQUIPMENT_PAGE_SIZE = 20/);
+  assert.match(equipmentConstantsSource, /export const EQUIPMENT_PAGE_SIZE_OPTIONS = \[DEFAULT_EQUIPMENT_PAGE_SIZE, 50, 100\]/);
+  assert.match(source, /React\.useState\(DEFAULT_EQUIPMENT_PAGE_SIZE\)/);
+  assert.match(source, /getEquipmentPageRange\(totalVisible, currentPage, pageSize\)/);
+  assert.match(source, /const paginatedEquipment = React\.useMemo/);
+  assert.match(source, /getEquipmentPageItems\(filteredEquipment, visibleCurrentPage, pageSize\)/);
+  assert.match(equipmentPaginationSource, /items\.slice\(\(currentPage - 1\) \* pageSize, currentPage \* pageSize\)/);
+  assert.match(equipmentPaginationSource, /Math\.max\(1, Math\.ceil\(totalVisible \/ pageSize\)\)/);
+  assert.doesNotMatch(registryListSource, /saleRowColumns|defaultRowColumns/);
+});
+
+test('equipment registry empty states are contextual and keep safe fallbacks', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const emptyStateSource = `${source}\n${equipmentConstantsSource}`;
+
+  for (const label of [
+    'Техника ещё не добавлена',
+    'Добавить технику',
+    'По выбранным фильтрам ничего не найдено',
+    'Сбросить фильтры',
+    'Техника на продажу пока не выставлена',
+    'Перейти к продажам',
+    'Проданных единиц пока нет',
+  ]) {
+    assert.match(emptyStateSource, new RegExp(label));
+  }
+
+  assert.match(source, /function EmptyState\(\{/);
+  assert.match(equipmentConstantsSource, /emptyRegistry: \{[\s\S]*title: 'Техника ещё не добавлена'/);
+  assert.match(source, /EQUIPMENT_EMPTY_STATE_COPY\.emptyRegistry/);
+  assert.match(source, /activeTab === 'for_sale' && activeTabTotal === 0/);
+  assert.match(source, /activeTab === 'sold' && activeTabTotal === 0/);
+  assert.match(equipmentConstantsSource, /noResults: \{[\s\S]*title: 'По выбранным фильтрам ничего не найдено'/);
+  assert.match(source, /EQUIPMENT_EMPTY_STATE_COPY\.noResults/);
+  assert.match(source, /activeFilterCount > 0/);
+  assert.match(source, /onClick=\{resetFilters\}/);
+  assert.match(equipmentHelpersSource, /label: 'Нет данных'/);
+  assert.match(equipmentHelpersSource, /if \(!hasEquipmentGsmData\(equipment\)\)[\s\S]*label: 'Нет данных'/);
+  assert.match(equipmentRegistryTableSource, /title="Нет фото"/);
+});
+
+test('equipment registry status badges use normalized visual categories without losing sale logic', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const statusBadgeSource = `${source}\n${equipmentConstantsSource}`;
+
+  assert.match(equipmentTypesSource, /export type EquipmentRegistryStatusKind = 'available' \| 'rented' \| 'reserved' \| 'service' \| 'written_off' \| 'for_sale' \| 'sold'/);
+  assert.match(source, /EquipmentRegistryStatusKind,[\s\S]*from '\.\/equipment\/equipment\.types';/);
+  assert.match(equipmentConstantsSource, /export const EQUIPMENT_STATUS_BADGE_STYLES/);
+
+  for (const label of ['Свободна', 'В аренде', 'Бронь', 'В сервисе', 'Списана', 'На продажу', 'Проданная']) {
+    assert.match(statusBadgeSource, new RegExp(label));
+  }
+
+  for (const tone of ['bg-emerald', 'bg-blue', 'bg-yellow', 'bg-orange', 'bg-violet', 'bg-slate']) {
+    assert.match(statusBadgeSource, new RegExp(tone));
+  }
+
+  assert.match(equipmentHelpersSource, /export function getRegistryStatusKind/);
+  assert.match(equipmentHelpersSource, /if \(isSoldEquipment\(equipment\)\) return 'sold'/);
+  assert.match(equipmentHelpersSource, /if \(isForSaleEquipment\(equipment\)\) return 'for_sale'/);
+  assert.match(equipmentHelpersSource, /hasCurrentRental\(equipment, activeRentalIndex\)/);
+  assert.match(equipmentHelpersSource, /getStatusKindFromBaseStatus\(equipment\.status\)/);
+  assert.match(source, /getRegistryStatusAppearance\(selectedEquipment, activeRentalIndex\)/);
+  assert.doesNotMatch(source, /saleStatusLabel/);
+  assert.doesNotMatch(source, /Свободен|Списан'/);
+});
+
+test('equipment registry row opens right quick view panel with tabs and linked context', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const quickViewSource = `${source}\n${equipmentConstantsSource}\n${equipmentQuickActionsSource}\n${equipmentQuickViewPanelSource}`;
+
+  assert.match(source, /import \{[\s\S]*EquipmentQuickViewPanel[\s\S]*from '\.\/equipment\/EquipmentQuickViewPanel';/);
+  assert.match(equipmentQuickViewPanelSource, /export function EquipmentQuickViewPanel/);
+  assert.match(equipmentConstantsSource, /export const EQUIPMENT_PREVIEW_TABS/);
+  assert.match(equipmentQuickViewPanelSource, /EQUIPMENT_PREVIEW_TABS\.map/);
+  for (const label of ['Обзор', 'Характеристики', 'Документы', 'Фото', 'История']) {
+    assert.match(equipmentConstantsSource, new RegExp(label));
+  }
+
+  assert.match(source, /<EquipmentRegistryTable[\s\S]*selectedEquipmentId=\{selectedEquipmentId\}[\s\S]*onSelectEquipment=\{\(equipment\) => setSelectedEquipmentId\(equipment\.id\)\}/);
+  assert.match(equipmentRegistryTableSource, /onClick=\{\(\) => onSelectEquipment\(equipment\)\}/);
+  assert.match(equipmentRegistryTableSource, /selectedEquipmentId === equipment\.id/);
+  assert.match(source, /setSelectedEquipmentId\(equipment\.id\)/);
+  assert.match(source, /<EquipmentQuickViewPanel[\s\S]*selectedEquipment=\{selectedEquipment\}[\s\S]*activeTab=\{activeQuickViewTab\}[\s\S]*onTabChange=\{setActiveQuickViewTab\}/);
+  assert.match(equipmentQuickViewPanelSource, /aria-label="Закрыть панель техники"/);
+  assert.match(equipmentQuickViewPanelSource, /<h2 className="app-shell-title truncate text-xl font-extrabold text-foreground">\{title\}<\/h2>/);
+  assert.match(source, /getRegistryStatusLabel\(selectedEquipment, activeRentalIndex\)/);
+  assert.match(equipmentQuickViewPanelSource, /INV \{inventoryNumber \|\| '—'\}/);
+  assert.match(equipmentQuickViewPanelSource, /SN \{serialNumber \|\| 'не указан'\}/);
+  assert.match(equipmentRegistryTableSource, /const ownerLabel = getRegistryOwnerLabel\(equipment\)/);
+  assert.match(equipmentRegistryTableSource, /const gsmDisplay = getEquipmentGsmDisplay\(equipment\)/);
+  assert.match(equipmentQuickViewPanelSource, /import \{ EquipmentQuickActions \} from '\.\/EquipmentQuickActions';/);
+  assert.match(equipmentQuickViewPanelSource, /<EquipmentQuickActions actions=\{quickActions\} \/>/);
+
+  for (const label of [
+    'Рабочая высота',
+    'Высота платформы',
+    'Грузоподъёмность',
+    'Масса',
+    'Габариты',
+    'Год выпуска',
+    'Наработка',
+    'Питание',
+    'Паспорт',
+    'Сертификат',
+    'Акт ввода',
+    'Договор / документы продажи',
+    'Показать все документы',
+    'Фото техники',
+    'Фото дефектов',
+    'Фото приёмки',
+    'Фото возврата',
+    'Собственник',
+    'GSM',
+    'Быстрые действия',
+  ]) {
+    assert.match(quickViewSource, new RegExp(label.replace('/', '\\/')));
+  }
+
+  assert.match(source, /useDocumentsList/);
+  assert.match(source, /useServiceTicketsList/);
+  assert.match(source, /useRentalsList/);
+  assert.match(source, /equipmentService\.getShippingPhotos/);
+  assert.match(source, /function buildEquipmentTimeline/);
+  assert.match(source, /documentMatchesEquipmentOrRentals/);
+  assert.match(source, /serviceTicketMatchesEquipment/);
+  assert.match(source, /ganttRentalMatchesEquipment/);
+});
+
+test('equipment quick view actions are status-aware and backed by routes or disabled reasons', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const quickActionUiSource = `${source}\n${equipmentQuickActionsSource}\n${equipmentQuickViewPanelSource}`;
+  const serviceNewSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/ServiceNew.tsx'), 'utf8');
+  const rentalNewSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/RentalNew.tsx'), 'utf8');
+  const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+
+  assert.match(source, /function buildEquipmentPreviewQuickActions/);
+  assert.match(equipmentQuickActionsSource, /export function EquipmentQuickActions/);
+  assert.match(source, /EquipmentPreviewQuickAction,[\s\S]*from '\.\/equipment\/equipment\.types';/);
+  assert.match(source, /buildEquipmentQuickActions/);
+  assert.match(source, /canPerform\(can, 'create', 'rentals'\)/);
+  assert.match(source, /canPerform\(can, 'create', 'service'\)/);
+  assert.match(source, /canPerform\(can, 'view', 'sales'\)/);
+  assert.match(source, /canPerform\(can, 'create', 'sales'\)/);
+  assert.match(source, /canPerform\(can, 'edit', 'sales'\)/);
+  assert.match(source, /canPerform\(can, 'edit', 'equipment'\)/);
+  assert.match(source, /canPerform\(can, 'create', 'documents'\)/);
+  assert.match(source, /const canManageSaleEquipment = canEditSales \|\| canEditEquipment/);
+
+  for (const label of [
+    'Быстрые действия',
+    'Редактировать',
+    'Создать аренду',
+    'Создать сервисную заявку',
+    'Выставить на продажу',
+    'Открыть аренду',
+    'Запланировать возврат',
+    'Открыть заявку',
+    'Назначить механика',
+    'История ремонта',
+    'Открыть карточку продажи',
+    'Создать КП',
+    'Редактировать цену',
+    'Снять с продажи',
+    'Создать PDI',
+    'Открыть сделку/продажу',
+    'Документы продажи',
+    'Вернуть в продажу',
+  ]) {
+    assert.match(quickActionUiSource, new RegExp(label.replace('/', '\\/')));
+  }
+
+  assert.match(source, /disabled: true,[\s\S]*Возврат планируется в карточке аренды/);
+  assert.match(source, /disabled: true,[\s\S]*Назначение выполняется в карточке заявки/);
+  assert.match(source, /disabled: true,[\s\S]*Статус продажи меняется в полной карточке продажи/);
+  assert.match(source, /disabled: true,[\s\S]*Оформляется в полной карточке продажи/);
+  assert.match(source, /const editPath = `\$\{detailPath\}\?action=edit`/);
+  assert.match(source, /const saleEditPath = `\$\{salePath\}\?action=edit`/);
+  assert.match(source, /if \(canViewSales && canCreateSales && canCreateDocuments\)/);
+  assert.match(source, /if \(canManageSaleEquipment\)/);
+  assert.match(source, /if \(canViewSales && canPerform\(can, 'create', 'service'\)\)/);
+  assert.match(source, /mode: 'sales_pdi'/);
+  assert.match(source, /onShowHistory: \(\) => setActiveQuickViewTab\('history'\)/);
+  assert.match(equipmentQuickActionsSource, /const disabled = Boolean\(action\.disabled \|\| \(!action\.to && !action\.onClick\)\)/);
+  assert.match(equipmentQuickActionsSource, /onClick=\{disabled \? undefined : action\.onClick\}/);
+  assert.match(equipmentQuickActionsSource, /disabled=\{disabled\}/);
+  assert.match(equipmentQuickActionsSource, /title=\{action\.reason \|\| undefined\}/);
+
+  assert.match(serviceNewSource, /useSearchParams/);
+  assert.match(serviceNewSource, /const initialEquipmentId = searchParams\.get\('equipmentId'\)/);
+  assert.match(serviceNewSource, /const isSalesPdi = mode === 'sales_pdi'/);
+  assert.match(serviceNewSource, /initialEquipmentId=\{initialEquipmentId\}/);
+  assert.match(serviceNewSource, /submitLabel=\{isSalesPdi \? 'Создать PDI' : undefined\}/);
+
+  assert.match(rentalNewSource, /searchParams\.get\('equipmentId'\)/);
+  assert.match(rentalNewSource, /searchParams\.get\('equipmentInv'\)/);
+  assert.match(rentalNewSource, /setEquipmentId\(selected\.id\)/);
+
+  assert.match(detailSource, /const routeSearchParams = new URLSearchParams\(location\.search\)/);
+  assert.match(detailSource, /const openEditFromRoute = routeSearchParams\.get\('action'\) === 'edit'/);
+  assert.match(detailSource, /const canEditSales = can\('edit', 'sales'\)/);
+  assert.match(detailSource, /const canEditCurrentEquipment = saleMode \? \(canEditEquipment \|\| canEditSales\) : canEditEquipment/);
+  assert.match(detailSource, /if \(openEditFromRoute && canEditCurrentEquipment\)/);
+  assert.match(detailSource, /show: can\('create', 'rentals'\)/);
+  assert.match(detailSource, /show: canCreateSales && canCreateDocuments/);
+  assert.match(detailSource, /show: can\('create', 'deliveries'\)/);
 });
 
 test('sales section is a commercial tool without publications crm or analytics tabs', () => {

@@ -102,6 +102,7 @@ export function isSaleModeEquipment(equipment, context = {}) {
   if (context.salesContext === true || hasSaleMarker(context.source) || hasSaleMarker(context.context)) return true;
   if (!equipment) return false;
 
+  if (equipment.saleMode === true || hasSaleMarker(equipment.saleMode)) return true;
   if (equipment.isForSale === true) return true;
   if (text(equipment.saleStatus)) return true;
   if (text(equipment.salesStatus)) return true;

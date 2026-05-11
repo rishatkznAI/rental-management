@@ -32,6 +32,12 @@ function rentalManagerPermissionBlock() {
   return match.groups.body;
 }
 
+function salesManagerPermissionBlock() {
+  const match = permissionsSource.match(/'Менеджер по продажам':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
+  assert.ok(match?.groups?.body, 'sales manager permission block must exist');
+  return match.groups.body;
+}
+
 function carrierPermissionBlock() {
   const match = permissionsSource.match(/'Перевозчик':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
   assert.ok(match?.groups?.body, 'carrier permission block must exist');
@@ -52,6 +58,30 @@ test('frontend rental manager permissions match backend write limits', () => {
   assert.doesNotMatch(block, /payments:\s+\['view', 'create', 'edit'\]/);
   assert.doesNotMatch(block, /\bfinance:\s+/);
   assert.doesNotMatch(block, /\badmin_panel:\s+/);
+});
+
+test('frontend equipment registry RBAC separates rental sales and investor capabilities', () => {
+  const rentalManagerBlock = rentalManagerPermissionBlock();
+  const salesManagerBlock = salesManagerPermissionBlock();
+
+  assert.match(rentalManagerBlock, /sales:\s+VIEW/);
+  assert.doesNotMatch(rentalManagerBlock, /sales:\s+ALL/);
+  assert.doesNotMatch(rentalManagerBlock, /sales:\s+\['view', 'create', 'edit'\]/);
+  assert.doesNotMatch(rentalManagerBlock, /equipment:\s+ALL/);
+
+  assert.match(salesManagerBlock, /sales:\s+ALL/);
+  assert.match(salesManagerBlock, /equipment:\s+VIEW/);
+
+  assert.match(equipmentPageSource, /const canViewSales = canPerform\(can, 'view', 'sales'\)/);
+  assert.match(equipmentPageSource, /const canCreateSales = canPerform\(can, 'create', 'sales'\)/);
+  assert.match(equipmentPageSource, /const canEditSales = canPerform\(can, 'edit', 'sales'\)/);
+  assert.match(equipmentPageSource, /if \(canViewSales && canCreateSales && canCreateDocuments\)/);
+  assert.match(equipmentPageSource, /if \(canManageSaleEquipment\)/);
+  assert.match(equipmentDetailSource, /const canEditSales = can\('edit', 'sales'\)/);
+  assert.match(equipmentDetailSource, /const canEditCurrentEquipment = saleMode \? \(canEditEquipment \|\| canEditSales\) : canEditEquipment/);
+  assert.match(equipmentDetailSource, /show: canCreateSales && canCreateDocuments/);
+  assert.match(equipmentDetailSource, /show: can\('create', 'rentals'\)/);
+  assert.match(equipmentDetailSource, /show: can\('create', 'deliveries'\)/);
 });
 
 test('frontend warranty mechanic menu grants only working sections', () => {
@@ -91,6 +121,12 @@ test('frontend investor permissions expose only own equipment, rentals and profi
   for (const section of ['dashboard', 'service', 'clients', 'documents', 'payments', 'finance', 'reports', 'admin_panel', 'deliveries']) {
     assert.doesNotMatch(block, new RegExp(`\\b${section}:\\s+`), `${section} must not be granted to investor`);
   }
+
+  assert.match(equipmentPageSource, /getInvestorBinding/);
+  assert.match(equipmentPageSource, /isInvestorUser/);
+  assert.match(equipmentPageSource, /const scopedEquipmentList = React\.useMemo/);
+  assert.match(equipmentPageSource, /equipmentList\.filter\(item => equipmentMatchesInvestorBinding\(item, investorBinding\)\)/);
+  assert.match(equipmentPageSource, /normalizeEquipmentList\(enrichEquipment\(scopedEquipmentList, ganttRentals\)\)/);
 });
 
 test('frontend normalizes warranty mechanic role aliases', () => {

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
 import { Button } from '../components/ui/button';
 import { ArrowLeft } from 'lucide-react';
@@ -7,7 +7,11 @@ import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
 
 export default function ServiceNew() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { can } = usePermissions();
+  const initialEquipmentId = searchParams.get('equipmentId') || undefined;
+  const mode = searchParams.get('mode') || '';
+  const isSalesPdi = mode === 'sales_pdi';
 
   useEffect(() => {
     if (!can('create', 'service')) navigate('/service', { replace: true });
@@ -26,6 +30,13 @@ export default function ServiceNew() {
         </div>
       </div>
       <ServiceTicketForm
+        initialEquipmentId={initialEquipmentId}
+        lockEquipment={Boolean(initialEquipmentId)}
+        initialReason={isSalesPdi ? 'PDI перед продажей' : undefined}
+        initialDescription={isSalesPdi ? 'Предпродажная проверка и подготовка техники к продаже.' : undefined}
+        scenarioTitle={isSalesPdi ? 'PDI перед продажей' : undefined}
+        scenarioDescription={isSalesPdi ? 'Проверка состояния, фотофиксация и замечания перед продажей.' : undefined}
+        submitLabel={isSalesPdi ? 'Создать PDI' : undefined}
         onCancel={() => navigate('/service')}
         onCreated={(ticket) => navigate(`/service/${ticket.id}`)}
       />

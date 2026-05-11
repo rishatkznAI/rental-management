@@ -688,21 +688,26 @@ export default function EquipmentDetail() {
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const canEditEquipment = can('edit', 'equipment');
+  const canEditSales = can('edit', 'sales');
+  const canCreateSales = can('create', 'sales');
+  const canCreateDocuments = can('create', 'documents');
   const canViewRentals = can('view', 'rentals');
   const canViewService = can('view', 'service');
   const canViewDocuments = can('view', 'documents');
   const canViewClients = can('view', 'clients');
   const canViewFinance = can('view', 'finance');
   const canCreateService = can('create', 'service');
-  const canManageAcceptance = canEditEquipment || canCreateService || isMechanicRole(user?.role);
+  const canManageAcceptance = canEditEquipment || canEditSales || canCreateService || isMechanicRole(user?.role);
   const normalizedRole = normalizeUserRole(user?.role);
   const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
     || isMechanicRole(normalizedRole);
   const { id } = useParams();
   const location = useLocation();
+  const routeSearchParams = new URLSearchParams(location.search);
   const routeContext = location.pathname.startsWith('/sales/')
     ? 'sales'
-    : new URLSearchParams(location.search).get('context') || '';
+    : routeSearchParams.get('context') || '';
+  const openEditFromRoute = routeSearchParams.get('action') === 'edit';
   const equipmentTypeCatalog = useEquipmentTypeCatalog();
 
   const [allEquipment, setAllEquipment] = useState<Equipment[]>([]);
@@ -787,6 +792,11 @@ export default function EquipmentDetail() {
     currentClient: rawEquipment.currentClient || activeRental?.client,
     returnDate: rawEquipment.returnDate || activeRental?.endDate,
   } : null;
+  const saleMode = isSaleModeEquipment(equipment, {
+    salesContext: routeContext === 'sales',
+    context: routeContext,
+  });
+  const canEditCurrentEquipment = saleMode ? (canEditEquipment || canEditSales) : canEditEquipment;
 
   // ── Related data (all from localStorage) ──
   const ganttRentals = useMemo(
@@ -936,7 +946,7 @@ export default function EquipmentDetail() {
     });
 
   const handleMainPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEditEquipment) {
+    if (!canEditCurrentEquipment) {
       e.target.value = '';
       return;
     }
@@ -951,7 +961,7 @@ export default function EquipmentDetail() {
   };
 
   const handleMainPhotoDelete = () => {
-    if (!equipment || !canEditEquipment) return;
+    if (!equipment || !canEditCurrentEquipment) return;
     const updated = allEquipment.map(eq =>
       eq.id === equipment.id ? { ...eq, photo: undefined } : eq,
     );
@@ -1304,6 +1314,12 @@ export default function EquipmentDetail() {
 
   // ── Modal state ──
   const [showEditModal, setShowEditModal] = useState(false);
+
+  useEffect(() => {
+    if (openEditFromRoute && canEditCurrentEquipment) {
+      setShowEditModal(true);
+    }
+  }, [canEditCurrentEquipment, openEditFromRoute]);
   const [showCreateServiceModal, setShowCreateServiceModal] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -1347,10 +1363,6 @@ export default function EquipmentDetail() {
     });
   }, []);
 
-  const saleMode = isSaleModeEquipment(equipment, {
-    salesContext: routeContext === 'sales',
-    context: routeContext,
-  });
   const salePdiStatus = (equipment?.salePdiStatus ?? 'not_started') as EquipmentSalePdiStatus;
   const saleReceiptStatus = equipment?.saleReceiptStatus as EquipmentSaleReceiptStatus | undefined;
 
@@ -1574,47 +1586,49 @@ export default function EquipmentDetail() {
       id: 'pdi',
       title: salePdiStatus === 'issues' ? 'PDI с замечаниями' : 'PDI не завершён',
       text: salePdiTickets.length > 0 ? 'Остались работы по предпродажной подготовке' : 'Создайте PDI-заявку после приёмки',
-      action: 'Открыть PDI',
-      onClick: () => setShowCreateServiceModal(true),
+      action: canCreateService ? 'Открыть PDI' : undefined,
+      onClick: canCreateService ? () => setShowCreateServiceModal(true) : undefined,
       danger: salePdiStatus === 'issues',
     } : null,
     !saleDocsReady ? {
       id: 'documents',
       title: 'Нет комплекта документов',
       text: 'Добавьте связанные документы техники',
-      action: 'Открыть документы',
-      to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`,
+      action: canViewDocuments ? 'Открыть документы' : undefined,
+      to: canViewDocuments ? `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}` : undefined,
     } : null,
     !salePhotoReady ? {
       id: 'photo',
       title: 'Нет основного фото',
       text: 'Добавьте фото для витрины продаж',
-      action: 'Добавить фото',
-      onClick: () => mainPhotoInputRef.current?.click(),
+      action: canEditCurrentEquipment ? 'Добавить фото' : undefined,
+      onClick: canEditCurrentEquipment ? () => mainPhotoInputRef.current?.click() : undefined,
     } : null,
     !saleReceiptReady ? {
       id: 'receipt',
       title: 'Не указана готовность к отгрузке',
       text: 'Завершите приёмку перед отгрузкой',
-      action: saleReceiptStatus === 'acceptance_in_progress' ? 'Завершить' : 'Заполнить',
-      onClick: saleReceiptStatus === 'acceptance_in_progress'
-        ? () => handleCompleteAcceptance(false)
-        : saleReceiptStatus === 'arrived_waiting_acceptance'
-          ? handleStartAcceptance
-          : handleMarkArrival,
+      action: canManageAcceptance ? (saleReceiptStatus === 'acceptance_in_progress' ? 'Завершить' : 'Заполнить') : undefined,
+      onClick: canManageAcceptance
+        ? saleReceiptStatus === 'acceptance_in_progress'
+          ? () => handleCompleteAcceptance(false)
+          : saleReceiptStatus === 'arrived_waiting_acceptance'
+            ? handleStartAcceptance
+            : handleMarkArrival
+        : undefined,
     } : null,
     !salePriceReady ? {
       id: 'price',
       title: 'Не указана цена продажи',
       text: 'Заполните цену перед созданием КП',
-      action: 'Редактировать',
-      onClick: () => setShowEditModal(true),
+      action: canEditCurrentEquipment ? 'Редактировать' : undefined,
+      onClick: canEditCurrentEquipment ? () => setShowEditModal(true) : undefined,
     } : null,
   ].filter(Boolean) as Array<{
     id: string;
     title: string;
     text: string;
-    action: string;
+    action?: string;
     to?: string;
     onClick?: () => void;
     danger?: boolean;
@@ -1627,12 +1641,12 @@ export default function EquipmentDetail() {
     onClick?: () => void;
     show: boolean;
   }> = [
-    { id: 'photo', label: 'Добавить фото', icon: Camera, onClick: () => mainPhotoInputRef.current?.click(), show: canEditEquipment },
+    { id: 'photo', label: 'Добавить фото', icon: Camera, onClick: () => mainPhotoInputRef.current?.click(), show: canEditCurrentEquipment },
     { id: 'documents', label: 'Открыть документы', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`, show: canViewDocuments },
-    { id: 'pdi', label: 'Открыть PDI', icon: Wrench, onClick: () => setShowCreateServiceModal(true), show: canCreateService || canViewService },
-    { id: 'quote', label: 'Создать КП', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create&type=commercial_offer`, show: canViewDocuments },
-    { id: 'delivery', label: 'Создать доставку', icon: Calendar, to: `/deliveries?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create`, show: can('create', 'deliveries') || can('view', 'deliveries') },
-    { id: 'edit', label: 'Редактировать', icon: PenLine, onClick: () => setShowEditModal(true), show: canEditEquipment },
+    { id: 'pdi', label: 'Открыть PDI', icon: Wrench, onClick: () => setShowCreateServiceModal(true), show: canCreateService },
+    { id: 'quote', label: 'Создать КП', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create&type=commercial_offer`, show: canCreateSales && canCreateDocuments },
+    { id: 'delivery', label: 'Создать доставку', icon: Calendar, to: `/deliveries?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create`, show: can('create', 'deliveries') },
+    { id: 'edit', label: 'Редактировать', icon: PenLine, onClick: () => setShowEditModal(true), show: canEditCurrentEquipment },
   ].filter(action => action.show);
   const assetTitle = `${equipment.manufacturer} ${equipment.model}`.trim() || equipment.inventoryNumber || 'Карточка техники';
   const assetGalleryPreview = saleGalleryPhotos.slice(0, 4);
@@ -1664,13 +1678,13 @@ export default function EquipmentDetail() {
       disabled: assetCreateRentalAction.disabled,
       reason: assetCreateRentalAction.reason,
       primary: true,
-      show: canViewRentals,
+      show: can('create', 'rentals'),
     } : null,
     { id: 'service', label: 'Создать сервисную заявку', icon: Wrench, to: `/service/new?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`, show: canCreateService },
-    { id: 'photo', label: 'Добавить фото', icon: Camera, onClick: () => mainPhotoInputRef.current?.click(), show: canEditEquipment },
+    { id: 'photo', label: 'Добавить фото', icon: Camera, onClick: () => mainPhotoInputRef.current?.click(), show: canEditCurrentEquipment },
     { id: 'documents', label: 'Открыть документы', icon: FileText, to: `/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`, show: canViewDocuments },
-    { id: 'move', label: 'Переместить технику', icon: MapPin, onClick: () => setShowEditModal(true), show: canEditEquipment },
-    { id: 'edit', label: 'Редактировать', icon: PenLine, onClick: () => setShowEditModal(true), show: canEditEquipment },
+    { id: 'move', label: 'Переместить технику', icon: MapPin, onClick: () => setShowEditModal(true), show: canEditCurrentEquipment },
+    { id: 'edit', label: 'Редактировать', icon: PenLine, onClick: () => setShowEditModal(true), show: canEditCurrentEquipment },
   ].filter(Boolean).filter(action => action?.show) as Array<{
     id: string;
     label: string;
@@ -1757,7 +1771,7 @@ export default function EquipmentDetail() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {can('edit', 'equipment') && (
+            {canEditCurrentEquipment && (
               <Button variant="secondary" size="sm" className="app-button-ghost rounded-xl px-4" onClick={() => setShowEditModal(true)}>
                 {saleMode && <PenLine className="h-3.5 w-3.5" />}
                 Редактировать
@@ -2152,13 +2166,13 @@ export default function EquipmentDetail() {
                             <p className="mt-0.5 text-xs text-muted-foreground">{blocker.text}</p>
                           </div>
                         </div>
-                        {blocker.to ? (
+                        {blocker.action && blocker.to ? (
                           <Link to={blocker.to}>
                             <Button size="sm" variant="secondary">{blocker.action}</Button>
                           </Link>
-                        ) : (
+                        ) : blocker.action && blocker.onClick ? (
                           <Button size="sm" variant="secondary" onClick={blocker.onClick}>{blocker.action}</Button>
-                        )}
+                        ) : null}
                       </div>
                     );
                     return <React.Fragment key={blocker.id}>{row}</React.Fragment>;
@@ -2194,7 +2208,7 @@ export default function EquipmentDetail() {
                   <SaleField label="Готова к отгрузке" value={saleReceiptReady && salePdiStatus === 'ready' ? 'Да' : 'Нет'} />
                   <SaleField label="Способ доставки" value="Самовывоз / доставка" />
                   <SaleField label="Ориентировочная дата" value={saleReceiptReady ? 'По согласованию' : '—'} />
-                  {(can('create', 'deliveries') || can('view', 'deliveries')) && (
+                  {can('create', 'deliveries') && (
                     <Link to={`/deliveries?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}&action=create`}>
                       <Button variant="secondary" className="mt-2 w-full justify-center">
                         <Calendar className="h-4 w-4" />
@@ -2361,7 +2375,7 @@ export default function EquipmentDetail() {
                     <SaleField label="Локация" value={equipment.location || '—'} icon={<MapPin className="h-4 w-4 text-blue-400" />} />
                     <SaleField label="Площадка" value={equipment.gsmAddress || '—'} />
                     <SaleField label="Адрес" value={equipment.gsmAddress || equipment.location || '—'} />
-                    {canEditEquipment && (
+                    {canEditCurrentEquipment && (
                       <button type="button" className="text-left text-sm font-medium text-blue-300 hover:underline" onClick={() => setShowEditModal(true)}>
                         Переместить технику →
                       </button>
@@ -2492,7 +2506,7 @@ export default function EquipmentDetail() {
                   <ImageIcon className="h-16 w-16 text-muted-foreground" />
                 </div>
               )}
-              {canEditEquipment && (
+              {canEditCurrentEquipment && (
                 <div className="absolute inset-0 hidden items-end justify-center rounded-2xl bg-black/0 pb-3 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100 sm:flex">
                   <div className="flex gap-2">
                     <button
@@ -2513,7 +2527,7 @@ export default function EquipmentDetail() {
                 </div>
               )}
             </div>
-            {canEditEquipment && (
+            {canEditCurrentEquipment && (
               <div className="flex gap-2 px-3 py-2 sm:hidden">
                 <button
                   onClick={() => mainPhotoInputRef.current?.click()}
@@ -3275,7 +3289,7 @@ export default function EquipmentDetail() {
                     <CardTitle>Фото и комплектация</CardTitle>
                     <CardDescription>Основное фото, комплектация и предпродажная готовность</CardDescription>
                   </div>
-                  {canEditEquipment && (
+                  {canEditCurrentEquipment && (
                     <Button size="sm" variant="secondary" onClick={() => mainPhotoInputRef.current?.click()}>
                       <Camera className="h-4 w-4" />
                       Добавить фото
@@ -3290,7 +3304,7 @@ export default function EquipmentDetail() {
                   </button>
                 ) : (
                   <EmptyState icon={<Camera className="h-12 w-12" />} text="Фото техники для продажи пока нет">
-                    {canEditEquipment && (
+                    {canEditCurrentEquipment && (
                       <Button variant="secondary" size="sm" className="mt-4" onClick={() => mainPhotoInputRef.current?.click()}>
                         Добавить фото
                       </Button>

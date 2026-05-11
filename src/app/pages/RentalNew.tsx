@@ -99,6 +99,18 @@ export default function RentalNew() {
 
   const selectedEquipment = allEq.find(e => e.id === equipmentId);
   useEffect(() => {
+    if (equipmentId || allEq.length === 0) return;
+    const requestedEquipmentId = searchParams.get('equipmentId');
+    const requestedEquipmentInv = searchParams.get('equipmentInv');
+    const selected = requestedEquipmentId
+      ? allEq.find(item => item.id === requestedEquipmentId)
+      : requestedEquipmentInv
+        ? allEq.find(item => item.inventoryNumber === requestedEquipmentInv)
+        : null;
+    if (selected) setEquipmentId(selected.id);
+  }, [allEq, equipmentId, searchParams]);
+
+  useEffect(() => {
     if (clients.length === 0 || clientId) return;
     const requestedClientId = searchParams.get('clientId');
     const requestedClientName = searchParams.get('client');

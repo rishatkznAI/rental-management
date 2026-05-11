@@ -1,6 +1,6 @@
 import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, EquipmentSaleCondition, EquipmentSalePdiStatus, EquipmentSaleReceiptStatus } from '../types';
 import { DEFAULT_EQUIPMENT_TYPE_CATALOG, findEquipmentTypeLabel } from './equipmentTypes';
-import { normalizeEquipmentSaleCondition } from './equipmentSaleMode.js';
+import { normalizeEquipmentSaleCondition, saleStatusKind } from './equipmentSaleMode.js';
 
 export const EQUIPMENT_CATEGORY_LABELS: Record<EquipmentCategory, string> = {
   own: 'Собственная',
@@ -74,7 +74,9 @@ export function normalizeEquipmentPatch<T extends Partial<Equipment>>(equipment:
 
 export function canEquipmentParticipateInRentals(equipment: Partial<Equipment>): boolean {
   const normalized = normalizeEquipment(equipment);
-  return normalized.activeInFleet && (normalized.category === 'own' || normalized.category === 'partner');
+  return saleStatusKind(normalized) !== 'sold'
+    && normalized.activeInFleet
+    && (normalized.category === 'own' || normalized.category === 'partner');
 }
 
 const DRIVE_LABELS: Record<EquipmentDrive, string> = {

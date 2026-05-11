@@ -28,7 +28,8 @@ test('admin can create rental from the rental form', async ({ page }) => {
   await page.getByRole('button', { name: 'Создать договор' }).click();
 
   await navigateInApp(page, '/rentals');
-  await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Аренды', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Список аренд' })).toBeVisible();
 
   const createdRental = await withAdminApi((api) => findRentalByClient(api, client.company));
   expect(createdRental.id).toBeTruthy();

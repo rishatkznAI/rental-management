@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  X, Calendar, CreditCard, FileText, User, MessageSquare,
+  X, CreditCard, FileText, User, MessageSquare,
   ArrowRight, RotateCcw, CirclePause as PauseCircle,
   CircleCheck, CircleAlert, Clock, Trash2, Plus, ChevronDown, ChevronUp,
-  CalendarClock, LogOut, Edit, Wrench
+  CalendarClock, LogOut, Edit, Wrench, Truck
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { formatCurrency, formatDate, formatDateTime, getRentalDays } from '../../lib/utils';
+import { formatCurrency, formatDate, formatDateTime } from '../../lib/utils';
 import { findConflictingRental } from '../../lib/rental-conflicts';
 import { animationDurations, useAnimatedPresence } from '../../lib/animations';
 import type { GanttRentalData } from '../../mock-data';
@@ -33,7 +33,11 @@ interface RentalDrawerProps {
   canReassignManager: boolean;
   canRestoreRentals: boolean;
   canDeleteRentals: boolean;
+  canViewMoney?: boolean;
   canCreatePayments: boolean;
+  canCreateDocuments?: boolean;
+  canCreateDeliveries?: boolean;
+  canCreateService?: boolean;
   onClose: () => void;
   onReturn: (rental: GanttRentalData) => void;
   onStatusChange: (rental: GanttRentalData) => void;
@@ -99,11 +103,13 @@ const serviceAlertStyles: Record<RentalServiceAlertSeverity, {
 };
 
 const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
+type RentalDrawerTab = 'overview' | 'payments' | 'documents' | 'delivery' | 'history';
 
 export function RentalDrawer({
   rental: rentalProp, equipment, allRentals, payments, serviceTickets = EMPTY_SERVICE_TICKETS,
   clients = [], clientReceivables = [], managers = [],
-  canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals, canCreatePayments,
+  canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals,
+  canViewMoney = true, canCreatePayments, canCreateDocuments = false, canCreateDeliveries = false, canCreateService = false,
   onClose, onReturn, onStatusChange, onDelete,
   onRestore, onUpdate, onAddComment, onAddPayment, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
@@ -124,6 +130,7 @@ export function RentalDrawer({
   const [commentText, setCommentText] = useState('');
   const [commentError, setCommentError] = useState('');
   const [managerEditMode, setManagerEditMode] = useState(false);
+  const [activeTab, setActiveTab] = useState<RentalDrawerTab>('overview');
 
   // Add payment form state
   const [showAddPayment, setShowAddPayment] = useState(false);
@@ -180,6 +187,7 @@ export function RentalDrawer({
     setCommentText('');
     setCommentError('');
     setManagerEditMode(false);
+    setActiveTab('overview');
   }, [displayRental]);
 
   if (!presence.shouldRender || !displayRental) return null;
@@ -213,6 +221,28 @@ export function RentalDrawer({
     ?? clientReceivables.find(item => !rental.clientId && item.client === rental.client);
   const serviceAlert = buildRentalServiceAlert(rental, currentEquipment, serviceTickets, todayKey);
   const serviceAlertStyle = serviceAlert ? serviceAlertStyles[serviceAlert.severity] : null;
+  const daysLeft = Math.ceil((new Date(rental.endDate).getTime() - new Date(todayKey).getTime()) / 86400000);
+  const daysLeftLabel = isReturnOverdue
+    ? `Просрочено на ${overdueDays} дн.`
+    : rental.status === 'closed' || rental.status === 'returned'
+      ? 'Период завершён'
+      : daysLeft >= 0
+        ? `Осталось ${daysLeft} дн.`
+        : '—';
+  const contractLabel = rental.contractId || rentalDetailId || 'Не привязан';
+  const equipmentLabel = [
+    currentEquipment?.manufacturer,
+    currentEquipment?.model,
+  ].filter(Boolean).join(' ') || rental.equipmentInv || 'Техника не указана';
+  const rentalLocation = clientProfile?.actualAddress || clientProfile?.address || clientProfile?.legalAddress || '—';
+  const moneyValue = (value: number) => canViewMoney ? formatCurrency(value) : 'Скрыто';
+  const nextPaymentLabel = canViewMoney
+    ? rental.expectedPaymentDate
+      ? `${formatDate(rental.expectedPaymentDate)} · ${remaining > 0 ? formatCurrency(remaining) : 'нет долга'}`
+      : remaining > 0
+        ? `Не назначен · ${formatCurrency(remaining)}`
+        : 'Нет ожидаемого платежа'
+    : 'Скрыто';
 
   // Handle add payment submit
   const handlePaySubmit = () => {
@@ -337,7 +367,7 @@ export function RentalDrawer({
       {/* Overlay */}
       <div
         data-state={presence.dataState}
-        className="app-animate-overlay absolute inset-0 bg-slate-950/40 backdrop-blur-[3px] dark:bg-black/60"
+        className="app-animate-overlay absolute inset-0 bg-slate-950/40 backdrop-blur-[3px] lg:bg-transparent lg:backdrop-blur-0 dark:bg-black/60 dark:lg:bg-transparent"
         onClick={onClose}
       />
 
@@ -346,13 +376,13 @@ export function RentalDrawer({
         data-side="right"
         data-state={presence.dataState}
         onAnimationEnd={presence.onExitAnimationEnd}
-        className="app-animate-drawer fixed inset-y-0 right-0 z-10 flex w-full max-w-[640px] flex-col overflow-hidden rounded-l-2xl border-l border-slate-200/90 bg-white shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] sm:w-[42%] sm:min-w-[440px] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl"
+        className="app-animate-drawer fixed inset-y-0 right-0 z-10 flex w-full max-w-[640px] flex-col overflow-hidden rounded-l-2xl border-l border-slate-200/90 bg-white shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] sm:w-[42%] sm:min-w-[440px] lg:max-w-[560px] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl"
       >
         {/* Header */}
         <div className="flex shrink-0 items-start justify-between border-b border-slate-100 bg-white px-6 py-5 dark:border-gray-800 dark:bg-gray-950">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h2 className="truncate text-xl font-semibold text-slate-950 dark:text-white">{rental.client}</h2>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h2 className="max-w-[360px] truncate text-xl font-semibold text-slate-950 dark:text-white" title={rental.client}>{rental.client}</h2>
               <Badge variant={statusVariants[rental.status]}>{statusLabels[rental.status]}</Badge>
               {isReturnOverdue && (
                 <Badge variant="warning">
@@ -360,10 +390,10 @@ export function RentalDrawer({
                 </Badge>
               )}
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500 dark:text-gray-400">
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500 dark:text-gray-400">
               <span className="font-mono">{rental.id}</span>
               <span>·</span>
-              <span>
+              <span className="max-w-full truncate">
                 {rental.equipmentInv} {currentEquipment?.model}
                 {currentEquipment?.serialNumber ? ` · SN ${currentEquipment.serialNumber}` : ''}
               </span>
@@ -375,6 +405,31 @@ export function RentalDrawer({
           >
             <X className="h-5 w-5" />
           </button>
+        </div>
+
+        <div className="shrink-0 border-b border-slate-100 bg-white px-4 py-2 dark:border-gray-800 dark:bg-gray-950">
+          <div className="flex gap-1 overflow-x-auto">
+            {([
+              ['overview', 'Обзор'],
+              ['payments', 'Платежи'],
+              ['documents', 'Документы'],
+              ['delivery', 'Доставка'],
+              ['history', 'История'],
+            ] as Array<[RentalDrawerTab, string]>).map(([tabId, label]) => (
+              <button
+                key={tabId}
+                type="button"
+                onClick={() => setActiveTab(tabId)}
+                className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === tabId
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Content */}
@@ -395,24 +450,105 @@ export function RentalDrawer({
             </div>
           )}
 
-          {canEditRentals && (
-            <section>
-              <button
-                onClick={() => {
-                  setShowEdit(v => !v);
-                  setEditError('');
-                }}
-                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-gray-800 dark:bg-gray-900/70 dark:text-gray-300 dark:hover:bg-gray-900"
-              >
-                <div className="flex items-center gap-2">
-                  <Edit className="h-4 w-4 text-gray-400" />
-                  <span>Редактировать аренду</span>
-                </div>
-                {showEdit ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
-              </button>
+          {activeTab === 'overview' && (
+            <section className="space-y-4">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  ['Статус', statusLabels[rental.status]],
+                  ['Клиент', rental.client || '—'],
+                  ['ИНН', clientProfile?.inn || '—'],
+                  ['Договор', contractLabel],
+                  ['Период', `${formatDate(rental.startDate)} — ${formatDate(rental.endDate)}`],
+                  ['Остаток срока', daysLeftLabel],
+                  ['Техника', equipmentLabel],
+                  ['Инвентарный №', rental.equipmentInv || currentEquipment?.inventoryNumber || '—'],
+                  ['Собственник', currentEquipment?.ownerName || currentEquipment?.owner || '—'],
+                  ['Менеджер', rental.manager || '—'],
+                  ['Условия', clientProfile?.paymentTerms || '—'],
+                  ['Локация выдачи', rentalLocation],
+                  ['Локация возврата', rentalLocation],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
+                    <div className="text-xs font-medium text-slate-500 dark:text-gray-400">{label}</div>
+                    <div className="mt-1 truncate text-sm font-semibold text-slate-950 dark:text-white" title={String(value)}>{value}</div>
+                  </div>
+                ))}
+              </div>
 
-              {showEdit && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
+                  <div className="text-xs font-medium text-slate-500 dark:text-gray-400">Сумма аренды</div>
+                  <div className="mt-1 text-sm font-bold text-slate-950 dark:text-white">{moneyValue(rental.amount)}</div>
+                </div>
+                <div className="rounded-xl border border-green-200 bg-green-50 px-3 py-2.5 dark:border-green-900/50 dark:bg-green-950/20">
+                  <div className="text-xs font-medium text-green-700 dark:text-green-300">Оплачено</div>
+                  <div className="mt-1 text-sm font-bold text-green-700 dark:text-green-300">{moneyValue(totalPaid)}</div>
+                </div>
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 dark:border-red-900/50 dark:bg-red-950/20">
+                  <div className="text-xs font-medium text-red-700 dark:text-red-300">Долг</div>
+                  <div className="mt-1 text-sm font-bold text-red-700 dark:text-red-300">{moneyValue(remaining)}</div>
+                </div>
+                <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 dark:border-blue-900/50 dark:bg-blue-950/20">
+                  <div className="text-xs font-medium text-blue-700 dark:text-blue-300">Следующий платёж</div>
+                  <div className="mt-1 text-sm font-bold text-blue-700 dark:text-blue-300">{nextPaymentLabel}</div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/70">
+                <div className="mb-3 text-sm font-semibold text-slate-950 dark:text-white">Быстрые действия</div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {canEditRentals && (
+                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" onClick={() => setShowEdit(true)}>
+                      <Edit className="h-4 w-4" />
+                      Редактировать аренду
+                    </Button>
+                  )}
+                  {canCreateDeliveries && (
+                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" asChild>
+                      <Link to="/deliveries/new">
+                        <Truck className="h-4 w-4" />
+                        Создать доставку
+                      </Link>
+                    </Button>
+                  )}
+                  {canEditRentals && (
+                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" onClick={() => onReturn(rental)}>
+                      <RotateCcw className="h-4 w-4" />
+                      Запланировать возврат
+                    </Button>
+                  )}
+                  {canCreateDocuments && (
+                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" asChild>
+                      <Link to="/documents">
+                        <FileText className="h-4 w-4" />
+                        Создать документ
+                      </Link>
+                    </Button>
+                  )}
+                  {canRegisterPayment && (
+                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" onClick={() => { setActiveTab('payments'); setShowAddPayment(true); }}>
+                      <CreditCard className="h-4 w-4" />
+                      Добавить оплату
+                    </Button>
+                  )}
+                  {canDeleteRentals && (
+                    <Button size="sm" variant="ghost" className="justify-start rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/20" onClick={() => setConfirmDelete(true)}>
+                      <Trash2 className="h-4 w-4" />
+                      Отменить аренду
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'overview' && canEditRentals && showEdit && (
+            <section>
                 <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50/70 p-4 shadow-sm dark:border-blue-800 dark:bg-blue-900/20">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-blue-800 dark:text-blue-200">Редактировать аренду</div>
+                    <Button size="sm" variant="ghost" onClick={() => { setShowEdit(false); setEditError(''); }}>Свернуть</Button>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="col-span-2">
                       <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Клиент *</label>
@@ -493,38 +629,11 @@ export function RentalDrawer({
                     </Button>
                   </div>
                 </div>
-              )}
             </section>
           )}
 
           {/* Dates */}
-          <section>
-            <div className="mb-2 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              <Calendar className="h-4 w-4" />
-              <span>Даты аренды</span>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
-              <div className="flex items-center gap-3">
-                <div>
-                  <div className="text-xs text-gray-500">Начало</div>
-                  <div className="text-sm text-gray-900 dark:text-white">{formatDate(rental.startDate)}</div>
-                </div>
-                <ArrowRight className="h-4 w-4 text-gray-400" />
-                <div>
-                  <div className="text-xs text-gray-500">Окончание</div>
-                  <div className="text-sm text-gray-900 dark:text-white">{formatDate(rental.endDate)}</div>
-                </div>
-                <div className="ml-auto">
-                  <div className="text-xs text-gray-500">Дней</div>
-                  <div className="text-sm text-gray-900 dark:text-white">
-                    {getRentalDays(rental.startDate, rental.endDate)}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {serviceAlert && serviceAlertStyle && (
+          {activeTab === 'overview' && serviceAlert && serviceAlertStyle && (
             <div className={`rounded-lg border px-4 py-3 ${serviceAlertStyle.container}`}>
               <div className="flex items-start gap-2">
                 <Wrench className={`mt-0.5 h-4 w-4 shrink-0 ${serviceAlertStyle.icon}`} />
@@ -548,6 +657,13 @@ export function RentalDrawer({
           )}
 
           {/* Payment Block */}
+          {activeTab === 'payments' && !canViewMoney && (
+            <section className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-gray-800 dark:bg-gray-900/70 dark:text-gray-400">
+              Финансовые суммы по аренде скрыты для вашей роли.
+            </section>
+          )}
+
+          {activeTab === 'payments' && canViewMoney && (
           <section>
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -736,9 +852,57 @@ export function RentalDrawer({
               </div>
             )}
           </section>
+          )}
+
+          {activeTab === 'delivery' && (
+            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/70">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-950 dark:text-white">Доставка и возврат</div>
+                  <div className="text-xs text-slate-500 dark:text-gray-400">Операционная информация по выдаче и возврату техники.</div>
+                </div>
+                {canCreateDeliveries && (
+                  <Button size="sm" variant="secondary" className="rounded-xl" asChild>
+                    <Link to="/deliveries/new">
+                      <Truck className="h-4 w-4" />
+                      Создать доставку
+                    </Link>
+                  </Button>
+                )}
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-950/60">
+                  <div className="text-xs text-slate-500 dark:text-gray-400">Локация выдачи</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{rentalLocation}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-950/60">
+                  <div className="text-xs text-slate-500 dark:text-gray-400">Локация возврата</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{rentalLocation}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-950/60">
+                  <div className="text-xs text-slate-500 dark:text-gray-400">Плановый возврат</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{formatDate(rental.endDate)}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-950/60">
+                  <div className="text-xs text-slate-500 dark:text-gray-400">Состояние</div>
+                  <div className={`mt-1 text-sm font-semibold ${isReturnOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-950 dark:text-white'}`}>{daysLeftLabel}</div>
+                </div>
+              </div>
+              {canCreateService && (
+                <div className="mt-3">
+                  <Button size="sm" variant="secondary" className="rounded-xl" asChild>
+                    <Link to="/service/new">
+                      <Wrench className="h-4 w-4" />
+                      Создать сервисную заявку при повреждении
+                    </Link>
+                  </Button>
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Extend Rental — only through the canonical rental card operation */}
-          {canEditRentalDates && (rental.status === 'active' || rental.status === 'created') && (
+          {activeTab === 'delivery' && canEditRentalDates && (rental.status === 'active' || rental.status === 'created') && (
             <section>
               <button
                 onClick={() => setShowExtend(v => !v)}
@@ -776,7 +940,7 @@ export function RentalDrawer({
           )}
 
           {/* Early Return — only for active */}
-          {canEditRentalDates && rental.status === 'active' && (
+          {activeTab === 'delivery' && canEditRentalDates && rental.status === 'active' && (
             <section>
               <button
                 onClick={() => setShowEarlyReturn(v => !v)}
@@ -831,12 +995,21 @@ export function RentalDrawer({
           )}
 
           {/* Documents / UPD */}
+          {activeTab === 'documents' && (
           <section>
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                 <FileText className="h-4 w-4" />
                 <span>Документы</span>
               </div>
+              {canCreateDocuments && (
+                <Button size="sm" variant="secondary" className="rounded-xl" asChild>
+                  <Link to="/documents">
+                    <FileText className="h-4 w-4" />
+                    Создать документ
+                  </Link>
+                </Button>
+              )}
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
@@ -939,8 +1112,10 @@ export function RentalDrawer({
               )}
             </div>
           </section>
+          )}
 
           {/* Manager */}
+          {activeTab === 'overview' && (
           <section>
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -998,8 +1173,10 @@ export function RentalDrawer({
               )}
             </div>
           </section>
+          )}
 
           {/* Comments / History */}
+          {activeTab === 'history' && (
           <section>
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -1055,6 +1232,7 @@ export function RentalDrawer({
               )}
             </div>
           </section>
+          )}
         </div>
 
         {/* Footer Actions */}

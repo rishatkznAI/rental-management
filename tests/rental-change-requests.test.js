@@ -1550,6 +1550,146 @@ test('PATCH /api/rentals/:id restores orphan gantt rental before creating approv
   });
 });
 
+test('PATCH /api/rentals/:id saves downtime for orphan gantt rental with stale placeholder inventory', async () => {
+  const { app, state } = createApprovalApp();
+  state.rentals = state.rentals.filter(item => item.id !== 'R-032');
+  state.gantt_rentals.push({
+    id: 'GR-1776324984409',
+    client: 'ЗМК МЕТАЛЛИСТ',
+    clientShort: 'ЗМК МЕТАЛЛИСТ',
+    clientId: 'C-1776324892044-710b4e',
+    startDate: '2026-04-01',
+    endDate: '2026-04-20',
+    equipmentId: 'EQ-032',
+    equipmentInv: '0',
+    manager: 'Руслан',
+    managerId: 'U-manager',
+    status: 'active',
+    amount: 180000,
+    comments: [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-1776324984409', 'admin-token', {
+      downtimeDays: 2,
+      downtimeReason: 'Ожидание клиента (период 2026-04-10 → 2026-04-11)',
+      ganttRentalId: 'GR-1776324984409',
+      __linkedGanttRentalId: 'GR-1776324984409',
+      __ganttSnapshot: {
+        id: 'GR-1776324984409',
+        client: 'ЗМК МЕТАЛЛИСТ',
+        clientId: 'C-1776324892044-710b4e',
+        startDate: '2026-04-01',
+        endDate: '2026-04-20',
+        equipmentId: 'EQ-032',
+        equipmentInv: '0',
+        status: 'active',
+      },
+      entityType: 'rental',
+      actionType: 'gantt_rental_update',
+      oldValues: {},
+      newValues: {
+        downtimeDays: 2,
+        downtimeReason: 'Ожидание клиента (период 2026-04-10 → 2026-04-11)',
+      },
+      changes: [
+        { field: 'downtimeDays', newValue: 2 },
+        { field: 'downtimeReason', newValue: 'Ожидание клиента (период 2026-04-10 → 2026-04-11)' },
+      ],
+      __changeReason: 'Простой техники SN-032: 2026-04-10 → 2026-04-11. Ожидание клиента',
+    });
+
+    assert.equal(update.status, 200);
+    assert.match(update.body.id, /^R-/);
+    assert.equal(update.body.downtimeDays, 2);
+    assert.equal(update.body.downtimeReason, 'Ожидание клиента (период 2026-04-10 → 2026-04-11)');
+    assert.equal(update.body.equipmentId, 'EQ-032');
+    assert.equal(update.body.equipmentInv, '03291436');
+    assert.deepEqual(update.body.equipment, ['03291436']);
+
+    const repairedGantt = state.gantt_rentals.find(item => item.id === 'GR-1776324984409');
+    assert.equal(repairedGantt.rentalId, update.body.id);
+    assert.equal(repairedGantt.sourceRentalId, update.body.id);
+    assert.equal(repairedGantt.equipmentId, 'EQ-032');
+    assert.equal(repairedGantt.equipmentInv, '03291436');
+    assert.equal(repairedGantt.inventoryNumber, '03291436');
+    assert.equal(repairedGantt.serialNumber, 'SN-032');
+    assert.equal(repairedGantt.downtimeDays, 2);
+    assert.equal(repairedGantt.downtimeReason, 'Ожидание клиента (период 2026-04-10 → 2026-04-11)');
+    assert.equal(state.rental_change_requests.length, 0);
+  });
+});
+
+test('PATCH /api/rentals/:id saves downtime for subrental equipment without inventory number', async () => {
+  const { app, state } = createApprovalApp();
+  state.equipment.push({
+    id: 'EQ-subrent',
+    inventoryNumber: '',
+    serialNumber: 'SN-SUBRENT-1',
+    category: 'partner',
+    activeInFleet: true,
+  });
+  state.gantt_rentals.push({
+    id: 'GR-subrent-orphan',
+    client: 'Субаренда без инвентарного номера',
+    startDate: '2026-04-01',
+    endDate: '2026-04-20',
+    equipmentId: 'EQ-subrent',
+    equipmentInv: '0',
+    serialNumber: 'SN-SUBRENT-1',
+    manager: 'Руслан',
+    managerId: 'U-manager',
+    status: 'active',
+    amount: 180000,
+    comments: [],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/GR-subrent-orphan', 'admin-token', {
+      downtimeDays: 1,
+      downtimeReason: 'Ожидание клиента',
+      ganttRentalId: 'GR-subrent-orphan',
+      __linkedGanttRentalId: 'GR-subrent-orphan',
+      __ganttSnapshot: {
+        id: 'GR-subrent-orphan',
+        client: 'Субаренда без инвентарного номера',
+        startDate: '2026-04-01',
+        endDate: '2026-04-20',
+        equipmentId: 'EQ-subrent',
+        equipmentInv: '0',
+        serialNumber: 'SN-SUBRENT-1',
+        status: 'active',
+      },
+      entityType: 'rental',
+      actionType: 'gantt_rental_update',
+      oldValues: {},
+      newValues: { downtimeDays: 1, downtimeReason: 'Ожидание клиента' },
+      changes: [
+        { field: 'downtimeDays', newValue: 1 },
+        { field: 'downtimeReason', newValue: 'Ожидание клиента' },
+      ],
+      __changeReason: 'Простой техники SN-SUBRENT-1',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.equipmentId, 'EQ-subrent');
+    assert.equal(update.body.equipmentInv, '');
+    assert.equal(update.body.inventoryNumber, '');
+    assert.equal(update.body.serialNumber, 'SN-SUBRENT-1');
+    assert.deepEqual(update.body.equipment, ['SN-SUBRENT-1']);
+    assert.equal(update.body.downtimeDays, 1);
+
+    const repairedGantt = state.gantt_rentals.find(item => item.id === 'GR-subrent-orphan');
+    assert.equal(repairedGantt.rentalId, update.body.id);
+    assert.equal(repairedGantt.equipmentId, 'EQ-subrent');
+    assert.equal(repairedGantt.equipmentInv, '');
+    assert.equal(repairedGantt.inventoryNumber, '');
+    assert.equal(repairedGantt.serialNumber, 'SN-SUBRENT-1');
+    assert.deepEqual(repairedGantt.equipment, ['SN-SUBRENT-1']);
+    assert.equal(repairedGantt.downtimeDays, 1);
+  });
+});
+
 test('rentals PATCH returns clear 400 and 404 for bad approval ids', async () => {
   const { app } = createApprovalApp();
 

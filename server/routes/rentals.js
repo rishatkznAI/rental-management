@@ -108,6 +108,17 @@ function normalizeDateKey(value) {
   return String(value || '').slice(0, 10);
 }
 
+function normalizeEquipmentRef(value) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized || normalized === 'undefined' || normalized === 'null') return '';
+  return normalized;
+}
+
+function isWeakEquipmentRef(value) {
+  const normalized = normalizeEquipmentRef(value).toLowerCase();
+  return !normalized || normalized === '0' || normalized === '-' || normalized === '—' || normalized === 'n/a' || normalized === 'unknown';
+}
+
 function parseDateKey(value) {
   const key = normalizeDateKey(value);
   if (!key) return null;
@@ -695,6 +706,8 @@ function registerRentalRoutes(deps) {
       const equipmentList = readData('equipment') || [];
       const equipmentById = equipmentList.find(item => item.id === ganttRental.equipmentId);
       const equipmentInv = ganttRental.equipmentInv || ganttRental.inventoryNumber || equipmentById?.inventoryNumber || '';
+      const serialNumber = ganttRental.serialNumber || equipmentById?.serialNumber || '';
+      const equipmentRef = equipmentInv || serialNumber || ganttRental.equipmentId || '';
       const oldValues = rawMeta.oldValues || {};
       const restored = withClientLink({
         id: generateUniqueRentalId(existingRentals),
@@ -707,7 +720,9 @@ function registerRentalRoutes(deps) {
         plannedReturnDate: oldValues.plannedReturnDate || oldValues.endDate || ganttRental.endDate || ganttRental.plannedReturnDate || '',
         equipmentId: ganttRental.equipmentId || '',
         equipmentInv,
-        equipment: equipmentInv ? [equipmentInv] : (ganttRental.equipmentId ? [ganttRental.equipmentId] : []),
+        inventoryNumber: equipmentInv,
+        serialNumber,
+        equipment: equipmentRef ? [equipmentRef] : [],
         rate: ganttRental.rate || '',
         price: Number(ganttRental.amount ?? ganttRental.price) || 0,
         discount: Number(ganttRental.discount) || 0,
@@ -800,19 +815,46 @@ function registerRentalRoutes(deps) {
         return null;
       }
 
-      const repairSource = mergeGanttRentalForRepair(fallbackGanttRental, exactGanttRental);
+      let repairSource = mergeGanttRentalForRepair(fallbackGanttRental, exactGanttRental);
       const equipmentList = readData('equipment') || [];
-      const repairEquipmentId = String(repairSource?.equipmentId || '').trim();
-      const repairInventory = String(repairSource?.equipmentInv || repairSource?.inventoryNumber || '').trim();
+      const repairEquipmentId = normalizeEquipmentRef(repairSource?.equipmentId);
+      const repairInventory = normalizeEquipmentRef(repairSource?.equipmentInv || repairSource?.inventoryNumber);
+      const repairSerial = normalizeEquipmentRef(repairSource?.serialNumber);
       const repairEquipment = repairEquipmentId
-        ? equipmentList.find(item => String(item?.id || '') === repairEquipmentId) || null
+        ? equipmentList.find(item => normalizeEquipmentRef(item?.id) === repairEquipmentId) || null
         : null;
-      if (
-        repairEquipment &&
-        repairInventory &&
-        String(repairEquipment.inventoryNumber || repairEquipment.equipmentInv || repairEquipment.inv || '').trim() !== repairInventory
-      ) {
-        return null;
+      if (repairEquipment) {
+        const canonicalEquipmentRefs = [
+          repairEquipment.id,
+          repairEquipment.inventoryNumber,
+          repairEquipment.equipmentInv,
+          repairEquipment.inv,
+          repairEquipment.serialNumber,
+        ].map(normalizeEquipmentRef).filter(Boolean);
+        const inventoryMatches = !repairInventory || canonicalEquipmentRefs.includes(repairInventory);
+        const serialMatches = !repairSerial || canonicalEquipmentRefs.includes(repairSerial);
+        if ((!inventoryMatches && !isWeakEquipmentRef(repairInventory)) || !serialMatches) {
+          return null;
+        }
+        const canonicalInventory = normalizeEquipmentRef(
+          repairEquipment.inventoryNumber ||
+          repairEquipment.equipmentInv ||
+          repairEquipment.inv ||
+          (isWeakEquipmentRef(repairInventory) ? '' : repairInventory),
+        );
+        const canonicalSerial = normalizeEquipmentRef(repairEquipment.serialNumber || repairSerial);
+        repairSource = {
+          ...repairSource,
+          equipmentId: normalizeEquipmentRef(repairEquipment.id) || repairEquipmentId,
+          equipmentInv: canonicalInventory,
+          inventoryNumber: canonicalInventory,
+          serialNumber: canonicalSerial || repairSource.serialNumber,
+          equipment: canonicalInventory
+            ? [canonicalInventory]
+            : canonicalSerial
+              ? [canonicalSerial]
+              : repairSource.equipment,
+        };
       }
       const restoredRental = buildClassicRentalFromGantt(repairSource, rawMeta, req.user?.userName, data);
       const validation = validateRentalPayload('rentals', restoredRental, data, equipmentList, '', { skipConflictCheck: false });
@@ -827,12 +869,17 @@ function registerRentalRoutes(deps) {
 
       data.push(restoredRental);
       writeData('rentals', data);
-      const repairedGanttRental = {
+      const repairedGanttRental = ensureGanttRentalLink({
         ...exactGanttRental,
+        equipmentId: repairSource.equipmentId || exactGanttRental.equipmentId,
+        equipmentInv: repairSource.equipmentInv || exactGanttRental.equipmentInv,
+        inventoryNumber: repairSource.inventoryNumber || exactGanttRental.inventoryNumber,
+        serialNumber: repairSource.serialNumber || exactGanttRental.serialNumber,
+        equipment: repairSource.equipment || exactGanttRental.equipment,
         rentalId: restoredRental.id,
         sourceRentalId: restoredRental.id,
         originalRentalId: exactGanttRental.originalRentalId || restoredRental.id,
-      };
+      }, restoredRental, equipmentList);
       ganttRentals[ganttIdx] = repairedGanttRental;
       writeData('gantt_rentals', ganttRentals);
       auditLog?.(req, {

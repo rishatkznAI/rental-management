@@ -1401,6 +1401,7 @@ function findCanonicalEquipmentForRental(rental, equipmentList = []) {
 function canonicalGanttEquipmentFields(rental, equipmentList = []) {
   const matchedEquipment = findCanonicalEquipmentForRental(rental, equipmentList);
   const rentalEquipment = Array.isArray(rental?.equipment) ? rental.equipment.filter(Boolean) : [];
+  const serialNumber = normalizeRentalIdentifier(matchedEquipment?.serialNumber || rental?.serialNumber);
   const hasRentalEquipmentReference = Boolean(
     normalizeRentalIdentifier(rental?.equipmentId) ||
     normalizeRentalIdentifier(rental?.equipmentInv) ||
@@ -1413,16 +1414,15 @@ function canonicalGanttEquipmentFields(rental, equipmentList = []) {
     matchedEquipment?.equipmentInv ||
     rental?.equipmentInv ||
     rental?.inventoryNumber ||
-    rentalEquipment[0],
+    (serialNumber ? '' : rentalEquipment[0]),
   );
   const equipmentId = normalizeRentalIdentifier(rental?.equipmentId || matchedEquipment?.id);
-  const serialNumber = normalizeRentalIdentifier(matchedEquipment?.serialNumber || rental?.serialNumber);
   return {
     equipmentId,
     equipmentInv,
     inventoryNumber: equipmentInv,
     serialNumber,
-    equipment: equipmentInv ? [equipmentInv] : rentalEquipment,
+    equipment: equipmentInv ? [equipmentInv] : (serialNumber ? [serialNumber] : rentalEquipment),
     hasRentalEquipmentReference,
   };
 }
@@ -1547,6 +1547,8 @@ function applyRentalFieldToGantt(ganttRental, field, value) {
   if (field === 'manager') return { ...ganttRental, manager: value, managerInitials: managerInitials(value) };
   if (field === 'status') return { ...ganttRental, status: rentalStatusToGanttStatus(value) };
   if (field === 'price') return { ...ganttRental, amount: Number(value) || 0 };
+  if (field === 'downtimeDays') return { ...ganttRental, downtimeDays: value };
+  if (field === 'downtimeReason') return { ...ganttRental, downtimeReason: value };
   return ganttRental;
 }
 

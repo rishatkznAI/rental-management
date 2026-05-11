@@ -16,6 +16,7 @@ import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { ServiceDayPlanBoard } from '../components/service/ServiceDayPlanBoard';
 import { WarrantyClaimsTab } from '../components/service/WarrantyClaimsTab';
+import ServiceDetail from './ServiceDetail';
 import type { AuthUser } from '../contexts/AuthContext';
 import { useAuth } from '../contexts/AuthContext';
 import { canManageServiceDayPlan, canViewServiceDayPlan, usePermissions } from '../lib/permissions';
@@ -412,6 +413,7 @@ function ServiceSidePanel({
   canEditService,
   canViewDocuments,
   canCreateDocuments,
+  onOpenTicket,
   onClose,
 }: {
   ticket: ServiceTicket | null;
@@ -420,6 +422,7 @@ function ServiceSidePanel({
   canEditService: boolean;
   canViewDocuments: boolean;
   canCreateDocuments: boolean;
+  onOpenTicket: (ticketId: string) => void;
   onClose: () => void;
 }) {
   const [activeTab, setActiveTab] = React.useState<'overview' | 'works' | 'parts' | 'documents' | 'history'>('overview');
@@ -452,6 +455,7 @@ function ServiceSidePanel({
   const canEditTicketFields = canEditService && (normalizeServiceStatus(ticket.status) !== 'closed' || isAdmin);
   const canAddRepairItems = canEditTicketFields && (isAdmin || (normalizeServiceStatus(ticket.status) === 'needs_revision' && isAssigned));
   const canCloseTicket = canEditService && normalizeServiceStatus(ticket.status) === 'ready';
+  const openTicket = () => onOpenTicket(ticket.id);
   const panelTabs = [
     { id: 'overview', label: 'Обзор' },
     { id: 'works', label: 'Работы' },
@@ -579,36 +583,24 @@ function ServiceSidePanel({
 
             <div className="grid gap-2">
               {canEditTicketFields && (
-                <Link to={`/service/${ticket.id}`}>
-                  <Button className="w-full" variant="secondary">Изменить заявку</Button>
-                </Link>
+                <Button type="button" className="w-full" variant="secondary" onClick={openTicket}>Изменить заявку</Button>
               )}
               {canAddRepairItems && (
                 <div className="grid grid-cols-2 gap-2">
-                  <Link to={`/service/${ticket.id}`}>
-                    <Button className="w-full" variant="secondary">Добавить работу</Button>
-                  </Link>
-                  <Link to={`/service/${ticket.id}`}>
-                    <Button className="w-full" variant="secondary">Заказать запчасть</Button>
-                  </Link>
+                  <Button type="button" className="w-full" variant="secondary" onClick={openTicket}>Добавить работу</Button>
+                  <Button type="button" className="w-full" variant="secondary" onClick={openTicket}>Заказать запчасть</Button>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2">
                 {canCreateDocuments && (
-                  <Link to={`/service/${ticket.id}`}>
-                    <Button className="w-full" variant="outline">Создать документ</Button>
-                  </Link>
+                  <Button type="button" className="w-full" variant="outline" onClick={openTicket}>Создать документ</Button>
                 )}
                 {canCloseTicket && (
-                  <Link to={`/service/${ticket.id}`}>
-                    <Button className="w-full">Закрыть заявку</Button>
-                  </Link>
+                  <Button type="button" className="w-full" onClick={openTicket}>Закрыть заявку</Button>
                 )}
               </div>
             </div>
-            <Link to={`/service/${ticket.id}`}>
-              <Button className="w-full" variant="outline">Открыть полную карточку</Button>
-            </Link>
+            <Button type="button" className="w-full" variant="outline" onClick={openTicket}>Открыть полную карточку</Button>
           </>
         )}
 
@@ -721,6 +713,7 @@ function ServiceQueueTab({
   canViewClients,
   canEditService,
   canAssignServiceTasks,
+  onOpenTicket,
 }: {
   queue: ReturnType<typeof buildServiceQueue>;
   mechanicOptions: string[];
@@ -730,6 +723,7 @@ function ServiceQueueTab({
   canViewClients: boolean;
   canEditService: boolean;
   canAssignServiceTasks: boolean;
+  onOpenTicket: (ticketId: string) => void;
 }) {
   const [search, setSearch] = React.useState('');
   const [priorityFilter, setPriorityFilter] = React.useState('all');
@@ -887,9 +881,14 @@ function ServiceQueueTab({
                 className="grid gap-3 border-b border-gray-100 px-4 py-4 last:border-b-0 dark:border-white/6 2xl:grid-cols-[minmax(120px,0.7fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_120px_110px_minmax(130px,0.7fr)_95px_minmax(160px,0.8fr)_minmax(170px,0.9fr)] 2xl:items-center"
               >
                 <div className="min-w-0">
-                  <Link to={`/service/${item.ticketId}`} className="font-mono text-sm font-bold text-[--color-primary] hover:underline">
+                  <button
+                    type="button"
+                    onClick={() => onOpenTicket(item.ticketId)}
+                    className="font-mono text-sm font-bold text-[--color-primary] hover:underline"
+                    aria-label={`Открыть заявку ${item.ticketId}`}
+                  >
                     {item.ticketId}
-                  </Link>
+                  </button>
                   <div className="mt-1 text-xs text-gray-500">{item.createdAt ? formatDate(item.createdAt) : '—'} · score {item.score}</div>
                 </div>
                 <div className="min-w-0">
@@ -922,13 +921,16 @@ function ServiceQueueTab({
                 <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{nextAction}</div>
                 <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
                   {canRunNextAction && (
-                    <Link to={`/service/${item.ticketId}`}>
-                      <Button size="sm" variant="secondary">{nextAction}</Button>
-                    </Link>
+                    <Button type="button" size="sm" variant="secondary" onClick={() => onOpenTicket(item.ticketId)}>{nextAction}</Button>
                   )}
-                  <Link to={`/service/${item.ticketId}`}>
-                    <Button size="sm" variant={canRunNextAction ? 'outline' : 'secondary'}>Открыть заявку</Button>
-                  </Link>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={canRunNextAction ? 'outline' : 'secondary'}
+                    onClick={() => onOpenTicket(item.ticketId)}
+                  >
+                    Открыть заявку
+                  </Button>
                   {canViewEquipment && item.equipmentId && (
                     <Link to={`/equipment/${item.equipmentId}`}>
                       <Button size="sm" variant="outline">Техника</Button>
@@ -955,6 +957,54 @@ function ServiceQueueTab({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function ServiceTicketCardModal({
+  ticketId,
+  onClose,
+}: {
+  ticketId: string | null;
+  onClose: () => void;
+}) {
+  React.useEffect(() => {
+    if (!ticketId) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose, ticketId]);
+
+  if (!ticketId) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/55 p-2 backdrop-blur-[3px] sm:p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Карточка сервисной заявки ${ticketId}`}
+        className="min-h-0 w-full max-w-7xl overflow-hidden rounded-xl border border-gray-200 bg-gray-50 shadow-2xl dark:border-white/10 dark:bg-gray-950"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="h-full max-h-[calc(100vh-1rem)] overflow-y-auto sm:max-h-[calc(100vh-2rem)]">
+          <ServiceDetail ticketId={ticketId} embedded onClose={onClose} />
+        </div>
+      </section>
     </div>
   );
 }
@@ -990,6 +1040,16 @@ export default function Service() {
   const [visibleCount, setVisibleCount] = React.useState(RESULT_BATCH_SIZE);
   const [viewMode, setViewMode] = React.useState<'list' | 'kanban'>('list');
   const [selectedTicketId, setSelectedTicketId] = React.useState<string | null>(null);
+  const [openTicketId, setOpenTicketId] = React.useState<string | null>(null);
+
+  const openTicketCard = React.useCallback((ticketId: string) => {
+    setSelectedTicketId(ticketId);
+    setOpenTicketId(ticketId);
+  }, []);
+
+  const closeTicketCard = React.useCallback(() => {
+    setOpenTicketId(null);
+  }, []);
 
   const { data: equipmentList = [] } = useQuery({
     queryKey: ['equipment', 'service-queue'],
@@ -1497,7 +1557,7 @@ export default function Service() {
                             <button
                               key={ticket.id}
                               type="button"
-                              onClick={() => setSelectedTicketId(ticket.id)}
+                              onClick={() => openTicketCard(ticket.id)}
                               className={`w-full rounded-lg border p-3 text-left transition hover:border-[--color-primary]/50 ${
                                 selectedTicket?.id === ticket.id
                                   ? 'border-[--color-primary] bg-[--color-primary]/10'
@@ -1545,18 +1605,19 @@ export default function Service() {
                       const dueMeta = getTicketDueMeta(ticket);
                       const repairType = getTicketRepairTypeLabel(ticket);
                       const isSelected = selectedTicket?.id === ticket.id;
-                      const selectTicket = () => setSelectedTicketId(ticket.id);
+                      const openTicket = () => openTicketCard(ticket.id);
 
                       return (
                         <div
                           key={ticket.id}
                           role="button"
                           tabIndex={0}
-                          onClick={selectTicket}
+                          aria-label={`Открыть заявку ${ticket.id}`}
+                          onClick={openTicket}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault();
-                              selectTicket();
+                              openTicket();
                             }
                           }}
                           className={`grid cursor-pointer gap-3 border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 hover:bg-[--color-primary]/5 dark:border-white/6 md:grid-cols-[32px_minmax(170px,0.9fr)_110px_minmax(220px,1fr)] lg:grid-cols-[32px_minmax(180px,0.9fr)_115px_minmax(220px,1fr)_minmax(180px,0.8fr)] lg:items-start ${
@@ -1602,14 +1663,18 @@ export default function Service() {
                           </div>
                           <div className="text-sm font-medium text-gray-600 dark:text-gray-300">{repairType}</div>
                           <div>{getServicePriorityPill(ticket.priority)}</div>
-                          <Link
-                            to={`/service/${ticket.id}`}
-                            onClick={(event) => event.stopPropagation()}
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openTicket();
+                            }}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-[--color-primary] dark:hover:bg-white/10"
                             title="Открыть полную карточку"
+                            aria-label={`Открыть полную карточку заявки ${ticket.id}`}
                           >
                             <MoreHorizontal className="h-4 w-4" />
-                          </Link>
+                          </button>
                         </div>
                       );
                     })
@@ -1625,6 +1690,7 @@ export default function Service() {
               canEditService={can('edit', 'service')}
               canViewDocuments={canViewDocuments}
               canCreateDocuments={can('create', 'documents')}
+              onOpenTicket={openTicketCard}
               onClose={() => setSelectedTicketId(null)}
             />
           </div>
@@ -1657,6 +1723,7 @@ export default function Service() {
             canViewClients={canViewClients}
             canEditService={can('edit', 'service')}
             canAssignServiceTasks={can('edit', 'service') && canManageDayPlan}
+            onOpenTicket={openTicketCard}
           />
         </TabsContent>
 
@@ -1669,6 +1736,7 @@ export default function Service() {
               canCreateService={can('create', 'service')}
               canEditService={can('edit', 'service')}
               canManageDayPlan={canManageDayPlan}
+              onOpenTicket={openTicketCard}
               onRefresh={() => {
                 void ticketsQuery.refetch();
                 void mechanicsQuery.refetch();
@@ -1689,10 +1757,12 @@ export default function Service() {
               canEdit={canManageWarrantyClaims}
               canDelete={can('delete', 'service')}
               canCreateDocuments={can('create', 'documents')}
+              onOpenTicket={openTicketCard}
             />
           </TabsContent>
         )}
       </Tabs>
+      <ServiceTicketCardModal ticketId={openTicketId} onClose={closeTicketCard} />
     </div>
   );
 }

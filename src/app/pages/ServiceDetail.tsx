@@ -380,8 +380,19 @@ function RepairPhotoGroup({
 
 // ─── main component ────────────────────────────────────────────────────────────
 
-export default function ServiceDetail() {
-  const { id } = useParams<{ id: string }>();
+type ServiceDetailProps = {
+  ticketId?: string;
+  embedded?: boolean;
+  onClose?: () => void;
+};
+
+export default function ServiceDetail({
+  ticketId,
+  embedded = false,
+  onClose,
+}: ServiceDetailProps = {}) {
+  const params = useParams<{ id: string }>();
+  const id = ticketId ?? params.id ?? '';
   const navigate = useNavigate();
   const { can } = usePermissions();
   const { user } = useAuth();
@@ -404,7 +415,8 @@ export default function ServiceDetail() {
   const canViewServiceVehicles = can('view', 'service_vehicles');
   const canCreateDocuments = can('create', 'documents');
 
-  const { data: fetchedTicket } = useServiceTicketById(id ?? '');
+  const ticketQuery = useServiceTicketById(id);
+  const { data: fetchedTicket } = ticketQuery;
   const { data: documents = [] } = useDocumentsList({ enabled: canViewDocuments });
   const { data: equipmentList = [] } = useQuery<Equipment[]>({
     queryKey: EQUIPMENT_KEYS.all,
@@ -449,6 +461,9 @@ export default function ServiceDetail() {
 
   // Local optimistic state — seeded from server, updated immediately on user actions
   const [ticket, setTicket] = useState<ServiceTicket | null>(null);
+  React.useEffect(() => {
+    setTicket(null);
+  }, [id]);
   React.useEffect(() => {
     if (fetchedTicket) setTicket(normalizeTicket(fetchedTicket as ServiceTicket));
   }, [fetchedTicket]);
@@ -850,12 +865,16 @@ export default function ServiceDetail() {
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
       ]);
 
-      navigate('/service');
+      if (onClose) {
+        onClose();
+      } else {
+        navigate('/service');
+      }
     } catch {
       setDeleteError('Не удалось удалить сервисную заявку. Попробуйте ещё раз.');
       setConfirmDelete(false);
     }
-  }, [canDeleteService, canEditEquipment, canViewRentals, navigate, queryClient, ticket]);
+  }, [canDeleteService, canEditEquipment, canViewRentals, navigate, onClose, queryClient, ticket]);
 
   const addWorkPerformed = async () => {
     if (!ticket || !canAddRepairItems || !selectedWorkId) return;
@@ -1032,15 +1051,45 @@ export default function ServiceDetail() {
 
   // ── "not found" screen ─────────────────────────────────────────────────────
 
+  const closeDetail = () => {
+    if (onClose) {
+      onClose();
+      return;
+    }
+    navigate('/service');
+  };
+
   if (!ticket) {
+    if (id && ticketQuery.isLoading) {
+      return (
+        <div className={`flex flex-col items-center justify-center gap-4 py-24 text-center ${embedded ? 'min-h-[420px]' : 'h-full'}`}>
+          <Clock className="h-12 w-12 text-gray-300" />
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Загрузка заявки</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Получаем актуальные данные сервисной карточки.</p>
+        </div>
+      );
+    }
+
+    if (ticketQuery.error) {
+      const message = ticketQuery.error instanceof Error ? ticketQuery.error.message : 'Не удалось загрузить сервисную заявку';
+      return (
+        <div className={`flex flex-col items-center justify-center gap-4 py-24 text-center ${embedded ? 'min-h-[420px]' : 'h-full'}`}>
+          <XCircle className="h-12 w-12 text-red-300" />
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Не удалось загрузить заявку</h2>
+          <p className="max-w-lg text-sm text-gray-500 dark:text-gray-400">{message}</p>
+          <Button onClick={closeDetail}>{embedded ? 'Закрыть карточку' : 'Вернуться к списку'}</Button>
+        </div>
+      );
+    }
+
     return (
-      <div className="flex flex-col items-center justify-center h-full py-24 gap-4 text-center">
+      <div className={`flex flex-col items-center justify-center gap-4 py-24 text-center ${embedded ? 'min-h-[420px]' : 'h-full'}`}>
         <XCircle className="h-12 w-12 text-gray-300" />
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Заявка не найдена</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Возможно, она была удалена или ID указан некорректно.
         </p>
-        <Button onClick={() => navigate('/service')}>Вернуться к списку</Button>
+        <Button onClick={closeDetail}>{embedded ? 'Закрыть карточку' : 'Вернуться к списку'}</Button>
       </div>
     );
   }
@@ -1211,12 +1260,17 @@ export default function ServiceDetail() {
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-4 p-4 pb-24 sm:space-y-6 sm:p-6 sm:pb-6 md:p-8">
+    <div className={embedded ? 'space-y-4 p-4 pb-8 sm:space-y-6 sm:p-6' : 'space-y-4 p-4 pb-24 sm:space-y-6 sm:p-6 sm:pb-6 md:p-8'}>
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="flex items-start gap-3">
-          <Button variant="secondary" size="sm" onClick={() => navigate('/service')}>
-            <ArrowLeft className="h-4 w-4" />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={closeDetail}
+            aria-label={embedded ? 'Закрыть карточку заявки' : 'Вернуться к списку заявок'}
+          >
+            {embedded ? <X className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />}
           </Button>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -1328,7 +1382,7 @@ export default function ServiceDetail() {
                 <Field label="Объект" value={ticket.objectName || ticket.objectId} />
                 <Field label="Адрес объекта" value={ticket.objectAddress} />
                 <Field label="Контакт объекта" value={[ticket.objectContactName, ticket.objectContactPhone].filter(Boolean).join(' · ')} />
-                <Field label="Договор" value={ticket.contractNumber || ticket.contractId} />
+                <Field label="Договор / аренда" value={ticket.contractNumber || ticket.contractId || ticket.rentalId} />
                 <Field label="Контактное лицо" value={ticket.reporterContact} />
                 <Field label="Заказ-наряд" value={relatedWorkOrder?.number} />
               </div>

@@ -94,15 +94,18 @@ function TaskRow({
   canEditService,
   canManageDayPlan,
   currentUser,
+  onOpenTicket,
 }: {
   task: DayPlanTask;
   canEditService: boolean;
   canManageDayPlan: boolean;
   currentUser: AuthUser | null;
+  onOpenTicket?: (ticketId: string) => void;
 }) {
   const dateLabel = task.dueDate || task.planDate || '';
   const canUseAssignedWorkflow = canEditService && (canManageDayPlan || dayPlanTaskMatchesCurrentUser(task, currentUser));
   const canReschedule = canEditService && canManageDayPlan;
+  const openTicket = () => onOpenTicket?.(task.id);
   return (
     <div className="border-b border-gray-100 px-3 py-3 last:border-b-0 dark:border-white/8">
       <div className="flex min-w-0 items-start justify-between gap-3">
@@ -118,11 +121,17 @@ function TaskRow({
             {[task.inventoryNumber ? `INV ${task.inventoryNumber}` : '', task.client, task.rentalId ? `Аренда ${task.rentalId}` : ''].filter(Boolean).join(' · ') || 'Без клиента/аренды'}
           </div>
         </div>
-        <Link to={`/service/${task.id}`} title="Открыть заявку" className="shrink-0">
-          <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Открыть заявку ${task.id}`}>
+        {onOpenTicket ? (
+          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" aria-label={`Открыть заявку ${task.id}`} onClick={openTicket}>
             <ExternalLink className="h-4 w-4" />
           </Button>
-        </Link>
+        ) : (
+          <Link to={`/service/${task.id}`} title="Открыть заявку" className="shrink-0">
+            <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Открыть заявку ${task.id}`}>
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </Link>
+        )}
       </div>
       <div className="mt-2 text-sm text-gray-700 dark:text-gray-200">{task.reason}</div>
       {task.description && (
@@ -134,25 +143,41 @@ function TaskRow({
         <span>{task.waitingParts ? 'Запчасти ожидаются' : task.hasParts ? 'Запчасти указаны' : 'Запчасти не указаны'}</span>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        <Link to={`/service/${task.id}`}>
-          <Button size="sm" variant="secondary">Открыть</Button>
-        </Link>
+        {onOpenTicket ? (
+          <Button type="button" size="sm" variant="secondary" onClick={openTicket}>Открыть</Button>
+        ) : (
+          <Link to={`/service/${task.id}`}>
+            <Button size="sm" variant="secondary">Открыть</Button>
+          </Link>
+        )}
         {(canUseAssignedWorkflow || canReschedule) && (
           <>
             {canUseAssignedWorkflow && (
-              <Link to={`/service/${task.id}`}>
-                <Button size="sm" variant="outline">Добавить работу</Button>
-              </Link>
+              onOpenTicket ? (
+                <Button type="button" size="sm" variant="outline" onClick={openTicket}>Добавить работу</Button>
+              ) : (
+                <Link to={`/service/${task.id}`}>
+                  <Button size="sm" variant="outline">Добавить работу</Button>
+                </Link>
+              )
             )}
             {canUseAssignedWorkflow && (task.status === 'in_progress' || task.status === 'needs_revision') ? (
-              <Link to={`/service/${task.id}`}>
-                <Button size="sm" variant="outline">Завершить</Button>
-              </Link>
+              onOpenTicket ? (
+                <Button type="button" size="sm" variant="outline" onClick={openTicket}>Завершить</Button>
+              ) : (
+                <Link to={`/service/${task.id}`}>
+                  <Button size="sm" variant="outline">Завершить</Button>
+                </Link>
+              )
             ) : null}
             {canReschedule && (
-              <Link to={`/service/${task.id}`}>
-                <Button size="sm" variant="outline">Перенести</Button>
-              </Link>
+              onOpenTicket ? (
+                <Button type="button" size="sm" variant="outline" onClick={openTicket}>Перенести</Button>
+              ) : (
+                <Link to={`/service/${task.id}`}>
+                  <Button size="sm" variant="outline">Перенести</Button>
+                </Link>
+              )
             )}
           </>
         )}
@@ -169,6 +194,7 @@ function ProblemList({
   canEditService,
   canManageDayPlan,
   currentUser,
+  onOpenTicket,
 }: {
   title: string;
   items: DayPlanTask[];
@@ -177,6 +203,7 @@ function ProblemList({
   canEditService: boolean;
   canManageDayPlan: boolean;
   currentUser: AuthUser | null;
+  onOpenTicket?: (ticketId: string) => void;
 }) {
   return (
     <section className="rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
@@ -196,6 +223,7 @@ function ProblemList({
               canEditService={canEditService}
               canManageDayPlan={canManageDayPlan}
               currentUser={currentUser}
+              onOpenTicket={onOpenTicket}
             />
           ))}
         </div>
@@ -212,6 +240,7 @@ export function ServiceDayPlanBoard({
   canCreateService = false,
   canEditService = false,
   canManageDayPlan = false,
+  onOpenTicket,
 }: {
   tickets: ServiceTicket[];
   mechanics: Mechanic[];
@@ -220,6 +249,7 @@ export function ServiceDayPlanBoard({
   canCreateService?: boolean;
   canEditService?: boolean;
   canManageDayPlan?: boolean;
+  onOpenTicket?: (ticketId: string) => void;
 }) {
   const { user } = useAuth();
   const today = React.useMemo(() => localDateKey(new Date()), []);
@@ -381,6 +411,7 @@ export function ServiceDayPlanBoard({
                     canEditService={canEditService}
                     canManageDayPlan={canManageDayPlan}
                     currentUser={user}
+                    onOpenTicket={onOpenTicket}
                   />
                 ))}
               </div>
@@ -393,10 +424,10 @@ export function ServiceDayPlanBoard({
             <AlertTriangle className="h-5 w-5 text-red-500" />
             <h2 className="text-lg font-black text-gray-900 dark:text-white">Проблемы дня</h2>
           </div>
-          <ProblemList title="Без механика" items={problemTasks.unassigned} empty="Все задачи назначены." icon={<UserRound className="h-4 w-4 text-amber-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} />
-          <ProblemList title="Просроченные" items={problemTasks.overdue} empty="Просрочек нет." icon={<Clock className="h-4 w-4 text-red-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} />
-          <ProblemList title="Ожидают запчасти" items={problemTasks.waitingParts} empty="Нет задач в ожидании запчастей." icon={<Wrench className="h-4 w-4 text-orange-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} />
-          <ProblemList title="Готово к закрытию" items={problemTasks.readyToClose} empty="Нет заявок, готовых к закрытию." icon={<ExternalLink className="h-4 w-4 text-emerald-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} />
+          <ProblemList title="Без механика" items={problemTasks.unassigned} empty="Все задачи назначены." icon={<UserRound className="h-4 w-4 text-amber-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} onOpenTicket={onOpenTicket} />
+          <ProblemList title="Просроченные" items={problemTasks.overdue} empty="Просрочек нет." icon={<Clock className="h-4 w-4 text-red-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} onOpenTicket={onOpenTicket} />
+          <ProblemList title="Ожидают запчасти" items={problemTasks.waitingParts} empty="Нет задач в ожидании запчастей." icon={<Wrench className="h-4 w-4 text-orange-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} onOpenTicket={onOpenTicket} />
+          <ProblemList title="Готово к закрытию" items={problemTasks.readyToClose} empty="Нет заявок, готовых к закрытию." icon={<ExternalLink className="h-4 w-4 text-emerald-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} onOpenTicket={onOpenTicket} />
         </aside>
       </div>
     </div>

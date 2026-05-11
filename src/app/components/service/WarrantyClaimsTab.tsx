@@ -231,9 +231,10 @@ type WarrantyClaimsTabProps = {
   canEdit: boolean;
   canDelete: boolean;
   canCreateDocuments?: boolean;
+  onOpenTicket?: (ticketId: string) => void;
 };
 
-export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocuments = false }: WarrantyClaimsTabProps) {
+export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocuments = false, onOpenTicket }: WarrantyClaimsTabProps) {
   const { user } = useAuth();
   const { data: claims = [], isLoading } = useWarrantyClaimsList();
   const { data: equipmentList = [] } = useEquipmentList();
@@ -862,12 +863,22 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                         <p>INV: {selectedClaim.inventoryNumber || '—'} · SN: {selectedClaim.serialNumber || '—'}</p>
                         <p>Создано: {formatDateSafe(selectedClaim.createdAt)}</p>
                         {selectedClaim.serviceTicketId && (
-                          <Link
-                            to={`/service/${selectedClaim.serviceTicketId}`}
-                            className="font-medium text-[--color-primary] hover:underline"
-                          >
-                            Открыть сервисную заявку {selectedClaim.serviceTicketId}
-                          </Link>
+                          onOpenTicket ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenTicket(selectedClaim.serviceTicketId!)}
+                              className="text-left font-medium text-[--color-primary] hover:underline"
+                            >
+                              Открыть сервисную заявку {selectedClaim.serviceTicketId}
+                            </button>
+                          ) : (
+                            <Link
+                              to={`/service/${selectedClaim.serviceTicketId}`}
+                              className="font-medium text-[--color-primary] hover:underline"
+                            >
+                              Открыть сервисную заявку {selectedClaim.serviceTicketId}
+                            </Link>
+                          )
                         )}
                       </div>
                     </div>
@@ -941,9 +952,15 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                       {canEdit && <Button type="button" variant="secondary" onClick={() => setPanelTab('decision')}>Изменить рекламацию</Button>}
                       {canEdit && <Button type="button" variant="secondary" onClick={() => setPanelTab('history')}>Добавить комментарий</Button>}
                       {canCreateDocuments && selectedClaim.serviceTicketId && (
-                        <Link to={`/service/${selectedClaim.serviceTicketId}`}>
-                          <Button type="button" variant="outline" className="w-full">Создать документ</Button>
-                        </Link>
+                        onOpenTicket ? (
+                          <Button type="button" variant="outline" className="w-full" onClick={() => onOpenTicket(selectedClaim.serviceTicketId!)}>
+                            Создать документ
+                          </Button>
+                        ) : (
+                          <Link to={`/service/${selectedClaim.serviceTicketId}`}>
+                            <Button type="button" variant="outline" className="w-full">Создать документ</Button>
+                          </Link>
+                        )
                       )}
                       {canEdit && !FINAL_STATUSES.includes(selectedClaim.status) && (
                         <Button
@@ -964,9 +981,19 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
                     Работы по рекламации ведутся в связанной сервисной заявке.
                     {selectedClaim.serviceTicketId && (
-                      <Link to={`/service/${selectedClaim.serviceTicketId}`} className="mt-2 block font-medium text-[--color-primary] hover:underline">
-                        Открыть работы в заявке {selectedClaim.serviceTicketId}
-                      </Link>
+                      onOpenTicket ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenTicket(selectedClaim.serviceTicketId!)}
+                          className="mt-2 block text-left font-medium text-[--color-primary] hover:underline"
+                        >
+                          Открыть работы в заявке {selectedClaim.serviceTicketId}
+                        </button>
+                      ) : (
+                        <Link to={`/service/${selectedClaim.serviceTicketId}`} className="mt-2 block font-medium text-[--color-primary] hover:underline">
+                          Открыть работы в заявке {selectedClaim.serviceTicketId}
+                        </Link>
+                      )
                     )}
                   </div>
                 )}
@@ -976,14 +1003,26 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     Документы и заводская переписка остаются связанными с рекламацией и сервисной заявкой.
                     <div className="mt-3 flex flex-wrap gap-2">
                       {selectedClaim.serviceTicketId && (
-                        <Link to={`/service/${selectedClaim.serviceTicketId}`}>
-                          <Button size="sm" variant="secondary">Открыть документы заявки</Button>
-                        </Link>
+                        onOpenTicket ? (
+                          <Button type="button" size="sm" variant="secondary" onClick={() => onOpenTicket(selectedClaim.serviceTicketId!)}>
+                            Открыть документы заявки
+                          </Button>
+                        ) : (
+                          <Link to={`/service/${selectedClaim.serviceTicketId}`}>
+                            <Button size="sm" variant="secondary">Открыть документы заявки</Button>
+                          </Link>
+                        )
                       )}
                       {canCreateDocuments && selectedClaim.serviceTicketId && (
-                        <Link to={`/service/${selectedClaim.serviceTicketId}`}>
-                          <Button size="sm" variant="outline">Создать документ</Button>
-                        </Link>
+                        onOpenTicket ? (
+                          <Button type="button" size="sm" variant="outline" onClick={() => onOpenTicket(selectedClaim.serviceTicketId!)}>
+                            Создать документ
+                          </Button>
+                        ) : (
+                          <Link to={`/service/${selectedClaim.serviceTicketId}`}>
+                            <Button size="sm" variant="outline">Создать документ</Button>
+                          </Link>
+                        )
                       )}
                     </div>
                   </div>

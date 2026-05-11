@@ -1,17 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useLocation } from 'react-router-dom';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
+  AlertTriangle,
   CalendarDays,
   CircleCheck,
-  CircleDollarSign,
-  CircleOff,
-  CirclePause,
+  Clock3,
+  FileText,
+  MoreHorizontal,
+  Navigation,
+  Phone,
   Plus,
   RefreshCw,
   Route,
   Search,
-  Send,
   Truck,
+  UserRound,
+  XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
@@ -50,22 +56,26 @@ const STATUS_LABELS: Record<DeliveryStatus, string> = {
 };
 
 const STATUS_CLASSES: Record<DeliveryStatus, string> = {
-  new: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  new: 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200',
   sent: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
   accepted: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-  in_transit: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
+  in_transit: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
   completed: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-  cancelled: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-};
-
-const TYPE_LABELS: Record<DeliveryType, string> = {
-  shipping: 'Отгрузка',
-  receiving: 'Приёмка',
+  cancelled: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
 };
 
 const TYPE_CLASSES: Record<DeliveryType, string> = {
   shipping: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
   receiving: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+};
+
+const OPERATIONAL_STATUS_CLASSES = {
+  inTransit: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  planned: 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200',
+  completed: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  overdue: 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
+  unassigned: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-200',
+  cancelled: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
 };
 
 type DeliveryFormState = {
@@ -111,8 +121,66 @@ type RentalOption = {
   contactPhone: string;
 };
 
+type DeliveryWorkspaceTab = 'all' | 'in_transit' | 'planned' | 'completed' | 'overdue' | 'cancelled';
+type DeliveryViewMode = 'list' | 'compact';
+type DeliveryDetailTab = 'overview' | 'route' | 'equipment' | 'documents' | 'history';
+type DeliveryPeriodFilter = 'today' | 'tomorrow' | 'week' | 'all';
+type DeliveryStatusFilter = '' | 'in_transit' | 'planned' | 'completed' | 'overdue' | 'unassigned' | 'cancelled';
+
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysIso(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getDeliveryDateKey(delivery: Delivery) {
+  return String(delivery.transportDate || delivery.neededBy || '').slice(0, 10);
+}
+
+function isDeliveryOverdue(delivery: Delivery, todayKey = todayIso()) {
+  const dateKey = getDeliveryDateKey(delivery);
+  return Boolean(dateKey && dateKey < todayKey && !['completed', 'cancelled'].includes(delivery.status));
+}
+
+function isDeliveryToday(delivery: Delivery, todayKey = todayIso()) {
+  return getDeliveryDateKey(delivery) === todayKey;
+}
+
+function isDeliveryInPeriod(delivery: Delivery, period: DeliveryPeriodFilter, todayKey = todayIso()) {
+  const dateKey = getDeliveryDateKey(delivery);
+  if (!dateKey || period === 'all') return true;
+  if (period === 'today') return dateKey === todayKey;
+  if (period === 'tomorrow') return dateKey === addDaysIso(todayKey, 1);
+  if (period === 'week') return dateKey >= todayKey && dateKey <= addDaysIso(todayKey, 6);
+  return true;
+}
+
+function isUnassignedDelivery(delivery: Delivery) {
+  return !delivery.carrierId && !delivery.carrierKey && !delivery.carrierName;
+}
+
+function matchesDeliveryStatusFilter(delivery: Delivery, filter: DeliveryStatusFilter, todayKey = todayIso()) {
+  if (!filter) return true;
+  if (filter === 'in_transit') return delivery.status === 'in_transit';
+  if (filter === 'planned') return ['new', 'sent', 'accepted'].includes(delivery.status);
+  if (filter === 'completed') return delivery.status === 'completed';
+  if (filter === 'overdue') return isDeliveryOverdue(delivery, todayKey);
+  if (filter === 'unassigned') return isUnassignedDelivery(delivery) && !['completed', 'cancelled'].includes(delivery.status);
+  if (filter === 'cancelled') return delivery.status === 'cancelled';
+  return true;
+}
+
+function getDeliveryStatusMeta(delivery: Delivery, todayKey = todayIso()) {
+  if (delivery.status === 'cancelled') return { label: 'Отменена', className: OPERATIONAL_STATUS_CLASSES.cancelled };
+  if (delivery.status === 'completed') return { label: 'Завершена', className: OPERATIONAL_STATUS_CLASSES.completed };
+  if (isDeliveryOverdue(delivery, todayKey)) return { label: 'Просрочена', className: OPERATIONAL_STATUS_CLASSES.overdue };
+  if (isUnassignedDelivery(delivery)) return { label: 'Ожидает назначения', className: OPERATIONAL_STATUS_CLASSES.unassigned };
+  if (delivery.status === 'in_transit') return { label: 'В пути', className: OPERATIONAL_STATUS_CLASSES.inTransit };
+  return { label: 'Запланирована', className: OPERATIONAL_STATUS_CLASSES.planned };
 }
 
 function makeEmptyForm(managerName = ''): DeliveryFormState {
@@ -142,10 +210,6 @@ function makeEmptyForm(managerName = ''): DeliveryFormState {
   };
 }
 
-function formatCurrency(value: number) {
-  return `${value.toLocaleString('ru-RU')} ₽`;
-}
-
 function formatDate(date: string) {
   if (!date) return '—';
   try {
@@ -153,6 +217,26 @@ function formatDate(date: string) {
   } catch {
     return date;
   }
+}
+
+function formatDateTime(date?: string | null) {
+  if (!date) return '—';
+  try {
+    return new Date(date).toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return date;
+  }
+}
+
+function safeText(value: unknown, fallback = '—') {
+  const text = String(value ?? '').trim();
+  return text || fallback;
 }
 
 function buildFormFromDelivery(delivery: Delivery): DeliveryFormState {
@@ -435,14 +519,15 @@ function DeliveryDialog({
 export default function Deliveries() {
   const { user } = useAuth();
   const { can } = usePermissions();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const canCreate = can('create', 'deliveries');
   const canEdit = can('edit', 'deliveries');
   const canDelete = can('delete', 'deliveries');
+  const canCreateDocuments = can('create', 'documents');
   const normalizedRole = normalizeUserRole(user?.role);
   const isCarrierView = normalizedRole === 'Перевозчик';
   const canManageDeliveries = canCreate || canEdit || canDelete;
-  const canFinancialControl = user?.role === 'Офис-менеджер' || user?.role === 'Администратор';
   const deliveryListQueryKey = useMemo(
     () => [...DELIVERY_KEYS.all, normalizedRole, user?.id || 'anonymous'] as const,
     [normalizedRole, user?.id],
@@ -479,9 +564,17 @@ export default function Deliveries() {
   });
 
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<DeliveryStatus | ''>('');
+  const [periodFilter, setPeriodFilter] = useState<DeliveryPeriodFilter>('today');
+  const [statusFilter, setStatusFilter] = useState<DeliveryStatusFilter>('');
   const [typeFilter, setTypeFilter] = useState<DeliveryType | ''>('');
-  const [managerFilter, setManagerFilter] = useState('');
+  const [carrierFilter, setCarrierFilter] = useState('');
+  const [activeTab, setActiveTab] = useState<DeliveryWorkspaceTab>('all');
+  const [viewMode, setViewMode] = useState<DeliveryViewMode>('list');
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<DeliveryDetailTab>('overview');
+  const [autoOpenKey, setAutoOpenKey] = useState('');
+  const [isDesktopDetail, setIsDesktopDetail] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDelivery, setEditingDelivery] = useState<Delivery | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -529,18 +622,38 @@ export default function Deliveries() {
       });
   }, [classicRentals, clients, equipment, ganttRentals]);
 
-  const managerOptions = useMemo(() => {
-    return [...new Set(deliveries.map((item) => item.manager).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+  const carrierOptions = useMemo(() => {
+    return [...new Set(deliveries.map((item) => item.carrierName || item.carrierKey || item.carrierId).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'ru'));
   }, [deliveries]);
+
+  const clientsById = useMemo(() => new Map((clients as Client[]).map((item) => [item.id, item])), [clients]);
+  const clientsByName = useMemo(() => {
+    const map = new Map<string, Client>();
+    for (const client of clients as Client[]) {
+      const key = client.company?.trim().toLowerCase();
+      if (key && !map.has(key)) map.set(key, client);
+    }
+    return map;
+  }, [clients]);
+
+  const todayKey = todayIso();
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return deliveries.filter((item) => {
-      if (statusFilter && item.status !== statusFilter) return false;
+      if (!isDeliveryInPeriod(item, periodFilter, todayKey)) return false;
+      if (!matchesDeliveryStatusFilter(item, statusFilter, todayKey)) return false;
       if (typeFilter && item.type !== typeFilter) return false;
-      if (managerFilter && item.manager !== managerFilter) return false;
+      if (carrierFilter && ![item.carrierName, item.carrierKey, item.carrierId].some((value) => value === carrierFilter)) return false;
+      if (activeTab === 'in_transit' && item.status !== 'in_transit') return false;
+      if (activeTab === 'planned' && !['new', 'sent', 'accepted'].includes(item.status)) return false;
+      if (activeTab === 'completed' && item.status !== 'completed') return false;
+      if (activeTab === 'overdue' && !isDeliveryOverdue(item, todayKey)) return false;
+      if (activeTab === 'cancelled' && item.status !== 'cancelled') return false;
       if (!q) return true;
       return [
+        item.id,
         item.client,
         item.cargo,
         item.origin,
@@ -548,28 +661,66 @@ export default function Deliveries() {
         item.contactName,
         item.contactPhone,
         item.carrierName,
+        item.manager,
         item.equipmentInv,
         item.equipmentLabel,
       ].some((value) => String(value || '').toLowerCase().includes(q));
     });
-  }, [deliveries, managerFilter, search, statusFilter, typeFilter]);
+  }, [activeTab, carrierFilter, deliveries, periodFilter, search, statusFilter, todayKey, typeFilter]);
 
   const kpis = useMemo(() => ({
     total: deliveries.length,
     needInvoice: deliveries.filter((item) => item.status === 'completed' && !item.carrierInvoiceReceived).length,
     unpaidByClient: deliveries.filter((item) => item.status === 'completed' && !item.clientPaymentVerified).length,
     sentToCarrier: deliveries.filter((item) => Boolean(item.botSentAt)).length,
-  }), [deliveries]);
+    today: deliveries.filter((item) => isDeliveryToday(item, todayKey)).length,
+    inTransit: deliveries.filter((item) => item.status === 'in_transit').length,
+    completedToday: deliveries.filter((item) => item.status === 'completed' && isDeliveryToday(item, todayKey)).length,
+    overdue: deliveries.filter((item) => isDeliveryOverdue(item, todayKey)).length,
+    unassigned: deliveries.filter((item) => isUnassignedDelivery(item) && !['completed', 'cancelled'].includes(item.status)).length,
+  }), [deliveries, todayKey]);
   const kpiCards = isCarrierView
     ? [
-        { label: 'Мои активные доставки', value: kpis.total, tone: 'text-slate-100', bg: 'from-slate-900 to-slate-800' },
+        { label: 'Мои активные доставки', value: kpis.total, icon: Truck, tone: 'text-slate-900 dark:text-white', hint: 'Только назначенные вам активные заявки', card: 'border-slate-200 bg-white dark:border-gray-800 dark:bg-gray-900' },
       ]
     : [
-        { label: 'Всего заявок', value: kpis.total, tone: 'text-slate-100', bg: 'from-slate-900 to-slate-800' },
-        { label: 'Отправлено перевозчику', value: kpis.sentToCarrier, tone: 'text-blue-100', bg: 'from-blue-900 to-blue-800' },
-        { label: 'Без счёта перевозчика', value: kpis.needInvoice, tone: 'text-amber-100', bg: 'from-amber-900 to-amber-800' },
-        { label: 'Клиент не подтвердил оплату', value: kpis.unpaidByClient, tone: 'text-red-100', bg: 'from-red-900 to-red-800' },
+        { label: 'Доставки сегодня', value: kpis.today, icon: CalendarDays, tone: 'text-slate-950 dark:text-white', hint: 'Отгрузки и возвраты на сегодня', card: 'border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20' },
+        { label: 'В пути', value: kpis.inTransit, icon: Navigation, tone: 'text-blue-700 dark:text-blue-300', hint: 'Перевозчик уже выехал', card: 'border-blue-200 bg-white dark:border-blue-900/50 dark:bg-gray-900' },
+        { label: 'Завершено сегодня', value: kpis.completedToday, icon: CircleCheck, tone: 'text-emerald-700 dark:text-emerald-300', hint: 'Закрытые перевозки дня', card: 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/20' },
+        { label: 'Просрочено', value: kpis.overdue, icon: AlertTriangle, tone: 'text-red-700 dark:text-red-300', hint: 'Дата прошла, доставка не закрыта', card: 'border-red-200 bg-red-50/70 dark:border-red-900/50 dark:bg-red-950/20' },
+        { label: 'Ожидают назначения', value: kpis.unassigned, icon: UserRound, tone: 'text-amber-700 dark:text-amber-300', hint: 'Нет водителя или перевозчика', card: 'border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20' },
       ];
+
+  const selectedDelivery = useMemo(
+    () => deliveries.find((item) => item.id === selectedDeliveryId) || null,
+    [deliveries, selectedDeliveryId],
+  );
+
+  const tabItems = useMemo(() => [
+    { id: 'all' as const, label: 'Все доставки', count: deliveries.length },
+    { id: 'in_transit' as const, label: 'В пути', count: deliveries.filter((item) => item.status === 'in_transit').length },
+    { id: 'planned' as const, label: 'Запланированы', count: deliveries.filter((item) => ['new', 'sent', 'accepted'].includes(item.status)).length },
+    { id: 'completed' as const, label: 'Выполнены', count: deliveries.filter((item) => item.status === 'completed').length },
+    { id: 'overdue' as const, label: 'Просрочены', count: deliveries.filter((item) => isDeliveryOverdue(item, todayKey)).length },
+    { id: 'cancelled' as const, label: 'Отменены', count: deliveries.filter((item) => item.status === 'cancelled').length },
+  ], [deliveries, todayKey]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const key = `${location.pathname}?${location.search}`;
+    const shouldOpenCreate = location.pathname.endsWith('/new') || params.get('action') === 'create';
+    if (!canCreate || dialogOpen || !shouldOpenCreate || autoOpenKey === key) return;
+    setAutoOpenKey(key);
+    openCreateDialog();
+  }, [autoOpenKey, canCreate, dialogOpen, location.pathname, location.search]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1536px)');
+    const update = () => setIsDesktopDetail(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
 
   function openCreateDialog() {
     setEditingDelivery(null);
@@ -687,22 +838,305 @@ export default function Deliveries() {
     }
   }
 
+  function resetFilters() {
+    setSearch('');
+    setPeriodFilter('today');
+    setStatusFilter('');
+    setTypeFilter('');
+    setCarrierFilter('');
+    setActiveTab('all');
+  }
+
+  async function cancelDelivery(delivery: Delivery) {
+    if (!window.confirm(`Отменить доставку ${delivery.id}?`)) return;
+    await toggleField(delivery, { status: 'cancelled' });
+  }
+
+  async function shareRoute(delivery: Delivery) {
+    const text = `${delivery.origin || '—'} → ${delivery.destination || '—'}`;
+    try {
+      await navigator.clipboard?.writeText(text);
+      toast.success('Маршрут скопирован для передачи перевозчику');
+    } catch {
+      toast.info(text);
+    }
+  }
+
+  function renderDeliveryPanel(delivery: Delivery, mode: 'aside' | 'sheet') {
+    const statusMeta = getDeliveryStatusMeta(delivery, todayKey);
+    const client = clientsById.get(delivery.clientId || '') || clientsByName.get(delivery.client?.trim().toLowerCase());
+    const clientInn = client?.inn || client?.innNormalized || '';
+    const contractLabel = delivery.contractId || delivery.classicRentalId || delivery.ganttRentalId || '';
+    const equipmentName = delivery.equipmentLabel || delivery.cargo;
+    const inventoryNumber = delivery.equipmentInv || '';
+    const driverName = delivery.carrierName || (delivery.carrierPhone ? 'Водитель' : '');
+    const canShareGeo = Boolean((delivery.carrierName || delivery.carrierPhone) && delivery.destination);
+    const canCancelDelivery = canEdit && !['completed', 'cancelled'].includes(delivery.status);
+
+    return (
+      <>
+        {mode === 'sheet' ? (
+          <SheetHeader>
+            <SheetTitle>Доставка {delivery.id}</SheetTitle>
+            <SheetDescription className="space-y-2">
+              <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.className}`}>
+                {statusMeta.label}
+              </span>
+              <span className="block">
+                {delivery.type === 'shipping' ? 'Доставка техники клиенту' : 'Возврат техники'} · {formatDate(delivery.transportDate)}
+              </span>
+            </SheetDescription>
+          </SheetHeader>
+        ) : (
+          <div className="relative flex shrink-0 flex-col gap-2 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
+            <button
+              type="button"
+              onClick={() => setSelectedDeliveryId(null)}
+              className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200"
+              aria-label="Закрыть панель доставки"
+            >
+              ×
+            </button>
+            <h2 className="text-xl font-semibold leading-tight text-slate-950 dark:text-white">Доставка {delivery.id}</h2>
+            <div className="space-y-2 text-sm leading-6 text-slate-500 dark:text-gray-400">
+              <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.className}`}>
+                {statusMeta.label}
+              </span>
+              <span className="block">
+                {delivery.type === 'shipping' ? 'Доставка техники клиенту' : 'Возврат техники'} · {formatDate(delivery.transportDate)}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-1 overflow-x-auto border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+          {([
+            ['overview', 'Обзор'],
+            ['route', 'Маршрут'],
+            ['equipment', 'Техника'],
+            ['documents', 'Документы'],
+            ['history', 'История'],
+          ] as Array<[DeliveryDetailTab, string]>).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setDetailTab(id)}
+              className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                detailTab === id
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-500 hover:bg-gray-100 hover:text-gray-950 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {detailTab === 'overview' && (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[
+                  ['Тип доставки', delivery.type === 'shipping' ? 'Доставка' : 'Возврат'],
+                  ['Клиент', delivery.client],
+                  ['ИНН клиента', clientInn],
+                  ['Договор', contractLabel],
+                  ['Техника', equipmentName],
+                  ['Инвентарный номер', inventoryNumber],
+                  ['Дата и время', `${formatDate(delivery.transportDate)} · ${delivery.pickupTime || 'время не указано'}`],
+                  ['ETA', delivery.neededBy ? formatDate(delivery.neededBy) : '—'],
+                  ['Статус', statusMeta.label],
+                  ['Водитель', driverName],
+                  ['Телефон водителя', delivery.carrierPhone],
+                  ['Ответственный', delivery.manager],
+                  ['Способ доставки', delivery.type === 'shipping' ? 'Отгрузка клиенту' : 'Приёмка / возврат'],
+                  ['Адрес подачи', delivery.origin],
+                  ['Адрес доставки', delivery.destination],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
+                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</div>
+                    <div className="mt-1 break-words text-sm font-semibold text-gray-950 dark:text-white">{safeText(value)}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/70">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Комментарий</div>
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-800 dark:text-gray-200">{safeText(delivery.comment)}</p>
+              </div>
+            </div>
+          )}
+
+          {detailTab === 'route' && (
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900/70">
+                <div className="flex items-start gap-3">
+                  <Route className="mt-0.5 h-5 w-5 shrink-0 text-blue-500" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">Подача</div>
+                    <div className="mt-1 break-words text-sm font-semibold text-gray-950 dark:text-white">{safeText(delivery.origin)}</div>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900/70">
+                <div className="flex items-start gap-3">
+                  <Route className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">Доставка</div>
+                    <div className="mt-1 break-words text-sm font-semibold text-gray-950 dark:text-white">{safeText(delivery.destination)}</div>
+                  </div>
+                </div>
+              </div>
+              <p className="rounded-xl bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                Адреса можно передать перевозчику через быстрые действия.
+              </p>
+            </div>
+          )}
+
+          {detailTab === 'equipment' && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                ['Груз', delivery.cargo],
+                ['Модель', delivery.equipmentLabel],
+                ['Инвентарный №', delivery.equipmentInv],
+                ['ID техники', delivery.equipmentId],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
+                  <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</div>
+                  <div className="mt-1 break-words text-sm font-semibold text-gray-950 dark:text-white">{safeText(value)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {detailTab === 'documents' && (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Связанная аренда</div>
+                <div className="mt-1 text-sm font-semibold text-gray-950 dark:text-white">{safeText(delivery.classicRentalId || delivery.ganttRentalId)}</div>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Договор / объект</div>
+                <div className="mt-1 text-sm font-semibold text-gray-950 dark:text-white">{safeText(delivery.contractId || delivery.objectName || delivery.objectAddress)}</div>
+              </div>
+              <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-900 dark:text-gray-300">
+                Детальный список документов хранится в разделе «Документы». Здесь показаны только связи, доступные в заявке доставки.
+              </p>
+            </div>
+          )}
+
+          {detailTab === 'history' && (
+            <div className="space-y-3">
+              {[
+                ['Создана', formatDateTime(delivery.createdAt), delivery.createdByName || delivery.createdBy],
+                ['Обновлена', formatDateTime(delivery.updatedAt), delivery.manager],
+                ['Отправлена в MAX', delivery.botSentAt ? formatDateTime(delivery.botSentAt) : '—', delivery.botSendError || 'Ошибок отправки нет'],
+                ['Завершена', delivery.completedAt ? formatDateTime(delivery.completedAt) : '—', statusMeta.label],
+              ].map(([title, time, meta]) => (
+                <div key={title} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/70">
+                  <div className="text-sm font-semibold text-gray-950 dark:text-white">{title}</div>
+                  <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">{time}</div>
+                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{safeText(meta)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <SheetFooter className="gap-2 sm:grid sm:grid-cols-2">
+          {canEdit && (
+            <Button variant="secondary" onClick={() => openEditDialog(delivery)}>
+              Изменить доставку
+            </Button>
+          )}
+          {delivery.carrierPhone && (
+            <Button variant="secondary" asChild>
+              <a href={`tel:${delivery.carrierPhone}`}>
+                <Phone className="h-4 w-4" />
+                Связаться с водителем
+              </a>
+            </Button>
+          )}
+          {canShareGeo && (
+            <Button variant="secondary" onClick={() => shareRoute(delivery)}>
+              <Navigation className="h-4 w-4" />
+              Передать геопозицию
+            </Button>
+          )}
+          {canCreateDocuments && (
+            <Button variant="secondary" asChild>
+              <Link to={`/documents?action=create&deliveryId=${encodeURIComponent(delivery.id)}`}>
+                <FileText className="h-4 w-4" />
+                Создать документ
+              </Link>
+            </Button>
+          )}
+          {canCancelDelivery && (
+            <Button variant="destructive" onClick={() => cancelDelivery(delivery)}>
+              <XCircle className="h-4 w-4" />
+              Отменить доставку
+            </Button>
+          )}
+        </SheetFooter>
+      </>
+    );
+  }
+
   return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div className="space-y-5 p-4 sm:p-6">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.28em] text-blue-500">Логистика</div>
+          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">Операции</div>
           <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Доставка</h1>
           <p className="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
-            Менеджер создаёт заявку на перевозку, система отправляет её выбранному перевозчику в MAX,
-            а офис видит, по каким клиентам перевозка выполнена, счёт получен и оплата подтверждена.
+            Операционный экран отгрузок и возвратов: статусы, перевозчики, срочные действия и связь с MAX без карты и лишней аналитики.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => refetch()}>
-            <RefreshCw className="mr-1.5 h-4 w-4" />
-            Обновить
-          </Button>
+          {!isCarrierView && (
+            <div className="relative">
+              <Button variant="secondary" type="button" onClick={() => setActionsOpen((open) => !open)}>
+                <MoreHorizontal className="mr-1.5 h-4 w-4" />
+                Ещё действия
+              </Button>
+              {actionsOpen && (
+                <div className="absolute right-0 z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-800 dark:bg-gray-950">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-900"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      void refetch();
+                    }}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Обновить данные
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-900"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      setActiveTab('overdue');
+                    }}
+                  >
+                    <AlertTriangle className="h-4 w-4" />
+                    Показать просроченные
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-900"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      resetFilters();
+                    }}
+                  >
+                    <XCircle className="h-4 w-4" />
+                    Сбросить фильтры
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {canCreate && (
             <Button onClick={openCreateDialog}>
               <Plus className="mr-1.5 h-4 w-4" />
@@ -712,228 +1146,356 @@ export default function Deliveries() {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        {kpiCards.map((card) => (
-          <div key={card.label} className={`rounded-2xl bg-gradient-to-br ${card.bg} p-4 shadow-lg`}>
-            <div className="text-xs uppercase tracking-[0.24em] text-white/60">{card.label}</div>
-            <div className={`mt-3 text-3xl font-semibold ${card.tone}`}>{card.value}</div>
-          </div>
-        ))}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {kpiCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <button
+              key={card.label}
+              type="button"
+              onClick={() => {
+                if (card.label === 'В пути') setActiveTab('in_transit');
+                if (card.label === 'Просрочено') setActiveTab('overdue');
+                if (card.label === 'Завершено сегодня') {
+                  setActiveTab('completed');
+                  setPeriodFilter('today');
+                }
+              }}
+              className={`min-h-[112px] rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${card.card}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{card.label}</div>
+                <span className="rounded-xl bg-white/80 p-2 text-gray-500 ring-1 ring-gray-200 dark:bg-gray-950/70 dark:ring-gray-800">
+                  <Icon className="h-4 w-4" />
+                </span>
+              </div>
+              <div className={`mt-3 text-3xl font-bold ${card.tone}`}>{card.value}</div>
+              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{card.hint}</div>
+            </button>
+          );
+        })}
       </div>
 
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="relative flex-1">
+      <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(260px,1.45fr)_repeat(4,minmax(150px,0.85fr))_auto]">
+          <div className="relative sm:col-span-2 lg:col-span-3 2xl:col-span-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <Input
-              className="pl-9"
-              placeholder={isCarrierView ? 'Груз, маршрут, контакт…' : 'Клиент, груз, перевозчик, маршрут…'}
+              className="h-11 pl-9"
+              placeholder={isCarrierView ? 'Заказ, техника, маршрут…' : 'Заказ, клиент, техника, водитель…'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as DeliveryType | '')}
-            className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-          >
-            <option value="">Все операции</option>
-            <option value="shipping">Отгрузка</option>
-            <option value="receiving">Приёмка</option>
+          <select value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value as DeliveryPeriodFilter)} className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-white">
+            <option value="today">Сегодня</option>
+            <option value="tomorrow">Завтра</option>
+            <option value="week">Неделя</option>
+            <option value="all">Все даты</option>
           </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as DeliveryStatus | '')}
-            className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-          >
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as DeliveryStatusFilter)} className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-white">
             <option value="">Все статусы</option>
-            {Object.entries(STATUS_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
+            <option value="in_transit">В пути</option>
+            <option value="planned">Запланирована</option>
+            <option value="completed">Завершена</option>
+            <option value="overdue">Просрочена</option>
+            <option value="unassigned">Ожидает назначения</option>
+            <option value="cancelled">Отменена</option>
+          </select>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as DeliveryType | '')} className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-white">
+            <option value="">Все типы</option>
+            <option value="shipping">Доставка</option>
+            <option value="receiving">Возврат</option>
           </select>
           {!isCarrierView && (
-            <select
-              value={managerFilter}
-              onChange={(e) => setManagerFilter(e.target.value)}
-              className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-            >
-              <option value="">Все менеджеры</option>
-              {managerOptions.map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
+            <select value={carrierFilter} onChange={(e) => setCarrierFilter(e.target.value)} className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-white">
+              <option value="">Все водители</option>
+              {carrierOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           )}
+          <Button variant="secondary" onClick={resetFilters} className="h-11 rounded-xl sm:col-span-2 lg:col-span-1 2xl:col-span-1">Сбросить</Button>
+        </div>
+      </section>
+
+      <div className={selectedDelivery ? 'grid gap-4 2xl:grid-cols-[minmax(0,1fr)_400px]' : undefined}>
+      <section className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex flex-col gap-3 border-b border-gray-100 p-3 dark:border-gray-800 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex gap-1 overflow-x-auto">
+            {tabItems.map((tab) => {
+              const isActive = activeTab === tab.id;
+              const isOverdueTab = tab.id === 'overdue';
+
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                    isActive
+                      ? isOverdueTab
+                        ? 'bg-red-600 text-white shadow-sm'
+                        : 'bg-blue-600 text-white shadow-sm'
+                      : isOverdueTab
+                        ? 'text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30'
+                        : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  {tab.label}
+                  <span className={`ml-2 rounded-full px-1.5 py-0.5 text-xs ${
+                    isActive
+                      ? 'bg-white/20 text-white'
+                      : isOverdueTab
+                        ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                        : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                  }`}>
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-gray-800 dark:bg-gray-950">
+            {(['list', 'compact'] as DeliveryViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${viewMode === mode ? 'bg-white text-gray-950 shadow-sm dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}
+              >
+                {mode === 'list' ? 'Список' : 'Компактно'}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="mt-4 overflow-x-auto">
-          {isLoading ? (
-            <div className="flex h-40 items-center justify-center text-gray-500 dark:text-gray-400">
-              <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
-              Загружаю доставки…
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex h-40 flex-col items-center justify-center text-gray-500 dark:text-gray-400">
-              <Truck className="mb-3 h-10 w-10 opacity-40" />
-              <p className="text-base font-medium">Доставок пока нет</p>
-              <p className="mt-1 text-sm">
-                {isCarrierView ? 'Активных заявок для вашей компании сейчас нет.' : 'Создай первую заявку на перевозку и она сразу уйдёт перевозчику в MAX.'}
-              </p>
-            </div>
-          ) : (
-            <table className="w-full min-w-[1200px] text-sm">
+        {isLoading ? (
+          <div className="flex h-52 items-center justify-center text-gray-500 dark:text-gray-400">
+            <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
+            Загружаю доставки…
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex h-56 flex-col items-center justify-center px-4 text-center text-gray-500 dark:text-gray-400">
+            <Truck className="mb-3 h-10 w-10 opacity-40" />
+            <p className="text-base font-semibold text-gray-900 dark:text-white">Доставок по выбранным фильтрам нет</p>
+            <p className="mt-1 max-w-md text-sm">
+              {isCarrierView ? 'Активных заявок для вашей компании сейчас нет.' : 'Сбросьте фильтры или создайте новую доставку.'}
+            </p>
+          </div>
+        ) : viewMode === 'compact' ? (
+          <div className="grid gap-3 p-3 md:grid-cols-2 xl:grid-cols-3">
+            {filtered.map((delivery) => (
+              <button
+                key={delivery.id}
+                type="button"
+                onClick={() => {
+                  setSelectedDeliveryId(delivery.id);
+                  setDetailTab('overview');
+                }}
+                className={`rounded-2xl border p-4 text-left transition hover:border-blue-300 hover:shadow-sm dark:hover:border-blue-800 ${
+                  selectedDeliveryId === delivery.id ? 'border-blue-400 bg-blue-50/70 dark:border-blue-700 dark:bg-blue-950/20' : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950/40'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-950 dark:text-white">{delivery.id}</div>
+                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDate(delivery.transportDate)} · {delivery.pickupTime || 'время не указано'}</div>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_CLASSES[delivery.status]}`}>{STATUS_LABELS[delivery.status]}</span>
+                </div>
+                <div className="mt-3 text-sm font-medium text-gray-900 dark:text-white">{safeText(delivery.client)}</div>
+                <div className="mt-1 truncate text-sm text-gray-600 dark:text-gray-300">{safeText(delivery.cargo)}</div>
+                <div className="mt-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <Route className="h-3.5 w-3.5" />
+                  <span className="truncate">{safeText(delivery.origin)} → {safeText(delivery.destination)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1160px] text-sm">
               <thead>
-                <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-[0.14em] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                  <th className="pb-3 font-medium">Операция</th>
-                  <th className="pb-3 font-medium">Дата</th>
-                  {!isCarrierView && <th className="pb-3 font-medium">Клиент</th>}
-                  <th className="pb-3 font-medium">Что везём</th>
-                  <th className="pb-3 font-medium">Маршрут</th>
-                  {!isCarrierView && <th className="pb-3 font-medium">Перевозчик</th>}
-                  <th className="pb-3 font-medium">Статус</th>
-                  {!isCarrierView && <th className="pb-3 font-medium">Финконтроль</th>}
-                  <th className="pb-3 font-medium">Действия</th>
+                <tr className="border-b border-gray-100 bg-gray-50/70 text-left text-xs uppercase tracking-[0.12em] text-gray-500 dark:border-gray-800 dark:bg-gray-950/60 dark:text-gray-400">
+                  <th className="px-4 py-3"><input type="checkbox" aria-label="Выбрать все доставки" /></th>
+                  <th className="px-4 py-3 font-semibold">№ доставки / дата</th>
+                  <th className="px-4 py-3 font-semibold">Статус</th>
+                  <th className="px-4 py-3 font-semibold">Тип</th>
+                  {!isCarrierView && <th className="px-4 py-3 font-semibold">Клиент</th>}
+                  <th className="px-4 py-3 font-semibold">Техника</th>
+                  <th className="px-4 py-3 font-semibold">Маршрут / адрес</th>
+                  <th className="px-4 py-3 font-semibold">Время</th>
+                  {!isCarrierView && <th className="px-4 py-3 font-semibold">Водитель</th>}
+                  <th className="px-4 py-3 font-semibold">Действия</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {filtered.map((delivery) => {
-                  const linkedCarrier = carriers.find((item) => item.key === delivery.carrierKey);
+                  const statusMeta = getDeliveryStatusMeta(delivery, todayKey);
+                  const isSelected = selectedDeliveryId === delivery.id;
+                  const isOverdue = isDeliveryOverdue(delivery, todayKey);
+                  const client = clientsById.get(delivery.clientId || '') || clientsByName.get(delivery.client?.trim().toLowerCase());
+                  const clientInn = client?.inn || client?.innNormalized || '';
+                  const equipmentName = delivery.equipmentLabel || delivery.cargo;
+                  const inventoryNumber = delivery.equipmentInv || '';
+                  const hasCarrier = Boolean(delivery.carrierName || delivery.carrierPhone);
+                  const timeTone = isOverdue
+                    ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                    : delivery.status === 'completed'
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                      : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
 
                   return (
-                  <tr key={delivery.id} className="align-top">
-                    <td className="py-3 pr-4">
-                      <div className="flex flex-col gap-2">
-                        <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-medium ${TYPE_CLASSES[delivery.type]}`}>
-                          {TYPE_LABELS[delivery.type]}
-                        </span>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{delivery.id}</div>
-                      </div>
-                    </td>
-                    <td className="py-3 pr-4">
-                      <div className="font-medium text-gray-900 dark:text-white">{formatDate(delivery.transportDate)}</div>
-                      <div className="mt-1 inline-flex w-fit rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-                        Время забора: {delivery.pickupTime || 'не указано'}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Нужно к {formatDate(delivery.neededBy || delivery.transportDate)}
-                      </div>
-                    </td>
-                    {!isCarrierView && (
-                      <td className="py-3 pr-4">
-                        <div className="font-medium text-gray-900 dark:text-white">{delivery.client}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{delivery.manager}</div>
+                    <tr
+                      key={delivery.id}
+                      onClick={() => {
+                        setSelectedDeliveryId(delivery.id);
+                        setDetailTab('overview');
+                      }}
+                      className={`cursor-pointer align-top transition hover:bg-blue-50/50 dark:hover:bg-blue-950/10 ${
+                        isSelected ? 'bg-blue-50/80 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/20 dark:ring-blue-900' : 'bg-white dark:bg-gray-900'
+                      }`}
+                    >
+                      <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать доставку ${delivery.id}`}
+                          checked={isSelected}
+                          onChange={() => {
+                            setSelectedDeliveryId(isSelected ? null : delivery.id);
+                            setDetailTab('overview');
+                          }}
+                        />
                       </td>
-                    )}
-                    <td className="py-3 pr-4">
-                      <div className="font-medium text-gray-900 dark:text-white">{delivery.cargo}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {delivery.equipmentInv || 'Без INV'}{delivery.equipmentLabel ? ` · ${delivery.equipmentLabel}` : ''}
-                      </div>
-                    </td>
-                    <td className="py-3 pr-4">
-                      <div className="font-medium text-gray-900 dark:text-white">{delivery.origin}</div>
-                      <div className="mt-1 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                        <Route className="h-3.5 w-3.5" />
-                        {delivery.destination}
-                      </div>
-                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        {delivery.contactName} · {delivery.contactPhone}
-                      </div>
-                    </td>
-                    {!isCarrierView && (
-                      <td className="py-3 pr-4">
-                        <div className="font-medium text-gray-900 dark:text-white">{delivery.carrierName || 'Не выбран'}</div>
-                        {(linkedCarrier?.company || linkedCarrier?.inn) && (
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            {linkedCarrier?.company || 'Без компании'}
-                            {linkedCarrier?.inn
-                              ? ` · ИНН ${linkedCarrier.inn}`
-                              : ''}
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedDeliveryId(delivery.id);
+                            setDetailTab('overview');
+                          }}
+                          className="text-left font-semibold text-blue-700 underline-offset-2 hover:underline dark:text-blue-300"
+                        >
+                          {delivery.id}
+                        </button>
+                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDate(delivery.transportDate)}</div>
+                        {isOverdue && (
+                          <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                            <AlertTriangle className="h-3 w-3" />
+                            Просрочка
                           </div>
                         )}
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {delivery.botSentAt
-                            ? `MAX: отправлено ${formatDate(delivery.botSentAt.slice(0, 10))}`
-                            : (delivery.botSendError || 'В MAX ещё не отправлено')}
-                        </div>
                       </td>
-                    )}
-                    <td className="py-3 pr-4">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_CLASSES[delivery.status]}`}>
-                        {STATUS_LABELS[delivery.status]}
-                      </span>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.className}`}>{statusMeta.label}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${TYPE_CLASSES[delivery.type]}`}>{delivery.type === 'shipping' ? 'Доставка' : 'Возврат'}</span>
+                      </td>
                       {!isCarrierView && (
-                        <div className="mt-2 font-medium text-gray-900 dark:text-white">{formatCurrency(delivery.cost)}</div>
+                        <td className="px-4 py-3">
+                          <div className="max-w-[210px] truncate font-medium text-gray-950 dark:text-white" title={delivery.client}>{safeText(delivery.client)}</div>
+                          <div className="mt-1 max-w-[210px] truncate text-xs text-gray-500 dark:text-gray-400" title={clientInn || undefined}>
+                            {clientInn ? `ИНН ${clientInn}` : 'ИНН не указан'}
+                          </div>
+                        </td>
                       )}
-                    </td>
-                    {!isCarrierView && (
-                      <td className="py-3 pr-4">
-                        <div className="space-y-2">
-                          <div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
-                            delivery.carrierInvoiceReceived
-                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-                          }`}>
-                            <CircleDollarSign className="h-3.5 w-3.5" />
-                            {delivery.carrierInvoiceReceived ? 'Счёт получен' : 'Ждём счёт'}
-                          </div>
-                          <div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
-                            delivery.clientPaymentVerified
-                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-                              : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                          }`}>
-                            <CircleCheck className="h-3.5 w-3.5" />
-                            {delivery.clientPaymentVerified ? 'Клиент оплатил' : 'Оплата не подтверждена'}
-                          </div>
+                      <td className="px-4 py-3">
+                        <div className="max-w-[230px] truncate font-medium text-gray-950 dark:text-white" title={equipmentName}>{safeText(equipmentName)}</div>
+                        <div className="mt-1 max-w-[230px] truncate text-xs text-gray-500 dark:text-gray-400" title={inventoryNumber || undefined}>
+                          {inventoryNumber ? `INV ${inventoryNumber}` : 'Инв. номер не указан'}
                         </div>
                       </td>
-                    )}
-                    <td className="py-3">
-                      <div className="flex flex-col gap-2">
-                        {canEdit && (
-                          <Button size="sm" variant="secondary" onClick={() => openEditDialog(delivery)}>
-                            Изменить
-                          </Button>
+                      <td className="px-4 py-3">
+                        <div className="flex max-w-[300px] items-start gap-2" title={delivery.origin}>
+                          <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[11px] font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-300">A</span>
+                          <span className="min-w-0 truncate font-medium text-gray-950 dark:text-white">{safeText(delivery.origin)}</span>
+                        </div>
+                        <div className="mt-1 flex max-w-[300px] items-start gap-2" title={delivery.destination}>
+                          <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">B</span>
+                          <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">{safeText(delivery.destination)}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${timeTone}`}>
+                          <Clock3 className="h-3 w-3" />
+                          План: {delivery.pickupTime || 'не указано'}
+                        </div>
+                        <div className={`mt-1 text-xs ${isOverdue ? 'font-semibold text-red-600 dark:text-red-300' : 'text-gray-500 dark:text-gray-400'}`}>
+                          ETA: {formatDate(delivery.neededBy || delivery.transportDate)}
+                        </div>
+                        {delivery.status === 'completed' && (
+                          <div className="mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                            Факт: {delivery.completedAt ? formatDateTime(delivery.completedAt) : 'выполнено'}
+                          </div>
                         )}
-                        {canEdit && (
-                          <Button size="sm" variant="secondary" onClick={() => resendToCarrier(delivery)}>
-                            <Send className="mr-1.5 h-3.5 w-3.5" />
-                            Отправить ещё раз
-                          </Button>
-                        )}
-                        {canFinancialControl && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => toggleField(delivery, { carrierInvoiceReceived: !delivery.carrierInvoiceReceived })}
-                          >
-                            {delivery.carrierInvoiceReceived ? 'Снять счёт' : 'Получен счёт'}
-                          </Button>
-                        )}
-                        {canFinancialControl && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => toggleField(delivery, { clientPaymentVerified: !delivery.clientPaymentVerified })}
-                          >
-                            {delivery.clientPaymentVerified ? 'Снять оплату' : 'Клиент оплатил'}
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <Button size="sm" variant="destructive" onClick={() => removeDelivery(delivery)}>
-                            Удалить
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                      {!isCarrierView && (
+                        <td className="px-4 py-3">
+                          <div className="max-w-[180px] truncate font-medium text-gray-950 dark:text-white" title={delivery.carrierName || undefined}>
+                            {hasCarrier ? safeText(delivery.carrierName, 'Водитель') : 'Ожидает назначения'}
+                          </div>
+                          <div className="mt-1 max-w-[180px] truncate font-mono text-xs text-gray-500 dark:text-gray-400" title={delivery.carrierPhone || undefined}>
+                            {delivery.carrierPhone || (delivery.botSentAt ? `MAX ${formatDate(delivery.botSentAt.slice(0, 10))}` : '—')}
+                          </div>
+                        </td>
+                      )}
+                      <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                        <DropdownMenu.Root>
+                          <DropdownMenu.Trigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex size-9 items-center justify-center rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none dark:hover:bg-accent/50"
+                              aria-label={`Действия доставки ${delivery.id}`}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
+                          </DropdownMenu.Trigger>
+                          <DropdownMenu.Portal>
+                            <DropdownMenu.Content align="end" className="z-50 min-w-48 rounded-xl border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-800 dark:bg-gray-900">
+                              <DropdownMenu.Item
+                                onSelect={() => {
+                                  setSelectedDeliveryId(delivery.id);
+                                  setDetailTab('overview');
+                                }}
+                                className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                              >
+                                Открыть панель
+                              </DropdownMenu.Item>
+                              {canEdit && (
+                                <DropdownMenu.Item
+                                  onSelect={() => openEditDialog(delivery)}
+                                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                                >
+                                  Изменить доставку
+                                </DropdownMenu.Item>
+                              )}
+                              {canEdit && !['completed', 'cancelled'].includes(delivery.status) && (
+                                <DropdownMenu.Item
+                                  onSelect={() => resendToCarrier(delivery)}
+                                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                                >
+                                  Отправить в MAX
+                                </DropdownMenu.Item>
+                              )}
+                            </DropdownMenu.Content>
+                          </DropdownMenu.Portal>
+                        </DropdownMenu.Root>
+                      </td>
+                    </tr>
                   );
                 })}
               </tbody>
             </table>
-          )}
-        </div>
+          </div>
+        )}
+      </section>
+
+      {selectedDelivery && (
+        <aside className="hidden min-h-[620px] max-h-[calc(100vh-8rem)] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm 2xl:flex 2xl:flex-col dark:border-gray-800 dark:bg-gray-950">
+          {renderDeliveryPanel(selectedDelivery, 'aside')}
+        </aside>
+      )}
       </div>
 
       <DeliveryDialog
@@ -949,6 +1511,14 @@ export default function Deliveries() {
         onClose={() => setDialogOpen(false)}
         onSubmit={handleSubmit}
       />
+
+      <Sheet open={Boolean(selectedDelivery) && !isDesktopDetail} onOpenChange={(open) => {
+        if (!open) setSelectedDeliveryId(null);
+      }}>
+        <SheetContent side="right" className="w-full overflow-hidden border-gray-200 bg-white sm:max-w-2xl dark:border-gray-800 dark:bg-gray-950">
+          {selectedDelivery && renderDeliveryPanel(selectedDelivery, 'sheet')}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

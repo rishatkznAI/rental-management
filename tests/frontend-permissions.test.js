@@ -185,8 +185,11 @@ test('carrier deliveries page does not prefetch forbidden context or show financ
   assert.match(deliveriesPageSource, /queryKey: deliveryListQueryKey/);
   assert.match(deliveriesPageSource, /enabled: canManageDeliveries/);
   assert.match(deliveriesPageSource, /Мои активные доставки/);
-  assert.match(deliveriesPageSource, /!isCarrierView && <th className="pb-3 font-medium">Финконтроль<\/th>/);
-  assert.match(deliveriesPageSource, /!isCarrierView && \(\s*<div className="mt-2 font-medium text-gray-900 dark:text-white">\{formatCurrency\(delivery\.cost\)\}<\/div>/);
+  assert.match(deliveriesPageSource, /!isCarrierView && <th className="px-4 py-3 font-semibold">Клиент<\/th>/);
+  assert.match(deliveriesPageSource, /!isCarrierView && <th className="px-4 py-3 font-semibold">Водитель<\/th>/);
+  assert.match(deliveriesPageSource, /!isCarrierView && \(\s*<select value=\{carrierFilter\}/);
+  assert.doesNotMatch(deliveriesPageSource, /Финконтроль/);
+  assert.doesNotMatch(deliveriesPageSource, /formatCurrency\(delivery\.cost\)/);
 });
 
 test('frontend verifies session before clearing auth after data endpoint 401', () => {

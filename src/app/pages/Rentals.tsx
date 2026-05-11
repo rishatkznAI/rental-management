@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
   Plus, ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightSmall, SlidersHorizontal, RotateCcw, CirclePause as PauseCircle,
-  Search, CircleCheck, CircleAlert, CreditCard, ArrowRightLeft,
+  Search, CircleCheck, CircleAlert, CreditCard,
   AlertTriangle, Archive, CalendarCheck, ClipboardCheck, Clock, FileText, HelpCircle, MoreHorizontal, PackageCheck, Truck, Wrench
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
@@ -80,6 +80,11 @@ type RentalWorkspaceTab = 'list' | 'planner' | 'returns' | 'debt_docs';
 type RentalMovementScale = 'days' | 'weeks' | 'months';
 type FleetLayerKey = 'returns' | 'deliveries' | 'service' | 'downtime';
 type FleetEquipmentStatusFilter = '' | 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive';
+type ReturnStateFilter = '' | 'today' | 'tomorrow' | 'overdue' | 'planned' | 'awaiting_acceptance' | 'needs_service';
+type ReturnDeliveryFilter = '' | 'planned' | 'missing';
+type ReturnServiceFilter = '' | 'yes' | 'no';
+type DebtDocsProblemFilter = '' | 'debt' | 'overdue' | 'partial' | 'missing_upd' | 'missing_contract' | 'unsigned';
+type DebtDocsDocumentFilter = '' | 'missing_upd' | 'missing_contract' | 'unsigned';
 type FleetMovementEntry = ShippingPhoto & {
   rental?: GanttRentalData;
   equipment?: Equipment;
@@ -1222,6 +1227,11 @@ export default function Rentals() {
   const [filterPayment, setFilterPayment] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterEquipmentStatus, setFilterEquipmentStatus] = useState<FleetEquipmentStatusFilter>('');
+  const [returnStateFilter, setReturnStateFilter] = useState<ReturnStateFilter>('');
+  const [returnDeliveryFilter, setReturnDeliveryFilter] = useState<ReturnDeliveryFilter>('');
+  const [returnServiceFilter, setReturnServiceFilter] = useState<ReturnServiceFilter>('');
+  const [debtDocsProblemFilter, setDebtDocsProblemFilter] = useState<DebtDocsProblemFilter>('');
+  const [debtDocsDocumentFilter, setDebtDocsDocumentFilter] = useState<DebtDocsDocumentFilter>('');
   const [rentalPreset, setRentalPreset] = useState<'all' | 'returns_today' | 'overdue' | 'unpaid' | 'with_service'>('all');
   const [fleetLayers, setFleetLayers] = useState<Record<FleetLayerKey, boolean>>({
     returns: true,
@@ -1238,8 +1248,8 @@ export default function Rentals() {
   });
 
   // Derived: any filter is currently active
-  const hasActiveFilters = !!(filterModel || filterManager || filterOwner || filterClient || filterUpd || filterPayment || filterStatus || filterEquipmentStatus || rentalPreset !== 'all');
-  const hasAdvancedFilters = !!(filterModel || filterManager || filterOwner || filterClient || filterUpd || filterPayment || filterStatus || filterEquipmentStatus || rentalPreset !== 'all');
+  const hasActiveFilters = !!(filterModel || filterManager || filterOwner || filterClient || filterUpd || filterPayment || filterStatus || filterEquipmentStatus || returnStateFilter || returnDeliveryFilter || returnServiceFilter || debtDocsProblemFilter || debtDocsDocumentFilter || rentalPreset !== 'all');
+  const hasAdvancedFilters = !!(filterModel || filterManager || filterOwner || filterClient || filterUpd || filterPayment || filterStatus || filterEquipmentStatus || returnStateFilter || returnDeliveryFilter || returnServiceFilter || debtDocsProblemFilter || debtDocsDocumentFilter || rentalPreset !== 'all');
   const activeFilterCount = [
     filterModel,
     filterManager,
@@ -1249,6 +1259,11 @@ export default function Rentals() {
     filterPayment,
     filterStatus,
     filterEquipmentStatus,
+    returnStateFilter,
+    returnDeliveryFilter,
+    returnServiceFilter,
+    debtDocsProblemFilter,
+    debtDocsDocumentFilter,
     rentalPreset !== 'all' ? rentalPreset : '',
   ].filter(Boolean).length;
 
@@ -1758,6 +1773,11 @@ export default function Rentals() {
     setFilterPayment('');
     setFilterStatus('');
     setFilterEquipmentStatus('');
+    setReturnStateFilter('');
+    setReturnDeliveryFilter('');
+    setReturnServiceFilter('');
+    setDebtDocsProblemFilter('');
+    setDebtDocsDocumentFilter('');
     setRentalPreset('all');
   };
 
@@ -2031,6 +2051,8 @@ export default function Rentals() {
     const deliveryToday = movementEntries.filter(entry => entry.type === 'shipping' && String(entry.date || '').slice(0, 10) === todayKey).length;
     return {
       activeRentals: activeRows.filter(row => row.rental.status === 'active').length,
+      newDrafts: rentalDealRows.filter(row => row.rental.status === 'created').length,
+      onDelivery: activeRows.filter(row => row.hasShippingDelivery && !row.hasReturnDelivery).length || deliveryToday,
       returnsTodayTomorrow: activeRows.filter(row => row.rental.endDate === todayKey || row.rental.endDate === tomorrowKey).length,
       overdueReturns: activeRows.filter(row => row.rental.endDate < todayKey).length,
       rentalDebt: activeRows.reduce((sum, row) => sum + row.debtAmount, 0),
@@ -2040,16 +2062,50 @@ export default function Rentals() {
   }, [movementEntries, rentalDealRows, today]);
 
   const returnsWorkspaceRows = useMemo(
-    () => rentalDealRows.filter(row => row.isReturnRelevant),
-    [rentalDealRows],
+    () => rentalDealRows
+      .filter(row => row.isReturnRelevant)
+      .filter(row => {
+        if (!returnStateFilter) return true;
+        if (returnStateFilter === 'today') return row.isReturnToday;
+        if (returnStateFilter === 'tomorrow') return row.isReturnTomorrow;
+        if (returnStateFilter === 'overdue') return row.isOverdueReturn;
+        if (returnStateFilter === 'planned') return row.isReturnPlanned;
+        if (returnStateFilter === 'awaiting_acceptance') return row.isAwaitingAcceptance || row.isReturnedNotClosed;
+        return row.needsReturnService;
+      })
+      .filter(row => {
+        if (!returnDeliveryFilter) return true;
+        return returnDeliveryFilter === 'planned' ? row.hasReturnDelivery : !row.hasReturnDelivery;
+      })
+      .filter(row => {
+        if (!returnServiceFilter) return true;
+        return returnServiceFilter === 'yes' ? row.needsReturnService : !row.needsReturnService;
+      }),
+    [rentalDealRows, returnDeliveryFilter, returnServiceFilter, returnStateFilter],
   );
 
   const debtDocsWorkspaceRows = useMemo(
-    () => rentalDealRows.filter(row =>
-      (canViewPayments && row.hasMoneyProblem) ||
-      (canViewDocuments && row.hasDocumentProblem)
-    ),
-    [canViewDocuments, canViewPayments, rentalDealRows],
+    () => rentalDealRows
+      .filter(row =>
+        (canViewPayments && row.hasMoneyProblem) ||
+        (canViewDocuments && row.hasDocumentProblem)
+      )
+      .filter(row => {
+        if (!debtDocsProblemFilter) return true;
+        if (debtDocsProblemFilter === 'debt') return canViewPayments && row.debtAmount > 0;
+        if (debtDocsProblemFilter === 'overdue') return canViewPayments && row.isOverdueDebt;
+        if (debtDocsProblemFilter === 'partial') return canViewPayments && (row.isPartialPayment || row.rental.paymentStatus === 'partial');
+        if (debtDocsProblemFilter === 'missing_upd') return row.missingUpd;
+        if (debtDocsProblemFilter === 'missing_contract') return row.missingContract;
+        return row.hasUnsignedDocuments;
+      })
+      .filter(row => {
+        if (!debtDocsDocumentFilter) return true;
+        if (debtDocsDocumentFilter === 'missing_upd') return row.missingUpd;
+        if (debtDocsDocumentFilter === 'missing_contract') return row.missingContract;
+        return row.hasUnsignedDocuments;
+      }),
+    [canViewDocuments, canViewPayments, debtDocsDocumentFilter, debtDocsProblemFilter, rentalDealRows],
   );
 
   const workspaceTableRows = useMemo(() => {
@@ -2082,6 +2138,7 @@ export default function Rentals() {
       missingContract: rows.filter(row => row.missingContract).length,
       unsignedDocuments: rows.filter(row => row.hasUnsignedDocuments).length,
       debtAmount: debtRows.reduce((sum, row) => sum + row.debtAmount, 0),
+      overdueDebtAmount: rows.reduce((sum, row) => sum + (row.isOverdueDebt ? row.debtAmount : 0), 0),
     };
   }, [debtDocsWorkspaceRows]);
 
@@ -2160,70 +2217,6 @@ export default function Rentals() {
       .map(([, value]) => value);
   }, [rentalMovementChart, rentalMovementScale]);
 
-  const plannerCriticalSummary = useMemo(() => {
-    const dayKeys = [0, 1, 2].map(offset => format(addDays(today, offset), 'yyyy-MM-dd'));
-    const serviceToday = servicePeriods.filter(period => period.startDate <= dayKeys[0] && period.endDate >= dayKeys[0]).length;
-    const buildDay = (dayKey: string) => ({
-      returns: rentalDealRows.filter(row => row.isActive && row.rental.endDate === dayKey).length,
-      deliveries: movementEntries.filter(entry => entry.type === 'shipping' && String(entry.date || '').slice(0, 10) === dayKey).length,
-      reserved: rentalDealRows.filter(row => row.rental.status === 'created' && row.rental.startDate === dayKey).length,
-    });
-    return {
-      today: { ...buildDay(dayKeys[0]), service: serviceToday },
-      tomorrow: buildDay(dayKeys[1]),
-      afterTomorrow: buildDay(dayKeys[2]),
-      overdue: {
-        returns: rentalDealRows.filter(row => row.isOverdueReturn).length,
-        debt: rentalDealRows.reduce((sum, row) => sum + (row.isOverdueReturn ? row.debtAmount : 0), 0),
-      },
-    };
-  }, [movementEntries, rentalDealRows, servicePeriods, today]);
-
-  const plannerCriticalCards = useMemo(() => {
-    const cards = [
-      {
-        title: 'Сегодня',
-        tone: 'border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20',
-        items: [
-          { label: 'Возвраты', value: plannerCriticalSummary.today.returns },
-          { label: 'Доставки', value: plannerCriticalSummary.today.deliveries },
-          { label: 'В сервисе', value: plannerCriticalSummary.today.service },
-        ],
-      },
-      {
-        title: 'Завтра',
-        tone: 'border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20',
-        items: [
-          { label: 'Возвраты', value: plannerCriticalSummary.tomorrow.returns },
-          { label: 'Доставки', value: plannerCriticalSummary.tomorrow.deliveries },
-          { label: 'Бронь', value: plannerCriticalSummary.tomorrow.reserved },
-        ],
-      },
-      {
-        title: 'Послезавтра',
-        tone: 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/30',
-        items: [
-          { label: 'Возвраты', value: plannerCriticalSummary.afterTomorrow.returns },
-          { label: 'Бронь', value: plannerCriticalSummary.afterTomorrow.reserved },
-        ],
-      },
-      {
-        title: 'Просрочка',
-        tone: 'border-red-200 bg-red-50/70 dark:border-red-900/50 dark:bg-red-950/20',
-        items: [
-          { label: 'Возвраты', value: plannerCriticalSummary.overdue.returns },
-          { label: 'Долг', value: formatCompactRub(plannerCriticalSummary.overdue.debt) },
-        ],
-      },
-    ];
-
-    const hasEvents = cards.some(card =>
-      card.items.some(item => (typeof item.value === 'number' ? item.value > 0 : plannerCriticalSummary.overdue.debt > 0)),
-    );
-
-    return { cards, hasEvents };
-  }, [plannerCriticalSummary]);
-
   const fleetPlanKpis = useMemo(() => {
     const todayKey = format(today, 'yyyy-MM-dd');
     const tomorrowKey = format(addDays(today, 1), 'yyyy-MM-dd');
@@ -2232,14 +2225,20 @@ export default function Rentals() {
       const status = computeEffectiveStatus(equipment, rentalsForEquipment, today, { start: viewStart, end: viewEnd });
       if (status === 'available') acc.available += 1;
       if (status === 'rented') acc.rented += 1;
+      if (status === 'reserved') acc.reserved += 1;
       if (status === 'in_service') acc.inService += 1;
       return acc;
-    }, { available: 0, rented: 0, inService: 0 });
+    }, { available: 0, rented: 0, reserved: 0, inService: 0 });
     const activeRows = rentalDealRows.filter(row => row.isActive);
+    const downtimeCount = filteredEquipment.reduce(
+      (sum, equipment) => sum + (downtimesByInventory.get(equipment.inventoryNumber) ?? []).length,
+      0,
+    );
     return {
       totalEquipment: filteredEquipment.length,
       available: counts.available,
       rented: counts.rented,
+      reserved: counts.reserved,
       inService: counts.inService,
       returnsTodayTomorrow: activeRows.filter(row => row.rental.endDate === todayKey || row.rental.endDate === tomorrowKey).length,
       shipmentsTodayTomorrow: movementEntries.filter(entry =>
@@ -2247,8 +2246,9 @@ export default function Rentals() {
         [todayKey, tomorrowKey].includes(String(entry.date || '').slice(0, 10)),
       ).length,
       overdueReturns: activeRows.filter(row => row.rental.endDate < todayKey).length,
+      downtime: downtimeCount,
     };
-  }, [filteredEquipment, ganttRentals, matchesEquipmentRow, movementEntries, rentalDealRows, today, viewEnd, viewStart]);
+  }, [downtimesByInventory, filteredEquipment, ganttRentals, matchesEquipmentRow, movementEntries, rentalDealRows, today, viewEnd, viewStart]);
 
   const mobileEquipmentCards = useMemo(() => {
     if (isDesktopViewport) return [];
@@ -2590,6 +2590,106 @@ export default function Rentals() {
     return diff * dayWidth;
   }, [today, viewStart, totalDays, dayWidth]);
 
+  const workspaceTabs = useMemo(() => ([
+    {
+      id: 'list' as const,
+      label: 'Список аренд',
+      description: 'Операционный список сделок, клиентов, техники, статусов и действий.',
+      badge: rentalWorkspaceKpis.activeRentals,
+      badgeLabel: 'активно',
+      Icon: ClipboardCheck,
+      tone: 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-900/50',
+    },
+    {
+      id: 'planner' as const,
+      label: 'План парка',
+      description: 'Загрузка техники по датам: аренды, свободные окна, возвраты, доставки, сервис и простой.',
+      badge: fleetPlanKpis.totalEquipment,
+      badgeLabel: 'ед.',
+      Icon: CalendarCheck,
+      tone: 'text-blue-700 bg-blue-50 border-blue-200 dark:text-blue-300 dark:bg-blue-950/30 dark:border-blue-900/50',
+    },
+    {
+      id: 'returns' as const,
+      label: 'Возвраты',
+      description: 'Контроль ближайших, просроченных и запланированных возвратов.',
+      badge: returnsTabSummary.overdue || returnsTabSummary.today + returnsTabSummary.tomorrow,
+      badgeLabel: returnsTabSummary.overdue > 0 ? 'проср.' : 'ближ.',
+      Icon: RotateCcw,
+      tone: 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-900/50',
+    },
+    {
+      id: 'debt_docs' as const,
+      label: 'Деньги и документы',
+      description: 'Проблемные аренды: долги, оплаты, УПД, договоры и неподписанные документы.',
+      badge: debtDocsTabSummary.debtCount + debtDocsTabSummary.missingUpd + debtDocsTabSummary.missingContract + debtDocsTabSummary.unsignedDocuments,
+      badgeLabel: 'проблем',
+      Icon: FileText,
+      tone: 'text-red-700 bg-red-50 border-red-200 dark:text-red-300 dark:bg-red-950/30 dark:border-red-900/50',
+    },
+  ]).filter(tab => tab.id !== 'debt_docs' || canViewPayments || canViewDocuments), [
+    canViewDocuments,
+    canViewPayments,
+    debtDocsTabSummary.debtCount,
+    debtDocsTabSummary.missingContract,
+    debtDocsTabSummary.missingUpd,
+    debtDocsTabSummary.unsignedDocuments,
+    fleetPlanKpis.totalEquipment,
+    rentalWorkspaceKpis.activeRentals,
+    returnsTabSummary.overdue,
+    returnsTabSummary.today,
+    returnsTabSummary.tomorrow,
+  ]);
+
+  const activeWorkspaceMeta = workspaceTabs.find(tab => tab.id === activeWorkspaceTab) ?? workspaceTabs[0]!;
+
+  const returnBoardColumns = useMemo(() => [
+    {
+      id: 'today',
+      title: 'Сегодня',
+      emptyLabel: 'Сегодня возвратов нет',
+      tone: 'border-blue-200 bg-blue-50/60 dark:border-blue-900/50 dark:bg-blue-950/20',
+      rows: returnsWorkspaceRows.filter(row => row.isReturnToday),
+    },
+    {
+      id: 'tomorrow',
+      title: 'Завтра',
+      emptyLabel: 'На завтра возвратов нет',
+      tone: 'border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-950/20',
+      rows: returnsWorkspaceRows.filter(row => row.isReturnTomorrow),
+    },
+    {
+      id: 'overdue',
+      title: 'Просрочено',
+      emptyLabel: 'Просроченных нет',
+      tone: 'border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20',
+      rows: returnsWorkspaceRows.filter(row => row.isOverdueReturn),
+    },
+    {
+      id: 'planned',
+      title: 'Запланировано',
+      emptyLabel: 'Запланированных нет',
+      tone: 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/30',
+      rows: returnsWorkspaceRows.filter(row => row.isReturnPlanned && !row.isReturnToday && !row.isReturnTomorrow && !row.isOverdueReturn),
+    },
+    {
+      id: 'awaiting',
+      title: 'Ожидает приёмки',
+      emptyLabel: 'Приёмки не ожидаются',
+      tone: 'border-violet-200 bg-violet-50/60 dark:border-violet-900/50 dark:bg-violet-950/20',
+      rows: returnsWorkspaceRows.filter(row => row.isAwaitingAcceptance || row.isReturnedNotClosed),
+    },
+    {
+      id: 'service',
+      title: 'Нужен сервис',
+      emptyLabel: 'Сервис не требуется',
+      tone: 'border-orange-200 bg-orange-50/60 dark:border-orange-900/50 dark:bg-orange-950/20',
+      rows: returnsWorkspaceRows.filter(row => row.needsReturnService),
+    },
+  ], [returnsWorkspaceRows]);
+
+  const hasReturnBoardRows = returnBoardColumns.some(column => column.rows.length > 0);
+
   return (
     <div
       className="relative flex h-[calc(100vh-56px-64px)] w-full min-w-0 max-w-full flex-col overflow-hidden bg-background sm:h-[calc(100vh)] sm:w-[calc(100vw-16rem)]"
@@ -2605,59 +2705,18 @@ export default function Rentals() {
       />
       {/* ===== Toolbar ===== */}
       <div className="relative z-10 border-b border-border/80 bg-card/80 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.65)] backdrop-blur-xl">
-        <div className="space-y-3 px-4 py-3">
+        <div className="space-y-4 px-4 py-3">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div className="space-y-2">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Аренды
-                </p>
-                <h1 className="app-shell-title mt-1 text-3xl font-extrabold tracking-tight text-foreground">
-                  Аренды
-                </h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Сделки, возвраты, деньги, документы и движение техники.
-                </p>
-              </div>
-
-              <div className="flex max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto whitespace-nowrap text-xs">
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary/80 px-2 py-0.5 text-muted-foreground">
-                  <span className="font-semibold text-foreground">{shownEquipment}</span>
-                  ед. техники
-                </span>
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary/80 px-2 py-0.5 text-muted-foreground">
-                  <span className="font-semibold text-foreground">{shownRentals}</span>
-                  аренд
-                </span>
-                <button
-                  type="button"
-                  onClick={() => toggleRentalPreset('unpaid')}
-                  className={cn(
-                    'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 transition-colors',
-                    rentalPreset === 'unpaid'
-                      ? 'border-blue-400/40 bg-blue-500/20 text-blue-200'
-                      : 'border-blue-500/15 bg-blue-500/10 text-blue-300 hover:border-blue-400/30 hover:bg-blue-500/15',
-                  )}
-                  title="Показать аренды без оплаты"
-                >
-                  <CreditCard className="h-3.5 w-3.5" />
-                  {quickFilterCounts.unpaid} без оплаты
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleRentalPreset('overdue')}
-                  className={cn(
-                    'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 transition-colors',
-                    rentalPreset === 'overdue'
-                      ? 'border-red-400/40 bg-red-500/20 text-red-200'
-                      : 'border-red-500/15 bg-red-500/10 text-red-300 hover:border-red-400/30 hover:bg-red-500/15',
-                  )}
-                  title="Показать просроченные аренды"
-                >
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  {quickFilterCounts.overdue} просроч.
-                </button>
-              </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Рабочий раздел
+              </p>
+              <h1 className="app-shell-title mt-1 text-3xl font-extrabold tracking-tight text-foreground">
+                Аренды
+              </h1>
+              <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                {activeWorkspaceMeta.description}
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 xl:justify-end">
@@ -2667,12 +2726,83 @@ export default function Rentals() {
                   Новая аренда
                 </Button>
               )}
-              {canViewApprovals && (
-                <>
+            </div>
+          </div>
+
+          <div className="flex max-w-full gap-5 overflow-x-auto border-t border-border/70 pt-3">
+            {workspaceTabs.map(tab => {
+              const active = activeWorkspaceTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  aria-pressed={active}
+                  data-state={active ? 'active' : 'inactive'}
+                  onClick={() => setActiveWorkspaceTab(tab.id)}
+                  className={cn(
+                    'relative flex h-11 shrink-0 items-center gap-2 border-b-2 px-1 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                    active
+                      ? 'rentals-workspace-tab-active border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
+                      : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+                  )}
+                >
+                  <span>{tab.label}</span>
+                  {tab.badge > 0 && (
+                    <span className={cn(
+                      'inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-bold',
+                      active
+                        ? 'rentals-workspace-tab-badge-active'
+                        : 'bg-red-500 text-white',
+                    )}>
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card/80 p-2">
+            {activeWorkspaceTab === 'list' && (
+              <>
+                {canCreateDeliveries && (
+                  <Link to="/deliveries/new">
+                    <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3">
+                      <Truck className="h-4 w-4" />
+                      Создать доставку
+                    </Button>
+                  </Link>
+                )}
+                {canCreateDocuments && (
+                  <Link to="/documents">
+                    <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3">
+                      <FileText className="h-4 w-4" />
+                      Создать документ
+                    </Button>
+                  </Link>
+                )}
+                {canCreatePayments && (
                   <Button
                     size="sm"
                     variant="secondary"
-                    className="app-button-outline h-10 rounded-xl px-4"
+                    className="app-button-outline h-9 rounded-xl px-3"
+                    onClick={() => {
+                      if (selectedRental) {
+                        showToast('Оплату можно добавить в открытой боковой панели аренды');
+                      } else {
+                        showToast('Выберите аренду в таблице и добавьте оплату в боковой панели');
+                      }
+                    }}
+                  >
+                    <CreditCard className="h-4 w-4" />
+                    Добавить оплату
+                  </Button>
+                )}
+                {canViewApprovals && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="app-button-outline h-9 rounded-xl px-3"
                     onClick={() => setShowApprovalHistorySheet(true)}
                   >
                     <ClipboardCheck className="h-4 w-4" />
@@ -2683,193 +2813,133 @@ export default function Rentals() {
                       </span>
                     )}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="app-button-outline h-10 rounded-xl px-4"
-                    onClick={() => setShowMovementSheet(true)}
-                  >
-                    <ArrowRightLeft className="h-4 w-4" />
-                    Движение техники
-                  </Button>
-                  <Button size="sm" variant="secondary" className="app-button-outline h-10 rounded-xl px-4" onClick={() => handleOpenReturn()}>
+                )}
+                <Button size="sm" variant="ghost" className="app-button-ghost h-9 rounded-xl px-3" onClick={() => setShowMovementSheet(true)}>
+                  <MoreHorizontal className="h-4 w-4" />
+                  Ещё действия
+                </Button>
+              </>
+            )}
+
+            {activeWorkspaceTab === 'planner' && (
+              <>
+                {canEditRentals && (
+                  <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3" onClick={() => handleOpenReturn()}>
                     <RotateCcw className="h-4 w-4" />
-                    Возврат техники
+                    Запланировать возврат
                   </Button>
-                  <Button size="sm" variant="secondary" className="app-button-ghost h-10 rounded-xl px-4" onClick={() => handleOpenDowntime()}>
+                )}
+                {canEditRentals && (
+                  <Button size="sm" variant="secondary" className="app-button-ghost h-9 rounded-xl px-3" onClick={() => handleOpenDowntime()}>
                     <PauseCircle className="h-4 w-4" />
                     Отметить простой
                   </Button>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
-            {[
-              { id: 'list' as const, label: 'Список аренд', badge: 0, badgeTone: '' },
-              { id: 'planner' as const, label: 'План парка', badge: 0, badgeTone: '' },
-              { id: 'returns' as const, label: 'Возвраты', badge: rentalWorkspaceKpis.overdueReturns, badgeTone: 'bg-red-500 text-white' },
-              {
-                id: 'debt_docs' as const,
-                label: canViewPayments ? 'Деньги и документы' : 'Документы',
-                badge: rentalWorkspaceKpis.rentalDebt > 0 || rentalWorkspaceKpis.missingDocs > 0 ? rentalWorkspaceKpis.missingDocs + (rentalWorkspaceKpis.rentalDebt > 0 ? 1 : 0) : 0,
-                badgeTone: 'bg-amber-500 text-white',
-              },
-            ].filter(tab => tab.id !== 'debt_docs' || canViewPayments || canViewDocuments).map(tab => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveWorkspaceTab(tab.id)}
-                className={cn(
-                  'rounded-xl border px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-                  activeWorkspaceTab === tab.id
-                    ? 'rentals-workspace-tab-active shadow-sm'
-                    : 'border-border bg-card text-muted-foreground hover:bg-secondary hover:text-foreground',
                 )}
-              >
-                <span>{tab.label}</span>
-                {tab.badge > 0 && (
-                  <span className={cn(
-                    'ml-2 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold',
-                    activeWorkspaceTab === tab.id
-                      ? 'rentals-workspace-tab-badge-active'
-                      : tab.badgeTone,
-                  )}>
-                    {tab.badge}
-                  </span>
+              </>
+            )}
+
+            {activeWorkspaceTab === 'returns' && (
+              <>
+                {canEditRentals && (
+                  <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3" onClick={() => handleOpenReturn()}>
+                    <RotateCcw className="h-4 w-4" />
+                    Запланировать возврат
+                  </Button>
                 )}
-              </button>
-            ))}
-          </div>
-
-          {activeWorkspaceTab !== 'planner' && (
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card/80 p-2">
-              {can('create', 'rentals') && (
-                <Button size="sm" className="app-button-primary h-9 rounded-xl px-3" onClick={() => handleOpenNewRental()}>
-                  <Plus className="h-4 w-4" />
-                  Новая аренда
-                </Button>
-              )}
-              {canCreateDeliveries && (
-                <Link to="/deliveries/new">
-                  <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3">
-                    <Truck className="h-4 w-4" />
-                    Создать доставку
-                  </Button>
-                </Link>
-              )}
-              {canEditRentals && (
-                <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3" onClick={() => handleOpenReturn()}>
-                  <RotateCcw className="h-4 w-4" />
-                  Запланировать возврат
-                </Button>
-              )}
-              {canCreateDocuments && (
-                <Link to="/documents">
-                  <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3">
-                    <FileText className="h-4 w-4" />
-                    Создать документ
-                  </Button>
-                </Link>
-              )}
-              {canCreatePayments && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="app-button-outline h-9 rounded-xl px-3"
-                  onClick={() => {
-                    if (selectedRental) {
-                      showToast('Оплату можно добавить в открытой боковой панели аренды');
-                    } else {
-                      showToast('Выберите аренду в таблице и добавьте оплату в боковой панели');
-                    }
-                  }}
-                >
-                  <CreditCard className="h-4 w-4" />
-                  Добавить оплату
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" className="app-button-ghost h-9 rounded-xl px-3" onClick={() => setShowMovementSheet(true)}>
-                <MoreHorizontal className="h-4 w-4" />
-                Ещё действия
-              </Button>
-            </div>
-          )}
-
-        </div>
-      </div>
-
-      {false ? (
-        <div className="relative z-10 flex-1 overflow-auto px-4 py-4">
-          <div className="mx-auto flex max-w-[1500px] flex-col gap-4">
-            <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="max-w-2xl">
-                  <h2 className="text-lg font-bold text-foreground">Визуальное планирование техники</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    В этой вкладке только краткая операционная сводка. Полный таймлайн техники остаётся в отдельном планировщике.
-                  </p>
-                </div>
-                {canViewPlanner && (
-                  <Link to="/planner">
-                    <Button className="app-button-primary rounded-xl">
-                      <CalendarCheck className="h-4 w-4" />
-                      Открыть общий планировщик
+                {canCreateDeliveries && (
+                  <Link to="/deliveries/new">
+                    <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3">
+                      <Truck className="h-4 w-4" />
+                      Создать возвратную доставку
                     </Button>
                   </Link>
                 )}
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <div className="rounded-xl border border-border bg-secondary/35 p-3">
-                  <div className="text-xs font-semibold text-muted-foreground">Период</div>
-                  <div className="mt-1 text-sm font-bold text-foreground">{rangeLabel}</div>
-                </div>
-                <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300">
-                  <div className="text-xs font-semibold opacity-80">Активные аренды</div>
-                  <div className="mt-1 text-2xl font-bold">{rentalWorkspaceKpis.activeRentals}</div>
-                </div>
-                <div className="rounded-xl border border-red-200 bg-red-50/70 p-3 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
-                  <div className="text-xs font-semibold opacity-80">Просроченные возвраты</div>
-                  <div className="mt-1 text-2xl font-bold">{rentalWorkspaceKpis.overdueReturns}</div>
-                </div>
-              </div>
-            </section>
+                {canEditRentals && (
+                  <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3" onClick={() => handleOpenReturn()}>
+                    <CircleCheck className="h-4 w-4" />
+                    Подтвердить возврат
+                  </Button>
+                )}
+              </>
+            )}
 
-            <section className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-foreground">Планировщик техники — критичные события</h2>
-                  <p className="text-xs text-muted-foreground">Сегодня, ближайшие возвраты и просрочки без полного Gantt.</p>
-                </div>
-                <Button size="sm" variant="secondary" className="rounded-xl" onClick={() => setActiveWorkspaceTab('list')}>
-                  К списку аренд
-                </Button>
+            {activeWorkspaceTab === 'debt_docs' && (
+              <>
+                {canCreateDocuments && (
+                  <Link to="/documents">
+                    <Button size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3">
+                      <FileText className="h-4 w-4" />
+                      Создать документ
+                    </Button>
+                  </Link>
+                )}
+                {canCreatePayments && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="app-button-outline h-9 rounded-xl px-3"
+                    onClick={() => showToast('Выберите проблемную аренду и добавьте оплату в боковой панели')}
+                  >
+                    <CreditCard className="h-4 w-4" />
+                    Добавить оплату
+                  </Button>
+                )}
+                {canViewPayments && (
+                  <Link to="/payments">
+                    <Button size="sm" variant="ghost" className="app-button-ghost h-9 rounded-xl px-3">
+                      <CreditCard className="h-4 w-4" />
+                      Открыть платежи
+                    </Button>
+                  </Link>
+                )}
+                {canViewDocuments && (
+                  <Link to="/documents">
+                    <Button size="sm" variant="ghost" className="app-button-ghost h-9 rounded-xl px-3">
+                      <FileText className="h-4 w-4" />
+                      Открыть документы
+                    </Button>
+                  </Link>
+                )}
+              </>
+            )}
+
+            {activeWorkspaceTab === 'list' && (
+              <div className="ml-auto flex max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto whitespace-nowrap text-xs">
+                <button
+                  type="button"
+                  onClick={() => toggleRentalPreset('unpaid')}
+                  className={cn(
+                    'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 transition-colors',
+                    rentalPreset === 'unpaid'
+                      ? 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
+                      : 'border-border bg-secondary/60 text-muted-foreground hover:text-foreground',
+                  )}
+                  title="Показать аренды без оплаты"
+                >
+                  <CreditCard className="h-3.5 w-3.5" />
+                  {quickFilterCounts.unpaid} без оплаты
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleRentalPreset('overdue')}
+                  className={cn(
+                    'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 transition-colors',
+                    rentalPreset === 'overdue'
+                      ? 'border-red-400 bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300'
+                      : 'border-border bg-secondary/60 text-muted-foreground hover:text-foreground',
+                  )}
+                  title="Показать просроченные аренды"
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {quickFilterCounts.overdue} просроч.
+                </button>
               </div>
-              {!plannerCriticalCards.hasEvents && (
-                <div className="mt-3 rounded-xl border border-dashed border-border bg-secondary/30 px-3 py-2 text-sm text-muted-foreground">
-                  Нет критичных событий на ближайшие дни.
-                </div>
-              )}
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {plannerCriticalCards.cards.map(card => (
-                  <div key={card.title} className={cn('rounded-xl border px-3 py-2.5', card.tone)}>
-                    <div className="mb-2 text-sm font-semibold text-foreground">{card.title}</div>
-                    <div className="space-y-1.5">
-                      {card.items.map(item => (
-                        <div key={item.label} className="flex items-baseline justify-between gap-3">
-                          <span className="text-xs text-muted-foreground">{item.label}</span>
-                          <span className="text-sm font-bold text-foreground">{item.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
+            )}
           </div>
         </div>
-      ) : activeWorkspaceTab === 'planner' ? (
+      </div>
+
+      {activeWorkspaceTab === 'planner' ? (
       <>
       <div className="hidden items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800 sm:flex lg:hidden">
         <div>
@@ -2905,24 +2975,45 @@ export default function Rentals() {
       </div>
 
       {/* ===== Filters ===== */}
-      <div className="relative z-10 border-b border-border/80 bg-card/70 backdrop-blur-xl">
-        <div className="px-4 py-2">
-          <div className="rounded-[24px] border border-border bg-card/80 px-4 py-3 shadow-[0_24px_50px_-38px_rgba(15,23,42,0.9)]">
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-foreground">План парка</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Загрузка техники по дням: аренды, свободные окна, возвраты, доставки, сервис и простой.
-                </p>
-              </div>
-              {canViewPlanner && (
+	      <div className="relative z-10 border-b border-border/80 bg-card/70 backdrop-blur-xl">
+	        <div className="px-4 py-2">
+	          <div className="rounded-2xl border border-border bg-card/80 px-4 py-3 shadow-[0_24px_50px_-38px_rgba(15,23,42,0.9)]">
+	            <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
+	              <div>
+	                <h2 className="text-lg font-bold text-foreground">План парка</h2>
+	                <p className="mt-1 text-sm text-muted-foreground">{shownEquipment} ед. в списке · {shownRentals} аренд · {rangeLabel}</p>
+	              </div>
+	              <div className="flex flex-wrap items-start justify-end gap-2">
+	                <div className="inline-flex rounded-2xl border border-blue-200 bg-blue-50/70 p-1 shadow-inner dark:border-blue-900/50 dark:bg-blue-950/20">
+	                  {[
+	                    { value: 'week' as Scale, label: 'Дни' },
+	                    { value: 'month' as Scale, label: 'Недели' },
+	                    { value: 'quarter' as Scale, label: 'Месяцы' },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+	                      type="button"
+	                      onClick={() => setScale(option.value)}
+	                      className={cn(
+	                        'rounded-xl px-4 py-2 text-sm font-bold transition-colors',
+	                        scale === option.value
+	                          ? 'bg-blue-600 text-white shadow-sm dark:bg-blue-500'
+	                          : 'text-blue-700 hover:bg-white/70 hover:text-blue-800 dark:text-blue-200 dark:hover:bg-blue-900/40',
+	                      )}
+	                    >
+	                      {option.label}
+	                    </button>
+                  ))}
+                </div>
+                {canViewPlanner && (
                 <div className="text-right">
                   <Link to="/planner">
                     <Button size="sm" variant="secondary" className="rounded-xl">Открыть общий планировщик</Button>
                   </Link>
                   <p className="mt-1 text-[11px] text-muted-foreground">Другой раздел: подготовка, сервис и задачи.</p>
                 </div>
-              )}
+                )}
+              </div>
             </div>
             <button
               type="button"
@@ -2955,24 +3046,26 @@ export default function Rentals() {
               </div>
             </button>
 
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+	            <div className="mt-2 grid gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9">
               {[
                 { label: 'Всего техники', value: fleetPlanKpis.totalEquipment, tone: 'border-slate-200 bg-slate-50/70 text-slate-700 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-300' },
                 { label: 'Свободно', value: fleetPlanKpis.available, tone: 'border-emerald-200 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300' },
                 { label: 'В аренде', value: fleetPlanKpis.rented, tone: 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300' },
                 { label: 'В сервисе', value: fleetPlanKpis.inService, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
-                { label: 'Возвраты 2 дня', value: fleetPlanKpis.returnsTodayTomorrow, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
-                { label: 'Отгрузки 2 дня', value: fleetPlanKpis.shipmentsTodayTomorrow, tone: 'border-cyan-200 bg-cyan-50/70 text-cyan-700 dark:border-cyan-900/50 dark:bg-cyan-950/20 dark:text-cyan-300' },
+                { label: 'Бронь', value: fleetPlanKpis.reserved, tone: 'border-violet-200 bg-violet-50/70 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/20 dark:text-violet-300' },
+                { label: 'Возвраты', value: fleetPlanKpis.returnsTodayTomorrow, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
+                { label: 'Отгрузки', value: fleetPlanKpis.shipmentsTodayTomorrow, tone: 'border-cyan-200 bg-cyan-50/70 text-cyan-700 dark:border-cyan-900/50 dark:bg-cyan-950/20 dark:text-cyan-300' },
                 { label: 'Просрочено', value: fleetPlanKpis.overdueReturns, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
+                { label: 'Простой', value: fleetPlanKpis.downtime, tone: 'border-orange-200 bg-orange-50/70 text-orange-700 dark:border-orange-900/50 dark:bg-orange-950/20 dark:text-orange-300' },
               ].map(item => (
-                <div key={item.label} className={cn('min-h-[76px] rounded-xl border px-3 py-2.5 shadow-sm', item.tone)}>
-                  <div className="text-[11px] font-semibold opacity-80">{item.label}</div>
-                  <div className="mt-1 text-2xl font-bold">{item.value}</div>
-                </div>
-              ))}
-            </div>
+	                <div key={item.label} className={cn('min-h-[62px] rounded-xl border px-3 py-2 shadow-sm', item.tone)}>
+	                  <div className="text-[11px] font-semibold opacity-80">{item.label}</div>
+	                  <div className="mt-0.5 text-xl font-bold">{item.value}</div>
+	                </div>
+	              ))}
+	            </div>
 
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100/90 pt-3 text-xs dark:border-white/8">
+	            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100/90 pt-2 text-xs dark:border-white/8">
               <div className="flex flex-wrap items-center gap-3 text-gray-500 dark:text-gray-400">
                 <span>{overviewCounts.available} свободно</span>
                 <span className="text-gray-300 dark:text-gray-600">•</span>
@@ -3142,12 +3235,12 @@ export default function Rentals() {
             </div>
 
             <div>
-              <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Поиск по технике, клиенту или договору</div>
+              <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Поиск техники</div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Модель, INV, SN, клиент, договор"
+                  placeholder="Модель, INV или SN"
                   value={filterModel}
                   onChange={e => setFilterModel(e.target.value)}
                   className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
@@ -3156,23 +3249,19 @@ export default function Rentals() {
             </div>
 
             <div className="space-y-2">
-              <div className="text-sm font-medium text-gray-900 dark:text-white">Быстрый режим</div>
-              <div className="flex flex-wrap gap-2">
-                {rentalPresetOptions.map(option => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setRentalPreset(option.value)}
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                      rentalPreset === option.value
-                        ? 'bg-[--color-primary] text-white shadow-sm'
-                        : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Свободные окна</div>
+              <button
+                type="button"
+                onClick={() => setFilterStatus(filterStatus === AVAILABLE_EQUIPMENT_STATUS_FILTER ? '' : AVAILABLE_EQUIPMENT_STATUS_FILTER)}
+                className={cn(
+                  'rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+                  filterStatus === AVAILABLE_EQUIPMENT_STATUS_FILTER
+                    ? 'bg-[--color-primary] text-white shadow-sm'
+                    : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300',
+                )}
+              >
+                Только свободные
+              </button>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -3199,60 +3288,6 @@ export default function Rentals() {
                   <option value="">Все собственники</option>
                   {ownerOptions.map(owner => (
                     <option key={owner} value={owner}>{owner}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Менеджер</div>
-                <select
-                  value={filterManager}
-                  onChange={e => setFilterManager(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                >
-                  <option value="">Все менеджеры</option>
-                  {managersList.map(u => (
-                    <option key={u.id} value={u.name}>{u.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Клиент</div>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Название клиента"
-                    value={filterClient}
-                    onChange={e => setFilterClient(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 pl-10 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">УПД</div>
-                <select
-                  value={filterUpd}
-                  onChange={e => setFilterUpd(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                >
-                  <option value="">Любой статус</option>
-                  <option value="yes">Подписан</option>
-                  <option value="no">Не подписан</option>
-                </select>
-              </div>
-
-              <div>
-                <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Статус аренды</div>
-                <select
-                  value={filterStatus}
-                  onChange={e => setFilterStatus(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-gray-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-primary] dark:border-gray-600 dark:bg-gray-900/60 dark:text-white"
-                >
-                  {RENTAL_STATUS_FILTERS.map(f => (
-                    <option key={f.value} value={f.value}>{f.label}</option>
                   ))}
                 </select>
               </div>
@@ -3283,26 +3318,6 @@ export default function Rentals() {
                 ))}
               </div>
             </div>
-
-            <div>
-              <div className="mb-2 text-sm font-medium text-gray-900 dark:text-white">Оплата</div>
-              <div className="grid gap-2 sm:grid-cols-4">
-                {PAYMENT_STATUS_FILTERS.map(f => (
-                  <button
-                    key={f.value}
-                    type="button"
-                    onClick={() => setFilterPayment(f.value)}
-                    className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
-                      filterPayment === f.value
-                        ? 'border-[--color-primary] bg-[--color-primary] text-white'
-                        : 'border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
-                    }`}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
 
           <DialogFooter>
@@ -3328,10 +3343,10 @@ export default function Rentals() {
             <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
               <div className="mb-2 text-2xl">🏗️</div>
               <div className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                В реестре нет техники
+                Нет данных по загрузке техники за выбранный период.
               </div>
               <div className="mt-1 max-w-xs text-xs text-gray-400 dark:text-gray-500">
-                Добавьте технику в разделе «Техника», и она появится здесь для планирования аренды.
+                Добавьте технику или измените период, чтобы увидеть строки планирования.
               </div>
               {can('create', 'equipment') && (
                 <Button
@@ -3346,7 +3361,7 @@ export default function Rentals() {
           ) : (
             <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
               <div className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                Нет техники по заданным фильтрам
+                Нет данных по загрузке техники за выбранный период.
               </div>
               <Button size="sm" variant="ghost" onClick={resetFilters} className="mt-2">
                 Сбросить фильтры
@@ -3512,29 +3527,36 @@ export default function Rentals() {
       </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-border/70 bg-card/80 px-3 py-2 text-[11px] text-muted-foreground shadow-sm">
-        <span className="font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">Финансы</span>
-        {(Object.entries(RENTAL_PAYMENT_BADGE_STYLES) as Array<[RentalPaymentTone, typeof RENTAL_PAYMENT_BADGE_STYLES[RentalPaymentTone]]>).map(([tone, item]) => (
-          <span key={tone} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-            <span className={`h-2.5 w-2.5 rounded-full ring-1 ${item.className}`} />
-            {item.label}
-          </span>
-        ))}
-        <span className="ml-1 font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">Документы</span>
-        {(Object.entries(RENTAL_UPD_BADGE_STYLES) as Array<[RentalUpdBadgeTone, typeof RENTAL_UPD_BADGE_STYLES[RentalUpdBadgeTone]]>).map(([tone, item]) => (
-          <span key={tone} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-            <span className={`h-2.5 w-2.5 rounded-full ring-1 ${item.className}`} />
-            {item.label}
-          </span>
-        ))}
-      </div>
+	      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border/70 bg-card/80 px-3 py-2 text-[11px] text-muted-foreground shadow-sm">
+	        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+	          <span className="font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">Финансы</span>
+	          {(Object.entries(RENTAL_PAYMENT_BADGE_STYLES) as Array<[RentalPaymentTone, typeof RENTAL_PAYMENT_BADGE_STYLES[RentalPaymentTone]]>).map(([tone, item]) => (
+	            <span key={tone} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+	              <span className={`h-2.5 w-2.5 rounded-full ring-1 ${item.className}`} />
+	              {item.label}
+	            </span>
+	          ))}
+	          <span className="ml-1 font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">Документы</span>
+	          {(Object.entries(RENTAL_UPD_BADGE_STYLES) as Array<[RentalUpdBadgeTone, typeof RENTAL_UPD_BADGE_STYLES[RentalUpdBadgeTone]]>).map(([tone, item]) => (
+	            <span key={tone} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+	              <span className={`h-2.5 w-2.5 rounded-full ring-1 ${item.className}`} />
+	              {item.label}
+	            </span>
+	          ))}
+	        </div>
+	        <div className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-semibold text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+	          <ChevronLeft className="h-3.5 w-3.5" />
+	          Прокручивайте таймлайн внутри блока
+	          <ChevronRight className="h-3.5 w-3.5" />
+	        </div>
+	      </div>
 
       {/* ===== Gantt Grid ===== */}
       <div
-        ref={scrollContainerRef}
-        className={`hidden min-w-0 max-w-full flex-1 overflow-auto ${compactView === 'timeline' ? 'sm:block' : 'sm:hidden'} lg:block`}
-        style={{ width: '100%', maxWidth: '100%', overflow: 'auto' }}
-      >
+	        ref={scrollContainerRef}
+	        className={`hidden min-h-[320px] min-w-0 max-w-full flex-1 overflow-auto rounded-2xl border border-border bg-card shadow-sm ${compactView === 'timeline' ? 'sm:block' : 'sm:hidden'} lg:block`}
+	        style={{ width: '100%', maxWidth: '100%', maxHeight: 'min(62vh, calc(100vh - 360px))', overflow: 'auto' }}
+	      >
         <div style={{ width: LEFT_PANEL_WIDTH + timelineWidth, minHeight: '100%' }}>
           {/* ===== Timeline Header (sticky top) ===== */}
           <div className="sticky top-0 z-20 flex border-b border-white/50 bg-white/84 shadow-[0_18px_36px_-32px_rgba(15,23,42,0.9)] backdrop-blur-xl dark:border-white/8 dark:bg-slate-900/62">
@@ -3609,10 +3631,10 @@ export default function Rentals() {
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="mb-1 text-2xl">🏗️</div>
                 <div className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                  В реестре нет техники
+                  Нет данных по загрузке техники за выбранный период.
                 </div>
                 <div className="mt-1 max-w-xs text-xs text-gray-400 dark:text-gray-500">
-                  Добавьте технику в разделе «Техника», и она появится здесь для планирования аренды.
+                  Добавьте технику или измените период, чтобы увидеть строки планирования.
                 </div>
                 {can('create', 'equipment') && (
                   <Button
@@ -3627,7 +3649,7 @@ export default function Rentals() {
             ) : (
               /* Техника есть, но фильтр дал пустой результат */
               <div className="flex flex-col items-center justify-center py-20">
-                <div className="text-gray-400 dark:text-gray-500">Нет техники по заданным фильтрам</div>
+                <div className="text-gray-400 dark:text-gray-500">Нет данных по загрузке техники за выбранный период.</div>
                 <Button size="sm" variant="ghost" onClick={resetFilters} className="mt-2">
                   Сбросить фильтры
                 </Button>
@@ -3726,114 +3748,263 @@ export default function Rentals() {
       ) : (
         <div className="relative z-10 flex-1 overflow-auto px-4 py-4">
           <div className="mx-auto flex max-w-[1500px] flex-col gap-4">
-            <div className="rounded-2xl border border-border bg-card/85 p-4 shadow-sm">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_1fr_auto]">
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold text-muted-foreground">Поиск</span>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      value={filterModel}
-                      onChange={event => setFilterModel(event.target.value)}
-                      placeholder="Клиент, техника, договор, ИНН"
-                      className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30"
-                    />
-                  </div>
-                </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold text-muted-foreground">Период</span>
-                  <select
-                    value={scale === 'custom' ? 'custom' : scale === 'month' ? 'month' : '30'}
-                    onChange={event => {
-                      const value = event.target.value;
-                      if (value === 'month') {
-                        setScale('month');
-                        setBaseDate(today);
-                      } else if (value === 'custom') {
-                        setScale('custom');
-                      } else {
-                        setScale('custom');
-                        setCustomRangeStart(format(today, 'yyyy-MM-dd'));
-                        setCustomRangeEnd(format(addDays(today, 30), 'yyyy-MM-dd'));
-                        setBaseDate(today);
-                      }
-                    }}
-                    className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30"
-                  >
-                    <option value="30">30 дней</option>
-                    <option value="month">Текущий месяц</option>
-                    <option value="custom">Произвольный период</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold text-muted-foreground">Статус</span>
-                  <select value={filterStatus} onChange={event => setFilterStatus(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
-                    {RENTAL_STATUS_FILTERS.filter(item => item.value !== AVAILABLE_EQUIPMENT_STATUS_FILTER).map(item => (
-                      <option key={item.value} value={item.value}>{item.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold text-muted-foreground">Менеджер</span>
-                  <select value={filterManager} onChange={event => setFilterManager(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
-                    <option value="">Все</option>
-                    {managersList.map(manager => (
-                      <option key={manager.id} value={manager.name}>{manager.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold text-muted-foreground">Собственник</span>
-                  <select value={filterOwner} onChange={event => setFilterOwner(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
-                    <option value="">Все</option>
-                    {ownerOptions.map(owner => (
-                      <option key={owner} value={owner}>{owner}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="flex items-end">
-                  <Button type="button" variant="secondary" className="h-10 w-full rounded-xl" onClick={resetFilters}>
-                    Сбросить
-                  </Button>
-                </div>
+            <section className="rounded-2xl border border-border bg-card/85 p-4 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+	                <div>
+	                  <h2 className="text-lg font-bold text-foreground">{activeWorkspaceTab === 'list' ? 'Аренды' : activeWorkspaceMeta.label}</h2>
+	                </div>
+                <Button type="button" variant="secondary" className="h-9 rounded-xl" onClick={resetFilters}>
+                  <RotateCcw className="h-4 w-4" />
+                  Сбросить фильтры
+                </Button>
               </div>
-              {scale === 'custom' && (
-                <div className="mt-3 flex flex-wrap items-end gap-3">
+
+              {activeWorkspaceTab === 'list' && (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_1fr]">
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Поиск</span>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                          value={filterModel}
+                          onChange={event => setFilterModel(event.target.value)}
+                          placeholder="Клиент, техника, договор, ИНН"
+                          className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30"
+                        />
+                      </div>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Период</span>
+                      <select
+                        value={scale === 'custom' ? 'custom' : scale === 'month' ? 'month' : '30'}
+                        onChange={event => {
+                          const value = event.target.value;
+                          if (value === 'month') {
+                            setScale('month');
+                            setBaseDate(today);
+                          } else if (value === 'custom') {
+                            setScale('custom');
+                          } else {
+                            setScale('custom');
+                            setCustomRangeStart(format(today, 'yyyy-MM-dd'));
+                            setCustomRangeEnd(format(addDays(today, 30), 'yyyy-MM-dd'));
+                            setBaseDate(today);
+                          }
+                        }}
+                        className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30"
+                      >
+                        <option value="30">30 дней</option>
+                        <option value="month">Текущий месяц</option>
+                        <option value="custom">Произвольный период</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Статус</span>
+                      <select value={filterStatus} onChange={event => setFilterStatus(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                        {RENTAL_STATUS_FILTERS.filter(item => item.value !== AVAILABLE_EQUIPMENT_STATUS_FILTER).map(item => (
+                          <option key={item.value} value={item.value}>{item.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Менеджер</span>
+                      <select value={filterManager} onChange={event => setFilterManager(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                        <option value="">Все</option>
+                        {managersList.map(manager => (
+                          <option key={manager.id} value={manager.name}>{manager.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Собственник</span>
+                      <select value={filterOwner} onChange={event => setFilterOwner(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                        <option value="">Все</option>
+                        {ownerOptions.map(owner => (
+                          <option key={owner} value={owner}>{owner}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  {scale === 'custom' && (
+                    <div className="mt-3 flex flex-wrap items-end gap-3">
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-xs font-semibold text-muted-foreground">С</span>
+                        <input type="date" value={customRangeStart} onChange={event => setCustomRangeStart(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm" />
+                      </label>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-xs font-semibold text-muted-foreground">По</span>
+                        <input type="date" value={customRangeEnd} onChange={event => setCustomRangeEnd(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm" />
+                      </label>
+                      <Button type="button" className="h-10 rounded-xl" onClick={applyCustomRange}>Применить период</Button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {activeWorkspaceTab === 'returns' && (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                   <label className="flex flex-col gap-1.5">
-                    <span className="text-xs font-semibold text-muted-foreground">С</span>
-                    <input type="date" value={customRangeStart} onChange={event => setCustomRangeStart(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm" />
+                    <span className="text-xs font-semibold text-muted-foreground">Период возврата</span>
+                    <select value={returnStateFilter} onChange={event => setReturnStateFilter(event.target.value as ReturnStateFilter)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                      <option value="">Все актуальные</option>
+                      <option value="today">Сегодня</option>
+                      <option value="tomorrow">Завтра</option>
+                      <option value="overdue">Просрочено</option>
+                      <option value="planned">Запланировано</option>
+                      <option value="awaiting_acceptance">Ожидает приёмки</option>
+                      <option value="needs_service">Нужен сервис</option>
+                    </select>
                   </label>
                   <label className="flex flex-col gap-1.5">
-                    <span className="text-xs font-semibold text-muted-foreground">По</span>
-                    <input type="date" value={customRangeEnd} onChange={event => setCustomRangeEnd(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm" />
+                    <span className="text-xs font-semibold text-muted-foreground">Менеджер</span>
+                    <select value={filterManager} onChange={event => setFilterManager(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                      <option value="">Все менеджеры</option>
+                      {managersList.map(manager => (
+                        <option key={manager.id} value={manager.name}>{manager.name}</option>
+                      ))}
+                    </select>
                   </label>
-                  <Button type="button" className="h-10 rounded-xl" onClick={applyCustomRange}>Применить период</Button>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-xs font-semibold text-muted-foreground">Доставка возврата</span>
+                    <select value={returnDeliveryFilter} onChange={event => setReturnDeliveryFilter(event.target.value as ReturnDeliveryFilter)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                      <option value="">Любая</option>
+                      <option value="planned">Запланирована</option>
+                      <option value="missing">Не запланирована</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-xs font-semibold text-muted-foreground">Требуется сервис</span>
+                    <select value={returnServiceFilter} onChange={event => setReturnServiceFilter(event.target.value as ReturnServiceFilter)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                      <option value="">Любой статус</option>
+                      <option value="yes">Да</option>
+                      <option value="no">Нет</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-xs font-semibold text-muted-foreground">Поиск</span>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <input value={filterModel} onChange={event => setFilterModel(event.target.value)} placeholder="Аренда, клиент, техника" className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30" />
+                    </div>
+                  </label>
                 </div>
               )}
-            </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-              {[
-                { label: 'Активные аренды', value: rentalWorkspaceKpis.activeRentals, tone: 'border-emerald-200 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300' },
-                { label: 'Возвраты сегодня/завтра', value: rentalWorkspaceKpis.returnsTodayTomorrow, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
-                { label: 'Просроченные возвраты', value: rentalWorkspaceKpis.overdueReturns, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
-                { label: 'Долг по арендам', value: formatCurrency(rentalWorkspaceKpis.rentalDebt), tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
-                { label: 'Без УПД / договора', value: rentalWorkspaceKpis.missingDocs, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
-                { label: 'Доставка сегодня', value: rentalWorkspaceKpis.deliveryToday, tone: 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300' },
-              ].map(item => (
-                <div key={item.label} className={cn('flex min-h-[92px] flex-col justify-between rounded-2xl border p-4 shadow-sm', item.tone)}>
-                  <p className="text-xs font-semibold opacity-80">{item.label}</p>
-                  <p className="mt-2 text-2xl font-bold">{item.value}</p>
+              {activeWorkspaceTab === 'debt_docs' && (
+                <div className="space-y-3">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Тип проблемы</span>
+                      <select value={debtDocsProblemFilter} onChange={event => setDebtDocsProblemFilter(event.target.value as DebtDocsProblemFilter)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                        <option value="">Все проблемы</option>
+                        <option value="debt">Долг</option>
+                        <option value="overdue">Просрочка</option>
+                        <option value="partial">Частичная оплата</option>
+                        <option value="missing_upd">Нет УПД</option>
+                        <option value="missing_contract">Нет договора</option>
+                        <option value="unsigned">Неподписанные</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Менеджер</span>
+                      <select value={filterManager} onChange={event => setFilterManager(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                        <option value="">Все</option>
+                        {managersList.map(manager => (
+                          <option key={manager.id} value={manager.name}>{manager.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Клиент</span>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <input value={filterClient} onChange={event => setFilterClient(event.target.value)} placeholder="Название клиента" className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30" />
+                      </div>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Просрочка</span>
+                      <select value={debtDocsProblemFilter === 'overdue' ? 'overdue' : ''} onChange={event => setDebtDocsProblemFilter(event.target.value as DebtDocsProblemFilter)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                        <option value="">Любая</option>
+                        <option value="overdue">Только просрочка</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Документы</span>
+                      <select value={debtDocsDocumentFilter} onChange={event => setDebtDocsDocumentFilter(event.target.value as DebtDocsDocumentFilter)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                        <option value="">Все документные</option>
+                        <option value="missing_upd">Нет УПД</option>
+                        <option value="missing_contract">Нет договора</option>
+                        <option value="unsigned">Неподписанные</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Оплата</span>
+                      <select value={filterPayment} onChange={event => setFilterPayment(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[--color-primary]/30">
+                        {PAYMENT_STATUS_FILTERS.map(item => (
+                          <option key={item.value || 'all'} value={item.value}>{item.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: '' as DebtDocsProblemFilter, label: 'Все проблемы' },
+                      { value: 'debt' as DebtDocsProblemFilter, label: 'Долг' },
+                      { value: 'overdue' as DebtDocsProblemFilter, label: 'Просрочка' },
+                      { value: 'missing_upd' as DebtDocsProblemFilter, label: 'Нет УПД' },
+                      { value: 'missing_contract' as DebtDocsProblemFilter, label: 'Нет договора' },
+                      { value: 'unsigned' as DebtDocsProblemFilter, label: 'Неподписанные' },
+                      { value: 'partial' as DebtDocsProblemFilter, label: 'Частичная оплата' },
+                    ].map(item => (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={() => setDebtDocsProblemFilter(item.value)}
+                        className={cn(
+                          'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
+                          debtDocsProblemFilter === item.value
+                            ? 'border-[--color-primary] bg-[--color-primary]/12 text-[--color-primary]'
+                            : 'border-border bg-secondary/50 text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
+              )}
+            </section>
 
-            <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+            {activeWorkspaceTab === 'list' && (
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                {[
+                  { label: 'Активные аренды', value: rentalWorkspaceKpis.activeRentals, tone: 'border-emerald-200 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300' },
+                  { label: 'Новые / черновики', value: rentalWorkspaceKpis.newDrafts, tone: 'border-slate-200 bg-slate-50/70 text-slate-700 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-300' },
+                  { label: 'На доставке', value: rentalWorkspaceKpis.onDelivery, tone: 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300' },
+                  { label: 'Просрочки', value: rentalWorkspaceKpis.overdueReturns, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
+                  { label: 'Долг', value: canViewPayments ? formatCurrency(rentalWorkspaceKpis.rentalDebt) : 'Скрыто', tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
+                  { label: 'Без УПД / договора', value: rentalWorkspaceKpis.missingDocs, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
+                ].map(item => (
+                  <div key={item.label} className={cn('flex min-h-[92px] flex-col justify-between rounded-2xl border p-4 shadow-sm', item.tone)}>
+                    <p className="text-xs font-semibold opacity-80">{item.label}</p>
+                    <p className="mt-2 text-2xl font-bold">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {activeWorkspaceTab === 'list' && (
+            <div className="grid gap-4">
               <section className="rounded-2xl border border-border bg-card p-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="text-base font-bold text-foreground">Движение аренды на 30 дней</h2>
-                    <p className="text-xs text-muted-foreground">Активность, возвраты, доставки и просроченный долг.</p>
+                    <p className="text-xs text-muted-foreground">
+                      {canViewPayments
+                        ? 'Активность, возвраты, доставки и просроченный долг.'
+                        : 'Активность, возвраты и доставки.'}
+                    </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-muted-foreground">{format(today, 'd MMM', { locale: ru })} — {format(addDays(today, 29), 'd MMM', { locale: ru })}</span>
@@ -3866,7 +4037,9 @@ export default function Rentals() {
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.28)" />
                       <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} minTickGap={18} />
                       <YAxis yAxisId="count" tickLine={false} axisLine={false} fontSize={11} allowDecimals={false} />
-                      <YAxis yAxisId="debt" orientation="right" tickFormatter={formatCompactRub} tickLine={false} axisLine={false} fontSize={11} width={70} />
+                      {canViewPayments && (
+                        <YAxis yAxisId="debt" orientation="right" tickFormatter={formatCompactRub} tickLine={false} axisLine={false} fontSize={11} width={70} />
+                      )}
                       <Tooltip
                         formatter={(value, name) => {
                           const label = name === 'active'
@@ -3877,9 +4050,13 @@ export default function Rentals() {
                                 ? 'Просроченные возвраты'
                                 : name === 'deliveries'
                                   ? 'Доставки'
-                                  : 'Просроченный долг';
+                                  : canViewPayments
+                                    ? 'Просроченный долг'
+                                    : 'Скрыто';
                           return [
-                            name === 'overdueDebt' ? formatCurrency(Number(value) || 0) : Number(value) || 0,
+                            name === 'overdueDebt'
+                              ? canViewPayments ? formatCurrency(Number(value) || 0) : 'Скрыто'
+                              : Number(value) || 0,
                             label,
                           ];
                         }}
@@ -3890,7 +4067,9 @@ export default function Rentals() {
                       <Bar yAxisId="count" dataKey="returns" name="returns" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={18} />
                       <Bar yAxisId="count" dataKey="overdueReturns" name="overdueReturns" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={18} />
                       <Bar yAxisId="count" dataKey="deliveries" name="deliveries" fill="#2563eb" radius={[4, 4, 0, 0]} maxBarSize={18} />
-                      <Line yAxisId="debt" type="monotone" dataKey="overdueDebt" name="overdueDebt" stroke="#dc2626" strokeWidth={2} dot={false} />
+                      {canViewPayments && (
+                        <Line yAxisId="debt" type="monotone" dataKey="overdueDebt" name="overdueDebt" stroke="#dc2626" strokeWidth={2} dot={false} />
+                      )}
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
@@ -3899,61 +4078,22 @@ export default function Rentals() {
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> Возвраты</span>
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> Просроченные возвраты</span>
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-blue-600" /> Доставки</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-0.5 w-4 rounded-full bg-red-600" /> Просроченный долг, ₽</span>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-bold text-foreground">Планировщик техники — критичные события</h2>
-                    <p className="text-xs text-muted-foreground">Короткая сводка без полного Gantt.</p>
-                  </div>
-                  {canViewPlanner && (
-                    <div className="flex flex-col items-start gap-1 sm:items-end">
-                      <Link to="/planner">
-                        <Button size="sm" variant="secondary" className="rounded-xl">Открыть общий планировщик</Button>
-                      </Link>
-                      <span className="text-[11px] text-muted-foreground">Отдельный раздел подготовки, сервиса и задач.</span>
-                    </div>
+                  {canViewPayments && (
+                    <span className="inline-flex items-center gap-1"><span className="h-0.5 w-4 rounded-full bg-red-600" /> Просроченный долг, ₽</span>
                   )}
                 </div>
-                {!plannerCriticalCards.hasEvents && (
-                  <div className="mt-3 rounded-xl border border-dashed border-border bg-secondary/30 px-3 py-2 text-sm text-muted-foreground">
-                    Нет критичных событий на ближайшие дни.
-                  </div>
-                )}
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  {plannerCriticalCards.cards.map(card => (
-                    <div key={card.title} className={cn('rounded-xl border px-3 py-2.5', card.tone)}>
-                      <div className="mb-2 text-sm font-semibold text-foreground">{card.title}</div>
-                      <div className="space-y-1.5">
-                        {card.items.map(item => (
-                          <div key={item.label} className="flex items-baseline justify-between gap-3">
-                            <span className="text-xs text-muted-foreground">{item.label}</span>
-                            <span className="text-sm font-bold text-foreground">{item.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </section>
+            </div>
+            )}
 
               {activeWorkspaceTab === 'returns' && (
                 <section className="rounded-2xl border border-border bg-card p-4 shadow-sm xl:col-span-2">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-base font-bold text-foreground">Возвраты — рабочий список</h2>
-                      <p className="text-xs text-muted-foreground">Только аренды, где возврат уже требует внимания или запланирован в выбранном периоде.</p>
-                    </div>
-                    {canEditRentals && (
-                      <Button size="sm" variant="secondary" className="rounded-xl" onClick={() => handleOpenReturn()}>
-                        <RotateCcw className="h-4 w-4" />
-                        Запланировать возврат
-                      </Button>
-                    )}
-                  </div>
+	                  <div className="flex flex-wrap items-start justify-between gap-3">
+	                    <div>
+	                      <h2 className="text-base font-bold text-foreground">Возвраты — рабочий список</h2>
+	                      <p className="text-xs text-muted-foreground">Только аренды, где возврат уже требует внимания или запланирован в выбранном периоде.</p>
+	                    </div>
+	                  </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
                     {[
                       { label: 'Сегодня', value: returnsTabSummary.today, tone: 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300' },
@@ -3975,37 +4115,21 @@ export default function Rentals() {
               {activeWorkspaceTab === 'debt_docs' && (
                 <section className="rounded-2xl border border-border bg-card p-4 shadow-sm xl:col-span-2">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-base font-bold text-foreground">Деньги и документы</h2>
-                      <p className="text-xs text-muted-foreground">
-                        {canViewPayments
-                          ? 'Только аренды с долгом, просрочкой, частичной оплатой или проблемами документов.'
-                          : 'Финансовые суммы скрыты для вашей роли; показаны только документные проблемы.'}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {canCreatePayments && (
-                        <Button size="sm" variant="secondary" className="rounded-xl" onClick={() => showToast('Выберите аренду и добавьте оплату в боковой панели')}>
-                          <CreditCard className="h-4 w-4" />
-                          Добавить оплату
-                        </Button>
-                      )}
-                      {canCreateDocuments && (
-                        <Link to="/documents">
-                          <Button size="sm" variant="secondary" className="rounded-xl">
-                            <FileText className="h-4 w-4" />
-                            Создать документ
-                          </Button>
-                        </Link>
-                      )}
-                    </div>
-                  </div>
+	                    <div>
+	                      <h2 className="text-base font-bold text-foreground">Деньги и документы</h2>
+	                      <p className="text-xs text-muted-foreground">
+	                        {canViewPayments
+	                          ? 'Только аренды с долгом, просрочкой, частичной оплатой или проблемами документов.'
+	                          : 'Финансовые суммы скрыты для вашей роли; показаны только документные проблемы.'}
+	                      </p>
+	                    </div>
+	                  </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-4">
                     {[
                       ...(canViewPayments ? [
-                        { label: 'Аренд с долгом', value: debtDocsTabSummary.debtCount, tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
-                        { label: 'Долг всего', value: formatCurrency(debtDocsTabSummary.debtAmount), tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
-                        { label: 'Просроченные платежи', value: debtDocsTabSummary.overduePaymentCount, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
+                        { label: 'Общий долг', value: formatCurrency(debtDocsTabSummary.debtAmount), tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
+                        { label: 'Просроченный долг', value: formatCurrency(debtDocsTabSummary.overdueDebtAmount), tone: 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300' },
+                        { label: 'Аренд с долгом', value: debtDocsTabSummary.debtCount, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
                         { label: 'Частичная оплата', value: debtDocsTabSummary.partialPaymentCount, tone: 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300' },
                       ] : []),
                       { label: 'Без УПД', value: debtDocsTabSummary.missingUpd, tone: 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300' },
@@ -4020,8 +4144,96 @@ export default function Rentals() {
                   </div>
                 </section>
               )}
-            </div>
+            {activeWorkspaceTab === 'returns' && (
+              <section className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">Диспетчерская доска возвратов</h2>
+                    <p className="text-xs text-muted-foreground">Сегодня, завтра, просрочки, приёмка и сервис разделены как отдельные рабочие очереди.</p>
+                  </div>
+                  <span className="rounded-full border border-border bg-secondary/60 px-3 py-1 text-xs font-semibold text-muted-foreground">
+                    {returnsWorkspaceRows.length} возвратов
+                  </span>
+                </div>
 
+                {!hasReturnBoardRows ? (
+                  <div className="rounded-2xl border border-dashed border-border bg-secondary/25 px-4 py-12 text-center text-sm text-muted-foreground">
+                    Нет актуальных возвратов за выбранный период.
+                  </div>
+                ) : (
+	                  <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+	                    {returnBoardColumns.map(column => (
+	                      <div key={column.id} className={cn('min-h-[220px] rounded-2xl border p-3', column.tone)}>
+	                        <div className="mb-3 flex items-center justify-between gap-2">
+	                          <h3 className="text-sm font-bold text-foreground">{column.title}</h3>
+	                          <span className="rounded-full bg-card/80 px-2 py-0.5 text-xs font-bold text-foreground">{column.rows.length}</span>
+	                        </div>
+	                        {column.rows.length === 0 ? (
+	                          <div className="rounded-xl border border-dashed border-border/70 bg-card/45 px-3 py-8 text-center text-xs text-muted-foreground">
+	                            {column.emptyLabel}
+	                          </div>
+	                        ) : (
+	                          <div className="space-y-2">
+	                            {column.rows.map(row => {
+                              const returnLabel = row.isOverdueReturn
+                                ? 'Просрочен'
+                                : row.isReturnToday
+                                  ? 'Сегодня'
+                                  : row.isReturnTomorrow
+                                    ? 'Завтра'
+                                    : row.isAwaitingAcceptance
+                                      ? 'Ожидает приёмки'
+                                      : row.isReturnedNotClosed
+                                        ? 'Возвращено, не закрыто'
+                                        : row.needsReturnService
+                                          ? 'Нужен сервис'
+                                          : 'Запланирован';
+                              const returnTone = row.isOverdueReturn
+                                ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                                : row.needsReturnService
+                                  ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300'
+                                  : row.isAwaitingAcceptance || row.isReturnedNotClosed
+                                    ? 'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300'
+                                    : row.isReturnToday || row.isReturnTomorrow
+                                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                                      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+                              return (
+                                <button
+                                  key={`${column.id}-${row.rental.id}`}
+                                  type="button"
+	                                  onClick={() => setSelectedRental(row.rental)}
+	                                  className="w-full rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors hover:bg-secondary/45"
+	                                >
+	                                  <div className="flex items-start justify-between gap-2">
+	                                    <div className="min-w-0">
+	                                      <div className="truncate font-semibold text-foreground">{row.rental.client || 'Без клиента'}</div>
+	                                      <div className="mt-0.5 truncate text-xs text-muted-foreground">{row.sourceRentalId || row.rental.id}</div>
+	                                    </div>
+	                                    <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold', returnTone)}>{returnLabel}</span>
+	                                  </div>
+	                                  <div className="mt-3 truncate text-sm font-medium text-foreground">{getEquipmentMovementLabel(row.equipment)}</div>
+	                                  <div className={cn('mt-1 text-xs', row.isOverdueReturn ? 'font-semibold text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
+	                                    {row.isOverdueReturn
+	                                      ? `Дедлайн: ${safeRentalDateLabel(row.rental.endDate)} · просрочено ${Math.abs(row.daysLeft)} дн.`
+	                                      : `Дедлайн: ${safeRentalDateLabel(row.rental.endDate)}`}
+	                                  </div>
+	                                  <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+	                                    <span className="text-muted-foreground">{row.hasReturnDelivery ? 'Доставка запланирована' : 'Доставка не назначена'}</span>
+	                                    <span className="font-semibold text-[--color-primary]">Открыть аренду</span>
+	                                  </div>
+	                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {activeWorkspaceTab !== 'returns' && (
             <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
               <div className="flex items-center justify-between border-b border-border px-4 py-3">
                 <div>
@@ -4089,7 +4301,7 @@ export default function Rentals() {
                             ? 'Нет актуальных возвратов за выбранный период.'
                             : activeWorkspaceTab === 'debt_docs'
                               ? 'Нет проблем по оплатам и документам.'
-                              : 'Нет аренд по выбранным фильтрам'}
+                              : 'Аренды не найдены по выбранным фильтрам.'}
                         </td>
                       </tr>
                     ) : workspaceTableRows.map(row => {
@@ -4332,6 +4544,7 @@ export default function Rentals() {
                 </table>
               </div>
             </section>
+            )}
           </div>
         </div>
       )}

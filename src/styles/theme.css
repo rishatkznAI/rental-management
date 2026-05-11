@@ -234,35 +234,35 @@
   }
 
   .rentals-workspace-tab-active {
-    border-color: color-mix(in srgb, var(--primary) 30%, transparent);
-    background-color: var(--accent);
-    color: var(--primary);
+    border-bottom-color: #2563eb;
+    background-color: transparent;
+    color: #1d4ed8;
   }
 
   .rentals-workspace-tab-active:hover {
-    background-color: var(--accent);
-    color: var(--primary);
+    background-color: transparent;
+    color: #1d4ed8;
   }
 
   .dark .rentals-workspace-tab-active {
-    border-color: color-mix(in srgb, var(--primary) 40%, transparent);
-    background-color: var(--primary);
-    color: var(--primary-foreground);
+    border-bottom-color: #60a5fa;
+    background-color: transparent;
+    color: #93c5fd;
   }
 
   .dark .rentals-workspace-tab-active:hover {
-    background-color: var(--primary);
-    color: var(--primary-foreground);
+    background-color: transparent;
+    color: #93c5fd;
   }
 
   .rentals-workspace-tab-badge-active {
-    background-color: color-mix(in srgb, var(--primary) 15%, transparent);
-    color: var(--primary);
+    background-color: #ef4444;
+    color: #fff;
   }
 
   .dark .rentals-workspace-tab-badge-active {
-    background-color: color-mix(in srgb, var(--primary-foreground) 20%, transparent);
-    color: var(--primary-foreground);
+    background-color: #ef4444;
+    color: #fff;
   }
 
   .equipment-detail-skin [data-slot="card"] {

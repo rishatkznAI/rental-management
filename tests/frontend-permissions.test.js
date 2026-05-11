@@ -157,17 +157,20 @@ test('rentals workspace active tabs keep readable contrast in light and dark the
   assert.match(rentalsPageSource, /label:\s*'Список аренд'/);
   assert.match(rentalsPageSource, /label:\s*'План парка'/);
   assert.match(rentalsPageSource, /label:\s*'Возвраты'/);
-  assert.match(rentalsPageSource, /label:\s*canViewPayments \? 'Деньги и документы' : 'Документы'/);
+  assert.match(rentalsPageSource, /label:\s*'Деньги и документы'/);
+  assert.match(rentalsPageSource, /\.filter\(tab => tab\.id !== 'debt_docs' \|\| canViewPayments \|\| canViewDocuments\)/);
   assert.match(rentalsPageSource, /canViewPayments \? formatCurrency\(row\.amount\) : 'Скрыто'/);
   assert.match(rentalsPageSource, /canViewPayments \? formatCurrency\(row\.paidAmount\) : 'Скрыто'/);
   assert.match(rentalsPageSource, /canViewPayments \? formatCurrency\(row\.debtAmount\) : 'Скрыто'/);
 
-  assert.match(rentalsPageSource, /rentals-workspace-tab-active shadow-sm/);
+  assert.match(rentalsPageSource, /aria-pressed=\{active\}/);
+  assert.match(rentalsPageSource, /data-state=\{active \? 'active' : 'inactive'\}/);
+  assert.match(rentalsPageSource, /rentals-workspace-tab-active border-blue-600 text-blue-700/);
   assert.match(rentalsPageSource, /rentals-workspace-tab-badge-active/);
-  assert.match(themeSource, /\.rentals-workspace-tab-active\s*\{[\s\S]*background-color: var\(--accent\);[\s\S]*color: var\(--primary\);/);
-  assert.match(themeSource, /\.dark \.rentals-workspace-tab-active\s*\{[\s\S]*background-color: var\(--primary\);[\s\S]*color: var\(--primary-foreground\);/);
-  assert.match(themeSource, /\.rentals-workspace-tab-badge-active\s*\{[\s\S]*color: var\(--primary\);/);
-  assert.match(themeSource, /\.dark \.rentals-workspace-tab-badge-active\s*\{[\s\S]*color: var\(--primary-foreground\);/);
+  assert.match(themeSource, /\.rentals-workspace-tab-active\s*\{[\s\S]*border-bottom-color: #2563eb;[\s\S]*background-color: transparent;[\s\S]*color: #1d4ed8;/);
+  assert.match(themeSource, /\.dark \.rentals-workspace-tab-active\s*\{[\s\S]*border-bottom-color: #60a5fa;[\s\S]*background-color: transparent;[\s\S]*color: #93c5fd;/);
+  assert.match(themeSource, /\.rentals-workspace-tab-badge-active\s*\{[\s\S]*background-color: #ef4444;[\s\S]*color: #fff;/);
+  assert.match(themeSource, /\.dark \.rentals-workspace-tab-badge-active\s*\{[\s\S]*background-color: #ef4444;[\s\S]*color: #fff;/);
   assert.doesNotMatch(rentalsPageSource, /activeWorkspaceTab === tab\.id\s*\?\s*'bg-\[--color-primary\] text-white shadow-sm'/);
   assert.doesNotMatch(rentalsPageSource, /activeWorkspaceTab === tab\.id \? 'bg-white\/20 text-white' : tab\.badgeTone/);
 });

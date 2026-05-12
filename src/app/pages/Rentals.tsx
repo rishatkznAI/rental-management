@@ -5738,22 +5738,25 @@ function EquipmentRow({
           </div>
         </div>
         {/* Quick actions */}
-        <div className="ml-2 flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="ml-2 flex shrink-0 items-center gap-1 opacity-100 transition-opacity">
           {canDo('create', 'rentals') && (
             <button
+              type="button"
               onClick={onNewRental}
-              className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400/60 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
               title="Создать аренду"
+              aria-label="Создать аренду"
             >
               <Plus className="h-3 w-3" />
             </button>
           )}
           {activeRental && (
             <button
+              type="button"
               onClick={() => {
                 if (activeRental) onReturn(withEquipmentRowContext(activeRental, equipment));
               }}
-              className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/30 dark:hover:text-green-400"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-green-50 hover:text-green-600 focus:outline-none focus:ring-2 focus:ring-green-400/60 dark:hover:bg-green-900/30 dark:hover:text-green-400"
               title="Оформить возврат по строке"
               aria-label="Оформить возврат по строке"
             >
@@ -5761,12 +5764,14 @@ function EquipmentRow({
             </button>
           )}
           <button
+            type="button"
             onClick={() => onDowntime()}
-            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/30 dark:hover:text-amber-400"
+            className="inline-flex h-7 items-center gap-1 rounded-lg px-1.5 text-[10px] font-medium text-amber-600 transition-colors hover:bg-amber-50 hover:text-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-400/60 dark:text-amber-300 dark:hover:bg-amber-900/30 dark:hover:text-amber-200"
             title="Добавить простой"
             aria-label="Добавить простой"
           >
             <PauseCircle className="h-3 w-3" />
+            <span>Простой</span>
           </button>
         </div>
       </div>

@@ -41,6 +41,13 @@ test('fleet planner persists equipment downtime and refreshes rows after save', 
   assert.doesNotMatch(rentalsSource, /mockDowntimes/);
 });
 
+test('fleet planner row downtime action is visible and explicit', () => {
+  assert.match(rentalsSource, /opacity-100 transition-opacity/);
+  assert.match(rentalsSource, /title="Добавить простой"[\s\S]*aria-label="Добавить простой"/);
+  assert.match(rentalsSource, /<span>Простой<\/span>/);
+  assert.doesNotMatch(rentalsSource, /opacity-0 transition-opacity group-hover:opacity-100/);
+});
+
 test('fleet planner shows rental downtime updates on rental bars', () => {
   assert.match(rentalsSource, /downtimeDays:\s*rental\.downtimeDays/);
   assert.match(rentalsSource, /downtimeStartDate:\s*rental\.downtimeStartDate/);

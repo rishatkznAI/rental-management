@@ -1733,6 +1733,110 @@ test('PATCH /api/rentals/:id saves downtime for subrental equipment without inve
   });
 });
 
+test('POST /api/rentals/:id/downtimes creates multiple rental downtime periods and syncs gantt row', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const first = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-10',
+      endDate: '2026-04-12',
+      reason: 'Ожидание клиента',
+      affectsBilling: true,
+    });
+    const second = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-15',
+      endDate: '2026-04-16',
+      reason: 'Эвакуатор не мог забрать технику',
+      comment: 'Перевозчик не приехал',
+      affectsBilling: false,
+    });
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.body.rental.downtimePeriods.length, 2);
+    assert.equal(second.body.rental.downtimeDays, 5);
+    assert.equal(second.body.rental.downtimeBillableDays, 3);
+    assert.equal(second.body.rental.billableDays, 8);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').downtimePeriods.length, 2);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').downtimePeriods.length, 2);
+  });
+});
+
+test('PATCH /api/rentals/:id/downtimes/:downtimeId updates one downtime period without overwriting another', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const first = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-10',
+      endDate: '2026-04-11',
+      reason: 'Ожидание клиента',
+    });
+    await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-15',
+      endDate: '2026-04-16',
+      reason: 'Эвакуатор',
+    });
+    const update = await request(baseUrl, 'PATCH', `/api/rentals/R-1/downtimes/${first.body.downtime.id}`, 'admin-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-12',
+      endDate: '2026-04-13',
+      reason: 'Ожидание акта от клиента',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.rental.downtimePeriods.length, 2);
+    assert.equal(update.body.rental.downtimePeriods[0].startDate, '2026-04-12');
+    assert.equal(update.body.rental.downtimePeriods[1].reason, 'Эвакуатор');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').downtimePeriods[0].startDate, '2026-04-12');
+  });
+});
+
+test('POST /api/rentals/:id/downtimes rejects overlapping downtime periods', async () => {
+  const { app } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const first = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-10',
+      endDate: '2026-04-12',
+      reason: 'Ожидание клиента',
+    });
+    const overlap = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-12',
+      endDate: '2026-04-13',
+      reason: 'Другое',
+    });
+
+    assert.equal(first.status, 200);
+    assert.equal(overlap.status, 409);
+    assert.match(overlap.body.error, /пересекается/);
+  });
+});
+
+test('manager rental downtime mutation goes to approval without mutating rental', async () => {
+  const { app, state } = createApprovalApp();
+
+  await withServer(app, async (baseUrl) => {
+    const create = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'manager-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-10',
+      endDate: '2026-04-12',
+      reason: 'Ожидание клиента',
+    });
+
+    assert.equal(create.status, 202);
+    assert.equal(create.body.applied, false);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').downtimePeriods, undefined);
+    assert.equal(state.rental_change_requests.length, 1);
+    assert.equal(state.rental_change_requests[0].field, 'downtimePeriods');
+  });
+});
+
 test('rentals PATCH returns clear 400 and 404 for bad approval ids', async () => {
   const { app } = createApprovalApp();
 

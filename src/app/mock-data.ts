@@ -107,6 +107,11 @@ export interface GanttRentalData {
   downtimeEndDate?: string;
   downtimeComment?: string;
   downtimeStatus?: 'active' | 'closed' | 'cancelled';
+  downtimeAffectsBilling?: boolean;
+  downtimeBillableDays?: number;
+  billableDays?: number;
+  activeRentalDays?: number;
+  downtimePeriods?: DowntimePeriod[];
   comments: RentalHistoryEntry[];
 }
 
@@ -119,6 +124,9 @@ export interface RentalHistoryEntry {
 
 export interface DowntimePeriod {
   id: string;
+  rentalId?: string;
+  ganttRentalId?: string;
+  clientId?: string;
   equipmentId?: string;
   equipmentInv: string;
   serialNumber?: string;
@@ -126,7 +134,9 @@ export interface DowntimePeriod {
   endDate?: string;
   reason: string;
   comment?: string;
+  affectsBilling?: boolean;
   status?: 'active' | 'closed' | 'cancelled';
+  createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
 }

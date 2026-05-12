@@ -3,11 +3,18 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   buildRentalDowntimePatch,
+  calculateRentalDowntimeSummary,
   findDowntimeRentalFlowTarget,
+  normalizeRentalDowntimePeriods,
 } from '../src/app/lib/rentalDowntimeFlow.js';
 
 const require = createRequire(import.meta.url);
 const { validateEquipmentDowntimePayload } = require('../server/lib/equipment-downtime.js');
+const {
+  createRentalDowntime,
+  updateRentalDowntime,
+  validateRentalDowntimePeriod,
+} = require('../server/lib/rental-downtime-periods.js');
 
 const activeRental = {
   id: 'GR-1',
@@ -248,4 +255,115 @@ test('standalone equipment downtime still rejects active rental overlap', () => 
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 409);
+});
+
+test('rental downtime periods keep multiple events on the same rental', () => {
+  const rental = {
+    id: 'R-1',
+    equipmentId: 'EQ-1',
+    equipmentInv: '083',
+    clientId: 'C-1',
+    startDate: '2026-05-01',
+    plannedReturnDate: '2026-05-31',
+    status: 'active',
+  };
+  const first = createRentalDowntime(rental, {
+    startDate: '2026-05-01',
+    endDate: '2026-05-07',
+    reason: 'Ожидание клиента',
+    affectsBilling: true,
+  }, { id: 'RDT-1', author: 'Admin', now: '2026-05-01T10:00:00.000Z' });
+  assert.equal(first.ok, true);
+  const second = createRentalDowntime(first.rental, {
+    startDate: '2026-05-13',
+    endDate: '2026-05-17',
+    reason: 'Эвакуатор не мог забрать технику',
+    comment: 'Ожидаем перевозчика',
+    affectsBilling: false,
+  }, { id: 'RDT-2', author: 'Admin', now: '2026-05-13T10:00:00.000Z' });
+
+  assert.equal(second.ok, true);
+  assert.equal(second.rental.downtimePeriods.length, 2);
+  assert.equal(second.rental.downtimeDays, 12);
+  assert.equal(second.rental.downtimeBillableDays, 7);
+  assert.equal(second.rental.billableDays, 24);
+  assert.equal(second.rental.downtimeReason, 'Эвакуатор не мог забрать технику');
+});
+
+test('rental downtime validation rejects overlap with existing rental downtime', () => {
+  const rental = {
+    id: 'R-1',
+    equipmentId: 'EQ-1',
+    startDate: '2026-05-01',
+    plannedReturnDate: '2026-05-31',
+    status: 'active',
+    downtimePeriods: [{
+      id: 'RDT-1',
+      startDate: '2026-05-01',
+      endDate: '2026-05-07',
+      reason: 'Ожидание клиента',
+      status: 'active',
+    }],
+  };
+  const result = validateRentalDowntimePeriod({
+    startDate: '2026-05-06',
+    endDate: '2026-05-10',
+    reason: 'Другое',
+  }, {
+    rental,
+    existingPeriods: rental.downtimePeriods,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 409);
+  assert.match(result.error, /пересекается/);
+});
+
+test('updating one rental downtime period does not overwrite another', () => {
+  const rental = {
+    id: 'R-1',
+    equipmentId: 'EQ-1',
+    startDate: '2026-05-01',
+    plannedReturnDate: '2026-05-31',
+    status: 'active',
+    downtimePeriods: [
+      { id: 'RDT-1', startDate: '2026-05-01', endDate: '2026-05-07', reason: 'Ожидание клиента', status: 'active' },
+      { id: 'RDT-2', startDate: '2026-05-13', endDate: '2026-05-17', reason: 'Эвакуатор', status: 'active' },
+    ],
+  };
+  const result = updateRentalDowntime(rental, 'RDT-2', {
+    startDate: '2026-05-14',
+    endDate: '2026-05-18',
+    reason: 'Эвакуатор не мог забрать технику',
+  }, { author: 'Admin', now: '2026-05-14T10:00:00.000Z' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rental.downtimePeriods.length, 2);
+  assert.equal(result.rental.downtimePeriods[0].id, 'RDT-1');
+  assert.equal(result.rental.downtimePeriods[1].startDate, '2026-05-14');
+});
+
+test('frontend downtime summary reads multiple downtime periods for planner and drawer', () => {
+  const rental = {
+    id: 'GR-1',
+    rentalId: 'R-1',
+    equipmentId: 'EQ-1',
+    equipmentInv: '083',
+    startDate: '2026-05-01',
+    endDate: '2026-05-31',
+    status: 'active',
+    downtimePeriods: [
+      { id: 'RDT-1', startDate: '2026-05-01', endDate: '2026-05-07', reason: 'Ожидание клиента', affectsBilling: true, status: 'active' },
+      { id: 'RDT-2', startDate: '2026-05-13', endDate: '2026-05-17', reason: 'Эвакуатор', affectsBilling: false, status: 'active' },
+    ],
+  };
+
+  assert.equal(normalizeRentalDowntimePeriods(rental).length, 2);
+  assert.deepEqual(calculateRentalDowntimeSummary(rental), {
+    periods: normalizeRentalDowntimePeriods(rental),
+    totalCalendarDays: 31,
+    downtimeDays: 12,
+    billableDowntimeDays: 7,
+    billableDays: 24,
+  });
 });

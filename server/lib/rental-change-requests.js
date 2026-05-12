@@ -33,6 +33,11 @@ const RENTAL_CHANGE_FIELD_LABELS = {
   downtimeEndDate: 'Окончание простоя',
   downtimeComment: 'Комментарий простоя',
   downtimeStatus: 'Статус простоя',
+  downtimeAffectsBilling: 'Влияние простоя на начисление',
+  downtimePeriods: 'Периоды простоя',
+  downtimeBillableDays: 'Неоплачиваемые дни простоя',
+  billableDays: 'Дней к начислению',
+  activeRentalDays: 'Дней фактической аренды',
   writeOffDays: 'Списание дней аренды',
   waivedDays: 'Списание дней аренды',
 };
@@ -1461,6 +1466,17 @@ function ensureGanttRentalLink(ganttRental, rental, equipmentList = []) {
   if (rental.status !== undefined) next.status = rentalStatusToGanttStatus(rental.status);
   if (rental.price !== undefined) next.amount = Number(rental.price) || 0;
   if (rental.paymentStatus !== undefined) next.paymentStatus = rental.paymentStatus || next.paymentStatus;
+  if (rental.downtimePeriods !== undefined) next.downtimePeriods = Array.isArray(rental.downtimePeriods) ? rental.downtimePeriods : [];
+  if (rental.downtimeDays !== undefined) next.downtimeDays = rental.downtimeDays;
+  if (rental.downtimeReason !== undefined) next.downtimeReason = rental.downtimeReason;
+  if (rental.downtimeStartDate !== undefined) next.downtimeStartDate = rental.downtimeStartDate;
+  if (rental.downtimeEndDate !== undefined) next.downtimeEndDate = rental.downtimeEndDate;
+  if (rental.downtimeComment !== undefined) next.downtimeComment = rental.downtimeComment;
+  if (rental.downtimeStatus !== undefined) next.downtimeStatus = rental.downtimeStatus;
+  if (rental.downtimeAffectsBilling !== undefined) next.downtimeAffectsBilling = rental.downtimeAffectsBilling;
+  if (rental.downtimeBillableDays !== undefined) next.downtimeBillableDays = rental.downtimeBillableDays;
+  if (rental.billableDays !== undefined) next.billableDays = rental.billableDays;
+  if (rental.activeRentalDays !== undefined) next.activeRentalDays = rental.activeRentalDays;
   if (equipmentFields.hasRentalEquipmentReference) {
     next.equipmentId = equipmentFields.equipmentId;
     next.equipmentInv = equipmentFields.equipmentInv;
@@ -1557,6 +1573,11 @@ function applyRentalFieldToGantt(ganttRental, field, value) {
   if (field === 'downtimeEndDate') return { ...ganttRental, downtimeEndDate: value };
   if (field === 'downtimeComment') return { ...ganttRental, downtimeComment: value };
   if (field === 'downtimeStatus') return { ...ganttRental, downtimeStatus: value };
+  if (field === 'downtimeAffectsBilling') return { ...ganttRental, downtimeAffectsBilling: value };
+  if (field === 'downtimePeriods') return { ...ganttRental, downtimePeriods: Array.isArray(value) ? value : [] };
+  if (field === 'downtimeBillableDays') return { ...ganttRental, downtimeBillableDays: value };
+  if (field === 'billableDays') return { ...ganttRental, billableDays: value };
+  if (field === 'activeRentalDays') return { ...ganttRental, activeRentalDays: value };
   return ganttRental;
 }
 

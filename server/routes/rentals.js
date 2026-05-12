@@ -16,6 +16,12 @@ const {
 const { normalizeClientRelationLinks } = require('../lib/client-relations');
 const { rentalMatchesEquipment } = require('../lib/rental-validation');
 const { LEGACY_AUDIT_COLLECTION, redactAuditValue } = require('../lib/security-audit');
+const {
+  cancelRentalDowntime,
+  createRentalDowntime,
+  normalizeRentalDowntimePeriods,
+  updateRentalDowntime,
+} = require('../lib/rental-downtime-periods');
 
 const AUDIT_COLLECTION = 'audit_logs';
 const RENTAL_AUDIT_LIMIT = 20;
@@ -739,6 +745,11 @@ function registerRentalRoutes(deps) {
         downtimeEndDate: ganttRental.downtimeEndDate,
         downtimeComment: ganttRental.downtimeComment,
         downtimeStatus: ganttRental.downtimeStatus,
+        downtimeAffectsBilling: ganttRental.downtimeAffectsBilling,
+        downtimeBillableDays: ganttRental.downtimeBillableDays,
+        billableDays: ganttRental.billableDays,
+        activeRentalDays: ganttRental.activeRentalDays,
+        downtimePeriods: Array.isArray(ganttRental.downtimePeriods) ? ganttRental.downtimePeriods : undefined,
         documents: Array.isArray(ganttRental.documents) ? ganttRental.documents : [],
         comments: '',
         history: [{
@@ -1419,6 +1430,211 @@ function registerRentalRoutes(deps) {
     });
 
     if (collection === 'rentals') {
+      function resolveRentalDowntimeRouteTarget(req, body = {}) {
+        const rentals = readData('rentals') || [];
+        const ganttRentals = readData('gantt_rentals') || [];
+        const routeId = String(req.params.id || '');
+        const linkedGanttRentalId = String(
+          body.linkedGanttRentalId ||
+          body.ganttRentalId ||
+          body.__linkedGanttRentalId ||
+          body.__ganttRentalId ||
+          ''
+        ).trim();
+        const fallbackGanttRental = body.ganttSnapshot || body.__ganttSnapshot || null;
+        const resolution = resolveRentalForChangeRequest({
+          rentalId: routeId,
+          linkedGanttRentalId,
+          fallbackGanttRental,
+          rentals,
+          ganttRentals,
+          equipment: readData('equipment') || [],
+          context: `rentals:downtimes:${routeId}`,
+        });
+        if (!resolution.ok) {
+          const restored = restoreOrphanGanttRentalIfSafe(req, rentals, {
+            ...body,
+            linkedGanttRentalId,
+            ganttRentalId: linkedGanttRentalId,
+          }, fallbackGanttRental, resolution);
+          if (restored?.restoredRental) {
+            const repairedRentals = readData('rentals') || [];
+            const repairedGanttRentals = readData('gantt_rentals') || [];
+            const repairedResolution = resolveRentalForChangeRequest({
+              rentalId: restored.restoredRental.id,
+              linkedGanttRentalId: restored.ganttRental?.id || linkedGanttRentalId,
+              fallbackGanttRental: restored.ganttRental || fallbackGanttRental,
+              rentals: repairedRentals,
+              ganttRentals: repairedGanttRentals,
+              equipment: readData('equipment') || [],
+              context: `rentals:downtimes:restored:${routeId}`,
+            });
+            if (repairedResolution.ok) {
+              return {
+                ok: true,
+                rentals: repairedRentals,
+                rental: repairedResolution.rental,
+                rentalIndex: repairedResolution.rentalIndex,
+                ganttRental: repairedResolution.linkedGanttRental || restored.ganttRental || null,
+                linkedGanttRentalId: restored.ganttRental?.id || linkedGanttRentalId,
+              };
+            }
+          }
+          return { ok: false, status: resolution.status || 404, error: resolution.error || 'Аренда для простоя не найдена.' };
+        }
+        return {
+          ok: true,
+          rentals,
+          rental: resolution.rental,
+          rentalIndex: resolution.rentalIndex,
+          ganttRental: resolution.linkedGanttRental || findLinkedGanttRental(resolution.rental, linkedGanttRentalId || routeId),
+          linkedGanttRentalId: linkedGanttRentalId || resolution.linkedGanttRentalId || resolution.linkedGanttRental?.id || '',
+        };
+      }
+
+      function rentalDowntimeHistoryEntry(action, downtime, author) {
+        const period = downtime?.startDate && downtime?.endDate
+          ? `${downtime.startDate} — ${downtime.endDate}`
+          : downtime?.startDate || '';
+        const reason = downtime?.reason ? ` · ${downtime.reason}` : '';
+        const billing = downtime?.affectsBilling ? ' · влияет на начисление' : ' · не влияет на начисление';
+        return {
+          date: new Date().toISOString(),
+          text: `${action}: ${period}${reason}${billing}`,
+          author: author || 'Система',
+          type: 'system',
+        };
+      }
+
+      function applyRentalDowntimeApproval(req, target, previousRental, nextRental, downtime, actionLabel) {
+        const change = {
+          field: 'downtimePeriods',
+          label: getFieldLabel('downtimePeriods'),
+          oldValue: previousRental.downtimePeriods,
+          newValue: nextRental.downtimePeriods,
+          type: 'Простой аренды',
+          reason: `${actionLabel}: ${downtime.startDate} — ${downtime.endDate}`,
+        };
+        const createdRequests = createApprovalRequests(previousRental, [change], {
+          linkedGanttRentalId: target.linkedGanttRentalId || target.ganttRental?.id || '',
+          sourceRentalId: previousRental.id,
+          rentalId: previousRental.id,
+          reason: change.reason,
+        }, req);
+        const nextWithHistory = appendRentalHistory(previousRental, buildRentalPendingApprovalHistoryEntries(createdRequests, req.user.userName));
+        target.rentals[target.rentalIndex] = nextWithHistory;
+        writeData('rentals', target.rentals);
+        auditLog?.(req, {
+          action: 'rentals.change_request',
+          entityType: 'rentals',
+          entityId: previousRental.id,
+          after: { requestIds: createdRequests.map(item => item.id), downtime },
+        });
+        return {
+          ok: true,
+          applied: false,
+          downtime,
+          rental: nextWithHistory,
+          approval: {
+            created: createdRequests.length > 0,
+            requestIds: createdRequests.map(item => item.id),
+          },
+        };
+      }
+
+      async function persistRentalDowntimeMutation(req, res, target, result, actionLabel) {
+        if (!result.ok) return res.status(result.status || 400).json({ ok: false, error: result.error });
+        const previousRental = target.rental;
+        const nextRental = appendRentalHistory(
+          result.rental,
+          [rentalDowntimeHistoryEntry(actionLabel, result.downtime, req.user.userName)],
+        );
+
+        if (req.user?.userRole === 'Менеджер по аренде') {
+          return res.status(202).json(applyRentalDowntimeApproval(req, target, previousRental, nextRental, result.downtime, actionLabel));
+        }
+
+        const validation = validateRentalPayload('rentals', nextRental, target.rentals, readData('equipment') || [], previousRental.id);
+        if (!validation.ok) return res.status(validation.status).json({ ok: false, error: validation.error });
+        const linkedValidation = validateLinkedGanttRental(target.linkedGanttRentalId || target.ganttRental?.id || '', previousRental, nextRental, req.user.userName);
+        if (!linkedValidation.ok) return res.status(linkedValidation.status).json({ ok: false, error: linkedValidation.error });
+
+        target.rentals[target.rentalIndex] = nextRental;
+        writeData('rentals', target.rentals);
+        syncLinkedGanttRental(target.linkedGanttRentalId || target.ganttRental?.id || '', previousRental, nextRental, req.user.userName);
+        auditLog?.(req, {
+          action: 'rentals.downtime',
+          entityType: 'rentals',
+          entityId: nextRental.id,
+          before: previousRental,
+          after: nextRental,
+          metadata: { downtimeId: result.downtime.id, actionLabel },
+        });
+        await emitRentalNotification(previousRental, nextRental);
+        const updatedGantt = (readData('gantt_rentals') || []).find(item =>
+          String(item.id || '') === String(target.linkedGanttRentalId || target.ganttRental?.id || '')
+        ) || null;
+        return res.json({ ok: true, applied: true, downtime: result.downtime, rental: nextRental, ganttRental: updatedGantt });
+      }
+
+      router.get(`/${collection}/:id/downtimes`, requireAuth, (req, res) => {
+        const target = resolveRentalDowntimeRouteTarget(req);
+        if (!target.ok) return res.status(target.status || 404).json({ ok: false, error: target.error });
+        try {
+          accessControl.assertCanUpdateEntity(collection, target.rental, req.user);
+        } catch (error) {
+          if (!accessControl.canAccessEntity(collection, target.rental, req.user)) {
+            return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+          }
+        }
+        return res.json({ ok: true, rentalId: target.rental.id, downtimes: normalizeRentalDowntimePeriods(target.rental) });
+      });
+
+      router.post(`/${collection}/:id/downtimes`, requireAuth, async (req, res) => {
+        const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
+        if (forbiddenReason) return res.status(403).json({ ok: false, error: forbiddenReason });
+        const target = resolveRentalDowntimeRouteTarget(req, req.body || {});
+        if (!target.ok) return res.status(target.status || 404).json({ ok: false, error: target.error });
+        try {
+          accessControl.assertCanUpdateEntity(collection, target.rental, req.user);
+        } catch (error) {
+          return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+        }
+        const result = createRentalDowntime(target.rental, req.body || {}, {
+          id: generateId(idPrefixes.rental_downtimes || 'RDT'),
+          author: req.user.userName,
+        });
+        return persistRentalDowntimeMutation(req, res, target, result, 'Простой создан');
+      });
+
+      router.patch(`/${collection}/:id/downtimes/:downtimeId`, requireAuth, async (req, res) => {
+        const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
+        if (forbiddenReason) return res.status(403).json({ ok: false, error: forbiddenReason });
+        const target = resolveRentalDowntimeRouteTarget(req, req.body || {});
+        if (!target.ok) return res.status(target.status || 404).json({ ok: false, error: target.error });
+        try {
+          accessControl.assertCanUpdateEntity(collection, target.rental, req.user);
+        } catch (error) {
+          return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+        }
+        const result = updateRentalDowntime(target.rental, req.params.downtimeId, req.body || {}, { author: req.user.userName });
+        return persistRentalDowntimeMutation(req, res, target, result, 'Простой изменён');
+      });
+
+      router.post(`/${collection}/:id/downtimes/:downtimeId/cancel`, requireAuth, async (req, res) => {
+        const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
+        if (forbiddenReason) return res.status(403).json({ ok: false, error: forbiddenReason });
+        const target = resolveRentalDowntimeRouteTarget(req, req.body || {});
+        if (!target.ok) return res.status(target.status || 404).json({ ok: false, error: target.error });
+        try {
+          accessControl.assertCanUpdateEntity(collection, target.rental, req.user);
+        } catch (error) {
+          return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+        }
+        const result = cancelRentalDowntime(target.rental, req.params.downtimeId, { author: req.user.userName });
+        return persistRentalDowntimeMutation(req, res, target, result, 'Простой отменён');
+      });
+
       router.post(`/${collection}/:id/extend`, requireAuth, async (req, res) => {
         const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
         if (forbiddenReason) {

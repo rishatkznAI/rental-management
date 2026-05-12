@@ -33,8 +33,9 @@ test('fleet planner persists equipment downtime and refreshes rows after save', 
   assert.match(rentalsSource, /queryKey:\s*RENTAL_KEYS\.downtimes/);
   assert.match(rentalsSource, /queryFn:\s*rentalsService\.getDowntimes/);
   assert.match(rentalsSource, /findDowntimeRentalFlowTarget/);
-  assert.match(rentalsSource, /downtimeFlow\.flow === 'rental'[\s\S]*requestClassicRentalChange/);
-  assert.match(rentalsSource, /buildRentalDowntimePatch\(payload\)/);
+  assert.match(rentalsSource, /downtimeFlow\.flow === 'rental'[\s\S]*saveAsRentalDowntime\(downtimeFlow\.rental\)/);
+  assert.match(rentalsSource, /rentalsService\.createRentalDowntime/);
+  assert.match(rentalsSource, /rentalsService\.updateRentalDowntime/);
   assert.doesNotMatch(rentalsSource, /data\.id\s*\?\s*\{\s*flow:\s*'standalone'\s*\}/);
   assert.match(rentalsSource, /rentalsService\.createDowntime\(payload\)/);
   assert.match(rentalsSource, /rentalsService\.updateDowntime\(data\.id,\s*payload\)/);
@@ -51,24 +52,28 @@ test('fleet planner row downtime action is visible and explicit', () => {
 });
 
 test('rental drawer downtime action opens downtime modal flow', () => {
-  assert.match(rentalDrawerSource, /onDowntime:\s*\(rental:\s*GanttRentalData\)\s*=>\s*void/);
+  assert.match(rentalDrawerSource, /onDowntime:\s*\(rental:\s*GanttRentalData,\s*downtime\?:\s*DowntimePeriod\)\s*=>\s*void/);
   assert.match(rentalDrawerSource, /Создать простой/);
   assert.match(rentalDrawerSource, /onClick=\{\(\)\s*=>\s*onDowntime\(rental\)\}/);
-  assert.match(rentalsSource, /onDowntime=\{\(rental\)\s*=>\s*\{/);
-  assert.match(rentalsSource, /handleOpenDowntime\(currentEquipment,\s*downtimePreset\)/);
+  assert.match(rentalDrawerSource, /Простои/);
+  assert.match(rentalDrawerSource, /downtimePeriods\.map/);
+  assert.match(rentalsSource, /onDowntime=\{\(rental,\s*downtime\)\s*=>\s*\{/);
+  assert.match(rentalsSource, /handleOpenDowntime\(currentEquipment,\s*downtimePreset,\s*rental\)/);
 });
 
 test('fleet planner shows rental downtime updates on rental bars', () => {
   assert.match(rentalsSource, /downtimeDays:\s*rental\.downtimeDays/);
   assert.match(rentalsSource, /downtimeStartDate:\s*rental\.downtimeStartDate/);
+  assert.match(rentalsSource, /downtimePeriods:\s*\(rental\.downtimePeriods/);
   assert.match(rentalsSource, /RENTAL_DOWNTIME_ID_PREFIX/);
-  assert.match(rentalsSource, /rentalDowntimePeriodFromRental/);
+  assert.match(rentalsSource, /rentalDowntimePeriodsFromRental/);
   assert.match(rentalsSource, /getRentalDowntimesForEquipment/);
   assert.match(rentalsSource, /mergeDowntimeLists\(getDowntimesForEquipment\(eq\),\s*getRentalDowntimesForEquipment\(eq\)\)/);
   assert.match(rentalsSource, /data\.id\?\.startsWith\(RENTAL_DOWNTIME_ID_PREFIX\)/);
-  assert.match(rentalsSource, /setGanttRentals\(current => current\.map\(item => item\.id === currentGanttRental\.id/);
+  assert.match(rentalsSource, /rentalDowntimePeriods\.map\(period =>/);
+  assert.match(rentalsSource, /setGanttRentals\(current => current\.map\(item => item\.id === response\.ganttRental\?\.id/);
   assert.match(rentalsSource, /data-payment-alert="downtime"/);
-  assert.match(rentalsSource, /Простой по аренде сохранён/);
+  assert.match(rentalsSource, /Простой аренды добавлен/);
 });
 
 test('fleet planner keeps equipment-id rentals out of inventory fallback buckets', () => {
@@ -87,6 +92,9 @@ test('downtime modal supports add edit close cancel and human validation', () =>
   assert.match(ganttModalsSource, /Отменить простой/);
   assert.match(ganttModalsSource, /Выберите технику для простоя/);
   assert.match(ganttModalsSource, /Укажите дату начала простоя/);
+  assert.match(ganttModalsSource, /Укажите дату окончания простоя/);
+  assert.match(ganttModalsSource, /Укажите причину простоя/);
+  assert.match(ganttModalsSource, /Влияет на начисление/);
   assert.match(ganttModalsSource, /Дата окончания простоя не может быть раньше даты начала/);
 });
 

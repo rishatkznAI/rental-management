@@ -35,6 +35,18 @@ export type RentalExtensionResponse = {
   };
 };
 
+export type RentalDowntimeResponse = {
+  ok: boolean;
+  applied?: boolean;
+  downtime: DowntimePeriod;
+  rental?: Rental;
+  ganttRental?: GanttRentalData | null;
+  approval?: {
+    created: boolean;
+    requestIds: string[];
+  };
+};
+
 export const rentalsService = {
   getAll: (): Promise<Rental[]> =>
     api.get<Rental[]>('/api/rentals'),
@@ -67,6 +79,9 @@ export const rentalsService = {
 
   getDowntimes: (): Promise<DowntimePeriod[]> =>
     api.get<DowntimePeriod[]>('/api/equipment_downtimes'),
+
+  getRentalDowntimes: (id: string): Promise<{ ok: boolean; rentalId: string; downtimes: DowntimePeriod[] }> =>
+    api.get(`/api/rentals/${id}/downtimes`),
 
   create: (data: Omit<Rental, 'id'>): Promise<Rental> =>
     api.post<Rental>('/api/rentals', data),
@@ -114,4 +129,17 @@ export const rentalsService = {
 
   updateDowntime: (id: string, data: Partial<DowntimePeriod>): Promise<DowntimePeriod> =>
     api.patch<DowntimePeriod>(`/api/equipment_downtimes/${id}`, data),
+
+  createRentalDowntime: (id: string, data: Omit<DowntimePeriod, 'id'> & Record<string, unknown>): Promise<RentalDowntimeResponse> =>
+    api.post<RentalDowntimeResponse>(`/api/rentals/${id}/downtimes`, data),
+
+  updateRentalDowntime: (
+    id: string,
+    downtimeId: string,
+    data: Partial<DowntimePeriod> & Record<string, unknown>,
+  ): Promise<RentalDowntimeResponse> =>
+    api.patch<RentalDowntimeResponse>(`/api/rentals/${id}/downtimes/${downtimeId}`, data),
+
+  cancelRentalDowntime: (id: string, downtimeId: string, data: Record<string, unknown> = {}): Promise<RentalDowntimeResponse> =>
+    api.post<RentalDowntimeResponse>(`/api/rentals/${id}/downtimes/${downtimeId}/cancel`, data),
 };

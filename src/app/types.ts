@@ -396,6 +396,25 @@ export interface ShippingPhoto {
 
 export type RentalStatus = 'new' | 'confirmed' | 'delivery' | 'active' | 'return_planned' | 'closed';
 
+export interface RentalDowntimePeriod {
+  id: string;
+  rentalId?: string;
+  ganttRentalId?: string;
+  clientId?: string;
+  equipmentId?: string;
+  equipmentInv?: string;
+  serialNumber?: string;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  comment?: string;
+  affectsBilling?: boolean;
+  status?: 'active' | 'closed' | 'cancelled';
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface Rental {
   id: string;
   clientId?: string;
@@ -421,6 +440,11 @@ export interface Rental {
   downtimeEndDate?: string;
   downtimeComment?: string;
   downtimeStatus?: 'active' | 'closed' | 'cancelled';
+  downtimeAffectsBilling?: boolean;
+  downtimeBillableDays?: number;
+  billableDays?: number;
+  activeRentalDays?: number;
+  downtimePeriods?: RentalDowntimePeriod[];
   documents?: string[];
   comments?: string;
   history?: AuditEntry[];

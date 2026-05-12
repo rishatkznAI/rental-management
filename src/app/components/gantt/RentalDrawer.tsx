@@ -17,6 +17,8 @@ import type { ClientReceivableRow } from '../../lib/finance';
 import { getEffectivePaidAmount } from '../../lib/finance';
 import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
 import { buildRentalServiceAlert, type RentalServiceAlertSeverity } from '../../lib/rentalServiceAlert';
+import { calculateRentalDowntimeSummary, getDowntimeRentalDays, normalizeRentalDowntimePeriods } from '../../lib/rentalDowntimeFlow.js';
+import type { DowntimePeriod } from '../../mock-data';
 
 interface RentalDrawerProps {
   rental: GanttRentalData | null;
@@ -40,7 +42,7 @@ interface RentalDrawerProps {
   canCreateService?: boolean;
   onClose: () => void;
   onReturn: (rental: GanttRentalData) => void;
-  onDowntime: (rental: GanttRentalData) => void;
+  onDowntime: (rental: GanttRentalData, downtime?: DowntimePeriod) => void;
   onStatusChange: (rental: GanttRentalData) => void;
   onRestore: (rental: GanttRentalData) => void;
   onDelete: (rental: GanttRentalData) => void;
@@ -234,6 +236,7 @@ export function RentalDrawer({
     || (rental as GanttRentalData & { actualReturnDate?: string; returnDate?: string }).returnDate
     || '';
   const isRentalFinished = rental.status === 'closed' || rental.status === 'returned';
+  const canManageDowntimes = canEditRentals && !isRentalFinished;
   const canExtendRentalTerm = canEditRentalDates && (rental.status === 'active' || rental.status === 'created') && !isRentalFinished;
   const canShowExtendShortcut = canEditRentalDates && rental.status === 'active' && !isRentalFinished;
   const canManageRentalReturn = canEditRentals && rental.status === 'active' && !isRentalFinished;
@@ -254,6 +257,8 @@ export function RentalDrawer({
   ].filter(Boolean).join(' ') || rental.equipmentInv || 'Техника не указана';
   const rentalLocation = clientProfile?.actualAddress || clientProfile?.address || clientProfile?.legalAddress || '—';
   const moneyValue = (value: number) => canViewMoney ? formatCurrency(value) : 'Скрыто';
+  const downtimeSummary = calculateRentalDowntimeSummary(rental);
+  const downtimePeriods = normalizeRentalDowntimePeriods(rental) as DowntimePeriod[];
   const nextPaymentLabel = canViewMoney
     ? rental.expectedPaymentDate
       ? `${formatDate(rental.expectedPaymentDate)} · ${remaining > 0 ? formatCurrency(remaining) : 'нет долга'}`
@@ -495,6 +500,60 @@ export function RentalDrawer({
                   <div className="text-xs font-medium text-blue-700 dark:text-blue-300">Следующий платёж</div>
                   <div className="mt-1 text-sm font-bold text-blue-700 dark:text-blue-300">{nextPaymentLabel}</div>
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-semibold text-amber-950 dark:text-amber-100">Простои</div>
+                    <div className="mt-0.5 text-xs text-amber-700 dark:text-amber-300">
+                      {downtimePeriods.length > 0
+                        ? `${downtimeSummary.downtimeDays} дн. простоя · ${downtimeSummary.billableDays || downtimeSummary.totalCalendarDays} дн. к начислению`
+                        : 'Периоды простоя не зафиксированы'}
+                    </div>
+                  </div>
+                  {canManageDowntimes && (
+                    <Button size="sm" variant="secondary" onClick={() => onDowntime(rental)}>
+                      <Plus className="h-3.5 w-3.5" />
+                      Добавить простой
+                    </Button>
+                  )}
+                </div>
+                {downtimePeriods.length > 0 && (
+                  <div className="space-y-2">
+                    {downtimePeriods.map(period => {
+                      const days = getDowntimeRentalDays(period.startDate, period.endDate);
+                      return (
+                        <div key={period.id} className="rounded-lg border border-amber-200 bg-white px-3 py-2 dark:border-amber-900/50 dark:bg-gray-950/40">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-slate-950 dark:text-white">
+                                {formatDate(period.startDate)} — {formatDate(period.endDate || period.startDate)} · {days} дн.
+                              </div>
+                              <div className="mt-1 text-xs text-slate-600 dark:text-gray-300">
+                                Причина: {period.reason || '—'}
+                              </div>
+                              {period.comment && (
+                                <div className="mt-1 text-xs text-slate-500 dark:text-gray-400">{period.comment}</div>
+                              )}
+                              <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                                {period.affectsBilling ? 'Влияет на начисление' : 'Не влияет на начисление'}
+                                {period.createdBy ? ` · ${period.createdBy}` : ''}
+                                {period.createdAt ? ` · ${formatDateTime(period.createdAt)}` : ''}
+                              </div>
+                            </div>
+                            {canManageDowntimes && (
+                              <Button size="sm" variant="ghost" onClick={() => onDowntime(rental, period)}>
+                                <Edit className="h-3.5 w-3.5" />
+                                Изменить
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/70">
@@ -1371,7 +1430,7 @@ export function RentalDrawer({
               Восстановить аренду
             </Button>
           )}
-          {canEditRentals && (
+          {canManageDowntimes && (
             <Button size="sm" variant="ghost" onClick={() => onDowntime(rental)}>
               <PauseCircle className="h-3.5 w-3.5" />
               Создать простой

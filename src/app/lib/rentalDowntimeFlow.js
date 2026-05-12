@@ -138,6 +138,82 @@ export function formatDowntimePeriod(startDate, endDate) {
   return end && end !== start ? `${start} → ${end}` : start;
 }
 
+export function normalizeRentalDowntimePeriod(period, rental = {}) {
+  const startDate = dateKey(period?.startDate || period?.downtimeStartDate);
+  const endDate = dateKey(period?.endDate || period?.downtimeEndDate || period?.startDate || period?.downtimeStartDate);
+  if (!startDate || !endDate) return null;
+  return {
+    id: text(period?.id),
+    rentalId: text(period?.rentalId) || canonicalDowntimeRentalId(rental),
+    ganttRentalId: text(period?.ganttRentalId || period?.linkedGanttRentalId) || text(rental?.id),
+    clientId: text(period?.clientId) || text(rental?.clientId),
+    equipmentId: text(period?.equipmentId) || text(rental?.equipmentId),
+    equipmentInv: text(period?.equipmentInv || period?.inventoryNumber) || text(rental?.equipmentInv || rental?.inventoryNumber),
+    serialNumber: text(period?.serialNumber) || text(rental?.serialNumber),
+    startDate,
+    endDate,
+    reason: text(period?.reason || period?.downtimeReason) || 'Простой аренды',
+    comment: text(period?.comment || period?.downtimeComment),
+    affectsBilling: period?.affectsBilling === true,
+    status: text(period?.status || period?.downtimeStatus) || 'active',
+    createdBy: text(period?.createdBy),
+    createdAt: text(period?.createdAt),
+    updatedAt: text(period?.updatedAt),
+  };
+}
+
+export function normalizeRentalDowntimePeriods(rental) {
+  const periods = Array.isArray(rental?.downtimePeriods)
+    ? rental.downtimePeriods.map(period => normalizeRentalDowntimePeriod(period, rental)).filter(Boolean).filter(period => period.id)
+    : [];
+  if (periods.length > 0) {
+    return periods
+      .filter(period => period.status !== 'cancelled')
+      .sort((left, right) => left.startDate.localeCompare(right.startDate) || left.endDate.localeCompare(right.endDate));
+  }
+  const legacy = buildLegacyRentalDowntimePeriod(rental);
+  return legacy ? [legacy] : [];
+}
+
+export function buildLegacyRentalDowntimePeriod(rental) {
+  if (!rental || rental.downtimeStatus === 'cancelled') return null;
+  const periodFromReason = String(rental.downtimeReason || '').match(/период\s+(\d{4}-\d{2}-\d{2})(?:\s*(?:→|->|-)\s*(\d{4}-\d{2}-\d{2}))?/i);
+  const startDate = dateKey(rental.downtimeStartDate || periodFromReason?.[1]);
+  const endDate = dateKey(rental.downtimeEndDate || rental.downtimeStartDate || periodFromReason?.[2] || periodFromReason?.[1]);
+  const days = Math.max(0, Number(rental.downtimeDays) || 0);
+  if (!startDate || (!days && !rental.downtimeReason)) return null;
+  return normalizeRentalDowntimePeriod({
+    id: `rental-downtime:${text(rental.id)}`,
+    rentalId: canonicalDowntimeRentalId(rental),
+    ganttRentalId: text(rental.id),
+    equipmentId: rental.equipmentId,
+    equipmentInv: rental.equipmentInv,
+    serialNumber: rental.serialNumber,
+    startDate,
+    endDate,
+    reason: rental.downtimeReason || 'Простой аренды',
+    comment: rental.downtimeComment || '',
+    affectsBilling: rental.downtimeAffectsBilling === true,
+    status: rental.downtimeStatus || 'active',
+  }, rental);
+}
+
+export function calculateRentalDowntimeSummary(rental) {
+  const periods = normalizeRentalDowntimePeriods(rental);
+  const totalCalendarDays = getDowntimeRentalDays(rental?.startDate, rental?.plannedReturnDate || rental?.endDate);
+  const downtimeDays = periods.reduce((sum, period) => sum + getDowntimeRentalDays(period.startDate, period.endDate), 0);
+  const billableDowntimeDays = periods
+    .filter(period => period.affectsBilling)
+    .reduce((sum, period) => sum + getDowntimeRentalDays(period.startDate, period.endDate), 0);
+  return {
+    periods,
+    totalCalendarDays,
+    downtimeDays,
+    billableDowntimeDays,
+    billableDays: totalCalendarDays ? Math.max(0, totalCalendarDays - billableDowntimeDays) : 0,
+  };
+}
+
 export function buildRentalDowntimePatch(downtime) {
   const reason = text(downtime?.reason) || 'Простой техники';
   const comment = text(downtime?.comment);

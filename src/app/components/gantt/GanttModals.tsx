@@ -318,6 +318,7 @@ interface DowntimeModalProps {
     endDate?: string;
     reason: string;
     comment?: string;
+    affectsBilling?: boolean;
     status: 'active' | 'closed' | 'cancelled';
   }) => void;
 }
@@ -337,6 +338,7 @@ export function DowntimeModal({
   const [endDate,   setEndDate]   = useState('');
   const [reason, setReason]       = useState('');
   const [comment, setComment]     = useState('');
+  const [affectsBilling, setAffectsBilling] = useState(false);
   const [status, setStatus]       = useState<'active' | 'closed' | 'cancelled'>('active');
   const [formError, setFormError] = useState('');
 
@@ -366,6 +368,7 @@ export function DowntimeModal({
     setEndDate(downtime?.endDate || '');
     setReason(downtime?.reason || '');
     setComment(downtime?.comment || '');
+    setAffectsBilling(downtime?.affectsBilling === true);
     setStatus(downtime?.status || 'active');
     setFormError('');
   }, [allEquipment, downtime, open, preselectedEquipmentId, preselectedEquipmentInv, today]);
@@ -397,8 +400,16 @@ export function DowntimeModal({
       setFormError('Укажите дату начала простоя.');
       return;
     }
-    if (nextEndDate && nextEndDate < startDate) {
+    if (!nextEndDate) {
+      setFormError('Укажите дату окончания простоя.');
+      return;
+    }
+    if (nextEndDate < startDate) {
       setFormError('Дата окончания простоя не может быть раньше даты начала.');
+      return;
+    }
+    if (!reason.trim()) {
+      setFormError('Укажите причину простоя.');
       return;
     }
 
@@ -412,6 +423,7 @@ export function DowntimeModal({
       endDate: nextEndDate,
       reason,
       comment,
+      affectsBilling,
       status: nextStatus,
     });
   };
@@ -477,6 +489,19 @@ export function DowntimeModal({
               placeholder="Что важно знать по этому простою"
             />
           </div>
+
+          <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-100">
+            <input
+              type="checkbox"
+              checked={affectsBilling}
+              onChange={(event) => setAffectsBilling(event.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+            />
+            <span>
+              <span className="block font-medium">Влияет на начисление</span>
+              <span className="block text-xs text-amber-700 dark:text-amber-300">Если включено, дни простоя будут вычитаться из дней к начислению.</span>
+            </span>
+          </label>
 
           {isEditing && (
             <div>

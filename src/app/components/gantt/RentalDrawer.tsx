@@ -40,6 +40,7 @@ interface RentalDrawerProps {
   canCreateService?: boolean;
   onClose: () => void;
   onReturn: (rental: GanttRentalData) => void;
+  onDowntime: (rental: GanttRentalData) => void;
   onStatusChange: (rental: GanttRentalData) => void;
   onRestore: (rental: GanttRentalData) => void;
   onDelete: (rental: GanttRentalData) => void;
@@ -110,7 +111,7 @@ export function RentalDrawer({
   clients = [], clientReceivables = [], managers = [],
   canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals,
   canViewMoney = true, canCreatePayments, canCreateDocuments = false, canCreateDeliveries = false, canCreateService = false,
-  onClose, onReturn, onStatusChange, onDelete,
+  onClose, onReturn, onDowntime, onStatusChange, onDelete,
   onRestore, onUpdate, onAddComment, onAddPayment, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
   const presence = useAnimatedPresence(Boolean(rentalProp), animationDurations.relaxed);
@@ -1370,10 +1371,12 @@ export function RentalDrawer({
               Восстановить аренду
             </Button>
           )}
-          <Button size="sm" variant="ghost">
-            <PauseCircle className="h-3.5 w-3.5" />
-            Создать простой
-          </Button>
+          {canEditRentals && (
+            <Button size="sm" variant="ghost" onClick={() => onDowntime(rental)}>
+              <PauseCircle className="h-3.5 w-3.5" />
+              Создать простой
+            </Button>
+          )}
 
           {canDeleteRentals && (
             <div className="ml-auto flex items-center gap-2">

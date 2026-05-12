@@ -7,6 +7,8 @@ const rentalsPagePath = path.join(process.cwd(), 'src/app/pages/Rentals.tsx');
 const rentalsSource = fs.readFileSync(rentalsPagePath, 'utf8');
 const ganttModalsPath = path.join(process.cwd(), 'src/app/components/gantt/GanttModals.tsx');
 const ganttModalsSource = fs.readFileSync(ganttModalsPath, 'utf8');
+const rentalDrawerPath = path.join(process.cwd(), 'src/app/components/gantt/RentalDrawer.tsx');
+const rentalDrawerSource = fs.readFileSync(rentalDrawerPath, 'utf8');
 
 test('rentals workspace tabs have clear active state and mode descriptions', () => {
   assert.match(rentalsSource, /aria-pressed=\{active\}/);
@@ -46,6 +48,14 @@ test('fleet planner row downtime action is visible and explicit', () => {
   assert.match(rentalsSource, /title="Добавить простой"[\s\S]*aria-label="Добавить простой"/);
   assert.match(rentalsSource, /<span>Простой<\/span>/);
   assert.doesNotMatch(rentalsSource, /opacity-0 transition-opacity group-hover:opacity-100/);
+});
+
+test('rental drawer downtime action opens downtime modal flow', () => {
+  assert.match(rentalDrawerSource, /onDowntime:\s*\(rental:\s*GanttRentalData\)\s*=>\s*void/);
+  assert.match(rentalDrawerSource, /Создать простой/);
+  assert.match(rentalDrawerSource, /onClick=\{\(\)\s*=>\s*onDowntime\(rental\)\}/);
+  assert.match(rentalsSource, /onDowntime=\{\(rental\)\s*=>\s*\{/);
+  assert.match(rentalsSource, /handleOpenDowntime\(currentEquipment,\s*downtimePreset\)/);
 });
 
 test('fleet planner shows rental downtime updates on rental bars', () => {

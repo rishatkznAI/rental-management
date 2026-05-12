@@ -5094,6 +5094,24 @@ export default function Rentals() {
             setSelectedRental(null);
             handleOpenReturn(r);
           }}
+          onDowntime={(rental) => {
+            if (!canEditRentals) return;
+            const currentEquipment = equipmentList.find(item => matchesEquipmentRow(rental, item));
+            const existingDowntime = rentalDowntimePeriodFromRental(rental);
+            const downtimePreset: DowntimePeriod = existingDowntime ?? {
+              id: '',
+              equipmentId: rental.equipmentId || currentEquipment?.id,
+              equipmentInv: rental.equipmentInv || currentEquipment?.inventoryNumber || '',
+              serialNumber: rental.serialNumber || currentEquipment?.serialNumber,
+              startDate: rental.downtimeStartDate || rental.startDate,
+              endDate: rental.downtimeEndDate || undefined,
+              reason: rental.downtimeReason || '',
+              comment: rental.downtimeComment || '',
+              status: rental.downtimeStatus || 'active',
+            };
+            setSelectedRental(null);
+            handleOpenDowntime(currentEquipment, downtimePreset);
+          }}
           onStatusChange={(rental) => {
             if (!canEditRentals) return;
             const currentEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));

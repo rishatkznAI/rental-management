@@ -54,6 +54,12 @@ import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { buildClientReceivables, buildRentalDebtRows, getEffectivePaidAmount, mergeClientsWithFinancials } from '../lib/finance';
 import { buildRentalPaymentBar } from '../lib/rentalTimeline.js';
 import {
+  DEFAULT_RENTAL_LIST_PAGE_SIZE,
+  RENTAL_LIST_PAGE_SIZE_OPTIONS,
+  getRentalListPageState,
+  normalizeRentalListPageSize,
+} from '../lib/rentalListPagination.js';
+import {
   buildRentalDowntimePatch,
   downtimeSaveErrorMessage,
   findDowntimeRentalFlowTarget,
@@ -1547,6 +1553,8 @@ export default function Rentals() {
   const [compactView, setCompactView] = useState<CompactView>('cards');
   const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
   const [rentalMovementScale, setRentalMovementScale] = useState<RentalMovementScale>('days');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_RENTAL_LIST_PAGE_SIZE);
   const [movementFilter, setMovementFilter] = useState<'all' | 'shipping' | 'receiving'>('all');
   const [isDesktopViewport, setIsDesktopViewport] = useState(() => (
     typeof window !== 'undefined'
@@ -2509,6 +2517,38 @@ export default function Rentals() {
     return rentalDealRows;
   }, [activeWorkspaceTab, debtDocsWorkspaceRows, rentalDealRows, returnsWorkspaceRows]);
 
+  const rentalListPagination = useMemo(
+    () => getRentalListPageState(workspaceTableRows, currentPage, pageSize),
+    [currentPage, pageSize, workspaceTableRows],
+  );
+  const paginatedRentals = rentalListPagination.pageItems;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    activeWorkspaceTab,
+    debtDocsDocumentFilter,
+    debtDocsProblemFilter,
+    filterClient,
+    filterManager,
+    filterModel,
+    filterOwner,
+    filterPayment,
+    filterStatus,
+    filterUpd,
+    pageSize,
+    rentalPreset,
+    returnDeliveryFilter,
+    returnServiceFilter,
+    returnStateFilter,
+  ]);
+
+  useEffect(() => {
+    if (currentPage !== rentalListPagination.currentPage) {
+      setCurrentPage(rentalListPagination.currentPage);
+    }
+  }, [currentPage, rentalListPagination.currentPage]);
+
   const returnsTabSummary = useMemo(() => {
     const todayKey = format(today, 'yyyy-MM-dd');
     const tomorrowKey = format(addDays(today, 1), 'yyyy-MM-dd');
@@ -3204,6 +3244,60 @@ export default function Rentals() {
   ], [returnsWorkspaceRows]);
 
   const hasReturnBoardRows = returnBoardColumns.some(column => column.rows.length > 0);
+
+  const rentalListPaginationControls = (placement: 'top' | 'bottom') => (
+    <div
+      data-rental-list-pagination={placement}
+      className={cn(
+        'flex min-w-0 flex-col gap-2 text-xs text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:justify-between',
+        placement === 'bottom' && 'border-t border-border px-4 py-3',
+      )}
+    >
+      <div className="min-w-0 font-medium text-foreground">
+        {rentalListPagination.rangeLabel}
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <label className="flex items-center gap-2">
+          <span className="text-muted-foreground">На странице</span>
+          <select
+            aria-label="Записей на странице"
+            value={pageSize}
+            onChange={event => {
+              setPageSize(normalizeRentalListPageSize(event.target.value));
+              setCurrentPage(1);
+            }}
+            className="h-9 rounded-xl border border-border bg-background px-3 text-sm font-semibold text-foreground outline-none focus:ring-2 focus:ring-[--color-primary]/30"
+          >
+            {RENTAL_LIST_PAGE_SIZE_OPTIONS.map(option => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-9 rounded-xl"
+            disabled={!rentalListPagination.hasPreviousPage}
+            onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+          >
+            Назад
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-9 rounded-xl"
+            disabled={!rentalListPagination.hasNextPage}
+            onClick={() => setCurrentPage(page => Math.min(rentalListPagination.maxPage, page + 1))}
+          >
+            Вперёд
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -4762,7 +4856,7 @@ export default function Rentals() {
 
             {activeWorkspaceTab !== 'returns' && (
             <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-              <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div className="flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <h2 className="text-base font-bold text-foreground">
                     {activeWorkspaceTab === 'returns'
@@ -4773,6 +4867,7 @@ export default function Rentals() {
                   </h2>
                   <p className="text-xs text-muted-foreground">{workspaceTableRows.length} записей по текущим фильтрам</p>
                 </div>
+                {rentalListPaginationControls('top')}
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-[1180px] w-full text-left text-sm">
@@ -4821,17 +4916,17 @@ export default function Rentals() {
                     )}
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {workspaceTableRows.length === 0 ? (
+                    {rentalListPagination.total === 0 ? (
                       <tr>
                         <td colSpan={activeWorkspaceTab === 'debt_docs' ? 12 : activeWorkspaceTab === 'returns' ? 9 : 11} className="px-4 py-12 text-center text-muted-foreground">
                           {activeWorkspaceTab === 'returns'
                             ? 'Нет актуальных возвратов за выбранный период.'
                             : activeWorkspaceTab === 'debt_docs'
                               ? 'Нет проблем по оплатам и документам.'
-                              : 'Аренды не найдены по выбранным фильтрам.'}
+                              : 'Ничего не найдено'}
                         </td>
                       </tr>
-                    ) : workspaceTableRows.map(row => {
+                    ) : paginatedRentals.map(row => {
                       const isSelected = selectedRental?.id === row.rental.id;
                       const statusClass = row.rental.status === 'active'
                         ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
@@ -5070,6 +5165,7 @@ export default function Rentals() {
                   </tbody>
                 </table>
               </div>
+              {rentalListPaginationControls('bottom')}
             </section>
             )}
           </div>

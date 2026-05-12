@@ -145,3 +145,30 @@ test('rentals workspace KPI cards have icons and honest compact trends', () => {
   assert.match(rentalsSource, /sparklineFallback: 'доставок в графике нет'/);
   assert.doesNotMatch(rentalsSource, /Math\.random|fake|mock trend|mockTrend/i);
 });
+
+test('rentals workspace paginates only the visual rental table', () => {
+  assert.match(rentalsSource, /DEFAULT_RENTAL_LIST_PAGE_SIZE/);
+  assert.match(rentalsSource, /RENTAL_LIST_PAGE_SIZE_OPTIONS/);
+  assert.match(rentalsSource, /const \[currentPage, setCurrentPage\] = useState\(1\)/);
+  assert.match(rentalsSource, /const \[pageSize, setPageSize\] = useState\(DEFAULT_RENTAL_LIST_PAGE_SIZE\)/);
+  assert.match(rentalsSource, /getRentalListPageState\(workspaceTableRows, currentPage, pageSize\)/);
+  assert.match(rentalsSource, /const paginatedRentals = rentalListPagination\.pageItems/);
+  assert.match(rentalsSource, /rentalListPagination\.total === 0/);
+  assert.match(rentalsSource, /\) : paginatedRentals\.map\(row =>/);
+  assert.doesNotMatch(rentalsSource, /workspaceTableRows\.map\(row =>/);
+  assert.match(rentalsSource, /\{workspaceTableRows\.length\} записей по текущим фильтрам/);
+  assert.match(rentalsSource, /const activeRows = rentalDealRows\.filter\(row => row\.isActive\)/);
+});
+
+test('rentals workspace pagination controls reset clamp and keep table actions working', () => {
+  assert.match(rentalsSource, /data-rental-list-pagination=\{placement\}/);
+  assert.match(rentalsSource, /rentalListPaginationControls\('top'\)/);
+  assert.match(rentalsSource, /rentalListPaginationControls\('bottom'\)/);
+  assert.match(rentalsSource, /aria-label="Записей на странице"/);
+  assert.match(rentalsSource, /disabled=\{!rentalListPagination\.hasPreviousPage\}[\s\S]*Назад/);
+  assert.match(rentalsSource, /disabled=\{!rentalListPagination\.hasNextPage\}[\s\S]*Вперёд/);
+  assert.match(rentalsSource, /setCurrentPage\(1\);[\s\S]*filterClient[\s\S]*filterManager[\s\S]*filterModel[\s\S]*filterStatus[\s\S]*pageSize[\s\S]*returnStateFilter/);
+  assert.match(rentalsSource, /if \(currentPage !== rentalListPagination\.currentPage\) \{[\s\S]*setCurrentPage\(rentalListPagination\.currentPage\)/);
+  assert.match(rentalsSource, /onClick=\{\(\) => setSelectedRental\(row\.rental\)\}/);
+  assert.match(rentalsSource, /Ничего не найдено/);
+});

@@ -1526,61 +1526,6 @@ export default function Rentals() {
 
     return response;
   }, [queryClient]);
-  // Очистка только «призрачных» черновиков:
-  // - 'created' с прошедшей endDate → 'closed'
-  // Просроченные активные аренды НЕ меняем автоматически:
-  // они должны остаться активными и попасть в сценарий «требует внимания».
-  React.useEffect(() => {
-    const todayStr = format(today, 'yyyy-MM-dd');
-    const current = ganttRentals;
-
-    const needsCleanup = current.some(r =>
-      r.status === 'created' && r.endDate < todayStr,
-    );
-
-    if (!needsCleanup) return;
-
-    const cleaned = current.map(r => {
-      if (r.status === 'created' && r.endDate < todayStr)
-        return { ...r, status: 'closed' as const };
-      return r;
-    });
-    void persistGanttRentals(cleaned);
-
-    // Для закрытых/возвращённых аренд: если у техники больше нет активных аренд —
-    // обновляем статус техники на 'available'.
-    const eqList = equipmentList;
-    const affectedEquipment = eqList.filter(e =>
-      current.some(r =>
-        (r.status === 'created' || r.status === 'active')
-        && r.endDate < todayStr
-        && matchesEquipmentRow(r, e),
-      ),
-    );
-    let eqChanged = false;
-    const updatedEq = eqList.map(e => {
-      if (!affectedEquipment.some(item => item.id === e.id)) return e;
-      const stillActive = cleaned.some(
-        r => matchesEquipmentRow(r, e)
-          && r.status !== 'returned'
-          && r.status !== 'closed',
-      );
-      if (!stillActive && e.status !== 'inactive' && e.status !== 'in_service') {
-        eqChanged = true;
-        return {
-          ...e,
-          status: hasOpenServiceTicketForEquipment(serviceTickets, e) ? 'in_service' as EquipmentStatus : 'available' as EquipmentStatus,
-          currentClient: undefined,
-          returnDate: undefined,
-        };
-      }
-      return e;
-    });
-    if (eqChanged) {
-      void persistEquipment(updatedEq);
-    }
-  }, [today, ganttRentals, equipmentList, persistEquipment, persistGanttRentals, serviceTickets]);
-
   const currentMonthStart = useMemo(() => startOfMonth(today), [today]);
   const currentMonthEnd = useMemo(() => endOfMonth(today), [today]);
   const [scale, setScale] = useState<Scale>('month');

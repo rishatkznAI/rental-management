@@ -44,6 +44,17 @@ test('fleet planner persists equipment downtime and refreshes rows after save', 
   assert.doesNotMatch(rentalsSource, /mockDowntimes/);
 });
 
+test('opening rentals workspace does not bulk-save gantt rows as cleanup', () => {
+  assert.doesNotMatch(
+    rentalsSource,
+    /React\.useEffect\(\(\)\s*=>\s*\{[\s\S]*status === 'created'[\s\S]*void persistGanttRentals\(cleaned\)/,
+  );
+  assert.doesNotMatch(
+    rentalsSource,
+    /React\.useEffect\(\(\)\s*=>\s*\{[\s\S]*bulkReplaceGantt/,
+  );
+});
+
 test('fleet planner row downtime action is visible and explicit', () => {
   assert.match(rentalsSource, /opacity-100 transition-opacity/);
   assert.match(rentalsSource, /title="Добавить простой"[\s\S]*aria-label="Добавить простой"/);

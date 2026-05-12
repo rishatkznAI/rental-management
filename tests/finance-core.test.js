@@ -12,7 +12,90 @@ const {
   buildOverdueBuckets,
   buildClientDebtAgingRows,
   buildFinanceReport,
+  calculateRentalBilling,
 } = require('../server/lib/finance-core.js');
+
+test('calculateRentalBilling keeps rentals without downtimes unchanged', () => {
+  const billing = calculateRentalBilling({
+    id: 'gr-no-downtime',
+    startDate: '2026-05-01',
+    endDate: '2026-05-31',
+    amount: 310000,
+  });
+
+  assert.equal(billing.totalCalendarDays, 31);
+  assert.equal(billing.downtimeDays, 0);
+  assert.equal(billing.billableDays, 31);
+  assert.equal(billing.finalRentalAmount, 310000);
+});
+
+test('calculateRentalBilling subtracts only billing downtime periods', () => {
+  const billing = calculateRentalBilling({
+    id: 'gr-metal',
+    startDate: '2026-05-01',
+    endDate: '2026-05-31',
+    amount: 310000,
+    downtimePeriods: [
+      {
+        id: 'dt-1',
+        rentalId: 'gr-metal',
+        startDate: '2026-05-01',
+        endDate: '2026-05-07',
+        reason: 'ожидание клиента',
+        affectsBilling: true,
+        status: 'active',
+      },
+      {
+        id: 'dt-2',
+        rentalId: 'gr-metal',
+        startDate: '2026-05-13',
+        endDate: '2026-05-17',
+        reason: 'эвакуатор не мог забрать технику',
+        affectsBilling: false,
+        status: 'active',
+      },
+    ],
+  });
+
+  assert.equal(billing.downtimeDays, 12);
+  assert.equal(billing.billingDowntimeDays, 7);
+  assert.equal(billing.nonBillingDowntimeDays, 5);
+  assert.equal(billing.billableDays, 24);
+  assert.equal(billing.activeRentalDays, 19);
+  assert.equal(billing.grossRentalAmount, 310000);
+  assert.equal(billing.downtimeAdjustmentAmount, 70000);
+  assert.equal(billing.finalRentalAmount, 240000);
+});
+
+test('calculateRentalBilling distributes downtime across month boundary', () => {
+  const rental = {
+    id: 'gr-cross-month',
+    startDate: '2026-05-25',
+    endDate: '2026-06-10',
+    amount: 170000,
+    downtimePeriods: [
+      {
+        id: 'dt-cross',
+        rentalId: 'gr-cross-month',
+        startDate: '2026-05-30',
+        endDate: '2026-06-03',
+        reason: 'ожидание возврата',
+        affectsBilling: true,
+        status: 'active',
+      },
+    ],
+  };
+
+  const may = calculateRentalBilling(rental, { periodStart: '2026-05-01', periodEnd: '2026-05-31' });
+  const june = calculateRentalBilling(rental, { periodStart: '2026-06-01', periodEnd: '2026-06-30' });
+
+  assert.equal(may.totalCalendarDays, 7);
+  assert.equal(may.billingDowntimeDays, 2);
+  assert.equal(may.finalRentalAmount, 50000);
+  assert.equal(june.totalCalendarDays, 10);
+  assert.equal(june.billingDowntimeDays, 3);
+  assert.equal(june.finalRentalAmount, 70000);
+});
 
 test('buildRentalDebtRows calculates outstanding from related payments', () => {
   const rows = buildRentalDebtRows(
@@ -40,6 +123,54 @@ test('buildRentalDebtRows calculates outstanding from related payments', () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].paidAmount, 40000);
   assert.equal(rows[0].outstanding, 60000);
+});
+
+test('buildRentalDebtRows uses downtime-adjusted rental amount', () => {
+  const rows = buildRentalDebtRows(
+    [
+      {
+        id: 'gr-downtime-debt',
+        clientId: 'c-1',
+        client: 'Металл',
+        equipmentInv: '013',
+        manager: 'Руслан',
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+        amount: 310000,
+        paymentStatus: 'partial',
+        status: 'active',
+        downtimePeriods: [
+          {
+            id: 'dt-1',
+            rentalId: 'gr-downtime-debt',
+            startDate: '2026-05-01',
+            endDate: '2026-05-07',
+            reason: 'ожидание клиента',
+            affectsBilling: true,
+            status: 'active',
+          },
+          {
+            id: 'dt-2',
+            rentalId: 'gr-downtime-debt',
+            startDate: '2026-05-13',
+            endDate: '2026-05-17',
+            reason: 'эвакуатор не мог забрать технику',
+            affectsBilling: true,
+            status: 'active',
+          },
+        ],
+      },
+    ],
+    [
+      { id: 'p-1', rentalId: 'gr-downtime-debt', amount: 310000, paidAmount: 100000, status: 'partial' },
+    ],
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].grossAmount, 310000);
+  assert.equal(rows[0].downtimeAdjustmentAmount, 120000);
+  assert.equal(rows[0].amount, 190000);
+  assert.equal(rows[0].outstanding, 90000);
 });
 
 test('buildRentalDebtRows keeps overpayment from creating negative debt', () => {

@@ -123,6 +123,34 @@ test('manager report period filter takes only the selected month share', () => {
   assert.equal(rows[0].debt, 18400);
 });
 
+test('manager report uses downtime-adjusted monthly accruals', () => {
+  const rows = buildManagerReportRows([
+    rental({
+      id: 'R-downtime',
+      startDate: '2026-05-25',
+      endDate: '2026-06-10',
+      amount: 170000,
+      downtimePeriods: [
+        {
+          id: 'DT-cross',
+          rentalId: 'R-downtime',
+          startDate: '2026-05-30',
+          endDate: '2026-06-03',
+          reason: 'эвакуатор не мог забрать технику',
+          affectsBilling: true,
+          status: 'active',
+        },
+      ],
+    }),
+  ], equipment, []);
+  const months = byMonth(rows);
+
+  assert.equal(rows.length, 2);
+  assert.equal(months['2026-05'].amount, 50000);
+  assert.equal(months['2026-06'].amount, 70000);
+  assert.equal(rows.reduce((sum, row) => sum + row.amount, 0), 120000);
+});
+
 test('manager report filters by manager client payment UPD status type and inventory', () => {
   const rows = buildManagerReportRows([
     rental({ id: 'R-1', client: 'ООО Альфа', manager: 'Руслан', updSigned: true, amount: 10000 }),

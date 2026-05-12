@@ -76,6 +76,7 @@ import type {
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
+import { calculateRentalBilling, getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
 import { buildDocumentControl } from '../lib/documentControl.js';
 import { buildDebtCollectionDashboardSummary } from '../lib/debtCollectionPlans.js';
@@ -620,6 +621,7 @@ export default function Dashboard() {
 
   // Equipment in service
   const equipmentInServiceList = equipment.filter(e => e.status === 'in_service');
+  const todayKey = today.toISOString().slice(0, 10);
 
   // Week revenue: sum of prices of rentals that started in the last 7 days, OR active rentals
   const weekStartedRentals = viewRentals.filter(r => {
@@ -627,18 +629,15 @@ export default function Dashboard() {
     return start >= weekAgo && (r.status === 'active' || r.status === 'closed' || r.status === 'confirmed');
   });
   const weekRevenue = weekStartedRentals.length > 0
-    ? weekStartedRentals.reduce((sum, r) => sum + (r.price || 0), 0)
+    ? weekStartedRentals.reduce((sum, r) => sum + getRentalBillingAmount(r), 0)
     : activeRentalsList.reduce((sum, r) => {
-        // Approximate daily rate × 7 for active rentals
-        const start = new Date(r.startDate);
-        const end = new Date(r.plannedReturnDate);
-        const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000));
-        const dailyRate = (r.price || 0) / totalDays;
-        return sum + dailyRate * 7;
+        return sum + calculateRentalBilling(r, {
+          periodStart: toDateKey(weekAgo),
+          periodEnd: todayKey,
+        }).finalRentalAmount;
       }, 0);
 
   // Debt
-  const todayKey = today.toISOString().slice(0, 10);
   const overduePayments = rentalDebtRows.filter(row =>
     (row.expectedPaymentDate && row.expectedPaymentDate < todayKey) || row.endDate < todayKey,
   );
@@ -692,7 +691,7 @@ export default function Dashboard() {
     const start = new Date(r.startDate);
     return start >= monthStart;
   });
-  const myMonthRevenue = myMonthRentals.reduce((sum, r) => sum + (r.amount || 0), 0);
+  const myMonthRevenue = myMonthRentals.reduce((sum, r) => sum + getRentalBillingAmount(r), 0);
 
   // Debt for current manager
   const myManualDebt = currentUserName
@@ -1150,7 +1149,7 @@ export default function Dashboard() {
         name,
         activeRentals: managerActiveRentals.length,
         monthRentals: managerMonthRentals.length,
-        monthRevenue: managerMonthRentals.reduce((sum, item) => sum + (item.amount || 0), 0),
+        monthRevenue: managerMonthRentals.reduce((sum, item) => sum + getRentalBillingAmount(item), 0),
         currentDebt: managerDebtRows.reduce((sum, item) => sum + item.outstanding, managerManualDebt),
         overdueDebt: managerOverdueRows.reduce((sum, item) => sum + item.outstanding, 0),
         returnsSoon: managerReturnsSoon,
@@ -1312,7 +1311,7 @@ export default function Dashboard() {
   const rentalsWithDebtThisMonth = rentalDebtRows.filter(row =>
     row.outstanding > 0 && (monthlyRentalIds.has(row.rentalId) || isDateInRange(row.startDate || row.endDate, monthStart, monthEnd)),
   );
-  const monthlyRevenue = rentalsStartedThisMonth.reduce((sum, rental) => sum + Number(rental.amount || 0), 0);
+  const monthlyRevenue = rentalsStartedThisMonth.reduce((sum, rental) => sum + getRentalBillingAmount(rental), 0);
   const monthlyPayments = payments.filter(payment =>
     isDateInRange(payment.paidDate || payment.dueDate, monthStart, monthEnd),
   );
@@ -1516,7 +1515,7 @@ export default function Dashboard() {
     const map = new Map(monthDayBuckets.map(bucket => [bucket.key, { ...bucket, revenue: 0, payments: 0 }]));
     rentalsStartedThisMonth.forEach(rental => {
       const target = map.get(toDateKey(rental.startDate));
-      if (target) target.revenue += Number(rental.amount || 0);
+      if (target) target.revenue += getRentalBillingAmount(rental);
     });
     monthlyPayments.forEach(payment => {
       const target = map.get(toDateKey(payment.paidDate || payment.dueDate));
@@ -2169,7 +2168,7 @@ export default function Dashboard() {
         ...rental,
         equipment: [rental.equipmentInv],
         plannedReturnDate: rental.endDate,
-        price: rental.amount,
+        price: getRentalBillingAmount(rental),
         link: '/rentals',
       })),
     },
@@ -3805,7 +3804,7 @@ export default function Dashboard() {
                       </div>
                       <div className="ml-3 shrink-0 text-right">
                         <p className="text-[17px] font-semibold text-foreground sm:text-[18px]">
-                          {canViewMoney && rental.amount > 0 ? formatCurrency(rental.amount) : '—'}
+                          {canViewMoney && getRentalBillingAmount(rental) > 0 ? formatCurrency(getRentalBillingAmount(rental)) : '—'}
                         </p>
                         <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${
                           rental.status === 'active'

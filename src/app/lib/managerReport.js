@@ -1,3 +1,5 @@
+import { calculateRentalBilling } from './rentalDowntimeFlow.js';
+
 const MONTH_NAMES = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
@@ -233,12 +235,12 @@ export function buildManagerReportRows(rentals, equipmentList, payments, period 
     if (parts.length === 0) continue;
 
     const relatedPayments = paysByRental.get(rental.id) ?? [];
-    const rentalAmount = toMoney(rental.amount);
     const rentalPaid = relatedPayments.reduce((sum, payment) => sum + getManagerReportPaidAmount(payment), 0);
-    const weights = parts.map(part => part.days);
-    const totalDays = getRentalTotalDays(rental);
-    const amountParts = splitMoneyByWeights(rentalAmount, weights, totalDays);
-    const paidParts = splitMoneyByWeights(rentalPaid, weights, totalDays);
+    const amountParts = parts.map(part => calculateRentalBilling(rental, {
+      periodStart: part.allocationStartDate,
+      periodEnd: part.allocationEndDate,
+    }).finalRentalAmount);
+    const paidParts = splitMoneyByWeights(rentalPaid, amountParts, calculateRentalBilling(rental).finalRentalAmount);
 
     let latestPaidDate = '';
     for (const payment of relatedPayments) {

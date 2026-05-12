@@ -1,5 +1,6 @@
 import type { GanttRentalData } from '../mock-data';
 import type { Client, Payment } from '../types';
+import { calculateRentalBilling } from './rentalDowntimeFlow.js';
 
 export interface RentalDebtRow {
   rentalId: string;
@@ -13,6 +14,11 @@ export interface RentalDebtRow {
   endDate: string;
   expectedPaymentDate?: string;
   amount: number;
+  grossAmount?: number;
+  downtimeAdjustmentAmount?: number;
+  downtimeDays?: number;
+  billingDowntimeDays?: number;
+  billableDays?: number;
   paidAmount: number;
   outstanding: number;
   paymentStatus: GanttRentalData['paymentStatus'];
@@ -176,7 +182,9 @@ export function buildRentalDebtRows(
     .map(rental => {
       const relatedPayments = byRentalId.get(rental.id) ?? [];
       const paidAmount = relatedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
-      const outstanding = Math.max(0, (rental.amount || 0) - paidAmount);
+      const billing = calculateRentalBilling(rental);
+      const amount = billing.finalRentalAmount;
+      const outstanding = Math.max(0, amount - paidAmount);
       const paymentStatus: GanttRentalData['paymentStatus'] = outstanding <= 0
         ? 'paid'
         : paidAmount > 0
@@ -193,7 +201,12 @@ export function buildRentalDebtRows(
         startDate: rental.startDate,
         endDate: rental.endDate,
         expectedPaymentDate: rental.expectedPaymentDate,
-        amount: rental.amount || 0,
+        amount,
+        grossAmount: billing.grossRentalAmount,
+        downtimeAdjustmentAmount: billing.downtimeAdjustmentAmount,
+        downtimeDays: billing.downtimeDays,
+        billingDowntimeDays: billing.billingDowntimeDays,
+        billableDays: billing.billableDays,
         paidAmount,
         outstanding,
         paymentStatus,

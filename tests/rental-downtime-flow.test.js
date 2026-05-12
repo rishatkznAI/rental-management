@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   buildRentalDowntimePatch,
+  calculateRentalBilling,
   calculateRentalDowntimeSummary,
   findDowntimeRentalFlowTarget,
   normalizeRentalDowntimePeriods,
@@ -117,6 +118,40 @@ test('duplicate gantt rows choose active before created for downtime rental-flow
 
   assert.equal(target.flow, 'rental');
   assert.equal(target.rental.id, 'GR-active');
+});
+
+test('frontend rental billing sums multiple billing downtimes', () => {
+  const billing = calculateRentalBilling({
+    id: 'GR-metal',
+    startDate: '2026-05-01',
+    endDate: '2026-05-31',
+    amount: 310000,
+    downtimePeriods: [
+      {
+        id: 'DT-1',
+        rentalId: 'GR-metal',
+        startDate: '2026-05-01',
+        endDate: '2026-05-07',
+        reason: 'ожидание клиента',
+        affectsBilling: true,
+        status: 'active',
+      },
+      {
+        id: 'DT-2',
+        rentalId: 'GR-metal',
+        startDate: '2026-05-13',
+        endDate: '2026-05-17',
+        reason: 'эвакуатор не мог забрать технику',
+        affectsBilling: true,
+        status: 'active',
+      },
+    ],
+  });
+
+  assert.equal(billing.totalCalendarDays, 31);
+  assert.equal(billing.billingDowntimeDays, 12);
+  assert.equal(billing.billableDays, 19);
+  assert.equal(billing.finalRentalAmount, 190000);
 });
 
 test('duplicate gantt rows dedupe by source and original rental ids', () => {
@@ -365,5 +400,6 @@ test('frontend downtime summary reads multiple downtime periods for planner and 
     downtimeDays: 12,
     billableDowntimeDays: 7,
     billableDays: 24,
+    activeRentalDays: 19,
   });
 });

@@ -2,6 +2,7 @@ const { createBotUi } = require('./bot-ui');
 const { resolveUserByLogin } = require('./auth-login');
 const { createBotFormatters } = require('./bot-formatters');
 const { createBotOperations } = require('./bot-operations');
+const { getRentalBillingAmount } = require('./rental-billing');
 const { SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE } = require('./service-audit-log');
 const {
   DELIVERY_STATUS_LABELS,
@@ -442,13 +443,13 @@ function createBotHandlers(deps) {
 
     const currentDebt = managerRentals.reduce((sum, rental) => {
       const paid = paidByRentalId.get(rental.id) || 0;
-      return sum + Math.max(0, Number(rental.amount || 0) - paid);
+      return sum + Math.max(0, getRentalBillingAmount(rental) - paid);
     }, 0);
 
     const freeEquipment = equipment.filter(item => item.status === 'available');
     return {
       activeRentals,
-      monthTurnover: monthRentals.reduce((sum, rental) => sum + Number(rental.amount || 0), 0),
+      monthTurnover: monthRentals.reduce((sum, rental) => sum + getRentalBillingAmount(rental), 0),
       currentDebt,
       freeEquipment,
     };

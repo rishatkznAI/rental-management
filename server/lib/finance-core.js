@@ -8,6 +8,7 @@ const {
 const {
   buildLeasingSummary,
 } = require('./leasing-core');
+const { calculateRentalBilling, getRentalBillingAmount } = require('./rental-billing');
 
 function toNumber(value) {
   const numeric = Number(value);
@@ -119,7 +120,8 @@ function buildRentalDebtRows(rentals, payments) {
     .map(rental => {
       const relatedPayments = byRentalId.get(rental.id) || [];
       const paidAmount = relatedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
-      const amount = toNumber(rental.amount);
+      const billing = calculateRentalBilling(rental);
+      const amount = billing.finalRentalAmount;
       const outstanding = Math.max(0, amount - paidAmount);
       const paymentStatus = outstanding <= 0
         ? 'paid'
@@ -139,6 +141,11 @@ function buildRentalDebtRows(rentals, payments) {
         endDate: rental.endDate || '',
         expectedPaymentDate: rental.expectedPaymentDate || '',
         amount,
+        grossAmount: billing.grossRentalAmount,
+        downtimeAdjustmentAmount: billing.downtimeAdjustmentAmount,
+        downtimeDays: billing.downtimeDays,
+        billingDowntimeDays: billing.billingDowntimeDays,
+        billableDays: billing.billableDays,
         paidAmount,
         outstanding,
         paymentStatus,
@@ -402,6 +409,8 @@ module.exports = {
   getEffectivePaidAmount,
   getRentalDebtOverdueDays,
   buildRentalDebtRows,
+  calculateRentalBilling,
+  getRentalBillingAmount,
   buildClientReceivables,
   buildClientFinancialSnapshots,
   buildManagerReceivables,

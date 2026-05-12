@@ -35,6 +35,7 @@ import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
 import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
+import { getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import { buildClient360Summary } from '../lib/client360.js';
 import { buildClientQuickActions } from '../lib/quickActions.js';
 import { resolveRentalNavigationId } from '../lib/rentalNavigation.js';
@@ -1557,7 +1558,7 @@ export default function ClientDetail() {
                           </div>
                           {canViewFinance && (
                             <div className="col-span-2 text-left text-sm font-semibold text-gray-950 dark:text-white sm:col-span-1 sm:self-start sm:pt-1 sm:text-right">
-                              {formatCurrency(rental.amount || 0)}
+                              {formatCurrency(getRentalBillingAmount(rental))}
                             </div>
                           )}
                         </button>
@@ -2346,7 +2347,7 @@ export default function ClientDetail() {
                           </div>
                           <div className="text-right shrink-0">
                             <p className="font-semibold text-sm text-gray-900 dark:text-white">
-                              {canViewFinance ? formatCurrency(rental.amount || 0) : 'Сумма скрыта'}
+                              {canViewFinance ? formatCurrency(getRentalBillingAmount(rental)) : 'Сумма скрыта'}
                             </p>
                             <p className="text-xs text-gray-500">{rental.manager || '—'}</p>
                             {navigationId ? (

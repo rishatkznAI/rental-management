@@ -1,5 +1,6 @@
 const { createRentalHistoryEntry } = require('./audit-history');
 const { resolveRentalEquipment } = require('./equipment-matching');
+const { getRentalBillingAmount } = require('./rental-billing');
 
 const RENTAL_CHANGE_REQUEST_STATUS = {
   PENDING: 'pending',
@@ -1163,7 +1164,9 @@ function calculateRentalDebt(rental, payments = []) {
   const paidAmount = (payments || [])
     .filter(payment => payment.rentalId === rental.id)
     .reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
-  return Math.max((Number(rental.price) || 0) - (Number(rental.discount) || 0) - paidAmount, 0);
+  const discountedPrice = Math.max(0, (Number(rental.price) || 0) - (Number(rental.discount) || 0));
+  const amount = getRentalBillingAmount({ ...rental, price: discountedPrice });
+  return Math.max(amount - paidAmount, 0);
 }
 
 function hasProtectedKeyword(field) {

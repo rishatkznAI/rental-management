@@ -58,6 +58,7 @@ import {
   downtimeSaveErrorMessage,
   findDowntimeRentalFlowTarget,
   getDowntimeRentalDays,
+  getRentalBillingAmount,
   normalizeRentalDowntimePeriods,
 } from '../lib/rentalDowntimeFlow.js';
 import {
@@ -2358,7 +2359,7 @@ export default function Rentals() {
           (!!sourceRentalId && payment.rentalId === sourceRentalId),
         );
         const paidAmount = linkedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
-        const amount = rental.amount || classicRental?.price || 0;
+        const amount = getRentalBillingAmount({ ...rental, price: classicRental?.price ?? rental.amount });
         const debtAmount = Math.max(0, amount - paidAmount);
         const dueDate = rental.expectedPaymentDate || rental.endDate;
         const isOverdueDebt = debtAmount > 0 && !!dueDate && dueDate < todayKey;
@@ -2858,7 +2859,7 @@ export default function Rentals() {
       rentalId,
       clientId: rental.clientId,
       client: rental.client,
-      amount: rental.amount,
+      amount: getRentalBillingAmount(rental),
       paidAmount: amount,
       dueDate: rental.expectedPaymentDate || rental.endDate,
       paidDate,
@@ -2873,7 +2874,8 @@ export default function Rentals() {
     const rentalPayments = allPayments.filter(p => p.rentalId === rentalId);
     const totalPaid = rentalPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
     let newPaymentStatus: GanttRentalData['paymentStatus'] = 'unpaid';
-    if (totalPaid >= rental.amount) newPaymentStatus = 'paid';
+    const billingAmount = getRentalBillingAmount(rental);
+    if (totalPaid >= billingAmount) newPaymentStatus = 'paid';
     else if (totalPaid > 0) newPaymentStatus = 'partial';
 
     const updatedRentals = ganttRentals.map(r =>

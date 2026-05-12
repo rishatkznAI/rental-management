@@ -1,3 +1,5 @@
+import { getRentalBillingAmount } from './rentalDowntimeFlow.js';
+
 const DAY_MS = 86400000;
 
 function normalizeText(value) {
@@ -149,7 +151,7 @@ function pushSegment(segments, tone, start, end, rentalStart, totalDays) {
 
 export function classifyRentalPaymentTone(rental, debtRow, todayKey = dateKey(new Date())) {
   const status = normalizeStatus(debtRow?.paymentStatus || rental?.paymentStatus);
-  const amount = safeNumber(debtRow?.amount ?? rental?.amount);
+  const amount = safeNumber(debtRow?.amount ?? getRentalBillingAmount(rental));
   const paidAmount = safeNumber(debtRow?.paidAmount);
   const outstanding = safeNumber(debtRow?.outstanding);
   const hasDebtFacts = Boolean(debtRow);
@@ -194,7 +196,7 @@ export function buildRentalPaymentBar(rental, debtRow, todayKey = dateKey(new Da
   }
 
   const status = normalizeStatus(debtRow?.paymentStatus || rental?.paymentStatus);
-  const amount = readAmount(debtRow?.amount, rental?.totalAmount, rental?.amount);
+  const amount = readAmount(debtRow?.amount, getRentalBillingAmount(rental), rental?.totalAmount, rental?.amount);
   const paidAmount = readAmount(debtRow?.paidAmount, rental?.paidAmount, rental?.paid);
   const explicitOutstanding = readAmount(debtRow?.outstanding, debtRow?.debt, rental?.outstanding, rental?.debt);
   const outstanding = status === 'paid'

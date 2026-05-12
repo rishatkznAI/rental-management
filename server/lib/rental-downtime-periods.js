@@ -196,6 +196,7 @@ function summarizeRentalDowntimes(rental) {
     .reduce((sum, period) => sum + inclusiveDays(period.startDate, period.endDate), 0);
   const totalCalendarDays = inclusiveDays(rentalStartDate(rental), rentalEndDate(rental));
   const billableDays = totalCalendarDays ? Math.max(0, totalCalendarDays - billableDowntimeDays) : 0;
+  const activeRentalDays = totalCalendarDays ? Math.max(0, totalCalendarDays - downtimeDays) : 0;
   const latest = activePeriods[activePeriods.length - 1] || null;
   return {
     periods,
@@ -203,7 +204,7 @@ function summarizeRentalDowntimes(rental) {
     downtimeDays,
     billableDowntimeDays,
     billableDays,
-    activeRentalDays: billableDays,
+    activeRentalDays,
     latest,
   };
 }

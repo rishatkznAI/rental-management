@@ -4,6 +4,7 @@ const {
   readNumberingSettings,
   writeNumberingSettings,
 } = require('../lib/documents-core');
+const { getRentalBillingAmount } = require('../lib/rental-billing');
 
 function registerFinanceRoutes(router, deps) {
   const {
@@ -614,7 +615,7 @@ function registerFinanceRoutes(router, deps) {
         name: manager,
         activeRentals: managerActiveRentals.length,
         monthRentals: managerMonthRentals.length,
-        monthRevenue: managerMonthRentals.reduce((sum, item) => sum + (item.amount || 0), 0),
+        monthRevenue: managerMonthRentals.reduce((sum, item) => sum + getRentalBillingAmount(item), 0),
         currentDebt: managerDebtRows.reduce((sum, item) => sum + item.outstanding, managerManualDebt),
         overdueDebt: managerOverdueRows.reduce((sum, item) => sum + item.outstanding, 0),
         returnsSoon: managerReturnsSoonRentals.length,
@@ -629,7 +630,7 @@ function registerFinanceRoutes(router, deps) {
           equipmentInv: item.equipmentInv || '',
           startDate: item.startDate || '',
           endDate: item.endDate || '',
-          amount: item.amount || 0,
+          amount: getRentalBillingAmount(item),
           status: item.status || 'created',
         })),
       currentDebtRows: managerDebtRows.map(decorateDebtRow),
@@ -643,7 +644,7 @@ function registerFinanceRoutes(router, deps) {
           equipmentInv: item.equipmentInv || '',
           startDate: item.startDate || '',
           endDate: item.endDate || '',
-          amount: item.amount || 0,
+          amount: getRentalBillingAmount(item),
           status: item.status || 'created',
         })),
       unsignedDocuments: managerUnsignedDocuments

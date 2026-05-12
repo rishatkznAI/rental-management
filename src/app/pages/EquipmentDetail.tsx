@@ -26,6 +26,7 @@ import {
 import type { Equipment, EquipmentOwnerType, EquipmentSalePdiStatus, EquipmentSaleReceiptStatus, RepairEventType } from '../types';
 import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS, EQUIPMENT_SALE_RECEIPT_OPTIONS, normalizeEquipment } from '../lib/equipmentClassification';
 import type { GanttRentalData } from '../mock-data';
+import { getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { usePermissions } from '../lib/permissions';
@@ -1549,16 +1550,12 @@ export default function EquipmentDetail() {
   const utilizationMonth = Math.round((Math.min(daysRentedThisMonth, daysInCurrentMonth) / daysInCurrentMonth) * 100);
 
   const actualMonthRevenue = monthRentals.reduce((sum, r) => {
-    const rentalDays = getRentalDays(r.startDate, r.endDate);
-    if (rentalDays <= 0) return sum;
-    const dailyRate = r.amount / rentalDays;
-    const daysInPeriod = getRentalOverlapDays(r.startDate, r.endDate, monthStartStr, monthEndStr);
-    return sum + dailyRate * daysInPeriod;
+    return sum + getRentalBillingAmount(r, { periodStart: monthStartStr, periodEnd: monthEndStr });
   }, 0);
 
   const totalRevenue = ganttRentals
     .filter(r => r.status === 'returned' || r.status === 'closed' || r.status === 'active')
-    .reduce((sum, r) => sum + r.amount, 0);
+    .reduce((sum, r) => sum + getRentalBillingAmount(r), 0);
 
   // ── Manager commission calculation ──
   const getManagerCommission = () => {

@@ -17,7 +17,7 @@ import type { ClientReceivableRow } from '../../lib/finance';
 import { getEffectivePaidAmount } from '../../lib/finance';
 import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
 import { buildRentalServiceAlert, type RentalServiceAlertSeverity } from '../../lib/rentalServiceAlert';
-import { calculateRentalDowntimeSummary, getDowntimeRentalDays, normalizeRentalDowntimePeriods } from '../../lib/rentalDowntimeFlow.js';
+import { calculateRentalBilling, calculateRentalDowntimeSummary, getDowntimeRentalDays, normalizeRentalDowntimePeriods } from '../../lib/rentalDowntimeFlow.js';
 import type { DowntimePeriod } from '../../mock-data';
 
 interface RentalDrawerProps {
@@ -211,7 +211,9 @@ export function RentalDrawer({
   // Payments for this rental
   const rentalPayments = payments.filter(p => p.rentalId === rental.id);
   const totalPaid = rentalPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
-  const remaining = Math.max(0, rental.amount - totalPaid);
+  const rentalBilling = calculateRentalBilling(rental);
+  const rentalBillingAmount = rentalBilling.finalRentalAmount;
+  const remaining = Math.max(0, rentalBillingAmount - totalPaid);
   const canRegisterPayment = canCreatePayments && remaining > 0;
   const todayKey = new Date().toISOString().slice(0, 10);
   const isReturnOverdue = rental.status === 'active' && rental.endDate < todayKey;
@@ -486,7 +488,7 @@ export function RentalDrawer({
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
                   <div className="text-xs font-medium text-slate-500 dark:text-gray-400">Сумма аренды</div>
-                  <div className="mt-1 text-sm font-bold text-slate-950 dark:text-white">{moneyValue(rental.amount)}</div>
+                  <div className="mt-1 text-sm font-bold text-slate-950 dark:text-white">{moneyValue(rentalBillingAmount)}</div>
                 </div>
                 <div className="rounded-xl border border-green-200 bg-green-50 px-3 py-2.5 dark:border-green-900/50 dark:bg-green-950/20">
                   <div className="text-xs font-medium text-green-700 dark:text-green-300">Оплачено</div>
@@ -501,6 +503,21 @@ export function RentalDrawer({
                   <div className="mt-1 text-sm font-bold text-blue-700 dark:text-blue-300">{nextPaymentLabel}</div>
                 </div>
               </div>
+
+              {canViewMoney && rentalBilling.downtimeDays > 0 && (
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-600 dark:border-gray-800 dark:bg-gray-900/70 dark:text-gray-300">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>Календарные дни: <span className="font-semibold text-slate-950 dark:text-white">{rentalBilling.totalCalendarDays}</span></div>
+                    <div>Оплачиваемые дни: <span className="font-semibold text-slate-950 dark:text-white">{rentalBilling.billableDays}</span></div>
+                    <div>Простои всего: <span className="font-semibold text-slate-950 dark:text-white">{rentalBilling.downtimeDays}</span></div>
+                    <div>Влияют на начисление: <span className="font-semibold text-slate-950 dark:text-white">{rentalBilling.billingDowntimeDays}</span></div>
+                    <div>Ставка: <span className="font-semibold text-slate-950 dark:text-white">{moneyValue(rentalBilling.dailyRate)}</span></div>
+                    <div>Корректировка: <span className="font-semibold text-amber-700 dark:text-amber-300">-{moneyValue(rentalBilling.downtimeAdjustmentAmount)}</span></div>
+                    <div>До корректировки: <span className="font-semibold text-slate-950 dark:text-white">{moneyValue(rentalBilling.grossRentalAmount)}</span></div>
+                    <div>Итог: <span className="font-semibold text-slate-950 dark:text-white">{moneyValue(rentalBilling.finalRentalAmount)}</span></div>
+                  </div>
+                </div>
+              )}
 
               <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
                 <div className="mb-3 flex items-center justify-between gap-2">
@@ -968,7 +985,7 @@ export function RentalDrawer({
                   {paymentLabels[rental.paymentStatus]}
                 </Badge>
                 <div className="text-right">
-                  <div className="text-lg font-semibold text-gray-900 dark:text-white">{formatCurrency(rental.amount)}</div>
+                  <div className="text-lg font-semibold text-gray-900 dark:text-white">{formatCurrency(rentalBillingAmount)}</div>
                   <div className="text-xs text-gray-500">общая сумма</div>
                 </div>
               </div>

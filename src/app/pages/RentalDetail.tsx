@@ -49,6 +49,7 @@ import {
   getRentalExtensionValidation,
 } from '../lib/rentalExtension.js';
 import { calculateRentalAmount, formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
+import { getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import type { Client, ClientContract, ClientObject, Document, DocumentType, Equipment, Payment, PaymentStatus, Rental, RentalStatus, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
@@ -473,12 +474,13 @@ export default function RentalDetail() {
   );
 
   const rentalDays = getRentalDays(rental?.startDate || '', rental?.plannedReturnDate || '');
+  const rentalBillingAmount = rental ? getRentalBillingAmount(rental) : 0;
   const editingDays = getRentalDays(formState?.startDate || '', formState?.plannedReturnDate || '');
   const priceValue = Number(formState?.price);
   const discountValue = Number(formState?.discount);
   const nextTotal = Number.isFinite(priceValue) ? priceValue : (rental?.price || 0);
   const nextDiscount = Number.isFinite(discountValue) ? discountValue : (rental?.discount || 0);
-  const remainingBalance = (rental?.price || 0) - (rental?.discount || 0) - paidAmount;
+  const remainingBalance = rentalBillingAmount - (rental?.discount || 0) - paidAmount;
   const nextRemainingBalance = nextTotal - nextDiscount - paidAmount;
   const clientDebt = Math.max(remainingBalance, selectedClient?.debt || 0);
   const extensionPreview = useMemo(() => {
@@ -749,7 +751,7 @@ export default function RentalDetail() {
     const lastInvoiceNumber = documents
       .filter(doc => documentBelongsToRental(doc, rental.id) && doc.type === 'invoice')
       .sort((a, b) => b.date.localeCompare(a.date))[0]?.number || `INV-${rental.id}`;
-    const suggestedAmount = Math.max((rental.price || 0) - paidAmount, 0);
+    const suggestedAmount = Math.max(getRentalBillingAmount(rental) - paidAmount, 0);
     setPaymentForm({
       invoiceNumber: lastInvoiceNumber,
       amount: String(suggestedAmount),
@@ -767,7 +769,7 @@ export default function RentalDetail() {
       return sum + getEffectivePaidAmount(payment);
     }, 0);
     let paymentStatus: GanttRentalData['paymentStatus'] = 'unpaid';
-    if (totalPaidForRental >= (linkedGanttRental.amount || rental.price || 0)) paymentStatus = 'paid';
+    if (totalPaidForRental >= getRentalBillingAmount(linkedGanttRental || rental)) paymentStatus = 'paid';
     else if (totalPaidForRental > 0) paymentStatus = 'partial';
     await rentalsService.updateGanttEntry(linkedGanttRental.id, {
       ...appendRentalHistory(
@@ -1385,7 +1387,7 @@ export default function RentalDetail() {
                   </div>
                 ) : (
                   <>
-                    <p className="mt-0.5 text-2xl font-bold text-gray-900 dark:text-white">{formatCurrency(rental.price)}</p>
+                    <p className="mt-0.5 text-2xl font-bold text-gray-900 dark:text-white">{formatCurrency(rentalBillingAmount)}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">{rental.rate} · {rentalDays} дн.</p>
                   </>
                 )}
@@ -1904,7 +1906,7 @@ export default function RentalDetail() {
                 <>
                   <div className="flex justify-between gap-3">
                     <span className="text-gray-500 dark:text-gray-400">Текущая сумма</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(rental.price || 0)}</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(rentalBillingAmount)}</span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-gray-500 dark:text-gray-400">Доплата за продление</span>

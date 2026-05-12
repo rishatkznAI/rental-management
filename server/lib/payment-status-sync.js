@@ -1,3 +1,5 @@
+const { getRentalBillingAmount } = require('./rental-billing');
+
 const IGNORED_PAYMENT_STATUSES = new Set([
   'cancelled',
   'canceled',
@@ -33,8 +35,7 @@ function getEffectivePaidAmount(payment) {
 function deriveRentalPaymentStatus(rental, payments) {
   if (!rental) return 'unpaid';
 
-  const amount = Number(rental.amount);
-  const totalAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+  const totalAmount = getRentalBillingAmount(rental);
   const totalPaid = (payments || [])
     .filter(payment => payment?.rentalId === rental.id)
     .reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);

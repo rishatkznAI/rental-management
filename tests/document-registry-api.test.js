@@ -123,6 +123,175 @@ test('documents API creates documents with automatic numbers and separate sequen
   });
 });
 
+test('closing rental documents snapshot downtime-adjusted billing amount', async () => {
+  const { app, state } = createApp();
+  state.rentals = [{
+    id: 'R-metal',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    manager: 'Руслан',
+    startDate: '2026-05-01',
+    plannedReturnDate: '2026-05-31',
+    price: 310000,
+  }];
+  state.gantt_rentals = [{
+    id: 'GR-metal',
+    rentalId: 'R-metal',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    manager: 'Руслан',
+    startDate: '2026-05-01',
+    endDate: '2026-05-31',
+    amount: 310000,
+    downtimePeriods: [
+      { id: 'DT-1', rentalId: 'R-metal', startDate: '2026-05-01', endDate: '2026-05-07', reason: 'ожидание клиента', affectsBilling: true, status: 'active' },
+      { id: 'DT-2', rentalId: 'R-metal', startDate: '2026-05-13', endDate: '2026-05-17', reason: 'эвакуатор не мог забрать технику', affectsBilling: true, status: 'active' },
+    ],
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const act = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'act',
+      clientId: 'C-1',
+      client: 'ООО Клиент',
+      rentalId: 'R-metal',
+      amount: 310000,
+      date: '2026-05-31',
+      status: 'draft',
+    });
+
+    assert.equal(act.response.status, 201);
+    assert.equal(act.json.amount, 190000);
+    assert.equal(act.json.rentalBillingSnapshot.grossRentalAmount, 310000);
+    assert.equal(act.json.rentalBillingSnapshot.downtimeAdjustmentAmount, 120000);
+    assert.equal(act.json.rentalBillingSnapshot.finalRentalAmount, 190000);
+    assert.equal(act.json.rentalBillingSnapshot.billingDowntimeDays, 12);
+
+    const upd = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'upd',
+      clientId: 'C-1',
+      client: 'ООО Клиент',
+      rentalId: 'R-metal',
+      date: '2026-05-31',
+      status: 'draft',
+    });
+
+    assert.equal(upd.response.status, 201);
+    assert.equal(upd.json.amount, 190000);
+    assert.equal(upd.json.billingSnapshot.billableDays, 19);
+  });
+});
+
+test('document snapshots stay fixed and new documents use current downtime billing', async () => {
+  const { app, state } = createApp();
+  state.rentals = [{
+    id: 'R-snapshot',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    manager: 'Руслан',
+    startDate: '2026-05-01',
+    plannedReturnDate: '2026-05-31',
+    price: 310000,
+  }];
+  state.gantt_rentals = [{
+    id: 'GR-snapshot',
+    rentalId: 'R-snapshot',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    manager: 'Руслан',
+    startDate: '2026-05-01',
+    endDate: '2026-05-31',
+    amount: 310000,
+    downtimePeriods: [
+      { id: 'DT-1', rentalId: 'R-snapshot', startDate: '2026-05-01', endDate: '2026-05-07', reason: 'ожидание клиента', affectsBilling: true, status: 'active' },
+    ],
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const first = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'act',
+      clientId: 'C-1',
+      client: 'ООО Клиент',
+      rentalId: 'R-snapshot',
+      date: '2026-05-31',
+      status: 'draft',
+    });
+    assert.equal(first.response.status, 201);
+    assert.equal(first.json.amount, 240000);
+
+    state.gantt_rentals[0].downtimePeriods.push(
+      { id: 'DT-2', rentalId: 'R-snapshot', startDate: '2026-05-13', endDate: '2026-05-17', reason: 'эвакуатор', affectsBilling: true, status: 'active' },
+    );
+
+    const oldDoc = await request(baseUrl, 'GET', `/api/documents/${first.json.id}`, 'office');
+    assert.equal(oldDoc.response.status, 200);
+    assert.equal(oldDoc.json.amount, 240000);
+    assert.equal(oldDoc.json.rentalBillingSnapshot.finalRentalAmount, 240000);
+
+    const second = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'act',
+      clientId: 'C-1',
+      client: 'ООО Клиент',
+      rentalId: 'R-snapshot',
+      date: '2026-05-31',
+      status: 'draft',
+    });
+    assert.equal(second.response.status, 201);
+    assert.equal(second.json.amount, 190000);
+    assert.equal(second.json.rentalBillingSnapshot.finalRentalAmount, 190000);
+  });
+});
+
+test('contract and custom invoice amounts are not overwritten by downtime billing', async () => {
+  const { app, state } = createApp();
+  state.rentals = [{
+    id: 'R-contract',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    startDate: '2026-05-01',
+    plannedReturnDate: '2026-05-31',
+    price: 310000,
+  }];
+  state.gantt_rentals = [{
+    id: 'GR-contract',
+    rentalId: 'R-contract',
+    startDate: '2026-05-01',
+    endDate: '2026-05-31',
+    amount: 310000,
+    downtimePeriods: [
+      { id: 'DT-1', rentalId: 'R-contract', startDate: '2026-05-01', endDate: '2026-05-07', reason: 'ожидание клиента', affectsBilling: true, status: 'active' },
+    ],
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const contract = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'contract',
+      clientId: 'C-1',
+      client: 'ООО Клиент',
+      rentalId: 'R-contract',
+      amount: 310000,
+      date: '2026-05-01',
+      status: 'draft',
+    });
+    assert.equal(contract.response.status, 201);
+    assert.equal(contract.json.amount, 310000);
+    assert.equal(contract.json.rentalBillingSnapshot.finalRentalAmount, 240000);
+
+    const invoice = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'invoice',
+      clientId: 'C-1',
+      client: 'ООО Клиент',
+      rentalId: 'R-contract',
+      amount: 50000,
+      date: '2026-05-10',
+      status: 'draft',
+    });
+    assert.equal(invoice.response.status, 201);
+    assert.equal(invoice.json.amount, 50000);
+    assert.equal(invoice.json.rentalBillingSnapshot.finalRentalAmount, 240000);
+  });
+});
+
 test('documents API rejects duplicate manual numbers and PATCH duplicates', async () => {
   const { app } = createApp();
   await withServer(app, async (baseUrl) => {

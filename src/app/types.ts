@@ -988,6 +988,32 @@ export interface Document {
   date: string;
   documentDate?: string;
   amount?: number;
+  rentalBillingSnapshot?: {
+    source?: string;
+    rentalId?: string;
+    generatedAt?: string;
+    totalCalendarDays?: number;
+    downtimeDays?: number;
+    billingDowntimeDays?: number;
+    nonBillingDowntimeDays?: number;
+    billableDays?: number;
+    activeRentalDays?: number;
+    dailyRate?: number;
+    grossRentalAmount?: number;
+    downtimeAdjustmentAmount?: number;
+    finalRentalAmount?: number;
+    downtimePeriods?: Array<{
+      id?: string;
+      startDate?: string;
+      endDate?: string;
+      reason?: string;
+      comment?: string;
+      affectsBilling?: boolean;
+      status?: string;
+      days?: number;
+    }>;
+  };
+  billingSnapshot?: Document['rentalBillingSnapshot'];
   status: DocumentStatus;
   signatoryName?: string;
   signatoryBasis?: string;

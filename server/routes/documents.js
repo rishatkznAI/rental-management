@@ -1,5 +1,6 @@
 const express = require('express');
 const { normalizeRole } = require('../lib/role-groups');
+const { calculateRentalBilling } = require('../lib/rental-billing');
 const {
   buildDocumentRegistrySummary,
   documentNumber,
@@ -58,6 +59,82 @@ function registerDocumentRoutes(router, deps) {
       if (item?.id) map.set(String(item.id), item);
     });
     return map;
+  }
+
+  function canonicalRentalId(record) {
+    return String(record?.rentalId || record?.sourceRentalId || record?.originalRentalId || record?.id || '').trim();
+  }
+
+  function findDocumentRental(rentalId) {
+    const wanted = String(rentalId || '').trim();
+    if (!wanted) return null;
+    const rentals = readData('rentals') || [];
+    const ganttRentals = readData('gantt_rentals') || [];
+    const classic = rentals.find(item => String(item?.id || '') === wanted) || null;
+    const gantt = ganttRentals.find(item =>
+      String(item?.id || '') === wanted ||
+      canonicalRentalId(item) === wanted
+    ) || null;
+    if (!classic && !gantt) return null;
+    return {
+      ...(classic || {}),
+      ...(gantt || {}),
+      id: classic?.id || canonicalRentalId(gantt) || gantt?.id || wanted,
+      amount: gantt?.amount ?? classic?.amount ?? classic?.price,
+      price: classic?.price ?? gantt?.amount,
+      downtimePeriods: Array.isArray(gantt?.downtimePeriods)
+        ? gantt.downtimePeriods
+        : (Array.isArray(classic?.downtimePeriods) ? classic.downtimePeriods : undefined),
+      startDate: gantt?.startDate || classic?.startDate,
+      endDate: gantt?.endDate || classic?.plannedReturnDate || classic?.endDate,
+      plannedReturnDate: gantt?.plannedReturnDate || classic?.plannedReturnDate,
+    };
+  }
+
+  function shouldApplyRentalBillingSnapshot(doc) {
+    const type = String(doc?.documentType || doc?.type || '').trim().toLowerCase();
+    return type === 'act' || type === 'upd';
+  }
+
+  function withRentalBillingSnapshot(doc) {
+    const rentalId = doc?.rentalId || doc?.rental;
+    if (!rentalId) return doc;
+    const rental = findDocumentRental(rentalId);
+    if (!rental) return doc;
+    const billing = calculateRentalBilling(rental);
+    const snapshot = {
+      source: 'rental-billing',
+      rentalId: String(rental.id || rentalId),
+      generatedAt: nowIso(),
+      totalCalendarDays: billing.totalCalendarDays,
+      downtimeDays: billing.downtimeDays,
+      billingDowntimeDays: billing.billingDowntimeDays,
+      nonBillingDowntimeDays: billing.nonBillingDowntimeDays,
+      billableDays: billing.billableDays,
+      activeRentalDays: billing.activeRentalDays,
+      dailyRate: billing.dailyRate,
+      grossRentalAmount: billing.grossRentalAmount,
+      downtimeAdjustmentAmount: billing.downtimeAdjustmentAmount,
+      finalRentalAmount: billing.finalRentalAmount,
+      downtimePeriods: billing.scopedPeriods.map(period => ({
+        id: period.id,
+        startDate: period.startDate,
+        endDate: period.endDate,
+        reason: period.reason,
+        comment: period.comment,
+        affectsBilling: period.affectsBilling,
+        status: period.status,
+        days: period.days,
+      })),
+    };
+    return {
+      ...doc,
+      amount: shouldApplyRentalBillingSnapshot(doc)
+        ? billing.finalRentalAmount
+        : (doc.amount ?? billing.finalRentalAmount),
+      rentalBillingSnapshot: doc.rentalBillingSnapshot || snapshot,
+      billingSnapshot: doc.billingSnapshot || snapshot,
+    };
   }
 
   function normalizeDocumentDomainRecord(item, existing = null) {
@@ -174,7 +251,7 @@ function registerDocumentRoutes(router, deps) {
         return res.status(403).json({ ok: false, error: 'Ручной номер документа может задать только администратор или офис-менеджер' });
       }
       const documents = readData('documents') || [];
-      const normalized = normalizeDocumentDomainRecord({ ...input, id: input.id || generateId(idPrefixes.documents || 'D') });
+      const normalized = withRentalBillingSnapshot(normalizeDocumentDomainRecord({ ...input, id: input.id || generateId(idPrefixes.documents || 'D') }));
       const prepared = prepareDocumentCreate(normalized, {
         documents,
         settings: readSettings(),

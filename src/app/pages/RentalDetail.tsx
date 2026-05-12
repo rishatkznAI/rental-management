@@ -554,12 +554,12 @@ export default function RentalDetail() {
       label: linkedGanttRental.id,
       date: linkedGanttRental.startDate,
       documentStatus: 'draft' as const,
-      documentAmount: linkedGanttRental.amount ?? rental.price ?? 0,
+      documentAmount: getRentalBillingAmount(linkedGanttRental || rental),
       dueDate: linkedGanttRental.expectedPaymentDate || linkedGanttRental.endDate,
       paidAmount,
       payments: relatedPayments,
     }];
-  }, [linkedGanttRental, paidAmount, paymentsByInvoice, relatedInvoices, relatedPayments, rental?.price]);
+  }, [linkedGanttRental, paidAmount, paymentsByInvoice, relatedInvoices, relatedPayments, rental]);
 
   const conflictingRental = useMemo(() => {
     if (!isEditing || !formState) return null;
@@ -745,7 +745,7 @@ export default function RentalDetail() {
       type: 'invoice',
       number: nextDocumentNumber('invoice', rental.id, existingCount),
       date: new Date().toISOString().slice(0, 10),
-      amount: String(rental.price || 0),
+      amount: String(rentalBillingAmount),
       status: 'draft',
     });
     const lastInvoiceNumber = documents
@@ -761,7 +761,7 @@ export default function RentalDetail() {
       status: 'pending',
       comment: '',
     });
-  }, [documents, linkedGanttRental?.expectedPaymentDate, paidAmount, rental]);
+  }, [documents, linkedGanttRental?.expectedPaymentDate, paidAmount, rental, rentalBillingAmount]);
 
   const syncPaymentStatus = React.useCallback(async (nextPayments: typeof relatedPayments) => {
     if (!linkedGanttRental) return;
@@ -1506,7 +1506,7 @@ export default function RentalDetail() {
                       ...prev,
                       type: 'act',
                       number: nextDocumentNumber('act', rental.id, relatedDocs.length),
-                      amount: String(rental.price || 0),
+                      amount: String(rentalBillingAmount),
                     }));
                     setDocumentDialogOpen(true);
                   }}

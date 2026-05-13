@@ -254,6 +254,87 @@ test('/api/admin/rental-equipment-diagnostics is admin-only', async () => {
   });
 });
 
+test('/api/admin/diagnostics/gantt-rentals-repair is admin-only', async () => {
+  const { app } = createSystemApp({
+    requireAuth: (req, _res, next) => {
+      req.user = { userId: 'U-manager', userRole: 'Менеджер по аренде' };
+      next();
+    },
+    requireAdmin: (req, res, next) => {
+      if (req.user?.userRole !== 'Администратор') {
+        return res.status(403).json({ ok: false, error: 'Forbidden: admin only' });
+      }
+      return next();
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/diagnostics/gantt-rentals-repair');
+    assert.equal(response.status, 403);
+  });
+});
+
+test('/api/admin/diagnostics/gantt-rentals-repair returns read-only sanitized report', async () => {
+  const collections = {
+    equipment: [{ id: 'EQ-1', inventoryNumber: 'INV-1', serialNumber: 'SN-1', model: 'Genie S-65' }],
+    rentals: [
+      { id: 'R-valid', clientId: 'C-1', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-05-01', endDate: '2026-05-10' },
+      { id: 'R-candidate', clientId: 'C-2', client: 'Safe Client', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-06-01', endDate: '2026-06-10' },
+    ],
+    gantt_rentals: [
+      { id: 'GR-valid', rentalId: 'R-valid', clientId: 'C-1', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-05-01', endDate: '2026-05-10' },
+      {
+        id: 'GR-1776257615497',
+        clientId: 'C-2',
+        client: 'Safe Client',
+        equipmentId: 'EQ-1',
+        inventoryNumber: 'INV-1',
+        startDate: '2026-06-01',
+        endDate: '2026-06-10',
+        status: 'active',
+        amount: 9000,
+        price: 1000,
+        manager: 'Sensitive Manager',
+        phone: '+79990000000',
+      },
+      { id: 'GR-stale', clientId: 'C-3', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-07-01', endDate: '2026-07-10' },
+    ],
+    documents: [{ id: 'DOC-1', rentalId: 'GR-stale', fileUrl: 'https://example.test/private.pdf' }],
+    payments: [{ id: 'PAY-1', rentalId: 'GR-stale', amount: 5000 }],
+    deliveries: [],
+    service: [],
+  };
+  const before = JSON.stringify(collections);
+  let writeCount = 0;
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: () => { writeCount += 1; },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/diagnostics/gantt-rentals-repair');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.productionDataChanged, false);
+    assert.equal(response.body.counts.rentals, 2);
+    assert.equal(response.body.counts.ganttRentals, 3);
+    assert.equal(response.body.counts.validLinks, 1);
+    assert.equal(response.body.counts.brokenRows, 2);
+    assert.equal(response.body.groups.B[0].ganttId, 'GR-1776257615497');
+    assert.equal(response.body.groups.B[0].flags.hasSafeSingleCandidate, true);
+    assert.deepEqual(response.body.groups.B[0].candidateIds, ['R-candidate']);
+    assert.equal(response.body.groups.C[0].flags.hasDocuments, true);
+    assert.equal(response.body.groups.C[0].flags.hasPayments, true);
+    assert.equal(response.body.target.id, 'GR-1776257615497');
+    assert.equal(response.body.target.found, true);
+    assert.equal(response.body.target.broken, true);
+    assert.equal(response.body.target.row.reason, 'POSSIBLE_LEGACY_RENTAL');
+    assert.equal(writeCount, 0);
+    assert.equal(JSON.stringify(collections), before);
+    assert.doesNotMatch(JSON.stringify(response.body), /9000|5000|Sensitive Manager|\+7999|private\.pdf|amount|price|manager|phone|fileUrl/i);
+  });
+});
+
 test('/api/admin/rental-equipment-diagnostics/backfill dry-run does not write and confirm applies repairs', async () => {
   const collections = {
     equipment: [

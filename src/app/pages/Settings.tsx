@@ -1,5 +1,5 @@
 import React from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -917,6 +917,62 @@ type ClientEndpointStatus = {
   error?: string;
 };
 
+type GanttRentalRepairRow = {
+  ganttId: string;
+  id?: string;
+  rentalId?: string;
+  sourceRentalId?: string;
+  originalRentalId?: string;
+  linkedRentalIds?: string[];
+  clientId?: string;
+  clientName?: string;
+  equipmentId?: string;
+  model?: string;
+  serialNumber?: string;
+  inventoryNumber?: string;
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  reason?: string;
+  group?: string;
+  recommendation?: string;
+  targetRentalId?: string;
+  candidatesCount?: number;
+  candidateIds?: string[];
+  flags?: {
+    hasDocuments?: boolean;
+    hasPayments?: boolean;
+    hasDeliveries?: boolean;
+    hasService?: boolean;
+    hasSafeSingleCandidate?: boolean;
+  };
+};
+
+type GanttRentalRepairDiagnostics = {
+  ok: boolean;
+  generatedAt: string;
+  productionDataChanged: false;
+  counts: {
+    rentals: number;
+    ganttRentals: number;
+    validLinks: number;
+    brokenRows: number;
+    groupA: number;
+    groupB: number;
+    groupC: number;
+    groupD: number;
+  };
+  groups: Record<'A' | 'B' | 'C' | 'D', GanttRentalRepairRow[]>;
+  brokenRows: GanttRentalRepairRow[];
+  target: {
+    id: string;
+    found: boolean;
+    broken: boolean;
+    status: string;
+    row?: GanttRentalRepairRow | null;
+  };
+};
+
 type DemoStatusResponse = {
   ok: boolean;
   demo: {
@@ -1225,6 +1281,114 @@ function AuditLogSection() {
   );
 }
 
+function GanttRentalRepairDiagnosticsSection({
+  query,
+}: {
+  query: UseQueryResult<GanttRentalRepairDiagnostics, Error>;
+}) {
+  const data = query.data;
+  const rows = data?.brokenRows || [];
+  const groupLabel = (key: 'A' | 'B' | 'C' | 'D') => {
+    const labels = {
+      A: 'A delete/archive',
+      B: 'B relink',
+      C: 'C manual',
+      D: 'D leave',
+    };
+    return labels[key];
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle>Диагностика связей rentals/gantt_rentals</CardTitle>
+            <CardDescription>Read-only отчёт по broken gantt_rentals без apply, delete или repair действий.</CardDescription>
+          </div>
+          <Button variant="secondary" onClick={() => void query.refetch()} disabled={query.isFetching}>
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} />
+            Обновить
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {query.isError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+            Диагностика gantt_rentals недоступна: {query.error instanceof Error ? query.error.message : 'неизвестная ошибка'}.
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <DiagnosticsField label="rentals" value={data?.counts.rentals ?? '—'} />
+              <DiagnosticsField label="gantt_rentals" value={data?.counts.ganttRentals ?? '—'} />
+              <DiagnosticsField label="valid links" value={data?.counts.validLinks ?? '—'} />
+              <DiagnosticsField label="broken rows" value={data?.counts.brokenRows ?? '—'} />
+            </div>
+            <div className="grid gap-3 md:grid-cols-4">
+              {(['A', 'B', 'C', 'D'] as const).map(key => (
+                <DiagnosticsField key={key} label={groupLabel(key)} value={data?.counts[`group${key}`] ?? '—'} />
+              ))}
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+              GR-1776257615497: {data?.target.found ? data.target.status : 'not_found'}
+              {data?.target.row?.reason ? ` · ${data.target.row.reason}` : ''}
+              {data?.target.row?.candidateIds?.length ? ` · candidates: ${data.target.row.candidateIds.join(', ')}` : ''}
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Техника</TableHead>
+                  <TableHead>Клиент</TableHead>
+                  <TableHead>Период</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead>Candidates</TableHead>
+                  <TableHead>Связи</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-8 text-center text-sm text-gray-500">
+                      Broken rows не найдены.
+                    </TableCell>
+                  </TableRow>
+                ) : rows.map(row => (
+                  <TableRow key={row.ganttId}>
+                    <TableCell className="font-mono text-xs">{row.ganttId}</TableCell>
+                    <TableCell>
+                      <p className="text-sm">{row.model || row.equipmentId || '—'}</p>
+                      <p className="text-xs text-gray-500">{[row.inventoryNumber, row.serialNumber].filter(Boolean).join(' · ') || '—'}</p>
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{row.clientName || row.clientId || '—'}</p>
+                      <p className="font-mono text-xs text-gray-500">{row.clientId || '—'}</p>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{row.startDate || '—'} - {row.endDate || '—'}</TableCell>
+                    <TableCell>
+                      <Badge variant={row.group === 'A' ? 'warning' : row.group === 'B' ? 'success' : 'secondary'}>{row.reason || '—'}</Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{row.candidateIds?.join(', ') || '0'}</TableCell>
+                    <TableCell className="text-xs">
+                      {[
+                        row.flags?.hasDocuments ? 'docs' : '',
+                        row.flags?.hasPayments ? 'payments' : '',
+                        row.flags?.hasDeliveries ? 'deliveries' : '',
+                        row.flags?.hasService ? 'service' : '',
+                      ].filter(Boolean).join(', ') || '—'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ProductionDiagnosticsSection() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -1232,6 +1396,11 @@ function ProductionDiagnosticsSection() {
   const diagnosticsQuery = useQuery<ProductionDiagnostics>({
     queryKey: ['admin-production-diagnostics'],
     queryFn: () => api.get<ProductionDiagnostics>('/api/admin/production-diagnostics'),
+    retry: 1,
+  });
+  const ganttRepairQuery = useQuery<GanttRentalRepairDiagnostics>({
+    queryKey: ['admin-gantt-rentals-repair-diagnostics'],
+    queryFn: () => api.get<GanttRentalRepairDiagnostics>('/api/admin/diagnostics/gantt-rentals-repair'),
     retry: 1,
   });
   const demoStatusQuery = useQuery<DemoStatusResponse>({
@@ -1251,6 +1420,7 @@ function ProductionDiagnosticsSection() {
   const clientEndpoints = endpointQuery.data || [];
   const refresh = () => {
     void diagnosticsQuery.refetch();
+    void ganttRepairQuery.refetch();
     void demoStatusQuery.refetch();
     void endpointQuery.refetch();
   };
@@ -1316,6 +1486,8 @@ function ProductionDiagnosticsSection() {
           </div>
         </CardContent>
       </Card>
+
+      <GanttRentalRepairDiagnosticsSection query={ganttRepairQuery} />
 
       {demo?.enabled && (
         <Card data-testid="demo-reset-panel">

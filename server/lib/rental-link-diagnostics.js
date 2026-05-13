@@ -495,6 +495,7 @@ function buildRentalLinkDiagnostics({ equipment = [], rentals = [], ganttRentals
 
 module.exports = {
   EQUIPMENT_FIELD_ALIASES,
+  buildEquipmentIndex,
   buildRentalLinkDiagnostics,
   resolveRecordEquipment,
 };

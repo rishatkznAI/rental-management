@@ -32,6 +32,7 @@ Thumbs.db
 *.temp
 *.zip
 backups/*.zip
+diagnostics/*.json
 
 # Local helper scripts
 *.command

@@ -11,6 +11,7 @@ const {
   analyzeRentalEquipmentDiagnostics,
   planRentalEquipmentBackfill,
 } = require('../lib/rental-equipment-diagnostics');
+const { buildAdminGanttRentalRepairDiagnostics } = require('../lib/gantt-rental-repair-diagnostics');
 const { buildRentalLinkDiagnostics } = require('../lib/rental-link-diagnostics');
 const dns = require('dns');
 const fs = require('fs');
@@ -1008,6 +1009,19 @@ function registerSystemRoutes(app, deps) {
       generatedAt: new Date().toISOString(),
       ...diagnostics,
     });
+  });
+
+  app.get('/api/admin/diagnostics/gantt-rentals-repair', requireAuth, requireAdmin, (_req, res) => {
+    const diagnostics = buildAdminGanttRentalRepairDiagnostics({
+      equipment: readData('equipment') || [],
+      rentals: readData('rentals') || [],
+      gantt_rentals: readData('gantt_rentals') || [],
+      documents: readData('documents') || [],
+      payments: readData('payments') || [],
+      deliveries: readData('deliveries') || [],
+      service: readData('service') || [],
+    });
+    return res.json(diagnostics);
   });
 
   app.post('/api/admin/rental-equipment-diagnostics/backfill', requireAuth, requireAdmin, (req, res) => {

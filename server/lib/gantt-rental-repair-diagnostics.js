@@ -343,6 +343,18 @@ function buildBrokenGanttRentalsRepairPlan(collections = {}) {
 
 function sanitizeRepairRow(row) {
   const candidateIds = uniq((row?.matches?.all || []).map(candidate => candidate?.rentalId || candidate?.id));
+  const candidateDetails = (row?.matches?.all || []).map(candidate => compactObject({
+    id: text(candidate?.id || candidate?.rentalId),
+    rentalId: text(candidate?.rentalId || candidate?.id),
+    clientId: text(candidate?.clientId),
+    clientName: text(candidate?.client),
+    equipmentId: text(candidate?.equipmentId),
+    inventoryNumber: firstText([candidate?.inventoryNumber, candidate?.equipmentInv]),
+    serialNumber: text(candidate?.serialNumber),
+    startDate: text(candidate?.startDate),
+    endDate: text(candidate?.endDate),
+    matchTypes: Array.isArray(candidate?.matchTypes) ? candidate.matchTypes.map(text).filter(Boolean) : [],
+  }));
   return {
     ganttId: text(row?.ganttId || row?.id),
     id: text(row?.id || row?.ganttId),
@@ -372,6 +384,13 @@ function sanitizeRepairRow(row) {
     candidateCount: Number(row?.candidateCount || 0),
     candidateIds,
     candidates: candidateIds.map(id => ({ id, rentalId: id })),
+    candidateDetails,
+    relatedCounts: {
+      documents: Number(row?.relatedCounts?.documents || 0),
+      payments: Number(row?.relatedCounts?.payments || 0),
+      deliveries: Number(row?.relatedCounts?.deliveries || 0),
+      service: Number(row?.relatedCounts?.service || 0),
+    },
     flags: {
       hasDocuments: Boolean(row?.hasDocuments),
       hasPayments: Boolean(row?.hasPayments),
@@ -384,6 +403,156 @@ function sanitizeRepairRow(row) {
 
 function countValidGanttLinks(ganttRentals, rentalsById) {
   return ganttRentals.filter(gantt => linkedRentalIds(gantt).some(id => rentalsById.has(id))).length;
+}
+
+function buildPreviewDecision(row) {
+  const hasPayments = Boolean(row?.flags?.hasPayments || row?.relatedCounts?.payments);
+  const hasDeliveries = Boolean(row?.flags?.hasDeliveries || row?.relatedCounts?.deliveries);
+  const hasDocuments = Boolean(row?.flags?.hasDocuments || row?.relatedCounts?.documents);
+  const hasService = Boolean(row?.flags?.hasService || row?.relatedCounts?.service);
+  const candidateCount = Number(row?.candidateCount || row?.candidatesCount || 0);
+  const reason = text(row?.reason);
+  const group = text(row?.group);
+
+  if (hasPayments) {
+    return {
+      previewAction: 'blocked_has_payments',
+      previewRisk: 'high',
+      previewReason: 'Есть связанные платежи; автоматическая очистка или relink запрещены до ручной сверки платежа с первичным договором/арендой.',
+    };
+  }
+  if (hasDeliveries) {
+    return {
+      previewAction: 'blocked_has_deliveries',
+      previewRisk: 'high',
+      previewReason: 'Есть связанные доставки или возвратные операции; автоматическая очистка запрещена до ручной проверки логистики.',
+    };
+  }
+  if (hasDocuments) {
+    return {
+      previewAction: 'blocked_has_documents',
+      previewRisk: 'high',
+      previewReason: 'Есть связанные документы; строку нельзя архивировать или перелинковать автоматически.',
+    };
+  }
+  if (hasService) {
+    return {
+      previewAction: 'blocked_has_service',
+      previewRisk: 'high',
+      previewReason: 'Есть связанные сервисные записи; требуется ручная проверка перед любым изменением.',
+    };
+  }
+  if (reason === 'MULTIPLE_CANDIDATES' || candidateCount > 1) {
+    return {
+      previewAction: 'candidate_duplicate_review',
+      previewRisk: 'medium',
+      previewReason: 'Найдено несколько candidate rentals; автоматика не может выбрать одну без риска связать строку с неверной арендой.',
+    };
+  }
+  if (group === 'A' && reason === 'NO_LINKED_RENTAL' && candidateCount === 0) {
+    return {
+      previewAction: 'candidate_archive',
+      previewRisk: 'medium',
+      previewReason: 'Нет rental-ссылки, кандидатов и связанных платежей/доставок/документов/сервиса; это только кандидат на будущий архив после backup/export.',
+    };
+  }
+  if (group === 'B' && row?.repairAllowed) {
+    return {
+      previewAction: 'candidate_manual_relink',
+      previewRisk: 'medium',
+      previewReason: 'Найден один high-confidence кандидат, но cleanup preview не выполняет relink; требуется отдельный apply-план.',
+    };
+  }
+  if (group === 'D') {
+    return {
+      previewAction: 'none',
+      previewRisk: 'low',
+      previewReason: 'Строка распознана как служебная запись планировщика и должна остаться без изменений.',
+    };
+  }
+  return {
+    previewAction: reason === 'NEED_MANUAL_REVIEW' ? 'blocked_low_confidence' : 'none',
+    previewRisk: reason === 'NEED_MANUAL_REVIEW' ? 'high' : 'low',
+    previewReason: reason === 'NEED_MANUAL_REVIEW'
+      ? 'Диагностика пометила строку как ручную проверку; confidence недостаточен для автоматического решения.'
+      : 'Read-only preview не предлагает действия для этой строки.',
+  };
+}
+
+function withPreviewDecision(row) {
+  return {
+    ...row,
+    ...buildPreviewDecision(row),
+  };
+}
+
+function sanitizeOkGanttRow(gantt, rentalsById) {
+  const linkedIds = linkedRentalIds(gantt);
+  const linkedRental = linkedIds.map(id => rentalsById.get(id)).find(Boolean);
+  return withPreviewDecision({
+    ...sanitizeRepairRow({
+      ...rowDto(gantt),
+      linkedRentalIds: linkedIds,
+      group: 'OK',
+      reason: 'OK',
+      confidence: 'high',
+      relatedCounts: {},
+    }),
+    foundRental: Boolean(linkedRental),
+    previewAction: 'none',
+    previewRisk: 'low',
+    previewReason: 'Связь gantt_rentals с rentals валидна; cleanup не требуется.',
+  });
+}
+
+function buildAdminGanttRentalCleanupPreview(collections = {}) {
+  const rentals = asArray(collections.rentals);
+  const ganttRentals = asArray(collections.gantt_rentals || collections.ganttRentals);
+  const rentalsById = new Map(rentals.map(rental => [text(rental?.id), rental]).filter(([id]) => id));
+  const repairDiagnostics = buildAdminGanttRentalRepairDiagnostics(collections);
+  const rows = repairDiagnostics.brokenRows.map(withPreviewDecision);
+  const okRows = ganttRentals
+    .filter(gantt => linkedRentalIds(gantt).some(id => rentalsById.has(id)))
+    .map(gantt => sanitizeOkGanttRow(gantt, rentalsById));
+  const archiveCandidates = rows.filter(row => row.previewAction === 'candidate_archive');
+  const duplicateReview = rows.filter(row => row.previewAction === 'candidate_duplicate_review');
+  const manualReview = rows.filter(row => row.previewAction === 'candidate_manual_relink' || row.previewAction === 'blocked_low_confidence');
+  const blockedRows = rows.filter(row => row.previewAction.startsWith('blocked_') && row.previewAction !== 'blocked_low_confidence');
+
+  return {
+    ok: true,
+    generatedAt: repairDiagnostics.generatedAt,
+    productionDataChanged: false,
+    counts: {
+      rentals: repairDiagnostics.counts.rentals,
+      ganttRentals: repairDiagnostics.counts.ganttRentals,
+      okRows: okRows.length,
+      validLinks: repairDiagnostics.counts.validLinks,
+      brokenRows: repairDiagnostics.counts.brokenRows,
+      archiveCandidates: archiveCandidates.length,
+      duplicateReview: duplicateReview.length,
+      manualReview: manualReview.length,
+      blockedRows: blockedRows.length,
+      blockedByPayments: rows.filter(row => row.previewAction === 'blocked_has_payments').length,
+      blockedByDeliveries: rows.filter(row => row.previewAction === 'blocked_has_deliveries').length,
+      blockedByDocuments: rows.filter(row => row.previewAction === 'blocked_has_documents').length,
+      blockedByService: rows.filter(row => row.previewAction === 'blocked_has_service').length,
+    },
+    groups: {
+      archiveCandidates,
+      duplicateReview,
+      manualReview,
+      blockedRows,
+      okRows,
+    },
+    rows: [...archiveCandidates, ...duplicateReview, ...manualReview, ...blockedRows],
+    target: repairDiagnostics.target.row
+      ? {
+        ...repairDiagnostics.target,
+        row: withPreviewDecision(repairDiagnostics.target.row),
+      }
+      : repairDiagnostics.target,
+  };
 }
 
 function buildAdminGanttRentalRepairDiagnostics(collections = {}, options = {}) {
@@ -548,6 +717,7 @@ function applyRepairPlan(collections = {}, plan, options = {}) {
 module.exports = {
   buildBrokenGanttRentalsRepairPlan,
   buildAdminGanttRentalRepairDiagnostics,
+  buildAdminGanttRentalCleanupPreview,
   buildDryRunOperations,
   buildSafeRepairOperations,
   applyRepairPlan,

@@ -115,6 +115,12 @@ async function postJson(baseUrl, path, body) {
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
 
+async function requestRaw(baseUrl, path, method) {
+  const response = await fetch(`${baseUrl}${path}`, { method });
+  const text = await response.text();
+  return { status: response.status, text };
+}
+
 test('/api/bot-test requires explicit chatId or env chat id', async () => {
   const previousEnabled = process.env.ENABLE_BOT_TEST;
   const previousChatId = process.env.BOT_TEST_CHAT_ID;
@@ -392,6 +398,119 @@ test('/api/admin/diagnostics/gantt-rentals-repair dry-run and apply repair only 
     assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-low').rentalId, undefined);
     assert.equal(writeCount, 1);
     assert.equal(auditEntries.some(entry => entry.action === 'gantt_rentals.repair_links'), true);
+  });
+});
+
+test('/api/admin/diagnostics/gantt-rentals-cleanup-preview is admin-only and requires auth', async () => {
+  const unauthorized = createSystemApp({
+    requireAuth: (_req, res) => res.status(401).json({ ok: false, error: 'Unauthorized' }),
+  });
+  await withServer(unauthorized.app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/diagnostics/gantt-rentals-cleanup-preview');
+    assert.equal(response.status, 401);
+  });
+
+  const nonAdmin = createSystemApp({
+    requireAuth: (req, _res, next) => {
+      req.user = { userId: 'U-manager', userRole: 'Менеджер по аренде' };
+      next();
+    },
+    requireAdmin: (req, res, next) => {
+      if (req.user?.userRole !== 'Администратор') {
+        return res.status(403).json({ ok: false, error: 'Forbidden: admin only' });
+      }
+      return next();
+    },
+  });
+  await withServer(nonAdmin.app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/diagnostics/gantt-rentals-cleanup-preview');
+    assert.equal(response.status, 403);
+  });
+});
+
+test('/api/admin/diagnostics/gantt-rentals-cleanup-preview classifies read-only cleanup decisions', async () => {
+  const collections = {
+    equipment: [
+      { id: 'EQ-1', inventoryNumber: 'INV-1', serialNumber: 'SN-1', model: 'Genie S-65' },
+      { id: 'EQ-2', inventoryNumber: 'INV-2', serialNumber: 'SN-2', model: 'JLG 2632R' },
+      { id: 'EQ-3', inventoryNumber: '025', serialNumber: 'SN-025', model: 'Mantall' },
+    ],
+    rentals: [
+      { id: 'R-ok', clientId: 'C-ok', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-05-01', endDate: '2026-05-10' },
+      { id: 'R-a', clientId: 'C-a', client: 'Candidate A', equipmentId: 'EQ-2', inventoryNumber: 'INV-2', startDate: '2026-06-01', endDate: '2026-06-10' },
+      { id: 'R-b', clientId: 'C-b', client: 'Candidate B', equipmentId: 'EQ-2', inventoryNumber: 'INV-2', startDate: '2026-06-01', endDate: '2026-06-10' },
+    ],
+    gantt_rentals: [
+      { id: 'GR-ok', rentalId: 'R-ok', clientId: 'C-ok', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-05-01', endDate: '2026-05-10' },
+      { id: 'GR-archive', clientId: 'C-archive', client: 'Archive Candidate', equipmentId: 'EQ-3', inventoryNumber: '025', startDate: '2026-04-01', endDate: '2026-04-10' },
+      { id: 'GR-pay', clientId: 'C-pay', client: 'Payment Blocked', equipmentId: 'EQ-3', inventoryNumber: '025', startDate: '2026-04-01', endDate: '2026-04-10' },
+      { id: 'GR-delivery', clientId: 'C-delivery', client: 'Delivery Blocked', equipmentId: 'EQ-3', inventoryNumber: '025', startDate: '2026-04-11', endDate: '2026-04-20' },
+      { id: 'GR-multi', clientId: 'C-x', client: 'Ambiguous', equipmentId: 'EQ-2', inventoryNumber: 'INV-2', startDate: '2026-06-01', endDate: '2026-06-10' },
+      { id: 'GR-low', equipmentId: 'EQ-3', inventoryNumber: '025', startDate: '2026-07-01', endDate: '2026-07-10' },
+      {
+        id: 'GR-1776257615497',
+        clientId: 'cli-xls-12',
+        client: 'Промтехмонтаж',
+        equipmentId: 'eq-1775822459003-f06191',
+        inventoryNumber: '025',
+        startDate: '2026-04-01',
+        endDate: '2026-04-30',
+        amount: 100000,
+        price: 1000,
+        phone: '+79990000000',
+      },
+    ],
+    documents: [],
+    payments: [
+      { id: 'PAY-1', rentalId: 'GR-pay', amount: 5000, cardNumber: '4111111111111111' },
+      { id: 'PAY-target', rentalId: 'GR-1776257615497', amount: 7000 },
+    ],
+    deliveries: [{ id: 'DEL-1', rentalId: 'GR-delivery', address: 'Private address' }],
+    service: [],
+  };
+  const before = JSON.stringify(collections);
+  let writeCount = 0;
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: () => { writeCount += 1; },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/diagnostics/gantt-rentals-cleanup-preview');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.productionDataChanged, false);
+    assert.equal(response.body.counts.ganttRentals, 7);
+    assert.equal(response.body.counts.okRows, 1);
+    assert.equal(response.body.counts.archiveCandidates, 1);
+    assert.equal(response.body.counts.duplicateReview, 1);
+    assert.equal(response.body.counts.blockedByPayments, 2);
+    assert.equal(response.body.counts.blockedByDeliveries, 1);
+
+    const rows = Object.fromEntries(response.body.rows.map(row => [row.ganttId, row]));
+    assert.equal(rows['GR-archive'].previewAction, 'candidate_archive');
+    assert.equal(rows['GR-archive'].previewRisk, 'medium');
+    assert.equal(rows['GR-pay'].previewAction, 'blocked_has_payments');
+    assert.equal(rows['GR-pay'].previewRisk, 'high');
+    assert.equal(rows['GR-delivery'].previewAction, 'blocked_has_deliveries');
+    assert.equal(rows['GR-delivery'].previewRisk, 'high');
+    assert.equal(rows['GR-multi'].previewAction, 'candidate_duplicate_review');
+    assert.equal(rows['GR-multi'].candidateIds.length, 2);
+    assert.equal(rows['GR-low'].previewAction, 'blocked_low_confidence');
+    assert.equal(rows['GR-low'].repairAllowed, false);
+    assert.equal(response.body.target.row.previewAction, 'blocked_has_payments');
+    assert.equal(response.body.target.row.previewRisk, 'high');
+    assert.match(response.body.target.row.previewReason, /ручной сверки платежа/);
+
+    assert.equal(writeCount, 0);
+    assert.equal(JSON.stringify(collections), before);
+    assert.doesNotMatch(JSON.stringify(response.body), /100000|5000|7000|price|amount|phone|cardNumber|Private address|411111/i);
+
+    for (const method of ['POST', 'PATCH', 'DELETE']) {
+      const methodResponse = await requestRaw(baseUrl, '/api/admin/diagnostics/gantt-rentals-cleanup-preview', method);
+      assert.notEqual(methodResponse.status, 200);
+    }
+    assert.equal(writeCount, 0);
   });
 });
 

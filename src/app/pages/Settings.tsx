@@ -938,7 +938,29 @@ type GanttRentalRepairRow = {
   recommendation?: string;
   targetRentalId?: string;
   candidatesCount?: number;
+  candidateCount?: number;
   candidateIds?: string[];
+  candidateDetails?: Array<{
+    id?: string;
+    rentalId?: string;
+    clientId?: string;
+    clientName?: string;
+    equipmentId?: string;
+    inventoryNumber?: string;
+    serialNumber?: string;
+    startDate?: string;
+    endDate?: string;
+    matchTypes?: string[];
+  }>;
+  relatedCounts?: {
+    documents?: number;
+    payments?: number;
+    deliveries?: number;
+    service?: number;
+  };
+  previewAction?: string;
+  previewRisk?: 'low' | 'medium' | 'high' | string;
+  previewReason?: string;
   flags?: {
     hasDocuments?: boolean;
     hasPayments?: boolean;
@@ -964,6 +986,42 @@ type GanttRentalRepairDiagnostics = {
   };
   groups: Record<'A' | 'B' | 'C' | 'D', GanttRentalRepairRow[]>;
   brokenRows: GanttRentalRepairRow[];
+  target: {
+    id: string;
+    found: boolean;
+    broken: boolean;
+    status: string;
+    row?: GanttRentalRepairRow | null;
+  };
+};
+
+type GanttRentalCleanupPreview = {
+  ok: boolean;
+  generatedAt: string;
+  productionDataChanged: false;
+  counts: {
+    rentals: number;
+    ganttRentals: number;
+    okRows: number;
+    validLinks: number;
+    brokenRows: number;
+    archiveCandidates: number;
+    duplicateReview: number;
+    manualReview: number;
+    blockedRows: number;
+    blockedByPayments: number;
+    blockedByDeliveries: number;
+    blockedByDocuments: number;
+    blockedByService: number;
+  };
+  groups: {
+    archiveCandidates: GanttRentalRepairRow[];
+    duplicateReview: GanttRentalRepairRow[];
+    manualReview: GanttRentalRepairRow[];
+    blockedRows: GanttRentalRepairRow[];
+    okRows: GanttRentalRepairRow[];
+  };
+  rows: GanttRentalRepairRow[];
   target: {
     id: string;
     found: boolean;
@@ -1389,6 +1447,122 @@ function GanttRentalRepairDiagnosticsSection({
   );
 }
 
+function GanttRentalCleanupPreviewSection({
+  query,
+}: {
+  query: UseQueryResult<GanttRentalCleanupPreview, Error>;
+}) {
+  const data = query.data;
+  const rows = data?.rows || [];
+  const riskVariant = (risk?: string) => {
+    if (risk === 'high') return 'danger';
+    if (risk === 'medium') return 'warning';
+    return 'secondary';
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle>Preview очистки gantt_rentals</CardTitle>
+            <CardDescription>Read-only список кандидатов для будущего archive/relink решения. Apply, delete, archive и repair здесь не реализованы.</CardDescription>
+          </div>
+          <Button variant="secondary" onClick={() => void query.refetch()} disabled={query.isFetching}>
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} />
+            Обновить
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {query.isError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+            Preview cleanup недоступен: {query.error instanceof Error ? query.error.message : 'неизвестная ошибка'}.
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <DiagnosticsField label="Всего gantt_rentals" value={data?.counts.ganttRentals ?? '—'} />
+              <DiagnosticsField label="OK" value={data?.counts.okRows ?? '—'} />
+              <DiagnosticsField label="Broken" value={data?.counts.brokenRows ?? '—'} />
+              <DiagnosticsField label="Кандидаты на архив" value={data?.counts.archiveCandidates ?? '—'} />
+              <DiagnosticsField label="Дубли / неоднозначные" value={data?.counts.duplicateReview ?? '—'} />
+              <DiagnosticsField label="Заблокированы" value={data?.counts.blockedRows ?? '—'} />
+              <DiagnosticsField label="Платежи / доставки" value={`${data?.counts.blockedByPayments ?? '—'} / ${data?.counts.blockedByDeliveries ?? '—'}`} />
+              <DiagnosticsField label="Ручная проверка" value={data?.counts.manualReview ?? '—'} />
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+              GR-1776257615497: {data?.target.row?.previewAction || data?.target.status || 'not_found'}
+              {data?.target.row?.previewRisk ? ` · ${data.target.row.previewRisk}` : ''}
+              {data?.target.row?.reason ? ` · ${data.target.row.reason}` : ''}
+              {data?.target.row?.previewReason ? ` · ${data.target.row.previewReason}` : ''}
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Техника</TableHead>
+                  <TableHead>Клиент</TableHead>
+                  <TableHead>Период</TableHead>
+                  <TableHead>Reason / group</TableHead>
+                  <TableHead>Preview</TableHead>
+                  <TableHead>Связи</TableHead>
+                  <TableHead>Candidates</TableHead>
+                  <TableHead>Recommendation</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="py-8 text-center text-sm text-gray-500">
+                      Cleanup preview rows не найдены.
+                    </TableCell>
+                  </TableRow>
+                ) : rows.map(row => (
+                  <TableRow key={row.ganttId}>
+                    <TableCell className="font-mono text-xs">{row.ganttId}</TableCell>
+                    <TableCell>
+                      <p className="text-sm">{row.model || row.equipmentId || '—'}</p>
+                      <p className="text-xs text-gray-500">{[row.inventoryNumber, row.serialNumber].filter(Boolean).join(' · ') || '—'}</p>
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{row.clientName || row.clientId || '—'}</p>
+                      <p className="font-mono text-xs text-gray-500">{row.clientId || '—'}</p>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{row.startDate || '—'} - {row.endDate || '—'}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        <Badge variant={row.group === 'A' ? 'warning' : row.group === 'B' ? 'success' : 'secondary'}>{row.reason || '—'}</Badge>
+                        <span className="text-xs text-muted-foreground">{row.group || '—'}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        <Badge variant={riskVariant(row.previewRisk)}>{row.previewAction || 'none'}</Badge>
+                        <span className="text-xs text-muted-foreground">{row.previewRisk || '—'}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {[
+                        row.flags?.hasDocuments ? 'docs' : '',
+                        row.flags?.hasPayments ? 'payments' : '',
+                        row.flags?.hasDeliveries ? 'deliveries' : '',
+                        row.flags?.hasService ? 'service' : '',
+                      ].filter(Boolean).join(', ') || '—'}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{row.candidateIds?.join(', ') || '0'}</TableCell>
+                    <TableCell className="max-w-md text-xs text-muted-foreground">{row.previewReason || row.recommendation || '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ProductionDiagnosticsSection() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -1401,6 +1575,11 @@ function ProductionDiagnosticsSection() {
   const ganttRepairQuery = useQuery<GanttRentalRepairDiagnostics>({
     queryKey: ['admin-gantt-rentals-repair-diagnostics'],
     queryFn: () => api.get<GanttRentalRepairDiagnostics>('/api/admin/diagnostics/gantt-rentals-repair'),
+    retry: 1,
+  });
+  const ganttCleanupPreviewQuery = useQuery<GanttRentalCleanupPreview>({
+    queryKey: ['admin-gantt-rentals-cleanup-preview'],
+    queryFn: () => api.get<GanttRentalCleanupPreview>('/api/admin/diagnostics/gantt-rentals-cleanup-preview'),
     retry: 1,
   });
   const demoStatusQuery = useQuery<DemoStatusResponse>({
@@ -1421,6 +1600,7 @@ function ProductionDiagnosticsSection() {
   const refresh = () => {
     void diagnosticsQuery.refetch();
     void ganttRepairQuery.refetch();
+    void ganttCleanupPreviewQuery.refetch();
     void demoStatusQuery.refetch();
     void endpointQuery.refetch();
   };
@@ -1488,6 +1668,7 @@ function ProductionDiagnosticsSection() {
       </Card>
 
       <GanttRentalRepairDiagnosticsSection query={ganttRepairQuery} />
+      <GanttRentalCleanupPreviewSection query={ganttCleanupPreviewQuery} />
 
       {demo?.enabled && (
         <Card data-testid="demo-reset-panel">

@@ -13,6 +13,7 @@ const {
 } = require('../lib/rental-equipment-diagnostics');
 const {
   applyRepairPlan,
+  buildAdminGanttRentalCleanupPreview,
   buildAdminGanttRentalRepairDiagnostics,
   buildBrokenGanttRentalsRepairPlan,
 } = require('../lib/gantt-rental-repair-diagnostics');
@@ -1026,6 +1027,19 @@ function registerSystemRoutes(app, deps) {
       service: readData('service') || [],
     });
     return res.json(diagnostics);
+  });
+
+  app.get('/api/admin/diagnostics/gantt-rentals-cleanup-preview', requireAuth, requireAdmin, (_req, res) => {
+    const preview = buildAdminGanttRentalCleanupPreview({
+      equipment: readData('equipment') || [],
+      rentals: readData('rentals') || [],
+      gantt_rentals: readData('gantt_rentals') || [],
+      documents: readData('documents') || [],
+      payments: readData('payments') || [],
+      deliveries: readData('deliveries') || [],
+      service: readData('service') || [],
+    });
+    return res.json(preview);
   });
 
   app.post('/api/admin/diagnostics/gantt-rentals-repair', requireAuth, requireAdmin, (req, res) => {

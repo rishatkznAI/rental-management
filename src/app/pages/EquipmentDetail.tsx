@@ -172,6 +172,21 @@ const PHOTO_CATEGORY_LABELS = {
   damage_photo: 'Повреждения',
 } as const;
 
+const ACCEPTANCE_PHOTO_LABELS = {
+  front: 'Спереди',
+  rear: 'Сзади',
+  left: 'Слева',
+  right: 'Справа',
+  serial_plate: 'VIN / SN / шильдик',
+  hour_meter: 'Моточасы',
+  lower_controls: 'Нижний пульт',
+  upper_controls: 'Верхний пульт',
+  platform: 'Площадка / люлька',
+  engine_bay: 'Подкапотное пространство',
+  undercarriage: 'Ходовая / низ',
+  defects: 'Дефекты',
+} as const;
+
 const HANDOFF_REQUIRED_PHOTO_CATEGORIES: EquipmentOperationPhotoCategory[] = [
   'front',
   'rear',
@@ -861,6 +876,13 @@ export default function EquipmentDetail() {
     salesContext: routeContext === 'sales',
     context: routeContext,
   });
+  const repairMode = !saleMode && (
+    routeContext === 'service'
+    || equipment?.category === 'client'
+    || equipment?.category === 'partner'
+    || equipment?.status === 'in_service'
+  );
+  const cardMode = saleMode ? 'sale' : repairMode ? 'repair' : 'rental';
   const canEditCurrentEquipment = saleMode ? (canEditEquipment || canEditSales) : canEditEquipment;
   const canEditAdminOnlyEquipmentFields = normalizedRole === 'Администратор';
   const canEditOperationalEquipmentFields = canEditAdminOnlyEquipmentFields || normalizedRole === 'Офис-менеджер';
@@ -1502,11 +1524,16 @@ export default function EquipmentDetail() {
   }, [equipment?.acceptanceComment, equipment?.acceptanceDefects, equipment?.actualArrivalDate, updateReceiptStatus]);
 
   useEffect(() => {
-    if (!saleMode) return;
-    if (!['overview', 'photos', 'documents'].includes(activeTab)) {
-      setActiveTab('overview');
+    const validTabsByMode = {
+      rental: ['overview', 'acceptance', 'rentals', 'economics', 'service', 'documents', 'history'],
+      sale: ['sale-overview', 'pdi', 'commerce', 'sale-service', 'sale-documents', 'sale-history'],
+      repair: ['repair-overview', 'diagnostics', 'work-parts', 'field-trips', 'repair-documents', 'service-history'],
+    };
+    const validTabs = validTabsByMode[cardMode];
+    if (!validTabs.includes(activeTab)) {
+      setActiveTab(validTabs[0]);
     }
-  }, [activeTab, saleMode]);
+  }, [activeTab, cardMode]);
 
   // ── Not found screen ──
   if (!equipment) {
@@ -1583,6 +1610,7 @@ export default function EquipmentDetail() {
   const equipmentRentalIds = new Set(ganttRentals.map(r => r.id));
   const equipmentPayments = allPayments.filter(p => p.rentalId && equipmentRentalIds.has(p.rentalId));
   const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
+  const equipmentDebt = Math.max(0, totalRevenue - totalPaidRevenue);
   const equipment360 = buildEquipment360Summary({
     equipment,
     rentals: canViewRentals ? allGanttRentals : [],
@@ -1593,6 +1621,103 @@ export default function EquipmentDetail() {
     inventoryIsUnique: (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1,
     utilizationPercent: saleMode ? null : utilizationMonth,
   });
+  const equipmentDocuments = canViewDocuments
+    ? documentData.filter(doc => {
+        const directMatch = doc.equipmentId === equipment.id
+          || (doc.equipmentInv && (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1 && doc.equipmentInv === equipment.inventoryNumber);
+        const rentalMatch = Boolean(doc.rentalId && equipmentRentalIds.has(doc.rentalId));
+        return directMatch || rentalMatch;
+      })
+    : [];
+  const acceptanceRecords = [
+    ...(equipment.acceptedAt || equipment.actualArrivalDate || equipment.acceptanceComment || equipment.acceptanceDefects?.length || equipment.acceptancePhotos ? [{
+      id: `equipment-acceptance-${equipment.id}`,
+      date: equipment.acceptedAt || equipment.actualArrivalDate || '',
+      title: 'Приёмка техники',
+      author: equipment.acceptedByName || 'Не указано',
+      comment: equipment.acceptanceComment || '',
+      defects: equipment.acceptanceDefects || [],
+      photos: Object.entries(equipment.acceptancePhotos || {}).flatMap(([key, photos]) =>
+        (Array.isArray(photos) ? photos : []).map(photo => ({
+          key,
+          label: ACCEPTANCE_PHOTO_LABELS[key as keyof typeof ACCEPTANCE_PHOTO_LABELS] || key,
+          photo,
+        })),
+      ),
+      rentalId: '',
+      deliveryId: '',
+    }] : []),
+    ...shippingPhotos
+      .filter(event => event.type === 'receiving')
+      .map(event => ({
+        id: event.id,
+        date: event.date,
+        title: 'Приёмка с аренды / возврат',
+        author: event.uploadedBy || 'Не указано',
+        comment: event.damageDescription || event.comment || '',
+        defects: event.damageDescription ? [event.damageDescription] : [],
+        photos: Object.entries(event.photoCategories || {}).flatMap(([key, photos]) =>
+          (Array.isArray(photos) ? photos : []).map(photo => ({
+            key,
+            label: PHOTO_CATEGORY_LABELS[key as keyof typeof PHOTO_CATEGORY_LABELS] || key,
+            photo,
+          })),
+        ).concat((event.photos || []).map(photo => ({ key: 'generic', label: 'Фото', photo }))),
+        rentalId: event.rentalId || '',
+        deliveryId: '',
+      })),
+  ].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+  const latestAcceptance = acceptanceRecords[0] || null;
+  const serviceCost = serviceHistory.reduce((sum, ticket) => {
+    const worksCost = (ticket.resultData?.worksPerformed || []).reduce((workSum, work) => workSum + (Number(work.totalCost) || 0), 0);
+    const partsCost = (ticket.resultData?.partsUsed || ticket.parts || []).reduce((partSum, part) => partSum + ((Number(part.cost) || 0) * (Number(part.qty) || 0)), 0);
+    return sum + worksCost + partsCost;
+  }, 0);
+  const fieldTripTickets = serviceHistory.filter(ticket => ticket.serviceVehicleId || ticket.serviceKind === 'field_trip' || ticket.type === 'field_trip');
+  const unifiedEvents = [
+    ...(equipment.history || []).map((entry, index) => ({
+      id: `history-${index}`,
+      date: entry.date,
+      title: entry.text,
+      meta: entry.author || 'Система',
+      type: 'history',
+    })),
+    ...ganttRentals.map(rental => ({
+      id: `rental-${rental.id}`,
+      date: rental.startDate,
+      title: `Аренда: ${rental.client || 'клиент не указан'}`,
+      meta: `${formatDate(rental.startDate)} — ${formatDate(rental.endDate)} · ${rental.status}`,
+      type: 'rental',
+    })),
+    ...acceptanceRecords.map(record => ({
+      id: `acceptance-${record.id}`,
+      date: record.date,
+      title: record.title,
+      meta: [record.author, record.rentalId ? `аренда ${record.rentalId}` : ''].filter(Boolean).join(' · '),
+      type: 'acceptance',
+    })),
+    ...serviceHistory.map(ticket => ({
+      id: `service-${ticket.id}`,
+      date: ticket.createdAt,
+      title: `Сервис: ${ticket.reason || ticket.description || ticket.id}`,
+      meta: `${SERVICE_STATUS_LABELS[ticket.status] || ticket.status} · ${ticket.assignedMechanicName || ticket.assignedTo || 'механик не назначен'}`,
+      type: 'service',
+    })),
+    ...equipmentDocuments.map(doc => ({
+      id: `document-${doc.id}`,
+      date: doc.date || doc.createdAt || '',
+      title: `Документ: ${doc.number || doc.documentNumber || doc.type || doc.id}`,
+      meta: doc.status || 'без статуса',
+      type: 'document',
+    })),
+    ...equipmentPayments.map(payment => ({
+      id: `payment-${payment.id}`,
+      date: payment.paidDate || payment.dueDate || '',
+      title: `Платёж: ${payment.status || 'без статуса'}`,
+      meta: canViewFinance ? formatCurrency(getEffectivePaidAmount(payment)) : 'Сумма скрыта правами',
+      type: 'payment',
+    })),
+  ].filter(event => event.date).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const saleDocuments = equipment360.documents.latest;
   const saleDocsReadiness = saleDocumentsReadiness(saleDocuments);
   const saleConditionContext = {
@@ -2546,6 +2671,401 @@ export default function EquipmentDetail() {
           )}
         </CardContent>
       </Card>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <div className="overflow-x-auto pb-1">
+          <TabsList className="min-w-max">
+            {cardMode === 'rental' && (
+              <>
+                <TabsTrigger value="overview" className={tabTriggerClass}>Обзор</TabsTrigger>
+                <TabsTrigger value="acceptance" className={tabTriggerClass}>Приёмка</TabsTrigger>
+                {canViewRentals && <TabsTrigger value="rentals" className={tabTriggerClass}>Аренды</TabsTrigger>}
+                <TabsTrigger value="economics" className={tabTriggerClass}>Экономика</TabsTrigger>
+                {canViewService && <TabsTrigger value="service" className={tabTriggerClass}>Сервис</TabsTrigger>}
+                {canViewDocuments && <TabsTrigger value="documents" className={tabTriggerClass}>Документы</TabsTrigger>}
+                <TabsTrigger value="history" className={tabTriggerClass}>История</TabsTrigger>
+              </>
+            )}
+            {cardMode === 'sale' && (
+              <>
+                <TabsTrigger value="sale-overview" className={tabTriggerClass}>Обзор продажи</TabsTrigger>
+                <TabsTrigger value="pdi" className={tabTriggerClass}>PDI / подготовка</TabsTrigger>
+                <TabsTrigger value="commerce" className={tabTriggerClass}>Коммерция</TabsTrigger>
+                {canViewService && <TabsTrigger value="sale-service" className={tabTriggerClass}>Сервисная готовность</TabsTrigger>}
+                {canViewDocuments && <TabsTrigger value="sale-documents" className={tabTriggerClass}>Документы</TabsTrigger>}
+                <TabsTrigger value="sale-history" className={tabTriggerClass}>История</TabsTrigger>
+              </>
+            )}
+            {cardMode === 'repair' && (
+              <>
+                <TabsTrigger value="repair-overview" className={tabTriggerClass}>Обзор ремонта</TabsTrigger>
+                <TabsTrigger value="diagnostics" className={tabTriggerClass}>Диагностика</TabsTrigger>
+                <TabsTrigger value="work-parts" className={tabTriggerClass}>Работы и запчасти</TabsTrigger>
+                <TabsTrigger value="field-trips" className={tabTriggerClass}>Выезды</TabsTrigger>
+                {canViewDocuments && <TabsTrigger value="repair-documents" className={tabTriggerClass}>Документы</TabsTrigger>}
+                {canViewService && <TabsTrigger value="service-history" className={tabTriggerClass}>История сервиса</TabsTrigger>}
+              </>
+            )}
+          </TabsList>
+        </div>
+
+        <TabsContent value="overview" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-4">
+            <CompactMetric label="Статус" value={EQ_STATUS_LABELS[equipment.status]} tone={equipment.status === 'in_service' ? 'warning' : 'default'} />
+            <CompactMetric label="Текущая занятость" value={equipment360.occupancy.label} tone={assetCurrentRental ? 'warning' : 'success'} />
+            <CompactMetric label="Ближайший возврат" value={formatDate(equipment.returnDate || assetCurrentRental?.endDate)} />
+            <CompactMetric label="Открытый сервис" value={openServiceTickets.length ? `${openServiceTickets.length} заявок` : 'Нет'} tone={openServiceTickets.length ? 'warning' : 'success'} />
+          </div>
+          <div className="grid gap-4 xl:grid-cols-[1fr_0.85fr]">
+            <SalePanel title="Паспорт и состояние">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <SaleField label="Модель" value={`${equipment.manufacturer} ${equipment.model}`.trim() || '—'} />
+                <SaleField label="Серийный №" value={equipment.serialNumber || '—'} mono />
+                <SaleField label="Инвентарный №" value={equipment.inventoryNumber || '—'} mono />
+                <SaleField label="Собственник" value={equipment.ownerName || ownerLabels[equipment.owner] || '—'} />
+                <SaleField label="Категория" value={EQUIPMENT_CATEGORY_LABELS[equipment.category]} />
+                <SaleField label="Тип" value={findEquipmentTypeLabel(equipment.type, equipmentTypeCatalog)} />
+                <SaleField label="Привод" value={equipment.drive === 'diesel' ? 'Дизельный' : 'Электрический'} />
+                <SaleField label="Локация" value={equipment.location || '—'} />
+                <SaleField label="Приоритет" value={EQUIPMENT_PRIORITY_LABELS[equipment.priority]} />
+              </div>
+            </SalePanel>
+            <SalePanel title="Быстрые действия">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                {assetQuickActions.map(action => {
+                  const Icon = action.icon;
+                  const button = (
+                    <Button variant={action.primary ? 'default' : 'secondary'} className="w-full justify-start" onClick={action.onClick} disabled={action.disabled} title={action.reason || undefined}>
+                      <Icon className="h-4 w-4" />
+                      {action.label}
+                    </Button>
+                  );
+                  return action.to && !action.disabled ? <Link key={action.id} to={action.to}>{button}</Link> : <span key={action.id}>{button}</span>;
+                })}
+              </div>
+            </SalePanel>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="acceptance" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-4">
+            <CompactMetric label="Последняя приёмка" value={latestAcceptance ? formatDateTime(latestAcceptance.date) : 'Нет записей'} tone={latestAcceptance ? 'success' : 'warning'} />
+            <CompactMetric label="Всего записей" value={String(acceptanceRecords.length)} />
+            <CompactMetric label="Фото" value={`${acceptanceRecords.reduce((sum, record) => sum + record.photos.length, 0)} фото`} />
+            <CompactMetric label="Дефекты" value={acceptanceRecords.some(record => record.defects.length) ? 'Есть замечания' : 'Не указаны'} tone={acceptanceRecords.some(record => record.defects.length) ? 'warning' : 'success'} />
+          </div>
+          {acceptanceRecords.length === 0 ? (
+            <SalePanel title="Приёмка техники">
+              <EmptyState icon={<Camera className="h-12 w-12" />} text="По этой технике пока нет записей приёмки" />
+            </SalePanel>
+          ) : (
+            <div className="space-y-4">
+              {acceptanceRecords.map(record => (
+                <SalePanel key={record.id} title={`${record.title} · ${formatDateTime(record.date)}`}>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <SaleField label="Модель" value={`${equipment.manufacturer} ${equipment.model}`.trim() || '—'} />
+                    <SaleField label="SN / INV" value={[equipment.serialNumber, equipment.inventoryNumber].filter(Boolean).join(' · ') || '—'} mono />
+                    <SaleField label="Автор" value={record.author || '—'} />
+                    <SaleField label="Связь" value={record.rentalId ? `Аренда ${record.rentalId}` : record.deliveryId ? `Доставка ${record.deliveryId}` : 'Не указана'} />
+                  </div>
+                  {record.comment ? <p className="text-sm leading-6 text-muted-foreground">{record.comment}</p> : <p className="text-sm text-muted-foreground">Комментарий приёмщика не указан.</p>}
+                  {record.defects.length > 0 ? (
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+                      <p className="text-sm font-semibold text-amber-300">Дефекты</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-muted-foreground">
+                        {record.defects.map((defect, index) => <li key={`${record.id}-defect-${index}`}>{defect}</li>)}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Дефекты в записи не указаны.</p>
+                  )}
+                  {record.photos.length > 0 ? (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      {record.photos.map((item, index) => (
+                        <button key={`${record.id}-${item.key}-${index}`} type="button" className="overflow-hidden rounded-lg border border-border bg-secondary text-left" onClick={() => setPreviewImage(displayPhotoUrl(item.photo))}>
+                          <img src={displayPhotoUrl(item.photo)} alt={item.label} className="h-32 w-full object-cover" onError={(event) => {
+                            const fallback = fallbackPhotoUrl(item.photo);
+                            if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                          }} />
+                          <span className="block px-3 py-2 text-xs text-muted-foreground">{item.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState icon={<ImageIcon className="h-10 w-10" />} text="Фото по этой записи не добавлены" />
+                  )}
+                </SalePanel>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {canViewRentals && (
+          <TabsContent value="rentals" className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-4">
+              <CompactMetric label="Текущая аренда" value={assetCurrentRental?.client || 'Нет'} tone={assetCurrentRental ? 'warning' : 'success'} />
+              <CompactMetric label="Всего аренд" value={String(ganttRentals.length)} />
+              <CompactMetric label="Дней в аренде" value={String(ganttRentals.reduce((sum, rental) => sum + getRentalDays(rental.startDate, rental.endDate), 0))} />
+              <CompactMetric label="Платёжный статус" value={equipmentDebt > 0 && canViewFinance ? `Долг ${formatCurrency(equipmentDebt)}` : canViewFinance ? 'Без долга' : 'Скрыто правами'} tone={equipmentDebt > 0 && canViewFinance ? 'danger' : 'default'} />
+            </div>
+            <SalePanel title="История аренд">
+              {ganttRentals.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Клиент</TableHead>
+                        <TableHead>Период</TableHead>
+                        <TableHead>Статус</TableHead>
+                        <TableHead>Менеджер</TableHead>
+                        {canViewFinance && <TableHead>Сумма</TableHead>}
+                        <TableHead>Переход</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ganttRentals.map(rental => (
+                        <TableRow key={rental.id}>
+                          <TableCell>{rental.client || '—'}</TableCell>
+                          <TableCell>{formatDate(rental.startDate)} — {formatDate(rental.endDate)}</TableCell>
+                          <TableCell>{rental.status}</TableCell>
+                          <TableCell>{rental.manager || rental.managerInitials || '—'}</TableCell>
+                          {canViewFinance && <TableCell>{formatCurrency(rental.amount || 0)}</TableCell>}
+                          <TableCell><Link to={`/rentals/${rental.id}`} className="text-[--color-primary] hover:underline">Открыть</Link></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <EmptyState icon={<Calendar className="h-12 w-12" />} text="История аренды пуста" />
+              )}
+            </SalePanel>
+          </TabsContent>
+        )}
+
+        <TabsContent value="economics" className="space-y-4">
+          {canViewFinance ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-4">
+                <CompactMetric label="Начислено" value={formatCurrency(totalRevenue)} />
+                <CompactMetric label="Оплачено" value={formatCurrency(totalPaidRevenue)} tone="success" />
+                <CompactMetric label="Долг" value={formatCurrency(equipmentDebt)} tone={equipmentDebt > 0 ? 'danger' : 'success'} />
+                <CompactMetric label="Средняя ставка" value={ganttRentals.length ? formatCurrency(Math.round(totalRevenue / Math.max(1, ganttRentals.reduce((sum, rental) => sum + getRentalDays(rental.startDate, rental.endDate), 0)))) : 'Нет данных'} />
+              </div>
+              <SalePanel title="Экономика техники">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <SaleField label="Текущая ставка / план" value={equipment.plannedMonthlyRevenue ? `${formatCurrency(equipment.plannedMonthlyRevenue)} / мес.` : 'Нет данных'} />
+                  <SaleField label="Количество аренд" value={String(equipment360.finance.rentalCount)} />
+                  <SaleField label="Дней в аренде за месяц" value={`${daysRentedThisMonth} из ${daysInCurrentMonth}`} />
+                  <SaleField label="Дней простоя за месяц" value={String(freeDaysThisMonth)} />
+                  <SaleField label="Утилизация" value={`${utilizationMonth}%`} />
+                  <SaleField label="Сервисные расходы" value={serviceCost > 0 ? formatCurrency(serviceCost) : 'Нет данных'} />
+                  <SaleField label="Окупаемость / маржа" value="Нет данных" />
+                  <SaleField label="Факт месяца" value={formatCurrency(Math.round(actualMonthRevenue))} />
+                </div>
+              </SalePanel>
+            </>
+          ) : (
+            <SalePanel title="Экономика техники">
+              <p className="text-sm text-muted-foreground">Финансовые показатели скрыты правами роли.</p>
+            </SalePanel>
+          )}
+        </TabsContent>
+
+        {canViewService && (
+          <TabsContent value="service" className="space-y-4">
+            <ServiceHistorySection
+              tickets={serviceHistory}
+              openTickets={openServiceTickets}
+              canViewFinance={canViewFinance}
+              canCreateService={canCreateService}
+              equipment={equipment}
+            />
+          </TabsContent>
+        )}
+
+        {canViewDocuments && (
+          <TabsContent value="documents" className="space-y-4">
+            <SalePanel title="Документы по технике и арендам">
+              {equipmentDocuments.length > 0 ? (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {equipmentDocuments.map(doc => (
+                    <LinkedRow
+                      key={doc.id}
+                      title={`${doc.number || doc.documentNumber || doc.type}${doc.rentalId ? ` · аренда ${doc.rentalId}` : ''}`}
+                      meta={`${formatDate(doc.date || doc.createdAt)} · ${doc.status}`}
+                      href="/documents"
+                      canOpen={canViewDocuments}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState icon={<FileText className="h-12 w-12" />} text="Связанных документов нет" />
+              )}
+            </SalePanel>
+          </TabsContent>
+        )}
+
+        <TabsContent value="history" className="space-y-4">
+          <TimelineSection events={unifiedEvents} />
+        </TabsContent>
+
+        <TabsContent value="sale-overview" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-4">
+            <CompactMetric label="Статус продажи" value={saleStatusText} tone={saleStatusKindValue === 'sold' ? 'success' : 'default'} />
+            <CompactMetric label="Цена" value={canViewFinance ? (saleMainPrice ? formatCurrency(saleMainPrice) : 'Нет данных') : 'Скрыто правами'} />
+            <CompactMetric label="Готовность" value={`${saleReadinessPercent}%`} tone={saleReadinessPercent === 100 ? 'success' : 'warning'} />
+            <CompactMetric label="PDI" value={salePdiLabel} tone={salePdiStatus === 'ready' ? 'success' : 'warning'} />
+          </div>
+          <SalePanel title="Обзор продажи">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <SaleField label="Модель" value={saleTitle} />
+              <SaleField label="SN / INV" value={[equipment.serialNumber, equipment.inventoryNumber].filter(Boolean).join(' · ') || '—'} mono />
+              <SaleField label="Состояние" value={saleCondition === 'used' ? 'Б/у' : 'Новая'} />
+              <SaleField label="Резерв / покупатель" value={equipment.currentClient || 'Нет данных'} />
+              <SaleField label="Поступление" value={saleReceiptStatus ? EQUIPMENT_SALE_RECEIPT_LABELS[saleReceiptStatus] : 'Не указано'} />
+              <SaleField label="Локация" value={equipment.location || '—'} />
+            </div>
+          </SalePanel>
+          <SalePanel title="Быстрые действия">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {saleQuickActions.map(action => {
+                const Icon = action.icon;
+                const button = <Button variant={action.id === 'quote' ? 'default' : 'secondary'} className="w-full justify-center" onClick={action.onClick}><Icon className="h-4 w-4" />{action.label}</Button>;
+                return action.to ? <Link key={action.id} to={action.to}>{button}</Link> : <span key={action.id}>{button}</span>;
+              })}
+            </div>
+          </SalePanel>
+        </TabsContent>
+
+        <TabsContent value="pdi" className="space-y-4">
+          <SalePanel title="PDI / предпродажная подготовка">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <SaleField label="Статус PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} />
+              <SaleField label="Ответственный" value={equipment.acceptedByName || '—'} />
+              <SaleField label="План / факт" value={[formatDate(equipment.plannedArrivalDate), formatDate(equipment.actualArrivalDate || equipment.acceptedAt)].join(' / ')} />
+              <SaleField label="Результат" value={salePdiStatus === 'ready' ? 'Готова' : salePdiStatus === 'issues' ? 'Есть замечания' : 'В работе / не начат'} />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <SaleCheckRow ready={Boolean(equipment.acceptanceChecklist?.serialNumberConfirmed)} label="SN / VIN подтверждён" />
+              <SaleCheckRow ready={Boolean(equipment.acceptanceChecklist?.modelConfirmed)} label="Модель подтверждена" />
+              <SaleCheckRow ready={Boolean(equipment.acceptanceChecklist?.configurationChecked)} label="Комплектация проверена" />
+              <SaleCheckRow ready={Boolean(equipment.acceptanceChecklist?.documentsReceived)} label="Документы получены" />
+              <SaleCheckRow ready={!equipment.acceptanceChecklist?.visualDamageFound} label="Критичных дефектов не отмечено" />
+              <SaleCheckRow ready={salePdiStatus === 'ready'} label="PDI завершён" />
+            </div>
+            {equipment.acceptanceComment ? <p className="text-sm text-muted-foreground">{equipment.acceptanceComment}</p> : <p className="text-sm text-muted-foreground">Замечания PDI не заполнены.</p>}
+          </SalePanel>
+          {salePdiTickets.length > 0 ? (
+            <ServiceHistorySection tickets={salePdiTickets} openTickets={salePdiTickets.filter(ticket => ticket.status !== 'closed')} canViewFinance={canViewFinance} canCreateService={canCreateService} equipment={equipment} />
+          ) : (
+            <SalePanel title="Связанные PDI-заявки">
+              <EmptyState icon={<Wrench className="h-12 w-12" />} text="PDI-заявок по этой технике пока нет" />
+            </SalePanel>
+          )}
+        </TabsContent>
+
+        <TabsContent value="commerce" className="space-y-4">
+          <SalePanel title="Коммерция продажи">
+            {canViewFinance ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <SaleField label="Цена продажи" value={saleMainPrice ? formatCurrency(saleMainPrice) : 'Нет данных'} />
+                <SaleField label="Минимальная цена / скидка" value={saleMinPrice ? formatCurrency(saleMinPrice) : 'Нет данных'} />
+                <SaleField label="Себестоимость / закупка" value={saleCostPrice ? formatCurrency(saleCostPrice) : 'Нет данных'} />
+                <SaleField label="Маржа" value={saleMargin ? `${formatCurrency(saleMargin)} · ${saleMarginPercent}%` : 'Нет данных'} />
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Коммерческие суммы скрыты правами роли.</p>
+            )}
+          </SalePanel>
+          <SalePanel title="КП и документы сделки">
+            {saleDocuments.length > 0 ? saleDocuments.map(doc => (
+              <LinkedRow key={doc.id} title={`${doc.type}${doc.id ? ` · ${doc.id}` : ''}`} meta={`${formatDate(doc.date)} · ${doc.status}`} href="/documents" canOpen={canViewDocuments} />
+            )) : <EmptyState icon={<FileText className="h-12 w-12" />} text="КП, договоры и УПД пока не связаны" />}
+          </SalePanel>
+        </TabsContent>
+
+        {canViewService && (
+          <TabsContent value="sale-service" className="space-y-4">
+            <ServiceHistorySection tickets={serviceHistory} openTickets={openServiceTickets} canViewFinance={canViewFinance} canCreateService={canCreateService} equipment={equipment} />
+          </TabsContent>
+        )}
+
+        {canViewDocuments && (
+          <TabsContent value="sale-documents" className="space-y-4">
+            <SalePanel title="Документы продажи">
+              {equipmentDocuments.length > 0 ? equipmentDocuments.map(doc => (
+                <LinkedRow key={doc.id} title={`${doc.number || doc.documentNumber || doc.type}`} meta={`${formatDate(doc.date || doc.createdAt)} · ${doc.status}`} href="/documents" canOpen={canViewDocuments} />
+              )) : <EmptyState icon={<FileText className="h-12 w-12" />} text="Документы продажи пока не добавлены" />}
+            </SalePanel>
+          </TabsContent>
+        )}
+
+        <TabsContent value="sale-history" className="space-y-4">
+          <TimelineSection events={unifiedEvents} />
+        </TabsContent>
+
+        <TabsContent value="repair-overview" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-4">
+            <CompactMetric label="Текущая заявка" value={openServiceTickets[0]?.reason || 'Нет открытой'} tone={openServiceTickets.length ? 'warning' : 'success'} />
+            <CompactMetric label="Статус" value={openServiceTickets[0] ? SERVICE_STATUS_LABELS[openServiceTickets[0].status] || openServiceTickets[0].status : EQ_STATUS_LABELS[equipment.status]} />
+            <CompactMetric label="Приоритет" value={openServiceTickets[0]?.priority || EQUIPMENT_PRIORITY_LABELS[equipment.priority]} />
+            <CompactMetric label="Дедлайн" value={formatDate(openServiceTickets[0]?.deadline || openServiceTickets[0]?.dueDate || openServiceTickets[0]?.targetDate)} />
+          </div>
+          <SalePanel title="Обзор ремонта">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <SaleField label="Техника" value={assetTitle} />
+              <SaleField label="Клиент" value={openServiceTickets[0]?.client || (equipment.category === 'client' ? equipment.currentClient : '—')} />
+              <SaleField label="Сценарий работ" value={openServiceTickets[0]?.serviceKind || openServiceTickets[0]?.scenario || openServiceTickets[0]?.type || '—'} />
+              <SaleField label="Механик" value={openServiceTickets[0]?.assignedMechanicName || openServiceTickets[0]?.assignedTo || 'Не назначен'} />
+              <SaleField label="Проблема" value={openServiceTickets[0]?.reason || '—'} />
+              <SaleField label="Дата поступления" value={formatDate(openServiceTickets[0]?.createdAt)} />
+            </div>
+          </SalePanel>
+        </TabsContent>
+
+        <TabsContent value="diagnostics" className="space-y-4">
+          <SalePanel title="Диагностика">
+            {serviceHistory.length > 0 ? serviceHistory.slice(0, 5).map(ticket => (
+              <ServiceTicketCompactCard key={ticket.id} ticket={ticket} canViewFinance={canViewFinance} />
+            )) : <EmptyState icon={<Wrench className="h-12 w-12" />} text="Диагностика по этой технике пока не зафиксирована" />}
+          </SalePanel>
+        </TabsContent>
+
+        <TabsContent value="work-parts" className="space-y-4">
+          <SalePanel title="Работы и запчасти">
+            {serviceHistory.some(ticket => (ticket.resultData?.worksPerformed || []).length || (ticket.resultData?.partsUsed || ticket.parts || []).length || ticket.resultData?.summary) ? (
+              serviceHistory.map(ticket => <ServiceTicketCompactCard key={ticket.id} ticket={ticket} canViewFinance={canViewFinance} expanded />)
+            ) : (
+              <EmptyState icon={<Wrench className="h-12 w-12" />} text="Работы и запчасти пока не записаны" />
+            )}
+          </SalePanel>
+        </TabsContent>
+
+        <TabsContent value="field-trips" className="space-y-4">
+          <SalePanel title="Выезды">
+            {fieldTripTickets.length > 0 ? fieldTripTickets.map(ticket => (
+              <LinkedRow key={ticket.id} title={ticket.reason || ticket.description || ticket.id} meta={`${formatDate(ticket.scheduledDate || ticket.plannedDate || ticket.createdAt)} · ${ticket.assignedMechanicName || ticket.assignedTo || 'механик не назначен'}${ticket.serviceVehicleId ? ` · машина ${ticket.serviceVehicleId}` : ''}`} href={`/service/${ticket.id}`} canOpen />
+            )) : <EmptyState icon={<MapPin className="h-12 w-12" />} text="Выездные работы по этой технике пока не зафиксированы" />}
+          </SalePanel>
+        </TabsContent>
+
+        {canViewDocuments && (
+          <TabsContent value="repair-documents" className="space-y-4">
+            <SalePanel title="Документы ремонта">
+              {equipmentDocuments.filter(doc => doc.serviceTicketId || doc.type === 'act' || doc.type === 'work_order').length > 0 ? equipmentDocuments.filter(doc => doc.serviceTicketId || doc.type === 'act' || doc.type === 'work_order').map(doc => (
+                <LinkedRow key={doc.id} title={`${doc.number || doc.documentNumber || doc.type}`} meta={`${formatDate(doc.date || doc.createdAt)} · ${doc.status}`} href="/documents" canOpen={canViewDocuments} />
+              )) : <EmptyState icon={<FileText className="h-12 w-12" />} text="Документы ремонта пока не добавлены" />}
+            </SalePanel>
+          </TabsContent>
+        )}
+
+        {canViewService && (
+          <TabsContent value="service-history" className="space-y-4">
+            <ServiceHistorySection tickets={serviceHistory} openTickets={openServiceTickets} canViewFinance={canViewFinance} canCreateService={canCreateService} equipment={equipment} />
+          </TabsContent>
+        )}
+      </Tabs>
 
       {showLegacyEquipmentSections && !saleMode && <div className="grid gap-4 sm:gap-6 lg:grid-cols-[260px_1fr]">
         <Card>
@@ -4258,6 +4778,163 @@ export default function EquipmentDetail() {
 }
 
 // ── Helper Components ──
+
+function TimelineSection({ events }: { events: Array<{ id: string; date: string; title: string; meta: string; type: string }> }) {
+  return (
+    <SalePanel title="История событий">
+      {events.length > 0 ? (
+        <div className="space-y-3">
+          {events.slice(0, 40).map(event => (
+            <div key={event.id} className="grid grid-cols-[20px_minmax(0,1fr)] gap-3 rounded-xl border border-border bg-secondary/50 p-3">
+              <Clock className="mt-0.5 h-4 w-4 text-muted-foreground" />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={event.type === 'service' ? 'warning' : event.type === 'payment' ? 'success' : event.type === 'acceptance' ? 'info' : 'default'}>
+                    {event.type === 'rental' ? 'Аренда' : event.type === 'service' ? 'Сервис' : event.type === 'acceptance' ? 'Приёмка' : event.type === 'document' ? 'Документ' : event.type === 'payment' ? 'Платёж' : 'История'}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">{formatDateTime(event.date)}</span>
+                </div>
+                <p className="mt-1 text-sm font-medium text-foreground">{event.title}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{event.meta}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState icon={<Clock className="h-12 w-12" />} text="История пока пуста" />
+      )}
+    </SalePanel>
+  );
+}
+
+function ServiceHistorySection({
+  tickets,
+  openTickets,
+  canViewFinance,
+  canCreateService,
+  equipment,
+}: {
+  tickets: ServiceTicket[];
+  openTickets: ServiceTicket[];
+  canViewFinance: boolean;
+  canCreateService: boolean;
+  equipment: Equipment;
+}) {
+  const closedTickets = tickets.filter(ticket => ticket.status === 'closed' || ticket.status === 'ready');
+  const repeatedReasons = tickets.reduce<Record<string, number>>((acc, ticket) => {
+    const key = (ticket.reason || '').trim().toLowerCase();
+    if (key) acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const repeatCount = Object.values(repeatedReasons).filter(count => count > 1).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-4">
+        <CompactMetric label="Открытые заявки" value={String(openTickets.length)} tone={openTickets.length ? 'warning' : 'success'} />
+        <CompactMetric label="Закрытые заявки" value={String(closedTickets.length)} />
+        <CompactMetric label="Ожидание запчастей" value={String(tickets.filter(ticket => ticket.status === 'waiting_parts').length)} tone={tickets.some(ticket => ticket.status === 'waiting_parts') ? 'warning' : 'default'} />
+        <CompactMetric label="Повторные обращения" value={repeatCount ? `${repeatCount} тем` : 'Нет данных'} />
+      </div>
+      <SalePanel title="Сервисная история">
+        <div className="mb-3 flex flex-wrap gap-2">
+          {canCreateService && (
+            <Link to={`/service/new?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`}>
+              <Button size="sm" variant="secondary"><Plus className="h-4 w-4" />Создать заявку</Button>
+            </Link>
+          )}
+          <Link to="/service">
+            <Button size="sm" variant="secondary"><Wrench className="h-4 w-4" />Открыть сервис</Button>
+          </Link>
+        </div>
+        {tickets.length > 0 ? (
+          <div className="space-y-3">
+            {tickets.slice(0, 12).map(ticket => (
+              <ServiceTicketCompactCard key={ticket.id} ticket={ticket} canViewFinance={canViewFinance} />
+            ))}
+            {tickets.length > 12 && <p className="text-sm text-muted-foreground">Показаны последние 12 заявок из {tickets.length}.</p>}
+          </div>
+        ) : (
+          <EmptyState icon={<Wrench className="h-12 w-12" />} text="Сервисных заявок нет" />
+        )}
+      </SalePanel>
+    </div>
+  );
+}
+
+function ServiceTicketCompactCard({
+  ticket,
+  canViewFinance,
+  expanded = false,
+}: {
+  ticket: ServiceTicket;
+  canViewFinance: boolean;
+  expanded?: boolean;
+}) {
+  const works = ticket.resultData?.worksPerformed || [];
+  const parts = ticket.resultData?.partsUsed || ticket.parts || [];
+  const photos = [
+    ...(ticket.photos || []),
+    ...(ticket.repairPhotos?.before || []),
+    ...(ticket.repairPhotos?.after || []),
+  ];
+  const partsCost = parts.reduce((sum, part) => sum + ((Number(part.cost) || 0) * (Number(part.qty) || 0)), 0);
+  const worksCost = works.reduce((sum, work) => sum + (Number(work.totalCost) || 0), 0);
+
+  return (
+    <div className="rounded-xl border border-border bg-secondary/50 p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <Link to={`/service/${ticket.id}`} className="text-sm font-semibold text-foreground hover:text-[--color-primary] hover:underline">
+            {ticket.reason || ticket.description || ticket.id}
+          </Link>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {formatDate(ticket.createdAt)}{ticket.closedAt ? ` — ${formatDate(ticket.closedAt)}` : ''} · {ticket.assignedMechanicName || ticket.assignedTo || 'механик не назначен'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={ticket.status === 'closed' || ticket.status === 'ready' ? 'success' : ticket.status === 'waiting_parts' ? 'warning' : 'info'}>
+            {SERVICE_STATUS_LABELS[ticket.status] || ticket.status}
+          </Badge>
+          <Badge variant={ticket.priority === 'critical' || ticket.priority === 'high' ? 'error' : 'default'}>{ticket.priority}</Badge>
+        </div>
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">{ticket.description || 'Описание проблемы не указано.'}</p>
+      {(expanded || works.length > 0 || parts.length > 0 || ticket.resultData?.summary) && (
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          <div className="rounded-lg border border-border bg-card/70 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Работы</p>
+            {works.length > 0 ? (
+              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                {works.slice(0, 4).map((work, index) => <li key={`${ticket.id}-work-${index}`}>{work.name} · {work.totalNormHours || work.normHours || 0} н/ч</li>)}
+              </ul>
+            ) : <p className="mt-2 text-sm text-muted-foreground">Работы не записаны.</p>}
+          </div>
+          <div className="rounded-lg border border-border bg-card/70 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Запчасти</p>
+            {parts.length > 0 ? (
+              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                {parts.slice(0, 4).map((part, index) => <li key={`${ticket.id}-part-${index}`}>{part.name} · {part.qty} шт.{canViewFinance ? ` · ${formatCurrency((part.cost || 0) * (part.qty || 0))}` : ''}</li>)}
+              </ul>
+            ) : <p className="mt-2 text-sm text-muted-foreground">Запчасти не записаны.</p>}
+          </div>
+          <div className="rounded-lg border border-border bg-card/70 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Итог ремонта</p>
+            <p className="mt-2 text-sm text-muted-foreground">{ticket.resultData?.summary || ticket.result || 'Итог пока не заполнен.'}</p>
+            {canViewFinance && (partsCost > 0 || worksCost > 0) && <p className="mt-2 text-sm font-semibold text-foreground">{formatCurrency(partsCost + worksCost)}</p>}
+          </div>
+        </div>
+      )}
+      {photos.length > 0 && (
+        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+          {photos.slice(0, 8).map((photo, index) => (
+            <img key={`${ticket.id}-photo-${index}`} src={displayPhotoUrl(photo)} alt="" className="h-20 w-28 shrink-0 rounded-lg border border-border object-cover" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SalePanel({
   title,

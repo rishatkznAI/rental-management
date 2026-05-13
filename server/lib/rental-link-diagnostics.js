@@ -234,6 +234,21 @@ function linkedRentalIds(gantt) {
   ].map(text).filter(Boolean))];
 }
 
+function isSmokeLikeRecord(record) {
+  const haystack = [
+    record?.id,
+    record?.rentalId,
+    record?.sourceRentalId,
+    record?.originalRentalId,
+    record?.client,
+    record?.clientName,
+    record?.manager,
+    record?.comment,
+    record?.notes,
+  ].map(lower).join(' ');
+  return /\b(e2e|smoke|ui-smoke|test-|seed-177|177844)\b/.test(haystack);
+}
+
 function findGanttRentalCandidates(gantt, rentals, rentalResolutions, ganttResolution) {
   return rentals
     .filter(rental => clientMatches(gantt, rental))
@@ -321,6 +336,8 @@ function buildRentalLinkDiagnostics({ equipment = [], rentals = [], ganttRentals
       rentalsLegacyOnlyEquipment: 0,
       ganttWithoutRentalId: 0,
       ganttEquipmentMismatch: 0,
+      duplicateGanttRentalLinks: 0,
+      smokeLikeGanttRentals: 0,
       duplicateInventoryNumbers: 0,
       unsafeRecords: 0,
     },
@@ -330,6 +347,8 @@ function buildRentalLinkDiagnostics({ equipment = [], rentals = [], ganttRentals
     brokenGanttRentalLinks: [],
     rentalsWithoutGantt: [],
     ganttEquipmentMismatch: [],
+    duplicateGanttRentalLinks: [],
+    smokeLikeGanttRentals: [],
     duplicateInventoryNumbers: duplicateInventoryGroups(equipmentList),
     unsafeRecords: [],
   };
@@ -486,8 +505,29 @@ function buildRentalLinkDiagnostics({ equipment = [], rentals = [], ganttRentals
       severity: 'info',
       suggestedAction: 'Если аренда должна отображаться в планировщике, создайте или восстановите связанную gantt_rentals строку.',
     }));
+  result.duplicateGanttRentalLinks = [...ganttRentalLinks.entries()]
+    .filter(([, ids]) => ids.length > 1)
+    .map(([rentalId, ids]) => ({
+      rentalId,
+      count: ids.length,
+      ganttIds: ids,
+      reason: 'duplicate_gantt_rental_link',
+      severity: 'warning',
+      suggestedAction: 'В UI показывайте одну лучшую строку по rentalId; любые data-fix действия выполняйте только через dry-run.',
+    }));
+  result.smokeLikeGanttRentals = ganttList
+    .filter(isSmokeLikeRecord)
+    .map(gantt => recordDto(gantt, {
+      ganttId: text(gantt?.id),
+      rentalId: text(gantt?.rentalId),
+      reason: 'smoke_or_e2e_like_record',
+      severity: 'info',
+      suggestedAction: 'Локальная тестовая запись. Не удаляйте в рабочем потоке; нужен отдельный cleanup dry-run.',
+    }));
   result.summary.rentalsWithoutGantt = result.rentalsWithoutGantt.length;
   result.summary.ganttEquipmentMismatch = result.ganttEquipmentMismatch.length;
+  result.summary.duplicateGanttRentalLinks = result.duplicateGanttRentalLinks.length;
+  result.summary.smokeLikeGanttRentals = result.smokeLikeGanttRentals.length;
   result.summary.duplicateInventoryNumbers = result.duplicateInventoryNumbers.length;
   result.summary.unsafeRecords = result.unsafeRecords.length;
   return result;

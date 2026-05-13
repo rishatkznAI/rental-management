@@ -179,9 +179,10 @@ test('rentals workspace pagination controls reset clamp and keep table actions w
 test('rentals workspace does not open broken gantt rows as full rentals', () => {
   assert.match(rentalsSource, /markBrokenRentalLink\(item, getBrokenRentalLinkReason\(item, inferredClassicCandidates\)\)/);
   assert.match(rentalsSource, /inferredClassicCandidates\.length === 1 \? inferredClassicCandidates\[0\] : null/);
-  assert.match(rentalsSource, /function isLinkedRentalRow\(ganttRental: GanttRentalData, rentalsById: Map<string, Rental>\): boolean/);
-  assert.match(rentalsSource, /const rentalRows = useMemo\(\s*\(\) => ganttRentals\.filter\(item => isLinkedRentalRow\(item, classicRentalsById\)\)/);
-  assert.match(rentalsSource, /const orphanPlannerRows = useMemo\(\s*\(\) => ganttRentals\.filter\(item => !isLinkedRentalRow\(item, classicRentalsById\)\)/);
+  assert.match(rentalsSource, /buildRentalPlannerRows/);
+  assert.match(rentalsSource, /const rentalRows = rentalPlannerRows\.rentalRows as GanttRentalData\[\]/);
+  assert.match(rentalsSource, /const orphanPlannerRows = rentalPlannerRows\.orphanPlannerRows as GanttRentalData\[\]/);
+  assert.match(rentalsSource, /const duplicatePlannerGroups = rentalPlannerRows\.duplicateGroups/);
   assert.match(rentalsSource, /let rentals = \[\.\.\.rentalRows\]/);
   assert.match(rentalsSource, /if \(!isBrokenRentalLink\) setSelectedRental\(buildRentalDrawerRental\(row\.rental, row\.classicRental\)\)/);
   assert.match(rentalsSource, /Связь повреждена/);

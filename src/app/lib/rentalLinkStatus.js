@@ -1,10 +1,10 @@
+import { getGanttRentalSourceId } from './rentalPlannerRows.js';
+
 function text(value) {
   return String(value ?? '').trim();
 }
 
-export function getGanttRentalSourceId(ganttRental) {
-  return text(ganttRental?.rentalId || ganttRental?.sourceRentalId || ganttRental?.originalRentalId);
-}
+export { getGanttRentalSourceId };
 
 export function documentBelongsToRental(doc, rentalIds) {
   const ids = new Set((rentalIds || []).map(text).filter(Boolean));
@@ -30,7 +30,7 @@ export function classifyRentalLinkStatus({
     return {
       status: 'duplicate_gantt',
       label: 'Дубль планировщика',
-      isBroken: true,
+      isBroken: false,
       isContractMissing: !hasContract,
       repairAllowed: false,
       confidence: 'medium',

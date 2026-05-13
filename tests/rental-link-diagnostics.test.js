@@ -61,6 +61,8 @@ test('rental link diagnostics ignores clean linked data', () => {
   assert.equal(diagnostics.summary.rentalsLegacyOnlyEquipment, 0);
   assert.equal(diagnostics.summary.ganttWithoutRentalId, 0);
   assert.equal(diagnostics.summary.ganttEquipmentMismatch, 0);
+  assert.equal(diagnostics.summary.duplicateGanttRentalLinks, 0);
+  assert.equal(diagnostics.summary.smokeLikeGanttRentals, 0);
   assert.equal(diagnostics.summary.duplicateInventoryNumbers, 0);
   assert.equal(diagnostics.summary.unsafeRecords, 0);
 });
@@ -151,6 +153,33 @@ test('rental link diagnostics reports equipment mismatch between gantt and linke
   assert.equal(diagnostics.ganttEquipmentMismatch[0].rentalId, 'R-1');
   assert.equal(diagnostics.ganttEquipmentMismatch[0].ganttEquipment.id, 'EQ-2');
   assert.equal(diagnostics.ganttEquipmentMismatch[0].rentalEquipment.id, 'EQ-1');
+});
+
+test('rental link diagnostics reports duplicate planner links without changing data', () => {
+  const diagnostics = buildRentalLinkDiagnostics({
+    equipment: baseEquipment(),
+    rentals: [cleanRental()],
+    ganttRentals: [
+      cleanGantt({ id: 'GR-1', rentalId: 'R-1' }),
+      cleanGantt({ id: 'GR-2', sourceRentalId: 'R-1' }),
+    ],
+  });
+
+  assert.equal(diagnostics.summary.ganttWithValidRentalLink, 2);
+  assert.equal(diagnostics.summary.duplicateGanttRentalLinks, 1);
+  assert.deepEqual(diagnostics.duplicateGanttRentalLinks[0].ganttIds, ['GR-1', 'GR-2']);
+  assert.equal(diagnostics.duplicateGanttRentalLinks[0].suggestedAction.includes('dry-run'), true);
+});
+
+test('rental link diagnostics reports smoke and e2e-like planner rows', () => {
+  const diagnostics = buildRentalLinkDiagnostics({
+    equipment: baseEquipment(),
+    rentals: [cleanRental({ id: 'R-smoke' })],
+    ganttRentals: [cleanGantt({ id: 'GR-e2e-1778447254848', rentalId: 'R-smoke', client: 'E2E Client detail-1778447254739' })],
+  });
+
+  assert.equal(diagnostics.summary.smokeLikeGanttRentals, 1);
+  assert.equal(diagnostics.smokeLikeGanttRentals[0].reason, 'smoke_or_e2e_like_record');
 });
 
 test('rental link diagnostics reports duplicate inventory numbers with normalized values', () => {
@@ -255,12 +284,14 @@ test('rental link diagnostics endpoint requires authorization and admin role', a
     assert.equal(admin.body.summary.rentalsTotal, 1);
     assert.deepEqual(Object.keys(admin.body).sort(), [
       'brokenGanttRentalLinks',
+      'duplicateGanttRentalLinks',
       'duplicateInventoryNumbers',
       'ganttEquipmentMismatch',
       'ganttWithoutRentalId',
       'rentalsWithoutGantt',
       'rentalsLegacyOnlyEquipment',
       'rentalsWithoutEquipment',
+      'smokeLikeGanttRentals',
       'summary',
       'unsafeRecords',
     ].sort());

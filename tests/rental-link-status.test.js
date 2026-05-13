@@ -63,7 +63,7 @@ test('duplicate gantt rows are classified separately from generic broken links',
 
   assert.equal(status.status, 'duplicate_gantt');
   assert.equal(status.label, 'Дубль планировщика');
-  assert.equal(status.isBroken, true);
+  assert.equal(status.isBroken, false);
 });
 
 test('normal rental with contract and equipment is ok', () => {

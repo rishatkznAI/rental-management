@@ -54,6 +54,7 @@ import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { buildClientReceivables, buildRentalDebtRows, getEffectivePaidAmount, mergeClientsWithFinancials } from '../lib/finance';
 import { buildRentalPaymentBar } from '../lib/rentalTimeline.js';
 import { classifyRentalLinkStatus } from '../lib/rentalLinkStatus.js';
+import { buildRentalPlannerRows, getGanttRentalSourceId } from '../lib/rentalPlannerRows.js';
 import {
   DEFAULT_RENTAL_LIST_PAGE_SIZE,
   RENTAL_LIST_PAGE_SIZE_OPTIONS,
@@ -141,21 +142,6 @@ const SCALE_CONFIG: Record<Scale, { dayWidth: number; label: string }> = {
 };
 
 const LEFT_PANEL_WIDTH = 236;
-
-function getGanttRentalSourceId(ganttRental: GanttRentalData): string {
-  return String(
-    ganttRental.rentalId ||
-    ganttRental.sourceRentalId ||
-    ganttRental.originalRentalId ||
-    ''
-  ).trim();
-}
-
-function isLinkedRentalRow(ganttRental: GanttRentalData, rentalsById: Map<string, Rental>): boolean {
-  const sourceRentalId = getGanttRentalSourceId(ganttRental);
-  if (!sourceRentalId) return false;
-  return rentalsById.has(sourceRentalId);
-}
 
 function normalizeMatchRef(value: unknown): string {
   return String(value ?? '').trim();
@@ -1379,14 +1365,18 @@ export default function Rentals() {
     () => new Map(classicRentalData.map(item => [item.id, item])),
     [classicRentalData],
   );
-  const rentalRows = useMemo(
-    () => ganttRentals.filter(item => isLinkedRentalRow(item, classicRentalsById)),
-    [classicRentalsById, ganttRentals],
+  const rentalPlannerRows = useMemo(
+    () => buildRentalPlannerRows({
+      ganttRentals,
+      rentals: classicRentalData,
+      todayKey: todayStr,
+    }),
+    [classicRentalData, ganttRentals, todayStr],
   );
-  const orphanPlannerRows = useMemo(
-    () => ganttRentals.filter(item => !isLinkedRentalRow(item, classicRentalsById)),
-    [classicRentalsById, ganttRentals],
-  );
+  const rentalRows = rentalPlannerRows.rentalRows as GanttRentalData[];
+  const orphanPlannerRows = rentalPlannerRows.orphanPlannerRows as GanttRentalData[];
+  const duplicatePlannerGroups = rentalPlannerRows.duplicateGroups as Array<{ rentalId: string; count: number; ids: string[] }>;
+  const duplicateGanttCountByRentalId = rentalPlannerRows.duplicateCountByRentalId as Map<string, number>;
 
   const computedClients = useMemo(
     () => mergeClientsWithFinancials(clientsData, rentalRows, payments),
@@ -2450,16 +2440,6 @@ export default function Rentals() {
     : filteredMovementEntries;
   const movementEntryCounts = isHeadRole ? headMovementEntries : movementEntries;
 
-  const ganttCountBySourceRentalId = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of ganttRentals) {
-      const sourceRentalId = getGanttRentalSourceId(item);
-      if (!sourceRentalId) continue;
-      counts.set(sourceRentalId, (counts.get(sourceRentalId) || 0) + 1);
-    }
-    return counts;
-  }, [ganttRentals]);
-
   const buildRentalDrawerRental = useCallback((ganttRental: GanttRentalData, classicRental?: Rental | null): DrawerRentalData => {
     const sourceRentalId = getGanttRentalSourceId(ganttRental);
     const resolvedClassicRental = classicRental || (sourceRentalId ? classicRentalsById.get(sourceRentalId) : null);
@@ -2645,7 +2625,7 @@ export default function Rentals() {
           classicRental,
           equipment,
           relatedDocuments,
-          duplicateGanttCount: sourceRentalId ? (ganttCountBySourceRentalId.get(sourceRentalId) || 1) : 1,
+          duplicateGanttCount: sourceRentalId ? (duplicateGanttCountByRentalId.get(sourceRentalId) || 1) : 1,
           candidateCount: (rental as DrawerRentalData).__brokenRentalLinkReason === 'MULTIPLE_CANDIDATES' ? 2 : 0,
         }) as RentalLinkStatus;
         const isBrokenRentalLink = Boolean(linkStatus.isBroken);
@@ -2736,6 +2716,7 @@ export default function Rentals() {
     filterPayment,
     filterStatus,
     filterUpd,
+    duplicateGanttCountByRentalId,
     isAdminRole,
     movementEntries,
     payments,
@@ -3302,7 +3283,6 @@ export default function Rentals() {
     canEditRentals,
     canEditRentalDates,
     equipmentList,
-    ganttCountBySourceRentalId,
     ganttRentals,
     historyAuthor,
     isAdminRole,
@@ -4296,8 +4276,8 @@ export default function Rentals() {
           )
         ) : (
           <div className="space-y-4 p-4">
-            {filteredEquipmentGroups.map(group => (
-              <div key={group.type} className="space-y-3">
+            {filteredEquipmentGroups.map((group, groupIndex) => (
+              <div key={`${group.type || 'unknown'}-${groupIndex}`} className="space-y-3">
                 <button
                   type="button"
                   onClick={() => toggleGroupCollapsed(group.type)}
@@ -4582,8 +4562,8 @@ export default function Rentals() {
               </div>
             )
           ) : (
-            filteredEquipmentGroups.map(group => (
-              <React.Fragment key={group.type}>
+            filteredEquipmentGroups.map((group, groupIndex) => (
+              <React.Fragment key={`${group.type || 'unknown'}-${groupIndex}`}>
                 <button
                   type="button"
                   onClick={() => toggleGroupCollapsed(group.type)}
@@ -4615,7 +4595,7 @@ export default function Rentals() {
 
                 {!collapsedGroups[group.type] && group.items.map((eq, idx) => (
                   <EquipmentRow
-                    key={eq.id}
+                    key={`${eq.id || eq.inventoryNumber || 'equipment'}-${idx}`}
                     rowIndex={idx}
                     equipment={eq}
                     rentals={getFilteredRentalsForEquipment(eq)}
@@ -5254,6 +5234,11 @@ export default function Rentals() {
                                           {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
                                         </span>
                                       )}
+                                      {!isBrokenRentalLink && row.linkStatus.status === 'duplicate_gantt' && (
+                                        <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                                          Дубль планировщика скрыт
+                                        </span>
+                                      )}
 	                                    </div>
 	                                    <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold', returnTone)}>{returnLabel}</span>
 	                                  </div>
@@ -5431,6 +5416,11 @@ export default function Rentals() {
                                     {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
                                   </span>
                                 )}
+                                {!isBrokenRentalLink && row.linkStatus.status === 'duplicate_gantt' && (
+                                  <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                                    Дубль планировщика скрыт
+                                  </span>
+                                )}
                                 <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
                               </td>
                               <td className="px-4 py-3">
@@ -5476,6 +5466,11 @@ export default function Rentals() {
                                     className={cn('mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300', isAdminRole && 'cursor-pointer hover:bg-red-200 dark:hover:bg-red-900/60')}
                                   >
                                     {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
+                                  </span>
+                                )}
+                                {!isBrokenRentalLink && row.linkStatus.status === 'duplicate_gantt' && (
+                                  <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                                    Дубль планировщика скрыт
                                   </span>
                                 )}
                                 <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
@@ -5530,6 +5525,11 @@ export default function Rentals() {
                                     className={cn('mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300', isAdminRole && 'cursor-pointer hover:bg-red-200 dark:hover:bg-red-900/60')}
                                   >
                                     {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
+                                  </span>
+                                )}
+                                {!isBrokenRentalLink && row.linkStatus.status === 'duplicate_gantt' && (
+                                  <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                                    Дубль планировщика скрыт
                                   </span>
                                 )}
                                 <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
@@ -5647,7 +5647,7 @@ export default function Rentals() {
           <DialogHeader>
             <DialogTitle>Диагностика связи аренды</DialogTitle>
             <DialogDescription>
-              Read-only проверка связки gantt_rentals, rentals, техники и договора. Orphan-записей вне рабочего списка: {orphanPlannerRows.length}.
+              Read-only проверка связки gantt_rentals, rentals, техники и договора. Плановых записей без договора: {orphanPlannerRows.length}; дублей планировщика: {duplicatePlannerGroups.length}.
             </DialogDescription>
           </DialogHeader>
           {linkDiagnosticRow && (
@@ -6493,13 +6493,13 @@ function EquipmentRow({
         {/* Return markers */}
         {showReturns && rentals
           .filter(rental => rental.status === 'active' || rental.status === 'created')
-          .map(rental => {
+          .map((rental, rentalIndex) => {
             const pos = barPosition(new Date(rental.endDate), addDays(new Date(rental.endDate), 1), viewStart, totalDays, dayWidth);
             if (!pos) return null;
             const isOverdue = rental.status === 'active' && rental.endDate < todayStr;
             return (
               <button
-                key={`return-${rental.id}`}
+                key={`return-${rental.id || rentalIndex}-${rentalIndex}`}
                 type="button"
                 onClick={() => onReturn(withEquipmentRowContext(rental, equipment))}
                 className={cn(
@@ -6518,7 +6518,7 @@ function EquipmentRow({
           })}
 
         {/* Delivery markers */}
-        {showDeliveries && movements.map(entry => {
+        {showDeliveries && movements.map((entry, movementIndex) => {
           const dateKey = String(entry.date || '').slice(0, 10);
           if (!dateKey) return null;
           const pos = barPosition(new Date(dateKey), addDays(new Date(dateKey), 1), viewStart, totalDays, dayWidth);
@@ -6526,7 +6526,7 @@ function EquipmentRow({
           const isReceiving = entry.type === 'receiving';
           return (
             <div
-              key={`movement-${entry.id}`}
+              key={`movement-${entry.id || movementIndex}-${dateKey}-${movementIndex}`}
               className={cn(
                 'absolute bottom-1 z-[12] flex h-5 min-w-5 -translate-x-1/2 items-center justify-center rounded-full border bg-white px-1 shadow-sm dark:bg-slate-900',
                 isReceiving
@@ -6542,12 +6542,12 @@ function EquipmentRow({
         })}
 
         {/* Service bars */}
-        {servicePeriods.map(sp => {
+        {servicePeriods.map((sp, serviceIndex) => {
           const pos = barPosition(new Date(sp.startDate), new Date(sp.endDate), viewStart, totalDays, dayWidth);
           if (!pos) return null;
           return (
             <div
-              key={sp.id}
+              key={`${sp.id || 'service'}-${serviceIndex}`}
               className="absolute z-[7] flex items-center overflow-hidden rounded-md px-1.5 text-[10px] font-medium text-red-700 shadow-sm dark:text-red-200"
               style={{
                 left: pos.left + 2,
@@ -6573,7 +6573,7 @@ function EquipmentRow({
         })}
 
         {/* Downtime bars */}
-        {downtimes.map(dt => {
+        {downtimes.map((dt, downtimeIndex) => {
           const displayEndDate = downtimeDisplayEndDate(dt, viewEnd, today);
           const pos = barPosition(new Date(dt.startDate), new Date(displayEndDate), viewStart, totalDays, dayWidth);
           if (!pos) return null;
@@ -6581,7 +6581,7 @@ function EquipmentRow({
           return (
             <button
               type="button"
-              key={dt.id}
+              key={`${dt.id || 'downtime'}-${downtimeIndex}`}
               onClick={() => onDowntime(dt)}
               className={cn(
                 'absolute z-[7] flex items-center overflow-hidden rounded-md px-1.5 text-left text-[10px] font-medium text-amber-800 shadow-sm transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-amber-400/60 dark:text-amber-200',
@@ -6683,7 +6683,7 @@ function EquipmentRow({
 
           return (
             <button
-              key={rental.id}
+              key={`${rental.id || 'rental'}-${rIdx}`}
               type="button"
               onClick={() => onBarClick(rental)}
               className={`absolute z-[8] flex cursor-pointer items-center overflow-hidden rounded-lg border border-white/25 bg-slate-600 text-left text-[clamp(10px,0.62vw,12px)] font-semibold text-white shadow-sm shadow-slate-950/20 transition-all hover:z-[11] hover:-translate-y-[1px] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/70 dark:border-white/15 ${

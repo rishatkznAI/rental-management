@@ -322,6 +322,8 @@ test('/api/admin/diagnostics/gantt-rentals-repair returns read-only sanitized re
     assert.equal(response.body.counts.brokenRows, 2);
     assert.equal(response.body.groups.B[0].ganttId, 'GR-1776257615497');
     assert.equal(response.body.groups.B[0].flags.hasSafeSingleCandidate, true);
+    assert.equal(response.body.groups.B[0].confidence, 'high');
+    assert.equal(response.body.groups.B[0].repairAllowed, true);
     assert.deepEqual(response.body.groups.B[0].candidateIds, ['R-candidate']);
     assert.equal(response.body.groups.C[0].flags.hasDocuments, true);
     assert.equal(response.body.groups.C[0].flags.hasPayments, true);
@@ -332,6 +334,64 @@ test('/api/admin/diagnostics/gantt-rentals-repair returns read-only sanitized re
     assert.equal(writeCount, 0);
     assert.equal(JSON.stringify(collections), before);
     assert.doesNotMatch(JSON.stringify(response.body), /9000|5000|Sensitive Manager|\+7999|private\.pdf|amount|price|manager|phone|fileUrl/i);
+  });
+});
+
+test('/api/admin/diagnostics/gantt-rentals-repair dry-run and apply repair only high-confidence rows', async () => {
+  const collections = {
+    equipment: [{ id: 'EQ-1', inventoryNumber: 'INV-1', serialNumber: 'SN-1', model: 'Genie S-65' }],
+    rentals: [
+      { id: 'R-candidate', clientId: 'C-2', client: 'Safe Client', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-06-01', endDate: '2026-06-10' },
+      { id: 'R-other', clientId: 'C-3', client: 'Other Client', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-07-01', endDate: '2026-07-10' },
+    ],
+    gantt_rentals: [
+      { id: 'GR-high', clientId: 'C-2', client: 'Safe Client', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-06-01', endDate: '2026-06-10' },
+      { id: 'GR-low', clientId: 'C-9', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', startDate: '2026-08-01', endDate: '2026-08-10' },
+    ],
+    documents: [],
+    payments: [],
+    deliveries: [],
+    service: [],
+  };
+  const before = JSON.stringify(collections);
+  let writeCount = 0;
+  const { app, auditEntries } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writeCount += 1;
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const dryRun = await postJson(baseUrl, '/api/admin/diagnostics/gantt-rentals-repair', { ids: ['GR-high', 'GR-low'] });
+    assert.equal(dryRun.status, 200);
+    assert.equal(dryRun.body.ok, true);
+    assert.equal(dryRun.body.applied, false);
+    assert.equal(dryRun.body.productionDataChanged, false);
+    assert.equal(dryRun.body.summary.repairableCount, 1);
+    assert.equal(dryRun.body.operations[0].id, 'GR-high');
+    assert.equal(writeCount, 0);
+    assert.equal(JSON.stringify(collections), before);
+
+    const rejected = await postJson(baseUrl, '/api/admin/diagnostics/gantt-rentals-repair', { ids: ['GR-high'], apply: true });
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.productionDataChanged, false);
+    assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-high').rentalId, undefined);
+
+    const applied = await postJson(baseUrl, '/api/admin/diagnostics/gantt-rentals-repair', {
+      ids: ['GR-high', 'GR-low'],
+      apply: true,
+      backupVerified: true,
+      confirm: 'APPLY_GANTT_REPAIR',
+    });
+    assert.equal(applied.status, 200);
+    assert.equal(applied.body.applied, true);
+    assert.equal(applied.body.productionDataChanged, true);
+    assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-high').rentalId, 'R-candidate');
+    assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-low').rentalId, undefined);
+    assert.equal(writeCount, 1);
+    assert.equal(auditEntries.some(entry => entry.action === 'gantt_rentals.repair_links'), true);
   });
 });
 

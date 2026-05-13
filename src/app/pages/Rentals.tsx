@@ -53,6 +53,7 @@ import { resolveRentalEquipment } from '../lib/rentalEquipment';
 import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { buildClientReceivables, buildRentalDebtRows, getEffectivePaidAmount, mergeClientsWithFinancials } from '../lib/finance';
 import { buildRentalPaymentBar } from '../lib/rentalTimeline.js';
+import { classifyRentalLinkStatus } from '../lib/rentalLinkStatus.js';
 import {
   DEFAULT_RENTAL_LIST_PAGE_SIZE,
   RENTAL_LIST_PAGE_SIZE_OPTIONS,
@@ -97,9 +98,19 @@ type ReturnServiceFilter = '' | 'yes' | 'no';
 type DebtDocsProblemFilter = '' | 'debt' | 'overdue' | 'partial' | 'missing_upd' | 'missing_contract' | 'unsigned';
 type DebtDocsDocumentFilter = '' | 'missing_upd' | 'missing_contract' | 'unsigned';
 type RentalChangeSuccessMessages = { pending?: string; applied?: string };
+type RentalLinkStatusCode = 'ok' | 'missing_rental' | 'missing_equipment' | 'missing_contract' | 'orphan_gantt' | 'duplicate_gantt' | 'legacy_match';
+type RentalLinkStatus = {
+  status: RentalLinkStatusCode;
+  label: string;
+  isBroken: boolean;
+  isContractMissing: boolean;
+  repairAllowed: boolean;
+  confidence: 'high' | 'medium' | 'low';
+  details: string;
+};
 type DrawerRentalData = GanttRentalData & {
   __brokenRentalLink?: boolean;
-  __brokenRentalLinkReason?: 'NO_LINKED_RENTAL' | 'MULTIPLE_CANDIDATES' | 'STALE_GANTT_ROW';
+  __brokenRentalLinkReason?: 'NO_LINKED_RENTAL' | 'MULTIPLE_CANDIDATES' | 'STALE_GANTT_ROW' | RentalLinkStatusCode;
   __ganttRentalId?: string;
   __linkedGanttRentalId?: string;
   __ganttSnapshot?: GanttRentalData;
@@ -406,14 +417,20 @@ function markBrokenRentalLink(
   };
 }
 
-function isBrokenRentalLinkRow(row: { rental: GanttRentalData; classicRental?: Rental | null }): boolean {
-  return Boolean((row.rental as DrawerRentalData).__brokenRentalLink || !row.classicRental);
+function isBrokenRentalLinkRow(row: { rental: GanttRentalData; classicRental?: Rental | null; linkStatus?: RentalLinkStatus }): boolean {
+  return Boolean(row.linkStatus?.isBroken || (row.rental as DrawerRentalData).__brokenRentalLink || !row.classicRental);
 }
 
 function brokenRentalLinkLabel(reason?: DrawerRentalData['__brokenRentalLinkReason']): string {
+  if (reason === 'missing_rental') return 'Связь повреждена';
+  if (reason === 'missing_equipment') return 'Техника не найдена';
+  if (reason === 'orphan_gantt') return 'Запись планировщика без аренды';
+  if (reason === 'duplicate_gantt') return 'Дубль планировщика';
+  if (reason === 'legacy_match') return 'Связь по старым полям';
+  if (reason === 'missing_contract') return 'Договор не привязан';
   if (reason === 'MULTIPLE_CANDIDATES') return 'Несколько кандидатов';
   if (reason === 'STALE_GANTT_ROW') return 'Нет записи rentals';
-  return 'Битая связь';
+  return 'Связь повреждена';
 }
 
 function withEquipmentRowContext(rental: GanttRentalData, equipment: Equipment): GanttRentalData {
@@ -1587,6 +1604,14 @@ export default function Rentals() {
   const [customRangeStart, setCustomRangeStart] = useState(format(currentMonthStart, 'yyyy-MM-dd'));
   const [customRangeEnd, setCustomRangeEnd] = useState(format(currentMonthEnd, 'yyyy-MM-dd'));
   const [selectedRental, setSelectedRental] = useState<GanttRentalData | null>(null);
+  const [linkDiagnosticRow, setLinkDiagnosticRow] = useState<{
+    rental: GanttRentalData;
+    classicRental?: Rental | null;
+    equipment?: Equipment | null;
+    sourceRentalId?: string;
+    linkStatus: RentalLinkStatus;
+  } | null>(null);
+  const [linkRepairPending, setLinkRepairPending] = useState(false);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showDowntimeModal, setShowDowntimeModal] = useState(false);
   const [showNewRentalModal, setShowNewRentalModal] = useState(false);
@@ -2337,6 +2362,16 @@ export default function Rentals() {
     [classicRentalData],
   );
 
+  const ganttCountBySourceRentalId = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of ganttRentals) {
+      const sourceRentalId = getGanttRentalSourceId(item);
+      if (!sourceRentalId) continue;
+      counts.set(sourceRentalId, (counts.get(sourceRentalId) || 0) + 1);
+    }
+    return counts;
+  }, [ganttRentals]);
+
   const buildRentalDrawerRental = useCallback((ganttRental: GanttRentalData, classicRental?: Rental | null): DrawerRentalData => {
     const sourceRentalId = getGanttRentalSourceId(ganttRental);
     const resolvedClassicRental = classicRental || (sourceRentalId ? classicRentalsById.get(sourceRentalId) : null);
@@ -2354,6 +2389,57 @@ export default function Rentals() {
       __ganttSnapshot: ganttRental,
     } as DrawerRentalData;
   }, [classicRentalsById, equipmentList]);
+
+  const handleRepairGanttLink = useCallback(async () => {
+    if (!linkDiagnosticRow || !isAdminRole || !linkDiagnosticRow.linkStatus.repairAllowed) return;
+    const ganttId = String(linkDiagnosticRow.rental.id || '').trim();
+    if (!ganttId) return;
+    setLinkRepairPending(true);
+    try {
+      const dryRun = await rentalsService.repairGanttLinks({ ids: [ganttId] });
+      if (!dryRun.operations.some(operation => operation.id === ganttId && operation.repairAllowed && operation.confidence === 'high')) {
+        showToast('Автоматическое восстановление недоступно: нужна ручная проверка.', 'error');
+        return;
+      }
+      const confirmed = window.confirm('Восстановить связь gantt_rentals с найденной арендой? Финансы, документы и статусы не изменятся.');
+      if (!confirmed) return;
+      const result = await rentalsService.repairGanttLinks({
+        ids: [ganttId],
+        apply: true,
+        backupVerified: true,
+        confirm: 'APPLY_GANTT_REPAIR',
+      });
+      if (!result.applied) {
+        showToast('Связь не была изменена.', 'error');
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+      setLinkDiagnosticRow(null);
+      showToast('Связь планировщика восстановлена.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Не удалось восстановить связь.', 'error');
+    } finally {
+      setLinkRepairPending(false);
+    }
+  }, [isAdminRole, linkDiagnosticRow, queryClient, showToast]);
+
+  const openLinkDiagnostic = useCallback((row: {
+    rental: GanttRentalData;
+    classicRental?: Rental | null;
+    equipment?: Equipment | null;
+    sourceRentalId?: string;
+    linkStatus: RentalLinkStatus;
+  }, event?: React.MouseEvent) => {
+    event?.stopPropagation();
+    if (!isAdminRole && row.linkStatus.isBroken) return;
+    setLinkDiagnosticRow({
+      rental: row.rental,
+      classicRental: row.classicRental,
+      equipment: row.equipment,
+      sourceRentalId: row.sourceRentalId,
+      linkStatus: row.linkStatus,
+    });
+  }, [isAdminRole]);
 
   useEffect(() => {
     if (!selectedRental) return;
@@ -2382,7 +2468,6 @@ export default function Rentals() {
       .map(rental => {
         const sourceRentalId = getGanttRentalSourceId(rental);
         const classicRental = sourceRentalId ? classicRentalsById.get(sourceRentalId) : undefined;
-        const isBrokenRentalLink = Boolean((rental as DrawerRentalData).__brokenRentalLink || !classicRental);
         const equipment = rental.equipmentId
           ? equipmentById.get(rental.equipmentId)
           : equipmentList.find(item => item.inventoryNumber === rental.equipmentInv);
@@ -2430,7 +2515,16 @@ export default function Rentals() {
         const hasContractDocument = relatedDocuments.some(doc => (doc.documentType || doc.type) === 'contract');
         const hasUpdDocument = relatedDocuments.some(doc => (doc.documentType || doc.type) === 'upd');
         const unsignedDocuments = relatedDocuments.filter(doc => doc.status !== 'signed');
-        const missingContract = !sourceRentalId && !classicRental?.contractId && !hasContractDocument;
+        const linkStatus = classifyRentalLinkStatus({
+          ganttRental: rental,
+          classicRental,
+          equipment,
+          relatedDocuments,
+          duplicateGanttCount: sourceRentalId ? (ganttCountBySourceRentalId.get(sourceRentalId) || 1) : 1,
+          candidateCount: (rental as DrawerRentalData).__brokenRentalLinkReason === 'MULTIPLE_CANDIDATES' ? 2 : 0,
+        }) as RentalLinkStatus;
+        const isBrokenRentalLink = Boolean(linkStatus.isBroken);
+        const missingContract = Boolean(linkStatus.isContractMissing);
         const missingUpd = !rental.updSigned && !hasUpdDocument;
         const hasUnsignedDocuments = unsignedDocuments.length > 0 || (!!rental.updDate && !rental.updSigned);
         const hasMoneyProblem = debtAmount > 0 || isOverdueDebt || isPartialPayment || rental.paymentStatus === 'partial';
@@ -2486,7 +2580,8 @@ export default function Rentals() {
           isVisibleInThirtyDays: rentalIntersectsRange(rental, today, nextThirtyDays),
           matchesQuery: !query || searchText.includes(query),
           isBrokenRentalLink,
-          brokenRentalLinkReason: (rental as DrawerRentalData).__brokenRentalLinkReason,
+          linkStatus,
+          brokenRentalLinkReason: linkStatus.status,
         };
       })
       .filter(row => row.matchesQuery)
@@ -3082,6 +3177,7 @@ export default function Rentals() {
     canEditRentals,
     canEditRentalDates,
     equipmentList,
+    ganttCountBySourceRentalId,
     ganttRentals,
     historyAuthor,
     isAdminRole,
@@ -4916,11 +5012,16 @@ export default function Rentals() {
 	                                  <div className="flex items-start justify-between gap-2">
 	                                    <div className="min-w-0">
 	                                      <div className="truncate font-semibold text-foreground">{row.rental.client || 'Без клиента'}</div>
-	                                      <div className="mt-0.5 truncate text-xs text-muted-foreground">{row.sourceRentalId || row.rental.id}</div>
+                                      <div className="mt-0.5 truncate text-xs text-muted-foreground">{row.sourceRentalId || row.rental.id}</div>
                                       {isBrokenRentalLink && (
-                                        <div className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                        <span
+                                          role={isAdminRole ? 'button' : undefined}
+                                          tabIndex={isAdminRole ? 0 : undefined}
+                                          onClick={event => openLinkDiagnostic(row, event)}
+                                          className={cn('mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300', isAdminRole && 'cursor-pointer hover:bg-red-200 dark:hover:bg-red-900/60')}
+                                        >
                                           {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
-                                        </div>
+                                        </span>
                                       )}
 	                                    </div>
 	                                    <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold', returnTone)}>{returnLabel}</span>
@@ -5089,9 +5190,14 @@ export default function Rentals() {
                               <td className="px-4 py-3">
                                 <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
                                 {isBrokenRentalLink && (
-                                  <div className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                  <span
+                                    role={isAdminRole ? 'button' : undefined}
+                                    tabIndex={isAdminRole ? 0 : undefined}
+                                    onClick={event => openLinkDiagnostic(row, event)}
+                                    className={cn('mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300', isAdminRole && 'cursor-pointer hover:bg-red-200 dark:hover:bg-red-900/60')}
+                                  >
                                     {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
-                                  </div>
+                                  </span>
                                 )}
                                 <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
                               </td>
@@ -5131,9 +5237,14 @@ export default function Rentals() {
                               <td className="px-4 py-3">
                                 <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
                                 {isBrokenRentalLink && (
-                                  <div className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                  <span
+                                    role={isAdminRole ? 'button' : undefined}
+                                    tabIndex={isAdminRole ? 0 : undefined}
+                                    onClick={event => openLinkDiagnostic(row, event)}
+                                    className={cn('mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300', isAdminRole && 'cursor-pointer hover:bg-red-200 dark:hover:bg-red-900/60')}
+                                  >
                                     {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
-                                  </div>
+                                  </span>
                                 )}
                                 <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
                               </td>
@@ -5180,9 +5291,14 @@ export default function Rentals() {
                               <td className="px-4 py-3">
                                 <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
                                 {isBrokenRentalLink && (
-                                  <div className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                  <span
+                                    role={isAdminRole ? 'button' : undefined}
+                                    tabIndex={isAdminRole ? 0 : undefined}
+                                    onClick={event => openLinkDiagnostic(row, event)}
+                                    className={cn('mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300', isAdminRole && 'cursor-pointer hover:bg-red-200 dark:hover:bg-red-900/60')}
+                                  >
                                     {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
-                                  </div>
+                                  </span>
                                 )}
                                 <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
                               </td>
@@ -5216,7 +5332,7 @@ export default function Rentals() {
                                 <div className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold', row.rental.updSigned ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300')}>
                                   {row.rental.updSigned ? 'УПД подписан' : 'Без УПД'}
                                 </div>
-                                <div className="mt-1 text-xs text-muted-foreground">{row.sourceRentalId ? 'Договор есть' : 'Договор не найден'}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">{row.missingContract ? 'Договор не привязан' : 'Договор есть'}</div>
                               </td>
                               <td className="px-4 py-3">
                                 <div className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold', returnTone)}>
@@ -5292,6 +5408,65 @@ export default function Rentals() {
           </div>
         </div>
       )}
+
+      <Dialog open={Boolean(linkDiagnosticRow)} onOpenChange={open => !open && setLinkDiagnosticRow(null)}>
+        <DialogContent className="sm:max-w-[620px]">
+          <DialogHeader>
+            <DialogTitle>Диагностика связи аренды</DialogTitle>
+            <DialogDescription>
+              Read-only проверка связки gantt_rentals, rentals, техники и договора.
+            </DialogDescription>
+          </DialogHeader>
+          {linkDiagnosticRow && (
+            <div className="space-y-4 text-sm">
+              <div className="rounded-lg border border-border p-3">
+                <div className="font-semibold text-foreground">{linkDiagnosticRow.linkStatus.label}</div>
+                <div className="mt-1 text-muted-foreground">{linkDiagnosticRow.linkStatus.details}</div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs uppercase text-muted-foreground">gantt_rentals.id</div>
+                  <div className="font-mono">{linkDiagnosticRow.rental.id || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-muted-foreground">linked rentalId</div>
+                  <div className="font-mono">{linkDiagnosticRow.sourceRentalId || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-muted-foreground">rentals.id</div>
+                  <div className="font-mono">{linkDiagnosticRow.classicRental?.id || 'не найдено'}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-muted-foreground">equipmentId</div>
+                  <div className="font-mono">{linkDiagnosticRow.equipment?.id || linkDiagnosticRow.rental.equipmentId || 'не найдено'}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-muted-foreground">confidence</div>
+                  <div>{linkDiagnosticRow.linkStatus.confidence}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-muted-foreground">auto repair</div>
+                  <div>{isAdminRole && linkDiagnosticRow.linkStatus.repairAllowed ? 'Доступен' : 'Требуется ручная проверка'}</div>
+                </div>
+              </div>
+              {!isAdminRole && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                  Детальное восстановление доступно только администратору.
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setLinkDiagnosticRow(null)}>Закрыть</Button>
+            {isAdminRole && linkDiagnosticRow?.linkStatus.repairAllowed && (
+              <Button onClick={() => void handleRepairGanttLink()} disabled={linkRepairPending}>
+                <Wrench className="h-4 w-4" />
+                Починить связь
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ===== Drawer ===== */}
       <RentalDrawer

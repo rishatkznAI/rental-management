@@ -47,6 +47,27 @@ export type RentalDowntimeResponse = {
   };
 };
 
+export type GanttRentalRepairResponse = {
+  ok: boolean;
+  applied: boolean;
+  productionDataChanged: boolean;
+  dryRun: boolean;
+  summary: {
+    requestedCount: number;
+    repairableCount: number;
+    skippedCount: number;
+  };
+  operations: Array<{
+    type: string;
+    id: string;
+    reason: string;
+    confidence: 'high' | 'medium' | 'low';
+    repairAllowed: boolean;
+    before: Record<string, string>;
+    after: Record<string, string>;
+  }>;
+};
+
 export const rentalsService = {
   getAll: (): Promise<Rental[]> =>
     api.get<Rental[]>('/api/rentals'),
@@ -123,6 +144,9 @@ export const rentalsService = {
 
   bulkReplaceGantt: (list: GanttRentalData[]): Promise<void> =>
     api.put('/api/gantt_rentals', list),
+
+  repairGanttLinks: (data: { ids?: string[]; apply?: boolean; backupVerified?: boolean; confirm?: string }): Promise<GanttRentalRepairResponse> =>
+    api.post<GanttRentalRepairResponse>('/api/admin/diagnostics/gantt-rentals-repair', data),
 
   createDowntime: (data: Omit<DowntimePeriod, 'id'>): Promise<DowntimePeriod> =>
     api.post<DowntimePeriod>('/api/equipment_downtimes', data),

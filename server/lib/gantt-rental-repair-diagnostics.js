@@ -270,6 +270,7 @@ function classifyBrokenGanttRow({ gantt, rentals, rentalsById, equipmentIndex, c
   }
 
   const targetRentalId = group === 'B' ? candidates[0].rentalId : '';
+  const confidence = group === 'B' ? 'high' : (candidates.length === 1 ? 'medium' : 'low');
   return compactObject({
     ...rowDto(gantt),
     linkedRentalIds: linkedIds,
@@ -294,6 +295,9 @@ function classifyBrokenGanttRow({ gantt, rentals, rentalsById, equipmentIndex, c
     candidateCount: candidates.length,
     reason,
     group,
+    confidence,
+    repairAllowed: group === 'B' && Boolean(targetRentalId),
+    repairAction: group === 'B' && targetRentalId ? 'link_gantt_to_rental' : '',
     recommendation,
     targetRentalId,
     manualReviewReasons: [
@@ -357,6 +361,11 @@ function sanitizeRepairRow(row) {
     status: text(row?.status),
     reason: text(row?.reason),
     group: text(row?.group),
+    confidence: text(row?.confidence),
+    repairAllowed: Boolean(row?.repairAllowed),
+    repairAction: text(row?.repairAction),
+    foundRental: Boolean(row?.targetRentalId),
+    foundEquipment: Boolean(row?.equipmentId || row?.inventoryNumber || row?.serialNumber),
     recommendation: text(row?.recommendation),
     targetRentalId: text(row?.targetRentalId),
     candidatesCount: Number(row?.candidateCount || 0),
@@ -461,19 +470,63 @@ function buildDryRunOperations(plan) {
   };
 }
 
+function allowedRepairIds(plan, ids = null) {
+  const allowed = new Set(plan.groups.B.map(row => row.ganttId));
+  if (!Array.isArray(ids)) return allowed;
+  return new Set(ids.map(text).filter(id => allowed.has(id)));
+}
+
+function buildSafeRepairOperations(plan, options = {}) {
+  const ids = allowedRepairIds(plan, options.ids);
+  const requestedCount = Array.isArray(options.ids) ? options.ids.map(text).filter(Boolean).length : plan.groups.B.length;
+  const operations = plan.groups.B
+    .filter(row => ids.has(row.ganttId))
+    .map(row => ({
+      type: 'link_gantt_row',
+      id: row.ganttId,
+      reason: row.reason,
+      confidence: row.confidence || 'high',
+      repairAllowed: true,
+      before: {
+        rentalId: row.rentalId || '',
+        sourceRentalId: row.sourceRentalId || '',
+        originalRentalId: row.originalRentalId || '',
+      },
+      after: {
+        rentalId: row.targetRentalId,
+        sourceRentalId: row.targetRentalId,
+        originalRentalId: row.targetRentalId,
+      },
+    }));
+
+  return {
+    dryRun: options.apply !== true,
+    productionDataChanged: false,
+    summary: {
+      requestedCount,
+      repairableCount: operations.length,
+      skippedCount: Math.max(0, requestedCount - operations.length),
+    },
+    operations,
+  };
+}
+
 function applyRepairPlan(collections = {}, plan, options = {}) {
   if (options.apply !== true) {
-    return { applied: false, collections, operations: buildDryRunOperations(plan) };
+    return { applied: false, collections, operations: buildSafeRepairOperations(plan, options) };
   }
   if (!options.backupVerified || !options.confirm) {
     throw new Error('--apply requires --backup-verified and --confirm=APPLY_GANTT_REPAIR');
   }
 
   const deleteIds = new Set(plan.groups.A.map(row => row.ganttId));
-  const relinkById = new Map(plan.groups.B.map(row => [row.ganttId, row.targetRentalId]));
+  const ids = allowedRepairIds(plan, options.ids);
+  const relinkById = new Map(plan.groups.B
+    .filter(row => ids.has(row.ganttId))
+    .map(row => [row.ganttId, row.targetRentalId]));
   const ganttRentals = asArray(collections.gantt_rentals || collections.ganttRentals);
   const nextGanttRentals = ganttRentals
-    .filter(row => !deleteIds.has(text(row?.id)))
+    .filter(row => !(options.allowDeletes === true && deleteIds.has(text(row?.id))))
     .map(row => {
       const id = text(row?.id);
       const targetRentalId = relinkById.get(id);
@@ -488,7 +541,7 @@ function applyRepairPlan(collections = {}, plan, options = {}) {
   return {
     applied: true,
     collections: { ...collections, gantt_rentals: nextGanttRentals },
-    operations: buildDryRunOperations(plan),
+    operations: buildSafeRepairOperations(plan, { ...options, apply: true }),
   };
 }
 
@@ -496,6 +549,7 @@ module.exports = {
   buildBrokenGanttRentalsRepairPlan,
   buildAdminGanttRentalRepairDiagnostics,
   buildDryRunOperations,
+  buildSafeRepairOperations,
   applyRepairPlan,
   isSpecialPlannerRow,
 };

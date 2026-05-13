@@ -181,6 +181,10 @@ test('rentals workspace does not open broken gantt rows as full rentals', () => 
   assert.match(rentalsSource, /inferredClassicCandidates\.length === 1 \? inferredClassicCandidates\[0\] : null/);
   assert.match(rentalsSource, /filter\(row => !row\.isBrokenRentalLink \|\| isAdminRole\)/);
   assert.match(rentalsSource, /if \(!isBrokenRentalLink\) setSelectedRental\(buildRentalDrawerRental\(row\.rental, row\.classicRental\)\)/);
-  assert.match(rentalsSource, /Нет записи rentals/);
+  assert.match(rentalsSource, /Связь повреждена/);
   assert.match(rentalsSource, /brokenRentalLinkLabel\(row\.brokenRentalLinkReason\)/);
+  assert.match(rentalsSource, /Починить связь/);
+  assert.match(rentalsSource, /classifyRentalLinkStatus/);
+  assert.match(rentalsSource, /\{isAdminRole && linkDiagnosticRow\?\.linkStatus\.repairAllowed && \(/);
+  assert.doesNotMatch(rentalsSource, /Битая связь/);
 });

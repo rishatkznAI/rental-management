@@ -11,7 +11,11 @@ const {
   analyzeRentalEquipmentDiagnostics,
   planRentalEquipmentBackfill,
 } = require('../lib/rental-equipment-diagnostics');
-const { buildAdminGanttRentalRepairDiagnostics } = require('../lib/gantt-rental-repair-diagnostics');
+const {
+  applyRepairPlan,
+  buildAdminGanttRentalRepairDiagnostics,
+  buildBrokenGanttRentalsRepairPlan,
+} = require('../lib/gantt-rental-repair-diagnostics');
 const { buildRentalLinkDiagnostics } = require('../lib/rental-link-diagnostics');
 const dns = require('dns');
 const fs = require('fs');
@@ -1022,6 +1026,56 @@ function registerSystemRoutes(app, deps) {
       service: readData('service') || [],
     });
     return res.json(diagnostics);
+  });
+
+  app.post('/api/admin/diagnostics/gantt-rentals-repair', requireAuth, requireAdmin, (req, res) => {
+    const collections = {
+      equipment: readData('equipment') || [],
+      rentals: readData('rentals') || [],
+      gantt_rentals: readData('gantt_rentals') || [],
+      documents: readData('documents') || [],
+      payments: readData('payments') || [],
+      deliveries: readData('deliveries') || [],
+      service: readData('service') || [],
+    };
+    const plan = buildBrokenGanttRentalsRepairPlan(collections);
+    const apply = req.body?.apply === true;
+    let result;
+    try {
+      result = applyRepairPlan(collections, plan, {
+        apply,
+        ids: Array.isArray(req.body?.ids) ? req.body.ids : null,
+        backupVerified: req.body?.backupVerified === true,
+        confirm: req.body?.confirm === 'APPLY_GANTT_REPAIR',
+      });
+    } catch (error) {
+      return res.status(400).json({
+        ok: false,
+        applied: false,
+        productionDataChanged: false,
+        error: error instanceof Error ? error.message : 'Repair rejected',
+      });
+    }
+
+    if (apply && result.applied) {
+      writeData('gantt_rentals', result.collections.gantt_rentals);
+      auditLog?.(req, {
+        action: 'gantt_rentals.repair_links',
+        entityType: 'gantt_rentals',
+        description: `Восстановлены связи gantt_rentals: ${result.operations.operations.length}`,
+        after: {
+          ids: result.operations.operations.map(operation => operation.id),
+          count: result.operations.operations.length,
+        },
+      });
+    }
+
+    return res.json({
+      ok: true,
+      ...result.operations,
+      applied: Boolean(apply && result.applied),
+      productionDataChanged: Boolean(apply && result.applied),
+    });
   });
 
   app.post('/api/admin/rental-equipment-diagnostics/backfill', requireAuth, requireAdmin, (req, res) => {

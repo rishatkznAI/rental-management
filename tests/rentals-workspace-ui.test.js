@@ -146,17 +146,20 @@ test('rentals workspace KPI cards have icons and honest compact trends', () => {
   assert.doesNotMatch(rentalsSource, /Math\.random|fake|mock trend|mockTrend/i);
 });
 
-test('rentals workspace paginates only the visual rental table', () => {
+test('rentals workspace paginates rendered rental rows after filters and tab selection', () => {
   assert.match(rentalsSource, /DEFAULT_RENTAL_LIST_PAGE_SIZE/);
   assert.match(rentalsSource, /RENTAL_LIST_PAGE_SIZE_OPTIONS/);
   assert.match(rentalsSource, /const \[currentPage, setCurrentPage\] = useState\(1\)/);
   assert.match(rentalsSource, /const \[pageSize, setPageSize\] = useState\(DEFAULT_RENTAL_LIST_PAGE_SIZE\)/);
-  assert.match(rentalsSource, /getRentalListPageState\(workspaceTableRows, currentPage, pageSize\)/);
-  assert.match(rentalsSource, /const paginatedRentals = rentalListPagination\.pageItems/);
+  assert.match(rentalsSource, /const filteredRentalRows = useMemo/);
+  assert.match(rentalsSource, /getRentalListPageState\(filteredRentalRows, currentPage, pageSize\)/);
+  assert.match(rentalsSource, /const paginatedRentalRows = rentalListPagination\.pageItems/);
   assert.match(rentalsSource, /rentalListPagination\.total === 0/);
-  assert.match(rentalsSource, /\) : paginatedRentals\.map\(row =>/);
-  assert.doesNotMatch(rentalsSource, /workspaceTableRows\.map\(row =>/);
-  assert.match(rentalsSource, /\{workspaceTableRows\.length\} записей по текущим фильтрам/);
+  assert.match(rentalsSource, /\) : paginatedRentalRows\.map\(row =>/);
+  assert.match(rentalsSource, /rows: paginatedRentalRows\.filter\(row => row\.isReturnToday\)/);
+  assert.doesNotMatch(rentalsSource, /filteredRentalRows\.map\(row =>/);
+  assert.doesNotMatch(rentalsSource, /rows: returnsWorkspaceRows\.filter\(row => row\.isReturnToday\)/);
+  assert.match(rentalsSource, /\{filteredRentalRows\.length\} записей по текущим фильтрам/);
   assert.match(rentalsSource, /const activeRows = rentalDealRows\.filter\(row => row\.isActive\)/);
 });
 

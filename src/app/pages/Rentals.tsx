@@ -2511,17 +2511,17 @@ export default function Rentals() {
     [canViewDocuments, canViewPayments, debtDocsDocumentFilter, debtDocsProblemFilter, rentalDealRows],
   );
 
-  const workspaceTableRows = useMemo(() => {
+  const filteredRentalRows = useMemo(() => {
     if (activeWorkspaceTab === 'returns') return returnsWorkspaceRows;
     if (activeWorkspaceTab === 'debt_docs') return debtDocsWorkspaceRows;
     return rentalDealRows;
   }, [activeWorkspaceTab, debtDocsWorkspaceRows, rentalDealRows, returnsWorkspaceRows]);
 
   const rentalListPagination = useMemo(
-    () => getRentalListPageState(workspaceTableRows, currentPage, pageSize),
-    [currentPage, pageSize, workspaceTableRows],
+    () => getRentalListPageState(filteredRentalRows, currentPage, pageSize),
+    [currentPage, filteredRentalRows, pageSize],
   );
-  const paginatedRentals = rentalListPagination.pageItems;
+  const paginatedRentalRows = rentalListPagination.pageItems;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -3204,44 +3204,44 @@ export default function Rentals() {
       title: 'Сегодня',
       emptyLabel: 'Сегодня возвратов нет',
       tone: 'border-blue-200 bg-blue-50/60 dark:border-blue-900/50 dark:bg-blue-950/20',
-      rows: returnsWorkspaceRows.filter(row => row.isReturnToday),
+      rows: paginatedRentalRows.filter(row => row.isReturnToday),
     },
     {
       id: 'tomorrow',
       title: 'Завтра',
       emptyLabel: 'На завтра возвратов нет',
       tone: 'border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-950/20',
-      rows: returnsWorkspaceRows.filter(row => row.isReturnTomorrow),
+      rows: paginatedRentalRows.filter(row => row.isReturnTomorrow),
     },
     {
       id: 'overdue',
       title: 'Просрочено',
       emptyLabel: 'Просроченных нет',
       tone: 'border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20',
-      rows: returnsWorkspaceRows.filter(row => row.isOverdueReturn),
+      rows: paginatedRentalRows.filter(row => row.isOverdueReturn),
     },
     {
       id: 'planned',
       title: 'Запланировано',
       emptyLabel: 'Запланированных нет',
       tone: 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/30',
-      rows: returnsWorkspaceRows.filter(row => row.isReturnPlanned && !row.isReturnToday && !row.isReturnTomorrow && !row.isOverdueReturn),
+      rows: paginatedRentalRows.filter(row => row.isReturnPlanned && !row.isReturnToday && !row.isReturnTomorrow && !row.isOverdueReturn),
     },
     {
       id: 'awaiting',
       title: 'Ожидает приёмки',
       emptyLabel: 'Приёмки не ожидаются',
       tone: 'border-violet-200 bg-violet-50/60 dark:border-violet-900/50 dark:bg-violet-950/20',
-      rows: returnsWorkspaceRows.filter(row => row.isAwaitingAcceptance || row.isReturnedNotClosed),
+      rows: paginatedRentalRows.filter(row => row.isAwaitingAcceptance || row.isReturnedNotClosed),
     },
     {
       id: 'service',
       title: 'Нужен сервис',
       emptyLabel: 'Сервис не требуется',
       tone: 'border-orange-200 bg-orange-50/60 dark:border-orange-900/50 dark:bg-orange-950/20',
-      rows: returnsWorkspaceRows.filter(row => row.needsReturnService),
+      rows: paginatedRentalRows.filter(row => row.needsReturnService),
     },
-  ], [returnsWorkspaceRows]);
+  ], [paginatedRentalRows]);
 
   const hasReturnBoardRows = returnBoardColumns.some(column => column.rows.length > 0);
 
@@ -4772,6 +4772,7 @@ export default function Rentals() {
                     <h2 className="text-base font-bold text-foreground">Диспетчерская доска возвратов</h2>
                     <p className="text-xs text-muted-foreground">Сегодня, завтра, просрочки, приёмка и сервис разделены как отдельные рабочие очереди.</p>
                   </div>
+                  {rentalListPaginationControls('top')}
                   <span className="rounded-full border border-border bg-secondary/60 px-3 py-1 text-xs font-semibold text-muted-foreground">
                     {returnsWorkspaceRows.length} возвратов
                   </span>
@@ -4851,6 +4852,7 @@ export default function Rentals() {
                     ))}
                   </div>
                 )}
+                {rentalListPaginationControls('bottom')}
               </section>
             )}
 
@@ -4865,7 +4867,7 @@ export default function Rentals() {
                         ? 'Проблемы по деньгам и документам'
                         : 'Таблица аренд'}
                   </h2>
-                  <p className="text-xs text-muted-foreground">{workspaceTableRows.length} записей по текущим фильтрам</p>
+                  <p className="text-xs text-muted-foreground">{filteredRentalRows.length} записей по текущим фильтрам</p>
                 </div>
                 {rentalListPaginationControls('top')}
               </div>
@@ -4926,7 +4928,7 @@ export default function Rentals() {
                               : 'Ничего не найдено'}
                         </td>
                       </tr>
-                    ) : paginatedRentals.map(row => {
+                    ) : paginatedRentalRows.map(row => {
                       const isSelected = selectedRental?.id === row.rental.id;
                       const statusClass = row.rental.status === 'active'
                         ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'

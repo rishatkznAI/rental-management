@@ -28,7 +28,7 @@ import { RENTAL_KEYS } from '../../hooks/useRentals';
 import { rentalsService } from '../../services/rentals.service';
 import type { RentalExtensionResponse } from '../../services/rentals.service';
 import type { GanttRentalData } from '../../mock-data';
-import type { Client, Equipment, Payment, Rental, ServiceTicket } from '../../types';
+import type { Client, Delivery, Equipment, Payment, Rental, ServiceTicket } from '../../types';
 import type { ClientReceivableRow } from '../../lib/finance';
 import { getEffectivePaidAmount } from '../../lib/finance';
 import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
@@ -44,6 +44,7 @@ interface RentalDrawerProps {
   payments: Payment[];
   serviceTickets?: ServiceTicket[];
   clients?: Client[];
+  deliveries?: Delivery[];
   clientReceivables?: ClientReceivableRow[];
   managers?: SystemUser[];
   canEditRentals: boolean;
@@ -126,9 +127,23 @@ const serviceAlertStyles: Record<RentalServiceAlertSeverity, {
 const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
 type RentalDrawerTab = 'overview' | 'terms' | 'payments' | 'documents' | 'delivery' | 'history';
 
+const deliveryTypeLabels: Record<Delivery['type'], string> = {
+  shipping: 'Доставка',
+  receiving: 'Возвратная доставка',
+};
+
+const deliveryStatusLabels: Record<Delivery['status'], string> = {
+  new: 'Новая',
+  sent: 'Отправлена перевозчику',
+  accepted: 'Принята',
+  in_transit: 'В пути',
+  completed: 'Завершена',
+  cancelled: 'Отменена',
+};
+
 export function RentalDrawer({
   rental: rentalProp, equipment, allRentals, classicRentals = [], payments, serviceTickets = EMPTY_SERVICE_TICKETS,
-  clients = [], clientReceivables = [], managers = [],
+  clients = [], deliveries = [], clientReceivables = [], managers = [],
   canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals,
   canViewMoney = true, canCreatePayments, canCreateDocuments = false, canCreateDeliveries = false, canCreateService = false,
   onClose, onReturn, onDowntime, onStatusChange, onDelete,
@@ -229,6 +244,24 @@ export function RentalDrawer({
 
   const rental = displayRental;
   const currentEquipment = displayEquipment;
+  const rentalComments = Array.isArray(rental.comments) ? rental.comments : [];
+  const rentalPaymentIds = new Set([
+    rental.id,
+    rental.rentalId,
+    rental.sourceRentalId,
+    rental.originalRentalId,
+    (rental as GanttRentalData & { __ganttRentalId?: string; __linkedGanttRentalId?: string }).__ganttRentalId,
+    (rental as GanttRentalData & { __ganttRentalId?: string; __linkedGanttRentalId?: string }).__linkedGanttRentalId,
+  ].map(value => String(value || '').trim()).filter(Boolean));
+  const rentalStatusLabel = statusLabels[rental.status] || 'Статус не указан';
+  const rentalStatusVariant = statusVariants[rental.status] || 'default';
+  const rentalPaymentLabel = paymentLabels[rental.paymentStatus] || 'Не оплачено';
+  const rentalPaymentVariant = paymentVariants[rental.paymentStatus] || 'warning';
+  const relatedDeliveries = deliveries.filter(delivery => [
+    delivery.rentalId,
+    delivery.classicRentalId,
+    delivery.ganttRentalId,
+  ].some(value => rentalPaymentIds.has(String(value || '').trim())));
 
   const rentalResolution = resolveRentalByAnyId(rental, classicRentals, allRentals);
   const rentalDetailId = rentalResolution.canonicalId;
@@ -239,7 +272,7 @@ export function RentalDrawer({
   const activeManagers = filterRentalManagerUsers(managers);
 
   // Payments for this rental
-  const rentalPayments = payments.filter(p => p.rentalId === rental.id);
+  const rentalPayments = payments.filter(p => rentalPaymentIds.has(String(p.rentalId || '').trim()));
   const totalPaid = rentalPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const rentalBilling = calculateRentalBilling(rental);
   const rentalBillingAmount = rentalBilling.finalRentalAmount;
@@ -523,6 +556,11 @@ export function RentalDrawer({
     setManagerEditMode(false);
   };
 
+  const handlePaymentStatusChange = (status: GanttRentalData['paymentStatus']) => {
+    if (!canEditRentals) return;
+    onUpdate(rental, { paymentStatus: status });
+  };
+
   return (
     <div className="fixed inset-0 z-50">
       {/* Overlay */}
@@ -544,7 +582,7 @@ export function RentalDrawer({
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <h2 className="max-w-[360px] truncate text-xl font-semibold text-slate-950 dark:text-white" title={rental.client}>{rental.client}</h2>
-              <Badge variant={statusVariants[rental.status]}>{statusLabels[rental.status]}</Badge>
+              <Badge variant={rentalStatusVariant}>{rentalStatusLabel}</Badge>
               {isReturnOverdue && (
                 <Badge variant="warning">
                   Срок истёк · {overdueDays} дн.
@@ -600,7 +638,7 @@ export function RentalDrawer({
             <section className="space-y-4">
               <div className="grid gap-2 sm:grid-cols-2">
                 {[
-                  ['Статус', statusLabels[rental.status]],
+                  ['Статус', rentalStatusLabel],
                   ['Клиент', rental.client || '—'],
                   ['ИНН', clientProfile?.inn || '—'],
                   ['Договор', contractLabel],
@@ -1148,8 +1186,8 @@ export function RentalDrawer({
             {/* Payment summary */}
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
               <div className="flex items-center justify-between">
-                <Badge variant={paymentVariants[rental.paymentStatus]}>
-                  {paymentLabels[rental.paymentStatus]}
+                <Badge variant={rentalPaymentVariant}>
+                  {rentalPaymentLabel}
                 </Badge>
                 <div className="text-right">
                   <div className="text-lg font-semibold text-gray-900 dark:text-white">{formatCurrency(rentalBillingAmount)}</div>
@@ -1200,7 +1238,7 @@ export function RentalDrawer({
                     {(['paid', 'partial', 'unpaid'] as const).map(status => (
                       <button
                         key={status}
-                        onClick={() => onPaymentStatusChange(rental, status)}
+                        onClick={() => handlePaymentStatusChange(status)}
                         className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
                           rental.paymentStatus === status
                             ? 'bg-[--color-primary] text-white'
@@ -1322,13 +1360,45 @@ export function RentalDrawer({
                   <div className={`mt-1 text-sm font-semibold ${isReturnOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-950 dark:text-white'}`}>{daysLeftLabel}</div>
                 </div>
               </div>
-              <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center dark:border-gray-800 dark:bg-gray-950/60">
-                <Truck className="mx-auto h-5 w-5 text-slate-400 dark:text-gray-500" />
-                <div className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">По этой аренде доставка ещё не создана</div>
-                <p className="mt-1 text-xs text-slate-500 dark:text-gray-400">
-                  Создайте доставку или возвратную доставку.
-                </p>
-              </div>
+              {relatedDeliveries.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {relatedDeliveries.map(delivery => (
+                    <div key={delivery.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950/60">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-slate-950 dark:text-white">
+                            {deliveryTypeLabels[delivery.type] || 'Доставка'} · {formatDate(delivery.transportDate)}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500 dark:text-gray-400">
+                            {delivery.origin || '—'} → {delivery.destination || '—'}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500 dark:text-gray-400">
+                            Перевозчик: {delivery.carrierName || 'не назначен'}
+                          </div>
+                        </div>
+                        <Badge variant={delivery.status === 'completed' ? 'success' : delivery.status === 'cancelled' ? 'default' : 'info'}>
+                          {deliveryStatusLabels[delivery.status] || delivery.status}
+                        </Badge>
+                      </div>
+                      {delivery.comment && (
+                        <div className="mt-2 text-xs text-slate-500 dark:text-gray-400">{delivery.comment}</div>
+                      )}
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-gray-400">
+                        <span className="font-mono">{delivery.id}</span>
+                        {canViewMoney && <span>{formatCurrency(Number(delivery.cost) || 0)}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center dark:border-gray-800 dark:bg-gray-950/60">
+                  <Truck className="mx-auto h-5 w-5 text-slate-400 dark:text-gray-500" />
+                  <div className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">По этой аренде доставка ещё не создана</div>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-gray-400">
+                    Создайте доставку или возвратную доставку.
+                  </p>
+                </div>
+              )}
               <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300">
                 Чтобы изменить срок аренды, перейдите во вкладку «Сроки и возврат».
               </div>
@@ -1556,13 +1626,13 @@ export function RentalDrawer({
               </div>
             )}
             <div className="space-y-2">
-              {rental.comments.length === 0 ? (
+              {rentalComments.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-gray-200 p-3 text-center text-sm text-gray-400 dark:border-gray-700">
                   Нет записей
                 </div>
               ) : (
-                rental.comments.map((comment, idx) => (
-                  <div key={idx} className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+                rentalComments.map((comment, idx) => (
+                  <div key={`${comment.date || 'date'}-${comment.author || 'author'}-${idx}`} className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                     <div className="flex items-center justify-between text-xs text-gray-500">
                       <span>{comment.author}</span>
                       <span>{formatDateTime(comment.date)}</span>

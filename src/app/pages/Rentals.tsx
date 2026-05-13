@@ -34,10 +34,11 @@ import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, isMechani
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
-import type { Client, Document, Equipment, EquipmentType, EquipmentStatus, Payment, Rental, RentalChangeRequest, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
+import type { Client, Delivery, Document, Equipment, EquipmentType, EquipmentStatus, Payment, Rental, RentalChangeRequest, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService, type RentalExtensionResponse } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
+import { deliveriesService } from '../services/deliveries.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
 import { clientsService } from '../services/clients.service';
 import { staffService, type StaffOption } from '../services/staff.service';
@@ -413,6 +414,36 @@ function markBrokenRentalLink(
     __linkedGanttRentalId: ganttRental.id,
     __ganttSnapshot: ganttRental,
   };
+}
+
+function getDrawerGanttRentalId(rental: GanttRentalData): string {
+  const drawerRental = rental as DrawerRentalData;
+  return String(drawerRental.__ganttRentalId || drawerRental.__linkedGanttRentalId || '').trim();
+}
+
+function getDrawerCanonicalRentalId(rental: GanttRentalData): string {
+  return getGanttRentalSourceId(rental) || String(rental.id || '').trim();
+}
+
+function findGanttRentalForDrawer(rental: GanttRentalData, ganttRentals: GanttRentalData[]): GanttRentalData | undefined {
+  const ganttId = getDrawerGanttRentalId(rental);
+  if (ganttId) {
+    const byGanttId = ganttRentals.find(item => item.id === ganttId);
+    if (byGanttId) return byGanttId;
+  }
+
+  const canonicalRentalId = getDrawerCanonicalRentalId(rental);
+  return ganttRentals.find(item => item.id === rental.id)
+    || ganttRentals.find(item => getGanttRentalSourceId(item) === canonicalRentalId);
+}
+
+function matchesDrawerGanttRental(item: GanttRentalData, rental: GanttRentalData): boolean {
+  const ganttId = getDrawerGanttRentalId(rental);
+  if (ganttId) return item.id === ganttId;
+  if (item.id === rental.id) return true;
+  const canonicalRentalId = getDrawerCanonicalRentalId(rental);
+  if (String(rental.id || '').startsWith('GR-')) return false;
+  return !!canonicalRentalId && getGanttRentalSourceId(item) === canonicalRentalId;
 }
 
 function isBrokenRentalLinkRow(row: { rental: GanttRentalData; classicRental?: Rental | null; linkStatus?: RentalLinkStatus }): boolean {
@@ -1173,6 +1204,7 @@ const EMPTY_RENTALS: Rental[] = [];
 const EMPTY_EQUIPMENT: Equipment[] = [];
 const EMPTY_PAYMENTS: Payment[] = [];
 const EMPTY_DOCUMENTS: Document[] = [];
+const EMPTY_DELIVERIES: Delivery[] = [];
 const EMPTY_SHIPPING_PHOTOS: ShippingPhoto[] = [];
 const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
 const EMPTY_SERVICE_PERIODS: ServicePeriod[] = [];
@@ -1216,6 +1248,7 @@ export default function Rentals() {
   const canViewClients = can('view', 'clients');
   const canViewPayments = can('view', 'payments') || can('view', 'finance');
   const canViewDocuments = can('view', 'documents');
+  const canViewDeliveries = can('view', 'deliveries');
   const canCreateDocuments = can('create', 'documents');
   const canCreateDeliveries = can('create', 'deliveries');
   const canCreateService = can('create', 'service');
@@ -1259,6 +1292,11 @@ export default function Rentals() {
     enabled: canViewPayments,
   });
   const { data: documentsData = EMPTY_DOCUMENTS } = useDocumentsList({ enabled: canViewDocuments });
+  const { data: deliveriesData = EMPTY_DELIVERIES } = useQuery<Delivery[]>({
+    queryKey: ['deliveries'],
+    queryFn: deliveriesService.getAll,
+    enabled: canViewDeliveries,
+  });
   const { data: shippingPhotos = EMPTY_SHIPPING_PHOTOS } = useQuery<ShippingPhoto[]>({
     queryKey: ['shippingPhotos', 'all'],
     queryFn: equipmentService.getAllShippingPhotos,
@@ -3119,13 +3157,15 @@ export default function Rentals() {
   // Add payment: creates a Payment record, updates ganttRental.paymentStatus
   const handleAddPayment = useCallback((rentalId: string, amount: number, paidDate: string, comment: string) => {
     if (!canCreatePayments) return;
-    const rental = ganttRentals.find(r => r.id === rentalId);
+    const rental = ganttRentals.find(r => r.id === rentalId)
+      || ganttRentals.find(r => getGanttRentalSourceId(r) === rentalId);
     if (!rental) return;
+    const canonicalRentalId = getGanttRentalSourceId(rental) || rentalId;
 
     const newPayment: Payment = {
       id: `PAY-${Date.now()}`,
-      invoiceNumber: `INV-${rental.id}`,
-      rentalId,
+      invoiceNumber: `INV-${canonicalRentalId}`,
+      rentalId: canonicalRentalId,
       clientId: rental.clientId,
       client: rental.client,
       amount: getRentalBillingAmount(rental),
@@ -3140,7 +3180,10 @@ export default function Rentals() {
     void persistPayments(allPayments);
 
     // Recalculate paymentStatus for this rental
-    const rentalPayments = allPayments.filter(p => p.rentalId === rentalId);
+    const rentalPayments = allPayments.filter(p => {
+      const paymentRentalId = String(p.rentalId || '').trim();
+      return paymentRentalId === canonicalRentalId || paymentRentalId === rental.id;
+    });
     const totalPaid = rentalPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
     let newPaymentStatus: GanttRentalData['paymentStatus'] = 'unpaid';
     const billingAmount = getRentalBillingAmount(rental);
@@ -3148,7 +3191,7 @@ export default function Rentals() {
     else if (totalPaid > 0) newPaymentStatus = 'partial';
 
     const updatedRentals = ganttRentals.map(r =>
-      r.id === rentalId
+      matchesDrawerGanttRental(r, rental)
         ? appendRentalHistory(
             { ...r, paymentStatus: newPaymentStatus },
             createRentalHistoryEntry(
@@ -3161,16 +3204,18 @@ export default function Rentals() {
     void persistGanttRentals(updatedRentals);
 
     // Also update selectedRental to reflect new state
-    if (selectedRental?.id === rentalId) {
-      setSelectedRental(updatedRentals.find(r => r.id === rentalId) || null);
+    if (selectedRental && matchesDrawerGanttRental(rental, selectedRental)) {
+      setSelectedRental(current => current ? { ...current, paymentStatus: newPaymentStatus } : current);
     }
   }, [canCreatePayments, ganttRentals, historyAuthor, payments, selectedRental]);
 
   // Update UPD signed status + optional date
   const handleUpdChange = useCallback((rental: GanttRentalData, updSigned: boolean, updDate?: string) => {
     if (!canEditRentals) return;
+    const currentRental = findGanttRentalForDrawer(rental, ganttRentals);
+    if (!currentRental) return;
     const updatedRentals = ganttRentals.map(r =>
-      r.id === rental.id
+      matchesDrawerGanttRental(r, rental)
         ? appendRentalHistory(
             {
               ...r,
@@ -3187,8 +3232,12 @@ export default function Rentals() {
         : r
     );
     void persistGanttRentals(updatedRentals);
-    if (selectedRental?.id === rental.id) {
-      setSelectedRental(updatedRentals.find(r => r.id === rental.id) || null);
+    if (selectedRental && matchesDrawerGanttRental(currentRental, selectedRental)) {
+      setSelectedRental(current => current ? {
+        ...current,
+        updSigned,
+        updDate: updSigned ? (updDate || current.updDate) : undefined,
+      } : current);
     }
   }, [canEditRentals, ganttRentals, historyAuthor, selectedRental]);
 
@@ -3222,17 +3271,19 @@ export default function Rentals() {
       return;
     }
 
-    const previousEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
-    const nextRental = { ...rental, ...nextData };
-    const historyEntries = buildRentalUpdateHistory(rental, nextRental, historyAuthor);
+    const currentRental = findGanttRentalForDrawer(rental, ganttRentals);
+    if (!currentRental) return;
+    const previousEquipment = equipmentList.find(e => matchesEquipmentRow(currentRental, e));
+    const nextRental = { ...currentRental, ...nextData };
+    const historyEntries = buildRentalUpdateHistory(currentRental, nextRental, historyAuthor);
     const updatedRentals = ganttRentals.map(item =>
-      item.id === rental.id ? appendRentalHistory(nextRental, ...historyEntries) : item
+      matchesDrawerGanttRental(item, rental) ? appendRentalHistory({ ...item, ...nextData }, ...historyEntries) : item
     );
     void persistGanttRentals(updatedRentals);
 
     if (previousEquipment) {
       const hasOtherActive = updatedRentals.some(item =>
-        item.id !== rental.id &&
+        item.id !== currentRental.id &&
         matchesEquipmentRow(item, previousEquipment) &&
         item.status !== 'returned' &&
         item.status !== 'closed'
@@ -3275,8 +3326,8 @@ export default function Rentals() {
       void persistEquipment(updatedEquipment);
     }
 
-    if (selectedRental?.id === rental.id) {
-      setSelectedRental(nextRental);
+    if (selectedRental && matchesDrawerGanttRental(currentRental, selectedRental)) {
+      setSelectedRental(current => current ? { ...current, ...nextData } : current);
     }
   }, [
     appendEquipmentHistoryEntry,
@@ -3298,8 +3349,10 @@ export default function Rentals() {
   const handleRestoreRental = useCallback((rental: GanttRentalData) => {
     if (!canRestoreRentals) return;
     const restoredStatus: GanttRentalData['status'] = rental.status === 'closed' ? 'returned' : 'active';
+    const currentRental = findGanttRentalForDrawer(rental, ganttRentals);
+    if (!currentRental) return;
     const updatedRentals = ganttRentals.map(item =>
-      item.id === rental.id
+      matchesDrawerGanttRental(item, rental)
         ? appendRentalHistory(
             { ...item, status: restoredStatus },
             createRentalHistoryEntry(
@@ -3315,7 +3368,7 @@ export default function Rentals() {
 
     if (restoredStatus === 'active') {
       const updatedEquipment = equipmentList.map(item =>
-        matchesEquipmentRow(rental, item)
+        matchesEquipmentRow(currentRental, item)
           ? appendEquipmentHistoryEntry(
               {
                 ...item,
@@ -3330,25 +3383,28 @@ export default function Rentals() {
       void persistEquipment(updatedEquipment);
     }
 
-    if (selectedRental?.id === rental.id) {
-      setSelectedRental(updatedRentals.find(item => item.id === rental.id) || null);
+    if (selectedRental && matchesDrawerGanttRental(currentRental, selectedRental)) {
+      setSelectedRental(current => current ? { ...current, status: restoredStatus } : current);
     }
     showToast(restoredStatus === 'active' ? 'Аренда восстановлена в статус «В аренде»' : 'Аренда восстановлена в статус «Возвращена»');
   }, [appendEquipmentHistoryEntry, canRestoreRentals, ganttRentals, equipmentList, historyAuthor, matchesEquipmentRow, persistEquipment, persistGanttRentals, selectedRental, showToast]);
 
   const handleAddRentalComment = useCallback((rental: GanttRentalData, text: string) => {
     if (!canEditRentals) return;
+    const currentRental = findGanttRentalForDrawer(rental, ganttRentals);
+    if (!currentRental) return;
+    const historyEntry = createRentalHistoryEntry(historyAuthor, text, 'comment');
     const updatedRentals = ganttRentals.map(item =>
-      item.id === rental.id
+      matchesDrawerGanttRental(item, rental)
         ? appendRentalHistory(
             item,
-            createRentalHistoryEntry(historyAuthor, text, 'comment'),
+            historyEntry,
           )
         : item
     );
     void persistGanttRentals(updatedRentals);
-    if (selectedRental?.id === rental.id) {
-      setSelectedRental(updatedRentals.find(item => item.id === rental.id) || null);
+    if (selectedRental && matchesDrawerGanttRental(currentRental, selectedRental)) {
+      setSelectedRental(current => current ? appendRentalHistory(current, historyEntry) : current);
     }
     showToast('Запись добавлена в историю аренды');
   }, [canEditRentals, ganttRentals, historyAuthor, persistGanttRentals, selectedRental, showToast]);
@@ -3356,19 +3412,21 @@ export default function Rentals() {
   // Early return: set rental endDate to actualReturnDate, status → returned, clear equipment
   const handleEarlyReturn = useCallback(async (rental: GanttRentalData, actualReturnDate: string) => {
     if (!canEditRentals || !canEditRentalDates) return;
+    const currentRental = findGanttRentalForDrawer(rental, ganttRentals);
+    if (!currentRental) return;
     if (!isAdminRole) {
       const ok = await requestClassicRentalChange(
-        rental,
+        currentRental,
         { plannedReturnDate: actualReturnDate },
-        `Досрочный возврат из планировщика: ${rental.endDate} → ${actualReturnDate}`,
+        `Досрочный возврат из планировщика: ${currentRental.endDate} → ${actualReturnDate}`,
       );
       if (ok) setSelectedRental(null);
       return;
     }
 
-    const currentEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
+    const currentEquipment = equipmentList.find(e => matchesEquipmentRow(currentRental, e));
     const updatedRentals = ganttRentals.map(r =>
-      r.id === rental.id
+      matchesDrawerGanttRental(r, rental)
         ? appendRentalHistory(
             { ...r, endDate: actualReturnDate, status: 'returned' as const },
             createRentalHistoryEntry(
@@ -3384,14 +3442,14 @@ export default function Rentals() {
     const hasOtherActive = updatedRentals.some(
       r =>
         !!currentEquipment
-        && r.id !== rental.id
+        && r.id !== currentRental.id
         && matchesEquipmentRow(r, currentEquipment)
         && r.status !== 'returned'
         && r.status !== 'closed'
     );
     if (!hasOtherActive) {
       const updatedEq = equipmentList.map(e =>
-        matchesEquipmentRow(rental, e)
+        matchesEquipmentRow(currentRental, e)
           ? appendEquipmentHistoryEntry(
               {
                 ...e,
@@ -5710,6 +5768,7 @@ export default function Rentals() {
         payments={payments}
         serviceTickets={serviceTickets}
         clients={computedClients}
+        deliveries={deliveriesData}
         clientReceivables={clientReceivables}
         managers={managersList}
         canEditRentals={canEditRentals}
@@ -5731,32 +5790,37 @@ export default function Rentals() {
         onRestore={handleRestoreRental}
         onReturn={(r) => {
             if (!canEditRentals) return;
+            const currentRental = findGanttRentalForDrawer(r, ganttRentals) || r;
             setSelectedRental(null);
-            handleOpenReturn(r);
+            handleOpenReturn(currentRental);
           }}
           onDowntime={(rental, downtime) => {
             if (!canEditRentals) return;
-            const currentEquipment = equipmentList.find(item => matchesEquipmentRow(rental, item));
+            const currentRental = findGanttRentalForDrawer(rental, ganttRentals) || rental;
+            const currentEquipment = equipmentList.find(item => matchesEquipmentRow(currentRental, item));
+            const currentGanttId = getDrawerGanttRentalId(rental) || currentRental.id;
             const downtimePreset: DowntimePeriod = downtime ?? {
               id: '',
-              equipmentId: rental.equipmentId || currentEquipment?.id,
-              equipmentInv: rental.equipmentInv || currentEquipment?.inventoryNumber || '',
-              serialNumber: rental.serialNumber || currentEquipment?.serialNumber,
-              rentalId: getGanttRentalSourceId(rental),
-              ganttRentalId: rental.id,
-              clientId: rental.clientId,
-              startDate: rental.startDate,
-              endDate: rental.startDate,
+              equipmentId: currentRental.equipmentId || currentEquipment?.id,
+              equipmentInv: currentRental.equipmentInv || currentEquipment?.inventoryNumber || '',
+              serialNumber: currentRental.serialNumber || currentEquipment?.serialNumber,
+              rentalId: getGanttRentalSourceId(currentRental),
+              ganttRentalId: currentGanttId,
+              clientId: currentRental.clientId,
+              startDate: currentRental.startDate,
+              endDate: currentRental.startDate,
               reason: '',
               comment: '',
               affectsBilling: false,
               status: 'active',
             };
-            handleOpenDowntime(currentEquipment, downtimePreset, rental);
+            handleOpenDowntime(currentEquipment, downtimePreset, currentRental);
           }}
           onStatusChange={(rental) => {
             if (!canEditRentals) return;
-            const currentEquipment = equipmentList.find(e => matchesEquipmentRow(rental, e));
+            const currentRental = findGanttRentalForDrawer(rental, ganttRentals);
+            if (!currentRental) return;
+            const currentEquipment = equipmentList.find(e => matchesEquipmentRow(currentRental, e));
             // created → active, returned → closed
             let nextStatus: GanttRentalData['status'] | null = null;
             if (rental.status === 'created') nextStatus = 'active';
@@ -5764,7 +5828,7 @@ export default function Rentals() {
 
             if (nextStatus) {
               const updated = ganttRentals.map(r =>
-                r.id === rental.id
+                matchesDrawerGanttRental(r, rental)
                   ? appendRentalHistory(
                       { ...r, status: nextStatus! },
                       createRentalHistoryEntry(
@@ -5781,10 +5845,10 @@ export default function Rentals() {
               // При активации аренды — техника "В аренде" + заполняем клиента и дату возврата
               if (nextStatus === 'active') {
                 const newEqList = equipmentList.map(e =>
-                  matchesEquipmentRow(rental, e)
+                  matchesEquipmentRow(currentRental, e)
                     ? appendEquipmentHistoryEntry(
-                        { ...e, status: 'rented' as EquipmentStatus, currentClient: rental.client, returnDate: rental.endDate },
-                        `Техника выдана в аренду клиенту ${rental.client}`,
+                        { ...e, status: 'rented' as EquipmentStatus, currentClient: currentRental.client, returnDate: currentRental.endDate },
+                        `Техника выдана в аренду клиенту ${currentRental.client}`,
                       )
                     : e,
                 );
@@ -5794,14 +5858,14 @@ export default function Rentals() {
               if (nextStatus === 'closed' && currentEquipment) {
                 const hasOtherActive = updated.some(
                   r =>
-                    r.id !== rental.id
+                    r.id !== currentRental.id
                     && matchesEquipmentRow(r, currentEquipment)
                     && r.status !== 'returned'
                     && r.status !== 'closed',
                 );
                 if (!hasOtherActive) {
                   const newEqList = equipmentList.map(e =>
-                    matchesEquipmentRow(rental, e)
+                    matchesEquipmentRow(currentRental, e)
                       ? appendEquipmentHistoryEntry(
                           {
                             ...e,
@@ -5822,19 +5886,22 @@ export default function Rentals() {
           onDelete={(rental) => {
             if (!canDeleteRentals) return;
             void (async () => {
-              const updatedRentals = ganttRentals.filter(item => item.id !== rental.id);
-              const updatedPayments = payments.filter(item => item.rentalId !== rental.id);
-              const currentEquipment = equipmentList.find(item => matchesEquipmentRow(rental, item));
+              const currentRental = findGanttRentalForDrawer(rental, ganttRentals);
+              if (!currentRental) return;
+              const canonicalRentalId = getGanttRentalSourceId(currentRental) || currentRental.id;
+              const updatedRentals = ganttRentals.filter(item => !matchesDrawerGanttRental(item, rental));
+              const updatedPayments = payments.filter(item => item.rentalId !== canonicalRentalId && item.rentalId !== currentRental.id);
+              const currentEquipment = equipmentList.find(item => matchesEquipmentRow(currentRental, item));
 
               try {
-                await rentalsService.deleteGanttEntry(rental.id);
+                await rentalsService.deleteGanttEntry(currentRental.id);
 
                 const classicRentals = await rentalsService.getAll();
                 const linkedClassicRentals = classicRentals.filter(item =>
-                  (item.clientId && rental.clientId ? item.clientId === rental.clientId : item.client === rental.client)
-                  && item.startDate === rental.startDate
-                  && item.plannedReturnDate === rental.endDate
-                  && item.equipment.includes(rental.equipmentInv),
+                  (item.clientId && currentRental.clientId ? item.clientId === currentRental.clientId : item.client === currentRental.client)
+                  && item.startDate === currentRental.startDate
+                  && item.plannedReturnDate === currentRental.endDate
+                  && item.equipment.includes(currentRental.equipmentInv),
                 );
 
                 if (linkedClassicRentals.length > 0) {
@@ -5867,7 +5934,7 @@ export default function Rentals() {
                     ? (nextEquipmentRental.status === 'active' ? 'rented' : 'reserved')
                     : (hasOpenServiceTicketForEquipment(serviceTickets, currentEquipment) ? 'in_service' : 'available');
 
-                  const historyText = `Аренда ${rental.id} удалена администратором`;
+                  const historyText = `Аренда ${currentRental.id} удалена администратором`;
                   const newEqList = equipmentList.map(item =>
                     item.id === currentEquipment.id
                       ? appendEquipmentHistoryEntry(

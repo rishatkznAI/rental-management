@@ -69,7 +69,7 @@ test('rental drawer downtime action opens downtime modal flow', () => {
   assert.match(rentalDrawerSource, /Простои/);
   assert.match(rentalDrawerSource, /downtimePeriods\.map/);
   assert.match(rentalsSource, /onDowntime=\{\(rental,\s*downtime\)\s*=>\s*\{/);
-  assert.match(rentalsSource, /handleOpenDowntime\(currentEquipment,\s*downtimePreset,\s*rental\)/);
+  assert.match(rentalsSource, /handleOpenDowntime\(currentEquipment,\s*downtimePreset,\s*currentRental\)/);
 });
 
 test('fleet planner shows rental downtime updates on rental bars', () => {

@@ -39,13 +39,14 @@ test('delivery tab keeps logistics actions out of rental lifecycle controls', ()
   assert.match(deliveryBlock, /Логистика аренды/);
   assert.match(deliveryBlock, /Создать доставку/);
   assert.match(deliveryBlock, /Создать возвратную доставку/);
+  assert.match(deliveryBlock, /relatedDeliveries\.length > 0/);
+  assert.match(deliveryBlock, /Перевозчик:/);
   assert.match(deliveryBlock, /По этой аренде доставка ещё не создана/);
   assert.match(deliveryBlock, /Создайте доставку или возвратную доставку\./);
   assert.match(deliveryBlock, /Чтобы изменить срок аренды, перейдите во вкладку «Сроки и возврат»/);
   assert.doesNotMatch(deliveryBlock, /Продлить аренду/);
   assert.doesNotMatch(deliveryBlock, /Досрочный возврат/);
   assert.doesNotMatch(deliveryBlock, /Оформить возврат техники/);
-  assert.doesNotMatch(deliveryBlock, /Перевозчик/);
   assert.doesNotMatch(deliveryBlock, /Дата перевозки/);
   assert.doesNotMatch(deliveryBlock, /Статус доставки/);
 });

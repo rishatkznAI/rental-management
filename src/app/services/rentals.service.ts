@@ -102,7 +102,7 @@ export const rentalsService = {
 
   extend: (
     id: string,
-    data: { newEndDate?: string; newPlannedReturnDate?: string; reason: string; comment?: string; confirmedByClient: boolean },
+    data: { newEndDate?: string; newPlannedReturnDate?: string; reason: string; comment?: string; confirmedByClient: boolean; invoiceSentToClient?: boolean },
   ): Promise<RentalExtensionResponse> => api.post(`/api/rentals/${id}/extend`, data),
 
   delete: (id: string): Promise<void> =>

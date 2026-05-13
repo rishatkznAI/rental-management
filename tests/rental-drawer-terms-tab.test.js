@@ -54,3 +54,24 @@ test('footer shortcuts keep rental term actions behind existing permissions', ()
   assert.match(source, /setActiveTab\('terms'\)/);
   assert.match(source, /Оформить возврат/);
 });
+
+test('extension dialog does not ask for reason and tracks invoice sent flag', () => {
+  const dialogBlock = extractBlock('<Dialog open={extensionDialogOpen}', '</Dialog>');
+
+  assert.doesNotMatch(dialogBlock, /Причина/);
+  assert.doesNotMatch(dialogBlock, /EXTENSION_REASONS/);
+  assert.match(dialogBlock, /Счёт отправлен клиенту/);
+  assert.match(dialogBlock, /Счёт по продлению/);
+  assert.match(dialogBlock, /extensionInvoiceSentToClient/);
+  assert.match(source, /invoiceSentToClient: false/);
+  assert.match(source, /invoiceSentToClient: extensionForm\.invoiceSentToClient/);
+});
+
+test('broken rental links use inline errors and cannot extend through GR id', () => {
+  assert.doesNotMatch(source, /window\.alert/);
+  assert.match(source, /setRentalDetailNotice\(rentalDetailError\)/);
+  assert.match(source, /Boolean\(rentalDetailId\).*rental\.status === 'active'/);
+  assert.match(source, /setExtensionError\('Нельзя продлить аренду без связанной записи rentals\.'\)/);
+  assert.match(source, /rentalsService\.extend\(rentalDetailId,/);
+  assert.doesNotMatch(source, /rentalsService\.extend\(rentalDetailId \|\| rental\.id/);
+});

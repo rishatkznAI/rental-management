@@ -52,6 +52,11 @@ test('rental link diagnostics ignores clean linked data', () => {
     ganttRentals: [cleanGantt()],
   });
 
+  assert.equal(diagnostics.summary.rentalsTotal, 1);
+  assert.equal(diagnostics.summary.ganttTotal, 1);
+  assert.equal(diagnostics.summary.ganttWithValidRentalLink, 1);
+  assert.equal(diagnostics.summary.ganttWithoutLinkedRental, 0);
+  assert.equal(diagnostics.summary.rentalsWithoutGantt, 0);
   assert.equal(diagnostics.summary.rentalsWithoutEquipment, 0);
   assert.equal(diagnostics.summary.rentalsLegacyOnlyEquipment, 0);
   assert.equal(diagnostics.summary.ganttWithoutRentalId, 0);
@@ -109,8 +114,29 @@ test('rental link diagnostics reports gantt entries with broken rentalId', () =>
   });
 
   assert.equal(diagnostics.summary.ganttWithoutRentalId, 1);
+  assert.equal(diagnostics.summary.ganttWithoutLinkedRental, 1);
+  assert.equal(diagnostics.brokenGanttRentalLinks[0].reason, 'STALE_GANTT_ROW');
+  assert.deepEqual(diagnostics.brokenGanttRentalLinks[0].linkedRentalIds, ['R-missing']);
   assert.equal(diagnostics.ganttWithoutRentalId[0].reason, 'brokenRentalId');
   assert.equal(diagnostics.ganttWithoutRentalId[0].rentalId, 'R-missing');
+});
+
+test('rental link diagnostics reports missing gantt links and ambiguous candidates', () => {
+  const diagnostics = buildRentalLinkDiagnostics({
+    equipment: baseEquipment(),
+    rentals: [cleanRental({ id: 'R-1' }), cleanRental({ id: 'R-2' })],
+    ganttRentals: [cleanGantt({ id: 'GR-unlinked', rentalId: '', sourceRentalId: '', originalRentalId: '' })],
+  });
+
+  assert.equal(diagnostics.summary.rentalsTotal, 2);
+  assert.equal(diagnostics.summary.ganttTotal, 1);
+  assert.equal(diagnostics.summary.ganttWithValidRentalLink, 0);
+  assert.equal(diagnostics.summary.ganttWithoutLinkedRental, 1);
+  assert.equal(diagnostics.summary.rentalsWithoutGantt, 2);
+  assert.equal(diagnostics.brokenGanttRentalLinks[0].ganttId, 'GR-unlinked');
+  assert.equal(diagnostics.brokenGanttRentalLinks[0].reason, 'MULTIPLE_CANDIDATES');
+  assert.equal(diagnostics.brokenGanttRentalLinks[0].candidateCount, 2);
+  assert.deepEqual(diagnostics.rentalsWithoutGantt.map(item => item.rentalId).sort(), ['R-1', 'R-2']);
 });
 
 test('rental link diagnostics reports equipment mismatch between gantt and linked rental', () => {
@@ -228,9 +254,11 @@ test('rental link diagnostics endpoint requires authorization and admin role', a
     assert.equal(admin.status, 200);
     assert.equal(admin.body.summary.rentalsTotal, 1);
     assert.deepEqual(Object.keys(admin.body).sort(), [
+      'brokenGanttRentalLinks',
       'duplicateInventoryNumbers',
       'ganttEquipmentMismatch',
       'ganttWithoutRentalId',
+      'rentalsWithoutGantt',
       'rentalsLegacyOnlyEquipment',
       'rentalsWithoutEquipment',
       'summary',

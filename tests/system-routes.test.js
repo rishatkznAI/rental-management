@@ -182,6 +182,9 @@ test('/api/admin/production-diagnostics returns safe admin diagnostics', async (
     assert.deepEqual(response.body.access.readableCollections, ['equipment', 'rentals']);
     assert.equal(response.body.endpoints.equipment.count, 1);
     assert.equal(response.body.endpoints.rentals.count, 2);
+    assert.equal(response.body.rentalLinks.summary.rentalsTotal, 2);
+    assert.equal(response.body.rentalLinks.summary.ganttTotal, 0);
+    assert.equal(response.body.rentalLinks.summary.rentalsWithoutGantt, 2);
 
     const serialized = JSON.stringify(response.body);
     assert.doesNotMatch(serialized, /password|token-present|secret/i);

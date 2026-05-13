@@ -1650,6 +1650,7 @@ function registerRentalRoutes(deps) {
         const reason = String(req.body?.reason || '').trim();
         const comment = String(req.body?.comment || '').trim();
         const confirmedByClient = req.body?.confirmedByClient === true;
+        const invoiceSentToClient = req.body?.invoiceSentToClient === true || req.body?.invoiceSent === true;
         const { classicRental, ganttRental, resolution: routeResolution } = findClassicRentalForRoute(routeId, rentals, ganttRentals);
 
         if (!classicRental && !ganttRental) {
@@ -1666,7 +1667,6 @@ function registerRentalRoutes(deps) {
         }
 
         const currentEnd = normalizeDateKey(classicRental?.plannedReturnDate || ganttRental?.endDate || ganttRental?.plannedReturnDate);
-        if (!reason) return res.status(400).json({ ok: false, error: 'Укажите причину продления.' });
         if (!confirmedByClient) return res.status(400).json({ ok: false, error: 'Подтвердите, что клиент согласовал продление.' });
         if (!newPlannedReturnDate || !parseDateKey(newPlannedReturnDate)) {
           return res.status(400).json({ ok: false, error: 'Укажите новую дату окончания аренды.' });
@@ -1721,7 +1721,7 @@ function registerRentalRoutes(deps) {
               }], {
                 linkedGanttRentalId: ganttRental?.id || '',
                 sourceRentalId: ganttRental?.id || '',
-                reason,
+                reason: reason || 'Продление аренды',
                 comment,
               }, req)
             : [];
@@ -1730,7 +1730,7 @@ function registerRentalRoutes(deps) {
             entityType: 'rentals',
             entityId: classicRental?.id || ganttRental?.id,
             after: { rentalId: classicRental?.id, requestIds: createdRequests.map(item => item.id) },
-            metadata: { reason, comment, conflict: conflictDto(conflict) },
+            metadata: { reason, comment, invoiceSentToClient, conflict: conflictDto(conflict) },
           });
           return res.status(202).json({
             ok: true,
@@ -1757,6 +1757,7 @@ function registerRentalRoutes(deps) {
                 price: financials.nextAmount,
                 amount: financials.nextAmount,
                 paymentStatus: financials.nextPaymentStatus,
+                extensionInvoiceSentToClient: invoiceSentToClient,
                 extensionFinancials: {
                   ...(classicRental.extensionFinancials || {}),
                   last: financials,
@@ -1765,9 +1766,10 @@ function registerRentalRoutes(deps) {
               [buildExtensionHistoryEntry(
                 currentEnd,
                 newPlannedReturnDate,
-                reason,
+                reason || 'Продление аренды',
                 [
                   comment,
+                  invoiceSentToClient ? 'счёт отправлен клиенту' : '',
                   `дней: ${financials.extensionDays}`,
                   `сумма: ${financials.previousAmount} → ${financials.nextAmount}`,
                   `дополнительно: ${financials.additionalAmount}`,
@@ -1783,6 +1785,7 @@ function registerRentalRoutes(deps) {
               plannedReturnDate: newPlannedReturnDate,
               amount: financials.nextAmount,
               paymentStatus: financials.nextPaymentStatus,
+              extensionInvoiceSentToClient: invoiceSentToClient,
             }, author), nextClassic || classicRental, equipmentList)
           : null;
 
@@ -1810,6 +1813,7 @@ function registerRentalRoutes(deps) {
           reason,
           comment,
           confirmedByClient,
+          invoiceSentToClient,
           financialImpact: financials,
           rentalId: nextClassic?.id || classicRental?.id || '',
           ganttRentalId: nextGantt?.id || ganttRental?.id || '',

@@ -32,6 +32,7 @@ export function buildExtensionFormState(rental) {
     reason: '',
     comment: '',
     confirmedByClient: false,
+    invoiceSentToClient: false,
   };
 }
 
@@ -50,8 +51,8 @@ export function getRentalExtensionValidation({ rental, form, today = new Date().
   if (!nextDate) return 'Укажите новую дату окончания аренды.';
   if (nextDate.getTime() <= currentDate.getTime()) return 'Новая дата должна быть позже текущей даты окончания.';
   if (todayDate && nextDate.getTime() < todayDate.getTime()) return 'Нельзя продлить аренду в прошлую дату.';
-  if (!String(form?.reason || '').trim()) return 'Укажите причину продления.';
   if (form?.confirmedByClient !== true) return 'Подтвердите, что клиент согласовал продление.';
+  if (form?.invoiceSentToClient !== true) return 'Подтвердите, что счёт отправлен клиенту.';
   return '';
 }
 

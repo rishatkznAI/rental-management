@@ -97,6 +97,13 @@ type ReturnServiceFilter = '' | 'yes' | 'no';
 type DebtDocsProblemFilter = '' | 'debt' | 'overdue' | 'partial' | 'missing_upd' | 'missing_contract' | 'unsigned';
 type DebtDocsDocumentFilter = '' | 'missing_upd' | 'missing_contract' | 'unsigned';
 type RentalChangeSuccessMessages = { pending?: string; applied?: string };
+type DrawerRentalData = GanttRentalData & {
+  __brokenRentalLink?: boolean;
+  __brokenRentalLinkReason?: 'NO_LINKED_RENTAL' | 'MULTIPLE_CANDIDATES' | 'STALE_GANTT_ROW';
+  __ganttRentalId?: string;
+  __linkedGanttRentalId?: string;
+  __ganttSnapshot?: GanttRentalData;
+};
 type FleetMovementEntry = ShippingPhoto & {
   rental?: GanttRentalData;
   equipment?: Equipment;
@@ -373,6 +380,40 @@ function canonicalizeGanttRentalFromClassic(
     activeRentalDays: rental.activeRentalDays ?? ganttRental.activeRentalDays,
     downtimePeriods: (rental.downtimePeriods as DowntimePeriod[] | undefined) ?? ganttRental.downtimePeriods,
   };
+}
+
+function getBrokenRentalLinkReason(
+  ganttRental: GanttRentalData,
+  candidates: Rental[] = [],
+): DrawerRentalData['__brokenRentalLinkReason'] {
+  const linkedRentalId = getGanttRentalSourceId(ganttRental);
+  if (linkedRentalId) return 'STALE_GANTT_ROW';
+  if (candidates.length > 1) return 'MULTIPLE_CANDIDATES';
+  return 'NO_LINKED_RENTAL';
+}
+
+function markBrokenRentalLink(
+  ganttRental: GanttRentalData,
+  reason: DrawerRentalData['__brokenRentalLinkReason'] = 'NO_LINKED_RENTAL',
+): DrawerRentalData {
+  return {
+    ...ganttRental,
+    __brokenRentalLink: true,
+    __brokenRentalLinkReason: reason,
+    __ganttRentalId: ganttRental.id,
+    __linkedGanttRentalId: ganttRental.id,
+    __ganttSnapshot: ganttRental,
+  };
+}
+
+function isBrokenRentalLinkRow(row: { rental: GanttRentalData; classicRental?: Rental | null }): boolean {
+  return Boolean((row.rental as DrawerRentalData).__brokenRentalLink || !row.classicRental);
+}
+
+function brokenRentalLinkLabel(reason?: DrawerRentalData['__brokenRentalLinkReason']): string {
+  if (reason === 'MULTIPLE_CANDIDATES') return 'Несколько кандидатов';
+  if (reason === 'STALE_GANTT_ROW') return 'Нет записи rentals';
+  return 'Битая связь';
 }
 
 function withEquipmentRowContext(rental: GanttRentalData, equipment: Equipment): GanttRentalData {
@@ -1259,10 +1300,17 @@ export default function Rentals() {
     const classicById = new Map(classicRentalData.map(item => [item.id, item]));
     const canonicalGanttData = ganttData.map(item => {
       const sourceRentalId = getGanttRentalSourceId(item);
-      const classicRental = sourceRentalId ? classicById.get(sourceRentalId) : null;
+      const explicitClassicRental = sourceRentalId ? classicById.get(sourceRentalId) : null;
+      const inferredClassicCandidates = explicitClassicRental
+        ? []
+        : classicRentalData.filter(rental =>
+            matchesOpenClassicRentalForGanttByEquipment(item, rental, equipmentData)
+            && matchesOpenClassicRentalForGanttByClient(item, rental, true),
+          );
+      const classicRental = explicitClassicRental || (inferredClassicCandidates.length === 1 ? inferredClassicCandidates[0] : null);
       return classicRental
         ? canonicalizeGanttRentalFromClassic(item, classicRental, equipmentData)
-        : item;
+        : markBrokenRentalLink(item, getBrokenRentalLinkReason(item, inferredClassicCandidates));
     });
     if (!isInvestorRole || !investorEquipmentIds || !investorInventoryNumbers) {
       setGanttRentals(canonicalGanttData);
@@ -2289,6 +2337,36 @@ export default function Rentals() {
     [classicRentalData],
   );
 
+  const buildRentalDrawerRental = useCallback((ganttRental: GanttRentalData, classicRental?: Rental | null): DrawerRentalData => {
+    const sourceRentalId = getGanttRentalSourceId(ganttRental);
+    const resolvedClassicRental = classicRental || (sourceRentalId ? classicRentalsById.get(sourceRentalId) : null);
+    if (!resolvedClassicRental) {
+      return markBrokenRentalLink(ganttRental, (ganttRental as DrawerRentalData).__brokenRentalLinkReason || getBrokenRentalLinkReason(ganttRental));
+    }
+    return {
+      ...canonicalizeGanttRentalFromClassic(ganttRental, resolvedClassicRental, equipmentList),
+      id: resolvedClassicRental.id,
+      rentalId: resolvedClassicRental.id,
+      sourceRentalId: resolvedClassicRental.id,
+      originalRentalId: ganttRental.originalRentalId || resolvedClassicRental.id,
+      __ganttRentalId: ganttRental.id,
+      __linkedGanttRentalId: ganttRental.id,
+      __ganttSnapshot: ganttRental,
+    } as DrawerRentalData;
+  }, [classicRentalsById, equipmentList]);
+
+  useEffect(() => {
+    if (!selectedRental) return;
+    const selected = selectedRental as DrawerRentalData;
+    const selectedId = String(selected.id || '');
+    const selectedGanttId = String(selected.__ganttRentalId || selected.__linkedGanttRentalId || '');
+    const existsAsClassic = classicRentalsById.has(selectedId);
+    const existsAsGantt = ganttRentals.some(item => item.id === selectedGanttId || item.id === selectedId);
+    if (selected.__brokenRentalLink || (!existsAsClassic && !existsAsGantt)) {
+      setSelectedRental(null);
+    }
+  }, [classicRentalsById, ganttRentals, selectedRental]);
+
   const equipmentById = useMemo(
     () => new Map(equipmentList.map(item => [item.id, item])),
     [equipmentList],
@@ -2304,6 +2382,7 @@ export default function Rentals() {
       .map(rental => {
         const sourceRentalId = getGanttRentalSourceId(rental);
         const classicRental = sourceRentalId ? classicRentalsById.get(sourceRentalId) : undefined;
+        const isBrokenRentalLink = Boolean((rental as DrawerRentalData).__brokenRentalLink || !classicRental);
         const equipment = rental.equipmentId
           ? equipmentById.get(rental.equipmentId)
           : equipmentList.find(item => item.inventoryNumber === rental.equipmentInv);
@@ -2406,9 +2485,12 @@ export default function Rentals() {
           isReturnRelevant,
           isVisibleInThirtyDays: rentalIntersectsRange(rental, today, nextThirtyDays),
           matchesQuery: !query || searchText.includes(query),
+          isBrokenRentalLink,
+          brokenRentalLinkReason: (rental as DrawerRentalData).__brokenRentalLinkReason,
         };
       })
       .filter(row => row.matchesQuery)
+      .filter(row => !row.isBrokenRentalLink || isAdminRole)
       .filter(row => !filterManager || row.rental.manager === filterManager)
       .filter(row => !filterOwner || row.equipment?.ownerName === filterOwner || row.equipment?.owner === filterOwner)
       .filter(row => !filterClient || row.rental.client.toLowerCase().includes(filterClient.toLowerCase()))
@@ -2435,6 +2517,7 @@ export default function Rentals() {
     filterStatus,
     filterUpd,
     ganttRentals,
+    isAdminRole,
     movementEntries,
     payments,
     serviceTickets,
@@ -4110,7 +4193,7 @@ export default function Rentals() {
 
                 <div className="mt-3 flex flex-wrap gap-2">
                   {primaryRental && (
-                    <Button size="sm" variant="secondary" onClick={() => setSelectedRental(withEquipmentRowContext(primaryRental, equipment))}>
+                    <Button size="sm" variant="secondary" onClick={() => setSelectedRental(buildRentalDrawerRental(withEquipmentRowContext(primaryRental, equipment)))}>
                       Открыть аренду
                     </Button>
                   )}
@@ -4321,7 +4404,7 @@ export default function Rentals() {
                     days={days}
                     today={today}
                     rentalDebtRowsById={rentalDebtRowsById}
-                    onBarClick={(rental) => setSelectedRental(withEquipmentRowContext(rental, eq))}
+                    onBarClick={(rental) => setSelectedRental(buildRentalDrawerRental(withEquipmentRowContext(rental, eq)))}
                     onNewRental={() => handleOpenNewRental(eq.id)}
                     onReturn={(rental) => handleOpenReturn(rental)}
                     onDowntime={(downtime) => {
@@ -4797,6 +4880,7 @@ export default function Rentals() {
 	                        ) : (
 	                          <div className="space-y-2">
 	                            {column.rows.map(row => {
+                              const isBrokenRentalLink = isBrokenRentalLinkRow(row);
                               const returnLabel = row.isOverdueReturn
                                 ? 'Просрочен'
                                 : row.isReturnToday
@@ -4823,13 +4907,21 @@ export default function Rentals() {
                                 <button
                                   key={`${column.id}-${row.rental.id}`}
                                   type="button"
-	                                  onClick={() => setSelectedRental(row.rental)}
-	                                  className="w-full rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors hover:bg-secondary/45"
+                                  disabled={isBrokenRentalLink}
+	                                  onClick={() => {
+                                    if (!isBrokenRentalLink) setSelectedRental(buildRentalDrawerRental(row.rental, row.classicRental));
+                                  }}
+	                                  className={cn('w-full rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors', isBrokenRentalLink ? 'cursor-not-allowed opacity-75' : 'hover:bg-secondary/45')}
 	                                >
 	                                  <div className="flex items-start justify-between gap-2">
 	                                    <div className="min-w-0">
 	                                      <div className="truncate font-semibold text-foreground">{row.rental.client || 'Без клиента'}</div>
 	                                      <div className="mt-0.5 truncate text-xs text-muted-foreground">{row.sourceRentalId || row.rental.id}</div>
+                                      {isBrokenRentalLink && (
+                                        <div className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                          {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
+                                        </div>
+                                      )}
 	                                    </div>
 	                                    <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold', returnTone)}>{returnLabel}</span>
 	                                  </div>
@@ -4841,7 +4933,9 @@ export default function Rentals() {
 	                                  </div>
 	                                  <div className="mt-3 flex items-center justify-between gap-2 text-xs">
 	                                    <span className="text-muted-foreground">{row.hasReturnDelivery ? 'Доставка запланирована' : 'Доставка не назначена'}</span>
-	                                    <span className="font-semibold text-[--color-primary]">Открыть аренду</span>
+	                                    <span className={cn('font-semibold', isBrokenRentalLink ? 'text-red-600 dark:text-red-300' : 'text-[--color-primary]')}>
+                                      {isBrokenRentalLink ? 'Нет записи rentals' : 'Открыть аренду'}
+                                    </span>
 	                                  </div>
 	                                </button>
                               );
@@ -4929,7 +5023,8 @@ export default function Rentals() {
                         </td>
                       </tr>
                     ) : paginatedRentalRows.map(row => {
-                      const isSelected = selectedRental?.id === row.rental.id;
+                      const isBrokenRentalLink = isBrokenRentalLinkRow(row);
+                      const isSelected = !isBrokenRentalLink && selectedRental?.id === row.rental.id;
                       const statusClass = row.rental.status === 'active'
                         ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
                         : row.rental.status === 'created'
@@ -4975,7 +5070,8 @@ export default function Rentals() {
                         <tr
                           key={row.rental.id}
                           className={cn(
-                            'cursor-pointer transition-colors hover:bg-secondary/45',
+                            'transition-colors',
+                            isBrokenRentalLink ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:bg-secondary/45',
                             isSelected
                               ? 'bg-[--color-primary]/10 ring-1 ring-inset ring-[--color-primary]/35'
                               : row.isOverdueReturn || (canViewPayments && row.debtAmount > 0)
@@ -4984,12 +5080,19 @@ export default function Rentals() {
                                   ? 'bg-amber-50/45 dark:bg-amber-950/10'
                                   : 'bg-card',
                           )}
-                          onClick={() => setSelectedRental(row.rental)}
+                          onClick={() => {
+                            if (!isBrokenRentalLink) setSelectedRental(buildRentalDrawerRental(row.rental, row.classicRental));
+                          }}
                         >
                           {activeWorkspaceTab === 'returns' ? (
                             <>
                               <td className="px-4 py-3">
                                 <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
+                                {isBrokenRentalLink && (
+                                  <div className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                    {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
+                                  </div>
+                                )}
                                 <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
                               </td>
                               <td className="px-4 py-3">
@@ -5027,6 +5130,11 @@ export default function Rentals() {
                             <>
                               <td className="px-4 py-3">
                                 <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
+                                {isBrokenRentalLink && (
+                                  <div className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                    {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
+                                  </div>
+                                )}
                                 <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
                               </td>
                               <td className="px-4 py-3">
@@ -5071,6 +5179,11 @@ export default function Rentals() {
                               <td className="px-4 py-3" onClick={event => event.stopPropagation()}><input type="checkbox" aria-label={`Выбрать ${row.rental.id}`} /></td>
                               <td className="px-4 py-3">
                                 <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
+                                {isBrokenRentalLink && (
+                                  <div className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                    {brokenRentalLinkLabel(row.brokenRentalLinkReason)}
+                                  </div>
+                                )}
                                 <div className="max-w-[190px] truncate text-xs text-muted-foreground" title={row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}>{row.classicRental?.contractId ? `Договор ${row.classicRental.contractId}` : 'Договор не привязан'}</div>
                               </td>
                               <td className="px-4 py-3">
@@ -5120,45 +5233,51 @@ export default function Rentals() {
                           )}
                           <td className="px-4 py-3 text-right" onClick={event => event.stopPropagation()}>
                             <div className="flex justify-end gap-1.5">
-                              {activeWorkspaceTab === 'returns' && canEditRentals && (
+                              {activeWorkspaceTab === 'returns' && canEditRentals && !isBrokenRentalLink && (
                                 <Button size="sm" variant="ghost" className="rounded-xl px-2" title="Запланировать или изменить возврат" onClick={() => handleOpenReturn(row.rental)}>
                                   <RotateCcw className="h-4 w-4" />
                                 </Button>
                               )}
-                              {activeWorkspaceTab === 'returns' && canCreateDeliveries && (
+                              {activeWorkspaceTab === 'returns' && canCreateDeliveries && !isBrokenRentalLink && (
                                 <Link to="/deliveries/new" title="Создать возвратную доставку">
                                   <Button size="sm" variant="ghost" className="rounded-xl px-2">
                                     <Truck className="h-4 w-4" />
                                   </Button>
                                 </Link>
                               )}
-                              {activeWorkspaceTab === 'returns' && canEditRentals && (
+                              {activeWorkspaceTab === 'returns' && canEditRentals && !isBrokenRentalLink && (
                                 <Button size="sm" variant="ghost" className="rounded-xl px-2" title="Подтвердить возврат" onClick={() => handleOpenReturn(row.rental)}>
                                   <CircleCheck className="h-4 w-4" />
                                 </Button>
                               )}
-                              {activeWorkspaceTab === 'returns' && canCreateService && (
+                              {activeWorkspaceTab === 'returns' && canCreateService && !isBrokenRentalLink && (
                                 <Link to="/service/new" title="Создать сервисную заявку">
                                   <Button size="sm" variant="ghost" className="rounded-xl px-2">
                                     <Wrench className="h-4 w-4" />
                                   </Button>
                                 </Link>
                               )}
-                              {activeWorkspaceTab === 'debt_docs' && canCreatePayments && (
-                                <Button size="sm" variant="ghost" className="rounded-xl px-2" title="Добавить оплату" onClick={() => { setSelectedRental(row.rental); showToast('Оплату можно добавить в открытой боковой панели аренды'); }}>
+                              {activeWorkspaceTab === 'debt_docs' && canCreatePayments && !isBrokenRentalLink && (
+                                <Button size="sm" variant="ghost" className="rounded-xl px-2" title="Добавить оплату" onClick={() => { setSelectedRental(buildRentalDrawerRental(row.rental, row.classicRental)); showToast('Оплату можно добавить в открытой боковой панели аренды'); }}>
                                   <CreditCard className="h-4 w-4" />
                                 </Button>
                               )}
-                              {activeWorkspaceTab === 'debt_docs' && canViewDocuments && (
+                              {activeWorkspaceTab === 'debt_docs' && canViewDocuments && !isBrokenRentalLink && (
                                 <Link to="/documents" title="Открыть документы">
                                   <Button size="sm" variant="ghost" className="rounded-xl px-2">
                                     <FileText className="h-4 w-4" />
                                   </Button>
                                 </Link>
                               )}
-                              <Button size="sm" variant="ghost" className="rounded-xl px-2" title="Открыть боковую панель" onClick={() => setSelectedRental(row.rental)}>
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
+                              {isBrokenRentalLink ? (
+                                <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                  Нет записи rentals
+                                </span>
+                              ) : (
+                                <Button size="sm" variant="ghost" className="rounded-xl px-2" title="Открыть боковую панель" onClick={() => setSelectedRental(buildRentalDrawerRental(row.rental, row.classicRental))}>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              )}
                             </div>
                           </td>
                         </tr>

@@ -722,6 +722,11 @@ function registerSystemRoutes(app, deps) {
     const roleAccess = typeof getRoleAccessSummary === 'function'
       ? getRoleAccessSummary(role)
       : null;
+    const rentalLinkDiagnostics = buildRentalLinkDiagnostics({
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      equipment: readData('equipment') || [],
+    });
 
     return res.json({
       ok: true,
@@ -745,6 +750,11 @@ function registerSystemRoutes(app, deps) {
         writableCollections: roleAccess?.writableCollections || [],
       },
       endpoints,
+      rentalLinks: {
+        summary: rentalLinkDiagnostics.summary,
+        brokenGanttRentalLinks: rentalLinkDiagnostics.brokenGanttRentalLinks.slice(0, 50),
+        rentalsWithoutGantt: rentalLinkDiagnostics.rentalsWithoutGantt.slice(0, 50),
+      },
     });
   });
 

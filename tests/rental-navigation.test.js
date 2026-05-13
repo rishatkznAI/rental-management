@@ -21,9 +21,12 @@ test('rental navigation resolver keeps canonical rental id', () => {
 
 test('rental detail resolver opens by rental.id', () => {
   const result = resolveRentalByAnyId('R-1', rentals, ganttRentals);
+  assert.equal(result.ok, true);
   assert.equal(result.status, 'found');
   assert.equal(result.canonicalId, 'R-1');
   assert.equal(result.rental.id, 'R-1');
+  assert.equal(result.source, 'rentals.id');
+  assert.deepEqual(result.warnings, []);
 });
 
 test('rental detail resolver opens by legacy rentalId', () => {
@@ -54,6 +57,8 @@ test('rental detail resolver resolves GR id through linked gantt rental', () => 
   const result = resolveRentalByAnyId('GR-1', rentals, ganttRentals);
   assert.equal(result.status, 'found');
   assert.equal(result.canonicalId, 'R-1');
+  assert.equal(result.source, 'gantt_rentals.linkedRentalId');
+  assert.equal(result.ganttRental.id, 'GR-1');
   assert.equal(result.diagnostics.foundGanttRecord.id, 'GR-1');
 });
 
@@ -68,6 +73,7 @@ test('rental detail resolver reports found gantt without linked rentals row', ()
   assert.equal(result.canonicalId, '');
   assert.equal(result.diagnostics.foundGanttRecord.id, 'GR-broken');
   assert.deepEqual(result.diagnostics.linkedRentalIds, ['R-missing']);
+  assert.deepEqual(result.warnings, ['gantt_rentals record links to rentals ids that are missing.']);
 });
 
 test('rental detail resolver refuses ambiguous linked records', () => {

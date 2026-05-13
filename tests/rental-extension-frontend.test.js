@@ -23,10 +23,13 @@ test('rental extension helper formats dates and disables invalid form', () => {
   assert.equal(initial.newPlannedReturnDate, '2026-06-10');
   assert.match(getRentalExtensionValidation({ rental, form: initial, today: '2026-05-02', hasEquipment: true }), /позже/);
 
-  const unconfirmed = { newPlannedReturnDate: '2026-06-12', reason: 'Клиент продлевает работы', comment: '', confirmedByClient: false };
+  const unconfirmed = { newPlannedReturnDate: '2026-06-12', comment: '', confirmedByClient: false, invoiceSentToClient: false };
   assert.match(getRentalExtensionValidation({ rental, form: unconfirmed, today: '2026-05-02', hasEquipment: true }), /согласовал/);
 
   const valid = { ...unconfirmed, confirmedByClient: true };
+  assert.match(getRentalExtensionValidation({ rental, form: valid, today: '2026-05-02', hasEquipment: true }), /счёт отправлен/);
+
+  valid.invoiceSentToClient = true;
   assert.equal(getRentalExtensionValidation({ rental, form: valid, today: '2026-05-02', hasEquipment: true }), '');
 
   const noEquipment = getRentalExtensionValidation({ rental, form: valid, today: '2026-05-02', hasEquipment: false });

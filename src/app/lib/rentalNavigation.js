@@ -43,6 +43,14 @@ function addRentalCandidate(candidates, rental, source) {
   candidates.set(id, { rental, sources: [source] });
 }
 
+function primarySource(sources = []) {
+  if (sources.includes('rentals.id')) return 'rentals.id';
+  if (sources.includes('rentals.rentalId')) return 'rentals.rentalId';
+  const ganttLink = sources.find(source => source.startsWith('gantt_rentals.'));
+  if (ganttLink) return 'gantt_rentals.linkedRentalId';
+  return sources[0] || 'legacy';
+}
+
 function valuesForLookup(value) {
   if (value && typeof value === 'object') {
     return RENTAL_ID_FIELDS
@@ -74,6 +82,8 @@ export function resolveRentalByAnyId(value, rentals = [], ganttRentals = []) {
     foundGanttRecord: null,
     linkedRentalIds: [],
     candidateIds: [],
+    candidateSources: {},
+    warnings: [],
   };
 
   if (requestedIds.length === 0) {
@@ -82,6 +92,9 @@ export function resolveRentalByAnyId(value, rentals = [], ganttRentals = []) {
       status: 'not_found',
       rental: null,
       canonicalId: '',
+      source: '',
+      ganttRental: null,
+      warnings: diagnostics.warnings,
       diagnostics,
       message: 'Аренда не найдена по пустому идентификатору.',
     };
@@ -135,6 +148,15 @@ export function resolveRentalByAnyId(value, rentals = [], ganttRentals = []) {
 
   diagnostics.linkedRentalIds = unique(diagnostics.linkedRentalIds);
   diagnostics.candidateIds = Array.from(candidates.keys());
+  diagnostics.candidateSources = Object.fromEntries(
+    Array.from(candidates.entries()).map(([id, candidate]) => [id, candidate.sources]),
+  );
+  if (diagnostics.foundGanttRecord && diagnostics.linkedRentalIds.length === 0) {
+    diagnostics.warnings.push('gantt_rentals record has no rentalId/sourceRentalId/originalRentalId link.');
+  }
+  if (diagnostics.linkedRentalIds.length > 0 && candidates.size === 0) {
+    diagnostics.warnings.push('gantt_rentals record links to rentals ids that are missing.');
+  }
 
   if (candidates.size === 1) {
     const [canonicalId, candidate] = Array.from(candidates.entries())[0];
@@ -143,6 +165,9 @@ export function resolveRentalByAnyId(value, rentals = [], ganttRentals = []) {
       status: 'found',
       rental: candidate.rental,
       canonicalId,
+      source: primarySource(candidate.sources),
+      ganttRental: diagnostics.foundGanttRecord,
+      warnings: diagnostics.warnings,
       diagnostics,
       message: '',
     };
@@ -154,6 +179,9 @@ export function resolveRentalByAnyId(value, rentals = [], ganttRentals = []) {
       status: 'conflict',
       rental: null,
       canonicalId: '',
+      source: '',
+      ganttRental: diagnostics.foundGanttRecord,
+      warnings: diagnostics.warnings,
       diagnostics,
       message: 'Найдено несколько связанных записей аренды. Нужна проверка связей.',
     };
@@ -164,6 +192,9 @@ export function resolveRentalByAnyId(value, rentals = [], ganttRentals = []) {
     status: 'not_found',
     rental: null,
     canonicalId: '',
+    source: '',
+    ganttRental: diagnostics.foundGanttRecord,
+    warnings: diagnostics.warnings,
     diagnostics,
     message: 'Аренда не найдена по переданному идентификатору.',
   };

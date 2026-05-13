@@ -21,7 +21,6 @@ import { findConflictingRental } from '../../lib/rental-conflicts';
 import { animationDurations, useAnimatedPresence } from '../../lib/animations';
 import { resolveRentalByAnyId } from '../../lib/rentalNavigation.js';
 import {
-  EXTENSION_REASONS,
   buildExtensionConflictDisplay,
   getRentalExtensionValidation,
 } from '../../lib/rentalExtension.js';
@@ -167,10 +166,12 @@ export function RentalDrawer({
     reason: '',
     comment: '',
     confirmedByClient: false,
+    invoiceSentToClient: false,
   });
   const [extensionError, setExtensionError] = useState('');
   const [extensionInfo, setExtensionInfo] = useState('');
   const [isExtending, setIsExtending] = useState(false);
+  const [rentalDetailNotice, setRentalDetailNotice] = useState('');
 
   // Early return state
   const [showEarlyReturn, setShowEarlyReturn] = useState(false);
@@ -217,6 +218,7 @@ export function RentalDrawer({
     setCommentText('');
     setCommentError('');
     setManagerEditMode(false);
+    setRentalDetailNotice('');
     setActiveTab('overview');
   }, [displayRental]);
 
@@ -264,7 +266,7 @@ export function RentalDrawer({
     || '';
   const isRentalFinished = rental.status === 'closed' || rental.status === 'returned';
   const canManageDowntimes = canEditRentals && !isRentalFinished;
-  const canExtendRentalTerm = canEditRentalDates && (rental.status === 'active' || rental.status === 'created') && !isRentalFinished;
+  const canExtendRentalTerm = canEditRentalDates && Boolean(rentalDetailId) && (rental.status === 'active' || rental.status === 'created') && !isRentalFinished;
   const canShowExtendShortcut = canEditRentalDates && rental.status === 'active' && !isRentalFinished;
   const canManageRentalReturn = canEditRentals && rental.status === 'active' && !isRentalFinished;
   const termStatusLabel = isRentalFinished
@@ -323,14 +325,17 @@ export function RentalDrawer({
         extensionStartDate || rental.endDate,
         extensionForm.newPlannedReturnDate,
         allRentals,
-        rental.id,
+        (rental as GanttRentalData & { __ganttRentalId?: string; __linkedGanttRentalId?: string }).__ganttRentalId
+          || (rental as GanttRentalData & { __ganttRentalId?: string; __linkedGanttRentalId?: string }).__linkedGanttRentalId
+          || rentalResolution.ganttRental?.id
+          || rental.id,
       ))
     : null;
 
   const openRentalCard = () => {
     if (rentalDetailId) return;
     console.warn('[rental-drawer] rental card navigation failed', rentalResolution.diagnostics);
-    window.alert(rentalDetailError);
+    setRentalDetailNotice(rentalDetailError);
   };
 
   const openExtensionDialog = () => {
@@ -339,6 +344,7 @@ export function RentalDrawer({
       reason: '',
       comment: '',
       confirmedByClient: false,
+      invoiceSentToClient: false,
     });
     setExtensionError('');
     setExtensionInfo('');
@@ -347,6 +353,11 @@ export function RentalDrawer({
 
   const handleExtendRental = async () => {
     if (!canExtendRentalTerm) return;
+    if (!rentalDetailId) {
+      console.warn('[rental-drawer] rental extension resolution failed', rentalResolution.diagnostics);
+      setExtensionError('Нельзя продлить аренду без связанной записи rentals.');
+      return;
+    }
     if (!rentalDetailId && rentalResolution.status === 'conflict') {
       console.warn('[rental-drawer] rental extension resolution conflict', rentalResolution.diagnostics);
       setExtensionError('Найдено несколько связанных записей аренды. Нужна проверка связей.');
@@ -360,12 +371,13 @@ export function RentalDrawer({
     setExtensionError('');
     setExtensionInfo('');
     try {
-      const result = await rentalsService.extend(rentalDetailId || rental.id, {
+      const result = await rentalsService.extend(rentalDetailId, {
         newEndDate: extensionForm.newPlannedReturnDate,
         newPlannedReturnDate: extensionForm.newPlannedReturnDate,
         reason: extensionForm.reason.trim(),
         comment: extensionForm.comment.trim(),
         confirmedByClient: extensionForm.confirmedByClient,
+        invoiceSentToClient: extensionForm.invoiceSentToClient,
       });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
@@ -750,6 +762,11 @@ export function RentalDrawer({
                     </Button>
                   )}
                 </div>
+                {rentalDetailNotice && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                    {rentalDetailNotice}
+                  </div>
+                )}
               </div>
             </section>
           )}
@@ -995,8 +1012,13 @@ export function RentalDrawer({
                     {extensionInfo && (
                       <p className="mt-2 text-xs leading-relaxed text-blue-700 dark:text-blue-300">{extensionInfo}</p>
                     )}
+                    {rentalDetailNotice && (
+                      <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                        {rentalDetailNotice}
+                      </p>
+                    )}
                     <div className="mt-3 flex flex-wrap justify-end gap-2">
-                      <Button size="sm" onClick={openExtensionDialog}>
+                      <Button size="sm" onClick={openExtensionDialog} disabled={!canExtendRentalTerm}>
                         Продлить аренду
                       </Button>
                       {rentalDetailId ? (
@@ -1638,6 +1660,12 @@ export function RentalDrawer({
                 <span className="text-slate-500 dark:text-gray-400">Текущая дата возврата</span>
                 <span className="font-semibold text-slate-950 dark:text-white">{formatDate(rental.endDate)}</span>
               </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500 dark:text-gray-400">Счёт по продлению</span>
+                <span className="font-semibold text-slate-950 dark:text-white">
+                  {(rental as GanttRentalData & { extensionInvoiceSentToClient?: boolean }).extensionInvoiceSentToClient ? 'отправлен' : 'не отправлен'}
+                </span>
+              </div>
               {clientDebt && canViewMoney && (
                 <div className="flex justify-between gap-3">
                   <span className="text-slate-500 dark:text-gray-400">Долг клиента</span>
@@ -1664,22 +1692,6 @@ export function RentalDrawer({
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Причина *</label>
-              <select
-                value={extensionForm.reason}
-                onChange={event => {
-                  setExtensionForm(prev => ({ ...prev, reason: event.target.value }));
-                  setExtensionError('');
-                }}
-                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-              >
-                <option value="">Выберите причину</option>
-                {EXTENSION_REASONS.map(reason => (
-                  <option key={reason} value={reason}>{reason}</option>
-                ))}
-              </select>
-            </div>
-            <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Комментарий</label>
               <textarea
                 value={extensionForm.comment}
@@ -1698,6 +1710,18 @@ export function RentalDrawer({
                 className="mt-1"
               />
               Клиент согласовал продление
+            </label>
+            <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={extensionForm.invoiceSentToClient}
+                onChange={event => {
+                  setExtensionForm(prev => ({ ...prev, invoiceSentToClient: event.target.checked }));
+                  setExtensionError('');
+                }}
+                className="mt-1"
+              />
+              Счёт отправлен клиенту
             </label>
             {(extensionError || extensionValidation) && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">

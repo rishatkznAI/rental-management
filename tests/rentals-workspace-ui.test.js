@@ -172,6 +172,15 @@ test('rentals workspace pagination controls reset clamp and keep table actions w
   assert.match(rentalsSource, /disabled=\{!rentalListPagination\.hasNextPage\}[\s\S]*Вперёд/);
   assert.match(rentalsSource, /setCurrentPage\(1\);[\s\S]*filterClient[\s\S]*filterManager[\s\S]*filterModel[\s\S]*filterStatus[\s\S]*pageSize[\s\S]*returnStateFilter/);
   assert.match(rentalsSource, /if \(currentPage !== rentalListPagination\.currentPage\) \{[\s\S]*setCurrentPage\(rentalListPagination\.currentPage\)/);
-  assert.match(rentalsSource, /onClick=\{\(\) => setSelectedRental\(row\.rental\)\}/);
+  assert.match(rentalsSource, /onClick=\{\(\) => setSelectedRental\(buildRentalDrawerRental\(row\.rental, row\.classicRental\)\)\}/);
   assert.match(rentalsSource, /Ничего не найдено/);
+});
+
+test('rentals workspace does not open broken gantt rows as full rentals', () => {
+  assert.match(rentalsSource, /markBrokenRentalLink\(item, getBrokenRentalLinkReason\(item, inferredClassicCandidates\)\)/);
+  assert.match(rentalsSource, /inferredClassicCandidates\.length === 1 \? inferredClassicCandidates\[0\] : null/);
+  assert.match(rentalsSource, /filter\(row => !row\.isBrokenRentalLink \|\| isAdminRole\)/);
+  assert.match(rentalsSource, /if \(!isBrokenRentalLink\) setSelectedRental\(buildRentalDrawerRental\(row\.rental, row\.classicRental\)\)/);
+  assert.match(rentalsSource, /Нет записи rentals/);
+  assert.match(rentalsSource, /brokenRentalLinkLabel\(row\.brokenRentalLinkReason\)/);
 });

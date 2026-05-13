@@ -226,6 +226,14 @@ function candidateDto(rental, resolution) {
   });
 }
 
+function linkedRentalIds(gantt) {
+  return [...new Set([
+    gantt?.rentalId,
+    gantt?.sourceRentalId,
+    gantt?.originalRentalId,
+  ].map(text).filter(Boolean))];
+}
+
 function findGanttRentalCandidates(gantt, rentals, rentalResolutions, ganttResolution) {
   return rentals
     .filter(rental => clientMatches(gantt, rental))
@@ -299,12 +307,16 @@ function buildRentalLinkDiagnostics({ equipment = [], rentals = [], ganttRentals
   const equipmentIndex = buildEquipmentIndex(equipmentList);
   const rentalResolutions = new Map(rentalList.map(rental => [rental, resolveRecordEquipment(rental, equipmentIndex)]));
   const rentalsById = new Map(rentalList.map(rental => [text(rental?.id), rental]).filter(([id]) => id));
+  const ganttRentalLinks = new Map();
 
   const result = {
     summary: {
       rentalsTotal: rentalList.length,
       ganttTotal: ganttList.length,
       equipmentTotal: equipmentList.length,
+      ganttWithValidRentalLink: 0,
+      ganttWithoutLinkedRental: 0,
+      rentalsWithoutGantt: 0,
       rentalsWithoutEquipment: 0,
       rentalsLegacyOnlyEquipment: 0,
       ganttWithoutRentalId: 0,
@@ -315,6 +327,8 @@ function buildRentalLinkDiagnostics({ equipment = [], rentals = [], ganttRentals
     rentalsWithoutEquipment: [],
     rentalsLegacyOnlyEquipment: [],
     ganttWithoutRentalId: [],
+    brokenGanttRentalLinks: [],
+    rentalsWithoutGantt: [],
     ganttEquipmentMismatch: [],
     duplicateInventoryNumbers: duplicateInventoryGroups(equipmentList),
     unsafeRecords: [],
@@ -367,11 +381,43 @@ function buildRentalLinkDiagnostics({ equipment = [], rentals = [], ganttRentals
 
   for (const gantt of ganttList) {
     const ganttResolution = resolveRecordEquipment(gantt, equipmentIndex);
+    const linkedIds = linkedRentalIds(gantt);
+    const linkedRentals = linkedIds.map(id => rentalsById.get(id)).filter(Boolean);
     const rentalId = text(gantt?.rentalId);
-    const linkedRental = rentalId ? rentalsById.get(rentalId) : null;
+    const linkedRental = linkedRentals[0] || null;
+    const candidates = linkedRental
+      ? []
+      : findGanttRentalCandidates(gantt, rentalList, rentalResolutions, ganttResolution);
+
+    if (linkedRental) {
+      result.summary.ganttWithValidRentalLink += 1;
+      const id = text(linkedRental.id);
+      if (!ganttRentalLinks.has(id)) ganttRentalLinks.set(id, []);
+      ganttRentalLinks.get(id).push(text(gantt?.id));
+    } else {
+      result.summary.ganttWithoutLinkedRental += 1;
+      const reason = linkedIds.length > 0
+        ? 'STALE_GANTT_ROW'
+        : candidates.length > 1
+          ? 'MULTIPLE_CANDIDATES'
+          : 'NO_LINKED_RENTAL';
+      result.brokenGanttRentalLinks.push(recordDto(gantt, {
+        ganttId: text(gantt?.id),
+        rentalId,
+        linkedRentalIds: linkedIds,
+        reason,
+        severity: candidates.length === 1 ? 'warning' : 'critical',
+        possibleCandidates: candidates,
+        candidateCount: candidates.length,
+        suggestedAction: reason === 'STALE_GANTT_ROW'
+          ? 'Связанная rentals-запись отсутствует. Проверьте, не осталась ли stale строка планировщика.'
+          : candidates.length === 1
+            ? 'Проверьте единственного кандидата вручную перед восстановлением rentalId.'
+            : 'Нельзя безопасно восстановить rentalId автоматически. Требуется ручная проверка.',
+      }));
+    }
 
     if (!hasRentalId(gantt) || !linkedRental) {
-      const candidates = findGanttRentalCandidates(gantt, rentalList, rentalResolutions, ganttResolution);
       const reason = !hasRentalId(gantt)
         ? (candidates.length === 0 ? 'noCandidate' : candidates.length > 1 ? 'multipleCandidates' : 'singleCandidate')
         : 'brokenRentalId';
@@ -432,6 +478,15 @@ function buildRentalLinkDiagnostics({ equipment = [], rentals = [], ganttRentals
   result.summary.rentalsWithoutEquipment = result.rentalsWithoutEquipment.length;
   result.summary.rentalsLegacyOnlyEquipment = result.rentalsLegacyOnlyEquipment.length;
   result.summary.ganttWithoutRentalId = result.ganttWithoutRentalId.length;
+  result.rentalsWithoutGantt = rentalList
+    .filter(rental => !ganttRentalLinks.has(text(rental?.id)))
+    .map(rental => recordDto(rental, {
+      rentalId: text(rental?.id),
+      reason: 'NO_GANTT_ROW',
+      severity: 'info',
+      suggestedAction: 'Если аренда должна отображаться в планировщике, создайте или восстановите связанную gantt_rentals строку.',
+    }));
+  result.summary.rentalsWithoutGantt = result.rentalsWithoutGantt.length;
   result.summary.ganttEquipmentMismatch = result.ganttEquipmentMismatch.length;
   result.summary.duplicateInventoryNumbers = result.duplicateInventoryNumbers.length;
   result.summary.unsafeRecords = result.unsafeRecords.length;

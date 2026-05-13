@@ -390,6 +390,7 @@ test('rental extension requires write access and writes safe audit events', asyn
       reason: 'Клиент продлевает работы',
       comment: 'secret should stay ordinary text',
       confirmedByClient: true,
+      invoiceSentToClient: true,
       password: 'hidden',
       apiKey: 'hidden',
     });
@@ -399,6 +400,8 @@ test('rental extension requires write access and writes safe audit events', asyn
     assert.ok(actions.includes('rentals.extend'));
     assert.ok(actions.includes('rentals.planned_return_date_change'));
     assert.ok(actions.includes('gantt_rentals.extend'));
+    assert.equal(state.rentals.find(item => item.id === 'R-1').extensionInvoiceSentToClient, true);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').extensionInvoiceSentToClient, true);
     assert.doesNotMatch(JSON.stringify(state.audit_logs), /password|apiKey|hidden/);
   });
 });

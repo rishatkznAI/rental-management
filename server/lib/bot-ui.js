@@ -270,6 +270,12 @@ function createBotUi() {
     if (normalizedRole === 'Менеджер по аренде') {
       return rentalManagerKeyboard();
     }
+    if (normalizedRole === 'Руководитель') {
+      return keyboard([
+        [button('Последнее движение техники', 'menu:head_movements')],
+        [button('Помощь', 'menu:help')],
+      ]);
+    }
     if (normalizedRole === 'Перевозчик') {
       return carrierKeyboard();
     }

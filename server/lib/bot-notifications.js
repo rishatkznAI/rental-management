@@ -125,6 +125,10 @@ function roleIsOfficeManager(role) {
   return normalizeRole(role) === 'Офис-менеджер';
 }
 
+function roleIsHead(role) {
+  return normalizeRole(role) === 'Руководитель';
+}
+
 function roleIsServiceLead(role) {
   const normalized = normalizeRole(role);
   return normalized === 'Администратор' ||
@@ -630,7 +634,9 @@ function createBotNotificationService(deps = {}) {
     });
 
     try {
-      const response = await sendMessage(target, event.text);
+      const response = await sendMessage(target, event.text, Array.isArray(event.attachments) && event.attachments.length
+        ? { attachments: event.attachments }
+        : undefined);
       patchNotificationEvent(record.id, {
         status: 'sent',
         sentAt: nowIso(),
@@ -1143,11 +1149,47 @@ function createBotNotificationService(deps = {}) {
     const status = String(nextDelivery.status || '').trim();
     if (status === 'completed' && deliveryTypeIsShipping(nextDelivery)) {
       const event = buildManagerDeliveryLifecycleEvent('manager_equipment_dispatched', nextDelivery);
-      return event ? dispatchEvent(event) : null;
+      const [managerResult, headResult] = await Promise.all([
+        event ? dispatchEvent(event) : null,
+        notifyHeadEquipmentMovement({
+          operationType: 'shipping',
+          photoEvent: {
+            id: nextDelivery.id,
+            equipmentId: nextDelivery.equipmentId,
+            date: nextDelivery.completedAt || nextDelivery.updatedAt || nextDelivery.transportDate || nowIso(),
+            type: 'shipping',
+            photos: nextDelivery.photos || nextDelivery.attachments || [],
+            comment: nextDelivery.comment,
+            carrierName: nextDelivery.carrierName,
+            rentalId: nextDelivery.ganttRentalId || nextDelivery.rentalId,
+          },
+          rental: resolveDeliveryRental(nextDelivery),
+          equipment: findEquipmentForEntity(nextDelivery),
+        }),
+      ]);
+      return { managerResult, headResult };
     }
     if (status === 'completed' && deliveryTypeIsReceiving(nextDelivery)) {
       const event = buildManagerDeliveryLifecycleEvent('manager_equipment_returned', nextDelivery);
-      return event ? dispatchEvent(event) : null;
+      const [managerResult, headResult] = await Promise.all([
+        event ? dispatchEvent(event) : null,
+        notifyHeadEquipmentMovement({
+          operationType: 'receiving',
+          photoEvent: {
+            id: nextDelivery.id,
+            equipmentId: nextDelivery.equipmentId,
+            date: nextDelivery.completedAt || nextDelivery.updatedAt || nextDelivery.transportDate || nowIso(),
+            type: 'receiving',
+            photos: nextDelivery.photos || nextDelivery.attachments || [],
+            comment: nextDelivery.comment,
+            carrierName: nextDelivery.carrierName,
+            rentalId: nextDelivery.ganttRentalId || nextDelivery.rentalId,
+          },
+          rental: resolveDeliveryRental(nextDelivery),
+          equipment: findEquipmentForEntity(nextDelivery),
+        }),
+      ]);
+      return { managerResult, headResult };
     }
     if (!deliveryTypeIsShipping(nextDelivery)) return null;
     if (!DELIVERY_STATUS_EVENTS.has(status)) return null;
@@ -1179,6 +1221,72 @@ function createBotNotificationService(deps = {}) {
         userName: getBotUserName(botUser),
       }))
       .filter(recipient => roleIsServiceLead(recipient.role));
+    const results = [];
+    for (const recipient of recipients) {
+      results.push(await sendEventToRecipient(event, recipient));
+    }
+    return { event, recipients, results };
+  }
+
+  function photoAttachmentsForHead(event) {
+    return compact(event?.photos || []).map(url => ({
+      type: 'image',
+      payload: { url },
+    }));
+  }
+
+  function buildHeadMovementEvent({ operationType, photoEvent, rental, equipment, authUser }) {
+    if (!photoEvent || !operationType) return null;
+    const typeLabel = operationType === 'receiving' ? 'Приёмка' : 'Отгрузка';
+    const photos = compact(photoEvent.photos || []);
+    const equipmentLabel = formatEquipment(photoEvent, equipment);
+    const client = findClientName(rental?.clientId, rental?.client || equipment?.currentClient || '');
+    const object = rental?.objectName || rental?.objectAddress || rental?.deliveryAddress || '';
+    const photoKey = photos.length ? photos.join('|') : 'no-photo';
+    const keyBase = `head_equipment_movement:${photoEvent.id || rental?.id || photoEvent.equipmentId}:${operationType}:${photoEvent.date || ''}:${photoKey}`;
+    return {
+      type: 'head_equipment_movement',
+      entityType: 'shipping_photo',
+      entityId: photoEvent.id || `${operationType}:${photoEvent.equipmentId || ''}:${photoEvent.date || ''}`,
+      keyBase,
+      text: [
+        `${typeLabel} техники`,
+        '',
+        `Тип операции: ${typeLabel}`,
+        `Техника: ${equipmentLabel}`,
+        `Клиент: ${client || 'не указан'}`,
+        `Объект / адрес: ${object || 'не указан'}`,
+        `Дата и время: ${formatDateTime(photoEvent.date || nowIso())}`,
+        `Ответственный менеджер: ${rental?.manager || 'не указан'}`,
+        `Перевозчик: ${photoEvent.carrierName || 'не указан'}`,
+        `Комментарий: ${photoEvent.comment || photoEvent.damageDescription || 'нет'}`,
+        photos.length ? `Фото: ${photos.length}` : 'Фото не приложены',
+      ].join('\n'),
+      attachments: photoAttachmentsForHead({ photos }),
+      metadata: {
+        operationType,
+        photoEventId: photoEvent.id || null,
+        rentalId: rental?.id || photoEvent.rentalId || null,
+        equipmentId: photoEvent.equipmentId || equipment?.id || null,
+        manager: rental?.manager || null,
+        actor: authUser?.userName || photoEvent.uploadedBy || null,
+        photoCount: photos.length,
+      },
+    };
+  }
+
+  async function notifyHeadEquipmentMovement(payload) {
+    const event = buildHeadMovementEvent(payload || {});
+    if (!event) return null;
+    const recipients = uniqBy(Object.entries(getBotUsers())
+      .map(([phone, botUser]) => ({
+        phone,
+        botUser,
+        role: getBotUserRole(botUser),
+        recipientId: getRecipientId(phone, botUser),
+        userName: getBotUserName(botUser),
+      }))
+      .filter(recipient => roleIsHead(recipient.role) && isSendableRecipient(recipient)), recipient => recipient.recipientId);
     const results = [];
     for (const recipient of recipients) {
       results.push(await sendEventToRecipient(event, recipient));
@@ -1405,6 +1513,7 @@ function createBotNotificationService(deps = {}) {
     notifyEquipmentRented: (rental, equipment) => safely('equipment rented notification failed', () => notifyEquipmentRented(rental, equipment)),
     notifyRentalChanged: (previousRental, nextRental, options) => safely('rental notification failed', () => notifyRentalChanged(previousRental, nextRental, options)),
     notifyRentalReturned: (rental, options) => safely('rental returned notification failed', () => notifyRentalReturned(rental, options)),
+    notifyHeadEquipmentMovement: payload => safely('head equipment movement notification failed', () => notifyHeadEquipmentMovement(payload)),
     notifyServiceRevisionResolved: ticket => safely('service revision resolved notification failed', () => notifyServiceRevisionResolved(ticket)),
     notifyServiceRevisionReturned: ticket => safely('service revision returned notification failed', () => notifyServiceRevisionReturned(ticket)),
     readNotificationEvents,

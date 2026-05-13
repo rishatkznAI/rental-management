@@ -88,7 +88,7 @@ import { animationClasses } from '../lib/animations';
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
 type CompactView = 'cards' | 'timeline';
 type DensityMode = 'comfortable' | 'compact';
-type RentalWorkspaceTab = 'list' | 'planner' | 'returns' | 'debt_docs';
+type RentalWorkspaceTab = 'list' | 'movement' | 'planner' | 'returns' | 'debt_docs';
 type RentalMovementScale = 'days' | 'weeks' | 'months';
 type FleetLayerKey = 'returns' | 'deliveries' | 'service' | 'downtime';
 type FleetEquipmentStatusFilter = '' | 'available' | 'rented' | 'reserved' | 'in_service' | 'inactive';
@@ -120,7 +120,10 @@ type FleetMovementEntry = ShippingPhoto & {
   equipment?: Equipment;
   equipmentLabel?: string;
   serialNumber?: string;
+  inventoryNumber?: string;
   clientLabel?: string;
+  objectLabel?: string;
+  operationStatusLabel?: string;
   typeLabel?: string;
   typeBadgeClassName?: string;
 };
@@ -747,6 +750,17 @@ function getEquipmentMovementLabel(equipment?: Pick<Equipment, 'manufacturer' | 
   return 'Без названия';
 }
 
+function getHeadMovementStatusLabel(entry: Pick<FleetMovementEntry, 'type' | 'rental'>): string {
+  if (entry.type === 'shipping') {
+    if (entry.rental?.status === 'created') return 'Ожидает отгрузки';
+    if (entry.rental?.status === 'active') return 'В аренде';
+    return 'Ушла клиенту';
+  }
+  if (entry.rental?.status === 'closed') return 'Закрыта';
+  if (entry.rental?.status === 'returned') return 'Вернулась';
+  return 'Ожидает приёмки';
+}
+
 function formatCompactRub(value: unknown) {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 0) return '0 ₽';
@@ -1225,9 +1239,10 @@ export default function Rentals() {
   const canEditRentalDates = canEditRentals;
   const canRestoreRentals = isAdminRole;
   const normalizedRole = normalizeUserRole(user?.role);
+  const isHeadRole = normalizedRole === 'Руководитель';
   const canViewDowntimes = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole);
   const canViewStaffOptions = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'].includes(normalizedRole);
-  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
+  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Руководитель'].includes(normalizedRole)
     || isMechanicRole(normalizedRole);
   const today = useMemo(() => startOfDay(new Date()), []);
   const todayStr = format(today, 'yyyy-MM-dd');
@@ -1732,7 +1747,10 @@ export default function Rentals() {
     if (activeWorkspaceTab === 'debt_docs' && !canViewPayments && !canViewDocuments) {
       setActiveWorkspaceTab('list');
     }
-  }, [activeWorkspaceTab, canViewDocuments, canViewPayments]);
+    if (isHeadRole && activeWorkspaceTab !== 'movement') {
+      setActiveWorkspaceTab('movement');
+    }
+  }, [activeWorkspaceTab, canViewDocuments, canViewPayments, isHeadRole]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2354,7 +2372,12 @@ export default function Rentals() {
           equipment,
           equipmentLabel: getEquipmentMovementLabel(equipment),
           serialNumber: event.serialNumber || equipment?.serialNumber || '',
+          inventoryNumber: (event as ShippingPhoto & { inventoryNumber?: string }).inventoryNumber || equipment?.inventoryNumber || '',
           clientLabel: rental?.client || equipment?.currentClient || 'Без клиента',
+          objectLabel: (rental as GanttRentalData & { objectName?: string; objectAddress?: string })?.objectName
+            || (rental as GanttRentalData & { objectName?: string; objectAddress?: string })?.objectAddress
+            || 'Объект не указан',
+          operationStatusLabel: getHeadMovementStatusLabel({ ...event, rental }),
           typeLabel: event.type === 'shipping' ? 'Отгрузка' : 'Приёмка',
           typeBadgeClassName: event.type === 'shipping'
             ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300'
@@ -2378,6 +2401,54 @@ export default function Rentals() {
     () => movementEntries.filter(entry => movementFilter === 'all' || entry.type === movementFilter),
     [movementEntries, movementFilter],
   );
+
+  const headMovementEntries = useMemo(() => {
+    const equipmentByIdForHead = new Map(equipmentList.map(item => [item.id, item]));
+    const existingByRentalAndType = new Set(
+      movementEntries.map(entry => `${entry.rentalId || entry.rental?.id || ''}:${entry.type}`),
+    );
+    const derived = rentalRows
+      .map(rental => {
+        const equipment = rental.equipmentId
+          ? equipmentByIdForHead.get(rental.equipmentId)
+          : equipmentList.find(item => item.inventoryNumber === rental.equipmentInv);
+        const isReturned = rental.status === 'returned' || rental.status === 'closed';
+        const type = isReturned ? 'receiving' : 'shipping';
+        if (existingByRentalAndType.has(`${rental.id}:${type}`)) return null;
+        const date = isReturned ? rental.endDate : rental.startDate;
+        return {
+          id: `rental-movement:${rental.id}:${type}`,
+          equipmentId: equipment?.id || rental.equipmentId || '',
+          rentalId: rental.id,
+          date,
+          type,
+          uploadedBy: '',
+          photos: [],
+          rental,
+          equipment,
+          equipmentLabel: getEquipmentMovementLabel(equipment),
+          serialNumber: rental.serialNumber || equipment?.serialNumber || '',
+          inventoryNumber: rental.equipmentInv || equipment?.inventoryNumber || '',
+          clientLabel: rental.client || equipment?.currentClient || 'Без клиента',
+          objectLabel: (rental as GanttRentalData & { objectName?: string; objectAddress?: string }).objectName
+            || (rental as GanttRentalData & { objectName?: string; objectAddress?: string }).objectAddress
+            || 'Объект не указан',
+          operationStatusLabel: getHeadMovementStatusLabel({ type, rental }),
+          typeLabel: type === 'shipping' ? 'Отгрузка' : 'Приёмка',
+          typeBadgeClassName: type === 'shipping'
+            ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300',
+        } as FleetMovementEntry;
+      })
+      .filter(Boolean) as FleetMovementEntry[];
+    return [...movementEntries, ...derived]
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  }, [equipmentList, movementEntries, rentalRows]);
+
+  const displayedMovementEntries = isHeadRole
+    ? headMovementEntries.filter(entry => movementFilter === 'all' || entry.type === movementFilter)
+    : filteredMovementEntries;
+  const movementEntryCounts = isHeadRole ? headMovementEntries : movementEntries;
 
   const ganttCountBySourceRentalId = useMemo(() => {
     const counts = new Map<string, number>();
@@ -3389,6 +3460,15 @@ export default function Rentals() {
       tone: 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-900/50',
     },
     {
+      id: 'movement' as const,
+      label: 'Движение техники',
+      description: 'Read-only журнал отгрузок и приёмок: что ушло клиенту и что вернулось обратно.',
+      badge: movementEntryCounts.length,
+      badgeLabel: 'событий',
+      Icon: Truck,
+      tone: 'text-cyan-700 bg-cyan-50 border-cyan-200 dark:text-cyan-300 dark:bg-cyan-950/30 dark:border-cyan-900/50',
+    },
+    {
       id: 'planner' as const,
       label: 'План парка',
       description: 'Загрузка техники по датам: аренды, свободные окна, возвраты, доставки, сервис и простой.',
@@ -3415,7 +3495,9 @@ export default function Rentals() {
       Icon: FileText,
       tone: 'text-red-700 bg-red-50 border-red-200 dark:text-red-300 dark:bg-red-950/30 dark:border-red-900/50',
     },
-  ]).filter(tab => tab.id !== 'debt_docs' || canViewPayments || canViewDocuments), [
+  ])
+    .filter(tab => !isHeadRole || tab.id === 'movement')
+    .filter(tab => tab.id !== 'debt_docs' || canViewPayments || canViewDocuments), [
     canViewDocuments,
     canViewPayments,
     debtDocsTabSummary.debtCount,
@@ -3423,6 +3505,8 @@ export default function Rentals() {
     debtDocsTabSummary.missingUpd,
     debtDocsTabSummary.unsignedDocuments,
     fleetPlanKpis.totalEquipment,
+    isHeadRole,
+    movementEntryCounts.length,
     rentalWorkspaceKpis.activeRentals,
     returnsTabSummary.overdue,
     returnsTabSummary.today,
@@ -4600,6 +4684,98 @@ export default function Rentals() {
       ) : (
         <div className="relative z-10 flex-1 overflow-auto px-4 py-4">
           <div className="mx-auto flex max-w-[1500px] flex-col gap-4">
+            {activeWorkspaceTab === 'movement' && (
+              <section className="rounded-2xl border border-border bg-card/85 p-4 shadow-sm">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-foreground">Движение техники</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">Отгрузки и приёмки без финансов, документов и рабочих действий.</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[
+                      { value: 'all' as const, label: `Все (${movementEntryCounts.length})` },
+                      { value: 'shipping' as const, label: `Ушло (${movementEntryCounts.filter(entry => entry.type === 'shipping').length})` },
+                      { value: 'receiving' as const, label: `Пришло (${movementEntryCounts.filter(entry => entry.type === 'receiving').length})` },
+                    ].map(filterOption => (
+                      <button
+                        key={filterOption.value}
+                        type="button"
+                        onClick={() => setMovementFilter(filterOption.value)}
+                        className={cn(
+                          'rounded-full border px-3 py-1.5 text-sm font-medium transition-colors',
+                          movementFilter === filterOption.value
+                            ? 'border-[--color-primary] bg-[--color-primary]/12 text-[--color-primary]'
+                            : 'border-border bg-secondary/60 text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        {filterOption.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {displayedMovementEntries.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border bg-secondary/25 px-6 py-12 text-center text-sm text-muted-foreground">
+                    Движения техники пока нет
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-border">
+                    <table className="min-w-full divide-y divide-border text-sm">
+                      <thead className="bg-secondary/60 text-left text-xs font-semibold uppercase text-muted-foreground">
+                        <tr>
+                          <th className="px-4 py-3">Операция</th>
+                          <th className="px-4 py-3">Дата</th>
+                          <th className="px-4 py-3">Техника</th>
+                          <th className="px-4 py-3">Клиент / объект</th>
+                          <th className="px-4 py-3">Статус</th>
+                          <th className="px-4 py-3">Фото</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border bg-card">
+                        {displayedMovementEntries.map(entry => (
+                          <tr key={entry.id}>
+                            <td className="px-4 py-3">
+                              <span className={cn('inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold', entry.typeBadgeClassName)}>
+                                {entry.type === 'shipping' ? 'Ушло' : 'Пришло'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 font-medium text-foreground">{safeMovementDateLabel(entry.date)}</td>
+                            <td className="px-4 py-3">
+                              <div className="font-semibold text-foreground">{entry.equipmentLabel}</div>
+                              <div className="text-xs text-muted-foreground">SN {entry.serialNumber || 'не указан'} · INV {entry.inventoryNumber || 'не указан'}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-foreground">{entry.clientLabel}</div>
+                              <div className="text-xs text-muted-foreground">{entry.objectLabel}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="inline-flex rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-foreground">
+                                {entry.operationStatusLabel}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {entry.photos.length > 0 ? (
+                                <div className="flex max-w-[220px] flex-wrap gap-2">
+                                  {entry.photos.slice(0, 4).map((photo, index) => (
+                                    <a key={`${entry.id}-${index}`} href={photo} target="_blank" rel="noreferrer" className="block h-14 w-14 overflow-hidden rounded-lg border border-border bg-secondary">
+                                      <img src={photo} alt="" className="h-full w-full object-cover" />
+                                    </a>
+                                  ))}
+                                  {entry.photos.length > 4 && <span className="text-xs text-muted-foreground">+{entry.photos.length - 4}</span>}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Фото ещё не загружены</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            )}
+            {activeWorkspaceTab !== 'movement' && (
             <section className="rounded-2xl border border-border bg-card/85 p-4 shadow-sm">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
 	                <div>
@@ -4827,6 +5003,7 @@ export default function Rentals() {
                 </div>
               )}
             </section>
+            )}
 
             {activeWorkspaceTab === 'list' && (
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
@@ -5106,6 +5283,7 @@ export default function Rentals() {
             )}
 
             {activeWorkspaceTab !== 'returns' && (
+            activeWorkspaceTab !== 'movement' && (
             <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
               <div className="flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
@@ -5458,6 +5636,7 @@ export default function Rentals() {
               </div>
               {rentalListPaginationControls('bottom')}
             </section>
+            )
             )}
           </div>
         </div>

@@ -77,8 +77,8 @@ function createMemoryNotifications(overrides = {}, options = {}) {
   const service = createBotNotificationService({
     readData,
     writeData,
-    sendMessage: options.sendMessage || (async (target, text) => {
-      messages.push({ target, text });
+    sendMessage: options.sendMessage || (async (target, text, sendOptions = {}) => {
+      messages.push({ target, text, options: sendOptions });
       return { message: { message_id: `msg-${messages.length}` } };
     }),
     generateId: (prefix) => `${prefix}-${state.bot_notifications.length + 1}`,
@@ -88,6 +88,62 @@ function createMemoryNotifications(overrides = {}, options = {}) {
   });
   return { state, messages, service };
 }
+
+test('head movement notifications go only to active head users with photos and dedupe keys', async () => {
+  const { state, messages, service } = createMemoryNotifications({
+    bot_users: {
+      '200': {
+        userId: 'U-head',
+        userName: 'Руководитель',
+        userRole: 'Руководитель',
+        isActive: true,
+        replyTarget: { user_id: 200, chat_id: null },
+      },
+      '201': {
+        userId: 'U-head-off',
+        userName: 'Отключенный руководитель',
+        userRole: 'head',
+        isActive: false,
+        replyTarget: { user_id: 201, chat_id: null },
+      },
+      '202': {
+        userId: 'U-manager-1',
+        userName: 'Иванов Иван',
+        userRole: 'Менеджер по аренде',
+        isActive: true,
+        replyTarget: { user_id: 202, chat_id: null },
+      },
+    },
+    gantt_rentals: [
+      { id: 'GR-1', client: 'ООО Клиент', manager: 'Иванов Иван', objectName: 'Объект 1', status: 'active' },
+    ],
+  });
+
+  const payload = {
+    operationType: 'shipping',
+    photoEvent: {
+      id: 'PHOTO-1',
+      equipmentId: 'EQ-1',
+      rentalId: 'GR-1',
+      type: 'shipping',
+      date: '2026-05-13T12:00:00.000Z',
+      photos: ['https://example.test/1.jpg'],
+      comment: 'Отгрузили',
+    },
+    rental: state.gantt_rentals[0],
+    equipment: state.equipment[0],
+  };
+
+  await service.notifyHeadEquipmentMovement(payload);
+  await service.notifyHeadEquipmentMovement(payload);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].target.user_id, 200);
+  assert.match(messages[0].text, /Тип операции: Отгрузка/);
+  assert.match(messages[0].text, /Фото: 1/);
+  assert.equal(messages[0].options.attachments[0].payload.url, 'https://example.test/1.jpg');
+  assert.equal(state.bot_notifications.filter(item => item.status === 'sent').length, 1);
+});
 
 test('scheduled return notifications go only to responsible managers and admins once', async () => {
   const { state, messages, service } = createMemoryNotifications({

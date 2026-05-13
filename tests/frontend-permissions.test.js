@@ -50,6 +50,12 @@ function investorPermissionBlock() {
   return match.groups.body;
 }
 
+function headPermissionBlock() {
+  const match = permissionsSource.match(/'Руководитель':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
+  assert.ok(match?.groups?.body, 'head permission block must exist');
+  return match.groups.body;
+}
+
 test('frontend rental manager permissions match backend write limits', () => {
   const block = rentalManagerPermissionBlock();
 
@@ -127,6 +133,26 @@ test('frontend investor permissions expose only own equipment, rentals and profi
   assert.match(equipmentPageSource, /const scopedEquipmentList = React\.useMemo/);
   assert.match(equipmentPageSource, /equipmentList\.filter\(item => equipmentMatchesInvestorBinding\(item, investorBinding\)\)/);
   assert.match(equipmentPageSource, /normalizeEquipmentList\(enrichEquipment\(scopedEquipmentList, ganttRentals\)\)/);
+});
+
+test('frontend head role is rentals-only read-only movement view', () => {
+  const block = headPermissionBlock();
+
+  assert.match(block, /rentals:\s+VIEW/);
+  assert.match(block, /profile_settings:\s+\['view', 'edit'\]/);
+  assert.doesNotMatch(block, /ALL/);
+  assert.doesNotMatch(block, /create/);
+  assert.doesNotMatch(block, /delete/);
+
+  for (const section of ['dashboard', 'equipment', 'gsm', 'deliveries', 'planner', 'service', 'clients', 'documents', 'payments', 'finance', 'reports', 'admin_panel', 'bots']) {
+    assert.doesNotMatch(block, new RegExp(`\\b${section}:\\s+`), `${section} must not be granted to head`);
+  }
+
+  assert.match(userStorageSource, /'Руководитель'/);
+  assert.match(rentalsPageSource, /const isHeadRole = normalizedRole === 'Руководитель'/);
+  assert.match(rentalsPageSource, /label: 'Движение техники'/);
+  assert.match(rentalsPageSource, /Фото ещё не загружены/);
+  assert.match(rentalsPageSource, /activeWorkspaceTab !== 'returns' && \(\s*activeWorkspaceTab !== 'movement'/);
 });
 
 test('frontend normalizes warranty mechanic role aliases', () => {

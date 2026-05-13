@@ -305,6 +305,34 @@ function createBotHandlers(deps) {
     return normalizedRole === 'Администратор' || normalizedRole === 'Менеджер по аренде';
   }
 
+  function isHeadRole(role) {
+    return normalizeRole(role) === 'Руководитель';
+  }
+
+  function buildHeadMovementText(limit = 5) {
+    const equipmentById = new Map((readData('equipment') || []).map(item => [item.id, item]));
+    const rentalById = new Map((readData('gantt_rentals') || []).map(item => [item.id, item]));
+    const events = (readData('shipping_photos') || [])
+      .filter(event => event?.type === 'shipping' || event?.type === 'receiving')
+      .sort((left, right) => String(right.date || '').localeCompare(String(left.date || '')))
+      .slice(0, limit);
+    if (!events.length) {
+      return 'Последнее движение техники\n\nДвижения техники пока нет.';
+    }
+    const lines = events.map(event => {
+      const equipment = equipmentById.get(event.equipmentId) || {};
+      const rental = event.rentalId ? rentalById.get(event.rentalId) : null;
+      const operation = event.type === 'receiving' ? 'Приёмка' : 'Отгрузка';
+      const model = [equipment.manufacturer, equipment.model].filter(Boolean).join(' ').trim() || equipment.model || event.equipmentId || 'техника не указана';
+      const refs = [
+        equipment.serialNumber ? `SN ${equipment.serialNumber}` : '',
+        equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
+      ].filter(Boolean).join(' · ');
+      return `• ${operation} · ${event.date || 'дата не указана'} · ${model}${refs ? ` (${refs})` : ''} · ${rental?.client || equipment.currentClient || 'клиент не указан'}`;
+    });
+    return ['Последнее движение техники', '', ...lines].join('\n');
+  }
+
   function buildNotificationMenuText(authUser, section = 'summary') {
     if (!notificationService || typeof notificationService.buildMenuText !== 'function') {
       return '🔔 Уведомления временно недоступны.';
@@ -2463,6 +2491,32 @@ function createBotHandlers(deps) {
       });
     }
 
+    if (normalized === 'menu:head_movements') {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      if (!isHeadRole(authUser.userRole)) {
+        return reply(senderId, '⛔ Раздел доступен только роли «Руководитель».', {
+          attachments: defaultKeyboardForRole(authUser.userRole),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      return reply(senderId, buildHeadMovementText(), {
+        attachments: defaultKeyboardForRole(authUser.userRole),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
     if (normalized.startsWith('equipmentcat:')) {
       const authUser = getAuthorizedUser(String(phone));
       if (!authUser) {
@@ -2851,6 +2905,15 @@ function createBotHandlers(deps) {
       }
       if (operation.type === 'receiving' && result.activeRental && notificationService?.notifyRentalReturned) {
         await notificationService.notifyRentalReturned(result.activeRental);
+      }
+      if (notificationService?.notifyHeadEquipmentMovement) {
+        await notificationService.notifyHeadEquipmentMovement({
+          operationType: operation.type,
+          photoEvent: result.event,
+          rental: result.activeRental,
+          equipment: completedEquipment,
+          authUser,
+        });
       }
       resetBotFlow(phone);
 
@@ -4228,6 +4291,20 @@ function createBotHandlers(deps) {
       return replyWithUi(getMainMenuText(authUser), {
         attachments: carrierKeyboard(),
         ...mainMenuImageOptions(userRole),
+      });
+    }
+
+    if (isHeadRole(userRole) && (commandText === 'последнее движение техники' || commandCompact === 'последнеедвижениетехники')) {
+      resetBotFlow(phone);
+      return replyWithUi(buildHeadMovementText(), {
+        attachments: defaultKeyboardForRole(userRole),
+      });
+    }
+
+    if (isHeadRole(userRole) && commandText !== 'меню' && commandText !== 'помощь' && commandCompact !== 'help') {
+      resetBotFlow(phone);
+      return replyWithUi(getMainMenuText(authUser), {
+        attachments: defaultKeyboardForRole(userRole),
       });
     }
 

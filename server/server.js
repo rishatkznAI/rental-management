@@ -109,6 +109,7 @@ const {
 } = require('./lib/service-vehicle-trips-core');
 const {
   MECHANIC_ROLES,
+  HEAD_ROLE,
   SERVICE_FOREMAN_ROLE,
   WARRANTY_MECHANIC_ROLE,
   WARRANTY_MECHANIC_ROLE_ALIASES,
@@ -509,12 +510,12 @@ const WRITE_PERMISSIONS = {
 };
 
 const READ_PERMISSIONS = {
-  equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   equipment_downtimes: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   client_objects: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   client_contracts: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
-  rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
-  gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', ...WARRANTY_MECHANIC_ROLES],
+  rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES],
+  gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES],
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Перевозчик'],
   delivery_carriers: ['Администратор'],
@@ -544,7 +545,7 @@ const READ_PERMISSIONS = {
   payroll_audit_events: ['Администратор'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
-  shipping_photos:['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
+  shipping_photos:['Администратор', 'Менеджер по аренде', 'Офис-менеджер', HEAD_ROLE, ...MECHANIC_ROLES],
   owners:         ['Администратор', 'Инвестор'],
   mechanics:      ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   service_works:  ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],

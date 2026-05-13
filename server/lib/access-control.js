@@ -1,5 +1,6 @@
 const {
   MECHANIC_ROLES,
+  HEAD_ROLE,
   SERVICE_FOREMAN_ROLE,
   WARRANTY_MECHANIC_ROLE,
   isWarrantyMechanicRole,
@@ -12,6 +13,7 @@ const ROLES = {
   RENTAL_MANAGER: 'Менеджер по аренде',
   SALES_MANAGER: 'Менеджер по продажам',
   INVESTOR: 'Инвестор',
+  HEAD: HEAD_ROLE,
   CARRIER: 'Перевозчик',
   SERVICE_FOREMAN: SERVICE_FOREMAN_ROLE,
   WARRANTY_MECHANIC: WARRANTY_MECHANIC_ROLE,
@@ -63,6 +65,22 @@ const MASS_ASSIGNMENT_BLOCKED_FIELDS = new Set([
   'createdAt',
   'updatedAt',
   'deletedAt',
+]);
+
+const HEAD_REDACTED_FIELDS = new Set([
+  'amount',
+  'balance',
+  'debt',
+  'discount',
+  'documents',
+  'margin',
+  'paidAmount',
+  'paymentStatus',
+  'payments',
+  'price',
+  'profit',
+  'rate',
+  'totalAmount',
 ]);
 
 const NON_ADMIN_BULK_ALLOWED_COLLECTIONS = new Set([
@@ -785,6 +803,10 @@ function isInvestor(user) {
   return roleIs(user, ROLES.INVESTOR);
 }
 
+function isHead(user) {
+  return roleIs(user, ROLES.HEAD);
+}
+
 function isCarrier(user) {
   return roleIs(user, ROLES.CARRIER);
 }
@@ -905,7 +927,7 @@ function rentalMatchesEquipment(rental, equipment) {
 
 function getScopedEquipment(user, readData) {
   const equipment = readData('equipment') || [];
-  if (isAdmin(user) || isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isMechanic(user) || isWarrantyMechanic(user)) {
+  if (isAdmin(user) || isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isHead(user) || isMechanic(user) || isWarrantyMechanic(user)) {
     return equipment;
   }
   if (isInvestor(user)) {
@@ -925,7 +947,7 @@ function getScopedRentals(user, readData) {
     ...(readData('rentals') || []),
     ...(readData('gantt_rentals') || []),
   ];
-  if (isAdmin(user) || isOfficeManager(user) || isWarrantyMechanic(user)) return rentals;
+  if (isAdmin(user) || isOfficeManager(user) || isHead(user) || isWarrantyMechanic(user)) return rentals;
   if (isRentalManager(user) || isSalesManager(user)) {
     return rentals.filter(item => matchesUserManager(item, user));
   }
@@ -1035,13 +1057,14 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'rentals':
     case 'gantt_rentals':
       if (isOfficeManager(user)) return true;
+      if (isHead(user)) return true;
       if (isWarrantyMechanic(user)) return true;
       if (isRentalManager(user) || isSalesManager(user)) return matchesUserManager(entity, user);
       if (isInvestor(user)) return isInvestorRental(entity, user, readData);
       return false;
     case 'equipment':
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user);
-      if (isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isMechanic(user) || isWarrantyMechanic(user)) return true;
+      if (isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isHead(user) || isMechanic(user) || isWarrantyMechanic(user)) return true;
       return false;
     case 'equipment_downtimes':
       return isOfficeManager(user) || isRentalManager(user);
@@ -1111,6 +1134,7 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isRentalManager(user) || isSalesManager(user)) return matchesUserManager(entity, user);
       return false;
     case 'shipping_photos':
+      if (isHead(user)) return true;
       if (isOfficeManager(user)) return true;
       if (isRentalManager(user) || isSalesManager(user)) return matchesScopedRental(entity, user, readData) || matchesUserManager(entity, user);
       if (isMechanic(user)) return isMechanicLinkedEntity(entity, user, readData);
@@ -1241,8 +1265,21 @@ function redactCommercialFields(value) {
   }, {});
 }
 
+function redactHeadFields(value) {
+  if (Array.isArray(value)) return value.map(redactHeadFields);
+  if (!value || typeof value !== 'object') return value;
+  return Object.entries(value).reduce((acc, [key, entryValue]) => {
+    if (HEAD_REDACTED_FIELDS.has(key)) return acc;
+    acc[key] = redactHeadFields(entryValue);
+    return acc;
+  }, {});
+}
+
 function sanitizeEntityForRead(collection, entity, user) {
   if (!entity) return entity;
+  if (isHead(user) && ['gantt_rentals', 'rentals'].includes(collection)) {
+    return redactHeadFields(entity);
+  }
   if (!isWarrantyMechanic(user)) return entity;
   if (![
     'equipment',

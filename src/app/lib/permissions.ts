@@ -10,6 +10,7 @@
  *  Механик по гарантии — Сервис/Рекламации + просмотр Техники и Продаж
  *  Инвестор         — только своя техника и связанные аренды
  *  Перевозчик       — только свои активные доставки, если backend явно разрешил frontend-вход
+ *  Руководитель     — read-only движение техники внутри раздела Аренды
  */
 
 import { useCallback, useMemo } from 'react';
@@ -82,6 +83,10 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   },
   'Инвестор': {
     equipment: VIEW,
+    rentals: VIEW,
+    profile_settings: ['view', 'edit'],
+  },
+  'Руководитель': {
     rentals: VIEW,
     profile_settings: ['view', 'edit'],
   },

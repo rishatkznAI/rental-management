@@ -1,4 +1,5 @@
 const express = require('express');
+const { buildAllocationPreview, getPaymentAllocationCap } = require('../lib/finance-core');
 const {
   prepareDocumentCreate,
   readNumberingSettings,
@@ -44,6 +45,7 @@ function registerFinanceRoutes(router, deps) {
       linkedRentalIds(item).some(id => classicRentalIds.has(id))
     );
     const payments = readData('payments') || [];
+    const paymentAllocations = readData('payment_allocations') || [];
     const clientObjects = readData('client_objects') || [];
     const leasingContracts = readData('leasing_contracts') || [];
     const leasingPaymentSchedule = readData('leasing_payment_schedule') || [];
@@ -56,6 +58,7 @@ function registerFinanceRoutes(router, deps) {
       clients: accessControl.filterCollectionByScope('clients', clients, user),
       rentals: accessControl.filterCollectionByScope('gantt_rentals', rentals, user),
       payments: accessControl.filterCollectionByScope('payments', payments, user),
+      paymentAllocations: accessControl.filterCollectionByScope('payment_allocations', paymentAllocations, user),
       clientObjects: accessControl.filterCollectionByScope('client_objects', clientObjects, user),
       leasingContracts: accessControl.filterCollectionByScope('leasing_contracts', leasingContracts, user),
       leasingPaymentSchedule: accessControl.filterCollectionByScope('leasing_payment_schedule', leasingPaymentSchedule, user),
@@ -344,8 +347,8 @@ function registerFinanceRoutes(router, deps) {
 
   function receivablesResponse(req) {
     const today = String(req.query.today || '').trim() || undefined;
-    const { clients, rentals, payments, documents, actions, paymentPlans } = getFinanceCollections(req.user);
-    return buildReceivables({ clients, rentals, payments, documents, actions, paymentPlans }, today);
+    const { clients, rentals, payments, paymentAllocations, documents, actions, paymentPlans } = getFinanceCollections(req.user);
+    return buildReceivables({ clients, rentals, payments, paymentAllocations, documents, actions, paymentPlans }, today);
   }
 
   router.get('/finance/accounts', requireAuth, requireRead('finance_accounts'), (req, res) => {
@@ -518,35 +521,35 @@ function registerFinanceRoutes(router, deps) {
   });
 
   router.get('/finance/debt-rows', requireAuth, requireRead('finance_operations'), (req, res) => {
-    const { rentals, payments } = getFinanceCollections(req.user);
+    const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildRentalDebtRows(rentals, payments, today);
+    const rows = buildRentalDebtRows(rentals, payments, { paymentAllocations, today });
     res.json(rows);
   });
 
   router.get('/finance/clients', requireAuth, requireRead('finance_operations'), (req, res) => {
-    const { clients, rentals, payments } = getFinanceCollections(req.user);
+    const { clients, rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildClientReceivables(clients, buildRentalDebtRows(rentals, payments), today);
+    const rows = buildClientReceivables(clients, buildRentalDebtRows(rentals, payments, { paymentAllocations }), today);
     res.json(rows);
   });
 
   router.get('/finance/client-snapshots', requireAuth, requireRead('finance_operations'), (req, res) => {
-    const { clients, rentals, payments } = getFinanceCollections(req.user);
+    const { clients, rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildClientFinancialSnapshots(clients, rentals, payments, today);
+    const rows = buildClientFinancialSnapshots(clients, rentals, payments, today, { paymentAllocations });
     res.json(rows);
   });
 
   router.get('/finance/managers', requireAuth, requireRead('finance_operations'), (req, res) => {
-    const { clients, rentals, payments } = getFinanceCollections(req.user);
+    const { clients, rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildManagerReceivables(buildRentalDebtRows(rentals, payments), today, clients);
+    const rows = buildManagerReceivables(buildRentalDebtRows(rentals, payments, { paymentAllocations }), today, clients);
     res.json(rows);
   });
 
   router.get('/finance/manager-breakdown', requireAuth, requireRead('finance_operations'), (req, res) => {
-    const { clients, rentals, payments } = getFinanceCollections(req.user);
+    const { clients, rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const documents = accessControl.filterCollectionByScope('documents', readData('documents') || [], req.user);
     const manager = String(req.query.manager || '').trim();
     const today = String(req.query.today || '').trim() || new Date().toISOString().slice(0, 10);
@@ -577,7 +580,7 @@ function registerFinanceRoutes(router, deps) {
       return (ret >= todayDate && ret < tomorrowStart) || (ret >= tomorrowStart && ret < dayAfterTomorrowStart);
     });
 
-    const debtRows = buildRentalDebtRows(rentals, payments);
+    const debtRows = buildRentalDebtRows(rentals, payments, { paymentAllocations });
     const managerDebtRows = debtRows.filter(item => item.manager === manager);
     const managerOverdueRows = managerDebtRows.filter(item => getRentalDebtOverdueDays(item, today) > 0);
     const managerManualDebt = clients
@@ -669,16 +672,66 @@ function registerFinanceRoutes(router, deps) {
   });
 
   router.get('/finance/aging', requireAuth, requireRead('finance_operations'), (req, res) => {
-    const { rentals, payments } = getFinanceCollections(req.user);
+    const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildOverdueBuckets(buildRentalDebtRows(rentals, payments), today);
+    const rows = buildOverdueBuckets(buildRentalDebtRows(rentals, payments, { paymentAllocations }), today);
     res.json(rows);
   });
 
   router.get('/finance/report', requireAuth, requireRead('finance_operations'), (req, res) => {
-    const { clients, rentals, payments, clientObjects, leasingContracts, leasingPaymentSchedule } = getFinanceCollections(req.user);
+    const { clients, rentals, payments, paymentAllocations, clientObjects, leasingContracts, leasingPaymentSchedule } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    res.json(buildFinanceReport({ clients, rentals, payments, clientObjects, leasingContracts, leasingPaymentSchedule }, today));
+    res.json(buildFinanceReport({ clients, rentals, payments, paymentAllocations, clientObjects, leasingContracts, leasingPaymentSchedule }, today));
+  });
+
+  router.post('/finance/payments/:id/allocation-preview', requireAuth, requireRead('finance_operations'), (req, res) => {
+    const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
+    return res.json(buildAllocationPreview({ payments, paymentAllocations, rentals }, req.params.id));
+  });
+
+  router.post('/finance/payments/:id/apply-allocation-preview', requireAuth, requireWrite('payment_allocations'), (req, res) => {
+    try {
+      const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
+      const payment = payments.find(item => text(item?.id) === text(req.params.id));
+      if (!payment) return res.status(404).json({ ok: false, error: 'Платёж не найден' });
+      const preview = buildAllocationPreview({ payments, paymentAllocations, rentals }, req.params.id);
+      const requested = Array.isArray(req.body?.allocations) ? req.body.allocations : preview.suggestedAllocations;
+      const allocations = collectionList('payment_allocations');
+      const now = nowIso();
+      const existingAllocated = allocations
+        .filter(item => text(item?.paymentId) === text(req.params.id) && text(item?.status) !== 'cancelled')
+        .reduce((sum, item) => sum + (Number.isFinite(Number(item?.amount)) && Number(item.amount) > 0 ? Number(item.amount) : 0), 0);
+      let remaining = Math.max(0, getPaymentAllocationCap(payment) - existingAllocated);
+      const created = [];
+      for (const item of requested) {
+        if (remaining <= 0) break;
+        const requestedAmount = money(item?.amount);
+        if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) continue;
+        const amount = Math.min(requestedAmount, remaining);
+        created.push({
+          id: text(item.id) || generateId(idPrefixes.payment_allocations || 'PA'),
+          paymentId: req.params.id,
+          clientId: text(item.clientId) || undefined,
+          objectId: text(item.objectId) || undefined,
+          contractId: text(item.contractId) || undefined,
+          rentalId: text(item.rentalId) || undefined,
+          documentId: text(item.documentId) || undefined,
+          amount,
+          status: 'active',
+          comment: text(item.comment) || undefined,
+          createdAt: now,
+          createdBy: userName(req.user) || undefined,
+          createdByUserId: req.user?.userId || req.user?.id || undefined,
+        });
+        remaining -= amount;
+      }
+      for (const item of created) accessControl.assertCanCreateCollection('payment_allocations', req.user, item);
+      writeData('payment_allocations', [...allocations, ...created]);
+      created.forEach(item => audit(req, 'payment_allocations.create', 'payment_allocations', null, item));
+      return res.status(201).json({ paymentId: req.params.id, allocations: created });
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось распределить платёж' });
+    }
   });
 
   router.get('/finance/receivables', requireAuth, requireRead('finance_operations'), (req, res) => {

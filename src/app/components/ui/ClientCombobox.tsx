@@ -8,19 +8,20 @@ function clientLabel(client: Client): string {
 }
 
 function clientSubtitle(client: Client): string {
-  return [client.contact, client.phone, client.inn].filter(Boolean).join(' · ');
+  return [client.contact, client.contactPerson, client.phone, client.inn].filter(Boolean).join(' · ');
 }
 
 function matchesSearch(client: Client, query: string): boolean {
   if (!query.trim()) return true;
   const lower = query.trim().toLowerCase();
-  return (
-    client.company.toLowerCase().includes(lower) ||
-    client.contact.toLowerCase().includes(lower) ||
-    client.phone.toLowerCase().includes(lower) ||
-    client.inn.toLowerCase().includes(lower) ||
-    client.email.toLowerCase().includes(lower)
-  );
+  return [
+    client.company,
+    client.contact,
+    client.contactPerson,
+    client.phone,
+    client.inn,
+    client.email,
+  ].some(value => String(value || '').toLowerCase().includes(lower));
 }
 
 export interface ClientComboboxProps {
@@ -211,7 +212,7 @@ export function ClientCombobox({
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{clientLabel(clientItem)}</p>
                       <p className="truncate text-xs text-gray-500 dark:text-gray-400">
-                        {clientSubtitle(clientItem) || clientItem.email}
+                        {clientSubtitle(clientItem) || clientItem.email || 'Без контактов'}
                       </p>
                     </div>
                   </li>

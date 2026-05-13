@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsService } from '../services/payments.service';
 import { RENTAL_KEYS } from './useRentals';
-import type { Payment } from '../types';
+import type { Payment, PaymentAllocation } from '../types';
 
 export const PAYMENT_KEYS = {
   all: ['payments'] as const,
+  allocations: ['payment_allocations'] as const,
   detail: (id: string) => ['payments', id] as const,
 };
 
@@ -16,6 +17,15 @@ export function usePaymentsList(options: QueryOptions = {}) {
   return useQuery({
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60 * 2,
+  });
+}
+
+export function usePaymentAllocationsList(options: QueryOptions = {}) {
+  return useQuery({
+    queryKey: PAYMENT_KEYS.allocations,
+    queryFn: paymentsService.getAllocations,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2,
   });
@@ -37,6 +47,39 @@ export function useCreatePayment() {
       qc.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
       qc.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
     },
+  });
+}
+
+function invalidatePaymentDependents(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
+  qc.invalidateQueries({ queryKey: PAYMENT_KEYS.allocations });
+  qc.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+  qc.invalidateQueries({ queryKey: ['finance'] });
+  qc.invalidateQueries({ queryKey: ['documents'] });
+}
+
+export function useCreatePaymentAllocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Omit<PaymentAllocation, 'id'>) => paymentsService.createAllocation(data),
+    onSuccess: () => invalidatePaymentDependents(qc),
+  });
+}
+
+export function useUpdatePaymentAllocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<PaymentAllocation> }) =>
+      paymentsService.updateAllocation(id, data),
+    onSuccess: () => invalidatePaymentDependents(qc),
+  });
+}
+
+export function useDeletePaymentAllocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => paymentsService.deleteAllocation(id),
+    onSuccess: () => invalidatePaymentDependents(qc),
   });
 }
 

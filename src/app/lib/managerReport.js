@@ -71,6 +71,70 @@ export function getManagerReportPaidAmount(payment) {
   return 0;
 }
 
+function getPaymentId(payment) {
+  return String(payment?.id || '').trim();
+}
+
+function getPaymentAllocationCap(payment) {
+  const paid = getManagerReportPaidAmount(payment);
+  const amount = toMoney(payment?.amount);
+  return amount > 0 ? Math.min(paid, amount) : paid;
+}
+
+function getAllocationAmount(allocation) {
+  return toMoney(allocation?.amount ?? allocation?.allocatedAmount);
+}
+
+function buildManagerReportPaidByRental(payments, paymentAllocations = []) {
+  const allocationsByPaymentId = new Map();
+  for (const allocation of paymentAllocations || []) {
+    if (!shouldCountManagerReportPayment(allocation)) continue;
+    const paymentId = String(allocation?.paymentId || '').trim();
+    if (!paymentId) continue;
+    const list = allocationsByPaymentId.get(paymentId) ?? [];
+    list.push(allocation);
+    allocationsByPaymentId.set(paymentId, list);
+  }
+
+  const paymentsById = new Map((payments || []).filter(payment => getPaymentId(payment)).map(payment => [getPaymentId(payment), payment]));
+  const paidByRental = new Map();
+  const paidDatesByRental = new Map();
+
+  for (const [paymentId, allocations] of allocationsByPaymentId) {
+    const payment = paymentsById.get(paymentId);
+    if (!payment || !shouldCountManagerReportPayment(payment)) continue;
+    let remaining = getPaymentAllocationCap(payment);
+    for (const allocation of allocations) {
+      const rentalId = String(allocation?.rentalId || '').trim();
+      const requested = getAllocationAmount(allocation);
+      if (!rentalId || requested <= 0 || remaining <= 0) continue;
+      const amount = Math.min(requested, remaining);
+      paidByRental.set(rentalId, (paidByRental.get(rentalId) ?? 0) + amount);
+      const date = payment.paidDate || allocation.paidDate || '';
+      if (date && date > (paidDatesByRental.get(rentalId) || '')) paidDatesByRental.set(rentalId, date);
+      remaining -= amount;
+    }
+  }
+
+  const seenLegacyPaymentIds = new Set();
+  for (const payment of payments || []) {
+    const id = getPaymentId(payment);
+    if (!payment?.rentalId || !shouldCountManagerReportPayment(payment) || (id && allocationsByPaymentId.has(id))) continue;
+    if (id) {
+      if (seenLegacyPaymentIds.has(id)) continue;
+      seenLegacyPaymentIds.add(id);
+    }
+    const amount = getPaymentAllocationCap(payment);
+    if (amount <= 0) continue;
+    paidByRental.set(payment.rentalId, (paidByRental.get(payment.rentalId) ?? 0) + amount);
+    if (payment.paidDate && payment.paidDate > (paidDatesByRental.get(payment.rentalId) || '')) {
+      paidDatesByRental.set(payment.rentalId, payment.paidDate);
+    }
+  }
+
+  return { paidByRental, paidDatesByRental };
+}
+
 function parseDateKey(value) {
   const text = String(value || '').slice(0, 10);
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
@@ -199,7 +263,7 @@ export function formatManagerReportDate(value) {
   return `${p(dt.getUTCDate())}.${p(dt.getUTCMonth() + 1)}.${dt.getUTCFullYear()}`;
 }
 
-export function buildManagerReportRows(rentals, equipmentList, payments, period = {}) {
+export function buildManagerReportRows(rentals, equipmentList, payments, period = {}, paymentAllocations = []) {
   const eqById = new Map();
   const eqByUniqueInv = new Map();
   const inventoryCounts = new Map();
@@ -213,19 +277,7 @@ export function buildManagerReportRows(rentals, equipmentList, payments, period 
     }
   }
 
-  const paysByRental = new Map();
-  const seenPaymentIds = new Set();
-  for (const payment of payments || []) {
-    if (!payment?.rentalId) continue;
-    if (!shouldCountManagerReportPayment(payment)) continue;
-    if (payment.id) {
-      if (seenPaymentIds.has(payment.id)) continue;
-      seenPaymentIds.add(payment.id);
-    }
-    const list = paysByRental.get(payment.rentalId) ?? [];
-    list.push(payment);
-    paysByRental.set(payment.rentalId, list);
-  }
+  const { paidByRental, paidDatesByRental } = buildManagerReportPaidByRental(payments, paymentAllocations);
 
   const rows = [];
   for (const rental of (rentals || []).filter(shouldCountManagerReportRental)) {
@@ -234,18 +286,14 @@ export function buildManagerReportRows(rentals, equipmentList, payments, period 
     const parts = splitRentalPeriodByMonth(rental, period);
     if (parts.length === 0) continue;
 
-    const relatedPayments = paysByRental.get(rental.id) ?? [];
-    const rentalPaid = relatedPayments.reduce((sum, payment) => sum + getManagerReportPaidAmount(payment), 0);
+    const rentalPaid = paidByRental.get(rental.id) ?? 0;
     const amountParts = parts.map(part => calculateRentalBilling(rental, {
       periodStart: part.allocationStartDate,
       periodEnd: part.allocationEndDate,
     }).finalRentalAmount);
     const paidParts = splitMoneyByWeights(rentalPaid, amountParts, calculateRentalBilling(rental).finalRentalAmount);
 
-    let latestPaidDate = '';
-    for (const payment of relatedPayments) {
-      if (payment.paidDate && payment.paidDate > latestPaidDate) latestPaidDate = payment.paidDate;
-    }
+    const latestPaidDate = paidDatesByRental.get(rental.id) || '';
 
     parts.forEach((part, index) => {
       const amount = amountParts[index] || 0;

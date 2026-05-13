@@ -16,6 +16,7 @@ function createApp() {
     clients: [],
     gantt_rentals: [],
     payments: [],
+    payment_allocations: [],
     documents: [],
     client_objects: [],
     leasing_contracts: [],
@@ -58,6 +59,7 @@ function createApp() {
   const requireWrite = collection => (req, res, next) => {
     if (collection === 'finance_accounts' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
     if (collection === 'finance_operations' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
+    if (collection === 'payment_allocations' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
     if (['debt_collection_actions', 'receivable_payment_plans'].includes(collection) && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   };
@@ -299,5 +301,32 @@ test('finance endpoints do not expose amounts to roles without finance access', 
         assert.equal(denied.response.status, 403, `${token} should not read ${path}`);
       }
     }
+  });
+});
+
+test('payment allocation preview is read-only and apply caps allocations by payment amount', async () => {
+  const { app, state } = createApp();
+  state.clients = [{ id: 'c-1', company: 'Клиент' }];
+  state.gantt_rentals = [
+    { id: 'r-1', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-1', client: 'Клиент', equipmentInv: '1', manager: 'Руслан', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
+    { id: 'r-2', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-2', client: 'Клиент', equipmentInv: '2', manager: 'Анна', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
+  ];
+  state.payments = [{ id: 'p-1', clientId: 'c-1', contractId: 'ct-1', amount: 120000, paidAmount: 150000, status: 'paid' }];
+
+  await withServer(app, async (baseUrl) => {
+    const preview = await request(baseUrl, 'POST', '/api/finance/payments/p-1/allocation-preview', 'office', {});
+    assert.equal(preview.response.status, 200);
+    assert.equal(preview.json.unallocatedAmount, 120000);
+    assert.equal(state.payment_allocations.length, 0);
+
+    const applied = await request(baseUrl, 'POST', '/api/finance/payments/p-1/apply-allocation-preview', 'office', {
+      allocations: [
+        { rentalId: 'r-1', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-1', amount: 100000 },
+        { rentalId: 'r-2', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-2', amount: 100000 },
+      ],
+    });
+    assert.equal(applied.response.status, 201);
+    assert.equal(applied.json.allocations.reduce((sum, item) => sum + item.amount, 0), 120000);
+    assert.equal(state.payment_allocations.reduce((sum, item) => sum + item.amount, 0), 120000);
   });
 });

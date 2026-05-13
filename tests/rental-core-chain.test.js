@@ -132,6 +132,8 @@ async function request(baseUrl, method, path, body) {
 function rentalPayload(overrides = {}) {
   return {
     clientId: 'C-1',
+    objectId: 'CO-1',
+    contractId: 'CC-1',
     client: 'ООО Ромашка',
     contact: 'Иван',
     startDate: '2026-05-10',
@@ -284,6 +286,22 @@ test('creating and patching rental preserves object and contract in linked plann
     assert.equal(patchedLinks.body.contractId, 'CC-3');
     assert.equal(updatedGantt.objectId, 'CO-3');
     assert.equal(updatedGantt.contractId, 'CC-3');
+  });
+});
+
+test('rental accepts same client contract on another client object', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    state.client_objects.push({ id: 'CO-3', clientId: 'C-1', name: 'Цех', address: 'Казань 2', status: 'active' });
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      objectId: 'CO-3',
+      contractId: 'CC-1',
+    }));
+
+    assert.equal(created.status, 201);
+    assert.equal(created.body.objectId, 'CO-3');
+    assert.equal(created.body.contractId, 'CC-1');
   });
 });
 

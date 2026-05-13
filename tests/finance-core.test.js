@@ -12,6 +12,8 @@ const {
   buildOverdueBuckets,
   buildClientDebtAgingRows,
   buildFinanceReport,
+  buildAllocationPreview,
+  backfillPaymentAllocations,
   calculateRentalBilling,
 } = require('../server/lib/finance-core.js');
 
@@ -335,6 +337,126 @@ test('expected and client-only payments do not reduce factual rental debt', () =
   assert.equal(rows.length, 1);
   assert.equal(rows[0].paidAmount, 0);
   assert.equal(rows[0].outstanding, 100000);
+});
+
+test('payment allocations close only selected rentals and keep contract payment remainder unallocated', () => {
+  const rentals = [
+    {
+      id: 'gr-1',
+      clientId: 'c-1',
+      objectId: 'o-1',
+      contractId: 'ct-1',
+      client: 'ЭМ-СТРОЙ',
+      equipmentInv: '083',
+      manager: 'Руслан',
+      managerId: 'u-1',
+      documentId: 'd-1',
+      startDate: '2026-04-01',
+      endDate: '2026-04-10',
+      amount: 100000,
+      status: 'active',
+    },
+    {
+      id: 'gr-2',
+      clientId: 'c-1',
+      objectId: 'o-2',
+      contractId: 'ct-1',
+      client: 'ЭМ-СТРОЙ',
+      equipmentInv: '084',
+      manager: 'Руслан',
+      managerId: 'u-1',
+      documentId: 'd-2',
+      startDate: '2026-04-01',
+      endDate: '2026-04-10',
+      amount: 100000,
+      status: 'active',
+    },
+  ];
+  const payments = [{ id: 'p-1', clientId: 'c-1', contractId: 'ct-1', amount: 150000, paidAmount: 150000, status: 'paid' }];
+  const allocations = [{ id: 'pa-1', paymentId: 'p-1', clientId: 'c-1', objectId: 'o-1', contractId: 'ct-1', rentalId: 'gr-1', documentId: 'd-1', amount: 100000 }];
+
+  const rows = buildRentalDebtRows(rentals, payments, { paymentAllocations: allocations });
+
+  assert.deepEqual(rows.map(row => [row.rentalId, row.paidAmount, row.outstanding]), [
+    ['gr-2', 0, 100000],
+  ]);
+
+  const report = buildFinanceReport({ clients: [{ id: 'c-1', company: 'ЭМ-СТРОЙ' }], rentals, payments, paymentAllocations: allocations }, '2026-04-18');
+  assert.equal(report.unallocatedPayments[0].unallocatedAmount, 50000);
+  assert.equal(report.debtByObject.find(row => row.objectId === 'o-2').debt, 100000);
+  assert.equal(report.debtByContract.find(row => row.contractId === 'ct-1').debt, 100000);
+  assert.equal(report.debtByRental.find(row => row.rentalId === 'gr-2').debt, 100000);
+  assert.equal(report.debtByManager.find(row => row.managerId === 'u-1').debt, 100000);
+  assert.equal(report.debtByDocument.find(row => row.documentId === 'd-2').debt, 100000);
+});
+
+test('allocation preview suggests but does not apply unallocated contract payment', () => {
+  const rentals = [
+    { id: 'gr-1', clientId: 'c-1', objectId: 'o-1', contractId: 'ct-1', client: 'Клиент', equipmentInv: '083', manager: 'Анна', startDate: '2026-04-01', endDate: '2026-04-10', amount: 60000, status: 'active' },
+    { id: 'gr-2', clientId: 'c-1', objectId: 'o-2', contractId: 'ct-1', client: 'Клиент', equipmentInv: '084', manager: 'Анна', startDate: '2026-04-01', endDate: '2026-04-10', amount: 60000, status: 'active' },
+  ];
+  const payments = [{ id: 'p-1', clientId: 'c-1', contractId: 'ct-1', amount: 90000, paidAmount: 90000, status: 'paid' }];
+
+  const preview = buildAllocationPreview({ payments, paymentAllocations: [], rentals }, 'p-1');
+  const rowsAfterPreview = buildRentalDebtRows(rentals, payments, { paymentAllocations: [] });
+
+  assert.equal(preview.unallocatedAmount, 90000);
+  assert.deepEqual(preview.suggestedAllocations.map(item => [item.rentalId, item.amount]), [
+    ['gr-1', 60000],
+    ['gr-2', 30000],
+  ]);
+  assert.deepEqual(rowsAfterPreview.map(row => [row.rentalId, row.outstanding]), [
+    ['gr-1', 60000],
+    ['gr-2', 60000],
+  ]);
+});
+
+test('legacy payment allocation backfill preserves payments and links rental or document payments only', () => {
+  const payments = [
+    { id: 'p-rental', rentalId: 'gr-1', clientId: 'c-1', amount: 100000, paidAmount: 80000, status: 'partial' },
+    { id: 'p-client', clientId: 'c-1', amount: 50000, paidAmount: 50000, status: 'paid' },
+    { id: 'p-document', documentId: 'd-1', clientId: 'c-1', amount: 70000, paidAmount: 90000, status: 'paid' },
+  ];
+  const result = backfillPaymentAllocations({
+    payments,
+    paymentAllocations: [],
+    rentals: [
+      { id: 'gr-1', clientId: 'c-1', objectId: 'o-1', contractId: 'ct-1' },
+      { id: 'gr-2', clientId: 'c-1', objectId: 'o-2', contractId: 'ct-1' },
+    ],
+    documents: [{ id: 'd-1', rentalId: 'gr-2', clientId: 'c-1' }],
+    nowIso: () => '2026-05-13T00:00:00.000Z',
+  });
+
+  assert.equal(payments.length, 3);
+  assert.equal(result.created, 2);
+  assert.deepEqual(result.allocations.map(item => [item.paymentId, item.rentalId, item.amount]), [
+    ['p-rental', 'gr-1', 80000],
+    ['p-document', 'gr-2', 70000],
+  ]);
+  assert.equal(result.allocations.some(item => item.paymentId === 'p-client'), false);
+});
+
+test('debt supports one contract on many objects and one object in many contracts through allocations', () => {
+  const rentals = [
+    { id: 'r-1', clientId: 'c-1', objectId: 'o-1', contractId: 'ct-1', client: 'Клиент', equipmentInv: '1', manager: 'М1', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
+    { id: 'r-2', clientId: 'c-1', objectId: 'o-2', contractId: 'ct-1', client: 'Клиент', equipmentInv: '2', manager: 'М1', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
+    { id: 'r-3', clientId: 'c-1', objectId: 'o-1', contractId: 'ct-2', client: 'Клиент', equipmentInv: '3', manager: 'М2', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
+  ];
+  const payments = [{ id: 'p-1', clientId: 'c-1', amount: 90000, paidAmount: 90000, status: 'paid' }];
+  const paymentAllocations = [
+    { id: 'pa-1', paymentId: 'p-1', rentalId: 'r-1', objectId: 'o-1', contractId: 'ct-1', amount: 30000 },
+    { id: 'pa-2', paymentId: 'p-1', rentalId: 'r-2', objectId: 'o-2', contractId: 'ct-1', amount: 30000 },
+    { id: 'pa-3', paymentId: 'p-1', rentalId: 'r-3', objectId: 'o-1', contractId: 'ct-2', amount: 30000 },
+  ];
+
+  const report = buildFinanceReport({ clients: [{ id: 'c-1', company: 'Клиент' }], rentals, payments, paymentAllocations }, '2026-05-13');
+
+  assert.equal(report.debtByClient.find(row => row.clientId === 'c-1').debt, 210000);
+  assert.equal(report.debtByObject.find(row => row.objectId === 'o-1').debt, 140000);
+  assert.equal(report.debtByObject.find(row => row.objectId === 'o-2').debt, 70000);
+  assert.equal(report.debtByContract.find(row => row.contractId === 'ct-1').debt, 140000);
+  assert.equal(report.debtByContract.find(row => row.contractId === 'ct-2').debt, 70000);
 });
 
 test('non-finite legacy paidAmount cannot poison debt rows with NaN', () => {

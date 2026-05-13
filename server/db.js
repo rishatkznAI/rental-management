@@ -36,6 +36,7 @@ const JSON_COLLECTIONS = [
   'documents',
   'mechanic_documents',
   'payments',
+  'payment_allocations',
   'debt_collection_plans',
   'debt_collection_actions',
   'receivable_payment_plans',

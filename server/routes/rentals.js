@@ -274,6 +274,7 @@ function registerRentalRoutes(deps) {
       if (!clientId && !item?.objectId && !item?.contractId) return item;
       return normalizeClientRelationLinks(item, clientId, {
         readData,
+        requireRentalRelations: collection === 'rentals' && !existing,
         requireActiveObject: !existing || String(item?.objectId || '') !== String(existing?.objectId || ''),
         allowArchivedObjectId: existing?.objectId,
       });

@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useClientsList } from '../hooks/useClients';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useEquipmentList } from '../hooks/useEquipment';
-import { usePaymentsList } from '../hooks/usePayments';
+import { usePaymentAllocationsList, usePaymentsList } from '../hooks/usePayments';
 import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
 import { RENTAL_KEYS, useGanttData, useRentalAuditHistory, useRentalsList } from '../hooks/useRentals';
 import { useClientContractsList, useClientObjectsList } from '../hooks/useClientRelations';
@@ -41,7 +41,6 @@ import { formatRentalAuditEvents } from '../lib/rentalAuditHistory.js';
 import { buildDocumentControl } from '../lib/documentControl.js';
 import { buildRentalQuickActions } from '../lib/quickActions.js';
 import { resolveRentalByAnyId } from '../lib/rentalNavigation.js';
-import { getEffectivePaidAmount } from '../lib/finance';
 import {
   EXTENSION_REASONS,
   buildExtensionConflictDisplay,
@@ -51,7 +50,7 @@ import {
 } from '../lib/rentalExtension.js';
 import { calculateRentalAmount, formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
 import { getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
-import type { Client, ClientContract, ClientObject, Document, DocumentType, Equipment, Payment, PaymentStatus, Rental, RentalStatus, ServiceTicket } from '../types';
+import type { Client, ClientContract, ClientObject, Document, DocumentType, Equipment, Payment, PaymentAllocation, PaymentStatus, Rental, RentalStatus, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
 const statusLabels: Record<RentalStatus, string> = {
@@ -92,6 +91,7 @@ const EMPTY_CLIENTS: Client[] = [];
 const EMPTY_CLIENT_OBJECTS: ClientObject[] = [];
 const EMPTY_CLIENT_CONTRACTS: ClientContract[] = [];
 const EMPTY_DOCUMENTS: Document[] = [];
+const EMPTY_PAYMENT_ALLOCATIONS: PaymentAllocation[] = [];
 
 type RentalSaveResponse = Rental & {
   changeRequestSummary?: {
@@ -182,6 +182,13 @@ function documentBelongsToRental(doc: { rental?: string; rentalId?: string }, re
   return doc.rentalId === rentalId || doc.rental === rentalId;
 }
 
+function getPaymentAmountForDisplay(payment: Payment): number {
+  const status = String(payment.status || '');
+  if (status === 'cancelled' || status === 'refunded') return 0;
+  if (typeof payment.paidAmount === 'number') return Math.max(0, payment.paidAmount);
+  return payment.status === 'paid' ? Math.max(0, payment.amount) : 0;
+}
+
 function auditBadgeVariant(kind: string) {
   if (kind === 'return') return 'success';
   if (kind === 'delete') return 'error';
@@ -214,6 +221,7 @@ export default function RentalDetail() {
   const { data: equipment = EMPTY_EQUIPMENT } = useEquipmentList();
   const { data: serviceTickets = EMPTY_SERVICE_TICKETS } = useServiceTicketsList({ enabled: canViewService });
   const { data: payments = EMPTY_PAYMENTS } = usePaymentsList({ enabled: canViewPayments });
+  const { data: paymentAllocations = EMPTY_PAYMENT_ALLOCATIONS } = usePaymentAllocationsList({ enabled: canViewPayments });
   const { data: clients = EMPTY_CLIENTS } = useClientsList({ enabled: canViewClients });
   const { data: clientObjects = EMPTY_CLIENT_OBJECTS } = useClientObjectsList({ enabled: canViewClients });
   const { data: clientContracts = EMPTY_CLIENT_CONTRACTS } = useClientContractsList({ enabled: canViewClients });
@@ -391,8 +399,30 @@ export default function RentalDetail() {
   const rentalDocumentSummary = rental?.id ? documentControl.getRentalSummary(rental.id) : null;
   const pendingChangeRequests = changeRequests.filter(request => request.rentalId === rental?.id && request.status === 'pending');
   const relatedInvoices = relatedDocs.filter(doc => doc.type === 'invoice');
-  const relatedPayments = payments.filter(p => p.rentalId === rental?.id);
-  const paidAmount = relatedPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
+  const activePaymentAllocations = paymentAllocations.filter(allocation => String(allocation.status || '') !== 'cancelled');
+  const relatedAllocations = activePaymentAllocations.filter(allocation => String(allocation.rentalId || '') === String(rental?.id || ''));
+  const paymentIdsWithAllocations = new Set(activePaymentAllocations.map(allocation => String(allocation.paymentId || '')).filter(Boolean));
+  const relatedPaymentIds = new Set([
+    ...payments.filter(payment => String(payment.rentalId || '') === String(rental?.id || '')).map(payment => payment.id),
+    ...relatedAllocations.map(allocation => String(allocation.paymentId || '')).filter(Boolean),
+  ]);
+  const relatedPayments = payments.filter(payment => relatedPaymentIds.has(payment.id));
+  const allocationPaidAmount = relatedAllocations.reduce((sum, allocation) => sum + Math.max(0, Number(allocation.amount) || 0), 0);
+  const legacyPaidAmount = payments
+    .filter(payment => String(payment.rentalId || '') === String(rental?.id || '') && !paymentIdsWithAllocations.has(payment.id))
+    .reduce((sum, payment) => sum + getPaymentAmountForDisplay(payment), 0);
+  const paidAmount = allocationPaidAmount + legacyPaidAmount;
+  const getPaymentAmountForRental = React.useCallback((payment: Payment, documentId?: string) => {
+    const allocationAmount = relatedAllocations
+      .filter(allocation => String(allocation.paymentId || '') === payment.id)
+      .filter(allocation => !documentId || String(allocation.documentId || '') === documentId)
+      .reduce((sum, allocation) => sum + Math.max(0, Number(allocation.amount) || 0), 0);
+    if (allocationAmount > 0) return allocationAmount;
+    if (!paymentIdsWithAllocations.has(payment.id) && String(payment.rentalId || '') === String(rental?.id || '')) {
+      return getPaymentAmountForDisplay(payment);
+    }
+    return 0;
+  }, [paymentIdsWithAllocations, relatedAllocations, rental?.id]);
   const relatedService = serviceTickets.filter(ticket =>
     isRegularServiceTicket(ticket) &&
     resolvedRentalEquipment.some(eq => eq.id === ticket.equipmentId),
@@ -540,7 +570,7 @@ export default function RentalDetail() {
 
     const invoiceDocs = relatedInvoices.map(invoice => {
       const invoicePayments = paymentsByInvoice.get(invoice.number) ?? [];
-      const invoicePaid = invoicePayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
+      const invoicePaid = invoicePayments.reduce((sum, payment) => sum + getPaymentAmountForRental(payment, invoice.id), 0);
       return {
         key: `invoice-${invoice.id}`,
         label: invoice.number,
@@ -562,7 +592,7 @@ export default function RentalDetail() {
         documentStatus: 'sent' as const,
         documentAmount: payment.amount,
         dueDate: payment.dueDate,
-        paidAmount: getEffectivePaidAmount(payment),
+        paidAmount: getPaymentAmountForRental(payment),
         payments: [payment],
       }));
 
@@ -579,7 +609,7 @@ export default function RentalDetail() {
       paidAmount,
       payments: relatedPayments,
     }];
-  }, [linkedGanttRental, paidAmount, paymentsByInvoice, relatedInvoices, relatedPayments, rental]);
+  }, [getPaymentAmountForRental, linkedGanttRental, paidAmount, paymentsByInvoice, relatedInvoices, relatedPayments, rental]);
 
   const conflictingRental = useMemo(() => {
     if (!isEditing || !formState) return null;
@@ -786,7 +816,7 @@ export default function RentalDetail() {
   const syncPaymentStatus = React.useCallback(async (nextPayments: typeof relatedPayments) => {
     if (!linkedGanttRental) return;
     const totalPaidForRental = nextPayments.reduce((sum, payment) => {
-      return sum + getEffectivePaidAmount(payment);
+      return sum + getPaymentAmountForRental(payment);
     }, 0);
     let paymentStatus: GanttRentalData['paymentStatus'] = 'unpaid';
     if (totalPaidForRental >= getRentalBillingAmount(linkedGanttRental || rental)) paymentStatus = 'paid';
@@ -797,7 +827,7 @@ export default function RentalDetail() {
         createRentalHistoryEntry(historyAuthor, `Статус оплаты обновлён автоматически: ${paymentStatus === 'paid' ? 'Оплачено' : paymentStatus === 'partial' ? 'Частично' : 'Не оплачено'}`),
       ),
     });
-  }, [historyAuthor, linkedGanttRental, rental?.price]);
+  }, [getPaymentAmountForRental, historyAuthor, linkedGanttRental, rental?.price]);
 
   const handleCreateDocument = async () => {
     if (!rental || !canCreateDocuments) return;
@@ -1510,6 +1540,10 @@ export default function RentalDetail() {
                     <span className="text-gray-500 dark:text-gray-400">Оплачено</span>
                     <span className="font-medium text-green-600">{formatCurrency(paidAmount)}</span>
                   </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500 dark:text-gray-400">Оплачено через распределения</span>
+                    <span className="font-medium text-green-600">{formatCurrency(allocationPaidAmount)}</span>
+                  </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500 dark:text-gray-400">Остаток к оплате</span>
                     <span className={`font-medium ${nextRemainingBalance > 0 ? 'text-orange-600' : 'text-gray-900 dark:text-white'}`}>
@@ -1701,7 +1735,7 @@ export default function RentalDetail() {
                                   {payment.paidDate ? `Оплата ${formatDate(payment.paidDate)}` : `Платёж со сроком ${formatDate(payment.dueDate)}`}
                                 </span>
                                 <span className="font-medium text-gray-900 dark:text-white">
-                                  {formatCurrency(getEffectivePaidAmount(payment))}
+                                  {formatCurrency(getPaymentAmountForRental(payment))}
                                 </span>
                               </div>
                               {payment.comment && (

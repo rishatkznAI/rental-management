@@ -123,6 +123,7 @@ async function startServer({ app, port, deps, logger = console }) {
     ensureLegacyDefaultUsers,
     migrateReferenceCollections,
     migrateLegacyRepairFacts,
+    backfillPaymentAllocations,
     normalizeClientLinks,
     backfillGanttRentalLinks,
     logGanttRentalLinkDiagnostics,
@@ -142,6 +143,27 @@ async function startServer({ app, port, deps, logger = console }) {
     ensureLegacyDefaultUsers();
     migrateReferenceCollections();
     migrateLegacyRepairFacts();
+    if (typeof backfillPaymentAllocations === 'function') {
+      try {
+        const result = backfillPaymentAllocations({
+          payments: deps.readData('payments') || [],
+          paymentAllocations: deps.readData('payment_allocations') || [],
+          rentals: [
+            ...(deps.readData('rentals') || []),
+            ...(deps.readData('gantt_rentals') || []),
+          ],
+          documents: deps.readData('documents') || [],
+          nowIso: () => new Date().toISOString(),
+          generateId: prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        });
+        if (result?.created > 0) {
+          deps.writeData('payment_allocations', result.allocations);
+          logger.log(`[payments] payment_allocations backfill created: ${result.created}`);
+        }
+      } catch (error) {
+        logger.warn(`[payments] payment_allocations backfill skipped: ${error?.message || String(error)}`);
+      }
+    }
     if (typeof normalizeClientLinks === 'function') {
       normalizeClientLinks({
         readData: deps.readData,

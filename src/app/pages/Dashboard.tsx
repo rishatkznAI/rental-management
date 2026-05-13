@@ -51,7 +51,7 @@ import { deliveriesService } from '../services/deliveries.service';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { useClientsList } from '../hooks/useClients';
-import { usePaymentsList } from '../hooks/usePayments';
+import { usePaymentAllocationsList, usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
 import { KPIDetailModal } from '../components/modals/KPIDetailModal';
@@ -69,6 +69,7 @@ import type {
   ServiceTicket,
   Client,
   Payment,
+  PaymentAllocation,
   Document,
   EquipmentStatus,
   ManagerBreakdownResponse,
@@ -413,6 +414,7 @@ export default function Dashboard() {
   const tickets = useMemo(() => rawTickets.filter(isRegularServiceTicket), [rawTickets]);
   const { data: clients = [] }    = useClientsList({ enabled: canViewClients });
   const { data: payments = [] }   = usePaymentsList({ enabled: canViewMoney });
+  const { data: paymentAllocations = [] } = usePaymentAllocationsList({ enabled: canViewMoney });
   const { data: documents = [] }  = useDocumentsList({ enabled: canViewDocuments });
   const { data: debtCollectionPlansResponse } = useDebtCollectionPlans({ enabled: canViewMoney });
   const debtCollectionPlans = debtCollectionPlansResponse?.plans ?? [];
@@ -504,12 +506,12 @@ export default function Dashboard() {
   const dayAfterTomorrowStart = new Date(today);
   dayAfterTomorrowStart.setDate(dayAfterTomorrowStart.getDate() + 2);
   const clientFinancials = useMemo(
-    () => buildClientFinancialSnapshots(clients, ganttRentals, payments),
-    [clients, ganttRentals, payments],
+    () => buildClientFinancialSnapshots(clients, ganttRentals, payments, paymentAllocations as PaymentAllocation[]),
+    [clients, ganttRentals, paymentAllocations, payments],
   );
   const rentalDebtRows = useMemo(
-    () => buildRentalDebtRows(ganttRentals, payments),
-    [ganttRentals, payments],
+    () => buildRentalDebtRows(ganttRentals, payments, paymentAllocations as PaymentAllocation[]),
+    [ganttRentals, paymentAllocations, payments],
   );
   const clientDebtAgingRows = useMemo(
     () => buildClientDebtAgingRows(clients, rentalDebtRows, today.toISOString().slice(0, 10)),

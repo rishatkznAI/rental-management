@@ -1,5 +1,5 @@
 import type { GanttRentalData } from '../mock-data';
-import type { Client, Payment } from '../types';
+import type { Client, Payment, PaymentAllocation } from '../types';
 import { calculateRentalBilling } from './rentalDowntimeFlow.js';
 
 export interface RentalDebtRow {
@@ -10,6 +10,8 @@ export interface RentalDebtRow {
   contractId?: string;
   equipmentInv: string;
   manager: string;
+  managerId?: string;
+  documentId?: string;
   startDate: string;
   endDate: string;
   expectedPaymentDate?: string;
@@ -120,6 +122,75 @@ export function getEffectivePaidAmount(payment: Payment): number {
   return 0;
 }
 
+function paymentId(payment: Payment): string {
+  return String(payment.id || '').trim();
+}
+
+function allocationPaymentId(allocation: PaymentAllocation): string {
+  return String(allocation.paymentId || '').trim();
+}
+
+function allocationAmount(allocation: PaymentAllocation): number {
+  return toMoney(allocation.amount);
+}
+
+function paymentAllocationCap(payment: Payment): number {
+  const paid = getEffectivePaidAmount(payment);
+  const amount = toMoney(payment.amount);
+  return amount > 0 ? Math.min(paid, amount) : paid;
+}
+
+function buildAllocationsByPaymentId(paymentAllocations: PaymentAllocation[] = []): Map<string, PaymentAllocation[]> {
+  const map = new Map<string, PaymentAllocation[]>();
+  const seen = new Set<string>();
+  paymentAllocations.forEach(allocation => {
+    if (!shouldCountPayment(allocation as unknown as Payment)) return;
+    const id = allocationPaymentId(allocation);
+    if (!id) return;
+    const dedupeKey = allocation.id || JSON.stringify([id, allocation.rentalId || '', allocation.documentId || '', allocation.amount || 0]);
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    if (!map.has(id)) map.set(id, []);
+    map.get(id)!.push(allocation);
+  });
+  return map;
+}
+
+function buildAllocatedAmountsByRental(payments: Payment[], paymentAllocations: PaymentAllocation[] = []): Map<string, number> {
+  const allocationsByPaymentId = buildAllocationsByPaymentId(paymentAllocations);
+  const paymentsById = new Map(payments.filter(payment => paymentId(payment)).map(payment => [paymentId(payment), payment] as const));
+  const byRentalId = new Map<string, number>();
+
+  allocationsByPaymentId.forEach((allocations, id) => {
+    const payment = paymentsById.get(id);
+    if (!payment || !shouldCountPayment(payment)) return;
+    let remaining = paymentAllocationCap(payment);
+    allocations.forEach(allocation => {
+      const rentalId = String(allocation.rentalId || '').trim();
+      const requested = allocationAmount(allocation);
+      if (!rentalId || requested <= 0 || remaining <= 0) return;
+      const amount = Math.min(requested, remaining);
+      byRentalId.set(rentalId, (byRentalId.get(rentalId) ?? 0) + amount);
+      remaining -= amount;
+    });
+  });
+
+  const seenLegacyPaymentIds = new Set<string>();
+  payments.forEach(payment => {
+    if (!payment.rentalId || !shouldCountPayment(payment) || allocationsByPaymentId.has(paymentId(payment))) return;
+    const id = paymentId(payment);
+    if (id) {
+      if (seenLegacyPaymentIds.has(id)) return;
+      seenLegacyPaymentIds.add(id);
+    }
+    const amount = paymentAllocationCap(payment);
+    if (amount <= 0) return;
+    byRentalId.set(payment.rentalId, (byRentalId.get(payment.rentalId) ?? 0) + amount);
+  });
+
+  return byRentalId;
+}
+
 function normalizeText(value: unknown): string {
   return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
@@ -163,25 +234,14 @@ export function getRentalDebtOverdueDays(
 export function buildRentalDebtRows(
   rentals: GanttRentalData[],
   payments: Payment[],
+  paymentAllocations: PaymentAllocation[] = [],
 ): RentalDebtRow[] {
-  const byRentalId = new Map<string, Payment[]>();
-  const seenPaymentIds = new Set<string>();
-  payments.forEach(payment => {
-    if (!payment.rentalId) return;
-    if (!shouldCountPayment(payment)) return;
-    if (payment.id) {
-      if (seenPaymentIds.has(payment.id)) return;
-      seenPaymentIds.add(payment.id);
-    }
-    if (!byRentalId.has(payment.rentalId)) byRentalId.set(payment.rentalId, []);
-    byRentalId.get(payment.rentalId)!.push(payment);
-  });
+  const paidByRentalId = buildAllocatedAmountsByRental(payments, paymentAllocations);
 
   return rentals
     .filter(shouldCountRental)
     .map(rental => {
-      const relatedPayments = byRentalId.get(rental.id) ?? [];
-      const paidAmount = relatedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
+      const paidAmount = paidByRentalId.get(rental.id) ?? 0;
       const billing = calculateRentalBilling(rental);
       const amount = billing.finalRentalAmount;
       const outstanding = Math.max(0, amount - paidAmount);
@@ -198,6 +258,8 @@ export function buildRentalDebtRows(
         contractId: rental.contractId || undefined,
         equipmentInv: rental.equipmentInv,
         manager: rental.manager,
+        managerId: (rental as unknown as { managerId?: string }).managerId,
+        documentId: (rental as unknown as { documentId?: string }).documentId,
         startDate: rental.startDate,
         endDate: rental.endDate,
         expectedPaymentDate: rental.expectedPaymentDate,
@@ -296,8 +358,9 @@ export function buildClientFinancialSnapshots(
   clients: Client[],
   rentals: GanttRentalData[],
   payments: Payment[],
+  paymentAllocations: PaymentAllocation[] = [],
 ): ClientFinancialSnapshot[] {
-  const debtRows = buildRentalDebtRows(rentals, payments);
+  const debtRows = buildRentalDebtRows(rentals, payments, paymentAllocations);
   const receivables = buildClientReceivables(clients, debtRows);
   const receivableMap = new Map(receivables.filter(item => item.clientId).map(item => [String(item.clientId), item] as const));
 
@@ -450,8 +513,9 @@ export function mergeClientsWithFinancials(
   clients: Client[],
   rentals: GanttRentalData[],
   payments: Payment[],
+  paymentAllocations: PaymentAllocation[] = [],
 ): Client[] {
-  const snapshots = buildClientFinancialSnapshots(clients, rentals, payments);
+  const snapshots = buildClientFinancialSnapshots(clients, rentals, payments, paymentAllocations);
   const byClient = new Map(snapshots.map(item => [item.clientId, item] as const));
   return clients.map(client => {
     const financial = byClient.get(client.id);

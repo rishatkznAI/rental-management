@@ -111,6 +111,24 @@ test('manager report marks unpaid, partial and paid monthly rows correctly', () 
   assert.equal(paidRows[0].debt, 0);
 });
 
+test('manager report uses only distributed payment allocations and splits payment between managers', () => {
+  const rows = buildManagerReportRows([
+    rental({ id: 'R-1', manager: 'Руслан', amount: 10000 }),
+    rental({ id: 'R-2', manager: 'Анна', amount: 10000 }),
+  ], equipment, [
+    payment({ id: 'P-allocated', rentalId: undefined, amount: 12000, paidAmount: 12000, status: 'paid' }),
+    payment({ id: 'P-unallocated', clientId: 'C-1', rentalId: undefined, amount: 5000, paidAmount: 5000, status: 'paid' }),
+  ], {}, [
+    { id: 'PA-1', paymentId: 'P-allocated', rentalId: 'R-1', amount: 7000 },
+    { id: 'PA-2', paymentId: 'P-allocated', rentalId: 'R-2', amount: 5000 },
+  ]);
+  const summary = buildManagerReportSummary(rows);
+
+  assert.equal(summary.find(row => row.manager === 'Руслан').paidAmount, 7000);
+  assert.equal(summary.find(row => row.manager === 'Анна').paidAmount, 5000);
+  assert.equal(summary.reduce((sum, row) => sum + row.paidAmount, 0), 12000);
+});
+
 test('manager report period filter takes only the selected month share', () => {
   const rows = buildManagerReportRows([
     rental({ startDate: '2026-04-25', endDate: '2026-05-08', amount: 32200 }),

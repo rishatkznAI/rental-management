@@ -101,6 +101,7 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'mechanics',
   'owners',
   'payments',
+  'payment_allocations',
   'planner_items',
   'repair_part_items',
   'repair_work_items',
@@ -200,7 +201,8 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'partnerCardUploadedBy',
   ]),
   client_objects: new Set(['clientId', 'name', 'address', 'contactName', 'contactPhone', 'contractId', 'contractNumber', 'notes', 'status']),
-  client_contracts: new Set(['clientId', 'objectId', 'number', 'date', 'title', 'status', 'notes']),
+  client_contracts: new Set(['clientId', 'objectId', 'objectIds', 'number', 'date', 'title', 'status', 'notes']),
+  payment_allocations: new Set(['paymentId', 'clientId', 'objectId', 'contractId', 'rentalId', 'documentId', 'managerId', 'periodStart', 'periodEnd', 'amount', 'status', 'source', 'comment']),
   documents: new Set([
     'type',
     'documentType',
@@ -1051,6 +1053,7 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'client_contracts':
     case 'documents':
     case 'payments':
+    case 'payment_allocations':
     case 'debt_collection_plans':
     case 'debt_collection_actions':
     case 'receivable_payment_plans':
@@ -1158,7 +1161,7 @@ function canMutateEntity(collection, entity, user, readData) {
   if (ADMIN_ONLY_MUTATE_COLLECTIONS.has(collection)) {
     return false;
   }
-  if (collection === 'payments') {
+  if (collection === 'payments' || collection === 'payment_allocations') {
     return isOfficeManager(user);
   }
   if (collection === 'company_expenses') {
@@ -1360,7 +1363,7 @@ function assertCanCreateCollection(collection, user, input = {}, readData) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
   }
-  if (collection === 'payments' && !(isAdmin(user) || isOfficeManager(user))) {
+  if ((collection === 'payments' || collection === 'payment_allocations') && !(isAdmin(user) || isOfficeManager(user))) {
     throw forbidden('Платежи можно создавать только администратору или офис-менеджеру.');
   }
   if (collection === 'debt_collection_plans' && !(isAdmin(user) || isOfficeManager(user))) {

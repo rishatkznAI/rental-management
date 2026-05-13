@@ -201,15 +201,17 @@ function registerCrudRoutes(deps) {
     if (collection === 'client_contracts') {
       return normalizeClientContractRecord(item, existing, { readData, nowIso });
     }
-    if (collection === 'payments' || collection === 'documents' || collection === 'service') {
+    if (collection === 'payments' || collection === 'payment_allocations' || collection === 'documents' || collection === 'service') {
       const enriched = enrichRecordFromRentalLinks(item, readData);
-      return normalizeClientRelationLinks(enriched, enriched.clientId, {
+      const normalized = normalizeClientRelationLinks(enriched, enriched.clientId, {
         readData,
         requireActiveObject: !existing,
         allowArchivedObjectId: existing?.objectId,
         includeObjectSnapshot: collection === 'service',
         includeContractSnapshot: collection === 'service',
       });
+      if (collection === 'payment_allocations') validatePaymentAllocationRecord(normalized, existing);
+      return normalized;
     }
     return item;
   }
@@ -588,6 +590,29 @@ function registerCrudRoutes(deps) {
     const hasPaidAmount = record && Object.prototype.hasOwnProperty.call(record, 'paidAmount');
     if (!partial || hasAmount) parsePaymentMoney(record?.amount, 'Сумма платежа', { required: true });
     if (hasPaidAmount) parsePaymentMoney(record?.paidAmount, 'Оплачено');
+  }
+
+  function paymentAllocationCap(payment) {
+    const paid = getEffectivePaidAmount(payment);
+    const amount = Number(payment?.amount);
+    return Number.isFinite(amount) && amount > 0 ? Math.min(paid, amount) : paid;
+  }
+
+  function validatePaymentAllocationRecord(record, existing = null) {
+    const paymentId = String(record?.paymentId || '').trim();
+    if (!paymentId) throw new Error('Для распределения платежа укажите paymentId');
+    const amount = parsePaymentMoney(record?.amount, 'Сумма распределения', { required: true });
+    if (amount <= 0) throw new Error('Сумма распределения должна быть больше 0');
+    const payment = (readData('payments') || []).find(item => String(item?.id || '').trim() === paymentId);
+    if (!payment) throw new Error('Платёж для распределения не найден');
+    const allocated = (readData('payment_allocations') || [])
+      .filter(item => String(item?.paymentId || '').trim() === paymentId)
+      .filter(item => String(item?.id || '').trim() !== String(existing?.id || record?.id || '').trim())
+      .filter(item => String(item?.status || '').trim() !== 'cancelled')
+      .reduce((sum, item) => sum + (Number.isFinite(Number(item?.amount)) && Number(item.amount) > 0 ? Number(item.amount) : 0), 0);
+    if (allocated + amount > paymentAllocationCap(payment) + 0.000001) {
+      throw new Error('Сумма распределений не может превышать сумму платежа');
+    }
   }
 
   function parseOptionalServiceNumber(record, field, fieldLabel, { required = false } = {}) {

@@ -24,7 +24,7 @@ import {
 import { cn, formatDate, formatDateTime, formatCurrency } from '../lib/utils';
 import { useClientById, useDeleteClient, useUpdateClient } from '../hooks/useClients';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
-import { usePaymentsList } from '../hooks/usePayments';
+import { usePaymentAllocationsList, usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
@@ -437,6 +437,7 @@ export default function ClientDetail() {
   const { data: rentals = [] } = useRentalsList({ enabled: canViewRentals });
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
+  const { data: paymentAllocations = [] } = usePaymentAllocationsList();
   const { data: serviceTickets = [] } = useServiceTicketsList();
   const { data: clientObjectsAll = [] } = useClientObjectsList();
   const { data: clientContractsAll = [] } = useClientContractsList();
@@ -464,11 +465,11 @@ export default function ClientDetail() {
 
   const clientFinancial = React.useMemo(() => {
     if (!client) return null;
-    return buildClientFinancialSnapshots([client], ganttRentals, payments)[0] ?? null;
-  }, [client, ganttRentals, payments]);
+    return buildClientFinancialSnapshots([client], ganttRentals, payments, paymentAllocations)[0] ?? null;
+  }, [client, ganttRentals, paymentAllocations, payments]);
   const rentalDebtRows = useMemo(
-    () => buildRentalDebtRows(ganttRentals, payments),
-    [ganttRentals, payments],
+    () => buildRentalDebtRows(ganttRentals, payments, paymentAllocations),
+    [ganttRentals, paymentAllocations, payments],
   );
   const debtByObject = useMemo(() => {
     if (!client) return [];
@@ -492,6 +493,19 @@ export default function ClientDetail() {
       });
     return [...groups.values()].sort((a, b) => b.debt - a.debt);
   }, [client, clientObjects, rentalDebtRows]);
+  const unallocatedClientPayments = useMemo(() => {
+    if (!client) return 0;
+    return payments
+      .filter(payment => payment.clientId === client.id)
+      .reduce((sum, payment) => {
+        const paid = typeof payment.paidAmount === 'number' ? Math.max(0, payment.paidAmount) : (payment.status === 'paid' ? Math.max(0, payment.amount) : 0);
+        const cap = payment.amount > 0 ? Math.min(paid, payment.amount) : paid;
+        const allocated = paymentAllocations
+          .filter(item => item.paymentId === payment.id && item.status !== 'cancelled')
+          .reduce((inner, item) => inner + Math.max(0, Number(item.amount) || 0), 0);
+        return sum + Math.max(0, cap - allocated);
+      }, 0);
+  }, [client, paymentAllocations, payments]);
   const client360 = useMemo(
     () => buildClient360Summary({
       client,
@@ -1949,6 +1963,10 @@ export default function ClientDetail() {
                   <p className={`text-xl font-bold ${client360.debt.overdue > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
                     {formatCurrency(client360.debt.overdue)}
                   </p>
+                </div>
+                <div className="col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900 dark:bg-amber-950/20">
+                  <p className="text-xs text-amber-700 dark:text-amber-300">Нераспределённые оплаты / авансы</p>
+                  <p className="text-lg font-bold text-amber-800 dark:text-amber-200">{formatCurrency(unallocatedClientPayments)}</p>
                 </div>
               </div>
             )}

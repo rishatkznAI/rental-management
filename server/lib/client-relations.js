@@ -4,7 +4,7 @@ const ORPHAN_CLIENT_ERROR = 'Клиент для записи не найден'
 const ORPHAN_OBJECT_ERROR = 'Объект клиента не найден или не принадлежит клиенту';
 const ORPHAN_CONTRACT_ERROR = 'Договор клиента не найден или не принадлежит клиенту';
 const ARCHIVED_OBJECT_ERROR = 'Архивный объект нельзя выбрать для новой записи';
-const CONTRACT_OBJECT_MISMATCH_ERROR = 'Договор не относится к выбранному объекту клиента';
+const REQUIRED_RENTAL_RELATIONS_ERROR = 'Для аренды укажите клиента, объект и договор';
 
 function text(value) {
   return String(value ?? '').trim();
@@ -71,17 +71,23 @@ function assertContractBelongsToClient(readData, contractId, clientId) {
 function assertContractObjectConsistency(readData, contractId, objectId, clientId) {
   const contract = assertContractBelongsToClient(readData, contractId, clientId);
   if (!contract) return null;
-  const linkedObjectId = text(contract.objectId);
   const currentObjectId = text(objectId);
-  if (linkedObjectId && currentObjectId && linkedObjectId !== currentObjectId) {
-    const error = new Error(CONTRACT_OBJECT_MISMATCH_ERROR);
-    error.status = 400;
-    throw error;
-  }
-  if (linkedObjectId && !currentObjectId) {
+  if (currentObjectId) assertObjectBelongsToClient(readData, currentObjectId, clientId);
+  for (const linkedObjectId of contractObjectIds(contract)) {
     assertObjectBelongsToClient(readData, linkedObjectId, clientId);
   }
   return contract;
+}
+
+function contractObjectIds(contract) {
+  const ids = new Set();
+  const add = value => {
+    const id = text(value);
+    if (id) ids.add(id);
+  };
+  add(contract?.objectId);
+  if (Array.isArray(contract?.objectIds)) contract.objectIds.forEach(add);
+  return [...ids];
 }
 
 function normalizeClientRelationLinks(payload, clientId, options = {}) {
@@ -90,6 +96,11 @@ function normalizeClientRelationLinks(payload, clientId, options = {}) {
   const resolvedClientId = text(clientId || payload?.clientId);
   const objectId = text(payload?.objectId);
   const contractId = text(payload?.contractId);
+  if (options.requireRentalRelations && (!resolvedClientId || !objectId || !contractId)) {
+    const error = new Error(REQUIRED_RENTAL_RELATIONS_ERROR);
+    error.status = 400;
+    throw error;
+  }
   if (!resolvedClientId && (objectId || contractId)) {
     const error = new Error(ORPHAN_CLIENT_ERROR);
     error.status = 400;
@@ -163,6 +174,9 @@ function normalizeClientContractRecord(record, existing = null, deps = {}) {
   const nowIso = typeof deps.nowIso === 'function' ? deps.nowIso : () => new Date().toISOString();
   const clientId = text(record?.clientId || existing?.clientId);
   const objectId = text(record?.objectId);
+  const objectIds = Array.isArray(record?.objectIds)
+    ? [...new Set(record.objectIds.map(text).filter(Boolean))]
+    : [];
   const number = text(record?.number);
   if (!clientId || !number) {
     const error = new Error(CONTRACT_REQUIRED_ERROR);
@@ -172,12 +186,14 @@ function normalizeClientContractRecord(record, existing = null, deps = {}) {
   if (typeof deps.readData === 'function') {
     assertClientExists(deps.readData, clientId);
     assertObjectBelongsToClient(deps.readData, objectId, clientId);
+    objectIds.forEach(id => assertObjectBelongsToClient(deps.readData, id, clientId));
   }
   return {
     ...existing,
     ...record,
     clientId,
     objectId: objectId || undefined,
+    objectIds,
     number,
     date: text(record?.date) || undefined,
     title: text(record?.title) || number,

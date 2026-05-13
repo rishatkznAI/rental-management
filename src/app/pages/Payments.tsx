@@ -1,20 +1,32 @@
 import React, { useState, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { ClientCombobox } from '../components/ui/ClientCombobox';
 import { getPaymentStatusBadge } from '../components/ui/badge';
-import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown } from 'lucide-react';
+import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown, Wand2, Trash2, Edit2, ListChecks } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { usePermissions } from '../lib/permissions';
-import { usePaymentsList, useCreatePayment } from '../hooks/usePayments';
+import {
+  PAYMENT_KEYS,
+  useCreatePayment,
+  useCreatePaymentAllocation,
+  useDeletePaymentAllocation,
+  usePaymentAllocationsList,
+  usePaymentsList,
+  useUpdatePaymentAllocation,
+} from '../hooks/usePayments';
 import { useClientsList } from '../hooks/useClients';
 import { useGanttData } from '../hooks/useRentals';
+import { useClientContractsList, useClientObjectsList } from '../hooks/useClientRelations';
+import { useDocumentsList, DOCUMENT_KEYS } from '../hooks/useDocuments';
 import type { GanttRentalData } from '../mock-data';
 import { formatDate, formatCurrency } from '../lib/utils';
-import type { Payment, PaymentStatus, Client } from '../types';
+import type { Client, ClientContract, ClientObject, Document, Payment, PaymentAllocation, PaymentStatus } from '../types';
 import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
+import { financeService } from '../services/finance.service';
 import {
   buildQuickActionContext,
   contextFilterLabel,
@@ -32,6 +44,19 @@ function genInvoice(payments: Payment[]) {
   return `СЧ-${String(n).padStart(4, '0')}`;
 }
 function today() { return new Date().toISOString().slice(0, 10); }
+function text(value: unknown) { return String(value ?? '').trim(); }
+function money(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+function paidAmount(payment: Payment) {
+  if (typeof payment.paidAmount === 'number') return Math.max(0, payment.paidAmount);
+  return payment.status === 'paid' ? Math.max(0, payment.amount) : 0;
+}
+function allocationCap(payment: Payment) {
+  const paid = paidAmount(payment);
+  return payment.amount > 0 ? Math.min(paid, payment.amount) : paid;
+}
 
 // ─── AddPaymentModal ─────────────────────────────────────────────────────────
 
@@ -325,20 +350,443 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
   );
 }
 
+type AllocationDraft = {
+  id?: string;
+  objectId: string;
+  contractId: string;
+  rentalId: string;
+  documentId: string;
+  amount: string;
+  periodStart: string;
+  periodEnd: string;
+  comment: string;
+};
+
+const emptyAllocationDraft: AllocationDraft = {
+  objectId: '',
+  contractId: '',
+  rentalId: '',
+  documentId: '',
+  amount: '',
+  periodStart: '',
+  periodEnd: '',
+  comment: '',
+};
+
+function PaymentAllocationPanel({
+  payment,
+  allPayments,
+  allocations,
+  rentals,
+  objects,
+  contracts,
+  documents,
+  onClose,
+}: {
+  payment: Payment;
+  allPayments: Payment[];
+  allocations: PaymentAllocation[];
+  rentals: GanttRentalData[];
+  objects: ClientObject[];
+  contracts: ClientContract[];
+  documents: Document[];
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const createAllocation = useCreatePaymentAllocation();
+  const updateAllocation = useUpdatePaymentAllocation();
+  const deleteAllocation = useDeletePaymentAllocation();
+  const [draft, setDraft] = useState<AllocationDraft>(emptyAllocationDraft);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [showDebtPicker, setShowDebtPicker] = useState(false);
+  const [selectedDebt, setSelectedDebt] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<Array<Partial<PaymentAllocation> & { reason?: string }>>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const paymentAllocations = useMemo(
+    () => allocations.filter(item => text(item.paymentId) === text(payment.id) && text(item.status) !== 'cancelled'),
+    [allocations, payment.id],
+  );
+  const paymentClientId = text(payment.clientId);
+  const paid = allocationCap(payment);
+  const allocated = paymentAllocations.reduce((sum, item) => sum + money(item.amount), 0);
+  const unallocated = Math.max(0, paid - allocated);
+  const allocationStatus = allocated <= 0 ? 'не распределён' : unallocated > 0 ? 'частично распределён' : 'распределён полностью';
+  const clientObjects = objects.filter(item => text(item.clientId) === paymentClientId);
+  const clientContracts = contracts.filter(item => text(item.clientId) === paymentClientId);
+  const rentalDebtRows = useMemo(
+    () => buildRentalDebtRows(rentals, allPayments, allocations),
+    [allocations, allPayments, rentals],
+  );
+  const clientDebtRows = rentalDebtRows.filter(row => !paymentClientId || row.clientId === paymentClientId);
+  const docsByRental = useMemo(() => {
+    const map = new Map<string, Document[]>();
+    documents.forEach(doc => {
+      const rentalId = text(doc.rentalId || doc.rental);
+      if (!rentalId) return;
+      if (!map.has(rentalId)) map.set(rentalId, []);
+      map.get(rentalId)!.push(doc);
+    });
+    return map;
+  }, [documents]);
+  const objectsById = useMemo(() => new Map(objects.map(item => [item.id, item])), [objects]);
+  const contractsById = useMemo(() => new Map(contracts.map(item => [item.id, item])), [contracts]);
+  const documentsById = useMemo(() => new Map(documents.map(item => [item.id, item])), [documents]);
+  const rentalsById = useMemo(() => new Map(rentals.map(item => [item.id, item])), [rentals]);
+
+  const filteredRentals = useMemo(() => rentals.filter(rental => {
+    if (paymentClientId && text(rental.clientId) !== paymentClientId) return false;
+    if (draft.objectId && text(rental.objectId) !== draft.objectId) return false;
+    if (draft.contractId && text(rental.contractId) !== draft.contractId) return false;
+    return true;
+  }), [draft.contractId, draft.objectId, paymentClientId, rentals]);
+
+  function resetDraft() {
+    setDraft(emptyAllocationDraft);
+    setError('');
+  }
+
+  function setDraftField(field: keyof AllocationDraft, value: string) {
+    setDraft(current => {
+      const next = { ...current, [field]: value };
+      if (field === 'rentalId') {
+        const rental = rentalsById.get(value);
+        if (rental) {
+          next.objectId = text(rental.objectId);
+          next.contractId = text(rental.contractId);
+          if (!next.periodStart) next.periodStart = text(rental.startDate);
+          if (!next.periodEnd) next.periodEnd = text(rental.endDate || rental.plannedReturnDate);
+          const rentalDocs = docsByRental.get(value) || [];
+          if (!next.documentId && rentalDocs.length === 1) next.documentId = rentalDocs[0].id;
+        }
+      }
+      return next;
+    });
+    setError('');
+  }
+
+  function allocationPayload(input: AllocationDraft): Omit<PaymentAllocation, 'id'> {
+    const amount = money(input.amount);
+    const rental = rentalsById.get(input.rentalId);
+    const nextTotal = allocated - (input.id ? money(paymentAllocations.find(item => item.id === input.id)?.amount) : 0) + amount;
+    if (!amount) throw new Error('Укажите сумму распределения больше 0');
+    if (nextTotal > paid + 0.000001) throw new Error('Сумма распределений не может превышать сумму платежа');
+    if (rental && paymentClientId && text(rental.clientId) !== paymentClientId) throw new Error('Нельзя выбрать аренду другого клиента');
+    if (input.objectId) {
+      const object = objectsById.get(input.objectId);
+      if (!object || text(object.clientId) !== paymentClientId) throw new Error('Нельзя выбрать объект другого клиента');
+    }
+    if (input.contractId) {
+      const contract = contractsById.get(input.contractId);
+      if (!contract || text(contract.clientId) !== paymentClientId) throw new Error('Нельзя выбрать договор другого клиента');
+    }
+    return {
+      paymentId: payment.id,
+      clientId: paymentClientId || text(rental?.clientId) || undefined,
+      objectId: input.objectId || text(rental?.objectId) || undefined,
+      contractId: input.contractId || text(rental?.contractId) || undefined,
+      rentalId: input.rentalId || undefined,
+      documentId: input.documentId || undefined,
+      managerId: text((rental as unknown as { managerId?: string })?.managerId) || undefined,
+      periodStart: input.periodStart || undefined,
+      periodEnd: input.periodEnd || undefined,
+      amount,
+      status: 'active',
+      source: 'manual',
+      comment: input.comment || undefined,
+    };
+  }
+
+  function saveDraft() {
+    try {
+      const payload = allocationPayload(draft);
+      const mutation = draft.id
+        ? updateAllocation.mutateAsync({ id: draft.id, data: payload })
+        : createAllocation.mutateAsync(payload);
+      mutation
+        .then(() => {
+          setMessage(draft.id ? 'Распределение обновлено' : 'Распределение добавлено');
+          resetDraft();
+        })
+        .catch(err => setError(err?.message || 'Не удалось сохранить распределение'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить распределение');
+    }
+  }
+
+  function editAllocation(allocation: PaymentAllocation) {
+    setDraft({
+      id: allocation.id,
+      objectId: text(allocation.objectId),
+      contractId: text(allocation.contractId),
+      rentalId: text(allocation.rentalId),
+      documentId: text(allocation.documentId),
+      amount: String(allocation.amount || ''),
+      periodStart: text(allocation.periodStart),
+      periodEnd: text(allocation.periodEnd),
+      comment: text(allocation.comment),
+    });
+    setMessage('');
+    setError('');
+  }
+
+  async function runPreview() {
+    setPreviewLoading(true);
+    setError('');
+    try {
+      const result = await financeService.previewPaymentAllocation(payment.id);
+      setPreview((result.suggestedAllocations || []).map((item, index) => {
+        const suggestion = item as Partial<PaymentAllocation>;
+        return {
+          ...suggestion,
+          reason: [
+            payment.contractId ? 'указан договор' : '',
+            suggestion.documentId ? 'указан документ' : '',
+            index === 0 ? 'старейшая просрочка' : 'следующий долг клиента',
+          ].filter(Boolean).join(', '),
+        };
+      }));
+      if (!result.suggestedAllocations?.length) setMessage('Автозачёт не нашёл подходящих долгов');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось получить предпросмотр автозачёта');
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function applyPreview() {
+    setError('');
+    try {
+      await financeService.applyPaymentAllocationPreview(payment.id, preview);
+      setPreview([]);
+      setMessage('Автозачёт применён');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.allocations }),
+        queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: ['finance'] }),
+        queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all }),
+      ]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось применить автозачёт');
+    }
+  }
+
+  async function allocateSelectedDebt() {
+    setError('');
+    let remaining = unallocated;
+    const rows = clientDebtRows
+      .map(row => ({ row, amount: Math.min(money(selectedDebt[row.rentalId]), row.outstanding, remaining) }))
+      .filter(item => item.amount > 0);
+    if (!rows.length) {
+      setError('Выберите долги и суммы для распределения');
+      return;
+    }
+    try {
+      for (const item of rows) {
+        if (remaining <= 0) break;
+        const amount = Math.min(item.amount, remaining);
+        const rental = rentalsById.get(item.row.rentalId);
+        await createAllocation.mutateAsync({
+          paymentId: payment.id,
+          clientId: paymentClientId || item.row.clientId || undefined,
+          objectId: item.row.objectId || undefined,
+          contractId: item.row.contractId || undefined,
+          rentalId: item.row.rentalId,
+          documentId: text((docsByRental.get(item.row.rentalId) || [])[0]?.id) || undefined,
+          managerId: text((rental as unknown as { managerId?: string })?.managerId) || undefined,
+          periodStart: item.row.startDate || undefined,
+          periodEnd: item.row.endDate || undefined,
+          amount,
+          status: 'active',
+          source: 'manual',
+          comment: 'Подбор долгов клиента',
+        });
+        remaining -= amount;
+      }
+      setSelectedDebt({});
+      setMessage('Выбранные долги распределены');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось распределить выбранные долги');
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-blue-200 bg-white p-4 shadow-sm dark:border-blue-900/60 dark:bg-gray-900">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Распределение оплаты</h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{payment.invoiceNumber || payment.id} · {payment.client}</p>
+        </div>
+        <Button size="sm" variant="ghost" onClick={onClose}><X className="h-4 w-4" /> Закрыть</Button>
+      </div>
+
+      {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">{error}</div>}
+      {message && <div className="mb-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300">{message}</div>}
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"><p className="text-xs text-gray-500">Сумма платежа</p><p className="font-semibold">{formatCurrency(payment.amount)}</p></div>
+        <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"><p className="text-xs text-gray-500">Распределено</p><p className="font-semibold text-green-600">{formatCurrency(allocated)}</p></div>
+        <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"><p className="text-xs text-gray-500">Не распределено</p><p className="font-semibold text-orange-600">{formatCurrency(unallocated)}</p></div>
+        <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"><p className="text-xs text-gray-500">Статус</p><p className="font-semibold">{allocationStatus}</p></div>
+      </div>
+      {unallocated > 0 && (
+        <div className="mt-3 flex gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>Часть платежа не распределена и не закрывает долг по арендам.</span>
+        </div>
+      )}
+
+      <div className="mt-5 overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+        <Table>
+          <TableHeader><TableRow><TableHead>Объект</TableHead><TableHead>Договор</TableHead><TableHead>Аренда</TableHead><TableHead>Документ/УПД</TableHead><TableHead>Период</TableHead><TableHead>Сумма</TableHead><TableHead>Комментарий</TableHead><TableHead>Источник</TableHead><TableHead>Действия</TableHead></TableRow></TableHeader>
+          <TableBody>
+            {paymentAllocations.map(item => {
+              const rental = item.rentalId ? rentalsById.get(item.rentalId) : null;
+              const doc = item.documentId ? documentsById.get(item.documentId) : null;
+              return (
+                <TableRow key={item.id}>
+                  <TableCell>{objectsById.get(text(item.objectId))?.name || '—'}</TableCell>
+                  <TableCell>{contractsById.get(text(item.contractId))?.number || text(item.contractId) || '—'}</TableCell>
+                  <TableCell>{item.rentalId ? `${item.rentalId} · ${rental?.equipmentInv || ''}` : '—'}</TableCell>
+                  <TableCell>{doc ? `${doc.type} ${doc.number || doc.documentNumber || doc.id}` : text(item.documentId) || '—'}</TableCell>
+                  <TableCell>{item.periodStart || rental?.startDate || '—'} — {item.periodEnd || rental?.endDate || rental?.plannedReturnDate || '—'}</TableCell>
+                  <TableCell className="font-semibold">{formatCurrency(item.amount)}</TableCell>
+                  <TableCell>{item.comment || '—'}</TableCell>
+                  <TableCell>{item.source || 'manual'}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => editAllocation(item)}><Edit2 className="h-4 w-4" /></Button>
+                      <Button size="sm" variant="ghost" onClick={() => deleteAllocation.mutate(item.id)}><Trash2 className="h-4 w-4" /></Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {paymentAllocations.length === 0 && <TableRow><TableCell colSpan={9} className="py-6 text-center text-sm text-gray-500">Распределений пока нет</TableCell></TableRow>}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="mt-5 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h3 className="font-semibold text-gray-900 dark:text-white">{draft.id ? 'Изменить распределение' : 'Добавить распределение'}</h3>
+          {draft.id && <Button size="sm" variant="secondary" onClick={resetDraft}>Новая строка</Button>}
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <select value={draft.objectId} onChange={e => setDraftField('objectId', e.target.value)} className="app-filter-input">
+            <option value="">Объект клиента</option>
+            {clientObjects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <select value={draft.contractId} onChange={e => setDraftField('contractId', e.target.value)} className="app-filter-input">
+            <option value="">Договор клиента</option>
+            {clientContracts.map(item => <option key={item.id} value={item.id}>{item.number}</option>)}
+          </select>
+          <select value={draft.rentalId} onChange={e => setDraftField('rentalId', e.target.value)} className="app-filter-input">
+            <option value="">Аренда</option>
+            {filteredRentals.map(rental => {
+              const debt = rentalDebtRows.find(row => row.rentalId === rental.id);
+              return <option key={rental.id} value={rental.id}>{rental.id} · {rental.equipmentInv} · долг {formatCurrency(debt?.outstanding || 0)}</option>;
+            })}
+          </select>
+          <select value={draft.documentId} onChange={e => setDraftField('documentId', e.target.value)} className="app-filter-input">
+            <option value="">Документ/УПД</option>
+            {(draft.rentalId ? docsByRental.get(draft.rentalId) || [] : documents.filter(doc => text(doc.clientId) === paymentClientId)).map(doc => <option key={doc.id} value={doc.id}>{doc.type} · {doc.number || doc.documentNumber || doc.id}</option>)}
+          </select>
+          <Input type="number" min="0" placeholder="Сумма" value={draft.amount} onChange={e => setDraftField('amount', e.target.value)} />
+          <Input placeholder="Комментарий" value={draft.comment} onChange={e => setDraftField('comment', e.target.value)} />
+          <Input type="date" value={draft.periodStart} onChange={e => setDraftField('periodStart', e.target.value)} />
+          <Input type="date" value={draft.periodEnd} onChange={e => setDraftField('periodEnd', e.target.value)} />
+          <Button onClick={saveDraft} disabled={createAllocation.isPending || updateAllocation.isPending}>Сохранить распределение</Button>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button variant="secondary" onClick={() => setShowDebtPicker(value => !value)}><ListChecks className="h-4 w-4" /> Подобрать долги клиента</Button>
+        <Button variant="secondary" onClick={runPreview} disabled={previewLoading || unallocated <= 0}><Wand2 className="h-4 w-4" /> Предпросмотр автозачёта</Button>
+      </div>
+
+      {showDebtPicker && (
+        <div className="mt-4 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+          <h3 className="mb-3 font-semibold">Долги клиента</h3>
+          <div className="space-y-2">
+            {clientDebtRows.map(row => {
+              const rental = rentalsById.get(row.rentalId);
+              const objectName = objectsById.get(text(row.objectId))?.name || 'Без объекта';
+              const contractNumber = contractsById.get(text(row.contractId))?.number || 'Без договора';
+              const doc = (docsByRental.get(row.rentalId) || [])[0];
+              const dueDate = row.expectedPaymentDate || row.endDate;
+              const overdueDays = dueDate && dueDate < today()
+                ? Math.ceil((new Date(today()).getTime() - new Date(dueDate).getTime()) / 86400000)
+                : 0;
+              return (
+                <div key={row.rentalId} className="grid gap-2 rounded-lg border border-gray-200 p-3 text-sm md:grid-cols-[1fr_150px] dark:border-gray-700">
+                  <div className="flex gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4"
+                      checked={money(selectedDebt[row.rentalId]) > 0}
+                      onChange={event => setSelectedDebt(current => ({
+                        ...current,
+                        [row.rentalId]: event.target.checked ? String(Math.min(row.outstanding, unallocated)) : '',
+                      }))}
+                    />
+                    <div>
+                    <p className="font-medium">{payment.client} → {objectName} → {contractNumber} → {row.rentalId}</p>
+                    <p className="text-gray-500">{rental?.equipmentInv || row.equipmentInv} · {row.startDate} — {row.endDate} · менеджер {row.manager || '—'} · документ {doc?.number || doc?.id || '—'}</p>
+                    <p className="text-gray-500">Начислено {formatCurrency(row.amount)} · оплачено {formatCurrency(row.paidAmount)} · долг {formatCurrency(row.outstanding)} · просрочка {overdueDays > 0 ? `${overdueDays} дн.` : 'нет'}</p>
+                    </div>
+                  </div>
+                  <Input type="number" min="0" value={selectedDebt[row.rentalId] || ''} onChange={e => setSelectedDebt(current => ({ ...current, [row.rentalId]: e.target.value }))} placeholder="Сумма" />
+                </div>
+              );
+            })}
+            {clientDebtRows.length === 0 && <p className="text-sm text-gray-500">Неоплаченных аренд клиента нет</p>}
+          </div>
+          <Button className="mt-3" onClick={allocateSelectedDebt}>Распределить выбранное</Button>
+        </div>
+      )}
+
+      {preview.length > 0 && (
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/20">
+          <h3 className="mb-3 font-semibold text-blue-950 dark:text-blue-100">Предпросмотр автозачёта</h3>
+          <div className="space-y-2">
+            {preview.map((item, index) => (
+              <div key={`${item.rentalId}-${index}`} className="rounded-lg bg-white p-3 text-sm dark:bg-gray-900">
+                <div className="flex justify-between gap-3"><span>{item.rentalId} · {objectsById.get(text(item.objectId))?.name || 'объект'} · {contractsById.get(text(item.contractId))?.number || 'договор'}</span><b>{formatCurrency(item.amount || 0)}</b></div>
+                <p className="mt-1 text-xs text-gray-500">Причина выбора: {item.reason || 'правило автозачёта'}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <Button onClick={applyPreview}>Применить автозачёт</Button>
+            <Button variant="secondary" onClick={() => setPreview([])}>Отмена</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Payments() {
   const [searchParams] = useSearchParams();
   const { can } = usePermissions();
   const { data: paymentList = [] } = usePaymentsList();
+  const { data: paymentAllocations = [] } = usePaymentAllocationsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: clients = [] } = useClientsList();
+  const { data: clientObjects = [] } = useClientObjectsList();
+  const { data: clientContracts = [] } = useClientContractsList();
+  const { data: documents = [] } = useDocumentsList();
   const createPayment = useCreatePayment();
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [clientFilter, setClientFilter] = React.useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [selectedPaymentId, setSelectedPaymentId] = useState('');
   const quickActionContext = React.useMemo(() => buildQuickActionContext(searchParams), [searchParams]);
   const hasQuickClientContext = hasClientContext(quickActionContext);
   const clientsById = useMemo(() => new Map(clients.map(client => [client.id, client])), [clients]);
@@ -388,8 +836,12 @@ export default function Payments() {
   const totalPaid = paymentList.filter(p => p.status === 'paid').reduce((s, p) => s + (p.paidAmount ?? p.amount), 0);
   const totalOverdue = paymentList.filter(p => p.status === 'overdue').reduce((s, p) => s + (p.amount - (p.paidAmount ?? 0)), 0);
   const totalPartial = paymentList.filter(p => p.status === 'partial').reduce((s, p) => s + (p.paidAmount ?? 0), 0);
-  const rentalDebtRows = useMemo(() => buildRentalDebtRows(ganttRentals as GanttRentalData[], paymentList), [ganttRentals, paymentList]);
+  const rentalDebtRows = useMemo(() => buildRentalDebtRows(ganttRentals as GanttRentalData[], paymentList, paymentAllocations), [ganttRentals, paymentAllocations, paymentList]);
   const clientReceivables = useMemo(() => buildClientReceivables(clients, rentalDebtRows), [clients, rentalDebtRows]);
+  const selectedPayment = useMemo(
+    () => paymentList.find(payment => payment.id === selectedPaymentId),
+    [paymentList, selectedPaymentId],
+  );
   const overdueDebtRentals = useMemo(
     () => rentalDebtRows.filter(row => {
       const today = new Date().toISOString().slice(0, 10);
@@ -580,6 +1032,19 @@ export default function Payments() {
         <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
       </div>
 
+      {selectedPayment && (
+        <PaymentAllocationPanel
+          payment={selectedPayment}
+          allPayments={paymentList}
+          allocations={paymentAllocations}
+          rentals={ganttRentals as GanttRentalData[]}
+          objects={clientObjects}
+          contracts={clientContracts}
+          documents={documents}
+          onClose={() => setSelectedPaymentId('')}
+        />
+      )}
+
       <FilterDialog
         open={showFilters}
         onOpenChange={setShowFilters}
@@ -645,6 +1110,7 @@ export default function Payments() {
               <TableHead>Дата оплаты</TableHead>
               <TableHead>Статус</TableHead>
               <TableHead>Комментарий</TableHead>
+              <TableHead>Распределение</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -699,6 +1165,11 @@ export default function Payments() {
                     ) : (
                       <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Button size="sm" variant={selectedPayment?.id === payment.id ? 'default' : 'secondary'} onClick={() => setSelectedPaymentId(payment.id)}>
+                      Открыть
+                    </Button>
                   </TableCell>
                 </TableRow>
               );

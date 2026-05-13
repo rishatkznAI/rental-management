@@ -1077,6 +1077,23 @@ export interface Payment {
   comment?: string;
 }
 
+export interface PaymentAllocation {
+  id: string;
+  paymentId: string;
+  clientId?: string;
+  objectId?: string;
+  contractId?: string;
+  rentalId?: string;
+  documentId?: string;
+  managerId?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  amount: number;
+  status?: string;
+  source?: 'manual' | 'auto_suggested' | 'imported' | 'legacy_backfill' | string;
+  comment?: string;
+}
+
 export type CompanyExpenseFrequency = 'monthly' | 'quarterly' | 'yearly';
 export type CompanyExpenseStatus = 'active' | 'paused' | 'archived';
 

@@ -12,7 +12,7 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown, Filter, X,
 } from 'lucide-react';
 import { type GanttRentalData } from '../mock-data';
-import type { Equipment, Payment } from '../types';
+import type { Equipment, Payment, PaymentAllocation } from '../types';
 import { formatCurrency } from '../lib/utils';
 import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
@@ -517,6 +517,10 @@ export default function ManagerReport() {
     queryKey: PAYMENT_KEYS.all,
     queryFn: paymentsService.getAll,
   });
+  const { data: paymentAllocations = [] } = useQuery<PaymentAllocation[]>({
+    queryKey: PAYMENT_KEYS.allocations,
+    queryFn: paymentsService.getAllocations,
+  });
 
   const refresh = useCallback(() => {
     setRefreshing(true);
@@ -524,6 +528,7 @@ export default function ManagerReport() {
       queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
       queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
       queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+      queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.allocations }),
     ]).finally(() => {
       setLoadedAt(Date.now());
       setRefreshing(false);
@@ -546,8 +551,8 @@ export default function ManagerReport() {
 
   // ── Build all rows from real data ──────────────────────────────────────────
   const allRows = useMemo(
-    () => buildManagerReportRows(rentals, equipment, payments) as ReportRow[],
-    [rentals, equipment, payments],
+    () => buildManagerReportRows(rentals, equipment, payments, {}, paymentAllocations) as ReportRow[],
+    [rentals, equipment, payments, paymentAllocations],
   );
 
   // ── Derived option lists ───────────────────────────────────────────────────
@@ -603,9 +608,9 @@ export default function ManagerReport() {
     const periodRows = buildManagerReportRows(rentals, equipment, payments, {
       dateFrom: filters.dateFrom,
       dateTo: filters.dateTo,
-    }) as ReportRow[];
+    }, paymentAllocations) as ReportRow[];
     return filterManagerReportRows(periodRows, filters) as ReportRow[];
-  }, [rentals, equipment, payments, filters]);
+  }, [rentals, equipment, payments, paymentAllocations, filters]);
 
   const summary = useMemo(
     () => buildManagerReportSummary(filteredRows) as ManagerSummaryRow[],

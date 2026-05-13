@@ -65,6 +65,103 @@ function getEffectivePaidAmount(payment) {
   return 0;
 }
 
+function getRecordId(record) {
+  return String(record?.id || '').trim();
+}
+
+function getPaymentId(record) {
+  return String(record?.paymentId || '').trim();
+}
+
+function getPaymentAllocationAmount(allocation) {
+  const amount = toNumber(allocation?.amount ?? allocation?.allocatedAmount);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function getPaymentAllocationCap(payment) {
+  const paid = getEffectivePaidAmount(payment);
+  const amount = toNumber(payment?.amount);
+  if (amount > 0) return Math.min(paid, amount);
+  return paid;
+}
+
+function normalizeFinanceArgs(value) {
+  if (Array.isArray(value)) return { paymentAllocations: value };
+  if (value && typeof value === 'object') {
+    return {
+      paymentAllocations: Array.isArray(value.paymentAllocations) ? value.paymentAllocations : [],
+    };
+  }
+  return { paymentAllocations: [] };
+}
+
+function paymentHasAllocations(payment, allocationsByPaymentId) {
+  const paymentId = getRecordId(payment);
+  return Boolean(paymentId && allocationsByPaymentId.has(paymentId));
+}
+
+function buildAllocationsByPaymentId(paymentAllocations) {
+  const map = new Map();
+  const seen = new Set();
+  for (const allocation of paymentAllocations || []) {
+    if (!shouldCountPayment(allocation)) continue;
+    const paymentId = getPaymentId(allocation);
+    if (!paymentId) continue;
+    const allocationId = getRecordId(allocation);
+    const dedupeKey = allocationId || JSON.stringify([
+      paymentId,
+      allocation?.rentalId || '',
+      allocation?.documentId || '',
+      allocation?.objectId || '',
+      allocation?.contractId || '',
+      getPaymentAllocationAmount(allocation),
+    ]);
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    if (!map.has(paymentId)) map.set(paymentId, []);
+    map.get(paymentId).push(allocation);
+  }
+  return map;
+}
+
+function buildAllocatedAmountsByRental(payments, paymentAllocations) {
+  const allocationsByPaymentId = buildAllocationsByPaymentId(paymentAllocations);
+  const byRentalId = new Map();
+  const paymentById = new Map((payments || []).filter(item => getRecordId(item)).map(item => [getRecordId(item), item]));
+
+  for (const [paymentId, allocations] of allocationsByPaymentId) {
+    const payment = paymentById.get(paymentId);
+    if (!payment || !shouldCountPayment(payment)) continue;
+    const effectivePaid = getPaymentAllocationCap(payment);
+    if (effectivePaid <= 0) continue;
+    let remaining = effectivePaid;
+    for (const allocation of allocations) {
+      const rentalId = String(allocation?.rentalId || '').trim();
+      const requested = getPaymentAllocationAmount(allocation);
+      if (!rentalId || requested <= 0 || remaining <= 0) continue;
+      const amount = Math.min(requested, remaining);
+      byRentalId.set(rentalId, (byRentalId.get(rentalId) || 0) + amount);
+      remaining -= amount;
+    }
+  }
+
+  const seenLegacyPaymentIds = new Set();
+  for (const payment of payments || []) {
+    if (!payment?.rentalId || !shouldCountPayment(payment) || paymentHasAllocations(payment, allocationsByPaymentId)) continue;
+    const paymentId = getRecordId(payment);
+    if (paymentId) {
+      if (seenLegacyPaymentIds.has(paymentId)) continue;
+      seenLegacyPaymentIds.add(paymentId);
+    }
+    const amount = getPaymentAllocationCap(payment);
+    if (amount <= 0) continue;
+    const rentalId = String(payment.rentalId);
+    byRentalId.set(rentalId, (byRentalId.get(rentalId) || 0) + amount);
+  }
+
+  return byRentalId;
+}
+
 function getOverdueDate(row) {
   return row?.expectedPaymentDate || row?.endDate || '';
 }
@@ -98,28 +195,17 @@ function getReceivableKey(row) {
   return `unlinked:${normalizeText(row?.client) || row?.rentalId || 'unknown'}`;
 }
 
-function buildRentalDebtRows(rentals, payments) {
-  const byRentalId = new Map();
-  const seenPaymentIds = new Set();
-  (payments || []).forEach(payment => {
-    // IMPORTANT: payment impact is joined through rentalId. Client names are editable labels
-    // and must not become financial foreign keys for debt calculations.
-    if (!payment?.rentalId) return;
-    if (!shouldCountPayment(payment)) return;
-    if (payment.id) {
-      const paymentId = String(payment.id);
-      if (seenPaymentIds.has(paymentId)) return;
-      seenPaymentIds.add(paymentId);
-    }
-    if (!byRentalId.has(payment.rentalId)) byRentalId.set(payment.rentalId, []);
-    byRentalId.get(payment.rentalId).push(payment);
-  });
+function buildRentalDebtRows(rentals, payments, options) {
+  const { paymentAllocations } = normalizeFinanceArgs(options);
+  // IMPORTANT: new payment impact is joined through payment_allocations.rentalId.
+  // Legacy payments with direct rentalId are still honored only when the payment has no
+  // explicit allocations, so contract-level receipts do not close every contract rental.
+  const paidByRentalId = buildAllocatedAmountsByRental(payments, paymentAllocations);
 
   return (rentals || [])
     .filter(shouldCountRental)
     .map(rental => {
-      const relatedPayments = byRentalId.get(rental.id) || [];
-      const paidAmount = relatedPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
+      const paidAmount = paidByRentalId.get(rental.id) || 0;
       const billing = calculateRentalBilling(rental);
       const amount = billing.finalRentalAmount;
       const outstanding = Math.max(0, amount - paidAmount);
@@ -137,6 +223,8 @@ function buildRentalDebtRows(rentals, payments) {
         equipmentId: rental.equipmentId || '',
         equipmentInv: rental.equipmentInv || '',
         manager: rental.manager || '',
+        managerId: rental.managerId || '',
+        documentId: rental.documentId || rental.actDocumentId || rental.invoiceDocumentId || '',
         startDate: rental.startDate || '',
         endDate: rental.endDate || '',
         expectedPaymentDate: rental.expectedPaymentDate || '',
@@ -230,8 +318,8 @@ function buildClientReceivables(clients, rentalDebtRows, today = new Date().toIS
   return Array.from(map.values()).sort((a, b) => b.currentDebt - a.currentDebt || a.client.localeCompare(b.client, 'ru'));
 }
 
-function buildClientFinancialSnapshots(clients, rentals, payments, today = new Date().toISOString().slice(0, 10)) {
-  const debtRows = buildRentalDebtRows(rentals, payments);
+function buildClientFinancialSnapshots(clients, rentals, payments, today = new Date().toISOString().slice(0, 10), options) {
+  const debtRows = buildRentalDebtRows(rentals, payments, options);
   const receivables = buildClientReceivables(clients, debtRows, today);
   const receivableMap = new Map(receivables.filter(item => item.clientId).map(item => [String(item.clientId), item]));
 
@@ -370,18 +458,151 @@ function buildClientDebtAgingRows(clients, rentalDebtRows, today = new Date().to
   );
 }
 
-function buildFinanceReport({ clients, rentals, payments, clientObjects, leasingContracts, leasingPaymentSchedule }, today = new Date().toISOString().slice(0, 10)) {
-  const debtRows = buildRentalDebtRows(rentals, payments);
+function buildDebtSummaryRows(rentalDebtRows, keyFields) {
+  const fields = Array.isArray(keyFields) ? keyFields : [keyFields];
+  const map = new Map();
+  for (const row of rentalDebtRows || []) {
+    const keyParts = fields.map(field => String(row?.[field] || '').trim());
+    const key = keyParts.map(value => value || 'none').join('|');
+    const existing = map.get(key) || fields.reduce((acc, field, index) => {
+      acc[field] = keyParts[index] || undefined;
+      return acc;
+    }, { debt: 0, rentals: 0 });
+    existing.debt += toNumber(row?.outstanding);
+    existing.rentals += 1;
+    map.set(key, existing);
+  }
+  return [...map.values()].sort((a, b) => b.debt - a.debt || JSON.stringify(a).localeCompare(JSON.stringify(b), 'ru'));
+}
+
+function buildUnallocatedPayments(payments, paymentAllocations) {
+  const allocationsByPaymentId = buildAllocationsByPaymentId(paymentAllocations);
+  return (payments || [])
+    .filter(shouldCountPayment)
+    .map(payment => {
+      const paymentId = getRecordId(payment);
+      const paidAmount = getPaymentAllocationCap(payment);
+      const allocations = paymentId ? (allocationsByPaymentId.get(paymentId) || []) : [];
+      const allocatedAmount = allocations.reduce((sum, allocation) => sum + getPaymentAllocationAmount(allocation), 0);
+      const legacyAllocatedAmount = payment?.rentalId && !paymentHasAllocations(payment, allocationsByPaymentId) ? paidAmount : 0;
+      const unallocatedAmount = Math.max(0, paidAmount - allocatedAmount - legacyAllocatedAmount);
+      return {
+        paymentId: paymentId || undefined,
+        clientId: getStableClientId(payment) || undefined,
+        objectId: payment.objectId || undefined,
+        contractId: payment.contractId || undefined,
+        amount: toNumber(payment.amount),
+        paidAmount,
+        allocatedAmount: Math.min(paidAmount, allocatedAmount + legacyAllocatedAmount),
+        unallocatedAmount,
+        status: payment.status || '',
+        paidDate: payment.paidDate || '',
+        dueDate: payment.dueDate || '',
+      };
+    })
+    .filter(row => row.unallocatedAmount > 0)
+    .sort((a, b) => b.unallocatedAmount - a.unallocatedAmount || String(a.paymentId || '').localeCompare(String(b.paymentId || '')));
+}
+
+function buildAllocationPreview({ payments, paymentAllocations, rentals }, paymentId) {
+  const id = String(paymentId || '').trim();
+  const payment = (payments || []).find(item => getRecordId(item) === id);
+  if (!payment || !shouldCountPayment(payment)) return { paymentId: id, unallocatedAmount: 0, suggestedAllocations: [] };
+  const existing = buildUnallocatedPayments([payment], paymentAllocations)[0];
+  const unallocatedAmount = existing?.unallocatedAmount || 0;
+  const clientId = getStableClientId(payment);
+  const contractId = String(payment.contractId || '').trim();
+  const candidateRows = buildRentalDebtRows(rentals || [], payments || [], { paymentAllocations })
+    .filter(row => (!clientId || row.clientId === clientId) && (!contractId || row.contractId === contractId))
+    .filter(row => row.outstanding > 0);
+  let remaining = unallocatedAmount;
+  const suggestedAllocations = [];
+  for (const row of candidateRows) {
+    if (remaining <= 0) break;
+    const amount = Math.min(row.outstanding, remaining);
+    suggestedAllocations.push({
+      paymentId: id,
+      clientId: row.clientId || clientId || undefined,
+      objectId: row.objectId || undefined,
+      contractId: row.contractId || contractId || undefined,
+      rentalId: row.rentalId,
+      amount,
+    });
+    remaining -= amount;
+  }
+  return { paymentId: id, unallocatedAmount, suggestedAllocations };
+}
+
+function resolveRentalForAllocation(payment, rentals, documentsById) {
+  const directRentalId = String(payment?.rentalId || '').trim();
+  if (directRentalId) return (rentals || []).find(item => String(item?.id || '').trim() === directRentalId) || { id: directRentalId };
+  const documentId = String(payment?.documentId || payment?.document || '').trim();
+  if (!documentId) return null;
+  const document = documentsById.get(documentId);
+  const documentRentalId = String(document?.rentalId || document?.rental || '').trim();
+  if (!documentRentalId) return null;
+  return (rentals || []).find(item => String(item?.id || '').trim() === documentRentalId) || { id: documentRentalId };
+}
+
+function backfillPaymentAllocations({ payments = [], paymentAllocations = [], rentals = [], documents = [], nowIso = () => new Date().toISOString(), generateId } = {}) {
+  const allocations = Array.isArray(paymentAllocations) ? paymentAllocations : [];
+  const existingPaymentIds = new Set(allocations.map(item => String(item?.paymentId || '').trim()).filter(Boolean));
+  const documentsById = new Map((documents || []).filter(item => item?.id).map(item => [String(item.id), item]));
+  const next = [...allocations];
+  let created = 0;
+
+  for (const payment of payments || []) {
+    const paymentId = getRecordId(payment);
+    if (!paymentId || existingPaymentIds.has(paymentId) || !shouldCountPayment(payment)) continue;
+    const amount = getPaymentAllocationCap(payment);
+    if (amount <= 0) continue;
+    const rental = resolveRentalForAllocation(payment, rentals, documentsById);
+    const rentalId = String(rental?.id || '').trim();
+    if (!rentalId) continue;
+    const documentId = String(payment?.documentId || payment?.document || '').trim() || undefined;
+    const id = typeof generateId === 'function'
+      ? generateId('PA')
+      : `PA-LEGACY-${paymentId}`;
+    next.push({
+      id,
+      paymentId,
+      clientId: getStableClientId(payment) || getStableClientId(rental) || undefined,
+      objectId: payment.objectId || rental.objectId || undefined,
+      contractId: payment.contractId || rental.contractId || undefined,
+      rentalId,
+      documentId,
+      amount,
+      status: 'active',
+      source: 'legacy_backfill',
+      createdAt: nowIso(),
+    });
+    existingPaymentIds.add(paymentId);
+    created += 1;
+  }
+
+  return { allocations: next, created };
+}
+
+function buildFinanceReport({ clients, rentals, payments, paymentAllocations, clientObjects, leasingContracts, leasingPaymentSchedule }, today = new Date().toISOString().slice(0, 10)) {
+  const debtRows = buildRentalDebtRows(rentals, payments, { paymentAllocations });
   const clientReceivables = buildClientReceivables(clients, debtRows, today);
-  const clientSnapshots = buildClientFinancialSnapshots(clients, rentals, payments, today);
+  const clientSnapshots = buildClientFinancialSnapshots(clients, rentals, payments, today, { paymentAllocations });
   const managerReceivables = buildManagerReceivables(debtRows, today, clients);
   const overdueBuckets = buildOverdueBuckets(debtRows, today);
   const clientDebtAgingRows = buildClientDebtAgingRows(clients, debtRows, today);
   const clientObjectDebtRows = buildClientObjectDebtBreakdown(clients, debtRows, clientObjects);
   const leasing = buildLeasingSummary(leasingContracts || [], leasingPaymentSchedule || [], today);
+  const unallocatedPayments = buildUnallocatedPayments(payments, paymentAllocations);
 
   return {
     debtRows,
+    debtByClient: buildDebtSummaryRows(debtRows, 'clientId'),
+    debtByObject: buildDebtSummaryRows(debtRows, ['clientId', 'objectId']),
+    debtByContract: buildDebtSummaryRows(debtRows, ['clientId', 'contractId']),
+    debtByRental: buildDebtSummaryRows(debtRows, ['clientId', 'objectId', 'contractId', 'rentalId']),
+    debtByManager: buildDebtSummaryRows(debtRows, ['managerId', 'manager']),
+    debtByDocument: buildDebtSummaryRows(debtRows, ['documentId']),
+    unallocatedPayments,
     clientReceivables,
     clientSnapshots,
     managerReceivables,
@@ -394,6 +615,7 @@ function buildFinanceReport({ clients, rentals, payments, clientObjects, leasing
       overdueClients: clientSnapshots.filter(item => item.overdueRentals > 0).length,
       exceededClients: clientSnapshots.filter(item => item.exceededLimit).length,
       unpaidRentals: debtRows.length,
+      unallocatedPayments: unallocatedPayments.reduce((sum, item) => sum + item.unallocatedAmount, 0),
       overdueDebt: managerReceivables.reduce((sum, item) => sum + item.overdueDebt, 0),
       leasingCurrentMonth: leasing.currentMonthAmount,
       leasingNextMonth: leasing.nextMonthAmount,
@@ -407,6 +629,7 @@ module.exports = {
   shouldCountPayment,
   shouldCountRental,
   getEffectivePaidAmount,
+  getPaymentAllocationCap,
   getRentalDebtOverdueDays,
   buildRentalDebtRows,
   calculateRentalBilling,
@@ -417,5 +640,9 @@ module.exports = {
   buildOverdueBuckets,
   buildClientDebtAgingRows,
   buildClientObjectDebtBreakdown,
+  buildDebtSummaryRows,
+  buildUnallocatedPayments,
+  buildAllocationPreview,
+  backfillPaymentAllocations,
   buildFinanceReport,
 };

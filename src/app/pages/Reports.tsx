@@ -25,7 +25,7 @@ import {
   calculateCurrentFleetUtilization,
   calculateMonthlyFleetUtilization,
 } from '../lib/fleetUtilization';
-import type { Equipment, ServiceTicket } from '../types';
+import type { Equipment, PaymentAllocation, ServiceTicket } from '../types';
 import type { Document } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
@@ -216,6 +216,10 @@ export default function Reports() {
     queryKey: ['payments'],
     queryFn: paymentsService.getAll,
   });
+  const { data: paymentAllocations = [] } = useQuery<PaymentAllocation[]>({
+    queryKey: ['payment_allocations'],
+    queryFn: paymentsService.getAllocations,
+  });
   const { data: tickets = [] } = useQuery<ServiceTicket[]>({
     queryKey: SERVICE_TICKET_KEYS.all,
     queryFn: serviceTicketsService.getAll,
@@ -293,12 +297,12 @@ export default function Reports() {
   }, [mechanicWorkload]);
 
   const financeDebtRows = useMemo(
-    () => buildRentalDebtRows(ganttRentals, payments),
-    [ganttRentals, payments],
+    () => buildRentalDebtRows(ganttRentals, payments, paymentAllocations),
+    [ganttRentals, paymentAllocations, payments],
   );
   const financeClientSnapshots = useMemo(
-    () => buildClientFinancialSnapshots(clients, ganttRentals, payments),
-    [clients, ganttRentals, payments],
+    () => buildClientFinancialSnapshots(clients, ganttRentals, payments, paymentAllocations),
+    [clients, ganttRentals, paymentAllocations, payments],
   );
   const financeManagerSnapshots = useMemo(
     () => buildManagerReceivables(financeDebtRows, undefined, clients),

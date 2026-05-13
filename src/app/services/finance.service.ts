@@ -45,6 +45,16 @@ export const financeService = {
     data: Partial<FinanceOperation>,
   ): Promise<FinanceOperation> =>
     api.patch<FinanceOperation>(`/api/finance/operations/${id}`, data),
+  previewPaymentAllocation: (paymentId: string): Promise<{ paymentId: string; unallocatedAmount: number; suggestedAllocations: unknown[] }> =>
+    api.post<{ paymentId: string; unallocatedAmount: number; suggestedAllocations: unknown[] }>(
+      `/api/finance/payments/${paymentId}/allocation-preview`,
+      {},
+    ),
+  applyPaymentAllocationPreview: (paymentId: string, allocations?: unknown[]): Promise<{ paymentId: string; allocations: unknown[] }> =>
+    api.post<{ paymentId: string; allocations: unknown[] }>(
+      `/api/finance/payments/${paymentId}/apply-allocation-preview`,
+      allocations ? { allocations } : {},
+    ),
   getManagerBreakdown: (manager: string, today?: string): Promise<ManagerBreakdownResponse> => {
     const params = new URLSearchParams({ manager });
     if (today) params.set('today', today);

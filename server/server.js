@@ -64,6 +64,7 @@ const {
   buildManagerReceivables,
   buildOverdueBuckets,
   buildFinanceReport,
+  backfillPaymentAllocations,
 } = require('./lib/finance-core');
 const {
   buildReceivables,
@@ -1187,6 +1188,7 @@ const COLLECTIONS = [
   'documents',
   'mechanic_documents',
   'payments',
+  'payment_allocations',
   'debt_collection_plans',
   'debt_collection_actions',
   'receivable_payment_plans',
@@ -2465,6 +2467,7 @@ startServer({
     ensureLegacyDefaultUsers,
     migrateReferenceCollections,
     migrateLegacyRepairFacts,
+    backfillPaymentAllocations,
     applyAdminResetFromEnv,
     registerWebhook: async () => {
       if (!SHOULD_REGISTER_MAX_WEBHOOKS) {

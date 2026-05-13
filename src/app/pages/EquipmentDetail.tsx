@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import {
 } from '../mock-data';
-import type { PhotoReference, ShippingPhoto, ServiceTicket, Payment, EquipmentStatus, EquipmentOperationPhotoCategory, ShippingEventType, Document, Client } from '../types';
+import type { PhotoReference, ShippingPhoto, ServiceTicket, Payment, EquipmentStatus, EquipmentOperationPhotoCategory, ShippingEventType, Document, Client, Delivery } from '../types';
 import { formatDate, formatDateTime, formatCurrency, getDaysUntil, getRentalDays, getRentalOverlapDays } from '../lib/utils';
 import { cn } from '../lib/utils';
 import { animatedModalClassName, animatedOverlayClassName } from '../lib/animations';
@@ -38,6 +38,7 @@ import { paymentsService } from '../services/payments.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
 import { documentsService } from '../services/documents.service';
 import { clientsService } from '../services/clients.service';
+import { deliveriesService } from '../services/deliveries.service';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
@@ -494,7 +495,8 @@ function printHandoffAct(event: ShippingPhoto, equipment: Equipment) {
     </section>
   `).join('');
 
-  const title = `${event.type === 'shipping' ? 'Акт отгрузки' : 'Акт приёмки'} ${equipment.inventoryNumber}`;
+  const operationKind = getShippingPhotoOperationKind(event);
+  const title = `${operationKind === 'shipping' ? 'Акт отгрузки' : 'Акт приёмки'} ${equipment.inventoryNumber}`;
   const html = `
     <!doctype html>
     <html lang="ru">
@@ -540,7 +542,7 @@ function printHandoffAct(event: ShippingPhoto, equipment: Equipment) {
           <div class="card">
             <strong>Состояние</strong>
             <div>Моточасы: ${escapeHtml(String(event.hoursValue ?? equipment.hours ?? '—'))}</div>
-            <div>Тип события: ${event.type === 'shipping' ? 'Отгрузка' : 'Приёмка'}</div>
+            <div>Тип события: ${operationKind === 'shipping' ? 'Отгрузка' : 'Приёмка'}</div>
             ${event.damageDescription ? `<div>Повреждения: ${escapeHtml(event.damageDescription)}</div>` : ''}
           </div>
         </div>
@@ -617,7 +619,96 @@ const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
 const EMPTY_PAYMENTS: Payment[] = [];
 const EMPTY_DOCUMENTS: Document[] = [];
 const EMPTY_CLIENTS: Client[] = [];
+const EMPTY_DELIVERIES: Delivery[] = [];
 const EMPTY_SHIPPING_PHOTOS: ShippingPhoto[] = [];
+
+const RECEIVING_OPERATION_ALIASES = new Set([
+  'receiving',
+  'acceptance',
+  'return',
+  'inbound',
+  'inspection',
+  'receipt',
+  'приемка',
+  'приёмка',
+  'возврат',
+]);
+
+const SHIPPING_OPERATION_ALIASES = new Set([
+  'shipment',
+  'shipping',
+  'dispatch',
+  'loading',
+  'delivery',
+  'outbound',
+  'отправка',
+  'отгрузка',
+]);
+
+function normalizeOperationText(value: unknown) {
+  return String(value || '').trim().toLowerCase().replaceAll('ё', 'е');
+}
+
+function normalizeEquipmentIdentifier(value: unknown) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getOperationKindFromValues(values: unknown[]) {
+  const normalized = values.map(normalizeOperationText).filter(Boolean);
+  if (normalized.some(value => RECEIVING_OPERATION_ALIASES.has(value))) return 'receiving' as const;
+  if (normalized.some(value => SHIPPING_OPERATION_ALIASES.has(value))) return 'shipping' as const;
+  return null;
+}
+
+function getDeliveryOperationKind(delivery: Delivery | null | undefined) {
+  if (!delivery) return null;
+  const source = delivery as Delivery & Record<string, unknown>;
+  return getOperationKindFromValues([
+    source.type,
+    source.kind,
+    source.category,
+    source.operationType,
+    source.operation,
+  ]);
+}
+
+function getShippingPhotoOperationKind(event: ShippingPhoto, delivery?: Delivery | null) {
+  const source = event as ShippingPhoto & Record<string, unknown>;
+  return getOperationKindFromValues([
+    source.type,
+    source.kind,
+    source.category,
+    source.operationType,
+    source.operation,
+    source.photoType,
+  ]) || getDeliveryOperationKind(delivery);
+}
+
+function getShippingPhotoList(event: ShippingPhoto) {
+  return Array.isArray(event.photos) ? event.photos : [];
+}
+
+function getDeliveryPhotoList(delivery: Delivery) {
+  const source = delivery as Delivery & Record<string, unknown>;
+  const photos = [
+    source.photo,
+    ...(Array.isArray(source.photos) ? source.photos : []),
+    ...(Array.isArray(source.deliveryPhotos) ? source.deliveryPhotos : []),
+    ...(Array.isArray(source.shippingPhotos) ? source.shippingPhotos : []),
+    ...(Array.isArray(source.attachments) ? source.attachments : []),
+  ];
+  return photos.filter((photo): photo is PhotoReference => Boolean(photoSource(photo as PhotoReference).trim()));
+}
+
+function getEventPhotoItems(event: ShippingPhoto) {
+  return Object.entries(event.photoCategories || {}).flatMap(([key, photos]) =>
+    (Array.isArray(photos) ? photos : []).map(photo => ({
+      key,
+      label: PHOTO_CATEGORY_LABELS[key as keyof typeof PHOTO_CATEGORY_LABELS] || key,
+      photo,
+    })),
+  ).concat(getShippingPhotoList(event).map(photo => ({ key: 'generic', label: 'Фото', photo })));
+}
 
 function getShippingPhotoGroups(event: ShippingPhoto): ShippingPhotoGroup[] {
   if (event.photoCategories && Object.keys(event.photoCategories).length > 0) {
@@ -712,7 +803,8 @@ function buildShippingComparisonPairs(events: ShippingPhoto[]) {
   const pairs: ShippingComparisonPair[] = [];
 
   chronological.forEach(event => {
-    if (event.type === 'shipping') {
+    const operationKind = getShippingPhotoOperationKind(event);
+    if (operationKind === 'shipping') {
       if (event.rentalId) {
         const list = openShippingByRental.get(event.rentalId) || [];
         list.push(event);
@@ -721,6 +813,7 @@ function buildShippingComparisonPairs(events: ShippingPhoto[]) {
       openShippingQueue.push(event);
       return;
     }
+    if (operationKind !== 'receiving') return;
 
     let matchingShipping: ShippingPhoto | undefined;
 
@@ -735,7 +828,7 @@ function buildShippingComparisonPairs(events: ShippingPhoto[]) {
     }
 
     if (!matchingShipping) {
-      matchingShipping = openShippingQueue.find(item => item.type === 'shipping');
+      matchingShipping = openShippingQueue.find(item => getShippingPhotoOperationKind(item) === 'shipping');
     }
 
     if (!matchingShipping) return;
@@ -823,6 +916,11 @@ export default function EquipmentDetail() {
     queryKey: ['clients'],
     queryFn: clientsService.getAll,
     enabled: canViewClients,
+  });
+  const { data: deliveryData = EMPTY_DELIVERIES } = useQuery({
+    queryKey: ['deliveries'],
+    queryFn: deliveriesService.getAll,
+    enabled: !!id && canViewShippingPhotos,
   });
   const { data: shippingPhotoData = EMPTY_SHIPPING_PHOTOS } = useQuery({
     queryKey: ['shippingPhotos', id],
@@ -930,27 +1028,84 @@ export default function EquipmentDetail() {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   ), [serviceHistory]);
 
+  const relatedRentalIds = useMemo(
+    () => new Set(ganttRentals.map(rental => String(rental.id || '')).filter(Boolean)),
+    [ganttRentals],
+  );
+  const relatedDeliveries = useMemo(
+    () => equipment
+      ? deliveryData.filter(delivery =>
+          delivery.equipmentId === equipment.id
+          || (delivery.equipmentInv && (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1 && delivery.equipmentInv === equipment.inventoryNumber)
+          || (delivery.rentalId && relatedRentalIds.has(String(delivery.rentalId)))
+          || (delivery.ganttRentalId && relatedRentalIds.has(String(delivery.ganttRentalId)))
+          || (delivery.classicRentalId && relatedRentalIds.has(String(delivery.classicRentalId)))
+        )
+      : [],
+    [deliveryData, equipment, inventoryCounts, relatedRentalIds],
+  );
+  const deliveryById = useMemo(
+    () => new Map(deliveryData.map(delivery => [String(delivery.id), delivery] as const)),
+    [deliveryData],
+  );
+  const relatedDeliveryById = useMemo(
+    () => new Map(relatedDeliveries.map(delivery => [String(delivery.id), delivery] as const)),
+    [relatedDeliveries],
+  );
+
   const [allShippingPhotos, setAllShippingPhotos] = useState<ShippingPhoto[]>([]);
   useEffect(() => {
     setAllShippingPhotos(shippingPhotoData);
   }, [shippingPhotoData]);
   const shippingPhotos = useMemo(
-    () => allShippingPhotos
-      .filter(p => p.equipmentId === id)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
-    [allShippingPhotos, id],
+    () => {
+      if (!equipment) return [];
+      const inventoryIsUnique = (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1;
+      const equipmentSerialNumber = normalizeEquipmentIdentifier(equipment.serialNumber);
+      const directEvents = allShippingPhotos.filter(event =>
+        event.equipmentId === equipment.id
+        || (equipmentSerialNumber && normalizeEquipmentIdentifier(event.serialNumber) === equipmentSerialNumber)
+        || ((event as ShippingPhoto & { equipmentInv?: string }).equipmentInv && inventoryIsUnique && (event as ShippingPhoto & { equipmentInv?: string }).equipmentInv === equipment.inventoryNumber)
+        || (event.rentalId && relatedRentalIds.has(String(event.rentalId)))
+        || ((event as ShippingPhoto & { deliveryId?: string }).deliveryId && relatedDeliveryById.has(String((event as ShippingPhoto & { deliveryId?: string }).deliveryId)))
+      );
+      const existingIds = new Set(directEvents.map(event => String(event.id)));
+      const deliveryEvents = relatedDeliveries.flatMap(delivery => {
+        const photos = getDeliveryPhotoList(delivery);
+        if (photos.length === 0) return [];
+        const operationKind = getDeliveryOperationKind(delivery);
+        if (!operationKind) return [];
+        const eventId = `delivery-photo-${delivery.id}`;
+        if (existingIds.has(eventId)) return [];
+        return [{
+          id: eventId,
+          equipmentId: equipment.id,
+          date: delivery.transportDate || delivery.neededBy || '',
+          type: operationKind,
+          uploadedBy: delivery.manager || delivery.carrierName || 'Доставка',
+          photos,
+          comment: delivery.comment,
+          rentalId: delivery.rentalId || delivery.ganttRentalId || delivery.classicRentalId || undefined,
+          source: 'manual' as const,
+          deliveryId: delivery.id,
+        } as ShippingPhoto & { deliveryId?: string }];
+      });
+      return [...directEvents, ...deliveryEvents]
+        .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+    },
+    [allShippingPhotos, deliveryById, equipment, inventoryCounts, relatedDeliveries, relatedDeliveryById, relatedRentalIds],
   );
   const shippingComparisonPairs = useMemo(
     () => buildShippingComparisonPairs(shippingPhotos),
     [shippingPhotos],
   );
   const latestShippingEvent = useMemo(
-    () => shippingPhotos.find(event => event.type === 'shipping') || null,
-    [shippingPhotos],
+    () => shippingPhotos.find(event => getShippingPhotoOperationKind(event, deliveryById.get(String((event as ShippingPhoto & { deliveryId?: string }).deliveryId || ''))) === 'shipping') || null,
+    [deliveryById, shippingPhotos],
   );
   const latestReceivingEvent = useMemo(
-    () => shippingPhotos.find(event => event.type === 'receiving') || null,
-    [shippingPhotos],
+    () => shippingPhotos.find(event => getShippingPhotoOperationKind(event, deliveryById.get(String((event as ShippingPhoto & { deliveryId?: string }).deliveryId || ''))) === 'receiving') || null,
+    [deliveryById, shippingPhotos],
   );
 
   const persistEquipment = React.useCallback(async (list: Equipment[]) => {
@@ -996,7 +1151,7 @@ export default function EquipmentDetail() {
             0,
           )
         : 0;
-      const flatCount = Array.isArray(event.photos) ? event.photos.length : 0;
+      const flatCount = getShippingPhotoList(event).length;
       return sum + Math.max(categoryCount, flatCount);
     }, 0),
     [shippingPhotos],
@@ -1084,7 +1239,8 @@ export default function EquipmentDetail() {
       let skippedPhotos = 0;
 
       for (const event of shippingPhotos) {
-        const baseFolder = `${sanitizeZipSegment(event.type === 'shipping' ? 'Отгрузка' : 'Приёмка')}_${sanitizeZipSegment(event.date || 'без-даты')}`;
+        const operationKind = getShippingPhotoOperationKind(event, deliveryById.get(String((event as ShippingPhoto & { deliveryId?: string }).deliveryId || '')));
+        const baseFolder = `${sanitizeZipSegment(operationKind === 'shipping' ? 'Отгрузка' : 'Приёмка')}_${sanitizeZipSegment(event.date || 'без-даты')}`;
         const groupedPhotos = getShippingPhotoAssets(event);
 
         for (let index = 0; index < groupedPhotos.length; index += 1) {
@@ -1151,7 +1307,7 @@ export default function EquipmentDetail() {
     } finally {
       setIsDownloadingPhotoZip(false);
     }
-  }, [equipment, isDownloadingPhotoZip, shippingPhotos]);
+  }, [deliveryById, equipment, isDownloadingPhotoZip, shippingPhotos]);
 
   const activeOrCreatedRental = ganttRentals.find(r => r.status === 'active' || r.status === 'created');
 
@@ -1608,6 +1764,8 @@ export default function EquipmentDetail() {
 
   // ── Payments for equipment rentals ──
   const equipmentRentalIds = new Set(ganttRentals.map(r => r.id));
+  const rentalById = new Map(ganttRentals.map(rental => [String(rental.id), rental] as const));
+  const clientById = new Map(clientData.map(client => [String(client.id), client] as const));
   const equipmentPayments = allPayments.filter(p => p.rentalId && equipmentRentalIds.has(p.rentalId));
   const totalPaidRevenue = equipmentPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const equipmentDebt = Math.max(0, totalRevenue - totalPaidRevenue);
@@ -1648,7 +1806,7 @@ export default function EquipmentDetail() {
       deliveryId: '',
     }] : []),
     ...shippingPhotos
-      .filter(event => event.type === 'receiving')
+      .filter(event => getShippingPhotoOperationKind(event, deliveryById.get(String((event as ShippingPhoto & { deliveryId?: string }).deliveryId || ''))) === 'receiving')
       .map(event => ({
         id: event.id,
         date: event.date,
@@ -1656,17 +1814,35 @@ export default function EquipmentDetail() {
         author: event.uploadedBy || 'Не указано',
         comment: event.damageDescription || event.comment || '',
         defects: event.damageDescription ? [event.damageDescription] : [],
-        photos: Object.entries(event.photoCategories || {}).flatMap(([key, photos]) =>
-          (Array.isArray(photos) ? photos : []).map(photo => ({
-            key,
-            label: PHOTO_CATEGORY_LABELS[key as keyof typeof PHOTO_CATEGORY_LABELS] || key,
-            photo,
-          })),
-        ).concat((event.photos || []).map(photo => ({ key: 'generic', label: 'Фото', photo }))),
+        photos: getEventPhotoItems(event),
         rentalId: event.rentalId || '',
-        deliveryId: '',
+        deliveryId: (event as ShippingPhoto & { deliveryId?: string }).deliveryId || '',
       })),
   ].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+  const shipmentRecords = shippingPhotos
+    .filter(event => getShippingPhotoOperationKind(event, deliveryById.get(String((event as ShippingPhoto & { deliveryId?: string }).deliveryId || ''))) === 'shipping')
+    .map(event => {
+      const deliveryId = (event as ShippingPhoto & { deliveryId?: string }).deliveryId || '';
+      const delivery = deliveryById.get(String(deliveryId)) || null;
+      const rental = event.rentalId ? rentalById.get(String(event.rentalId)) : null;
+      const client = (delivery?.clientId && clientById.get(String(delivery.clientId)))
+        || (rental?.clientId && clientById.get(String(rental.clientId)))
+        || null;
+      return {
+        id: event.id,
+        date: event.date,
+        title: 'Фото отгрузки',
+        author: event.uploadedBy || 'Не указано',
+        comment: event.comment || '',
+        photos: getEventPhotoItems(event),
+        rentalId: event.rentalId || delivery?.rentalId || delivery?.ganttRentalId || '',
+        deliveryId,
+        client: client?.company || delivery?.client || rental?.client || '',
+        route: delivery ? [delivery.origin, delivery.destination].filter(Boolean).join(' → ') : '',
+        address: delivery?.objectAddress || delivery?.destination || '',
+      };
+    })
+    .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
   const latestAcceptance = acceptanceRecords[0] || null;
   const serviceCost = serviceHistory.reduce((sum, ticket) => {
     const worksCost = (ticket.resultData?.worksPerformed || []).reduce((workSum, work) => workSum + (Number(work.totalCost) || 0), 0);
@@ -2752,16 +2928,53 @@ export default function EquipmentDetail() {
             <CompactMetric label="Последняя приёмка" value={latestAcceptance ? formatDateTime(latestAcceptance.date) : 'Нет записей'} tone={latestAcceptance ? 'success' : 'warning'} />
             <CompactMetric label="Всего записей" value={String(acceptanceRecords.length)} />
             <CompactMetric label="Фото" value={`${acceptanceRecords.reduce((sum, record) => sum + record.photos.length, 0)} фото`} />
-            <CompactMetric label="Дефекты" value={acceptanceRecords.some(record => record.defects.length) ? 'Есть замечания' : 'Не указаны'} tone={acceptanceRecords.some(record => record.defects.length) ? 'warning' : 'success'} />
+            <CompactMetric label="Фото отгрузки" value={`${shipmentRecords.reduce((sum, record) => sum + record.photos.length, 0)} фото`} tone={shipmentRecords.length ? 'success' : 'warning'} />
           </div>
-          {acceptanceRecords.length === 0 ? (
-            <SalePanel title="Приёмка техники">
-              <EmptyState icon={<Camera className="h-12 w-12" />} text="По этой технике пока нет записей приёмки" />
+          <div className="space-y-4">
+            <SalePanel title="Фото отгрузки">
+              {shipmentRecords.length === 0 ? (
+                <EmptyState icon={<Camera className="h-12 w-12" />} text="Фото отгрузки по этой технике пока не добавлены" />
+              ) : (
+                <div className="space-y-4">
+                  {shipmentRecords.map(record => (
+                    <div key={record.id} className="rounded-xl border border-border bg-secondary/40 p-4">
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <SaleField label="Дата" value={formatDateTime(record.date)} />
+                        <SaleField label="Связь" value={record.deliveryId ? `Доставка ${record.deliveryId}` : record.rentalId ? `Аренда ${record.rentalId}` : 'Не указана'} />
+                        <SaleField label="Клиент" value={record.client || 'Не указан'} />
+                        <SaleField label="Маршрут / адрес" value={record.route || record.address || 'Не указан'} />
+                      </div>
+                      {record.comment ? <p className="mt-3 text-sm leading-6 text-muted-foreground">{record.comment}</p> : null}
+                      {record.photos.length > 0 ? (
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          {record.photos.map((item, index) => (
+                            <button key={`${record.id}-${item.key}-${index}`} type="button" className="overflow-hidden rounded-lg border border-border bg-card text-left" onClick={() => setPreviewImage(displayPhotoUrl(item.photo))}>
+                              <img src={displayPhotoUrl(item.photo)} alt={item.label} className="h-32 w-full object-cover" onError={(event) => {
+                                const fallback = fallbackPhotoUrl(item.photo);
+                                if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                              }} />
+                              <span className="block px-3 py-2 text-xs text-muted-foreground">{item.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <EmptyState icon={<ImageIcon className="h-10 w-10" />} text="Фото по этой отгрузке не добавлены" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </SalePanel>
-          ) : (
-            <div className="space-y-4">
+            {acceptanceRecords.length === 0 ? (
+              <SalePanel title="Фото приёмки">
+                <EmptyState icon={<Camera className="h-12 w-12" />} text="По этой технике пока нет записей приёмки" />
+              </SalePanel>
+            ) : (
+              <SalePanel title="Фото приёмки">
+                <div className="space-y-4">
               {acceptanceRecords.map(record => (
-                <SalePanel key={record.id} title={`${record.title} · ${formatDateTime(record.date)}`}>
+                <div key={record.id} className="rounded-xl border border-border bg-secondary/40 p-4">
+                  <p className="mb-3 text-sm font-semibold text-foreground">{record.title} · {formatDateTime(record.date)}</p>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <SaleField label="Модель" value={`${equipment.manufacturer} ${equipment.model}`.trim() || '—'} />
                     <SaleField label="SN / INV" value={[equipment.serialNumber, equipment.inventoryNumber].filter(Boolean).join(' · ') || '—'} mono />
@@ -2794,10 +3007,12 @@ export default function EquipmentDetail() {
                   ) : (
                     <EmptyState icon={<ImageIcon className="h-10 w-10" />} text="Фото по этой записи не добавлены" />
                   )}
-                </SalePanel>
+                </div>
               ))}
-            </div>
-          )}
+                </div>
+              </SalePanel>
+            )}
+          </div>
         </TabsContent>
 
         {canViewRentals && (
@@ -4027,15 +4242,16 @@ export default function EquipmentDetail() {
                 <div className="grid gap-4 lg:grid-cols-2">
                   {[latestShippingEvent, latestReceivingEvent].filter(Boolean).map(event => {
                     const isCollapsed = isShippingEventCollapsed(event!.id);
+                    const operationKind = getShippingPhotoOperationKind(event!, deliveryById.get(String((event as ShippingPhoto & { deliveryId?: string }).deliveryId || '')));
                     const categoryCount = event?.photoCategories
                       ? Object.values(event.photoCategories).filter(list => Array.isArray(list) && list.length > 0).length
-                      : (event?.photos?.length ? 1 : 0);
+                      : (getShippingPhotoList(event!).length ? 1 : 0);
                     const checklistComplete = event?.checklist ? Object.values(event.checklist).every(Boolean) : false;
                     return (
                       <div
                         key={event!.id}
                         className={`rounded-xl border p-4 ${
-                          event!.type === 'shipping'
+                          operationKind === 'shipping'
                             ? 'border-blue-500/20 bg-blue-500/10'
                             : 'border-emerald-500/20 bg-emerald-500/10'
                         }`}
@@ -4043,8 +4259,8 @@ export default function EquipmentDetail() {
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <div className="flex items-center gap-2">
-                              <Badge variant={event!.type === 'shipping' ? 'info' : 'success'}>
-                                {event!.type === 'shipping' ? 'Последняя отгрузка' : 'Последняя приёмка'}
+                              <Badge variant={operationKind === 'shipping' ? 'info' : 'success'}>
+                                {operationKind === 'shipping' ? 'Последняя отгрузка' : 'Последняя приёмка'}
                               </Badge>
                               <span className="text-xs text-muted-foreground">{formatDate(event!.date)}</span>
                             </div>
@@ -4444,12 +4660,15 @@ export default function EquipmentDetail() {
               {/* Photo events list */}
               {shippingPhotos.length > 0 ? (
                 <div className="space-y-6">
-                  {shippingPhotos.map(event => (
+                  {shippingPhotos.map(event => {
+                    const operationKind = getShippingPhotoOperationKind(event, deliveryById.get(String((event as ShippingPhoto & { deliveryId?: string }).deliveryId || '')));
+                    const flatPhotos = getShippingPhotoList(event);
+                    return (
                     <div key={event.id} className="rounded-2xl border border-border bg-card/70 p-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Badge variant={event.type === 'shipping' ? 'info' : 'success'}>
-                            {event.type === 'shipping' ? 'Отгрузка' : 'Приёмка (возврат)'}
+                          <Badge variant={operationKind === 'shipping' ? 'info' : 'success'}>
+                            {operationKind === 'shipping' ? 'Отгрузка' : 'Приёмка (возврат)'}
                           </Badge>
                           <span className="text-sm text-muted-foreground">{formatDate(event.date)}</span>
                           {event.source === 'bot' && (
@@ -4548,7 +4767,7 @@ export default function EquipmentDetail() {
                             </div>
                           ) : (
                             <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
-                              {event.photos.map((photo, idx) => (
+                              {flatPhotos.map((photo, idx) => (
                                 <img key={idx} src={displayPhotoUrl(photo)} alt={`Фото ${idx + 1}`}
                                   className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
                                   onError={(event) => {
@@ -4560,11 +4779,12 @@ export default function EquipmentDetail() {
                               ))}
                             </div>
                           )}
-                          <p className="mt-2 text-xs text-muted-foreground">{event.photos.length} фото · нажмите для просмотра</p>
+                          <p className="mt-2 text-xs text-muted-foreground">{getEventPhotoItems(event).length} фото · нажмите для просмотра</p>
                         </>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 !showUploadPhotoForm && (

@@ -12,11 +12,38 @@ test('equipment detail renders rental fleet mode tabs and restored data blocks',
   }
   assert.match(detailSource, /const acceptanceRecords = \[/);
   assert.match(detailSource, /equipment\.acceptancePhotos/);
-  assert.match(detailSource, /shippingPhotos[\s\S]*event\.type === 'receiving'/);
+  assert.match(detailSource, /shippingPhotos[\s\S]*getShippingPhotoOperationKind\(event[\s\S]*=== 'receiving'/);
   assert.match(detailSource, /По этой технике пока нет записей приёмки/);
   assert.match(detailSource, /const equipmentDebt = Math\.max\(0, totalRevenue - totalPaidRevenue\)/);
   assert.match(detailSource, /getEffectivePaidAmount/);
   assert.match(detailSource, /Сервисные расходы/);
+});
+
+test('equipment detail keeps receiving and shipment photos separated with legacy shipment aliases', () => {
+  const minimalMantallEvent = {
+    equipment: { manufacturer: 'Mantall', model: 'XE140RT', serialNumber: '12310938' },
+    receivingPhoto: { type: 'receiving', photos: ['receiving.jpg'] },
+    shipmentPhoto: { type: 'dispatch', photos: ['dispatch.jpg'] },
+  };
+
+  assert.equal(minimalMantallEvent.equipment.serialNumber, '12310938');
+  for (const type of ['shipment', 'shipping', 'dispatch', 'loading', 'delivery', 'outbound', 'отправка', 'отгрузка']) {
+    assert.match(detailSource, new RegExp(`['"]${type}['"]`));
+  }
+  for (const type of ['receiving', 'acceptance', 'return', 'inbound', 'inspection', 'receipt']) {
+    assert.match(detailSource, new RegExp(`['"]${type}['"]`));
+  }
+  assert.match(detailSource, /function getShippingPhotoOperationKind/);
+  assert.match(detailSource, /function normalizeEquipmentIdentifier/);
+  assert.match(detailSource, /equipmentSerialNumber && normalizeEquipmentIdentifier\(event\.serialNumber\) === equipmentSerialNumber/);
+  assert.match(detailSource, /getDeliveryOperationKind\(delivery\)/);
+  assert.match(detailSource, /getDeliveryPhotoList\(delivery\)/);
+  assert.match(detailSource, /const shipmentRecords = shippingPhotos/);
+  assert.match(detailSource, /<SalePanel title="Фото отгрузки">/);
+  assert.match(detailSource, /<SalePanel title="Фото приёмки">/);
+  assert.match(detailSource, /getShippingPhotoOperationKind\(event[\s\S]*=== 'receiving'/);
+  assert.match(detailSource, /getShippingPhotoOperationKind\(event[\s\S]*=== 'shipping'/);
+  assert.doesNotMatch(detailSource, /Фото отгрузки по этой технике пока не добавлены[\s\S]*shipmentRecords\.length > 0/);
 });
 
 test('equipment detail renders sale mode tabs without making rental actions primary', () => {

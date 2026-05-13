@@ -1710,6 +1710,9 @@ function registerRentalRoutes(deps) {
         if (isClosedRentalStatus(classicRental?.status) || isClosedRentalStatus(ganttRental?.status)) {
           return res.status(409).json({ ok: false, error: 'Нельзя продлить закрытую или отменённую аренду.' });
         }
+        if (!invoiceSentToClient) {
+          return res.status(400).json({ ok: false, error: 'Подтвердите, что счёт отправлен клиенту.' });
+        }
         if (!hasRentalEquipment(classicRental || ganttRental)) {
           return res.status(409).json({ ok: false, error: 'Нельзя продлить аренду без техники.' });
         }
@@ -1781,9 +1784,11 @@ function registerRentalRoutes(deps) {
               {
                 ...classicRental,
                 plannedReturnDate: newPlannedReturnDate,
+                endDate: newPlannedReturnDate,
                 price: financials.nextAmount,
                 amount: financials.nextAmount,
                 paymentStatus: financials.nextPaymentStatus,
+                extensionConfirmedByClient: true,
                 extensionInvoiceSentToClient: invoiceSentToClient,
                 extensionFinancials: {
                   ...(classicRental.extensionFinancials || {}),
@@ -1812,6 +1817,7 @@ function registerRentalRoutes(deps) {
               plannedReturnDate: newPlannedReturnDate,
               amount: financials.nextAmount,
               paymentStatus: financials.nextPaymentStatus,
+              extensionConfirmedByClient: true,
               extensionInvoiceSentToClient: invoiceSentToClient,
             }, author), nextClassic || classicRental, equipmentList)
           : null;

@@ -907,6 +907,7 @@ export default function RentalDetail() {
         reason: extensionForm.reason.trim(),
         comment: extensionForm.comment.trim(),
         confirmedByClient: extensionForm.confirmedByClient,
+        invoiceSentToClient: extensionForm.invoiceSentToClient,
       });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),

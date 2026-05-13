@@ -36,7 +36,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
 import type { Client, Document, Equipment, EquipmentType, EquipmentStatus, Payment, Rental, RentalChangeRequest, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
 import { equipmentService } from '../services/equipment.service';
-import { rentalsService } from '../services/rentals.service';
+import { rentalsService, type RentalExtensionResponse } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
 import { serviceTicketsService } from '../services/service-tickets.service';
 import { clientsService } from '../services/clients.service';
@@ -344,6 +344,9 @@ type RentalEquipmentFields = Rental & {
   inventoryNumber?: string;
   serialNumber?: string;
   endDate?: string;
+  amount?: number;
+  paymentStatus?: GanttRentalData['paymentStatus'];
+  extensionInvoiceSentToClient?: boolean;
 };
 
 function canonicalizeGanttRentalFromClassic(
@@ -2436,6 +2439,43 @@ export default function Rentals() {
       setLinkRepairPending(false);
     }
   }, [isAdminRole, linkDiagnosticRow, queryClient, showToast]);
+
+  const handleRentalExtended = useCallback((response: RentalExtensionResponse) => {
+    if (!response.applied) return;
+    const updatedClassic = response.rental;
+    const updatedGantt = response.ganttRental;
+
+    if (updatedGantt) {
+      const nextGantt = updatedClassic
+        ? canonicalizeGanttRentalFromClassic(updatedGantt, updatedClassic, equipmentList)
+        : updatedGantt;
+      setGanttRentals(current => current.map(item => item.id === nextGantt.id ? nextGantt : item));
+      setSelectedRental(current => {
+        if (!current) return current;
+        const currentGanttId = (current as DrawerRentalData).__ganttRentalId || current.id;
+        const currentRentalId = getGanttRentalSourceId(current);
+        if (currentGanttId !== nextGantt.id && currentRentalId !== updatedClassic?.id) return current;
+        return buildRentalDrawerRental(nextGantt, updatedClassic);
+      });
+      return;
+    }
+
+    if (updatedClassic) {
+      setSelectedRental(current => {
+        if (!current) return current;
+        const currentRentalId = getGanttRentalSourceId(current) || current.id;
+        if (currentRentalId !== updatedClassic.id) return current;
+        const updatedClassicFields = updatedClassic as RentalEquipmentFields;
+        return {
+          ...current,
+          endDate: updatedClassic.plannedReturnDate || updatedClassicFields.endDate || current.endDate,
+          amount: updatedClassic.price || updatedClassicFields.amount || current.amount,
+          paymentStatus: updatedClassicFields.paymentStatus || current.paymentStatus,
+          extensionInvoiceSentToClient: updatedClassicFields.extensionInvoiceSentToClient,
+        } as DrawerRentalData;
+      });
+    }
+  }, [buildRentalDrawerRental, equipmentList]);
 
   const openLinkDiagnostic = useCallback((row: {
     rental: GanttRentalData;
@@ -5508,6 +5548,7 @@ export default function Rentals() {
         onAddPayment={handleAddPayment}
         onEarlyReturn={handleEarlyReturn}
         onUpdChange={handleUpdChange}
+        onExtended={handleRentalExtended}
         onRestore={handleRestoreRental}
         onReturn={(r) => {
             if (!canEditRentals) return;

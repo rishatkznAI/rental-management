@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const source = fs.readFileSync(new URL('../src/app/components/gantt/RentalDrawer.tsx', import.meta.url), 'utf8');
+const rentalsPageSource = fs.readFileSync(new URL('../src/app/pages/Rentals.tsx', import.meta.url), 'utf8');
+const rentalDetailSource = fs.readFileSync(new URL('../src/app/pages/RentalDetail.tsx', import.meta.url), 'utf8');
 
 function extractBlock(startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -65,6 +67,16 @@ test('extension dialog does not ask for reason and tracks invoice sent flag', ()
   assert.match(dialogBlock, /extensionInvoiceSentToClient/);
   assert.match(source, /invoiceSentToClient: false/);
   assert.match(source, /invoiceSentToClient: extensionForm\.invoiceSentToClient/);
+  assert.match(rentalDetailSource, /invoiceSentToClient: extensionForm\.invoiceSentToClient/);
+});
+
+test('successful extension response refreshes the open rental drawer date', () => {
+  assert.match(source, /onExtended\?: \(response: RentalExtensionResponse\) => void/);
+  assert.match(source, /onExtended\?\.\(result\)/);
+  assert.match(rentalsPageSource, /const handleRentalExtended = useCallback\(\(response: RentalExtensionResponse\)/);
+  assert.match(rentalsPageSource, /canonicalizeGanttRentalFromClassic\(updatedGantt, updatedClassic, equipmentList\)/);
+  assert.match(rentalsPageSource, /setSelectedRental\(current =>/);
+  assert.match(rentalsPageSource, /onExtended=\{handleRentalExtended\}/);
 });
 
 test('broken rental links use inline errors and cannot extend through GR id', () => {

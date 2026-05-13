@@ -26,6 +26,7 @@ import {
 } from '../../lib/rentalExtension.js';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
 import { rentalsService } from '../../services/rentals.service';
+import type { RentalExtensionResponse } from '../../services/rentals.service';
 import type { GanttRentalData } from '../../mock-data';
 import type { Client, Equipment, Payment, Rental, ServiceTicket } from '../../types';
 import type { ClientReceivableRow } from '../../lib/finance';
@@ -67,6 +68,7 @@ interface RentalDrawerProps {
   onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string) => void;
   onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
   onUpdChange: (rental: GanttRentalData, updSigned: boolean, updDate?: string) => void;
+  onExtended?: (response: RentalExtensionResponse) => void;
 }
 
 const statusLabels: Record<GanttRentalData['status'], string> = {
@@ -131,6 +133,7 @@ export function RentalDrawer({
   canViewMoney = true, canCreatePayments, canCreateDocuments = false, canCreateDeliveries = false, canCreateService = false,
   onClose, onReturn, onDowntime, onStatusChange, onDelete,
   onRestore, onUpdate, onAddComment, onAddPayment, onEarlyReturn, onUpdChange,
+  onExtended,
 }: RentalDrawerProps) {
   const queryClient = useQueryClient();
   const presence = useAnimatedPresence(Boolean(rentalProp), animationDurations.relaxed);
@@ -385,6 +388,7 @@ export function RentalDrawer({
         queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
       ]);
       if (result.applied) {
+        onExtended?.(result);
         setExtensionDialogOpen(false);
         setShowExtend(false);
         setExtensionInfo('Аренда продлена и синхронизирована с планировщиком.');

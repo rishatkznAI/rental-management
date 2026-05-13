@@ -199,17 +199,42 @@ test('rental extension without conflict applies and synchronizes classic and gan
       reason: 'Клиент продлевает работы',
       comment: 'Без изменения документов',
       confirmedByClient: true,
+      invoiceSentToClient: true,
       token: 'must-not-leak',
     });
 
     assert.equal(response.status, 200);
     assert.equal(response.body.applied, true);
     assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-14');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').endDate, '2026-06-14');
+    assert.equal(response.body.rental.endDate, '2026-06-14');
     assert.equal(state.rentals.find(item => item.id === 'R-1').price, 14000);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').amount, 14000);
     assert.equal(response.body.financialImpact.additionalAmount, 4000);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, '2026-06-14');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').extensionConfirmedByClient, true);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').extensionConfirmedByClient, true);
     assert.equal(state.rental_change_requests.length, 0);
+  });
+});
+
+test('rental extension requires invoice sent confirmation before applying dates', async () => {
+  const { app, state } = createApp();
+  state.rentals = state.rentals.filter(item => item.id !== 'R-conflict');
+  state.gantt_rentals = state.gantt_rentals.filter(item => item.id !== 'GR-conflict');
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'admin-token', {
+      newPlannedReturnDate: '2026-06-14',
+      reason: 'Клиент продлевает работы',
+      confirmedByClient: true,
+      invoiceSentToClient: false,
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /счёт отправлен/);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-10');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, '2026-06-10');
   });
 });
 
@@ -228,6 +253,7 @@ test('rental extension rejects zero financial delta when rate cannot be determin
       newPlannedReturnDate: '2026-06-14',
       reason: 'Клиент продлевает работы',
       confirmedByClient: true,
+      invoiceSentToClient: true,
     });
 
     assert.equal(response.status, 400);
@@ -248,12 +274,14 @@ test('repeated rental extension appends history and keeps a single linked planne
       reason: 'Клиент продлевает работы',
       comment: 'Первое продление',
       confirmedByClient: true,
+      invoiceSentToClient: true,
     });
     const second = await request(baseUrl, 'admin-token', {
       newPlannedReturnDate: '2026-06-16',
       reason: 'Задержка на объекте',
       comment: 'Второе продление',
       confirmedByClient: true,
+      invoiceSentToClient: true,
     });
 
     assert.equal(first.status, 200);
@@ -283,12 +311,14 @@ test('rental extension safely updates classic rental when linked gantt is missin
       newPlannedReturnDate: '2026-06-14',
       reason: 'Клиент продлевает работы',
       confirmedByClient: true,
+      invoiceSentToClient: true,
     });
 
     assert.equal(response.status, 200);
     assert.equal(response.body.applied, true);
     assert.equal(response.body.ganttRental, null);
     assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-14');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').endDate, '2026-06-14');
     assert.deepEqual(state.gantt_rentals, []);
   });
 });
@@ -309,6 +339,7 @@ test('rental extension rejects past date and closed rental', async () => {
       newPlannedReturnDate: '2026-04-01',
       reason: 'Клиент продлевает работы',
       confirmedByClient: true,
+      invoiceSentToClient: true,
     });
     assert.equal(past.status, 400);
 
@@ -359,6 +390,7 @@ test('rental extension detects future equipment conflict and creates approval re
       reason: 'Задержка на объекте',
       comment: 'Проверить бронь',
       confirmedByClient: true,
+      invoiceSentToClient: true,
     });
 
     assert.equal(response.status, 202);
@@ -382,6 +414,7 @@ test('rental extension requires write access and writes safe audit events', asyn
       newPlannedReturnDate: '2026-06-14',
       reason: 'Клиент продлевает работы',
       confirmedByClient: true,
+      invoiceSentToClient: true,
     });
     assert.equal(forbidden.status, 403);
 

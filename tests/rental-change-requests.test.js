@@ -917,6 +917,7 @@ test('approved conflicting rental extension is rechecked and rejected while conf
       newEndDate: '2026-06-24',
       reason: 'Клиент просит продлить аренду',
       confirmedByClient: true,
+      invoiceSentToClient: true,
     });
 
     assert.equal(update.status, 202);
@@ -1884,6 +1885,7 @@ test('conflict-free extension applies immediately and does not create approval',
       newEndDate: '2026-05-30',
       reason: 'Клиент продлил аренду',
       confirmedByClient: true,
+      invoiceSentToClient: true,
     });
 
     assert.equal(update.status, 200);

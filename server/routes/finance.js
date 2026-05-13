@@ -5,6 +5,7 @@ const {
   writeNumberingSettings,
 } = require('../lib/documents-core');
 const { getRentalBillingAmount } = require('../lib/rental-billing');
+const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 
 function registerFinanceRoutes(router, deps) {
   const {
@@ -37,7 +38,11 @@ function registerFinanceRoutes(router, deps) {
 
   function getFinanceCollections(user) {
     const clients = readData('clients') || [];
-    const rentals = readData('gantt_rentals') || [];
+    const classicRentals = readData('rentals') || [];
+    const classicRentalIds = new Set(classicRentals.map(item => String(item?.id || '').trim()).filter(Boolean));
+    const rentals = (readData('gantt_rentals') || []).filter(item =>
+      linkedRentalIds(item).some(id => classicRentalIds.has(id))
+    );
     const payments = readData('payments') || [];
     const clientObjects = readData('client_objects') || [];
     const leasingContracts = readData('leasing_contracts') || [];

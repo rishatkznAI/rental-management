@@ -179,7 +179,10 @@ test('rentals workspace pagination controls reset clamp and keep table actions w
 test('rentals workspace does not open broken gantt rows as full rentals', () => {
   assert.match(rentalsSource, /markBrokenRentalLink\(item, getBrokenRentalLinkReason\(item, inferredClassicCandidates\)\)/);
   assert.match(rentalsSource, /inferredClassicCandidates\.length === 1 \? inferredClassicCandidates\[0\] : null/);
-  assert.match(rentalsSource, /filter\(row => !row\.isBrokenRentalLink \|\| isAdminRole\)/);
+  assert.match(rentalsSource, /function isLinkedRentalRow\(ganttRental: GanttRentalData, rentalsById: Map<string, Rental>\): boolean/);
+  assert.match(rentalsSource, /const rentalRows = useMemo\(\s*\(\) => ganttRentals\.filter\(item => isLinkedRentalRow\(item, classicRentalsById\)\)/);
+  assert.match(rentalsSource, /const orphanPlannerRows = useMemo\(\s*\(\) => ganttRentals\.filter\(item => !isLinkedRentalRow\(item, classicRentalsById\)\)/);
+  assert.match(rentalsSource, /let rentals = \[\.\.\.rentalRows\]/);
   assert.match(rentalsSource, /if \(!isBrokenRentalLink\) setSelectedRental\(buildRentalDrawerRental\(row\.rental, row\.classicRental\)\)/);
   assert.match(rentalsSource, /Связь повреждена/);
   assert.match(rentalsSource, /brokenRentalLinkLabel\(row\.brokenRentalLinkReason\)/);
@@ -187,4 +190,19 @@ test('rentals workspace does not open broken gantt rows as full rentals', () => 
   assert.match(rentalsSource, /classifyRentalLinkStatus/);
   assert.match(rentalsSource, /\{isAdminRole && linkDiagnosticRow\?\.linkStatus\.repairAllowed && \(/);
   assert.doesNotMatch(rentalsSource, /Битая связь/);
+});
+
+test('orphan gantt planner rows are excluded from rental workspace calculations and actions', () => {
+  assert.match(rentalsSource, /mergeClientsWithFinancials\(clientsData, rentalRows, payments\)/);
+  assert.match(rentalsSource, /buildRentalDebtRows\(rentalRows, payments\)/);
+  assert.match(rentalsSource, /const totalRentals = rentalRows\.length/);
+  assert.match(rentalsSource, /returnsToday: rentalRows\.filter/);
+  assert.match(rentalsSource, /unpaid: rentalRows\.filter/);
+  assert.match(rentalsSource, /overdue: rentalRows\.filter/);
+  assert.match(rentalsSource, /return rentalDealRows/);
+  assert.match(rentalsSource, /if \(activeWorkspaceTab === 'returns'\) return returnsWorkspaceRows/);
+  assert.match(rentalsSource, /if \(activeWorkspaceTab === 'debt_docs'\) return debtDocsWorkspaceRows/);
+  assert.match(rentalsSource, /allRentals=\{rentalRows\}/);
+  assert.match(rentalsSource, /ganttRentals=\{rentalRows\}/);
+  assert.doesNotMatch(rentalsSource, /const totalRentals = ganttRentals\.length/);
 });

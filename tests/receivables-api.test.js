@@ -14,8 +14,21 @@ function createApp() {
   let idCounter = 0;
   const state = {
     clients: [{ id: 'c-1', company: 'ООО Долг', inn: '7701000000', manager: 'Office' }],
-    gantt_rentals: [{
+    rentals: [{
       id: 'r-1',
+      clientId: 'c-1',
+      client: 'ООО Долг',
+      equipmentInv: 'A-1',
+      manager: 'Office',
+      startDate: '2026-04-01',
+      plannedReturnDate: '2026-04-10',
+      status: 'active',
+    }],
+    gantt_rentals: [{
+      id: 'gr-1',
+      rentalId: 'r-1',
+      sourceRentalId: 'r-1',
+      originalRentalId: 'r-1',
       clientId: 'c-1',
       client: 'ООО Долг',
       equipmentInv: 'A-1',

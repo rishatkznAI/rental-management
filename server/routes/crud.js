@@ -38,6 +38,7 @@ const {
   normalizeEquipmentStoragePatch,
   normalizeEquipmentStorageRecord,
 } = require('../lib/equipment-classification');
+const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 
 function registerCrudRoutes(deps) {
   const {
@@ -165,8 +166,13 @@ function registerCrudRoutes(deps) {
 
   function relatedRentalsById() {
     const map = new Map();
-    [...(readData('rentals') || []), ...(readData('gantt_rentals') || [])].forEach(item => {
+    const rentals = readData('rentals') || [];
+    const rentalIds = new Set(rentals.map(item => String(item?.id || '').trim()).filter(Boolean));
+    rentals.forEach(item => {
       if (item?.id) map.set(String(item.id), item);
+    });
+    (readData('gantt_rentals') || []).forEach(item => {
+      if (item?.id && linkedRentalIds(item).some(id => rentalIds.has(id))) map.set(String(item.id), item);
     });
     return map;
   }

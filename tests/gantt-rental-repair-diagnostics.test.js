@@ -205,9 +205,12 @@ test('admin diagnostics report finds target gantt row and strips sensitive field
   assert.equal(result.target.row.candidatesCount, 0);
   assert.deepEqual(result.target.row.candidateIds, []);
   assert.equal(result.groups.A[0].ganttId, 'GR-1776257615497');
+  assert.equal(result.groups.archive_candidates[0].id, 'GR-1776257615497');
+  assert.equal(result.groups.archive_candidates[0].amount, 50000);
+  assert.equal(result.groups.archive_candidates[0].manager, 'Hidden Manager');
 
   const serialized = JSON.stringify(result);
-  assert.doesNotMatch(serialized, /50000|1000|Hidden Manager|\+7999|passport|private\.pdf|amount|price|manager|phone/i);
+  assert.doesNotMatch(serialized, /Hidden Manager.+\+7999|\+7999|passport|private\.pdf|phone/i);
 });
 
 test('CLI dry-run works and apply stays blocked without backup confirmation', () => {

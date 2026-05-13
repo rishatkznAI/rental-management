@@ -22,6 +22,10 @@ const {
   normalizeRentalDowntimePeriods,
   updateRentalDowntime,
 } = require('../lib/rental-downtime-periods');
+const {
+  isStandalonePlannerRow,
+  validateGanttRentalLinkRequirement,
+} = require('../lib/gantt-rental-link-guard');
 
 const AUDIT_COLLECTION = 'audit_logs';
 const RENTAL_AUDIT_LIMIT = 20;
@@ -332,6 +336,9 @@ function registerRentalRoutes(deps) {
     function linkGanttRentalForWrite(ganttRental, list, context) {
       if (collection !== 'gantt_rentals') return { ok: true, item: ganttRental };
       const rentals = readData('rentals') || [];
+      const linkRequirement = validateGanttRentalLinkRequirement(ganttRental, rentals);
+      if (!linkRequirement.ok) return linkRequirement;
+      if (isStandalonePlannerRow(ganttRental)) return { ok: true, item: ganttRental };
       const equipment = readData('equipment') || [];
       const resolution = resolveGanttRentalLink({
         ganttRental,
@@ -1136,7 +1143,7 @@ function registerRentalRoutes(deps) {
       if (collection === 'gantt_rentals') {
         const linked = linkGanttRentalForWrite(newItem, [], `${collection}:create`);
         if (!linked.ok) {
-          return res.status(linked.status || 400).json({ ok: false, error: linked.error });
+          return res.status(linked.status || 400).json({ ok: false, error: linked.code || linked.error, message: linked.error });
         }
         newItem = linked.item;
       }
@@ -1193,6 +1200,26 @@ function registerRentalRoutes(deps) {
       let meta = rawMeta;
       const data = readData(collection) || [];
       let idx = data.findIndex(entry => String(entry.id) === String(req.params.id));
+      if (collection === 'gantt_rentals' && idx !== -1) {
+        const linkFieldPatch = ['rentalId', 'sourceRentalId', 'originalRentalId']
+          .some(field => Object.prototype.hasOwnProperty.call(req.body || {}, field));
+        if (linkFieldPatch) {
+          const linkCandidate = {
+            ...data[idx],
+            ...(Object.prototype.hasOwnProperty.call(req.body || {}, 'rentalId') ? { rentalId: req.body.rentalId } : {}),
+            ...(Object.prototype.hasOwnProperty.call(req.body || {}, 'sourceRentalId') ? { sourceRentalId: req.body.sourceRentalId } : {}),
+            ...(Object.prototype.hasOwnProperty.call(req.body || {}, 'originalRentalId') ? { originalRentalId: req.body.originalRentalId } : {}),
+          };
+          const linkRequirement = validateGanttRentalLinkRequirement(linkCandidate, readData('rentals') || []);
+          if (!linkRequirement.ok) {
+            return res.status(linkRequirement.status || 400).json({
+              ok: false,
+              error: linkRequirement.code || linkRequirement.error,
+              message: linkRequirement.error,
+            });
+          }
+        }
+      }
       if (collection === 'rentals') {
         const rawRentalId = String(rawMeta.rentalId || '').trim();
         const rawSourceRentalId = String(rawMeta.sourceRentalId || '').trim();
@@ -1383,7 +1410,7 @@ function registerRentalRoutes(deps) {
       if (collection === 'gantt_rentals') {
         const linked = linkGanttRentalForWrite(nextItem, data, `${collection}:update:${data[idx].id}`);
         if (!linked.ok) {
-          return res.status(linked.status || 400).json({ ok: false, error: linked.error });
+          return res.status(linked.status || 400).json({ ok: false, error: linked.code || linked.error, message: linked.error });
         }
         nextItem = linked.item;
         nextItem = normalizeGanttRentalStatus(nextItem);
@@ -2077,13 +2104,13 @@ function registerRentalRoutes(deps) {
           const existing = existingById.get(String(item?.id || '')) || null;
           const candidate = {
             ...item,
-            rentalId: item.rentalId || existing?.rentalId,
-            sourceRentalId: item.sourceRentalId || existing?.sourceRentalId,
-            originalRentalId: item.originalRentalId || existing?.originalRentalId,
+            rentalId: Object.prototype.hasOwnProperty.call(item || {}, 'rentalId') ? item.rentalId : existing?.rentalId,
+            sourceRentalId: Object.prototype.hasOwnProperty.call(item || {}, 'sourceRentalId') ? item.sourceRentalId : existing?.sourceRentalId,
+            originalRentalId: Object.prototype.hasOwnProperty.call(item || {}, 'originalRentalId') ? item.originalRentalId : existing?.originalRentalId,
           };
           const linked = linkGanttRentalForWrite(candidate, linkedList, `${collection}:bulk:${item?.id || 'new'}`);
           if (!linked.ok) {
-            return res.status(linked.status || 400).json({ ok: false, error: linked.error });
+            return res.status(linked.status || 400).json({ ok: false, error: linked.code || linked.error, message: linked.error });
           }
           nextList.push(linked.item);
         }

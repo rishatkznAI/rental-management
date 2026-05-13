@@ -34,18 +34,20 @@ function createState(overrides = {}) {
       { id: 'C-2', company: 'ООО Чужой', manager: 'Анна' },
     ],
     rentals: [
+      { id: 'R-1', clientId: 'C-1', client: 'ООО Должник', manager: 'Руслан', equipmentInv: 'SKY-1', status: 'active', startDate: '2026-03-01', plannedReturnDate: '2026-05-02' },
+      { id: 'R-2', clientId: 'C-2', client: 'ООО Чужой', manager: 'Анна', equipmentInv: 'SKY-2', status: 'active', startDate: '2026-03-01', plannedReturnDate: '2026-04-01' },
       { id: 'R-closed', clientId: 'C-1', client: 'ООО Должник', manager: 'Руслан', equipmentInv: 'SKY-1', status: 'closed', startDate: '2026-03-01', plannedReturnDate: '2026-04-15', actualReturnDate: '2026-04-15' },
     ],
     gantt_rentals: [
-      { id: 'GR-1', clientId: 'C-1', client: 'ООО Должник', manager: 'Руслан', equipmentInv: 'SKY-1', status: 'active', startDate: '2026-03-01', endDate: '2026-05-02', amount: 100000 },
-      { id: 'GR-2', clientId: 'C-2', client: 'ООО Чужой', manager: 'Анна', equipmentInv: 'SKY-2', status: 'active', startDate: '2026-03-01', endDate: '2026-04-01', amount: 80000 },
+      { id: 'GR-1', rentalId: 'R-1', sourceRentalId: 'R-1', originalRentalId: 'R-1', clientId: 'C-1', client: 'ООО Должник', manager: 'Руслан', equipmentInv: 'SKY-1', status: 'active', startDate: '2026-03-01', endDate: '2026-05-02', amount: 100000 },
+      { id: 'GR-2', rentalId: 'R-2', sourceRentalId: 'R-2', originalRentalId: 'R-2', clientId: 'C-2', client: 'ООО Чужой', manager: 'Анна', equipmentInv: 'SKY-2', status: 'active', startDate: '2026-03-01', endDate: '2026-04-01', amount: 80000 },
     ],
     payments: [
-      { id: 'P-1', rentalId: 'GR-1', clientId: 'C-1', amount: 100000, paidAmount: 0, status: 'pending', dueDate: '2026-03-15' },
-      { id: 'P-2', rentalId: 'GR-2', clientId: 'C-2', amount: 80000, paidAmount: 0, status: 'pending', dueDate: '2026-03-15' },
+      { id: 'P-1', rentalId: 'R-1', clientId: 'C-1', amount: 100000, paidAmount: 0, status: 'pending', dueDate: '2026-03-15' },
+      { id: 'P-2', rentalId: 'R-2', clientId: 'C-2', amount: 80000, paidAmount: 0, status: 'pending', dueDate: '2026-03-15' },
     ],
     documents: [
-      { id: 'D-1', type: 'contract', status: 'sent', clientId: 'C-1', client: 'ООО Должник', rentalId: 'GR-1', manager: 'Руслан', date: '2026-05-01' },
+      { id: 'D-1', type: 'contract', status: 'sent', clientId: 'C-1', client: 'ООО Должник', rentalId: 'R-1', manager: 'Руслан', date: '2026-05-01' },
       { id: 'D-orphan', type: 'contract', status: 'signed', number: 'DOC-ORPHAN', manager: 'Руслан', date: '2026-05-01' },
     ],
     service: [

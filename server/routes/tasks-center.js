@@ -2,6 +2,7 @@ const express = require('express');
 const { buildClientDebtAgingRows, buildRentalDebtRows } = require('../lib/finance-core');
 const { normalizeRole } = require('../lib/role-groups');
 const { isRegularServiceTicket } = require('../lib/service-ticket-kind');
+const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 
 const OPEN_RENTAL_STATUSES = new Set(['active', 'confirmed', 'return_planned']);
 const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'ready']);
@@ -189,7 +190,9 @@ function buildTasksCenterPayload(input) {
 
   const clients = collectionData({ readData, accessControl, req, collection: 'clients' });
   const rentals = collectionData({ readData, accessControl, req, collection: 'rentals' });
-  const ganttRentals = collectionData({ readData, accessControl, req, collection: 'gantt_rentals' });
+  const rentalIds = new Set(rentals.map(item => normalizeText(item?.id)).filter(Boolean));
+  const ganttRentals = collectionData({ readData, accessControl, req, collection: 'gantt_rentals' })
+    .filter(item => linkedRentalIds(item).some(id => rentalIds.has(id)));
   const payments = collectionData({ readData, accessControl, req, collection: 'payments' });
   const documents = collectionData({ readData, accessControl, req, collection: 'documents' });
   const service = collectionData({ readData, accessControl, req, collection: 'service' });

@@ -148,6 +148,12 @@ function getGanttRentalSourceId(ganttRental: GanttRentalData): string {
   ).trim();
 }
 
+function isLinkedRentalRow(ganttRental: GanttRentalData, rentalsById: Map<string, Rental>): boolean {
+  const sourceRentalId = getGanttRentalSourceId(ganttRental);
+  if (!sourceRentalId) return false;
+  return rentalsById.has(sourceRentalId);
+}
+
 function normalizeMatchRef(value: unknown): string {
   return String(value ?? '').trim();
 }
@@ -1351,13 +1357,26 @@ export default function Rentals() {
     setPayments(paymentData);
   }, [paymentData]);
 
+  const classicRentalsById = useMemo(
+    () => new Map(classicRentalData.map(item => [item.id, item])),
+    [classicRentalData],
+  );
+  const rentalRows = useMemo(
+    () => ganttRentals.filter(item => isLinkedRentalRow(item, classicRentalsById)),
+    [classicRentalsById, ganttRentals],
+  );
+  const orphanPlannerRows = useMemo(
+    () => ganttRentals.filter(item => !isLinkedRentalRow(item, classicRentalsById)),
+    [classicRentalsById, ganttRentals],
+  );
+
   const computedClients = useMemo(
-    () => mergeClientsWithFinancials(clientsData, ganttRentals, payments),
-    [clientsData, ganttRentals, payments],
+    () => mergeClientsWithFinancials(clientsData, rentalRows, payments),
+    [clientsData, payments, rentalRows],
   );
   const rentalDebtRows = useMemo(
-    () => buildRentalDebtRows(ganttRentals, payments),
-    [ganttRentals, payments],
+    () => buildRentalDebtRows(rentalRows, payments),
+    [payments, rentalRows],
   );
   const rentalDebtRowsById = useMemo(
     () => new Map(rentalDebtRows.map(row => [row.rentalId, row])),
@@ -1838,7 +1857,7 @@ export default function Rentals() {
 
   // ── Filter rentals (always live, no gate) ────────────────────────────────────
   const filteredRentals = useMemo(() => {
-    let rentals = [...ganttRentals];
+    let rentals = [...rentalRows];
     const query = filterModel.trim().toLowerCase();
     const classicBySourceId = new Map(classicRentalData.map(item => [item.id, item]));
     const equipmentByIdForSearch = new Map(equipmentList.map(item => [item.id, item]));
@@ -1903,7 +1922,7 @@ export default function Rentals() {
       });
     }
     return rentals;
-  }, [classicRentalData, equipmentList, filterManager, filterClient, filterModel, filterPayment, filterStatus, filterUpd, ganttRentals, rentalPreset, serviceTickets, today]);
+  }, [classicRentalData, equipmentList, filterManager, filterClient, filterModel, filterPayment, filterStatus, filterUpd, rentalPreset, rentalRows, serviceTickets, today]);
 
   const visibleFilteredRentals = useMemo(
     () => filteredRentals.filter(r => rentalIntersectsRange(r, viewStart, viewEnd)),
@@ -1976,8 +1995,8 @@ export default function Rentals() {
   }, [ambiguousInventoryNumbers, canonicalEquipmentIdByInventory, equipmentList]);
 
   const ambiguousLegacyRentals = useMemo(
-    () => ganttRentals.filter(r => !r.equipmentId && ambiguousInventoryNumbers.has(r.equipmentInv)),
-    [ganttRentals, ambiguousInventoryNumbers],
+    () => rentalRows.filter(r => !r.equipmentId && ambiguousInventoryNumbers.has(r.equipmentInv)),
+    [rentalRows, ambiguousInventoryNumbers],
   );
 
   // ── Filter equipment (always live) ───────────────────────────────────────────
@@ -2007,18 +2026,18 @@ export default function Rentals() {
     }
     if (filterStatus === AVAILABLE_EQUIPMENT_STATUS_FILTER) {
       eq = eq.filter(e => {
-        const rentalsForEquipment = ganttRentals.filter(r => matchesEquipmentRow(r, e));
+        const rentalsForEquipment = rentalRows.filter(r => matchesEquipmentRow(r, e));
         return computeEffectiveStatus(e, rentalsForEquipment, today, { start: viewStart, end: viewEnd }) === 'available';
       });
     }
     if (filterEquipmentStatus) {
       eq = eq.filter(e => {
-        const rentalsForEquipment = ganttRentals.filter(r => matchesEquipmentRow(r, e));
+        const rentalsForEquipment = rentalRows.filter(r => matchesEquipmentRow(r, e));
         return computeEffectiveStatus(e, rentalsForEquipment, today, { start: viewStart, end: viewEnd }) === filterEquipmentStatus;
       });
     }
     return [...eq].sort(compareEquipmentForPlanner);
-  }, [equipmentList, filterModel, visibleFilteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus, filterEquipmentStatus, ganttRentals, matchesEquipmentRow, today, viewEnd, viewStart]);
+  }, [equipmentList, filterModel, visibleFilteredRentals, filterManager, filterClient, filterUpd, filterPayment, filterStatus, filterEquipmentStatus, rentalRows, matchesEquipmentRow, today, viewEnd, viewStart]);
 
   const filteredEquipmentGroups = useMemo(() => {
     const grouped = new Map<EquipmentType, Equipment[]>();
@@ -2163,7 +2182,7 @@ export default function Rentals() {
 
   // Stats
   const totalEquipment = equipmentList.length;
-  const totalRentals = ganttRentals.length;
+  const totalRentals = rentalRows.length;
   const shownEquipment = filteredEquipment.length;
   const shownRentals = filterStatus === AVAILABLE_EQUIPMENT_STATUS_FILTER ? 0 : filteredRentals.length;
   const overviewCounts = useMemo(() => {
@@ -2299,18 +2318,18 @@ export default function Rentals() {
   const quickFilterCounts = useMemo(() => {
     const todayStr = format(today, 'yyyy-MM-dd');
     return {
-      returnsToday: ganttRentals.filter(
+      returnsToday: rentalRows.filter(
         rental => rental.endDate === todayStr && rental.status !== 'returned' && rental.status !== 'closed',
       ).length,
-      unpaid: ganttRentals.filter(rental => rental.paymentStatus !== 'paid').length,
-      overdue: ganttRentals.filter(
+      unpaid: rentalRows.filter(rental => rental.paymentStatus !== 'paid').length,
+      overdue: rentalRows.filter(
         rental => rental.endDate < todayStr && rental.status !== 'returned' && rental.status !== 'closed',
       ).length,
     };
-  }, [ganttRentals, today]);
+  }, [rentalRows, today]);
 
   const movementEntries = useMemo(() => {
-    const rentalsById = new Map(ganttRentals.map(rental => [rental.id, rental]));
+    const rentalsById = new Map(rentalRows.map(rental => [rental.id, rental]));
     const equipmentById = new Map(equipmentList.map(item => [item.id, item]));
 
     return [...shippingPhotos]
@@ -2339,7 +2358,7 @@ export default function Rentals() {
             : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300',
         };
       });
-  }, [equipmentList, ganttRentals, shippingPhotos]);
+  }, [equipmentList, rentalRows, shippingPhotos]);
 
   const getMovementsForEquipment = useCallback((equipment: Equipment) => {
     return movementEntries.filter(entry =>
@@ -2355,11 +2374,6 @@ export default function Rentals() {
   const filteredMovementEntries = useMemo(
     () => movementEntries.filter(entry => movementFilter === 'all' || entry.type === movementFilter),
     [movementEntries, movementFilter],
-  );
-
-  const classicRentalsById = useMemo(
-    () => new Map(classicRentalData.map(item => [item.id, item])),
-    [classicRentalData],
   );
 
   const ganttCountBySourceRentalId = useMemo(() => {
@@ -2447,11 +2461,11 @@ export default function Rentals() {
     const selectedId = String(selected.id || '');
     const selectedGanttId = String(selected.__ganttRentalId || selected.__linkedGanttRentalId || '');
     const existsAsClassic = classicRentalsById.has(selectedId);
-    const existsAsGantt = ganttRentals.some(item => item.id === selectedGanttId || item.id === selectedId);
+    const existsAsGantt = rentalRows.some(item => item.id === selectedGanttId || item.id === selectedId);
     if (selected.__brokenRentalLink || (!existsAsClassic && !existsAsGantt)) {
       setSelectedRental(null);
     }
-  }, [classicRentalsById, ganttRentals, selectedRental]);
+  }, [classicRentalsById, rentalRows, selectedRental]);
 
   const equipmentById = useMemo(
     () => new Map(equipmentList.map(item => [item.id, item])),
@@ -2464,7 +2478,7 @@ export default function Rentals() {
     const nextThirtyDays = addDays(today, 30);
     const query = filterModel.trim().toLowerCase();
 
-    return ganttRentals
+    return rentalRows
       .map(rental => {
         const sourceRentalId = getGanttRentalSourceId(rental);
         const classicRental = sourceRentalId ? classicRentalsById.get(sourceRentalId) : undefined;
@@ -2611,10 +2625,10 @@ export default function Rentals() {
     filterPayment,
     filterStatus,
     filterUpd,
-    ganttRentals,
     isAdminRole,
     movementEntries,
     payments,
+    rentalRows,
     serviceTickets,
     today,
     viewEnd,
@@ -2947,7 +2961,7 @@ export default function Rentals() {
     const todayKey = format(today, 'yyyy-MM-dd');
     const tomorrowKey = format(addDays(today, 1), 'yyyy-MM-dd');
     const counts = filteredEquipment.reduce((acc, equipment) => {
-      const rentalsForEquipment = ganttRentals.filter(rental => matchesEquipmentRow(rental, equipment));
+      const rentalsForEquipment = rentalRows.filter(rental => matchesEquipmentRow(rental, equipment));
       const status = computeEffectiveStatus(equipment, rentalsForEquipment, today, { start: viewStart, end: viewEnd });
       if (status === 'available') acc.available += 1;
       if (status === 'rented') acc.rented += 1;
@@ -5414,7 +5428,7 @@ export default function Rentals() {
           <DialogHeader>
             <DialogTitle>Диагностика связи аренды</DialogTitle>
             <DialogDescription>
-              Read-only проверка связки gantt_rentals, rentals, техники и договора.
+              Read-only проверка связки gantt_rentals, rentals, техники и договора. Orphan-записей вне рабочего списка: {orphanPlannerRows.length}.
             </DialogDescription>
           </DialogHeader>
           {linkDiagnosticRow && (
@@ -5472,7 +5486,7 @@ export default function Rentals() {
       <RentalDrawer
         rental={selectedRental}
         equipment={selectedRental ? equipmentList.find(e => matchesEquipmentRow(selectedRental, e)) : undefined}
-        allRentals={ganttRentals}
+        allRentals={rentalRows}
         classicRentals={classicRentalData}
         payments={payments}
         serviceTickets={serviceTickets}
@@ -5674,12 +5688,12 @@ export default function Rentals() {
       <ReturnModal
         open={showReturnModal}
         rental={returnRental}
-        ganttRentals={ganttRentals}
+        ganttRentals={rentalRows}
         onClose={() => { setShowReturnModal(false); setReturnRental(null); }}
         onConfirm={async (data) => {
           if (!canEditRentals) return;
           const ganttRentalId = data.ganttRentalId || data.rentalId;
-          const rental = ganttRentals.find(r => r.id === ganttRentalId) ?? data.rental;
+          const rental = rentalRows.find(r => r.id === ganttRentalId) ?? data.rental;
           if (!rental) {
             showToast('Не найдена аренда для возврата. Обновите планировщик и повторите действие.', 'error');
             return;
@@ -5859,7 +5873,7 @@ export default function Rentals() {
       <NewRentalModal
           open={showNewRentalModal}
           preselectedEquipmentId={preselectedEquipmentId}
-          ganttRentals={ganttRentals}
+          ganttRentals={rentalRows}
           equipmentList={equipmentList}
         onClose={() => setShowNewRentalModal(false)}
         onConfirm={async (data) => {

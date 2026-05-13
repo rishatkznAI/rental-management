@@ -166,6 +166,86 @@ test('creating a client rental creates a linked planner row with stable ids', as
   });
 });
 
+test('cannot create rental-type gantt row without an existing rental link', async () => {
+  const { app } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const missingLink = await request(baseUrl, 'POST', '/api/gantt_rentals', {
+      clientId: 'C-1',
+      client: 'ООО Ромашка',
+      equipmentId: 'EQ-1',
+      equipmentInv: 'INV-1',
+      startDate: '2026-05-10',
+      endDate: '2026-05-20',
+      status: 'active',
+    });
+    assert.equal(missingLink.status, 400);
+    assert.equal(missingLink.body.error, 'GANTT_RENTAL_WITHOUT_RENTAL');
+
+    const brokenLink = await request(baseUrl, 'POST', '/api/gantt_rentals', {
+      rentalId: 'R-missing',
+      clientId: 'C-1',
+      client: 'ООО Ромашка',
+      equipmentId: 'EQ-1',
+      equipmentInv: 'INV-1',
+      startDate: '2026-05-10',
+      endDate: '2026-05-20',
+      status: 'active',
+    });
+    assert.equal(brokenLink.status, 400);
+    assert.equal(brokenLink.body.error, 'GANTT_RENTAL_WITHOUT_RENTAL');
+  });
+});
+
+test('cannot update or bulk sync gantt rows into rental-type orphans', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+    const gantt = state.gantt_rentals.find(item => item.rentalId === created.body.id);
+    assert.ok(gantt);
+
+    const orphanPatch = await request(baseUrl, 'PATCH', `/api/gantt_rentals/${gantt.id}`, {
+      rentalId: '',
+      sourceRentalId: '',
+      originalRentalId: '',
+    });
+    assert.equal(orphanPatch.status, 400);
+    assert.equal(orphanPatch.body.error, 'GANTT_RENTAL_WITHOUT_RENTAL');
+
+    const bulk = await request(baseUrl, 'PUT', '/api/gantt_rentals', [
+      {
+        ...gantt,
+        rentalId: 'R-missing',
+        sourceRentalId: '',
+        originalRentalId: '',
+      },
+    ]);
+    assert.equal(bulk.status, 400);
+    assert.equal(bulk.body.error, 'GANTT_RENTAL_WITHOUT_RENTAL');
+  });
+});
+
+test('standalone planner rows require explicit non-rental type and do not need rental link', async () => {
+  const { app } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/gantt_rentals', {
+      sourceType: 'maintenance',
+      operationType: 'maintenance',
+      client: 'ТО',
+      equipmentId: 'EQ-1',
+      equipmentInv: 'INV-1',
+      startDate: '2026-05-10',
+      endDate: '2026-05-10',
+      status: 'maintenance',
+    });
+    assert.equal(response.status, 201);
+    assert.equal(response.body.sourceType, 'maintenance');
+  });
+});
+
 test('creating and patching rental preserves object and contract in linked planner row', async () => {
   const { app, state } = createApp();
 

@@ -15,6 +15,7 @@ const {
   enrichRecordFromRentalLinks,
   normalizeClientRelationLinks,
 } = require('../lib/client-relations');
+const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 
 function registerDocumentRoutes(router, deps) {
   const {
@@ -55,8 +56,13 @@ function registerDocumentRoutes(router, deps) {
 
   function relatedRentalsById() {
     const map = new Map();
-    [...(readData('rentals') || []), ...(readData('gantt_rentals') || [])].forEach(item => {
+    const rentals = readData('rentals') || [];
+    const rentalIds = new Set(rentals.map(item => String(item?.id || '').trim()).filter(Boolean));
+    rentals.forEach(item => {
       if (item?.id) map.set(String(item.id), item);
+    });
+    (readData('gantt_rentals') || []).forEach(item => {
+      if (item?.id && linkedRentalIds(item).some(id => rentalIds.has(id))) map.set(String(item.id), item);
     });
     return map;
   }
@@ -69,11 +75,14 @@ function registerDocumentRoutes(router, deps) {
     const wanted = String(rentalId || '').trim();
     if (!wanted) return null;
     const rentals = readData('rentals') || [];
+    const rentalIds = new Set(rentals.map(item => String(item?.id || '').trim()).filter(Boolean));
     const ganttRentals = readData('gantt_rentals') || [];
     const classic = rentals.find(item => String(item?.id || '') === wanted) || null;
     const gantt = ganttRentals.find(item =>
+      linkedRentalIds(item).some(id => rentalIds.has(id)) && (
       String(item?.id || '') === wanted ||
       canonicalRentalId(item) === wanted
+      )
     ) || null;
     if (!classic && !gantt) return null;
     return {

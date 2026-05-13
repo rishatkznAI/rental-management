@@ -365,11 +365,14 @@ function sanitizeRepairRow(row) {
     clientId: text(row?.clientId),
     clientName: firstText([row?.clientName, row?.client]),
     equipmentId: text(row?.equipmentId),
+    equipmentName: text(row?.model),
     model: text(row?.model),
     serialNumber: text(row?.serialNumber),
     inventoryNumber: text(row?.inventoryNumber),
     startDate: text(row?.startDate),
     endDate: text(row?.endDate),
+    amount: Number.isFinite(Number(row?.amount)) ? Number(row.amount) : undefined,
+    manager: text(row?.manager || row?.responsible),
     status: text(row?.status),
     reason: text(row?.reason),
     group: text(row?.group),
@@ -379,6 +382,7 @@ function sanitizeRepairRow(row) {
     foundRental: Boolean(row?.targetRentalId),
     foundEquipment: Boolean(row?.equipmentId || row?.inventoryNumber || row?.serialNumber),
     recommendation: text(row?.recommendation),
+    recommendedAction: text(row?.recommendation),
     targetRentalId: text(row?.targetRentalId),
     candidatesCount: Number(row?.candidateCount || 0),
     candidateCount: Number(row?.candidateCount || 0),
@@ -399,6 +403,31 @@ function sanitizeRepairRow(row) {
       hasSafeSingleCandidate: Boolean(row?.group === 'B' && row?.targetRentalId),
     },
   };
+}
+
+function duplicateReviewRows(ganttRentals, rentalsById) {
+  const byRentalId = new Map();
+  for (const gantt of ganttRentals) {
+    const linkedId = linkedRentalIds(gantt).find(id => rentalsById.has(id));
+    if (!linkedId) continue;
+    if (!byRentalId.has(linkedId)) byRentalId.set(linkedId, []);
+    byRentalId.get(linkedId).push(gantt);
+  }
+  return [...byRentalId.entries()]
+    .filter(([, rows]) => rows.length > 1)
+    .flatMap(([rentalId, rows]) => rows.map(row => ({
+      ...sanitizeRepairRow({
+        ...rowDto(row),
+        linkedRentalIds: linkedRentalIds(row),
+        reason: 'DUPLICATE_GANTT_FOR_RENTAL',
+        group: 'duplicate_review',
+        recommendation: 'manual_duplicate_review',
+        confidence: 'medium',
+        relatedCounts: {},
+      }),
+      targetRentalId: rentalId,
+      recommendedAction: 'manual_duplicate_review',
+    })));
 }
 
 function countValidGanttLinks(ganttRentals, rentalsById) {
@@ -565,6 +594,28 @@ function buildAdminGanttRentalRepairDiagnostics(collections = {}, options = {}) 
     Object.entries(plan.groups).map(([group, rows]) => [group, rows.map(sanitizeRepairRow)]),
   );
   const brokenRows = plan.rows.map(sanitizeRepairRow);
+  const rowsWithPreview = brokenRows.map(withPreviewDecision);
+  const ok = ganttRentals
+    .filter(gantt => linkedRentalIds(gantt).some(id => rentalsById.has(id)))
+    .map(gantt => sanitizeOkGanttRow(gantt, rentalsById));
+  const duplicateReview = duplicateReviewRows(ganttRentals, rentalsById);
+  const archiveCandidates = rowsWithPreview.filter(row => row.previewAction === 'candidate_archive');
+  const blocked = rowsWithPreview.filter(row =>
+    row.previewAction.startsWith('blocked_') ||
+    row.flags.hasPayments ||
+    row.flags.hasDocuments ||
+    row.flags.hasDeliveries ||
+    row.flags.hasService
+  );
+  const blockedIds = new Set(blocked.map(row => row.ganttId));
+  const archiveIds = new Set(archiveCandidates.map(row => row.ganttId));
+  const duplicateIds = new Set(duplicateReview.map(row => row.ganttId));
+  const orphan = rowsWithPreview.filter(row =>
+    !blockedIds.has(row.ganttId) &&
+    !archiveIds.has(row.ganttId) &&
+    !duplicateIds.has(row.ganttId) &&
+    row.group !== 'D'
+  );
   const targetRow = brokenRows.find(row => row.ganttId === targetId || row.id === targetId) || null;
   const targetExists = ganttRentals.some(row => text(row?.id) === targetId);
 
@@ -579,12 +630,24 @@ function buildAdminGanttRentalRepairDiagnostics(collections = {}, options = {}) 
       totalGanttRentals: ganttRentals.length,
       validLinks: countValidGanttLinks(ganttRentals, rentalsById),
       brokenRows: brokenRows.length,
+      ok: ok.length,
+      orphan: orphan.length,
+      duplicateReview: duplicateReview.length,
+      archiveCandidates: archiveCandidates.length,
+      blocked: blocked.length,
       groupA: groups.A.length,
       groupB: groups.B.length,
       groupC: groups.C.length,
       groupD: groups.D.length,
     },
-    groups,
+    groups: {
+      ...groups,
+      ok,
+      orphan,
+      duplicate_review: duplicateReview,
+      archive_candidates: archiveCandidates,
+      blocked,
+    },
     brokenRows,
     target: {
       id: targetId,

@@ -1,5 +1,6 @@
 const { assertRepairItemsAdmin } = require('./service-audit-log');
 const { calculateWorkAmount, normalizePayType } = require('./mechanic-workload');
+const { linkedRentalIds } = require('./gantt-rental-link-guard');
 
 function createBotOperations(deps) {
   const {
@@ -721,7 +722,10 @@ function createBotOperations(deps) {
       throw new Error('Техника для операции не найдена');
     }
 
-    const rentals = readData('gantt_rentals') || [];
+    const classicRentalIds = new Set((readData('rentals') || []).map(item => String(item?.id || '').trim()).filter(Boolean));
+    const rentals = (readData('gantt_rentals') || []).filter(item =>
+      linkedRentalIds(item).some(id => classicRentalIds.has(id))
+    );
     const todayStr = new Date().toISOString().slice(0, 10);
     const now = nowIso();
     const activeRental = rentals.find(r =>
@@ -843,7 +847,10 @@ function createBotOperations(deps) {
 
   function saveBotShippingPhotoEvent(equipment, authUser, type, photoUrls, comment = '') {
     const events = readData('shipping_photos') || [];
-    const rentals = readData('gantt_rentals') || [];
+    const classicRentalIds = new Set((readData('rentals') || []).map(item => String(item?.id || '').trim()).filter(Boolean));
+    const rentals = (readData('gantt_rentals') || []).filter(item =>
+      linkedRentalIds(item).some(id => classicRentalIds.has(id))
+    );
     const todayStr = new Date().toISOString().slice(0, 10);
     const now = nowIso();
     const activeRental = rentals.find(r =>

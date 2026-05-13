@@ -4,6 +4,7 @@ const { createBotFormatters } = require('./bot-formatters');
 const { createBotOperations } = require('./bot-operations');
 const { getRentalBillingAmount } = require('./rental-billing');
 const { SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE } = require('./service-audit-log');
+const { linkedRentalIds } = require('./gantt-rental-link-guard');
 const {
   DELIVERY_STATUS_LABELS,
   canCarrierAccessDelivery,
@@ -418,7 +419,10 @@ function createBotHandlers(deps) {
   }
 
   function getManagerSummaryData(managerName) {
-    const rentals = readData('gantt_rentals') || [];
+    const classicRentalIds = new Set((readData('rentals') || []).map(item => String(item?.id || '').trim()).filter(Boolean));
+    const rentals = (readData('gantt_rentals') || []).filter(item =>
+      linkedRentalIds(item).some(id => classicRentalIds.has(id))
+    );
     const payments = readData('payments') || [];
     const equipment = readData('equipment') || [];
     const monthStart = new Date();

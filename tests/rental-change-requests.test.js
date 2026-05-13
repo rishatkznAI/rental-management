@@ -2102,6 +2102,7 @@ test('gantt create restores rentalId from one exact classic rental match', async
 
   await withServer(app, async (baseUrl) => {
     const created = await request(baseUrl, 'POST', '/api/gantt_rentals', 'admin-token', {
+      rentalId: classicRental.id,
       client: classicRental.client,
       equipmentInv: '083',
       startDate: '2026-04-10',
@@ -2200,6 +2201,7 @@ test('gantt create canonicalizes wrong equipment from the matched rental', async
 
   await withServer(app, async (baseUrl) => {
     const created = await request(baseUrl, 'POST', '/api/gantt_rentals', 'admin-token', {
+      rentalId: classicRental.id,
       client: classicRental.client,
       equipmentId: 'EQ-032',
       equipmentInv: '03291436',

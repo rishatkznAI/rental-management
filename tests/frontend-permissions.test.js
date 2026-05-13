@@ -235,7 +235,7 @@ test('frontend investor rental surfaces avoid forbidden background reads', () =>
   assert.match(rentalDetailSource, /useClientContractsList\(\{ enabled: canViewClients \}\)/);
   assert.match(rentalDetailSource, /useDocumentsList\(\{ enabled: canViewDocuments \}\)/);
   assert.match(rentalDetailSource, /useRentalChangeRequestsList\(canViewApprovals\)/);
-  assert.match(rentalDetailSource, /useRentalAuditHistory\(id \|\| '', \{ enabled: !!rental \}\)/);
+  assert.match(rentalDetailSource, /useRentalAuditHistory\(canonicalRentalId, \{ enabled: !!rental \}\)/);
 });
 
 test('carrier deliveries page does not prefetch forbidden context or show finance controls', () => {

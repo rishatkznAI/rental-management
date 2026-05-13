@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   X, CreditCard, FileText, User, MessageSquare,
   ArrowRight, RotateCcw, CirclePause as PauseCircle,
@@ -8,11 +9,26 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
 import { formatCurrency, formatDate, formatDateTime } from '../../lib/utils';
 import { findConflictingRental } from '../../lib/rental-conflicts';
 import { animationDurations, useAnimatedPresence } from '../../lib/animations';
+import { resolveRentalByAnyId } from '../../lib/rentalNavigation.js';
+import {
+  EXTENSION_REASONS,
+  buildExtensionConflictDisplay,
+  getRentalExtensionValidation,
+} from '../../lib/rentalExtension.js';
+import { RENTAL_KEYS } from '../../hooks/useRentals';
+import { rentalsService } from '../../services/rentals.service';
 import type { GanttRentalData } from '../../mock-data';
-import type { Client, Equipment, Payment, ServiceTicket } from '../../types';
+import type { Client, Equipment, Payment, Rental, ServiceTicket } from '../../types';
 import type { ClientReceivableRow } from '../../lib/finance';
 import { getEffectivePaidAmount } from '../../lib/finance';
 import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
@@ -24,6 +40,7 @@ interface RentalDrawerProps {
   rental: GanttRentalData | null;
   equipment: Equipment | undefined;
   allRentals: GanttRentalData[];
+  classicRentals?: Rental[];
   payments: Payment[];
   serviceTickets?: ServiceTicket[];
   clients?: Client[];
@@ -109,13 +126,14 @@ const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
 type RentalDrawerTab = 'overview' | 'terms' | 'payments' | 'documents' | 'delivery' | 'history';
 
 export function RentalDrawer({
-  rental: rentalProp, equipment, allRentals, payments, serviceTickets = EMPTY_SERVICE_TICKETS,
+  rental: rentalProp, equipment, allRentals, classicRentals = [], payments, serviceTickets = EMPTY_SERVICE_TICKETS,
   clients = [], clientReceivables = [], managers = [],
   canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals,
   canViewMoney = true, canCreatePayments, canCreateDocuments = false, canCreateDeliveries = false, canCreateService = false,
   onClose, onReturn, onDowntime, onStatusChange, onDelete,
   onRestore, onUpdate, onAddComment, onAddPayment, onEarlyReturn, onUpdChange,
 }: RentalDrawerProps) {
+  const queryClient = useQueryClient();
   const presence = useAnimatedPresence(Boolean(rentalProp), animationDurations.relaxed);
   const [retainedRental, setRetainedRental] = useState<GanttRentalData | null>(rentalProp);
   const [retainedEquipment, setRetainedEquipment] = useState<Equipment | undefined>(equipment);
@@ -142,8 +160,17 @@ export function RentalDrawer({
   const [payComment, setPayComment] = useState('');
   const [payError, setPayError] = useState('');
 
-  // Extension is opened from the canonical rental card to avoid silent date-only changes.
   const [showExtend, setShowExtend] = useState(false);
+  const [extensionDialogOpen, setExtensionDialogOpen] = useState(false);
+  const [extensionForm, setExtensionForm] = useState({
+    newPlannedReturnDate: '',
+    reason: '',
+    comment: '',
+    confirmedByClient: false,
+  });
+  const [extensionError, setExtensionError] = useState('');
+  const [extensionInfo, setExtensionInfo] = useState('');
+  const [isExtending, setIsExtending] = useState(false);
 
   // Early return state
   const [showEarlyReturn, setShowEarlyReturn] = useState(false);
@@ -198,13 +225,11 @@ export function RentalDrawer({
   const rental = displayRental;
   const currentEquipment = displayEquipment;
 
-  const rentalDetailId = String(
-    rental.rentalId ||
-    rental.sourceRentalId ||
-    rental.originalRentalId ||
-    rental.id ||
-    ''
-  ).trim();
+  const rentalResolution = resolveRentalByAnyId(rental, classicRentals, allRentals);
+  const rentalDetailId = rentalResolution.canonicalId;
+  const rentalDetailError = rentalResolution.status === 'conflict'
+    ? 'Найдено несколько связанных записей аренды. Нужна проверка связей.'
+    : `Не удалось открыть карточку аренды: не найдена связанная запись rentals для ${rental.id}`;
 
   const activeManagers = filterRentalManagerUsers(managers);
 
@@ -268,6 +293,101 @@ export function RentalDrawer({
         ? `Не назначен · ${formatCurrency(remaining)}`
         : 'Нет ожидаемого платежа'
     : 'Скрыто';
+  const extensionRental = {
+    ...rental,
+    id: rentalDetailId || rental.id,
+    plannedReturnDate: rental.endDate,
+    equipment: [rental.equipmentInv].filter(Boolean),
+    price: rental.amount || rentalBillingAmount,
+    discount: 0,
+    rate: '',
+    contact: '',
+    deliveryAddress: rentalLocation === '—' ? '' : rentalLocation,
+    status: rental.status === 'closed' || rental.status === 'returned' ? 'closed' : 'active',
+  } as Rental;
+  const extensionValidation = getRentalExtensionValidation({
+    rental: extensionRental,
+    form: extensionForm,
+    hasEquipment: Boolean(rental.equipmentId || rental.equipmentInv || currentEquipment),
+  });
+  const extensionStartDate = (() => {
+    if (!rental.endDate) return '';
+    const date = new Date(`${rental.endDate}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return '';
+    date.setDate(date.getDate() + 1);
+    return date.toISOString().slice(0, 10);
+  })();
+  const extensionConflict = extensionForm.newPlannedReturnDate
+    ? buildExtensionConflictDisplay(findConflictingRental(
+        { id: rental.equipmentId || currentEquipment?.id || rental.equipmentInv, inventoryNumber: rental.equipmentInv || currentEquipment?.inventoryNumber },
+        extensionStartDate || rental.endDate,
+        extensionForm.newPlannedReturnDate,
+        allRentals,
+        rental.id,
+      ))
+    : null;
+
+  const openRentalCard = () => {
+    if (rentalDetailId) return;
+    console.warn('[rental-drawer] rental card navigation failed', rentalResolution.diagnostics);
+    window.alert(rentalDetailError);
+  };
+
+  const openExtensionDialog = () => {
+    setExtensionForm({
+      newPlannedReturnDate: rental.endDate || '',
+      reason: '',
+      comment: '',
+      confirmedByClient: false,
+    });
+    setExtensionError('');
+    setExtensionInfo('');
+    setExtensionDialogOpen(true);
+  };
+
+  const handleExtendRental = async () => {
+    if (!canExtendRentalTerm) return;
+    if (!rentalDetailId && rentalResolution.status === 'conflict') {
+      console.warn('[rental-drawer] rental extension resolution conflict', rentalResolution.diagnostics);
+      setExtensionError('Найдено несколько связанных записей аренды. Нужна проверка связей.');
+      return;
+    }
+    if (extensionValidation) {
+      setExtensionError(extensionValidation);
+      return;
+    }
+    setIsExtending(true);
+    setExtensionError('');
+    setExtensionInfo('');
+    try {
+      const result = await rentalsService.extend(rentalDetailId || rental.id, {
+        newEndDate: extensionForm.newPlannedReturnDate,
+        newPlannedReturnDate: extensionForm.newPlannedReturnDate,
+        reason: extensionForm.reason.trim(),
+        comment: extensionForm.comment.trim(),
+        confirmedByClient: extensionForm.confirmedByClient,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        queryClient.invalidateQueries({ queryKey: ['rental-change-requests'] }),
+      ]);
+      if (result.applied) {
+        setExtensionDialogOpen(false);
+        setShowExtend(false);
+        setExtensionInfo('Аренда продлена и синхронизирована с планировщиком.');
+      } else {
+        const conflict = buildExtensionConflictDisplay(result.conflict);
+        setExtensionInfo(conflict
+          ? `Найден конфликт: ${conflict.client}, ${conflict.period}. Запрос отправлен на согласование.`
+          : 'Продление отправлено на согласование.');
+      }
+    } catch (error) {
+      setExtensionError(error instanceof Error ? error.message : 'Не удалось продлить аренду.');
+    } finally {
+      setIsExtending(false);
+    }
+  };
 
   // Handle add payment submit
   const handlePaySubmit = () => {
@@ -318,7 +438,7 @@ export function RentalDrawer({
       return;
     }
     if (editEndDate > rental.endDate) {
-      setEditError('Продление срока выполняется через карточку аренды с расчётом суммы и подтверждением клиента.');
+      setEditError('Для продления используйте действие «Продлить аренду» во вкладке «Сроки и возврат».');
       return;
     }
     const amount = Number(editAmount);
@@ -596,6 +716,19 @@ export function RentalDrawer({
                       Сроки и возврат
                     </Button>
                   )}
+                  {rentalDetailId ? (
+                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" asChild>
+                      <Link to={`/rentals/${encodeURIComponent(rentalDetailId)}`}>
+                        <ArrowRight className="h-4 w-4" />
+                        Открыть полную карточку
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" onClick={openRentalCard}>
+                      <ArrowRight className="h-4 w-4" />
+                      Открыть полную карточку
+                    </Button>
+                  )}
                   {canCreateDocuments && (
                     <Button size="sm" variant="secondary" className="justify-start rounded-xl" asChild>
                       <Link to="/documents">
@@ -850,22 +983,30 @@ export function RentalDrawer({
 
               {activeTab === 'terms' && canExtendRentalTerm && showExtend && (
                 <section>
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
                     <div className="mb-2 text-xs text-amber-700 dark:text-amber-400">
                       Текущая дата возврата: <strong>{formatDate(rental.endDate)}</strong>
                     </div>
-                    <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">
-                      Продление выполняется в карточке аренды: там проверяются конфликты техники, сумма продления, долг клиента и согласование с клиентом.
-                    </p>
-                    <div className="mt-3 flex justify-end">
+                    {clientDebt && canViewMoney && (
+                      <p className="text-xs leading-relaxed text-blue-700 dark:text-blue-300">
+                        Текущий долг клиента: <strong>{formatCurrency(clientDebt.currentDebt || 0)}</strong>
+                      </p>
+                    )}
+                    {extensionInfo && (
+                      <p className="mt-2 text-xs leading-relaxed text-blue-700 dark:text-blue-300">{extensionInfo}</p>
+                    )}
+                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      <Button size="sm" onClick={openExtensionDialog}>
+                        Продлить аренду
+                      </Button>
                       {rentalDetailId ? (
-                        <Button size="sm" asChild>
+                        <Button size="sm" variant="secondary" asChild>
                           <Link to={`/rentals/${encodeURIComponent(rentalDetailId)}`}>
-                            Открыть карточку
+                            Открыть полную карточку
                           </Link>
                         </Button>
                       ) : (
-                        <Button size="sm" disabled>Карточка недоступна</Button>
+                        <Button size="sm" variant="secondary" onClick={openRentalCard}>Открыть полную карточку</Button>
                       )}
                     </div>
                   </div>
@@ -1485,6 +1626,93 @@ export function RentalDrawer({
           )}
         </div>
       </div>
+
+      <Dialog open={extensionDialogOpen} onOpenChange={setExtensionDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Продлить аренду</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-gray-800 dark:bg-gray-950/60">
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500 dark:text-gray-400">Текущая дата возврата</span>
+                <span className="font-semibold text-slate-950 dark:text-white">{formatDate(rental.endDate)}</span>
+              </div>
+              {clientDebt && canViewMoney && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-500 dark:text-gray-400">Долг клиента</span>
+                  <span className="font-semibold text-slate-950 dark:text-white">{formatCurrency(clientDebt.currentDebt || 0)}</span>
+                </div>
+              )}
+              {extensionConflict && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                  Конфликт техники: {extensionConflict.client}, {extensionConflict.period}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Новая дата окончания *</label>
+              <input
+                type="date"
+                value={extensionForm.newPlannedReturnDate}
+                min={extensionStartDate || rental.endDate}
+                onChange={event => {
+                  setExtensionForm(prev => ({ ...prev, newPlannedReturnDate: event.target.value }));
+                  setExtensionError('');
+                }}
+                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Причина *</label>
+              <select
+                value={extensionForm.reason}
+                onChange={event => {
+                  setExtensionForm(prev => ({ ...prev, reason: event.target.value }));
+                  setExtensionError('');
+                }}
+                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+              >
+                <option value="">Выберите причину</option>
+                {EXTENSION_REASONS.map(reason => (
+                  <option key={reason} value={reason}>{reason}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Комментарий</label>
+              <textarea
+                value={extensionForm.comment}
+                onChange={event => setExtensionForm(prev => ({ ...prev, comment: event.target.value }))}
+                className="min-h-20 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+              />
+            </div>
+            <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={extensionForm.confirmedByClient}
+                onChange={event => {
+                  setExtensionForm(prev => ({ ...prev, confirmedByClient: event.target.checked }));
+                  setExtensionError('');
+                }}
+                className="mt-1"
+              />
+              Клиент согласовал продление
+            </label>
+            {(extensionError || extensionValidation) && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                {extensionError || extensionValidation}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setExtensionDialogOpen(false)}>Отмена</Button>
+            <Button onClick={() => void handleExtendRental()} disabled={isExtending || Boolean(extensionValidation)}>
+              {isExtending ? 'Продление...' : 'Продлить аренду'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

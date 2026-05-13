@@ -5179,6 +5179,7 @@ export default function Rentals() {
         rental={selectedRental}
         equipment={selectedRental ? equipmentList.find(e => matchesEquipmentRow(selectedRental, e)) : undefined}
         allRentals={ganttRentals}
+        classicRentals={classicRentalData}
         payments={payments}
         serviceTickets={serviceTickets}
         clients={computedClients}

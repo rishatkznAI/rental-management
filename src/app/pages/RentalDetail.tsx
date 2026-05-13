@@ -40,6 +40,7 @@ import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { formatRentalAuditEvents } from '../lib/rentalAuditHistory.js';
 import { buildDocumentControl } from '../lib/documentControl.js';
 import { buildRentalQuickActions } from '../lib/quickActions.js';
+import { resolveRentalByAnyId } from '../lib/rentalNavigation.js';
 import { getEffectivePaidAmount } from '../lib/finance';
 import {
   EXTENSION_REASONS,
@@ -79,6 +80,8 @@ type RentalFormState = {
   deliveryAddress: string;
   comments: string;
 };
+
+type RentalDetailTab = 'overview' | 'terms' | 'payments' | 'documents' | 'delivery' | 'service' | 'history';
 
 const EMPTY_RENTALS: Rental[] = [];
 const EMPTY_GANTT_RENTALS: GanttRentalData[] = [];
@@ -217,9 +220,15 @@ export default function RentalDetail() {
   const { data: documents = EMPTY_DOCUMENTS } = useDocumentsList({ enabled: canViewDocuments });
   const { data: changeRequests = [] } = useRentalChangeRequestsList(canViewApprovals);
 
-  const rental = rentals.find(r => r.id === id);
-  const { data: auditHistory, isLoading: auditHistoryLoading, isError: auditHistoryError } = useRentalAuditHistory(id || '', { enabled: !!rental });
+  const rentalResolution = useMemo(
+    () => resolveRentalByAnyId(id || '', rentals, ganttRentals),
+    [ganttRentals, id, rentals],
+  );
+  const rental = rentalResolution.rental as Rental | null;
+  const canonicalRentalId = rentalResolution.canonicalId || rental?.id || '';
+  const { data: auditHistory, isLoading: auditHistoryLoading, isError: auditHistoryError } = useRentalAuditHistory(canonicalRentalId, { enabled: !!rental });
   const [isEditing, setIsEditing] = useState(false);
+  const [activeDetailTab, setActiveDetailTab] = useState<RentalDetailTab>('overview');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveInfo, setSaveInfo] = useState('');
@@ -269,6 +278,17 @@ export default function RentalDetail() {
     setExtensionForm(buildExtensionFormState(rental));
     setExtensionConflict(null);
   }, [rental]);
+
+  useEffect(() => {
+    if (rentalResolution.status === 'conflict') {
+      console.warn('[rental-detail] rental id resolution conflict', rentalResolution.diagnostics);
+    }
+  }, [rentalResolution]);
+
+  useEffect(() => {
+    if (!rental || !id || canonicalRentalId === id) return;
+    navigate(`/rentals/${encodeURIComponent(canonicalRentalId)}`, { replace: true });
+  }, [canonicalRentalId, id, navigate, rental]);
 
   const inventoryCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -961,15 +981,54 @@ export default function RentalDetail() {
   const displayManager = isEditing ? (formState?.manager || '') : (rental?.manager || '');
 
   if (!rental || !formState) {
+    const diagnostics = rentalResolution.diagnostics;
+    const foundGanttRecord = diagnostics.foundGanttRecord as (GanttRentalData | null);
+    const diagnosticRows = [
+      ['Искали ID', diagnostics.requestedIds.join(', ') || id || '—'],
+      ['Коллекции', diagnostics.searchedCollections.join(', ')],
+      ['Gantt-запись', foundGanttRecord ? foundGanttRecord.id : 'не найдена'],
+      ['Связанные rental id', diagnostics.linkedRentalIds.join(', ') || 'нет'],
+      ['Кандидаты rentals', diagnostics.candidateIds.join(', ') || 'нет'],
+    ];
     return (
       <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
-        <div className="text-center py-12">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Аренда не найдена</h2>
-          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Договор с ID «{id}» не существует</p>
-          <Button className="mt-4" onClick={() => navigate('/rentals')}>
-            Вернуться к списку
-          </Button>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Аренда не найдена
+            </CardTitle>
+            <CardDescription>
+              {rentalResolution.message || `Договор с ID «${id}» не существует.`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-2 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-900/60">
+              {diagnosticRows.map(([label, value]) => (
+                <div key={label} className="grid gap-1 sm:grid-cols-[180px_1fr]">
+                  <span className="text-gray-500 dark:text-gray-400">{label}</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{value}</span>
+                </div>
+              ))}
+            </div>
+            {foundGanttRecord && diagnostics.linkedRentalIds.length === 0 && (
+              <p className="text-sm text-amber-700 dark:text-amber-300">
+                Запись планировщика найдена, но у неё нет `rentalId/sourceRentalId/originalRentalId`.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => navigate('/rentals')}>Вернуться к списку</Button>
+              <Button variant="secondary" onClick={() => navigate('/rentals')}>
+                Найти по номеру договора
+              </Button>
+              {isAdmin && (
+                <Button variant="secondary" onClick={() => navigate(`/admin?rentalLink=${encodeURIComponent(id || '')}`)}>
+                  Открыть диагностику связи
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -1066,11 +1125,42 @@ export default function RentalDetail() {
         </Card>
       )}
 
+      <div className="flex gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1 dark:border-gray-800 dark:bg-gray-950">
+        {([
+          ['overview', 'Обзор'],
+          ['terms', 'Сроки и возврат'],
+          ['payments', 'Платежи'],
+          ['documents', 'Документы'],
+          ['delivery', 'Доставка'],
+          ['service', 'Сервис'],
+          ['history', 'История'],
+        ] as Array<[RentalDetailTab, string]>).map(([tab, label]) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => {
+              setActiveDetailTab(tab);
+              const targetId = `rental-tab-${tab}`;
+              window.requestAnimationFrame(() => {
+                document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              });
+            }}
+            className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+              activeDetailTab === tab
+                ? 'bg-[--color-primary] text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-900'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle id="rental-tab-overview" className="flex scroll-mt-24 items-center gap-2">
                 <User className="h-5 w-5 text-[--color-primary]" />
                 Клиент
               </CardTitle>
@@ -1244,7 +1334,7 @@ export default function RentalDetail() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle id="rental-tab-terms" className="flex scroll-mt-24 items-center gap-2">
                 <Calendar className="h-5 w-5 text-[--color-primary]" />
                 Даты аренды
               </CardTitle>
@@ -1335,10 +1425,10 @@ export default function RentalDetail() {
           {relatedService.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Wrench className="h-5 w-5 text-orange-500" />
-                  Связанные сервисные заявки
-                </CardTitle>
+              <CardTitle id="rental-tab-service" className="flex scroll-mt-24 items-center gap-2">
+                <Wrench className="h-5 w-5 text-orange-500" />
+                Связанные сервисные заявки
+              </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
@@ -1372,7 +1462,7 @@ export default function RentalDetail() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle id="rental-tab-payments" className="flex scroll-mt-24 items-center gap-2">
                 <DollarSign className="h-5 w-5 text-[--color-primary]" />
                 Финансы
               </CardTitle>
@@ -1635,7 +1725,7 @@ export default function RentalDetail() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle id="rental-tab-delivery" className="flex scroll-mt-24 items-center gap-2">
                 <User className="h-5 w-5 text-[--color-primary]" />
                 Менеджер и статус
               </CardTitle>
@@ -1680,7 +1770,7 @@ export default function RentalDetail() {
           {canViewDocuments && (
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle id="rental-tab-documents" className="flex scroll-mt-24 items-center gap-2">
                 <FileText className="h-5 w-5 text-[--color-primary]" />
                 Документы по аренде
               </CardTitle>
@@ -1813,7 +1903,7 @@ export default function RentalDetail() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle id="rental-tab-history" className="flex scroll-mt-24 items-center gap-2">
                 <Clock className="h-5 w-5 text-[--color-primary]" />
                 История
               </CardTitle>

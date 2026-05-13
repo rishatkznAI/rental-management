@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
+import { AuthenticatedImage } from '../components/ui/AuthenticatedImage';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -47,7 +48,7 @@ import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
 import { PdiForm } from '../components/sales/PdiForm';
 import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
 import { getToken } from '../lib/api';
-import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media';
+import { absoluteMediaUrl, normalizePhotoReference, photoFallbackSource, photoSource } from '../lib/media';
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
@@ -697,7 +698,9 @@ function getDeliveryPhotoList(delivery: Delivery) {
     ...(Array.isArray(source.shippingPhotos) ? source.shippingPhotos : []),
     ...(Array.isArray(source.attachments) ? source.attachments : []),
   ];
-  return photos.filter((photo): photo is PhotoReference => Boolean(photoSource(photo as PhotoReference).trim()));
+  return photos.filter((photo): photo is PhotoReference => (
+    photo != null && (typeof photo !== 'string' || photo.trim().length > 0)
+  ));
 }
 
 function getEventPhotoItems(event: ShippingPhoto) {
@@ -724,7 +727,7 @@ function getShippingPhotoGroups(event: ShippingPhoto): ShippingPhotoGroup[] {
   }
 
   return Array.isArray(event.photos) && event.photos.length > 0
-    ? [{ key: 'generic', label: 'Фотографии', photos: event.photos.filter(photo => Boolean(photoSource(photo).trim())) }]
+    ? [{ key: 'generic', label: 'Фотографии', photos: event.photos.filter(photo => photo != null && (typeof photo !== 'string' || photo.trim().length > 0)) }]
     : [];
 }
 
@@ -872,7 +875,7 @@ export default function EquipmentDetail() {
   const canCreateService = can('create', 'service');
   const canManageAcceptance = canEditEquipment || canEditSales || canCreateService || isMechanicRole(user?.role);
   const normalizedRole = normalizeUserRole(user?.role);
-  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
+  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Руководитель'].includes(normalizedRole)
     || isMechanicRole(normalizedRole);
   const { id } = useParams();
   const location = useLocation();
@@ -2948,13 +2951,17 @@ export default function EquipmentDetail() {
                       {record.photos.length > 0 ? (
                         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                           {record.photos.map((item, index) => (
-                            <button key={`${record.id}-${item.key}-${index}`} type="button" className="overflow-hidden rounded-lg border border-border bg-card text-left" onClick={() => setPreviewImage(displayPhotoUrl(item.photo))}>
-                              <img src={displayPhotoUrl(item.photo)} alt={item.label} className="h-32 w-full object-cover" onError={(event) => {
-                                const fallback = fallbackPhotoUrl(item.photo);
-                                if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                              }} />
+                            <div key={`${record.id}-${item.key}-${index}`} className="overflow-hidden rounded-lg border border-border bg-card text-left">
+                              <AuthenticatedImage
+                                photo={normalizePhotoReference(item.photo, { idPrefix: `${record.id}-${item.key}-${index}` })}
+                                alt={item.label}
+                                className="w-full rounded-none border-0"
+                                fallbackClassName="h-32 rounded-none border-0"
+                                imgClassName="h-32 w-full object-cover"
+                                onOpen={setPreviewImage}
+                              />
                               <span className="block px-3 py-2 text-xs text-muted-foreground">{item.label}</span>
-                            </button>
+                            </div>
                           ))}
                         </div>
                       ) : (
@@ -2995,13 +3002,17 @@ export default function EquipmentDetail() {
                   {record.photos.length > 0 ? (
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       {record.photos.map((item, index) => (
-                        <button key={`${record.id}-${item.key}-${index}`} type="button" className="overflow-hidden rounded-lg border border-border bg-secondary text-left" onClick={() => setPreviewImage(displayPhotoUrl(item.photo))}>
-                          <img src={displayPhotoUrl(item.photo)} alt={item.label} className="h-32 w-full object-cover" onError={(event) => {
-                            const fallback = fallbackPhotoUrl(item.photo);
-                            if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                          }} />
+                        <div key={`${record.id}-${item.key}-${index}`} className="overflow-hidden rounded-lg border border-border bg-secondary text-left">
+                          <AuthenticatedImage
+                            photo={normalizePhotoReference(item.photo, { idPrefix: `${record.id}-${item.key}-${index}` })}
+                            alt={item.label}
+                            className="w-full rounded-none border-0"
+                            fallbackClassName="h-32 rounded-none border-0"
+                            imgClassName="h-32 w-full object-cover"
+                            onOpen={setPreviewImage}
+                          />
                           <span className="block px-3 py-2 text-xs text-muted-foreground">{item.label}</span>
-                        </button>
+                        </div>
                       ))}
                     </div>
                   ) : (
@@ -4748,16 +4759,14 @@ export default function EquipmentDetail() {
                                     </div>
                                     <div className="flex gap-3 overflow-x-auto pb-1">
                                       {photos.map((photo, idx) => (
-                                        <img
+                                        <AuthenticatedImage
                                           key={`${key}-${idx}`}
-                                          src={displayPhotoUrl(photo)}
+                                          photo={normalizePhotoReference(photo, { idPrefix: `${event.id}-${key}-${idx}` })}
                                           alt={`${label} ${idx + 1}`}
-                                          className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
-                                          onError={(event) => {
-                                            const fallback = fallbackPhotoUrl(photo);
-                                            if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                                          }}
-                                          onClick={() => setPreviewImage(displayPhotoUrl(photo))}
+                                          className="h-32 w-48 shrink-0 hover:opacity-90"
+                                          fallbackClassName="h-32 w-48 shrink-0"
+                                          imgClassName="h-32 w-48 object-cover cursor-zoom-in"
+                                          onOpen={setPreviewImage}
                                         />
                                       ))}
                                     </div>
@@ -4768,18 +4777,19 @@ export default function EquipmentDetail() {
                           ) : (
                             <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
                               {flatPhotos.map((photo, idx) => (
-                                <img key={idx} src={displayPhotoUrl(photo)} alt={`Фото ${idx + 1}`}
-                                  className="h-32 w-48 shrink-0 rounded-lg border border-border object-cover cursor-zoom-in hover:opacity-90"
-                                  onError={(event) => {
-                                    const fallback = fallbackPhotoUrl(photo);
-                                    if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                                  }}
-                                  onClick={() => setPreviewImage(displayPhotoUrl(photo))}
+                                <AuthenticatedImage
+                                  key={idx}
+                                  photo={normalizePhotoReference(photo, { idPrefix: `${event.id}-photo-${idx}` })}
+                                  alt={`Фото ${idx + 1}`}
+                                  className="h-32 w-48 shrink-0 hover:opacity-90"
+                                  fallbackClassName="h-32 w-48 shrink-0"
+                                  imgClassName="h-32 w-48 object-cover cursor-zoom-in"
+                                  onOpen={setPreviewImage}
                                 />
                               ))}
                             </div>
                           )}
-                          <p className="mt-2 text-xs text-muted-foreground">{getEventPhotoItems(event).length} фото · нажмите для просмотра</p>
+                          <p className="mt-2 text-xs text-muted-foreground">{getEventPhotoItems(event).length} фото · недоступные отмечены в карточке</p>
                         </>
                       )}
                     </div>
@@ -4973,6 +4983,7 @@ export default function EquipmentDetail() {
         <Dialog.Portal>
           <Dialog.Overlay className={animatedOverlayClassName('bg-black/75')} />
           <Dialog.Content className={animatedModalClassName('flex max-h-[92vh] w-[min(96vw,1200px)] items-center justify-center border-0 bg-transparent p-0 shadow-none outline-none')}>
+            <Dialog.Title className="sr-only">Просмотр фото</Dialog.Title>
             {previewImage && (
               <div className="relative w-full">
                 <button
@@ -5349,22 +5360,15 @@ function ComparisonPhotoColumn({
       {photos.length > 0 ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {photos.map((photo, index) => (
-            <button
+            <AuthenticatedImage
               key={`${title}-${index}`}
-              type="button"
-              onClick={() => onPreview(displayPhotoUrl(photo))}
-              className="group overflow-hidden rounded-lg border border-border bg-card text-left transition hover:border-primary/40"
-            >
-              <img
-                src={displayPhotoUrl(photo)}
-                alt={`${title} ${index + 1}`}
-                className="h-28 w-full object-cover transition group-hover:scale-[1.02]"
-                onError={(event) => {
-                  const fallback = fallbackPhotoUrl(photo);
-                  if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                }}
-              />
-            </button>
+              photo={normalizePhotoReference(photo, { idPrefix: `${title}-${index}` })}
+              alt={`${title} ${index + 1}`}
+              className="group transition hover:border-primary/40"
+              fallbackClassName="h-28"
+              imgClassName="h-28 w-full object-cover transition group-hover:scale-[1.02]"
+              onOpen={onPreview}
+            />
           ))}
         </div>
       ) : (

@@ -135,16 +135,17 @@ test('frontend investor permissions expose only own equipment, rentals and profi
   assert.match(equipmentPageSource, /normalizeEquipmentList\(enrichEquipment\(scopedEquipmentList, ganttRentals\)\)/);
 });
 
-test('frontend head role is rentals-only read-only movement view', () => {
+test('frontend head role has read-only movement and equipment photo history view', () => {
   const block = headPermissionBlock();
 
+  assert.match(block, /equipment:\s+VIEW/);
   assert.match(block, /rentals:\s+VIEW/);
   assert.match(block, /profile_settings:\s+\['view', 'edit'\]/);
   assert.doesNotMatch(block, /ALL/);
   assert.doesNotMatch(block, /create/);
   assert.doesNotMatch(block, /delete/);
 
-  for (const section of ['dashboard', 'equipment', 'gsm', 'deliveries', 'planner', 'service', 'clients', 'documents', 'payments', 'finance', 'reports', 'admin_panel', 'bots']) {
+  for (const section of ['dashboard', 'gsm', 'deliveries', 'planner', 'service', 'clients', 'documents', 'payments', 'finance', 'reports', 'admin_panel', 'bots']) {
     assert.doesNotMatch(block, new RegExp(`\\b${section}:\\s+`), `${section} must not be granted to head`);
   }
 
@@ -209,7 +210,7 @@ test('frontend warranty pages do not prefetch forbidden operational collections'
   assert.match(rentalsPageSource, /const canViewApprovals = can\('view', 'approvals'\)/);
   assert.match(rentalsPageSource, /useRentalChangeRequestsList\(canViewApprovals\)/);
 
-  assert.match(equipmentDetailSource, /const canViewShippingPhotos = \['Администратор', 'Офис-менеджер', 'Менеджер по аренде'\]\.includes\(normalizedRole\)[\s\S]*isMechanicRole\(normalizedRole\)/);
+  assert.match(equipmentDetailSource, /const canViewShippingPhotos = \['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Руководитель'\]\.includes\(normalizedRole\)[\s\S]*isMechanicRole\(normalizedRole\)/);
   assert.match(equipmentDetailSource, /enabled: !!id && canViewShippingPhotos/);
 
   assert.match(rentalApprovalHistorySheetSource, /useClientsList\(\{ enabled: open \}\)/);

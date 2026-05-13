@@ -27,6 +27,22 @@ interface KPIDetailModalProps {
   data: any;
 }
 
+function kpiRowKey(prefix: string, row: any, index: number, ...fields: Array<string | number | null | undefined>) {
+  const stablePart = [row?.id, row?.rentalId, row?.equipmentId, row?.clientId, ...fields]
+    .filter(value => value !== undefined && value !== null && value !== '')
+    .join('-');
+  return stablePart ? `${prefix}-${stablePart}` : `${prefix}-${index}`;
+}
+
+function safeCurrency(value: unknown) {
+  const amount = Number(value);
+  return formatCurrency(Number.isFinite(amount) ? amount : 0);
+}
+
+function entityHref(section: string, id?: string | number | null, fallback = `/${section}`) {
+  return id ? `/${section}/${id}` : fallback;
+}
+
 export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailModalProps) {
   if (!kpiType) return null;
 
@@ -78,24 +94,24 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
               </div>
               <div className="space-y-2">
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Список активных аренд:</p>
-                {data.activeRentals?.slice(0, 10).map((rental: any) => (
+                {data.activeRentals?.slice(0, 10).map((rental: any, index: number) => (
                   <Link
-                    key={rental.id}
-                    to={rental.link || `/rentals/${rental.id}`}
+                    key={kpiRowKey('active-rental', rental, index)}
+                    to={rental.link || entityHref('rentals', rental.id)}
                     onClick={() => onOpenChange(false)}
                     className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-medium text-gray-900 dark:text-white">{rental.client}</p>
-                        <span className="text-xs text-gray-400 dark:text-gray-500">{rental.id}</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500">{rental.id || '—'}</span>
                       </div>
                       <p className="text-sm text-gray-500 dark:text-gray-400">
                         {rental.equipment?.join(', ')} · {formatDate(rental.startDate)} — {formatDate(rental.plannedReturnDate)}
                       </p>
                     </div>
                     <div className="ml-3 flex items-center gap-2">
-                      <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(rental.price)}</p>
+                      <p className="font-semibold text-gray-900 dark:text-white">{safeCurrency(rental.price)}</p>
                       <ExternalLink className="h-4 w-4 text-[--color-primary]" />
                     </div>
                   </Link>
@@ -118,10 +134,10 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
               {data.overdueRentals && data.overdueRentals.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Требуют внимания:</p>
-                  {data.overdueRentals.map((rental: any) => (
+                  {data.overdueRentals.map((rental: any, index: number) => (
                     <Link
-                      key={rental.id}
-                      to={rental.link || `/rentals/${rental.id}`}
+                      key={kpiRowKey('overdue-rental', rental, index)}
+                      to={rental.link || entityHref('rentals', rental.id)}
                       onClick={() => onOpenChange(false)}
                       className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 transition-colors hover:border-red-400 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:hover:border-red-600 dark:hover:bg-red-900/40"
                     >
@@ -172,9 +188,9 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
               </div>
               <div className="space-y-2">
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Сегодня:</p>
-                {data.todayRentals?.length ? data.todayRentals.map((rental: any) => (
+                {data.todayRentals?.length ? data.todayRentals.map((rental: any, index: number) => (
                   <Link
-                    key={`today-${rental.id}`}
+                    key={kpiRowKey('today-rental', rental, index)}
                     to={rental.link || '/rentals'}
                     onClick={() => onOpenChange(false)}
                     className="flex items-center justify-between rounded-lg border border-yellow-200 bg-yellow-50 p-3 transition-colors hover:border-yellow-400 hover:bg-yellow-100 dark:border-yellow-800 dark:bg-yellow-900/20 dark:hover:bg-yellow-900/40"
@@ -193,9 +209,9 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
               </div>
               <div className="space-y-2">
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Завтра:</p>
-                {data.tomorrowRentals?.length ? data.tomorrowRentals.map((rental: any) => (
+                {data.tomorrowRentals?.length ? data.tomorrowRentals.map((rental: any, index: number) => (
                   <Link
-                    key={`tomorrow-${rental.id}`}
+                    key={kpiRowKey('tomorrow-rental', rental, index)}
                     to={rental.link || '/rentals'}
                     onClick={() => onOpenChange(false)}
                     className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-3 transition-colors hover:border-blue-400 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:hover:bg-blue-900/40"
@@ -233,10 +249,10 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 </div>
               </div>
               <div className="space-y-2">
-                {data.idleEquipment?.length ? data.idleEquipment.map((equipment: any) => (
+                {data.idleEquipment?.length ? data.idleEquipment.map((equipment: any, index: number) => (
                   <Link
-                    key={equipment.id}
-                    to={`/equipment/${equipment.id}`}
+                    key={kpiRowKey('idle-equipment', equipment, index, equipment?.inventoryNumber)}
+                    to={entityHref('equipment', equipment.id)}
                     onClick={() => onOpenChange(false)}
                     className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                   >
@@ -269,10 +285,10 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
               {data.openTickets && data.openTickets.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Список заявок:</p>
-                  {data.openTickets.map((ticket: any) => (
+                  {data.openTickets.map((ticket: any, index: number) => (
                     <Link
-                      key={ticket.id}
-                      to={`/service/${ticket.id}`}
+                      key={kpiRowKey('open-ticket', ticket, index)}
+                      to={entityHref('service', ticket.id)}
                       onClick={() => onOpenChange(false)}
                       className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                     >
@@ -301,10 +317,10 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 <p className="text-sm text-gray-600 dark:text-gray-400">Без механика</p>
                 <p className="text-3xl font-bold text-red-600">{data.unassignedTickets?.length || 0}</p>
               </div>
-              {data.unassignedTickets?.length ? data.unassignedTickets.map((ticket: any) => (
+              {data.unassignedTickets?.length ? data.unassignedTickets.map((ticket: any, index: number) => (
                 <Link
-                  key={ticket.id}
-                  to={`/service/${ticket.id}`}
+                  key={kpiRowKey('unassigned-ticket', ticket, index)}
+                  to={entityHref('service', ticket.id)}
                   onClick={() => onOpenChange(false)}
                   className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 transition-colors hover:border-red-400 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:hover:bg-red-900/40"
                 >
@@ -331,10 +347,10 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 <p className="text-sm text-gray-600 dark:text-gray-400">Ждут запчасти</p>
                 <p className="text-3xl font-bold text-yellow-600">{data.waitingTickets?.length || 0}</p>
               </div>
-              {data.waitingTickets?.length ? data.waitingTickets.map((ticket: any) => (
+              {data.waitingTickets?.length ? data.waitingTickets.map((ticket: any, index: number) => (
                 <Link
-                  key={ticket.id}
-                  to={`/service/${ticket.id}`}
+                  key={kpiRowKey('waiting-ticket', ticket, index)}
+                  to={entityHref('service', ticket.id)}
                   onClick={() => onOpenChange(false)}
                   className="flex items-center justify-between rounded-lg border border-yellow-200 bg-yellow-50 p-3 transition-colors hover:border-yellow-400 hover:bg-yellow-100 dark:border-yellow-800 dark:bg-yellow-900/20 dark:hover:bg-yellow-900/40"
                 >
@@ -361,9 +377,9 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 <p className="text-sm text-gray-600 dark:text-gray-400">Повторных случаев</p>
                 <p className="text-3xl font-bold text-red-600">{data.repeatFailures?.length || 0}</p>
               </div>
-              {data.repeatFailures?.length ? data.repeatFailures.map((row: any) => (
+              {data.repeatFailures?.length ? data.repeatFailures.map((row: any, index: number) => (
                 <Link
-                  key={`${row.equipmentId}-${row.reason}`}
+                  key={kpiRowKey('repeat-failure', row, index, row?.reason)}
                   to={row.equipmentId ? `/equipment/${row.equipmentId}` : '/reports'}
                   onClick={() => onOpenChange(false)}
                   className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 transition-colors hover:border-red-400 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:hover:bg-red-900/40"
@@ -404,10 +420,10 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 </div>
               </div>
               <div className="space-y-2">
-                {data.rows?.length ? data.rows.map((row: any) => (
+                {data.rows?.length ? data.rows.map((row: any, index: number) => (
                   <Link
-                    key={row.id}
-                    to={`/service/${row.id}`}
+                    key={kpiRowKey('service-days', row, index, row?.inventoryNumber)}
+                    to={entityHref('service', row.id)}
                     onClick={() => onOpenChange(false)}
                     className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                   >
@@ -438,7 +454,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
             <div className="space-y-4">
               <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-gray-400">Общая выручка</p>
-                <p className="text-3xl font-bold text-green-600">{formatCurrency(data.weekRevenue)}</p>
+                <p className="text-3xl font-bold text-green-600">{safeCurrency(data.weekRevenue)}</p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
@@ -448,7 +464,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
                   <p className="text-xs text-gray-600 dark:text-gray-400">Средний чек</p>
                   <p className="text-xl font-bold text-gray-900 dark:text-white">
-                    {formatCurrency(data.averagePrice)}
+                    {safeCurrency(data.averagePrice)}
                   </p>
                 </div>
               </div>
@@ -464,15 +480,15 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
             <div className="space-y-4">
               <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-gray-400">Общая дебиторка</p>
-                <p className="text-3xl font-bold text-orange-600">{formatCurrency(data.totalDebt)}</p>
+                <p className="text-3xl font-bold text-orange-600">{safeCurrency(data.totalDebt)}</p>
               </div>
               {data.clients && data.clients.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Клиенты с задолженностью:</p>
-                  {data.clients.map((client: any) => (
+                  {data.clients.map((client: any, index: number) => (
                     <Link
-                      key={client.id}
-                      to={`/clients/${client.id}`}
+                      key={kpiRowKey('debt-client', client, index, client?.company)}
+                      to={entityHref('clients', client.id)}
                       onClick={() => onOpenChange(false)}
                       className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                     >
@@ -481,7 +497,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                         <p className="text-sm text-gray-500 dark:text-gray-400">{client.contact}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <p className="font-semibold text-orange-600">{formatCurrency(client.debt)}</p>
+                        <p className="font-semibold text-orange-600">{safeCurrency(client.debt)}</p>
                         <ExternalLink className="h-4 w-4 text-[--color-primary]" />
                       </div>
                     </Link>
@@ -491,15 +507,15 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
               {data.overduePayments && data.overduePayments.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Просроченные платежи:</p>
-                  {data.overduePayments.map((p: any) => (
-                    <div key={p.id} className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+                  {data.overduePayments.map((p: any, index: number) => (
+                    <div key={kpiRowKey('total-debt-payment', p, index, p?.invoiceNumber)} className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
                       <div>
                         <p className="font-medium text-gray-900 dark:text-white">{p.client}</p>
                         <p className="text-sm text-red-600">
                           {p.invoiceNumber || `Аренда ${p.rentalId}`} · Срок: {formatDate(p.dueDate || p.expectedPaymentDate || p.endDate)}
                         </p>
                       </div>
-                      <p className="font-semibold text-red-600">{formatCurrency(p.outstanding ?? p.amount)}</p>
+                      <p className="font-semibold text-red-600">{safeCurrency(p.outstanding ?? p.amount)}</p>
                     </div>
                   ))}
                 </div>
@@ -516,20 +532,20 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
             <div className="space-y-4">
               <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-gray-400">Дебиторка за месяц</p>
-                <p className="text-3xl font-bold text-red-600">{formatCurrency(data.monthDebt)}</p>
+                <p className="text-3xl font-bold text-red-600">{safeCurrency(data.monthDebt)}</p>
               </div>
               {data.overduePayments && data.overduePayments.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Просроченные платежи:</p>
-                  {data.overduePayments.map((p: any) => (
-                    <div key={p.id} className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+                  {data.overduePayments.map((p: any, index: number) => (
+                    <div key={kpiRowKey('month-debt-payment', p, index, p?.invoiceNumber)} className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
                       <div>
                         <p className="font-medium text-gray-900 dark:text-white">{p.client}</p>
                         <p className="text-sm text-red-600">
                           {p.invoiceNumber || `Аренда ${p.rentalId}`} · Срок: {formatDate(p.dueDate || p.expectedPaymentDate || p.endDate)}
                         </p>
                       </div>
-                      <p className="font-semibold text-red-600">{formatCurrency(p.outstanding ?? p.amount)}</p>
+                      <p className="font-semibold text-red-600">{safeCurrency(p.outstanding ?? p.amount)}</p>
                     </div>
                   ))}
                 </div>

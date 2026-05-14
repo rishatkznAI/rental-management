@@ -84,6 +84,7 @@ import {
 import { ru } from 'date-fns/locale';
 import { cn, formatCurrency, getRentalDays } from '../lib/utils';
 import { animationClasses } from '../lib/animations';
+import { normalizePhotoReference, type NormalizedPhoto } from '../lib/media';
 
 // ========== Constants & Types ==========
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
@@ -119,6 +120,8 @@ type DrawerRentalData = GanttRentalData & {
 type FleetMovementEntry = ShippingPhoto & {
   rental?: GanttRentalData;
   equipment?: Equipment;
+  photoItems?: NormalizedPhoto[];
+  equipmentNavigationId?: string;
   equipmentLabel?: string;
   serialNumber?: string;
   inventoryNumber?: string;
@@ -2392,12 +2395,18 @@ export default function Rentals() {
         return bTime - aTime;
       })
       .map(event => {
-        const rental = event.rentalId ? rentalsById.get(event.rentalId) : undefined;
-        const equipment = equipmentById.get(event.equipmentId);
+        const rentalId = typeof event.rentalId === 'string' ? event.rentalId.trim() : '';
+        const eventEquipmentId = typeof event.equipmentId === 'string' ? event.equipmentId.trim() : '';
+        const rental = rentalId ? rentalsById.get(rentalId) : undefined;
+        const equipment = eventEquipmentId ? equipmentById.get(eventEquipmentId) : undefined;
         return {
           ...event,
           rental,
           equipment,
+          equipmentNavigationId: equipment?.id || eventEquipmentId,
+          photoItems: (Array.isArray(event.photos) ? event.photos : []).map((photo, index) =>
+            normalizePhotoReference(photo, { idPrefix: `${event.id || 'movement'}-${index}` }),
+          ),
           equipmentLabel: getEquipmentMovementLabel(equipment),
           serialNumber: event.serialNumber || equipment?.serialNumber || '',
           inventoryNumber: (event as ShippingPhoto & { inventoryNumber?: string }).inventoryNumber || equipment?.inventoryNumber || '',
@@ -2452,6 +2461,8 @@ export default function Rentals() {
           type,
           uploadedBy: '',
           photos: [],
+          photoItems: [],
+          equipmentNavigationId: equipment?.id || rental.equipmentId || '',
           rental,
           equipment,
           equipmentLabel: getEquipmentMovementLabel(equipment),
@@ -4778,43 +4789,48 @@ export default function Rentals() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border bg-card">
-                        {displayedMovementEntries.map(entry => (
-                          <tr key={entry.id}>
-                            <td className="px-4 py-3">
-                              <span className={cn('inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold', entry.typeBadgeClassName)}>
-                                {entry.type === 'shipping' ? 'Ушло' : 'Пришло'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 font-medium text-foreground">{safeMovementDateLabel(entry.date)}</td>
-                            <td className="px-4 py-3">
-                              <div className="font-semibold text-foreground">{entry.equipmentLabel}</div>
-                              <div className="text-xs text-muted-foreground">SN {entry.serialNumber || 'не указан'} · INV {entry.inventoryNumber || 'не указан'}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="font-medium text-foreground">{entry.clientLabel}</div>
-                              <div className="text-xs text-muted-foreground">{entry.objectLabel}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="inline-flex rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-foreground">
-                                {entry.operationStatusLabel}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              {entry.photos.length > 0 ? (
-                                <div className="flex max-w-[220px] flex-wrap gap-2">
-                                  {entry.photos.slice(0, 4).map((photo, index) => (
-                                    <a key={`${entry.id}-${index}`} href={photo} target="_blank" rel="noreferrer" className="block h-14 w-14 overflow-hidden rounded-lg border border-border bg-secondary">
-                                      <img src={photo} alt="" className="h-full w-full object-cover" />
-                                    </a>
-                                  ))}
-                                  {entry.photos.length > 4 && <span className="text-xs text-muted-foreground">+{entry.photos.length - 4}</span>}
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">Фото ещё не загружены</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                        {displayedMovementEntries.map(entry => {
+                          const movementPhotos = (entry.photoItems || [])
+                            .filter(photo => Boolean(photo.fullUrl));
+                          const hiddenPhotoCount = Math.max(0, (entry.photos?.length || 0) - movementPhotos.length);
+                          return (
+                            <tr key={entry.id}>
+                              <td className="px-4 py-3">
+                                <span className={cn('inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold', entry.typeBadgeClassName)}>
+                                  {entry.type === 'shipping' ? 'Ушло' : 'Пришло'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 font-medium text-foreground">{safeMovementDateLabel(entry.date)}</td>
+                              <td className="px-4 py-3">
+                                <div className="font-semibold text-foreground">{entry.equipmentLabel}</div>
+                                <div className="text-xs text-muted-foreground">SN {entry.serialNumber || 'не указан'} · INV {entry.inventoryNumber || 'не указан'}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-foreground">{entry.clientLabel}</div>
+                                <div className="text-xs text-muted-foreground">{entry.objectLabel}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="inline-flex rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-foreground">
+                                  {entry.operationStatusLabel}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {movementPhotos.length > 0 ? (
+                                  <div className="flex max-w-[220px] flex-wrap gap-2">
+                                    {movementPhotos.slice(0, 4).map((photo, index) => (
+                                      <a key={photo.id || `${entry.id}-${index}`} href={photo.fullUrl || undefined} target="_blank" rel="noreferrer" className="block h-14 w-14 overflow-hidden rounded-lg border border-border bg-secondary">
+                                        <img src={photo.thumbnailUrl || photo.fullUrl || undefined} alt="" className="h-full w-full object-cover" />
+                                      </a>
+                                    ))}
+                                    {movementPhotos.length > 4 && <span className="text-xs text-muted-foreground">+{movementPhotos.length - 4}</span>}
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">{hiddenPhotoCount > 0 ? 'Фото недоступны' : 'Фото ещё не загружены'}</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -6307,13 +6323,19 @@ export default function Rentals() {
                         </div>
 
                         <div className="space-y-1">
-                          <Link
-                            to={`/equipment/${entry.equipmentId}`}
-                            className="inline-flex items-center gap-1 text-sm font-semibold text-[--color-primary] hover:underline"
-                            onClick={() => setShowMovementSheet(false)}
-                          >
-                            {entry.equipmentLabel}
-                          </Link>
+                          {entry.equipmentNavigationId ? (
+                            <Link
+                              to={`/equipment/${encodeURIComponent(entry.equipmentNavigationId)}`}
+                              className="inline-flex items-center gap-1 text-sm font-semibold text-[--color-primary] hover:underline"
+                              onClick={() => setShowMovementSheet(false)}
+                            >
+                              {entry.equipmentLabel}
+                            </Link>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-sm font-semibold text-muted-foreground">
+                              {entry.equipmentLabel || 'Техника не определена'}
+                            </span>
+                          )}
                           <div className="text-sm text-gray-600 dark:text-gray-300">
                             Серийный номер: <span className="font-medium text-gray-900 dark:text-white">{entry.serialNumber || 'не указан'}</span>
                           </div>

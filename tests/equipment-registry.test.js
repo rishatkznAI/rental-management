@@ -1,8 +1,34 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import fs, { mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import {
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { build } from 'esbuild';
+
+async function importEquipmentHelpersModule() {
+  const outdir = mkdtempSync(join(tmpdir(), 'skytech-equipment-helpers-test-'));
+  const outfile = join(outdir, 'equipment.helpers.mjs');
+  await build({
+    entryPoints: ['src/app/pages/equipment/equipment.helpers.ts'],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    outfile,
+    logLevel: 'silent',
+  });
+  const module = await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
+  return {
+    module,
+    cleanup: () => rmSync(outdir, { recursive: true, force: true }),
+  };
+}
+
+const { module: equipmentHelpers, cleanup } = await importEquipmentHelpersModule();
+after(cleanup);
+
+const {
   buildActiveRentalIndex,
   buildEquipmentTabCounts,
   documentMatchesEquipmentOrRentals,
@@ -24,7 +50,7 @@ import {
   recordMatchesEquipmentBySafeKey,
   rentalMatchesEquipment,
   serviceTicketMatchesEquipment,
-} from '../src/app/pages/equipment/equipment.helpers.ts';
+} = equipmentHelpers;
 
 const equipmentClassificationSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/equipmentClassification.ts'), 'utf8');
 

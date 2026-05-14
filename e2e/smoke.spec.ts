@@ -147,7 +147,10 @@ test.describe('production smoke', () => {
     await page.getByPlaceholder('Опишите неисправность или проблему, с которой обратились в сервис.').fill(`SMOKE-UI description ${suffix}`);
     await page.getByRole('button', { name: 'Создать заявку' }).click();
     await expect(page).toHaveURL(/#\/service\/.+/);
-    await expect(page.getByText(serviceReason)).toBeVisible();
+    const problemCard = page
+      .getByRole('heading', { name: 'Проблема', exact: true })
+      .locator('xpath=ancestor::*[@data-slot="card"][1]');
+    await expect(problemCard.getByText(serviceReason, { exact: true })).toBeVisible();
 
     const ticket = await withAdminApi((api) => findServiceTicketByReason(api, serviceReason));
     expect(ticket.id).toBeTruthy();

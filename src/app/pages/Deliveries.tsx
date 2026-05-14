@@ -39,6 +39,7 @@ import type { GanttRentalData } from '../mock-data';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { normalizeUserRole } from '../lib/userStorage';
+import { chooseBestGanttRentalEntry, getGanttRentalSourceId } from '../lib/rentalPlannerRows.js';
 import {
   ACTIVE_DELIVERY_STATUSES,
   CLOSED_DELIVERY_STATUSES,
@@ -234,6 +235,10 @@ function buildFormFromDelivery(delivery: Delivery): DeliveryFormState {
     equipmentLabel: delivery.equipmentLabel || '',
     status: delivery.status,
   };
+}
+
+function normalizeParam(value: string | null) {
+  return String(value || '').trim();
 }
 
 function DeliveryDialog({
@@ -558,9 +563,11 @@ export default function Deliveries() {
   const rentalOptions = useMemo<RentalOption[]>(() => {
     const equipmentById = new Map(equipment.map((item) => [item.id, item]));
     const classicMatchByGantt = new Map<string, Rental>();
+    const classicById = new Map((classicRentals as Rental[]).map((item) => [String(item.id || ''), item]));
 
     for (const gantt of ganttRentals as GanttRentalData[]) {
-      const classic = (classicRentals as Rental[]).find((item) =>
+      const sourceId = getGanttRentalSourceId(gantt);
+      const classic = (sourceId && classicById.get(sourceId)) || (classicRentals as Rental[]).find((item) =>
         item.client === gantt.client &&
         Array.isArray(item.equipment) &&
         item.equipment.includes(gantt.equipmentInv) &&
@@ -569,7 +576,18 @@ export default function Deliveries() {
       if (classic) classicMatchByGantt.set(gantt.id, classic);
     }
 
-    return (ganttRentals as GanttRentalData[])
+    const groupedRentals = new Map<string, GanttRentalData[]>();
+    for (const item of ganttRentals as GanttRentalData[]) {
+      if (item.status === 'closed') continue;
+      const key = getGanttRentalSourceId(item) || item.id;
+      if (!key) continue;
+      if (!groupedRentals.has(key)) groupedRentals.set(key, []);
+      groupedRentals.get(key)?.push(item);
+    }
+
+    return Array.from(groupedRentals.values())
+      .map(entries => chooseBestGanttRentalEntry(entries, { todayKey: todayIso() }))
+      .filter(Boolean)
       .filter((item) => item.status !== 'closed')
       .map((item) => {
         const classic = classicMatchByGantt.get(item.id);
@@ -578,9 +596,9 @@ export default function Deliveries() {
         const equipmentLabel = eq ? `${eq.manufacturer} ${eq.model}` : item.equipmentInv;
         return {
           ganttRentalId: item.id,
-          classicRentalId: classic?.id || '',
-          client: item.client || '',
-          clientId: client?.id || '',
+          classicRentalId: getGanttRentalSourceId(item) || classic?.id || '',
+          client: item.client || classic?.client || '',
+          clientId: item.clientId || classic?.clientId || client?.id || '',
           manager: item.manager || classic?.manager || '',
           equipmentId: eq?.id || item.equipmentId || '',
           equipmentInv: item.equipmentInv || eq?.inventoryNumber || '',
@@ -677,8 +695,8 @@ export default function Deliveries() {
     const shouldOpenCreate = location.pathname.endsWith('/new') || params.get('action') === 'create';
     if (!canCreate || dialogOpen || !shouldOpenCreate || autoOpenKey === key) return;
     setAutoOpenKey(key);
-    openCreateDialog();
-  }, [autoOpenKey, canCreate, dialogOpen, location.pathname, location.search]);
+    openCreateDialog(params);
+  }, [autoOpenKey, canCreate, dialogOpen, location.pathname, location.search, rentalOptions, user?.name]);
 
   useEffect(() => {
     const media = window.matchMedia('(min-width: 1536px)');
@@ -688,9 +706,35 @@ export default function Deliveries() {
     return () => media.removeEventListener('change', update);
   }, []);
 
-  function openCreateDialog() {
+  function openCreateDialog(params?: URLSearchParams) {
+    const requestedType = normalizeParam(params?.get('type'));
+    const requestedRentalId = normalizeParam(params?.get('rentalId') || params?.get('classicRentalId'));
+    const requestedGanttRentalId = normalizeParam(params?.get('ganttRentalId'));
+    const matchedRental = requestedGanttRentalId
+      ? rentalOptions.find(option => option.ganttRentalId === requestedGanttRentalId)
+      : requestedRentalId
+        ? rentalOptions.find(option => option.classicRentalId === requestedRentalId)
+        : undefined;
     setEditingDelivery(null);
-    setForm(makeEmptyForm(user?.name || ''));
+    setForm({
+      ...makeEmptyForm(user?.name || ''),
+      type: requestedType === 'receiving' ? 'receiving' : 'shipping',
+      ganttRentalId: matchedRental?.ganttRentalId || requestedGanttRentalId,
+      classicRentalId: matchedRental?.classicRentalId || requestedRentalId,
+      client: matchedRental?.client || '',
+      clientId: matchedRental?.clientId || '',
+      manager: matchedRental?.manager || user?.name || '',
+      equipmentId: matchedRental?.equipmentId || '',
+      equipmentInv: matchedRental?.equipmentInv || '',
+      equipmentLabel: matchedRental?.equipmentLabel || '',
+      cargo: matchedRental ? `${matchedRental.equipmentLabel} · INV ${matchedRental.equipmentInv}` : '',
+      transportDate: matchedRental ? (requestedType === 'receiving' ? matchedRental.endDate : matchedRental.startDate) : todayIso(),
+      neededBy: matchedRental ? (requestedType === 'receiving' ? matchedRental.endDate : matchedRental.startDate) : todayIso(),
+      origin: matchedRental ? (requestedType === 'receiving' ? matchedRental.receivingFrom : matchedRental.shippingFrom) : '',
+      destination: matchedRental ? (requestedType === 'receiving' ? matchedRental.receivingTo : matchedRental.shippingTo) : '',
+      contactName: matchedRental?.contactName || '',
+      contactPhone: matchedRental?.contactPhone || '',
+    });
     setDialogOpen(true);
   }
 

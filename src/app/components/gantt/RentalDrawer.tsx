@@ -28,7 +28,7 @@ import { RENTAL_KEYS } from '../../hooks/useRentals';
 import { rentalsService } from '../../services/rentals.service';
 import type { RentalExtensionResponse } from '../../services/rentals.service';
 import type { GanttRentalData } from '../../mock-data';
-import type { Client, Delivery, Equipment, Payment, Rental, ServiceTicket } from '../../types';
+import type { Client, Delivery, Document, Equipment, Payment, Rental, ServiceTicket } from '../../types';
 import type { ClientReceivableRow } from '../../lib/finance';
 import { getEffectivePaidAmount } from '../../lib/finance';
 import { filterRentalManagerUsers, type SystemUser } from '../../lib/userStorage';
@@ -42,6 +42,7 @@ interface RentalDrawerProps {
   allRentals: GanttRentalData[];
   classicRentals?: Rental[];
   payments: Payment[];
+  documents?: Document[];
   serviceTickets?: ServiceTicket[];
   clients?: Client[];
   deliveries?: Delivery[];
@@ -98,6 +99,28 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
   partial: 'warning',
 };
 
+const documentTypeLabels: Record<Document['type'], string> = {
+  contract: 'Договор',
+  commercial_offer: 'Коммерческое предложение',
+  act: 'Акт',
+  upd: 'УПД',
+  invoice: 'Счёт',
+  service_act: 'Сервисный акт',
+  work_order: 'Заказ-наряд',
+  debt_notification: 'Уведомление о задолженности',
+  pretrial_claim: 'Досудебная претензия',
+  court_document: 'Судебный документ',
+  court_decision: 'Решение суда',
+  enforcement_writ: 'Исполнительный лист',
+  other: 'Документ',
+};
+
+const documentStatusLabels: Record<Document['status'], string> = {
+  draft: 'Черновик',
+  sent: 'Отправлен',
+  signed: 'Подписан',
+};
+
 const serviceAlertStyles: Record<RentalServiceAlertSeverity, {
   container: string;
   icon: string;
@@ -142,7 +165,7 @@ const deliveryStatusLabels: Record<Delivery['status'], string> = {
 };
 
 export function RentalDrawer({
-  rental: rentalProp, equipment, allRentals, classicRentals = [], payments, serviceTickets = EMPTY_SERVICE_TICKETS,
+  rental: rentalProp, equipment, allRentals, classicRentals = [], payments, documents = [], serviceTickets = EMPTY_SERVICE_TICKETS,
   clients = [], deliveries = [], clientReceivables = [], managers = [],
   canEditRentals, canEditRentalDates, dateConflictsRequireApproval = false, canReassignManager, canRestoreRentals, canDeleteRentals,
   canViewMoney = true, canCreatePayments, canCreateDocuments = false, canCreateDeliveries = false, canCreateService = false,
@@ -270,9 +293,33 @@ export function RentalDrawer({
     : `Не удалось открыть карточку аренды: не найдена связанная запись rentals для ${rental.id}`;
 
   const activeManagers = filterRentalManagerUsers(managers);
+  const ganttRentalId = (rental as GanttRentalData & { __ganttRentalId?: string; __linkedGanttRentalId?: string }).__ganttRentalId
+    || (rental as GanttRentalData & { __ganttRentalId?: string; __linkedGanttRentalId?: string }).__linkedGanttRentalId
+    || rentalResolution.ganttRental?.id
+    || (String(rental.id || '').startsWith('GR-') ? rental.id : '');
+  const canonicalRentalId = rentalDetailId || rental.rentalId || rental.sourceRentalId || rental.originalRentalId || (!String(rental.id || '').startsWith('GR-') ? rental.id : '');
+  const createDocumentUrl = (() => {
+    const params = new URLSearchParams({ action: 'create' });
+    if (canonicalRentalId) params.set('rentalId', canonicalRentalId);
+    if (rental.clientId) params.set('clientId', rental.clientId);
+    if (rental.client) params.set('clientName', rental.client);
+    if (rental.equipmentId || currentEquipment?.id) params.set('equipmentId', rental.equipmentId || currentEquipment?.id || '');
+    if (rental.equipmentInv || currentEquipment?.inventoryNumber) params.set('equipmentInv', rental.equipmentInv || currentEquipment?.inventoryNumber || '');
+    return `/documents?${params.toString()}`;
+  })();
+  const createDeliveryUrl = (type: Delivery['type']) => {
+    const params = new URLSearchParams({ action: 'create', type });
+    if (canonicalRentalId) params.set('rentalId', canonicalRentalId);
+    if (ganttRentalId) params.set('ganttRentalId', ganttRentalId);
+    return `/deliveries?${params.toString()}`;
+  };
 
   // Payments for this rental
   const rentalPayments = payments.filter(p => rentalPaymentIds.has(String(p.rentalId || '').trim()));
+  const relatedDocuments = documents.filter(doc => [
+    doc.rentalId,
+    doc.rental,
+  ].some(value => rentalPaymentIds.has(String(value || '').trim())));
   const totalPaid = rentalPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const rentalBilling = calculateRentalBilling(rental);
   const rentalBillingAmount = rentalBilling.finalRentalAmount;
@@ -451,7 +498,7 @@ export function RentalDrawer({
       return;
     }
     setPayError('');
-    onAddPayment(rental.id, amt, payDate, payComment);
+    onAddPayment(canonicalRentalId || rental.id, amt, payDate, payComment);
     setPayAmount('');
     setPayComment('');
     setPayDate(new Date().toISOString().slice(0, 10));
@@ -758,7 +805,7 @@ export function RentalDrawer({
                   )}
                   {canCreateDeliveries && (
                     <Button size="sm" variant="secondary" className="justify-start rounded-xl" asChild>
-                      <Link to="/deliveries/new">
+                      <Link to={createDeliveryUrl('shipping')}>
                         <Truck className="h-4 w-4" />
                         Создать доставку
                       </Link>
@@ -785,7 +832,7 @@ export function RentalDrawer({
                   )}
                   {canCreateDocuments && (
                     <Button size="sm" variant="secondary" className="justify-start rounded-xl" asChild>
-                      <Link to="/documents">
+                      <Link to={createDocumentUrl}>
                         <FileText className="h-4 w-4" />
                         Создать документ
                       </Link>
@@ -1328,13 +1375,13 @@ export function RentalDrawer({
                 {canCreateDeliveries && (
                   <div className="flex flex-wrap justify-end gap-2">
                     <Button size="sm" variant="secondary" className="rounded-xl" asChild>
-                      <Link to="/deliveries/new">
+                      <Link to={createDeliveryUrl('shipping')}>
                         <Truck className="h-4 w-4" />
                         Создать доставку
                       </Link>
                     </Button>
                     <Button size="sm" variant="secondary" className="rounded-xl" asChild>
-                      <Link to="/deliveries/new">
+                      <Link to={createDeliveryUrl('receiving')}>
                         <RotateCcw className="h-4 w-4" />
                         Создать возвратную доставку
                       </Link>
@@ -1415,7 +1462,7 @@ export function RentalDrawer({
               </div>
               {canCreateDocuments && (
                 <Button size="sm" variant="secondary" className="rounded-xl" asChild>
-                  <Link to="/documents">
+                  <Link to={createDocumentUrl}>
                     <FileText className="h-4 w-4" />
                     Создать документ
                   </Link>
@@ -1522,6 +1569,38 @@ export function RentalDrawer({
                 </div>
               )}
             </div>
+            {relatedDocuments.length > 0 ? (
+              <div className="mt-2 space-y-1.5">
+                <div className="text-xs text-gray-500 dark:text-gray-400">Документы по аренде:</div>
+                {relatedDocuments.map(doc => {
+                  const docNumber = doc.documentNumber || doc.number || 'Без номера';
+                  const docDate = doc.documentDate || doc.date || doc.createdAt || '';
+                  const docType = documentTypeLabels[doc.documentType || doc.type] || 'Документ';
+                  const docStatus = documentStatusLabels[doc.status] || 'Черновик';
+                  return (
+                    <div key={doc.id} className="rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900/30">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-medium text-gray-900 dark:text-white" title={`${docType} · ${docNumber}`}>
+                            {docType} · {docNumber}
+                          </div>
+                          <div className="mt-1 text-xs text-gray-500">
+                            {docDate ? formatDate(docDate) : '—'} · {docStatus}
+                          </div>
+                        </div>
+                        <Link to={`/documents?rentalId=${encodeURIComponent(canonicalRentalId || doc.rentalId || doc.rental || '')}`} className="shrink-0 text-xs font-medium text-[--color-primary] hover:underline">
+                          Открыть
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-2 rounded-lg border border-dashed border-gray-200 p-3 text-center text-sm text-gray-400 dark:border-gray-700">
+                По этой аренде документы ещё не созданы
+              </div>
+            )}
           </section>
           )}
 

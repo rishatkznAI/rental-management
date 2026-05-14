@@ -699,6 +699,7 @@ export default function Documents() {
     }
 
     if (quickActionContext.action !== 'create' || !canManageDocuments) return;
+    if (quickActionContext.rentalId && !quickActionRental) return;
 
     const actionKey = searchParams.toString();
     if (appliedQuickActionRef.current === actionKey) return;

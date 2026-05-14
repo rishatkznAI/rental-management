@@ -36,8 +36,14 @@ function deriveRentalPaymentStatus(rental, payments) {
   if (!rental) return 'unpaid';
 
   const totalAmount = getRentalBillingAmount(rental);
+  const rentalIds = new Set([
+    rental.id,
+    rental.rentalId,
+    rental.sourceRentalId,
+    rental.originalRentalId,
+  ].map(value => String(value || '').trim()).filter(Boolean));
   const totalPaid = (payments || [])
-    .filter(payment => payment?.rentalId === rental.id)
+    .filter(payment => rentalIds.has(String(payment?.rentalId || '').trim()))
     .reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
 
   if (totalPaid >= totalAmount) return 'paid';

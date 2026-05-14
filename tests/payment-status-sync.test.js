@@ -90,3 +90,20 @@ test('syncGanttRentalPaymentStatuses updates only linked rentals', () => {
   assert.equal(updated[0].paymentStatus, 'paid');
   assert.equal(updated[1].paymentStatus, 'unpaid');
 });
+
+test('syncGanttRentalPaymentStatuses counts canonical payments for planner-linked rentals', () => {
+  const updated = syncGanttRentalPaymentStatuses(
+    [
+      { id: 'GR-visible', rentalId: 'R-canonical', amount: 50000, paymentStatus: 'unpaid' },
+      { id: 'R-canonical', rentalId: 'R-canonical', amount: 50000, paymentStatus: 'unpaid' },
+      { id: 'GR-other', rentalId: 'R-other', amount: 70000, paymentStatus: 'unpaid' },
+    ],
+    [
+      { id: 'p-1', rentalId: 'R-canonical', amount: 50000, paidAmount: 12000, status: 'paid' },
+    ],
+  );
+
+  assert.equal(updated[0].paymentStatus, 'partial');
+  assert.equal(updated[1].paymentStatus, 'partial');
+  assert.equal(updated[2].paymentStatus, 'unpaid');
+});

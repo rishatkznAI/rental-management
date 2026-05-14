@@ -1488,6 +1488,7 @@ export default function Rentals() {
     try {
       await paymentsService.bulkReplace(list);
       await queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
+      await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
     } catch {
       showToast('Не удалось сохранить платежи', 'error');
     }
@@ -3156,10 +3157,18 @@ export default function Rentals() {
   // Add payment: creates a Payment record, updates ganttRental.paymentStatus
   const handleAddPayment = useCallback((rentalId: string, amount: number, paidDate: string, comment: string) => {
     if (!canCreatePayments) return;
-    const rental = ganttRentals.find(r => r.id === rentalId)
+    const selectedCanonicalRentalId = selectedRental ? getDrawerCanonicalRentalId(selectedRental) : '';
+    const selectedGanttRental = selectedRental && selectedCanonicalRentalId === rentalId
+      ? findGanttRentalForDrawer(selectedRental, ganttRentals)
+      : undefined;
+    const rental = selectedGanttRental
+      || ganttRentals.find(r => r.id === rentalId)
       || ganttRentals.find(r => getGanttRentalSourceId(r) === rentalId);
     if (!rental) return;
     const canonicalRentalId = getGanttRentalSourceId(rental) || rentalId;
+    const drawerMatchRental = selectedRental && selectedCanonicalRentalId === canonicalRentalId
+      ? selectedRental
+      : rental;
 
     const newPayment: Payment = {
       id: `PAY-${Date.now()}`,
@@ -3190,7 +3199,7 @@ export default function Rentals() {
     else if (totalPaid > 0) newPaymentStatus = 'partial';
 
     const updatedRentals = ganttRentals.map(r =>
-      matchesDrawerGanttRental(r, rental)
+      matchesDrawerGanttRental(r, drawerMatchRental)
         ? appendRentalHistory(
             { ...r, paymentStatus: newPaymentStatus },
             createRentalHistoryEntry(
@@ -3200,10 +3209,10 @@ export default function Rentals() {
           )
         : r
     );
-    void persistGanttRentals(updatedRentals);
+    setGanttRentals(updatedRentals);
 
     // Also update selectedRental to reflect new state
-    if (selectedRental && matchesDrawerGanttRental(rental, selectedRental)) {
+    if (selectedRental && selectedCanonicalRentalId === canonicalRentalId) {
       setSelectedRental(current => current ? { ...current, paymentStatus: newPaymentStatus } : current);
     }
   }, [canCreatePayments, ganttRentals, historyAuthor, payments, selectedRental]);
@@ -5765,6 +5774,7 @@ export default function Rentals() {
         allRentals={rentalRows}
         classicRentals={classicRentalData}
         payments={payments}
+        documents={documentsData}
         serviceTickets={serviceTickets}
         clients={computedClients}
         deliveries={deliveriesData}

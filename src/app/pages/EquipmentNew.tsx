@@ -202,6 +202,14 @@ export default function EquipmentNew() {
     setForm(prev => ({ ...prev, [field]: value }));
 
   useEffect(() => {
+    if (owners.length === 0) return;
+    setForm(prev => {
+      if (owners.some(owner => owner.id === prev.ownerId)) return prev;
+      return { ...prev, ownerId: owners[0].id };
+    });
+  }, [owners]);
+
+  useEffect(() => {
     if (!isSaleMode) return;
     setForm(prev => ({
       ...prev,

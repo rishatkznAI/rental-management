@@ -338,6 +338,61 @@ function registerCrudRoutes(deps) {
     });
   }
 
+  function normalizedEquipmentField(value) {
+    return String(value ?? '').trim().toLowerCase();
+  }
+
+  function equipmentFieldChanged(previous, next, field) {
+    if (!previous) return Boolean(normalizedEquipmentField(next?.[field]));
+    return normalizedEquipmentField(previous?.[field]) !== normalizedEquipmentField(next?.[field]);
+  }
+
+  function findEquipmentIdentifierConflict(equipmentList, candidate, field, ignoreId = '') {
+    const normalizedValue = normalizedEquipmentField(candidate?.[field]);
+    if (!normalizedValue) return null;
+    return (equipmentList || []).find(item => (
+      String(item?.id || '') !== String(ignoreId || '')
+      && normalizedEquipmentField(item?.[field]) === normalizedValue
+    )) || null;
+  }
+
+  function validateEquipmentRecord(nextItem, equipmentList, previousItem = null) {
+    if (!String(nextItem?.model || '').trim()) {
+      throw Object.assign(new Error('Модель техники обязательна'), {
+        status: 400,
+        code: 'EQUIPMENT_MODEL_REQUIRED',
+      });
+    }
+
+    for (const field of ['inventoryNumber', 'serialNumber']) {
+      if (!equipmentFieldChanged(previousItem, nextItem, field)) continue;
+      const conflict = findEquipmentIdentifierConflict(equipmentList, nextItem, field, nextItem?.id);
+      if (!conflict) continue;
+      const label = field === 'inventoryNumber' ? 'инвентарным номером' : 'серийным номером';
+      throw Object.assign(new Error(`Техника с таким ${label} уже существует`), {
+        status: 409,
+        code: 'EQUIPMENT_IDENTIFIER_DUPLICATE',
+        field,
+        conflictEquipment: {
+          id: conflict.id,
+          inventoryNumber: conflict.inventoryNumber,
+          serialNumber: conflict.serialNumber,
+          model: conflict.model,
+        },
+      });
+    }
+  }
+
+  function sendEquipmentValidationError(res, error) {
+    return res.status(error?.status || 400).json({
+      ok: false,
+      error: error?.message || 'Некорректные данные техники',
+      code: error?.code,
+      field: error?.field,
+      conflictEquipment: error?.conflictEquipment,
+    });
+  }
+
   function canReadPublicUsers(req) {
     return new Set([
       'Администратор',
@@ -920,6 +975,9 @@ function registerCrudRoutes(deps) {
         if (collection === 'clients') {
           assertClientInnUnique(data, newItem);
         }
+        if (collection === 'equipment') {
+          validateEquipmentRecord(newItem, data);
+        }
         if (collection === 'users') {
           newItem = normalizeUserPasswordForWrite(newItem);
         }
@@ -989,6 +1047,9 @@ function registerCrudRoutes(deps) {
       } catch (error) {
         if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
           return sendClientInnError(res, error);
+        }
+        if (collection === 'equipment' && error?.code?.startsWith('EQUIPMENT_')) {
+          return sendEquipmentValidationError(res, error);
         }
         if (error?.status) return sendAccessError(res, error);
         return res.status(400).json({ ok: false, error: error.message });
@@ -1124,6 +1185,9 @@ function registerCrudRoutes(deps) {
           if (collection === 'clients') {
             assertClientInnUnique(data, nextItem, data[idx].id);
           }
+          if (collection === 'equipment') {
+            validateEquipmentRecord(nextItem, data, data[idx]);
+          }
           if (collection === 'users') {
             if (
               safePatch.password ||
@@ -1196,6 +1260,9 @@ function registerCrudRoutes(deps) {
       } catch (error) {
         if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
           return sendClientInnError(res, error);
+        }
+        if (collection === 'equipment' && error?.code?.startsWith('EQUIPMENT_')) {
+          return sendEquipmentValidationError(res, error);
         }
         return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }

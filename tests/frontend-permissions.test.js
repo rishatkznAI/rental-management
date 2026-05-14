@@ -9,6 +9,7 @@ const notificationCenterSource = readFileSync(new URL('../src/app/components/lay
 const rentalApprovalHistorySheetSource = readFileSync(new URL('../src/app/components/gantt/RentalApprovalHistorySheet.tsx', import.meta.url), 'utf8');
 const equipmentPageSource = readFileSync(new URL('../src/app/pages/Equipment.tsx', import.meta.url), 'utf8');
 const equipmentDetailSource = readFileSync(new URL('../src/app/pages/EquipmentDetail.tsx', import.meta.url), 'utf8');
+const equipmentNewSource = readFileSync(new URL('../src/app/pages/EquipmentNew.tsx', import.meta.url), 'utf8');
 const rentalsPageSource = readFileSync(new URL('../src/app/pages/Rentals.tsx', import.meta.url), 'utf8');
 const rentalDetailSource = readFileSync(new URL('../src/app/pages/RentalDetail.tsx', import.meta.url), 'utf8');
 const servicePageSource = readFileSync(new URL('../src/app/pages/Service.tsx', import.meta.url), 'utf8');
@@ -122,6 +123,12 @@ test('frontend equipment registry RBAC separates rental sales and investor capab
   assert.match(equipmentDetailSource, /show: canCreateSales && canCreateDocuments/);
   assert.match(equipmentDetailSource, /show: can\('create', 'rentals'\)/);
   assert.match(equipmentDetailSource, /show: can\('create', 'deliveries'\)/);
+});
+
+test('equipment create form keeps selected owner aligned with loaded owners catalog', () => {
+  assert.match(equipmentNewSource, /api\.get<typeof DEFAULT_OWNERS>\('\/api\/owners'\)/);
+  assert.match(equipmentNewSource, /owners\.some\(owner => owner\.id === prev\.ownerId\)/);
+  assert.match(equipmentNewSource, /return \{ \.\.\.prev, ownerId: owners\[0\]\.id \}/);
 });
 
 test('frontend warranty mechanic menu grants only working sections', () => {

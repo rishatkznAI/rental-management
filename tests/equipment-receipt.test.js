@@ -142,6 +142,85 @@ test('sales manager creates new sale equipment with planned arrival without turn
   });
 });
 
+test('admin equipment CRUD validates required model and unique identifiers', async () => {
+  const state = {
+    equipment: [
+      {
+        id: 'EQ-existing',
+        manufacturer: 'JLG',
+        model: '1932R',
+        inventoryNumber: 'INV-EXIST',
+        serialNumber: 'SN-EXIST',
+        gsmImei: '123456789012345',
+        saleReceiptStatus: 'planned_arrival',
+        history: [],
+      },
+    ],
+    service: [],
+  };
+
+  await withServer(createCrudApp(state), async baseUrl => {
+    const list = await request(baseUrl, 'GET', '/api/equipment');
+    assert.equal(list.status, 200);
+    assert.equal(list.body.length, 1);
+
+    const missingModel = await request(baseUrl, 'POST', '/api/equipment', {
+      manufacturer: 'Genie',
+      inventoryNumber: 'INV-NEW',
+      serialNumber: 'SN-NEW',
+    });
+    assert.equal(missingModel.status, 400);
+    assert.equal(missingModel.body.code, 'EQUIPMENT_MODEL_REQUIRED');
+
+    const duplicateSerial = await request(baseUrl, 'POST', '/api/equipment', {
+      manufacturer: 'Genie',
+      model: 'GS-1932',
+      inventoryNumber: 'INV-NEW',
+      serialNumber: 'SN-EXIST',
+    });
+    assert.equal(duplicateSerial.status, 409);
+    assert.equal(duplicateSerial.body.code, 'EQUIPMENT_IDENTIFIER_DUPLICATE');
+    assert.equal(duplicateSerial.body.field, 'serialNumber');
+    assert.equal(duplicateSerial.body.conflictEquipment.id, 'EQ-existing');
+
+    const created = await request(baseUrl, 'POST', '/api/equipment', {
+      manufacturer: 'Genie',
+      model: 'GS-1932',
+      inventoryNumber: 'INV-NEW',
+      serialNumber: 'SN-NEW',
+      status: 'available',
+      category: 'own',
+      activeInFleet: true,
+      priority: 'medium',
+      history: [],
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.model, 'GS-1932');
+
+    const detail = await request(baseUrl, 'GET', `/api/equipment/${created.body.id}`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.inventoryNumber, 'INV-NEW');
+
+    const patched = await request(baseUrl, 'PATCH', `/api/equipment/${created.body.id}`, {
+      notes: 'Проверено аудитом',
+    });
+    assert.equal(patched.status, 200);
+    assert.equal(patched.body.notes, 'Проверено аудитом');
+    assert.equal(patched.body.serialNumber, 'SN-NEW');
+    assert.equal(patched.body.inventoryNumber, 'INV-NEW');
+
+    const duplicateInventory = await request(baseUrl, 'PATCH', `/api/equipment/${created.body.id}`, {
+      inventoryNumber: 'INV-EXIST',
+    });
+    assert.equal(duplicateInventory.status, 409);
+    assert.equal(duplicateInventory.body.field, 'inventoryNumber');
+
+    const original = state.equipment.find(item => item.id === 'EQ-existing');
+    assert.equal(original.gsmImei, '123456789012345');
+    assert.equal(original.saleReceiptStatus, 'planned_arrival');
+  });
+});
+
 test('PATCH saleReceiptStatus preserves saleCondition and records receipt history', async () => {
   const state = createState();
   await withServer(createCrudApp(state), async baseUrl => {

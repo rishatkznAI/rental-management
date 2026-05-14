@@ -2,6 +2,9 @@ import type { Equipment, EquipmentCategory, EquipmentDrive, EquipmentPriority, E
 import { DEFAULT_EQUIPMENT_TYPE_CATALOG, findEquipmentTypeLabel } from './equipmentTypes';
 import { normalizeEquipmentSaleCondition, saleStatusKind } from './equipmentSaleMode.js';
 
+const ACTIVE_SALE_STATUS_LABEL = 'На продаже';
+const REMOVED_SALE_STATUS_LABEL = 'Снята с продажи';
+
 export const EQUIPMENT_CATEGORY_LABELS: Record<EquipmentCategory, string> = {
   own: 'Собственная',
   sold: 'Проданная',
@@ -86,12 +89,18 @@ export function normalizeEquipmentActiveInFleet(equipment: Partial<Equipment> & 
 
 export function normalizeEquipment<T extends Partial<Equipment>>(equipment: T): T & Pick<Equipment, 'category' | 'activeInFleet' | 'priority' | 'isForSale' | 'salePdiStatus'> {
   const saleCondition = normalizeEquipmentSaleCondition(equipment) as EquipmentSaleCondition | undefined;
+  const saleKind = saleStatusKind(equipment);
+  const activeSale = equipment.isForSale === true
+    || equipment.forSale === true
+    || (equipment.saleMode === true && saleKind !== 'removed' && saleKind !== 'sold');
+  const removedSaleStatus = saleKind === 'removed';
   return {
     ...equipment,
     category: equipment.category ?? 'own',
     activeInFleet: normalizeEquipmentActiveInFleet(equipment as T & Record<string, unknown>, true),
     priority: equipment.priority ?? 'medium',
-    isForSale: equipment.isForSale ?? false,
+    isForSale: activeSale || equipment.isForSale === true,
+    ...(activeSale && removedSaleStatus ? { saleStatus: ACTIVE_SALE_STATUS_LABEL } : {}),
     ...(saleCondition ? { saleCondition } : {}),
     salePdiStatus: equipment.salePdiStatus ?? 'not_started',
   };
@@ -105,6 +114,9 @@ export function normalizeEquipmentPatch<T extends Partial<Equipment>>(equipment:
   const source = equipment as T & Record<string, unknown>;
   const saleCondition = normalizeEquipmentSaleCondition(equipment) as EquipmentSaleCondition | undefined;
   const hasActiveInFleet = ACTIVE_IN_FLEET_ALIAS_KEYS.some(key => hasOwn(source, key));
+  const saleKind = saleStatusKind(source);
+  const saleOff = source.isForSale === false || source.forSale === false || saleKind === 'removed';
+  const saleOn = source.isForSale === true || source.forSale === true || (source.saleMode === true && !saleOff);
   const {
     fleet: _fleet,
     rentalFleet: _rentalFleet,
@@ -117,6 +129,8 @@ export function normalizeEquipmentPatch<T extends Partial<Equipment>>(equipment:
   return {
     ...(rest as T),
     ...(hasActiveInFleet ? { activeInFleet: normalizeEquipmentActiveInFleet(source, true) } : {}),
+    ...(saleOn ? { isForSale: true, forSale: true, saleMode: true, saleStatus: ACTIVE_SALE_STATUS_LABEL } : {}),
+    ...(saleOff ? { isForSale: false, forSale: false, saleMode: true, saleStatus: REMOVED_SALE_STATUS_LABEL } : {}),
     ...(saleCondition ? { saleCondition } : {}),
   };
 }

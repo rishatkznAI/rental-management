@@ -401,6 +401,9 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'maintenancePTO',
     'notes',
     'isForSale',
+    'forSale',
+    'saleMode',
+    'saleStatus',
     'saleCondition',
     'salePdiStatus',
     'saleReceiptStatus',
@@ -1366,6 +1369,9 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
   if (collection === 'equipment' && isSalesManager(user)) {
     const allowed = new Set([
       'isForSale',
+      'forSale',
+      'saleMode',
+      'saleStatus',
       'saleCondition',
       'salePdiStatus',
       'saleReceiptStatus',

@@ -132,6 +132,10 @@ export interface Equipment {
   subleasePrice?: number;
   plannedMonthlyRevenue: number;
   isForSale?: boolean;
+  forSale?: boolean;
+  saleMode?: boolean;
+  saleStatus?: string;
+  salesStatus?: string;
   saleCondition?: EquipmentSaleCondition;
   saleType?: EquipmentSaleCondition;
   salePdiStatus?: EquipmentSalePdiStatus;

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import {
   buildSaleStatusPatch,
   getSaleOperationHistory,
@@ -13,6 +14,12 @@ import {
   saleStatusLabel,
 } from '../src/app/lib/equipmentSaleMode.js';
 import { buildEquipmentQuickActions } from '../src/app/lib/quickActions.js';
+
+const require = createRequire(import.meta.url);
+const {
+  normalizeEquipmentSalePatch,
+  normalizeEquipmentStorageRecord,
+} = require('../server/lib/equipment-classification.js');
 
 const allowAll = () => true;
 const equipmentConstantsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/equipment.constants.ts'), 'utf8');
@@ -127,6 +134,69 @@ test('sale status patches keep returned sold equipment out of rental fleet', () 
   assert.equal(removed.isForSale, false);
   assert.equal(removed.activeInFleet, false);
   assert.equal(removed.status, 'inactive');
+});
+
+test('active sale flags override stale removed sale status in lists and cards', () => {
+  const equipment = {
+    id: 'EQ-mantall',
+    manufacturer: 'Mantall',
+    model: 'XE140RT',
+    serialNumber: '03331938',
+    status: 'available',
+    saleCondition: 'new',
+    isForSale: true,
+    saleMode: true,
+    saleStatus: 'Снята с продажи',
+  };
+
+  assert.equal(saleConditionLabel(equipment), 'Новая');
+  assert.equal(saleStatusKind(equipment), 'on_sale');
+  assert.equal(saleStatusLabel(equipment), 'На продаже');
+});
+
+test('backend normalizes enabling sale from removed state to active sale fields', () => {
+  const existing = {
+    id: 'EQ-removed',
+    status: 'inactive',
+    saleStatus: 'Снята с продажи',
+    isForSale: false,
+    forSale: false,
+    saleMode: true,
+  };
+  const patch = normalizeEquipmentSalePatch(existing, { isForSale: true, status: 'available' });
+
+  assert.equal(patch.isForSale, true);
+  assert.equal(patch.forSale, true);
+  assert.equal(patch.saleMode, true);
+  assert.equal(patch.saleStatus, 'На продаже');
+  assert.equal(patch.status, 'available');
+});
+
+test('backend partial ordinary status patch does not remove active sale status', () => {
+  const stored = normalizeEquipmentStorageRecord({
+    id: 'EQ-active',
+    status: 'available',
+    saleStatus: 'На продаже',
+    isForSale: true,
+    saleMode: true,
+  });
+  const next = normalizeEquipmentStorageRecord({ ...stored, status: 'available' });
+
+  assert.equal(next.saleStatus, 'На продаже');
+  assert.equal(next.isForSale, true);
+  assert.equal(next.saleMode, true);
+});
+
+test('backend keeps explicit sale removal as removed and not for sale', () => {
+  const patch = normalizeEquipmentSalePatch(
+    { id: 'EQ-active', status: 'available', saleStatus: 'На продаже', isForSale: true, saleMode: true },
+    { isForSale: false },
+  );
+
+  assert.equal(patch.isForSale, false);
+  assert.equal(patch.forSale, false);
+  assert.equal(patch.saleMode, true);
+  assert.equal(patch.saleStatus, 'Снята с продажи');
 });
 
 test('rental eligibility excludes sold sale records but not active on-sale fleet units', () => {

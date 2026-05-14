@@ -36,6 +36,12 @@ function hasSaleMarker(value) {
   ].includes(normalized);
 }
 
+function hasActiveSaleFlag(equipment = {}) {
+  return equipment.isForSale === true
+    || equipment.forSale === true
+    || hasSaleMarker(equipment.saleMode);
+}
+
 export const SALE_STATUS_LABELS = {
   on_sale: 'На продаже',
   reserved: 'Резерв',
@@ -91,10 +97,12 @@ export function normalizeEquipmentSaleCondition(equipment = {}) {
 export function saleStatusKind(equipment = {}) {
   const rawStatus = lower(equipment.saleStatus || equipment.salesStatus || equipment.status || equipment.category);
   if (equipment.category === 'sold' || rawStatus === 'sold' || rawStatus === 'продана' || rawStatus === 'продано') return 'sold';
-  if (rawStatus === 'removed' || rawStatus === 'withdrawn' || rawStatus === 'снята с продажи' || rawStatus === 'снято с продажи') return 'removed';
   if (rawStatus === 'reserved' || rawStatus === 'резерв') return 'reserved';
   if (rawStatus === 'in_deal' || rawStatus === 'deal' || rawStatus === 'в сделке') return 'in_deal';
-  if (hasSaleMarker(rawStatus) || equipment.isForSale) return 'on_sale';
+  if (hasActiveSaleFlag(equipment)) return 'on_sale';
+  if (rawStatus === 'removed' || rawStatus === 'withdrawn' || rawStatus === 'снята с продажи' || rawStatus === 'снято с продажи') return 'removed';
+  if (equipment.saleMode === true) return 'on_sale';
+  if (hasSaleMarker(rawStatus)) return 'on_sale';
   return 'unknown';
 }
 
@@ -104,6 +112,7 @@ export function isSaleModeEquipment(equipment, context = {}) {
 
   if (equipment.saleMode === true || hasSaleMarker(equipment.saleMode)) return true;
   if (equipment.isForSale === true) return true;
+  if (equipment.forSale === true) return true;
   if (text(equipment.saleStatus)) return true;
   if (text(equipment.salesStatus)) return true;
   if (hasSaleMarker(equipment.status)) return true;
@@ -182,6 +191,8 @@ export function buildSaleStatusPatch(equipment = {}, nextStatus) {
     return {
       category: baseCategory,
       isForSale: true,
+      forSale: true,
+      saleMode: true,
       activeInFleet: false,
       status: 'available',
       saleStatus: SALE_STATUS_LABELS.on_sale,
@@ -191,6 +202,8 @@ export function buildSaleStatusPatch(equipment = {}, nextStatus) {
     return {
       category: baseCategory,
       isForSale: true,
+      forSale: true,
+      saleMode: true,
       activeInFleet: false,
       status: 'reserved',
       saleStatus: SALE_STATUS_LABELS.reserved,
@@ -200,6 +213,8 @@ export function buildSaleStatusPatch(equipment = {}, nextStatus) {
     return {
       category: baseCategory,
       isForSale: true,
+      forSale: true,
+      saleMode: true,
       activeInFleet: false,
       status: 'reserved',
       saleStatus: SALE_STATUS_LABELS.in_deal,
@@ -209,6 +224,8 @@ export function buildSaleStatusPatch(equipment = {}, nextStatus) {
     return {
       category: 'sold',
       isForSale: false,
+      forSale: false,
+      saleMode: true,
       activeInFleet: false,
       status: 'inactive',
       saleStatus: SALE_STATUS_LABELS.sold,
@@ -218,6 +235,8 @@ export function buildSaleStatusPatch(equipment = {}, nextStatus) {
     return {
       category: baseCategory,
       isForSale: false,
+      forSale: false,
+      saleMode: true,
       activeInFleet: false,
       status: 'inactive',
       saleStatus: SALE_STATUS_LABELS.removed,

@@ -8,6 +8,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { AuthenticatedImage } from '../components/ui/AuthenticatedImage';
 import {
   Dialog,
   DialogContent,
@@ -4818,9 +4819,14 @@ export default function Rentals() {
                                 {movementPhotos.length > 0 ? (
                                   <div className="flex max-w-[220px] flex-wrap gap-2">
                                     {movementPhotos.slice(0, 4).map((photo, index) => (
-                                      <a key={photo.id || `${entry.id}-${index}`} href={photo.fullUrl || undefined} target="_blank" rel="noreferrer" className="block h-14 w-14 overflow-hidden rounded-lg border border-border bg-secondary">
-                                        <img src={photo.thumbnailUrl || photo.fullUrl || undefined} alt="" className="h-full w-full object-cover" />
-                                      </a>
+                                      <AuthenticatedImage
+                                        key={photo.id || `${entry.id}-${index}`}
+                                        photo={photo}
+                                        alt=""
+                                        className="h-14 w-14 rounded-lg"
+                                        fallbackClassName="h-14 w-14 min-h-0 rounded-lg p-1 text-[10px]"
+                                        imgClassName="h-full w-full object-cover"
+                                      />
                                     ))}
                                     {movementPhotos.length > 4 && <span className="text-xs text-muted-foreground">+{movementPhotos.length - 4}</span>}
                                   </div>

@@ -73,6 +73,9 @@ test('marks empty, stale blob and corrupted values as unavailable', () => {
 test('detects protected media endpoints that need bearer fetch instead of img src', () => {
   assert.equal(isAuthenticatedMediaUrl('/api/files/photo.jpg', ''), true);
   assert.equal(isAuthenticatedMediaUrl('/uploads/photo.jpg', ''), true);
+  assert.equal(isAuthenticatedMediaUrl('https://api.example.test/uploads/photo.jpg', 'https://api.example.test'), true);
+  assert.equal(isAuthenticatedMediaUrl('https://api.example.test/api/files/photo.jpg', 'https://api.example.test'), true);
+  assert.equal(isAuthenticatedMediaUrl('https://other.example.test/uploads/photo.jpg', 'https://api.example.test'), false);
   assert.equal(isAuthenticatedMediaUrl('https://cdn.example.test/photo.jpg', ''), false);
   assert.equal(isAuthenticatedMediaUrl('data:image/jpeg;base64,abcd', ''), false);
 });

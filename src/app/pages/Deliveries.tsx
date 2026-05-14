@@ -1148,7 +1148,7 @@ export default function Deliveries() {
             </div>
           )}
           {canCreate && (
-            <Button onClick={openCreateDialog}>
+            <Button onClick={() => openCreateDialog()}>
               <Plus className="mr-1.5 h-4 w-4" />
               Новая доставка
             </Button>
@@ -1303,7 +1303,7 @@ export default function Deliveries() {
             <p className="text-base font-semibold text-gray-900 dark:text-white">{emptyState.title}</p>
             <p className="mt-1 max-w-md text-sm">{emptyState.description}</p>
             {canCreate && deliveries.length === 0 && (
-              <Button className="mt-4" onClick={openCreateDialog}>
+              <Button className="mt-4" onClick={() => openCreateDialog()}>
                 <Plus className="h-4 w-4" />
                 Создать доставку
               </Button>

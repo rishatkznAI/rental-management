@@ -32,6 +32,18 @@ function rentalManagerPermissionBlock() {
   return match.groups.body;
 }
 
+function adminPermissionBlock() {
+  const match = permissionsSource.match(/'Администратор':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
+  assert.ok(match?.groups?.body, 'admin permission block must exist');
+  return match.groups.body;
+}
+
+function officeManagerPermissionBlock() {
+  const match = permissionsSource.match(/'Офис-менеджер':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
+  assert.ok(match?.groups?.body, 'office manager permission block must exist');
+  return match.groups.body;
+}
+
 function salesManagerPermissionBlock() {
   const match = permissionsSource.match(/'Менеджер по продажам':\s*\{(?<body>[\s\S]*?)\n\s*\},/);
   assert.ok(match?.groups?.body, 'sales manager permission block must exist');
@@ -64,6 +76,27 @@ test('frontend rental manager permissions match backend write limits', () => {
   assert.doesNotMatch(block, /payments:\s+\['view', 'create', 'edit'\]/);
   assert.doesNotMatch(block, /\bfinance:\s+/);
   assert.doesNotMatch(block, /\badmin_panel:\s+/);
+});
+
+test('frontend delivery create RBAC exposes active create only to operational roles', () => {
+  const adminBlock = adminPermissionBlock();
+  const officeBlock = officeManagerPermissionBlock();
+  const rentalManagerBlock = rentalManagerPermissionBlock();
+  const carrierBlock = carrierPermissionBlock();
+  const headBlock = headPermissionBlock();
+  const investorBlock = investorPermissionBlock();
+
+  assert.match(adminBlock, /deliveries:\s+ALL/);
+  assert.match(officeBlock, /deliveries:\s+ALL/);
+  assert.match(rentalManagerBlock, /deliveries:\s+\['view', 'create', 'edit'\]/);
+  assert.match(deliveriesPageSource, /const canCreate = can\('create', 'deliveries'\)/);
+  assert.match(deliveriesPageSource, /canCreate && \(/);
+  assert.match(deliveriesPageSource, /<Button onClick=\{\(\) => openCreateDialog\(\)\}>/);
+
+  assert.match(carrierBlock, /deliveries:\s+VIEW/);
+  assert.doesNotMatch(carrierBlock, /create/);
+  assert.doesNotMatch(headBlock, /\bdeliveries:\s+/);
+  assert.doesNotMatch(investorBlock, /\bdeliveries:\s+/);
 });
 
 test('frontend equipment registry RBAC separates rental sales and investor capabilities', () => {

@@ -35,3 +35,30 @@ test('delivery rental options prefer source rental id over legacy name matching'
   assert.match(optionsBlock, /classicRentalId: getGanttRentalSourceId\(item\) \|\| classic\?\.id \|\| ''/);
   assert.match(optionsBlock, /clientId: item\.clientId \|\| classic\?\.clientId \|\| client\?\.id \|\| ''/);
 });
+
+test('delivery create buttons open the form without forwarding click events as params', () => {
+  const renderBlock = extract('return (', '<DeliveryDialog');
+
+  assert.doesNotMatch(renderBlock, /onClick=\{openCreateDialog\}/, 'create buttons must not pass React click events into URLSearchParams prefill logic');
+  assert.match(renderBlock, /onClick=\{\(\) => openCreateDialog\(\)\}/);
+  assert.match(renderBlock, /canCreate && \(/);
+  assert.match(renderBlock, /Новая доставка/);
+  assert.match(renderBlock, /Создать доставку/);
+});
+
+test('delivery create dialog stays mounted and exposes required logistics fields', () => {
+  const dialogPropsBlock = extract('<DeliveryDialog', '<Sheet open={Boolean(selectedDelivery)');
+  const dialogBlock = extract('function DeliveryDialog({', 'export default function Deliveries()');
+
+  assert.match(dialogPropsBlock, /open=\{dialogOpen\}/);
+  assert.match(dialogPropsBlock, /onClose=\{\(\) => setDialogOpen\(false\)\}/);
+  assert.match(dialogPropsBlock, /onSubmit=\{handleSubmit\}/);
+  assert.match(dialogBlock, /<Sheet open=\{open\}/);
+  assert.match(dialogBlock, /Тип операции/);
+  assert.match(dialogBlock, /Перевозчик/);
+  assert.match(dialogBlock, /Откуда/);
+  assert.match(dialogBlock, /Куда/);
+  assert.match(dialogBlock, /Клиент/);
+  assert.match(dialogBlock, /Что перевозим/);
+  assert.match(dialogBlock, /Контактное лицо/);
+});

@@ -12,3 +12,19 @@ export function isPdiServiceTicket(ticket) {
 export function isRegularServiceTicket(ticket) {
   return !isPdiServiceTicket(ticket);
 }
+
+function normalizedServiceStatus(ticket) {
+  const status = String(ticket?.status || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (status === 'done' || status === 'complete' || status === 'completed' || status === 'finished') {
+    return 'closed';
+  }
+  return status || 'new';
+}
+
+export function isArchivedServiceTicket(ticket) {
+  return isRegularServiceTicket(ticket) && normalizedServiceStatus(ticket) === 'closed';
+}
+
+export function isActiveServiceTicket(ticket) {
+  return isRegularServiceTicket(ticket) && !isArchivedServiceTicket(ticket);
+}

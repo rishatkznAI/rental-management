@@ -26,7 +26,7 @@ import { formatDate } from '../lib/utils';
 import type { Client, Mechanic, ServiceTicket } from '../types';
 import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
 import { buildServiceQueue } from '../lib/serviceQueue';
-import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
+import { isActiveServiceTicket, isArchivedServiceTicket, isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { clientsService } from '../services/clients.service';
@@ -71,10 +71,6 @@ function truncateText(value: string, maxLength: number) {
   const normalized = value.trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength).trimEnd()}...`;
-}
-
-function isActiveTicket(ticket: ServiceTicket) {
-  return normalizeServiceStatus(ticket.status) !== 'closed';
 }
 
 function normalizeServicePriority(priority: ServiceTicket['priority']): ServiceTicket['priority'] {
@@ -1038,6 +1034,9 @@ export default function Service() {
   const [dateTo, setDateTo] = React.useState('');
   const [showFilters, setShowFilters] = React.useState(false);
   const [visibleCount, setVisibleCount] = React.useState(RESULT_BATCH_SIZE);
+  const [archiveSearch, setArchiveSearch] = React.useState('');
+  const [archiveStatusFilter, setArchiveStatusFilter] = React.useState<'closed'>('closed');
+  const [archiveVisibleCount, setArchiveVisibleCount] = React.useState(RESULT_BATCH_SIZE);
   const [viewMode, setViewMode] = React.useState<'list' | 'kanban'>('list');
   const [selectedTicketId, setSelectedTicketId] = React.useState<string | null>(null);
   const [openTicketId, setOpenTicketId] = React.useState<string | null>(null);
@@ -1088,15 +1087,6 @@ export default function Service() {
     return start.toISOString().slice(0, 10);
   }, []);
 
-  const mechanicOptions = React.useMemo(() => (
-    Array.from(new Set(
-      ticketList
-        .map(ticket => ticket.assignedMechanicName || ticket.assignedTo || '')
-        .map(value => value.trim())
-        .filter(Boolean),
-    )).sort((left, right) => left.localeCompare(right, 'ru'))
-  ), [ticketList]);
-
   const clientLookup = React.useMemo(() => {
     const lookup = new Map<string, Client>();
     clients.forEach(client => {
@@ -1107,9 +1097,23 @@ export default function Service() {
   }, [clients]);
 
   const activeTickets = React.useMemo(
-    () => ticketList.filter(isActiveTicket),
+    () => ticketList.filter(isActiveServiceTicket),
     [ticketList],
   );
+
+  const archivedTickets = React.useMemo(
+    () => ticketList.filter(isArchivedServiceTicket),
+    [ticketList],
+  );
+
+  const mechanicOptions = React.useMemo(() => (
+    Array.from(new Set(
+      activeTickets
+        .map(ticket => ticket.assignedMechanicName || ticket.assignedTo || '')
+        .map(value => value.trim())
+        .filter(Boolean),
+    )).sort((left, right) => left.localeCompare(right, 'ru'))
+  ), [activeTickets]);
 
   const workflowCounts = React.useMemo(() => (
     WORKFLOW_FILTER_OPTIONS.reduce<Record<ServiceWorkflowFilter, number>>((acc, option) => {
@@ -1149,7 +1153,7 @@ export default function Service() {
     );
     const effectiveDateTo = dateTo || (datePreset === 'all' ? '' : todayIso);
 
-    return ticketList
+    return activeTickets
       .filter(ticket => {
         const matchesSearch = query === '' || getTicketSearchText(ticket).includes(query);
         const ticketPriority = normalizeServicePriority(ticket.priority);
@@ -1191,16 +1195,31 @@ export default function Service() {
     scenarioFilter,
     search,
     statusFilter,
-    ticketList,
     todayIso,
     workflowFilter,
+    activeTickets,
   ]);
+
+  const filteredArchiveTickets = React.useMemo(() => {
+    const query = normalizeSearch(archiveSearch);
+    return archivedTickets
+      .filter(ticket => archiveStatusFilter === 'closed' && isArchivedServiceTicket(ticket))
+      .filter(ticket => !query || getTicketSearchText(ticket).includes(query))
+      .sort((left, right) => (
+        String(right.closedAt || right.createdAt || '').localeCompare(String(left.closedAt || left.createdAt || ''))
+      ));
+  }, [archiveSearch, archiveStatusFilter, archivedTickets]);
 
   React.useEffect(() => {
     setVisibleCount(RESULT_BATCH_SIZE);
   }, [search, priorityFilter, statusFilter, scenarioFilter, mechanicFilter, workflowFilter, preset, datePreset, dateFrom, dateTo]);
 
+  React.useEffect(() => {
+    setArchiveVisibleCount(RESULT_BATCH_SIZE);
+  }, [archiveSearch, archiveStatusFilter]);
+
   const visibleTickets = filteredTickets.slice(0, visibleCount);
+  const visibleArchiveTickets = filteredArchiveTickets.slice(0, archiveVisibleCount);
   const selectedTicket = React.useMemo(() => (
     selectedTicketId
       ? filteredTickets.find(ticket => ticket.id === selectedTicketId) ?? null
@@ -1377,7 +1396,6 @@ export default function Service() {
                   <SelectItem value="waiting_parts">Ожидание запчастей</SelectItem>
                   <SelectItem value="needs_revision">На доработке</SelectItem>
                   <SelectItem value="ready">Готово</SelectItem>
-                  <SelectItem value="closed">Закрыто</SelectItem>
                 </SelectContent>
               </Select>
             </FilterField>
@@ -1421,6 +1439,13 @@ export default function Service() {
             className="flex-none rounded-none border-0 border-b-4 border-transparent bg-transparent px-0 pb-4 pt-0 text-xl font-black text-gray-500 data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:data-[state=active]:bg-transparent"
           >
             Заявки
+          </TabsTrigger>
+          <TabsTrigger
+            value="archive"
+            className="flex-none rounded-none border-0 border-b-4 border-transparent bg-transparent px-0 pb-4 pt-0 text-xl font-black text-gray-500 data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:data-[state=active]:bg-transparent"
+          >
+            Архив
+            <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500 dark:bg-white/8 dark:text-gray-300">{archivedTickets.length}</span>
           </TabsTrigger>
           <TabsTrigger
             value="queue"
@@ -1483,7 +1508,6 @@ export default function Service() {
                   <SelectItem value="waiting_parts">Ожидает запчасти</SelectItem>
                   <SelectItem value="needs_revision">На доработке</SelectItem>
                   <SelectItem value="ready">Готова к выдаче</SelectItem>
-                  <SelectItem value="closed">Закрыта</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={scenarioFilter} onValueChange={setScenarioFilter}>
@@ -1703,6 +1727,130 @@ export default function Service() {
                   type="button"
                   variant="secondary"
                   onClick={() => setVisibleCount(count => count + RESULT_BATCH_SIZE)}
+                  className="w-full rounded-full sm:w-auto"
+                >
+                  <ArrowDown className="h-4 w-4" />
+                  Показать ещё
+                </Button>
+              )}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="archive" className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <ServiceMetricCard title="В архиве" value={archivedTickets.length} caption="Закрытые заявки" tone="neutral" />
+            <ServiceMetricCard title="Закрыто" value={archivedTickets.filter(ticket => isArchivedServiceTicket(ticket)).length} caption="Финальный статус" tone="green" />
+            <ServiceMetricCard title="Найдено" value={filteredArchiveTickets.length} caption="По текущим фильтрам" tone="blue" />
+          </div>
+
+          <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="grid gap-3 md:grid-cols-[minmax(240px,1fr)_220px_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Поиск в архиве: № заявки, техника, клиент..."
+                  value={archiveSearch}
+                  onChange={(e) => setArchiveSearch(e.target.value)}
+                  className="h-11 pl-10"
+                />
+              </div>
+              <Select value={archiveStatusFilter} onValueChange={(value) => setArchiveStatusFilter(value as 'closed')}>
+                <SelectTrigger className="h-11"><SelectValue placeholder="Статус" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="closed">Закрыта</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button type="button" variant="secondary" className="h-11" onClick={() => setArchiveSearch('')}>
+                Сбросить
+              </Button>
+            </div>
+          </section>
+
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="hidden grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] lg:grid">
+              <div>№ заявки / дата</div>
+              <div>Статус</div>
+              <div>Техника</div>
+              <div>Клиент / проблема</div>
+              <div>Закрыта</div>
+              <div></div>
+            </div>
+            {visibleArchiveTickets.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-14 text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-white/8">
+                  <Search className="h-7 w-7 text-gray-400 dark:text-gray-500" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">Архивные заявки не найдены</h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Попробуйте изменить поиск по архиву.</p>
+              </div>
+            ) : (
+              visibleArchiveTickets.map((ticket, index) => {
+                const inventory = getTicketInventory(ticket);
+                const serialNumber = ticket.serialNumber || '';
+                const clientDetails = getTicketClientDetails(ticket, clientLookup);
+                const description = ticket.description ? truncateText(ticket.description, 90) : '';
+                const openTicket = () => openTicketCard(ticket.id);
+
+                return (
+                  <div
+                    key={ticket.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Открыть архивную заявку ${ticket.id}`}
+                    onClick={openTicket}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openTicket();
+                      }
+                    }}
+                    className={`grid cursor-pointer gap-3 border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 hover:bg-[--color-primary]/5 dark:border-white/6 lg:grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] lg:items-start ${
+                      index % 2 === 0 ? 'bg-gray-50/60 dark:bg-white/[0.015]' : 'bg-white dark:bg-transparent'
+                    }`}
+                  >
+                    <div className="min-w-0 text-left">
+                      <div className="truncate font-mono text-sm font-bold text-[--color-primary]">{ticket.id}</div>
+                      <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
+                    </div>
+                    <div>{getServiceStatusBadge(normalizeServiceStatus(ticket.status))}</div>
+                    <div className="min-w-0 text-left">
+                      <div className="truncate text-sm font-bold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</div>
+                      <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
+                        INV: {inventory}{serialNumber ? ` · SN: ${serialNumber}` : ''}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{clientDetails.name}</div>
+                      <div className="mt-0.5 truncate text-xs text-gray-500">{ticket.reason || description || '—'}</div>
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-300">{ticket.closedAt ? formatShortDate(ticket.closedAt) : '—'}</div>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openTicket();
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-[--color-primary] dark:hover:bg-white/10"
+                      title="Открыть полную карточку"
+                      aria-label={`Открыть полную карточку архивной заявки ${ticket.id}`}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {filteredArchiveTickets.length > 0 && (
+            <div className="flex flex-col gap-3 text-sm text-gray-500 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
+              <p>Показано {visibleArchiveTickets.length} из {filteredArchiveTickets.length} архивных заявок</p>
+              {visibleArchiveTickets.length < filteredArchiveTickets.length && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setArchiveVisibleCount(count => count + RESULT_BATCH_SIZE)}
                   className="w-full rounded-full sm:w-auto"
                 >
                   <ArrowDown className="h-4 w-4" />

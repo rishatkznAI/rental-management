@@ -60,7 +60,7 @@ test('keeps legacy delivery and shipping photo arrays visible even with mixed ob
 });
 
 test('marks empty, stale blob and corrupted values as unavailable', () => {
-  for (const value of ['', null, undefined, 'blob:https://old-session/1', '[object Object]', { url: '[object Object]' }]) {
+  for (const value of ['', null, undefined, 'blob:https://old-session/1', '[object Object]', { url: '[object Object]' }, '/undefined', '/uploads/undefined', '/uploads/NaN']) {
     const normalized = normalizePhotoReference(value, { apiBaseUrl: '' });
     assert.equal(normalized.url, null);
     assert.equal(normalized.thumbnailUrl, null);

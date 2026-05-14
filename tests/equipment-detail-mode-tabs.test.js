@@ -35,9 +35,10 @@ test('equipment detail keeps receiving and shipment photos separated with legacy
   }
   assert.match(detailSource, /function getShippingPhotoOperationKind/);
   assert.match(detailSource, /function normalizeEquipmentIdentifier/);
-  assert.match(detailSource, /equipmentSerialNumber && normalizeEquipmentIdentifier\(event\.serialNumber\) === equipmentSerialNumber/);
+  assert.match(detailSource, /buildEquipmentMovementEvents/);
+  assert.match(detailSource, /queryFn: equipmentService\.getAllShippingPhotos/);
   assert.match(detailSource, /getDeliveryOperationKind\(delivery\)/);
-  assert.match(detailSource, /getDeliveryPhotoList\(delivery\)/);
+  assert.match(detailSource, /equipmentMovementEvents\.map/);
   assert.match(detailSource, /const shipmentRecords = shippingPhotos/);
   assert.match(detailSource, /<SalePanel title="Фото отгрузки">/);
   assert.match(detailSource, /<SalePanel title="Фото приёмки">/);

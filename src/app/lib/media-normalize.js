@@ -41,6 +41,7 @@ function isHttpUrl(value) {
 function isProbablyRelativeMediaPath(value) {
   if (!value || /^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
   if (value.includes('[object Object]')) return false;
+  if (/\/(?:undefined|null|nan)(?:[/?#.]|$)/i.test(value)) return false;
   if (value.startsWith('/') || value.startsWith('./') || value.startsWith('../')) return true;
   if (/^(api|uploads|photos|documents|files|attachments)\//i.test(value)) return true;
   return /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)(\?|#|$)/i.test(value);

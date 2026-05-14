@@ -49,6 +49,7 @@ import { PdiForm } from '../components/sales/PdiForm';
 import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
 import { getToken } from '../lib/api';
 import { absoluteMediaUrl, normalizePhotoReference, photoFallbackSource, photoSource } from '../lib/media';
+import { buildEquipmentMovementEvents } from '../lib/equipmentMovementEvents.js';
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
@@ -926,8 +927,8 @@ export default function EquipmentDetail() {
     enabled: !!id && canViewShippingPhotos,
   });
   const { data: shippingPhotoData = EMPTY_SHIPPING_PHOTOS } = useQuery({
-    queryKey: ['shippingPhotos', id],
-    queryFn: () => equipmentService.getShippingPhotos(String(id ?? '')),
+    queryKey: ['shippingPhotos'],
+    queryFn: equipmentService.getAllShippingPhotos,
     enabled: !!id && canViewShippingPhotos,
   });
 
@@ -1060,43 +1061,36 @@ export default function EquipmentDetail() {
   useEffect(() => {
     setAllShippingPhotos(shippingPhotoData);
   }, [shippingPhotoData]);
+  const equipmentMovementEvents = useMemo(
+    () => buildEquipmentMovementEvents({
+      equipment,
+      equipmentList: allEquipment,
+      rentals: allGanttRentals,
+      deliveries: deliveryData,
+      shippingPhotos: allShippingPhotos,
+      apiBaseUrl: API_BASE_URL,
+    }),
+    [allEquipment, allGanttRentals, allShippingPhotos, deliveryData, equipment],
+  );
   const shippingPhotos = useMemo(
-    () => {
-      if (!equipment) return [];
-      const inventoryIsUnique = (inventoryCounts.get(equipment.inventoryNumber) ?? 0) === 1;
-      const equipmentSerialNumber = normalizeEquipmentIdentifier(equipment.serialNumber);
-      const directEvents = allShippingPhotos.filter(event =>
-        event.equipmentId === equipment.id
-        || (equipmentSerialNumber && normalizeEquipmentIdentifier(event.serialNumber) === equipmentSerialNumber)
-        || ((event as ShippingPhoto & { equipmentInv?: string }).equipmentInv && inventoryIsUnique && (event as ShippingPhoto & { equipmentInv?: string }).equipmentInv === equipment.inventoryNumber)
-        || (event.rentalId && relatedRentalIds.has(String(event.rentalId)))
-        || ((event as ShippingPhoto & { deliveryId?: string }).deliveryId && relatedDeliveryById.has(String((event as ShippingPhoto & { deliveryId?: string }).deliveryId)))
-      );
-      const existingIds = new Set(directEvents.map(event => String(event.id)));
-      const deliveryEvents = relatedDeliveries.flatMap(delivery => {
-        const photos = getDeliveryPhotoList(delivery);
-        if (photos.length === 0) return [];
-        const operationKind = getDeliveryOperationKind(delivery);
-        if (!operationKind) return [];
-        const eventId = `delivery-photo-${delivery.id}`;
-        if (existingIds.has(eventId)) return [];
-        return [{
-          id: eventId,
-          equipmentId: equipment.id,
-          date: delivery.transportDate || delivery.neededBy || '',
-          type: operationKind,
-          uploadedBy: delivery.manager || delivery.carrierName || 'Доставка',
-          photos,
-          comment: delivery.comment,
-          rentalId: delivery.rentalId || delivery.ganttRentalId || delivery.classicRentalId || undefined,
-          source: 'manual' as const,
-          deliveryId: delivery.id,
-        } as ShippingPhoto & { deliveryId?: string }];
-      });
-      return [...directEvents, ...deliveryEvents]
-        .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
-    },
-    [allShippingPhotos, deliveryById, equipment, inventoryCounts, relatedDeliveries, relatedDeliveryById, relatedRentalIds],
+    () => equipmentMovementEvents.map(event => ({
+      id: event.id,
+      equipmentId: event.equipmentId,
+      date: event.date || '',
+      type: event.kind === 'receiving' ? 'receiving' : 'shipping',
+      uploadedBy: event.uploadedBy || event.carrierName || 'Не указано',
+      photos: event.rawPhotos || [],
+      comment: event.comment,
+      rentalId: event.rentalId || event.ganttRentalId,
+      source: 'manual',
+      photoCategories: event.photoCategories,
+      hoursValue: event.hoursValue,
+      damageDescription: event.damageDescription,
+      checklist: event.checklist,
+      deliveryId: event.deliveryId,
+      movementEvent: event,
+    } as ShippingPhoto & { deliveryId?: string; movementEvent?: typeof event })),
+    [equipmentMovementEvents],
   );
   const shippingComparisonPairs = useMemo(
     () => buildShippingComparisonPairs(shippingPhotos),
@@ -1120,8 +1114,8 @@ export default function EquipmentDetail() {
   const persistShippingPhotos = React.useCallback(async (list: ShippingPhoto[]) => {
     setAllShippingPhotos(list);
     await equipmentService.bulkReplaceShippingPhotos(list);
-    await queryClient.invalidateQueries({ queryKey: ['shippingPhotos', id] });
-  }, [id, queryClient]);
+    await queryClient.invalidateQueries({ queryKey: ['shippingPhotos'] });
+  }, [queryClient]);
 
   const persistGanttRentals = React.useCallback(async (list: GanttRentalData[]) => {
     setAllGanttRentals(list);
@@ -1686,7 +1680,7 @@ export default function EquipmentDetail() {
     const validTabsByMode = {
       rental: ['overview', 'acceptance', 'rentals', 'economics', 'service', 'documents', 'history'],
       sale: ['sale-overview', 'pdi', 'commerce', 'sale-service', 'sale-documents', 'sale-history'],
-      repair: ['repair-overview', 'diagnostics', 'work-parts', 'field-trips', 'repair-documents', 'service-history'],
+      repair: ['repair-overview', 'acceptance', 'diagnostics', 'work-parts', 'field-trips', 'repair-documents', 'service-history'],
     };
     const validTabs = validTabsByMode[cardMode];
     if (!validTabs.includes(activeTab)) {
@@ -2878,6 +2872,7 @@ export default function EquipmentDetail() {
             {cardMode === 'repair' && (
               <>
                 <TabsTrigger value="repair-overview" className={tabTriggerClass}>Обзор ремонта</TabsTrigger>
+                <TabsTrigger value="acceptance" className={tabTriggerClass}>Отгрузки/приёмки</TabsTrigger>
                 <TabsTrigger value="diagnostics" className={tabTriggerClass}>Диагностика</TabsTrigger>
                 <TabsTrigger value="work-parts" className={tabTriggerClass}>Работы и запчасти</TabsTrigger>
                 <TabsTrigger value="field-trips" className={tabTriggerClass}>Выезды</TabsTrigger>
@@ -2936,7 +2931,7 @@ export default function EquipmentDetail() {
           <div className="space-y-4">
             <SalePanel title="Фото отгрузки">
               {shipmentRecords.length === 0 ? (
-                <EmptyState icon={<Camera className="h-12 w-12" />} text="Фото отгрузки по этой технике пока не добавлены" />
+                <EmptyState icon={<Camera className="h-12 w-12" />} text="Фото ещё не загружены" />
               ) : (
                 <div className="space-y-4">
                   {shipmentRecords.map(record => (
@@ -2965,7 +2960,7 @@ export default function EquipmentDetail() {
                           ))}
                         </div>
                       ) : (
-                        <EmptyState icon={<ImageIcon className="h-10 w-10" />} text="Фото по этой отгрузке не добавлены" />
+                        <EmptyState icon={<ImageIcon className="h-10 w-10" />} text="Фото ещё не загружены" />
                       )}
                     </div>
                   ))}
@@ -3016,7 +3011,7 @@ export default function EquipmentDetail() {
                       ))}
                     </div>
                   ) : (
-                    <EmptyState icon={<ImageIcon className="h-10 w-10" />} text="Фото по этой записи не добавлены" />
+                    <EmptyState icon={<ImageIcon className="h-10 w-10" />} text="Фото ещё не загружены" />
                   )}
                 </div>
               ))}
@@ -4722,6 +4717,27 @@ export default function EquipmentDetail() {
                       {!isShippingEventCollapsed(event.id) && (
                         <>
                           {event.comment && <p className="mt-2 text-sm text-muted-foreground">{event.comment}</p>}
+                          {(() => {
+                            const movementEvent = (event as ShippingPhoto & { movementEvent?: { clientName?: string; objectName?: string; addressFrom?: string; addressTo?: string; carrierName?: string; status?: string | null; source?: string; diagnostics?: string[] } }).movementEvent;
+                            const metaItems = [
+                              movementEvent?.clientName && `Клиент: ${movementEvent.clientName}`,
+                              movementEvent?.objectName && `Объект: ${movementEvent.objectName}`,
+                              (movementEvent?.addressFrom || movementEvent?.addressTo) && `Маршрут: ${[movementEvent.addressFrom, movementEvent.addressTo].filter(Boolean).join(' → ')}`,
+                              movementEvent?.carrierName && `Перевозчик: ${movementEvent.carrierName}`,
+                              movementEvent?.status && `Статус: ${movementEvent.status}`,
+                              event.rentalId && `Аренда: ${event.rentalId}`,
+                              (event as ShippingPhoto & { deliveryId?: string }).deliveryId && `Доставка: ${(event as ShippingPhoto & { deliveryId?: string }).deliveryId}`,
+                              movementEvent?.source && `Источник: ${movementEvent.source}`,
+                            ].filter(Boolean);
+                            if (metaItems.length === 0) return null;
+                            return (
+                              <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                                {metaItems.map(item => (
+                                  <div key={item} className="rounded-lg border border-border bg-secondary/50 px-3 py-2">{item}</div>
+                                ))}
+                              </div>
+                            );
+                          })()}
                           {event.checklist && (
                             <div className="mt-3 rounded-xl border border-border bg-secondary/70 p-3">
                               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -4775,19 +4791,25 @@ export default function EquipmentDetail() {
                               })}
                             </div>
                           ) : (
-                            <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
-                              {flatPhotos.map((photo, idx) => (
-                                <AuthenticatedImage
-                                  key={idx}
-                                  photo={normalizePhotoReference(photo, { idPrefix: `${event.id}-photo-${idx}` })}
-                                  alt={`Фото ${idx + 1}`}
-                                  className="h-32 w-48 shrink-0 hover:opacity-90"
-                                  fallbackClassName="h-32 w-48 shrink-0"
-                                  imgClassName="h-32 w-48 object-cover cursor-zoom-in"
-                                  onOpen={setPreviewImage}
-                                />
-                              ))}
-                            </div>
+                            flatPhotos.length > 0 ? (
+                              <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+                                {flatPhotos.map((photo, idx) => (
+                                  <AuthenticatedImage
+                                    key={idx}
+                                    photo={normalizePhotoReference(photo, { idPrefix: `${event.id}-photo-${idx}` })}
+                                    alt={`Фото ${idx + 1}`}
+                                    className="h-32 w-48 shrink-0 hover:opacity-90"
+                                    fallbackClassName="h-32 w-48 shrink-0"
+                                    imgClassName="h-32 w-48 object-cover cursor-zoom-in"
+                                    onOpen={setPreviewImage}
+                                  />
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="mt-3 rounded-lg border border-dashed border-border bg-card/60 px-3 py-6 text-center text-sm text-muted-foreground">
+                                Фото ещё не загружены
+                              </div>
+                            )
                           )}
                           <p className="mt-2 text-xs text-muted-foreground">{getEventPhotoItems(event).length} фото · недоступные отмечены в карточке</p>
                         </>

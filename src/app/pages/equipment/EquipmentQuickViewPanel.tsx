@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Boxes, X } from 'lucide-react';
 import { Button } from '../../components/ui/button';
+import { AuthenticatedImage } from '../../components/ui/AuthenticatedImage';
+import { normalizePhotoReference } from '../../lib/media';
 import type { Equipment as EquipmentEntity } from '../../types';
 import { EQUIPMENT_PREVIEW_TABS, EQUIPMENT_QUICK_VIEW_EMPTY_COPY } from './equipment.constants';
 import type {
@@ -130,7 +132,13 @@ export function EquipmentQuickViewPanel({
           {activeTab === 'overview' && (
             <div className="space-y-4">
               {mainPhoto ? (
-                <img src={mainPhoto} alt={title} className="h-56 w-full rounded-xl border border-border object-cover" />
+                <AuthenticatedImage
+                  photo={normalizePhotoReference(mainPhoto, { idPrefix: `${selectedEquipment.id}-quick-main` })}
+                  alt={title}
+                  className="h-56 w-full rounded-xl border border-border"
+                  imgClassName="h-full w-full object-cover"
+                  fallbackClassName="h-56"
+                />
               ) : (
                 <div className="flex h-56 w-full items-center justify-center rounded-xl border border-dashed border-border bg-secondary/60 text-muted-foreground">
                   <Boxes className="h-7 w-7" />
@@ -206,7 +214,13 @@ export function EquipmentQuickViewPanel({
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {photos.map(photo => (
                     <figure key={photo.id} className="overflow-hidden rounded-xl border border-border bg-secondary/40">
-                      <img src={photo.src} alt={photo.label} className="h-32 w-full object-cover" loading="lazy" />
+                      <AuthenticatedImage
+                        photo={normalizePhotoReference(photo.src, { idPrefix: photo.id })}
+                        alt={photo.label}
+                        className="h-32 w-full rounded-none border-0"
+                        imgClassName="h-full w-full object-cover"
+                        fallbackClassName="h-32 rounded-none border-0"
+                      />
                       <figcaption className="space-y-1 p-2 text-xs">
                         <div className="font-semibold text-foreground">{photo.label}</div>
                         <div className="line-clamp-2 text-muted-foreground">{photo.metaLabel}</div>

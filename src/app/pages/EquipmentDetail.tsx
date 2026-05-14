@@ -48,7 +48,7 @@ import { ServiceTicketForm } from '../components/service/ServiceTicketForm';
 import { PdiForm } from '../components/sales/PdiForm';
 import { appendAuditHistory, buildFieldDiffHistory, createAuditEntry } from '../lib/entity-history';
 import { getToken } from '../lib/api';
-import { absoluteMediaUrl, normalizePhotoReference, photoFallbackSource, photoSource } from '../lib/media';
+import { absoluteMediaUrl, isAuthenticatedMediaUrl, normalizePhotoReference, photoFallbackSource, photoSource } from '../lib/media';
 import { buildEquipmentMovementEvents } from '../lib/equipmentMovementEvents.js';
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
@@ -607,6 +607,72 @@ function displayPhotoUrl(photo: PhotoReference): string {
 
 function fallbackPhotoUrl(photo: PhotoReference): string {
   return absoluteMediaUrl(photoFallbackSource(photo));
+}
+
+function SafeEquipmentPhoto({
+  photo,
+  alt,
+  idPrefix,
+  className,
+  imgClassName,
+  fallbackClassName,
+  onOpen,
+}: {
+  photo: PhotoReference | null | undefined;
+  alt: string;
+  idPrefix: string;
+  className?: string;
+  imgClassName?: string;
+  fallbackClassName?: string;
+  onOpen?: (url: string) => void;
+}) {
+  return (
+    <AuthenticatedImage
+      photo={normalizePhotoReference(photo, { idPrefix })}
+      alt={alt}
+      className={className}
+      imgClassName={imgClassName}
+      fallbackClassName={fallbackClassName}
+      onOpen={onOpen}
+    />
+  );
+}
+
+function PreviewImage({
+  src,
+  onClose,
+}: {
+  src: string;
+  onClose: () => void;
+}) {
+  const isProtected = isAuthenticatedMediaUrl(src);
+  return (
+    <div className="relative w-full">
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute right-3 top-3 z-10 rounded-full bg-black/60 p-2 text-white transition hover:bg-black/80"
+        aria-label="Закрыть просмотр"
+      >
+        <X className="h-5 w-5" />
+      </button>
+      {isProtected ? (
+        <AuthenticatedImage
+          photo={normalizePhotoReference(src, { idPrefix: 'preview' })}
+          alt="Просмотр фото"
+          className="block border-0 bg-transparent"
+          imgClassName="max-h-[92vh] w-full rounded-xl bg-black object-contain"
+          fallbackClassName="min-h-[50vh]"
+        />
+      ) : (
+        <img
+          src={src}
+          alt="Просмотр фото"
+          className="max-h-[92vh] w-full rounded-xl bg-black object-contain"
+        />
+      )}
+    </div>
+  );
 }
 
 type ShippingComparisonPair = {
@@ -2389,17 +2455,16 @@ export default function EquipmentDetail() {
                   />
                   <div className="flex min-h-[22rem] items-center justify-center bg-secondary">
                     {equipment.photo ? (
-                      <img
-                        src={photoSource(equipment.photo)}
-                        onError={(event) => {
-                          const fallback = photoFallbackSource(equipment.photo);
-                          if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                        }}
+                      <SafeEquipmentPhoto
+                        photo={equipment.photo}
+                        idPrefix={`${equipment.id}-sale-main`}
                         alt={saleTitle}
-                        className="h-full max-h-[26rem] w-full cursor-zoom-in object-cover"
-                        onClick={() => setPreviewImage(photoSource(equipment.photo))}
+                        className="h-full w-full rounded-none border-0"
+                        imgClassName="h-full max-h-[26rem] w-full cursor-zoom-in object-cover"
+                        fallbackClassName="min-h-[22rem] rounded-none border-0"
+                        onOpen={setPreviewImage}
                       />
-                    ) : (
+                    ) : canEditCurrentEquipment ? (
                       <button
                         type="button"
                         className="flex h-full min-h-[22rem] w-full flex-col items-center justify-center gap-3 text-muted-foreground"
@@ -2408,19 +2473,26 @@ export default function EquipmentDetail() {
                         <ImageIcon className="h-16 w-16" />
                         <span className="text-sm">Добавить фото техники</span>
                       </button>
+                    ) : (
+                      <div className="flex h-full min-h-[22rem] w-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                        <ImageIcon className="h-16 w-16" />
+                        <span className="text-sm">Фото ещё не загружено</span>
+                      </div>
                     )}
                   </div>
                   <div className="grid grid-cols-4 gap-2 p-2">
                     {saleGalleryPreview.length > 0 ? saleGalleryPreview.map((photo, index) => (
-                      <button
-                        type="button"
+                      <SafeEquipmentPhoto
                         key={`${photoSource(photo)}-${index}`}
+                        photo={photo}
+                        idPrefix={`${equipment.id}-sale-gallery-${index}`}
+                        alt={`${saleTitle} фото ${index + 1}`}
                         className="h-16 overflow-hidden rounded-lg border border-border bg-secondary"
-                        onClick={() => setPreviewImage(photoSource(photo))}
-                      >
-                        <img src={photoSource(photo)} alt="" className="h-full w-full object-cover" />
-                      </button>
-                    )) : (
+                        imgClassName="h-full w-full object-cover"
+                        fallbackClassName="h-16 min-h-0"
+                        onOpen={setPreviewImage}
+                      />
+                    )) : canEditCurrentEquipment ? (
                       <button
                         type="button"
                         className="col-span-3 h-16 rounded-lg border border-dashed border-border text-xs text-muted-foreground"
@@ -2428,14 +2500,20 @@ export default function EquipmentDetail() {
                       >
                         Галерея пуста
                       </button>
+                    ) : (
+                      <div className="col-span-3 flex h-16 items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
+                        Галерея пуста
+                      </div>
                     )}
-                    <button
-                      type="button"
-                      className="h-16 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-2 text-xs font-medium text-blue-300"
-                      onClick={() => mainPhotoInputRef.current?.click()}
-                    >
-                      +{Math.max(shippingGalleryPhotoCount + saleGalleryPhotos.length - saleGalleryPreview.length, 0)} фото
-                    </button>
+                    {canEditCurrentEquipment && (
+                      <button
+                        type="button"
+                        className="h-16 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-2 text-xs font-medium text-blue-300"
+                        onClick={() => mainPhotoInputRef.current?.click()}
+                      >
+                        +{Math.max(shippingGalleryPhotoCount + saleGalleryPhotos.length - saleGalleryPreview.length, 0)} фото
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -2635,17 +2713,16 @@ export default function EquipmentDetail() {
                   />
                   <div className="relative flex min-h-[23rem] items-center justify-center bg-secondary">
                     {equipment.photo ? (
-                      <img
-                        src={photoSource(equipment.photo)}
-                        onError={(event) => {
-                          const fallback = photoFallbackSource(equipment.photo);
-                          if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                        }}
+                      <SafeEquipmentPhoto
+                        photo={equipment.photo}
+                        idPrefix={`${equipment.id}-asset-main`}
                         alt={assetTitle}
-                        className="h-full max-h-[28rem] w-full cursor-zoom-in object-cover"
-                        onClick={() => setPreviewImage(photoSource(equipment.photo))}
+                        className="h-full w-full rounded-none border-0"
+                        imgClassName="h-full max-h-[28rem] w-full cursor-zoom-in object-cover"
+                        fallbackClassName="min-h-[23rem] rounded-none border-0"
+                        onOpen={setPreviewImage}
                       />
-                    ) : (
+                    ) : canEditCurrentEquipment ? (
                       <button
                         type="button"
                         className="flex h-full min-h-[23rem] w-full flex-col items-center justify-center gap-3 text-muted-foreground"
@@ -2654,6 +2731,11 @@ export default function EquipmentDetail() {
                         <ImageIcon className="h-16 w-16" />
                         <span className="text-sm">Добавить фото техники</span>
                       </button>
+                    ) : (
+                      <div className="flex h-full min-h-[23rem] w-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                        <ImageIcon className="h-16 w-16" />
+                        <span className="text-sm">Фото ещё не загружено</span>
+                      </div>
                     )}
                     <span className="absolute bottom-3 left-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-medium text-white">
                       {Math.max(assetGalleryPreview.length, equipment.photo ? 1 : 0)} / {Math.max(saleGalleryPhotos.length, 1)}
@@ -2661,15 +2743,17 @@ export default function EquipmentDetail() {
                   </div>
                   <div className="grid grid-cols-4 gap-2 p-2">
                     {assetGalleryPreview.length > 0 ? assetGalleryPreview.map((photo, index) => (
-                      <button
-                        type="button"
+                      <SafeEquipmentPhoto
                         key={`${photoSource(photo)}-${index}`}
+                        photo={photo}
+                        idPrefix={`${equipment.id}-asset-gallery-${index}`}
+                        alt={`${assetTitle} фото ${index + 1}`}
                         className="h-16 overflow-hidden rounded-lg border border-border bg-secondary"
-                        onClick={() => setPreviewImage(photoSource(photo))}
-                      >
-                        <img src={photoSource(photo)} alt="" className="h-full w-full object-cover" />
-                      </button>
-                    )) : (
+                        imgClassName="h-full w-full object-cover"
+                        fallbackClassName="h-16 min-h-0"
+                        onOpen={setPreviewImage}
+                      />
+                    )) : canEditCurrentEquipment ? (
                       <button
                         type="button"
                         className="col-span-3 h-16 rounded-lg border border-dashed border-border text-xs text-muted-foreground"
@@ -2677,14 +2761,20 @@ export default function EquipmentDetail() {
                       >
                         Галерея пуста
                       </button>
+                    ) : (
+                      <div className="col-span-3 flex h-16 items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
+                        Галерея пуста
+                      </div>
                     )}
-                    <button
-                      type="button"
-                      className="h-16 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-2 text-xs font-medium text-blue-300"
-                      onClick={() => mainPhotoInputRef.current?.click()}
-                    >
-                      +{Math.max(shippingGalleryPhotoCount + saleGalleryPhotos.length - assetGalleryPreview.length, 0)} фото
-                    </button>
+                    {canEditCurrentEquipment && (
+                      <button
+                        type="button"
+                        className="h-16 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-2 text-xs font-medium text-blue-300"
+                        onClick={() => mainPhotoInputRef.current?.click()}
+                      >
+                        +{Math.max(shippingGalleryPhotoCount + saleGalleryPhotos.length - assetGalleryPreview.length, 0)} фото
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -3301,11 +3391,14 @@ export default function EquipmentDetail() {
             <div className="group relative">
               {equipment.photo ? (
                 <div className="flex min-h-[18rem] items-center justify-center overflow-hidden rounded-2xl bg-secondary p-3">
-                  <img
-                    src={equipment.photo}
+                  <SafeEquipmentPhoto
+                    photo={equipment.photo}
+                    idPrefix={`${equipment.id}-legacy-main`}
                     alt={equipment.model}
-                    className="max-h-[32rem] w-full cursor-zoom-in rounded-xl object-contain"
-                    onClick={() => setPreviewImage(equipment.photo ?? null)}
+                    className="block w-full border-0 bg-transparent"
+                    imgClassName="max-h-[32rem] w-full cursor-zoom-in rounded-xl object-contain"
+                    fallbackClassName="min-h-[18rem]"
+                    onOpen={setPreviewImage}
                   />
                 </div>
               ) : (
@@ -4106,9 +4199,15 @@ export default function EquipmentDetail() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {equipment.photo ? (
-                  <button type="button" className="block w-full" onClick={() => setPreviewImage(equipment.photo ?? null)}>
-                    <img src={displayPhotoUrl(equipment.photo)} alt={equipment.model} className="max-h-[32rem] w-full rounded-xl border border-border object-contain" />
-                  </button>
+                  <SafeEquipmentPhoto
+                    photo={equipment.photo}
+                    idPrefix={`${equipment.id}-sale-photos-tab`}
+                    alt={equipment.model}
+                    className="block w-full"
+                    imgClassName="max-h-[32rem] w-full rounded-xl border border-border object-contain"
+                    fallbackClassName="min-h-[18rem]"
+                    onOpen={setPreviewImage}
+                  />
                 ) : (
                   <EmptyState icon={<Camera className="h-12 w-12" />} text="Фото техники для продажи пока нет">
                     {canEditCurrentEquipment && (
@@ -5006,23 +5105,7 @@ export default function EquipmentDetail() {
           <Dialog.Overlay className={animatedOverlayClassName('bg-black/75')} />
           <Dialog.Content className={animatedModalClassName('flex max-h-[92vh] w-[min(96vw,1200px)] items-center justify-center border-0 bg-transparent p-0 shadow-none outline-none')}>
             <Dialog.Title className="sr-only">Просмотр фото</Dialog.Title>
-            {previewImage && (
-              <div className="relative w-full">
-                <button
-                  type="button"
-                  onClick={() => setPreviewImage(null)}
-                  className="absolute right-3 top-3 z-10 rounded-full bg-black/60 p-2 text-white transition hover:bg-black/80"
-                  aria-label="Закрыть просмотр"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-                <img
-                  src={previewImage}
-                  alt="Просмотр фото"
-                  className="max-h-[92vh] w-full rounded-xl bg-black object-contain"
-                />
-              </div>
-            )}
+            {previewImage && <PreviewImage src={previewImage} onClose={() => setPreviewImage(null)} />}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -5181,7 +5264,15 @@ function ServiceTicketCompactCard({
       {photos.length > 0 && (
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
           {photos.slice(0, 8).map((photo, index) => (
-            <img key={`${ticket.id}-photo-${index}`} src={displayPhotoUrl(photo)} alt="" className="h-20 w-28 shrink-0 rounded-lg border border-border object-cover" />
+            <SafeEquipmentPhoto
+              key={`${ticket.id}-photo-${index}`}
+              photo={photo}
+              idPrefix={`${ticket.id}-service-photo-${index}`}
+              alt={`${ticket.reason || ticket.id} фото ${index + 1}`}
+              className="h-20 w-28 shrink-0 rounded-lg border border-border"
+              imgClassName="h-full w-full object-cover"
+              fallbackClassName="h-20 min-h-0 w-28"
+            />
           ))}
         </div>
       )}

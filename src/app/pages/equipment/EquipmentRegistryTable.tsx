@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Boxes, MoreVertical } from 'lucide-react';
-import { photoSource } from '../../lib/media';
+import { AuthenticatedImage } from '../../components/ui/AuthenticatedImage';
+import { normalizePhotoReference, photoSource } from '../../lib/media';
 import type { Equipment as EquipmentEntity } from '../../types';
 import type { ActiveRentalIndex } from './equipment.types';
 
@@ -80,11 +81,12 @@ export function EquipmentRegistryTable({
               >
                 <td className="px-4 py-3">
                   {imageSrc ? (
-                    <img
-                      src={imageSrc}
+                    <AuthenticatedImage
+                      photo={normalizePhotoReference(equipment.photo, { idPrefix: `${equipment.id}-registry` })}
                       alt={title}
-                      loading="lazy"
-                      className="h-12 w-16 rounded-lg border border-border/70 object-cover"
+                      className="h-12 w-16 rounded-lg border border-border/70"
+                      imgClassName="h-full w-full object-cover"
+                      fallbackClassName="h-12 min-h-0 w-16"
                     />
                   ) : (
                     <div className="flex h-12 w-16 items-center justify-center rounded-lg border border-dashed border-border bg-secondary/70 text-muted-foreground" title="Нет фото">

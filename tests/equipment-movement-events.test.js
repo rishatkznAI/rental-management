@@ -115,10 +115,23 @@ test('helper keeps legacy photo fields safe and reports broken object photos', (
 test('equipment card uses full shipping photo collection and authenticated image rendering', async () => {
   const fs = await import('node:fs');
   const source = fs.readFileSync('src/app/pages/EquipmentDetail.tsx', 'utf8');
+  const quickViewSource = fs.readFileSync('src/app/pages/equipment/EquipmentQuickViewPanel.tsx', 'utf8');
+  const registrySource = fs.readFileSync('src/app/pages/equipment/EquipmentRegistryTable.tsx', 'utf8');
 
   assert.match(source, /queryFn: equipmentService\.getAllShippingPhotos/);
   assert.match(source, /buildEquipmentMovementEvents/);
   assert.match(source, /Фото ещё не загружены/);
   assert.match(source, /<AuthenticatedImage/);
+  assert.match(source, /function SafeEquipmentPhoto/);
+  assert.match(source, /function PreviewImage/);
+  assert.match(source, /isAuthenticatedMediaUrl\(src\)/);
   assert.doesNotMatch(source, /src=\{photo\.thumbnailUrl \|\| photo\.fullUrl \|\| undefined\}/);
+  assert.doesNotMatch(source, /<img\s+src=\{photoSource\(photo\)\}/);
+  assert.doesNotMatch(source, /<img\s+src=\{displayPhotoUrl\(photo\)\}/);
+  assert.doesNotMatch(source, /<img\s+src=\{equipment\.photo\}/);
+  assert.match(quickViewSource, /<AuthenticatedImage/);
+  assert.doesNotMatch(quickViewSource, /<img\s+src=\{photo\.src\}/);
+  assert.doesNotMatch(quickViewSource, /<img\s+src=\{mainPhoto\}/);
+  assert.match(registrySource, /<AuthenticatedImage/);
+  assert.doesNotMatch(registrySource, /<img[\s\S]*src=\{imageSrc\}/);
 });

@@ -187,6 +187,11 @@ test('frontend head role has read-only movement and equipment photo history view
   assert.match(rentalsPageSource, /label: 'Движение техники'/);
   assert.match(rentalsPageSource, /Фото ещё не загружены/);
   assert.match(rentalsPageSource, /activeWorkspaceTab !== 'returns' && \(\s*activeWorkspaceTab !== 'movement'/);
+  assert.match(equipmentDetailSource, /const canEditCurrentEquipment = saleMode \? \(canEditEquipment \|\| canEditSales\) : canEditEquipment/);
+  assert.match(equipmentDetailSource, /\) : canEditCurrentEquipment \? \(/);
+  assert.match(equipmentDetailSource, /<span className="text-sm">Фото ещё не загружено<\/span>/);
+  assert.doesNotMatch(block, /\bequipment:\s+ALL/);
+  assert.doesNotMatch(block, /\bequipment:\s+\[[^\]]*(?:create|edit|delete)/);
 });
 
 test('frontend normalizes warranty mechanic role aliases', () => {

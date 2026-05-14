@@ -8,10 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
   ArrowLeft, Wrench, User, Clock, MapPin, Tag, FileText,
   CheckCircle, XCircle, AlertTriangle, Play, Package, History,
-  Camera, Upload, Trash2, X, Plus, Car,
+  Camera, Upload, Trash2, X, Plus, Car, ExternalLink,
 } from 'lucide-react';
 import { formatDate } from '../lib/utils';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
@@ -33,7 +34,14 @@ import type {
   ServiceWorkPerformed,
   SparePart,
   PhotoReference,
+  Client,
+  Delivery,
+  ServiceFieldTrip,
+  WarrantyClaim,
 } from '../types';
+import type { GanttRentalData } from '../mock-data';
+import { clientsService } from '../services/clients.service';
+import { deliveriesService } from '../services/deliveries.service';
 import { documentsService } from '../services/documents.service';
 import { equipmentService } from '../services/equipment.service';
 import { mechanicsService } from '../services/mechanics.service';
@@ -42,8 +50,10 @@ import { repairWorkItemsService } from '../services/repair-work-items.service';
 import { rentalsService } from '../services/rentals.service';
 import { serviceWorksService } from '../services/service-works.service';
 import { serviceTicketsService, type ServiceAuditLogEntry } from '../services/service-tickets.service';
+import { serviceFieldTripsService } from '../services/service-field-trips.service';
 import { sparePartsService } from '../services/spare-parts.service';
 import { serviceVehiclesService } from '../services/service-vehicles.service';
+import { warrantyClaimsService } from '../services/warranty-claims.service';
 import { getEquipmentTypeLabel } from '../lib/equipmentClassification';
 import { getServiceScenarioLabel, inferServiceKind, isRepairScenario } from '../lib/serviceScenarios';
 import {
@@ -105,6 +115,39 @@ function Field({ label, value, mono }: { label: string; value?: string | null; m
     <div>
       <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
       <p className={`text-sm font-medium text-gray-900 dark:text-white ${mono ? 'font-mono' : ''}`}>{value}</p>
+    </div>
+  );
+}
+
+function EmptySection({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
+  return (
+    <div className="flex min-h-[132px] flex-col items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center dark:border-gray-700 dark:bg-white/[0.03]">
+      <div className="mb-2 text-gray-300 dark:text-gray-600">{icon}</div>
+      <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">{title}</p>
+      <p className="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">{text}</p>
+    </div>
+  );
+}
+
+function DetailTile({ label, value, mono }: { label: string; value?: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
+      <p className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">{label}</p>
+      <div className={`mt-1 min-h-5 text-sm font-semibold text-gray-900 dark:text-white ${mono ? 'font-mono' : ''}`}>
+        {value || <span className="font-normal text-gray-400">—</span>}
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ icon, title, action }: { icon: React.ReactNode; title: string; action?: React.ReactNode }) {
+  return (
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <h2 className="flex items-center gap-2 text-base font-bold text-gray-900 dark:text-white">
+        {icon}
+        {title}
+      </h2>
+      {action}
     </div>
   );
 }
@@ -412,12 +455,39 @@ export default function ServiceDetail({
   const canEditEquipment = can('edit', 'equipment');
   const canViewDocuments = can('view', 'documents');
   const canViewRentals = can('view', 'rentals');
+  const canViewClients = can('view', 'clients');
+  const canViewDeliveries = can('view', 'deliveries');
   const canViewServiceVehicles = can('view', 'service_vehicles');
   const canCreateDocuments = can('create', 'documents');
 
   const ticketQuery = useServiceTicketById(id);
   const { data: fetchedTicket } = ticketQuery;
   const { data: documents = [] } = useDocumentsList({ enabled: canViewDocuments });
+  const { data: clients = [] } = useQuery<Client[]>({
+    queryKey: ['clients', 'service-detail'],
+    queryFn: clientsService.getAll,
+    enabled: canViewClients,
+  });
+  const { data: rentals = [] } = useQuery({
+    queryKey: ['rentals', 'service-detail'],
+    queryFn: rentalsService.getAll,
+    enabled: canViewRentals,
+  });
+  const { data: ganttRentals = [] } = useQuery<GanttRentalData[]>({
+    queryKey: ['ganttRentals', 'service-detail'],
+    queryFn: rentalsService.getGanttData,
+    enabled: canViewRentals,
+  });
+  const { data: deliveries = [] } = useQuery<Delivery[]>({
+    queryKey: ['deliveries', 'service-detail'],
+    queryFn: deliveriesService.getAll,
+    enabled: canViewDeliveries,
+  });
+  const { data: warrantyClaims = [] } = useQuery<WarrantyClaim[]>({
+    queryKey: ['warrantyClaims', 'service-detail'],
+    queryFn: warrantyClaimsService.getAll,
+    enabled: canViewServiceVehicles || canViewDocuments || canEdit,
+  });
   const { data: equipmentList = [] } = useQuery<Equipment[]>({
     queryKey: EQUIPMENT_KEYS.all,
     queryFn: equipmentService.getAll,
@@ -431,6 +501,11 @@ export default function ServiceDetail({
     queryKey: ['service_vehicles'],
     queryFn:  serviceVehiclesService.getAll,
     enabled: canViewServiceVehicles,
+  });
+  const { data: serviceFieldTrips = [] } = useQuery<ServiceFieldTrip[]>({
+    queryKey: ['serviceFieldTrips', id],
+    queryFn: serviceFieldTripsService.getAll,
+    enabled: Boolean(id) && canViewServiceVehicles,
   });
   const { data: workCatalog = [] } = useQuery<ServiceWork[]>({
     queryKey: ['serviceWorks', 'active'],
@@ -591,6 +666,63 @@ export default function ServiceDetail({
     if (!ticket) return null;
     return documents.find((doc) => doc.type === 'work_order' && doc.serviceTicket === ticket.id) ?? null;
   }, [documents, ticket]);
+  const relatedClient = React.useMemo(() => {
+    if (!ticket) return undefined;
+    return (
+      (ticket.clientId ? clients.find(item => item.id === ticket.clientId) : undefined)
+      ?? (ticket.client ? clients.find(item => item.company === ticket.client) : undefined)
+    );
+  }, [clients, ticket]);
+  const relatedRental = React.useMemo(() => {
+    if (!ticket) return undefined;
+    return (
+      (ticket.rentalId ? rentals.find(item => item.id === ticket.rentalId) : undefined)
+      ?? (ticket.contractId ? rentals.find(item => item.contractId === ticket.contractId) : undefined)
+      ?? (ticket.clientId ? rentals.find(item => item.clientId === ticket.clientId && item.equipment?.some(eq => eq === ticket.inventoryNumber || eq === ticket.equipmentId || eq === ticket.equipment)) : undefined)
+    );
+  }, [rentals, ticket]);
+  const relatedGanttRental = React.useMemo(() => {
+    if (!ticket) return undefined;
+    return (
+      (ticket.rentalId ? ganttRentals.find(item => item.id === ticket.rentalId || item.rentalId === ticket.rentalId || item.sourceRentalId === ticket.rentalId) : undefined)
+      ?? (ticket.equipmentId ? ganttRentals.find(item => item.equipmentId === ticket.equipmentId && item.status !== 'closed' && item.status !== 'returned') : undefined)
+      ?? (ticket.inventoryNumber ? ganttRentals.find(item => item.equipmentInv === ticket.inventoryNumber && item.status !== 'closed' && item.status !== 'returned') : undefined)
+    );
+  }, [ganttRentals, ticket]);
+  const relatedDeliveries = React.useMemo(() => {
+    if (!ticket) return [];
+    return deliveries.filter(delivery =>
+      delivery.serviceTicketId === ticket.id
+      || (ticket.rentalId && [delivery.rentalId, delivery.ganttRentalId, delivery.classicRentalId].includes(ticket.rentalId))
+      || (ticket.equipmentId && delivery.equipmentId === ticket.equipmentId)
+      || (ticket.inventoryNumber && delivery.equipmentInv === ticket.inventoryNumber)
+    );
+  }, [deliveries, ticket]);
+  const relatedWarrantyClaims = React.useMemo(() => {
+    if (!ticket) return [];
+    return warrantyClaims.filter(claim =>
+      claim.serviceTicketId === ticket.id
+      || (ticket.equipmentId && claim.equipmentId === ticket.equipmentId)
+      || (ticket.inventoryNumber && claim.inventoryNumber === ticket.inventoryNumber)
+    );
+  }, [ticket, warrantyClaims]);
+  const relatedDocuments = React.useMemo(() => {
+    if (!ticket) return [];
+    return documents.filter(doc =>
+      doc.serviceTicket === ticket.id
+      || doc.serviceTicketId === ticket.id
+      || (ticket.rentalId && doc.rentalId === ticket.rentalId)
+      || (ticket.equipmentId && doc.equipmentId === ticket.equipmentId)
+    );
+  }, [documents, ticket]);
+  const relatedFieldTrips = React.useMemo(() => {
+    if (!ticket) return [];
+    return serviceFieldTrips.filter(trip =>
+      trip.serviceTicketId === ticket.id
+      || (ticket.equipmentId && trip.equipmentId === ticket.equipmentId)
+      || (ticket.inventoryNumber && trip.inventoryNumber === ticket.inventoryNumber)
+    );
+  }, [serviceFieldTrips, ticket]);
 
   // ── actions ────────────────────────────────────────────────────────────────
 
@@ -1274,11 +1406,19 @@ export default function ServiceDetail({
           </Button>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Сервисная заявка</span>
               <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{ticket.id}</h1>
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
             </div>
             <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400 truncate max-w-[280px] sm:max-w-none">{ticket.equipment}</p>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+              <span>Сценарий: {serviceScenarioLabel}</span>
+              <span>Создана: {formatServiceDate(ticket.createdAt)}</span>
+              <span>Срок: {formatServiceDate(ticket.dueDate || ticket.deadline || ticket.targetDate || ticket.plannedDate || ticket.scheduledDate)}</span>
+              <span>Источник: {ticket.source ? SOURCE_LABELS[ticket.source] ?? ticket.source : '—'}</span>
+              <span>Ответственный: {ticket.assignedMechanicName || ticket.assignedTo || 'не назначен'}</span>
+            </div>
           </div>
         </div>
         {/* Action buttons */}
@@ -1353,6 +1493,156 @@ export default function ServiceDetail({
           </CardContent>
         </Card>
       )}
+
+      <Tabs defaultValue="overview" className="space-y-5">
+        <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto rounded-lg border border-gray-200 bg-white p-1 dark:border-white/10 dark:bg-white/[0.03]">
+          <TabsTrigger value="overview" className="rounded-md px-4 py-2">Обзор</TabsTrigger>
+          <TabsTrigger value="works" className="rounded-md px-4 py-2">Работы</TabsTrigger>
+          <TabsTrigger value="parts" className="rounded-md px-4 py-2">Запчасти</TabsTrigger>
+          <TabsTrigger value="photos" className="rounded-md px-4 py-2">Фото</TabsTrigger>
+          <TabsTrigger value="history" className="rounded-md px-4 py-2">История</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Wrench className="h-4 w-4" />
+                  Техника
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="aspect-[4/3] overflow-hidden rounded-lg border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800">
+                  {currentEquipment?.photo ? (
+                    <img
+                      src={absoluteMediaUrl(photoSource(currentEquipment.photo))}
+                      alt={ticket.equipment}
+                      className="h-full w-full object-cover"
+                      onError={(event) => {
+                        const fallback = absoluteMediaUrl(photoFallbackSource(currentEquipment.photo));
+                        if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+                      }}
+                    />
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center text-gray-400 dark:text-gray-500">
+                      <Camera className="mb-2 h-10 w-10" />
+                      <span className="text-sm">Фото техники нет</span>
+                    </div>
+                  )}
+                </div>
+                <div className="grid gap-2">
+                  <DetailTile label="Модель" value={currentEquipment ? `${currentEquipment.manufacturer} ${currentEquipment.model}` : ticket.equipment} />
+                  <DetailTile label="Инвентарный номер" value={ticket.inventoryNumber || currentEquipment?.inventoryNumber} mono />
+                  <DetailTile label="Серийный номер" value={ticket.serialNumber || currentEquipment?.serialNumber} mono />
+                  <DetailTile label="Статус техники" value={currentEquipment?.status ? currentEquipment.status : undefined} />
+                  {currentEquipment?.id && (
+                    <Link to={`/equipment/${currentEquipment.id}`}>
+                      <Button type="button" variant="secondary" className="w-full">
+                        <ExternalLink className="h-4 w-4" />
+                        Открыть технику
+                      </Button>
+                    </Link>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <FileText className="h-4 w-4" />
+                    Паспорт заявки
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-2 sm:grid-cols-2">
+                  <DetailTile label="Номер" value={ticket.id} mono />
+                  <DetailTile label="Статус" value={STATUS_LABELS[ticket.status]} />
+                  <DetailTile label="Приоритет" value={PRIORITY_LABELS[ticket.priority] ?? ticket.priority} />
+                  <DetailTile label="Сценарий" value={serviceScenarioLabel} />
+                  <DetailTile label="Создана" value={formatServiceDate(ticket.createdAt)} />
+                  <DetailTile label="Дедлайн" value={formatServiceDate(ticket.dueDate || ticket.deadline || ticket.targetDate || ticket.plannedDate || ticket.scheduledDate)} />
+                  <DetailTile label="Источник" value={ticket.source ? SOURCE_LABELS[ticket.source] ?? ticket.source : undefined} />
+                  <DetailTile label="Механик" value={ticket.assignedMechanicName || ticket.assignedTo} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <User className="h-4 w-4" />
+                    Клиент и аренда
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-2">
+                  <DetailTile label="Клиент" value={ticket.client || relatedClient?.company || relatedGanttRental?.client} />
+                  <DetailTile label="Объект" value={ticket.objectName || relatedRental?.deliveryAddress || relatedGanttRental?.deliveryAddress} />
+                  <DetailTile label="Аренда" value={ticket.rentalId || relatedRental?.id || relatedGanttRental?.rentalId || relatedGanttRental?.id} mono />
+                  <DetailTile label="Менеджер" value={relatedRental?.manager || relatedGanttRental?.manager} />
+                  <DetailTile label="Адрес" value={ticket.objectAddress || relatedRental?.deliveryAddress || relatedGanttRental?.deliveryAddress || relatedClient?.actualAddress || relatedClient?.address} />
+                  {canViewClients && (
+                    <DetailTile
+                      label="Контакты"
+                      value={[
+                        ticket.objectContactName || relatedClient?.contact,
+                        ticket.objectContactPhone || ticket.reporterContact || relatedClient?.phone,
+                        relatedClient?.email,
+                      ].filter(Boolean).join(' · ')}
+                    />
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="md:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <AlertTriangle className="h-4 w-4" />
+                    Проблема и связанные сущности
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <DetailTile label="Причина обращения" value={ticket.reason} />
+                    <DetailTile label="Кто создал" value={ticket.createdByUserName || ticket.createdBy} />
+                    <DetailTile label="Комментариев" value={(ticket.workLog ?? []).filter(entry => entry.type === 'comment').length} />
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-white/[0.03] dark:text-gray-200">
+                    {ticket.description || 'Описание проблемы не заполнено.'}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-5">
+                    <DetailTile label="Работы" value={repairResult?.worksPerformed.length ?? 0} />
+                    <DetailTile label="Запчасти" value={repairResult?.partsUsed.length ?? 0} />
+                    <DetailTile label="Фото" value={(ticket.photos ?? []).length + (repairPhotos.before?.length ?? 0) + (repairPhotos.after?.length ?? 0)} />
+                    <DetailTile label="Выезды" value={relatedFieldTrips.length} />
+                    <DetailTile label="Документы" value={relatedDocuments.length} />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(ticket.rentalId || relatedRental || relatedGanttRental) && canViewRentals && (
+                      <Link to={`/rentals/${ticket.rentalId || relatedRental?.id || relatedGanttRental?.rentalId || relatedGanttRental?.id}`}>
+                        <Button type="button" size="sm" variant="outline">Аренда</Button>
+                      </Link>
+                    )}
+                    {relatedDeliveries.slice(0, 2).map(delivery => (
+                      <Link key={delivery.id} to={`/deliveries/${delivery.id}`}>
+                        <Button type="button" size="sm" variant="outline">Доставка {delivery.id}</Button>
+                      </Link>
+                    ))}
+                    {relatedWarrantyClaims.slice(0, 2).map(claim => (
+                      <Button key={claim.id} type="button" size="sm" variant="outline" disabled>
+                        Рекламация {claim.number || claim.id}
+                      </Button>
+                    ))}
+                    {relatedDocuments.slice(0, 2).map(doc => (
+                      <Link key={doc.id} to={`/documents/${doc.id}`}>
+                        <Button type="button" size="sm" variant="outline">Документ {doc.number || doc.id}</Button>
+                      </Link>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ── Left column (2/3) ───────────────────────────────────────────── */}
@@ -2074,6 +2364,276 @@ export default function ServiceDetail({
           )}
         </div>
       </div>
+        </TabsContent>
+
+        <TabsContent value="works" className="space-y-4">
+          <Card id="service-repair-result" className="scroll-mt-24">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Wrench className="h-4 w-4" />
+                Работы
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {repairResult && repairResult.worksPerformed.length > 0 ? (
+                <div className="space-y-2">
+                  {repairResult.worksPerformed.map((work, index) => {
+                    const item = repairWorkItems[index];
+                    return (
+                      <div key={item?.id ?? `${work.catalogId}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-gray-900 dark:text-white">{work.name || '—'}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {work.normHours} н/ч × {work.qty} = {work.totalNormHours} н/ч
+                            {work.ratePerHour > 0 && <span className="ml-2 font-medium text-gray-700 dark:text-gray-300">· {work.totalCost.toLocaleString('ru-RU')} ₽</span>}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {work.createdAt ? formatServiceDate(work.createdAt) : 'Дата не указана'}
+                            {work.createdByUserName ? ` · ${work.createdByUserName}` : ''}
+                            {work.meterHours !== undefined ? ` · ${work.meterHours} м/ч` : ''}
+                          </p>
+                        </div>
+                        {canDeleteRepairItems && item && (
+                          <button onClick={() => void removeWorkPerformed(item, work.name)} className="text-xs text-red-500 hover:underline">Удалить</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptySection icon={<Wrench className="h-8 w-8" />} title="Работы не добавлены" text="Когда механик или администратор внесёт работу, она появится в этом списке." />
+              )}
+              {repairFormError && <p className="text-sm text-red-500">{repairFormError}</p>}
+              {canAddRepairItems && (
+                <div className="grid gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-[minmax(0,1fr)_90px_auto]">
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить работу</label>
+                    <SearchableSelect
+                      options={workCatalog.map(work => ({
+                        value: work.id,
+                        label: work.name,
+                        meta: `${work.category || 'Без категории'} · ${work.normHours} н/ч`,
+                        keywords: [work.category || '', work.description || ''],
+                      }))}
+                      value={selectedWorkId}
+                      onChange={setSelectedWorkId}
+                      placeholder="Выберите работу из справочника"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Кол-во</label>
+                    <Input type="number" min="1" value={selectedWorkQty} onChange={e => setSelectedWorkQty(e.target.value)} />
+                  </div>
+                  <div className="flex items-end">
+                    <Button size="sm" variant="secondary" onClick={() => void addWorkPerformed()} disabled={!selectedWorkId}>Добавить работу</Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="parts" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Package className="h-4 w-4" />
+                Запчасти
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {repairResult && repairResult.partsUsed.length > 0 ? (
+                <div className="space-y-2">
+                  {repairResult.partsUsed.map((part, index) => {
+                    const item = repairPartItems[index];
+                    return (
+                      <div key={item?.id ?? `${part.catalogId ?? part.name}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-gray-900 dark:text-white">{part.name || '—'}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {part.sku ? `${part.sku} · ` : ''}{part.qty} {item?.unitSnapshot || 'шт'} × {part.cost.toLocaleString('ru-RU')} ₽
+                            {part.cost > 0 && <span className="ml-2 font-medium text-gray-700 dark:text-gray-300">= {(part.qty * part.cost).toLocaleString('ru-RU')} ₽</span>}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {item?.createdByUserName || 'Автор не указан'}{item?.createdAt ? ` · ${formatServiceDate(item.createdAt)}` : ''}
+                          </p>
+                        </div>
+                        {canDeleteRepairItems && item && (
+                          <button onClick={() => void removePartUsage(item, part.name)} className="text-xs text-red-500 hover:underline">Удалить</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptySection icon={<Package className="h-8 w-8" />} title="Запчасти не добавлены" text="Если запчасти не требовались, это останется видимым в чек-листе закрытия." />
+              )}
+              {canAddRepairItems && (
+                <div className="grid gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-[minmax(0,1fr)_90px_120px_auto]">
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить запчасть</label>
+                    <SearchableSelect
+                      options={sparePartsCatalog.map(part => ({
+                        value: part.id,
+                        label: part.name,
+                        meta: `${part.article || part.sku || 'Без артикула'} · ${part.defaultPrice.toLocaleString('ru-RU')} ₽/${part.unit}`,
+                        keywords: [part.article || '', part.sku || '', part.category || '', part.manufacturer || ''],
+                      }))}
+                      value={selectedPartId}
+                      onChange={nextId => {
+                        const part = sparePartsCatalog.find(item => item.id === nextId);
+                        setSelectedPartId(nextId);
+                        setSelectedPartCost(String(part?.defaultPrice ?? 0));
+                      }}
+                      placeholder="Выберите запчасть"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Кол-во</label>
+                    <Input type="number" min="1" value={selectedPartQty} onChange={e => setSelectedPartQty(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Цена</label>
+                    <Input type="number" min="0" value={selectedPartCost} onChange={e => setSelectedPartCost(e.target.value)} />
+                  </div>
+                  <div className="flex items-end">
+                    <Button size="sm" variant="secondary" onClick={() => void addPartUsage()} disabled={!selectedPartId}>Добавить запчасть</Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="photos" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <SectionTitle
+                icon={<Camera className="h-4 w-4" />}
+                title="Фото"
+                action={canEditTicketFields && (
+                  <Button size="sm" variant="secondary" onClick={() => photoInputRef.current?.click()}>
+                    <Plus className="h-4 w-4" />
+                    Добавить фото
+                  </Button>
+                )}
+              />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoFilePick} />
+              <RepairPhotoGroup title="Фото ДО" photos={repairPhotos.before} uploadedAt={repairPhotos.beforeUploadedAt} uploadedBy={repairPhotos.beforeUploadedBy} />
+              <RepairPhotoGroup title="Фото ПОСЛЕ" photos={repairPhotos.after} uploadedAt={repairPhotos.afterUploadedAt} uploadedBy={repairPhotos.afterUploadedBy} />
+              <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">Фото из MAX-бота и карточки</p>
+                  <Badge variant={(ticket.photos ?? []).length > 0 ? 'info' : 'default'}>{(ticket.photos ?? []).length} фото</Badge>
+                </div>
+                {(ticket.photos ?? []).length > 0 ? (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {(ticket.photos ?? []).map((photo, index) => {
+                      const src = absoluteMediaUrl(photoSource(photo));
+                      const fallback = absoluteMediaUrl(photoFallbackSource(photo));
+                      return (
+                        <button key={index} type="button" onClick={() => window.open(src, '_blank')} className="group relative aspect-square overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
+                          <img src={src} alt={`Фото ${index + 1}`} className="h-full w-full object-cover group-hover:opacity-90" onError={(event) => { if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback; }} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <EmptySection icon={<Camera className="h-8 w-8" />} title="Фото пока нет" text="В карточке останется плейсхолдер до загрузки фото из интерфейса или MAX-бота." />
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="history" className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <History className="h-4 w-4" />
+                  История и ревизии
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {ticket.workLog.length === 0 && serviceAuditLog.length === 0 && (ticket.revisionHistory ?? []).length === 0 && (
+                  <p className="text-sm text-gray-400 italic">История пуста</p>
+                )}
+                {[...(ticket.revisionHistory ?? [])].reverse().map(entry => (
+                  <div key={entry.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-900/40 dark:bg-amber-950/30">
+                    <p className="font-medium text-amber-900 dark:text-amber-100">{entry.createdByName || 'Ответственный'} вернул заявку на доработку: {entry.reason}</p>
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{formatServiceDate(entry.createdAt)}{entry.mechanicName ? ` · Механик: ${entry.mechanicName}` : ''}</p>
+                    {entry.details && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{entry.details}</p>}
+                  </div>
+                ))}
+                {serviceAuditLog.map(entry => (
+                  <div key={entry.id} className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+                    <p className="text-gray-900 dark:text-white">{serviceAuditText(entry)}</p>
+                    <p className="mt-1 text-xs text-gray-400">{entry.source === 'sync' ? 'Синхронизация' : entry.source === 'api' ? 'API' : 'Web'} · {entry.entityId}</p>
+                  </div>
+                ))}
+                {[...ticket.workLog].reverse().map((entry, i) => (
+                  <div key={i} className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+                    <p className="text-gray-900 dark:text-white">{entry.text}</p>
+                    <p className="mt-1 text-xs text-gray-400">{entry.author} · {formatServiceDate(entry.date)}</p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <CheckCircle className="h-4 w-4" />
+                    Итог ремонта
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <DetailTile label="Result" value={ticket.result} />
+                  <DetailTile label="Summary" value={ticket.resultData?.summary} />
+                  <DetailTile label="Closed at" value={ticket.closedAt ? formatServiceDate(ticket.closedAt) : undefined} />
+                  <DetailTile label="Кто закрыл" value={ticket.workLog.findLast?.(entry => entry.text?.includes('закрыт'))?.author || ticket.createdByUserName || ticket.createdBy} />
+                  <div className="space-y-2">
+                    {closeChecklistEntries.map(item => (
+                      <div key={item.key} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                        <span>{item.label}</span>
+                        <Badge variant={item.done ? 'success' : 'default'}>{item.done ? 'OK' : 'Нет'}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Car className="h-4 w-4" />
+                    Выезды
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {relatedFieldTrips.length > 0 ? relatedFieldTrips.map(trip => (
+                    <div key={trip.id} className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+                      <p className="font-medium text-gray-900 dark:text-white">{trip.routeFrom} → {trip.routeTo}</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {trip.mechanicName} · {trip.distanceKm} км · {trip.closedNormHours} н/ч · {trip.status}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {formatServiceDate(trip.startedAt)}{trip.completedAt ? ` · завершён ${formatServiceDate(trip.completedAt)}` : ''}
+                      </p>
+                    </div>
+                  )) : (
+                    <EmptySection icon={<Car className="h-8 w-8" />} title="Выездов нет" text="Связанные выезды из MAX-бота появятся здесь без изменения модели заявки." />
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
       {canChangeTicketStatus && (
         <div className="fixed inset-x-0 bottom-16 z-10 border-t border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:hidden">
           <div className="grid grid-cols-2 gap-2">

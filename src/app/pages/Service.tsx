@@ -1013,13 +1013,13 @@ export default function Service() {
     () => (ticketsQuery.data ?? []).filter(isRegularServiceTicket),
     [ticketsQuery.data],
   );
-  const canManageWarrantyClaims = can('edit', 'service');
+  const normalizedRole = normalizeUserRole(user?.role);
+  const canManageWarrantyClaims = ['Администратор', 'Офис-менеджер'].includes(normalizedRole) || isWarrantyMechanicRole(normalizedRole);
   const canViewEquipment = can('view', 'equipment');
   const canViewRentals = can('view', 'rentals');
   const canViewClients = can('view', 'clients');
   const canViewFinance = can('view', 'finance');
   const canViewDocuments = can('view', 'documents');
-  const normalizedRole = normalizeUserRole(user?.role);
   const showDayPlan = canViewServiceDayPlan(normalizedRole);
   const canManageDayPlan = canManageServiceDayPlan(normalizedRole);
   const [search, setSearch] = React.useState('');

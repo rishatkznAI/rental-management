@@ -1,7 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle,
   CalendarClock,
   Factory,
   FileText,
@@ -55,52 +54,61 @@ const PROCESS_STEPS: WarrantyClaimStatus[] = [
   'closed',
 ];
 
-const FACTORY_ACTIVE_STATUSES: WarrantyClaimStatus[] = ['sent_to_factory', 'factory_review'];
-const FINAL_STATUSES: WarrantyClaimStatus[] = ['approved', 'rejected', 'closed'];
+const MANAGEMENT_ACTIVE_STATUSES = ['new', 'review', 'repair_required', 'waiting_client'] as const;
+type ManagementClaimStatus = typeof MANAGEMENT_ACTIVE_STATUSES[number] | 'closed' | 'rejected';
 
 type BadgeVariant = React.ComponentProps<typeof Badge>['variant'];
 
 const STATUS_META: Record<WarrantyClaimStatus, { label: string; variant: BadgeVariant; description: string }> = {
   draft: {
-    label: 'Черновик',
+    label: 'Новая',
     variant: 'default',
-    description: 'Сбор данных, фото и описания поломки',
+    description: 'Рекламация принята в контур контроля качества',
   },
   sent_to_factory: {
-    label: 'Отправлено на завод',
-    variant: 'info',
-    description: 'Обращение передано производителю',
+    label: 'На рассмотрении',
+    variant: 'warning',
+    description: 'Ответственный разбирает причину и следующий шаг',
   },
   factory_review: {
     label: 'На рассмотрении',
     variant: 'warning',
-    description: 'Завод проверяет гарантийный случай',
+    description: 'Рекламация требует управленческого решения',
   },
   answer_received: {
-    label: 'Ответ получен',
+    label: 'Ожидание клиента',
     variant: 'info',
-    description: 'Есть официальный ответ или уточнение',
+    description: 'Нужен ответ, подтверждение или согласование клиента',
   },
   approved: {
-    label: 'Одобрено',
-    variant: 'success',
-    description: 'Гарантийное решение принято',
+    label: 'Требует ремонта',
+    variant: 'warning',
+    description: 'По рекламации нужен ремонт или доработка',
   },
   rejected: {
     label: 'Отклонено',
     variant: 'error',
-    description: 'Завод отказал в гарантии',
+    description: 'Рекламация отклонена после проверки',
   },
   parts_shipping: {
-    label: 'Запчасти едут',
+    label: 'Требует ремонта',
     variant: 'warning',
-    description: 'Ожидается поставка по решению завода',
+    description: 'Рекламация требует ремонта, запчастей или доработки',
   },
   closed: {
-    label: 'Закрыто',
+    label: 'Закрыта',
     variant: 'default',
     description: 'Рекламация завершена',
   },
+};
+
+const MANAGEMENT_STATUS_META: Record<ManagementClaimStatus, { label: string; variant: BadgeVariant; description: string }> = {
+  new: { label: 'Новая', variant: 'default', description: 'Новые обращения контроля качества' },
+  review: { label: 'На рассмотрении', variant: 'warning', description: 'Требуют управленческого разбора' },
+  repair_required: { label: 'Требует ремонта', variant: 'warning', description: 'Нужен повторный ремонт или доработка' },
+  waiting_client: { label: 'Ожидание клиента', variant: 'info', description: 'Ожидается позиция или подтверждение клиента' },
+  closed: { label: 'Закрыта', variant: 'success', description: 'Закрытые рекламации' },
+  rejected: { label: 'Отклонена', variant: 'error', description: 'Отклоненные обращения' },
 };
 
 const PRIORITY_OPTIONS: Array<{ value: ServicePriority; label: string }> = [
@@ -161,28 +169,110 @@ function formatEquipmentLabel(equipment: Equipment) {
 function getClaimSearchText(claim: WarrantyClaim) {
   return [
     claim.id,
+    claim.number,
+    claim.serviceTicketId,
     claim.equipmentLabel,
     claim.inventoryNumber,
     claim.serialNumber,
     claim.manufacturer,
+    claim.client,
+    claim.clientName,
     claim.factoryName,
     claim.factoryCaseNumber,
+    claim.reason,
     claim.failureDescription,
     claim.requestedResolution,
+    claim.result,
+    claim.decision,
   ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function getClaimNumber(claim: WarrantyClaim) {
+  return claim.number || claim.id;
 }
 
 function getClaimClient(claim: WarrantyClaim, ticketById: Map<string, ServiceTicket>) {
   const ticket = claim.serviceTicketId ? ticketById.get(claim.serviceTicketId) : undefined;
-  return ticket?.client || '—';
+  return claim.clientName || claim.client || ticket?.client || '—';
 }
 
 function getClaimResponsible(claim: WarrantyClaim) {
-  return claim.createdByUserName || claim.createdByUserId || '—';
+  return claim.responsible || claim.responsibleUserName || claim.createdByUserName || claim.responsibleUserId || claim.createdByUserId || '—';
+}
+
+function getClaimReason(claim: WarrantyClaim) {
+  return claim.reason || claim.failureDescription || '—';
+}
+
+function getClaimDeadline(claim: WarrantyClaim) {
+  return claim.deadline || claim.responseDueDate;
+}
+
+function getClaimResult(claim: WarrantyClaim) {
+  return claim.result || claim.decision || claim.factoryResponse || '—';
+}
+
+function normalizeManagementStatus(status?: string): ManagementClaimStatus {
+  switch ((status || '').trim()) {
+    case 'draft':
+    case 'new':
+    case 'created':
+    case 'open':
+      return 'new';
+    case 'sent_to_factory':
+    case 'factory_review':
+    case 'in_review':
+    case 'review':
+    case 'investigation':
+    case 'answer_received':
+      return 'review';
+    case 'approved':
+    case 'parts_shipping':
+    case 'repair_required':
+    case 'needs_repair':
+    case 'requires_repair':
+    case 'in_repair':
+      return 'repair_required';
+    case 'waiting_client':
+    case 'client_waiting':
+    case 'waiting_for_client':
+      return 'waiting_client';
+    case 'rejected':
+    case 'declined':
+      return 'rejected';
+    case 'closed':
+    case 'completed':
+    case 'done':
+      return 'closed';
+    default:
+      return 'review';
+  }
+}
+
+function getManagementStatusBadge(status?: string) {
+  const meta = MANAGEMENT_STATUS_META[normalizeManagementStatus(status)];
+  return <Badge variant={meta.variant}>{meta.label}</Badge>;
+}
+
+function toEditableStatus(status?: string): WarrantyClaimStatus {
+  return PROCESS_STEPS.includes(status as WarrantyClaimStatus)
+    ? status as WarrantyClaimStatus
+    : 'factory_review';
+}
+
+function isClaimClosedThisMonth(claim: WarrantyClaim) {
+  const status = normalizeManagementStatus(claim.status);
+  if (status !== 'closed' && status !== 'rejected') return false;
+  const dateKey = (claim.closedAt || claim.updatedAt || claim.createdAt || '').slice(0, 10);
+  if (!dateKey) return false;
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+  const todayKey = today.toISOString().slice(0, 10);
+  return dateKey >= monthStart && dateKey <= todayKey;
 }
 
 function getClaimDueTone(claim: WarrantyClaim) {
-  if (FINAL_STATUSES.includes(claim.status)) return 'text-emerald-700 dark:text-emerald-300';
+  if (normalizeManagementStatus(claim.status) === 'closed') return 'text-emerald-700 dark:text-emerald-300';
   if (isResponseOverdue(claim)) return 'font-semibold text-red-600 dark:text-red-300';
   if (claim.status === 'factory_review' || claim.status === 'parts_shipping') return 'font-semibold text-orange-600 dark:text-orange-300';
   return 'text-gray-600 dark:text-gray-300';
@@ -203,13 +293,9 @@ function claimMatchesPeriod(claim: WarrantyClaim, period: string) {
 }
 
 function isResponseOverdue(claim: WarrantyClaim) {
-  if (!claim.responseDueDate || FINAL_STATUSES.includes(claim.status)) return false;
-  return claim.responseDueDate.slice(0, 10) < new Date().toISOString().slice(0, 10);
-}
-
-function getStatusBadge(status: WarrantyClaimStatus) {
-  const meta = STATUS_META[status];
-  return <Badge variant={meta.variant}>{meta.label}</Badge>;
+  const deadline = getClaimDeadline(claim);
+  if (!deadline || ['closed', 'rejected'].includes(normalizeManagementStatus(claim.status))) return false;
+  return deadline.slice(0, 10) < new Date().toISOString().slice(0, 10);
 }
 
 function getPriorityLabel(priority: ServicePriority) {
@@ -243,7 +329,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
   const deleteClaim = useDeleteWarrantyClaim();
 
   const [form, setForm] = React.useState<ClaimFormState>(EMPTY_FORM);
-  const [statusFilter, setStatusFilter] = React.useState<WarrantyClaimStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = React.useState<ManagementClaimStatus | 'all'>('all');
   const [search, setSearch] = React.useState('');
   const [selectedClaimId, setSelectedClaimId] = React.useState<string | null>(null);
   const [editForm, setEditForm] = React.useState<ClaimEditState | null>(null);
@@ -267,7 +353,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
   const filteredClaims = React.useMemo(() => {
     const query = search.trim().toLowerCase();
     return claims
-      .filter(claim => statusFilter === 'all' || claim.status === statusFilter)
+      .filter(claim => statusFilter === 'all' || normalizeManagementStatus(claim.status) === statusFilter)
       .filter(claim => equipmentFilter === 'all' || claim.equipmentLabel === equipmentFilter)
       .filter(claim => clientFilter === 'all' || getClaimClient(claim, ticketById) === clientFilter)
       .filter(claim => factoryFilter === 'all' || claim.factoryName === factoryFilter)
@@ -294,7 +380,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
     setSelectedClaimId(selectedClaim.id);
     setPanelTab('overview');
     setEditForm({
-      status: selectedClaim.status,
+      status: toEditableStatus(selectedClaim.status),
       factoryCaseNumber: selectedClaim.factoryCaseNumber ?? '',
       responseDueDate: toDateInputValue(selectedClaim.responseDueDate),
       factoryResponse: selectedClaim.factoryResponse ?? '',
@@ -303,19 +389,19 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
   }, [selectedClaim?.id]);
 
   const statusCounts = React.useMemo(() => {
-    const counts = Object.fromEntries(PROCESS_STEPS.map(status => [status, 0])) as Record<WarrantyClaimStatus, number>;
+    const counts = Object.fromEntries(Object.keys(MANAGEMENT_STATUS_META).map(status => [status, 0])) as Record<ManagementClaimStatus, number>;
     claims.forEach(claim => {
-      counts[claim.status] = (counts[claim.status] ?? 0) + 1;
+      const status = normalizeManagementStatus(claim.status);
+      counts[status] = (counts[status] ?? 0) + 1;
     });
     return counts;
   }, [claims]);
 
   const metrics = React.useMemo(() => ({
-    total: claims.length,
-    new: claims.filter(claim => claim.status === 'draft').length,
-    inWork: claims.filter(claim => FACTORY_ACTIVE_STATUSES.includes(claim.status) || claim.status === 'parts_shipping').length,
-    waitingDecision: claims.filter(claim => claim.status === 'factory_review' || claim.status === 'answer_received').length,
-    closed: claims.filter(claim => FINAL_STATUSES.includes(claim.status)).length,
+    active: claims.filter(claim => !['closed', 'rejected'].includes(normalizeManagementStatus(claim.status))).length,
+    new: claims.filter(claim => normalizeManagementStatus(claim.status) === 'new').length,
+    inReview: claims.filter(claim => normalizeManagementStatus(claim.status) === 'review').length,
+    closedMonth: claims.filter(isClaimClosedThisMonth).length,
     overdue: claims.filter(isResponseOverdue).length,
   }), [claims]);
 
@@ -357,15 +443,15 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
       return;
     }
     if (!form.factoryName.trim()) {
-      toast.error('Укажите завод или производителя.');
+      toast.error('Укажите ответственного контрагента или производителя.');
       return;
     }
     if (!form.failureDescription.trim()) {
-      toast.error('Опишите неисправность для завода.');
+      toast.error('Опишите причину рекламации.');
       return;
     }
     if (!form.requestedResolution.trim()) {
-      toast.error('Укажите, какое решение запрашиваем у завода.');
+      toast.error('Укажите ожидаемый управленческий итог.');
       return;
     }
 
@@ -395,7 +481,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
         history: [
           {
             date: createdAt,
-            text: 'Создана рекламация по гарантийному обращению на завод.',
+            text: 'Создана рекламация в контуре контроля качества.',
             author,
             type: 'status_change',
           },
@@ -419,9 +505,11 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
     const nextDecision = editForm.decision.trim();
 
     if (selectedClaim.status !== editForm.status) {
+      const previousLabel = STATUS_META[selectedClaim.status as WarrantyClaimStatus]?.label ?? MANAGEMENT_STATUS_META[normalizeManagementStatus(selectedClaim.status)].label;
+      const nextLabel = STATUS_META[editForm.status]?.label ?? MANAGEMENT_STATUS_META[normalizeManagementStatus(editForm.status)].label;
       history.push({
         date: updatedAt,
-        text: `Статус изменён: ${STATUS_META[selectedClaim.status].label} → ${STATUS_META[editForm.status].label}.`,
+        text: `Статус изменён: ${previousLabel} → ${nextLabel}.`,
         author,
         type: 'status_change',
       });
@@ -483,36 +571,31 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <p className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Всего рекламаций</p>
-          <p className="mt-2 text-3xl font-black text-gray-900 dark:text-white">{metrics.total}</p>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">В журнале</p>
+          <p className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Активные</p>
+          <p className="mt-2 text-3xl font-black text-gray-900 dark:text-white">{metrics.active}</p>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Требуют контроля</p>
         </div>
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
           <p className="text-xs font-bold uppercase text-blue-700 dark:text-blue-300">Новые</p>
           <p className="mt-2 text-3xl font-black text-blue-900 dark:text-blue-100">{metrics.new}</p>
-          <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">Черновики</p>
+          <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">Первичная проверка</p>
         </div>
         <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-900/50 dark:bg-orange-950/20">
-          <p className="text-xs font-bold uppercase text-orange-700 dark:text-orange-300">В работе</p>
-          <p className="mt-2 text-3xl font-black text-orange-900 dark:text-orange-100">{metrics.inWork}</p>
-          <p className="mt-1 text-xs text-orange-700/80 dark:text-orange-300/80">Завод / запчасти</p>
-        </div>
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
-          <p className="text-xs font-bold uppercase text-amber-700 dark:text-amber-300">Ожидают решения</p>
-          <p className="mt-2 text-3xl font-black text-amber-900 dark:text-amber-100">{metrics.waitingDecision}</p>
-          <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-300/80">Ответ или решение</p>
+          <p className="text-xs font-bold uppercase text-orange-700 dark:text-orange-300">На рассмотрении</p>
+          <p className="mt-2 text-3xl font-black text-orange-900 dark:text-orange-100">{metrics.inReview}</p>
+          <p className="mt-1 text-xs text-orange-700/80 dark:text-orange-300/80">Разбор причины</p>
         </div>
         <div className="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-900/50 dark:bg-green-950/20">
-          <p className="text-xs font-bold uppercase text-green-700 dark:text-green-300">Закрыты</p>
-          <p className="mt-2 text-3xl font-black text-green-900 dark:text-green-100">{metrics.closed}</p>
-          <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">Финальные статусы</p>
+          <p className="text-xs font-bold uppercase text-green-700 dark:text-green-300">Закрыты за месяц</p>
+          <p className="mt-2 text-3xl font-black text-green-900 dark:text-green-100">{metrics.closedMonth}</p>
+          <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">Итог за период</p>
         </div>
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-950/20">
           <p className="text-xs font-bold uppercase text-red-700 dark:text-red-300">Просрочены</p>
           <p className="mt-2 text-3xl font-black text-red-900 dark:text-red-100">{metrics.overdue}</p>
-          <p className="mt-1 text-xs text-red-700/80 dark:text-red-300/80">Нужен повторный запрос</p>
+          <p className="mt-1 text-xs text-red-700/80 dark:text-red-300/80">Нарушен срок реакции</p>
         </div>
       </div>
 
@@ -520,15 +603,15 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Factory className="h-5 w-5 text-[--color-primary]" />
-            Процесс обращения на завод
+            Управленческий контур рекламаций
           </CardTitle>
           <CardDescription>
-            Этапы помогают видеть, где находится гарантийный вопрос: от черновика до решения и закрытия.
+            Отдельный журнал повторных поломок, претензий клиентов, гарантийных случаев и спорных ремонтов.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {PROCESS_STEPS.map(status => (
+            {(Object.keys(MANAGEMENT_STATUS_META) as ManagementClaimStatus[]).map(status => (
               <button
                 key={status}
                 type="button"
@@ -541,10 +624,10 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  {getStatusBadge(status)}
+                  <Badge variant={MANAGEMENT_STATUS_META[status].variant}>{MANAGEMENT_STATUS_META[status].label}</Badge>
                   <span className="text-sm font-semibold text-gray-900 dark:text-white">{statusCounts[status]}</span>
                 </div>
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{STATUS_META[status].description}</p>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{MANAGEMENT_STATUS_META[status].description}</p>
               </button>
             ))}
           </div>
@@ -559,7 +642,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 <Send className="h-5 w-5 text-[--color-primary]" />
                 Новая рекламация
               </CardTitle>
-              <CardDescription>Сформируйте гарантийное обращение из сервисной заявки или напрямую по технике.</CardDescription>
+              <CardDescription>Зафиксируйте повторную поломку, претензию клиента, гарантийный случай или спор по качеству ремонта.</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleCreateClaim} className="space-y-4">
@@ -590,7 +673,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Завод / производитель</span>
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Контрагент / производитель</span>
                     <Input
                       value={form.factoryName}
                       onChange={(event) => setForm(prev => ({ ...prev, factoryName: event.target.value }))}
@@ -598,7 +681,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Контакт завода</span>
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Контакт</span>
                     <Input
                       value={form.factoryContact}
                       onChange={(event) => setForm(prev => ({ ...prev, factoryContact: event.target.value }))}
@@ -606,7 +689,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Номер дела завода</span>
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Внешний номер</span>
                     <Input
                       value={form.factoryCaseNumber}
                       onChange={(event) => setForm(prev => ({ ...prev, factoryCaseNumber: event.target.value }))}
@@ -614,7 +697,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Срок ответа</span>
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Срок реакции</span>
                     <Input
                       type="date"
                       value={form.responseDueDate}
@@ -650,21 +733,21 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 </div>
 
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Описание неисправности</span>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Причина рекламации</span>
                   <Textarea
                     value={form.failureDescription}
                     onChange={(event) => setForm(prev => ({ ...prev, failureDescription: event.target.value }))}
-                    placeholder="Симптомы, условия возникновения, что уже проверили..."
+                    placeholder="Повторная поломка, претензия клиента, гарантия, спор по качеству..."
                     rows={4}
                   />
                 </label>
 
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Запрашиваемое решение</span>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Ожидаемый итог</span>
                   <Textarea
                     value={form.requestedResolution}
                     onChange={(event) => setForm(prev => ({ ...prev, requestedResolution: event.target.value }))}
-                    placeholder="Компенсация, гарантийная запчасть, техническое заключение..."
+                    placeholder="Повторный ремонт, компенсация, отказ, согласование с клиентом..."
                     rows={3}
                   />
                 </label>
@@ -685,7 +768,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 <FileText className="h-5 w-5 text-[--color-primary]" />
                 Журнал рекламаций
               </CardTitle>
-              <CardDescription>Поиск по технике, номеру обращения, серийному номеру или описанию.</CardDescription>
+              <CardDescription>Поиск по номеру, технике, клиенту, связанной заявке и причине.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 lg:grid-cols-[minmax(220px,1.4fr)_repeat(5,minmax(130px,1fr))]">
@@ -694,16 +777,16 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="№, техника, клиент, проблема..."
+                    placeholder="№, техника, клиент, заявка, причина..."
                     className="pl-10"
                   />
                 </div>
-                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as WarrantyClaimStatus | 'all')}>
+                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ManagementClaimStatus | 'all')}>
                   <SelectTrigger><SelectValue placeholder="Статус" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все статусы</SelectItem>
-                    {PROCESS_STEPS.map(status => (
-                      <SelectItem key={status} value={status}>{STATUS_META[status].label}</SelectItem>
+                    {(Object.keys(MANAGEMENT_STATUS_META) as ManagementClaimStatus[]).map(status => (
+                      <SelectItem key={status} value={status}>{MANAGEMENT_STATUS_META[status].label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -782,16 +865,16 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
-                    <div className="hidden grid-cols-[minmax(110px,0.7fr)_100px_minmax(170px,1fr)_minmax(130px,0.8fr)_minmax(190px,1.2fr)_120px_minmax(130px,0.8fr)_95px_minmax(150px,0.9fr)] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-gray-700 dark:bg-gray-900/50 xl:grid">
+                    <div className="hidden grid-cols-[minmax(110px,0.7fr)_minmax(160px,1fr)_minmax(130px,0.8fr)_minmax(110px,0.7fr)_minmax(190px,1.2fr)_130px_minmax(130px,0.8fr)_105px_minmax(110px,0.7fr)] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-gray-700 dark:bg-gray-900/50 xl:grid">
                       <div>№ рекламации</div>
-                      <div>Дата</div>
                       <div>Техника</div>
                       <div>Клиент</div>
-                      <div>Проблема</div>
+                      <div>Заявка</div>
+                      <div>Причина</div>
                       <div>Статус</div>
                       <div>Ответственный</div>
-                      <div>Срок</div>
-                      <div>Решение</div>
+                      <div>Срок реакции</div>
+                      <div>Обновлено</div>
                     </div>
                     {filteredClaims.map(claim => (
                       <button
@@ -799,14 +882,13 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                         type="button"
                         onClick={() => setSelectedClaimId(claim.id)}
                         className={cn(
-                          'grid w-full gap-3 border-b border-gray-100 px-4 py-3 text-left transition-colors last:border-b-0 dark:border-gray-800 xl:grid-cols-[minmax(110px,0.7fr)_100px_minmax(170px,1fr)_minmax(130px,0.8fr)_minmax(190px,1.2fr)_120px_minmax(130px,0.8fr)_95px_minmax(150px,0.9fr)] xl:items-center',
+                          'grid w-full gap-3 border-b border-gray-100 px-4 py-3 text-left transition-colors last:border-b-0 dark:border-gray-800 xl:grid-cols-[minmax(110px,0.7fr)_minmax(160px,1fr)_minmax(130px,0.8fr)_minmax(110px,0.7fr)_minmax(190px,1.2fr)_130px_minmax(130px,0.8fr)_105px_minmax(110px,0.7fr)] xl:items-center',
                           selectedClaim?.id === claim.id
                             ? 'bg-[--color-primary]/10'
                             : 'bg-white hover:bg-gray-50 dark:bg-gray-900/40 dark:hover:bg-gray-900',
                         )}
                       >
-                        <div className="font-mono text-sm font-bold text-[--color-primary]">{claim.id}</div>
-                        <div className="text-sm text-gray-600 dark:text-gray-300">{formatDateSafe(claim.createdAt)}</div>
+                        <div className="font-mono text-sm font-bold text-[--color-primary]">{getClaimNumber(claim)}</div>
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{claim.equipmentLabel || '—'}</div>
                           <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
@@ -814,17 +896,18 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                           </div>
                         </div>
                         <div className="truncate text-sm text-gray-700 dark:text-gray-200">{getClaimClient(claim, ticketById)}</div>
+                        <div className="font-mono text-sm text-gray-700 dark:text-gray-200">{claim.serviceTicketId || '—'}</div>
                         <div className="min-w-0">
-                          <div className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-white">{claim.failureDescription || '—'}</div>
-                          <div className="mt-0.5 truncate text-xs text-gray-500">{claim.factoryName || 'Поставщик не указан'}</div>
+                          <div className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-white">{getClaimReason(claim)}</div>
+                          <div className="mt-0.5 truncate text-xs text-gray-500">{getClaimResult(claim)}</div>
                         </div>
                         <div className="flex flex-wrap gap-1">
-                          {getStatusBadge(claim.status)}
+                          {getManagementStatusBadge(claim.status)}
                           {isResponseOverdue(claim) && <Badge variant="error">Просрочено</Badge>}
                         </div>
                         <div className="truncate text-sm text-gray-700 dark:text-gray-200">{getClaimResponsible(claim)}</div>
-                        <div className={`text-sm ${getClaimDueTone(claim)}`}>{formatDateSafe(claim.responseDueDate)}</div>
-                        <div className="line-clamp-2 text-sm text-gray-600 dark:text-gray-300">{claim.decision || claim.factoryResponse || '—'}</div>
+                        <div className={`text-sm ${getClaimDueTone(claim)}`}>{formatDateSafe(getClaimDeadline(claim))}</div>
+                        <div className="text-sm text-gray-600 dark:text-gray-300">{formatDateSafe(claim.updatedAt || claim.createdAt)}</div>
                       </button>
                     ))}
                   </div>
@@ -835,12 +918,12 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
         </div>
 
         <Card className="rounded-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <ShieldCheck className="h-5 w-5 text-[--color-primary]" />
-              Карточка обращения
-            </CardTitle>
-            <CardDescription>Фиксация номера завода, ответа, решения и текущего этапа.</CardDescription>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <ShieldCheck className="h-5 w-5 text-[--color-primary]" />
+              Карточка рекламации
+              </CardTitle>
+            <CardDescription>Детали причины, срока реакции, связанной заявки и управленческого итога.</CardDescription>
           </CardHeader>
           <CardContent>
             {!selectedClaim || !editForm ? (
@@ -854,14 +937,15 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-[--color-primary]">{selectedClaim.id}</span>
-                        {getStatusBadge(selectedClaim.status)}
+                        {getManagementStatusBadge(selectedClaim.status)}
                         <Badge variant="default">{getPriorityLabel(selectedClaim.priority)}</Badge>
                       </div>
                       <p className="mt-3 font-medium text-gray-900 dark:text-white">{selectedClaim.equipmentLabel}</p>
                       <div className="mt-2 grid gap-1 text-sm text-gray-500 dark:text-gray-400">
-                        <p>Завод: {selectedClaim.factoryName}</p>
+                        <p>Клиент: {getClaimClient(selectedClaim, ticketById)}</p>
                         <p>INV: {selectedClaim.inventoryNumber || '—'} · SN: {selectedClaim.serialNumber || '—'}</p>
                         <p>Создано: {formatDateSafe(selectedClaim.createdAt)}</p>
+                        <p>Обновлено: {formatDateSafe(selectedClaim.updatedAt || selectedClaim.createdAt)}</p>
                         {selectedClaim.serviceTicketId && (
                           onOpenTicket ? (
                             <button
@@ -886,7 +970,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                       <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
                         <div className="flex items-center gap-2">
                           <CalendarClock className="h-4 w-4" />
-                          Срок ответа прошёл
+                          Срок реакции прошёл
                         </div>
                       </div>
                     )}
@@ -926,26 +1010,26 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                       </div>
                       <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
                         <p className="font-medium text-gray-900 dark:text-white">Ключевые даты</p>
-                        <p className="mt-1">Ответ до: {formatDateSafe(selectedClaim.responseDueDate)}</p>
+                        <p className="mt-1">Реакция до: {formatDateSafe(getClaimDeadline(selectedClaim))}</p>
                         <p>Отправлено: {formatDateSafe(selectedClaim.sentAt)}</p>
                         <p>Закрыто: {formatDateSafe(selectedClaim.closedAt)}</p>
                       </div>
                       <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                        <p className="font-medium text-gray-900 dark:text-white">Завод / дело</p>
-                        <p className="mt-1">{selectedClaim.factoryName || '—'}</p>
-                        <p>{selectedClaim.factoryCaseNumber || 'Номер дела не указан'}</p>
+                        <p className="font-medium text-gray-900 dark:text-white">Связи</p>
+                        <p className="mt-1">Заявка: {selectedClaim.serviceTicketId || '—'}</p>
+                        <p>Аренда: {selectedClaim.rentalId || '—'}</p>
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Неисправность</span>
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Причина</span>
                       <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200">
-                        {selectedClaim.failureDescription || '—'}
+                        {getClaimReason(selectedClaim)}
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Запрашиваемое решение</span>
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Итог / ожидаемое решение</span>
                       <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200">
-                        {selectedClaim.requestedResolution || '—'}
+                        {getClaimResult(selectedClaim) !== '—' ? getClaimResult(selectedClaim) : selectedClaim.requestedResolution || '—'}
                       </div>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
@@ -962,7 +1046,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                           </Link>
                         )
                       )}
-                      {canEdit && !FINAL_STATUSES.includes(selectedClaim.status) && (
+                      {canEdit && !['closed', 'rejected'].includes(normalizeManagementStatus(selectedClaim.status)) && (
                         <Button
                           type="button"
                           onClick={() => {

@@ -789,8 +789,13 @@ export interface WarrantyClaimHistoryEntry {
 
 export interface WarrantyClaim {
   id: string;
+  number?: string;
   serviceTicketId?: string;
   equipmentId?: string;
+  clientId?: string;
+  client?: string;
+  clientName?: string;
+  rentalId?: string;
   equipmentLabel: string;
   inventoryNumber?: string;
   serialNumber?: string;
@@ -798,17 +803,23 @@ export interface WarrantyClaim {
   factoryName: string;
   factoryContact?: string;
   factoryCaseNumber?: string;
+  reason?: string;
   failureDescription: string;
   requestedResolution: string;
-  status: WarrantyClaimStatus;
+  status: WarrantyClaimStatus | string;
   priority: ServicePriority;
   responseDueDate?: string;
+  deadline?: string;
   sentAt?: string;
   factoryResponse?: string;
   decision?: string;
+  result?: string;
   closedAt?: string;
   createdAt: string;
   updatedAt?: string;
+  responsible?: string;
+  responsibleUserId?: string;
+  responsibleUserName?: string;
   createdByUserId?: string;
   createdByUserName?: string;
   history?: WarrantyClaimHistoryEntry[];

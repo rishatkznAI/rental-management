@@ -560,7 +560,8 @@ test('equipment registry uses asset-centric tabs for one equipment entity', () =
   assert.match(equipmentHelpersSource, /saleMode === true/);
   assert.match(equipmentHelpersSource, /export function isForSaleEquipment/);
   assert.match(equipmentHelpersSource, /export function isSoldEquipment/);
-  assert.match(equipmentHelpersSource, /getEquipmentSaleKind\(equipment\) === 'sold'/);
+  assert.match(equipmentHelpersSource, /export function getEquipmentRegistryBucket/);
+  assert.match(equipmentHelpersSource, /getExplicitSaleStatusKind\(equipment\) === 'sold'/);
   assert.match(source, /activeTab === 'for_sale' \|\| activeTab === 'sold'/);
   assert.match(source, /function getEquipmentDetailPath/);
   assert.match(source, /\/sales\/equipment\/\$\{equipment\.id\}/);
@@ -655,11 +656,11 @@ test('equipment registry tab search and filter logic covers sale sold and availa
   assert.match(equipmentHelpersSource, /const fields = \[[\s\S]*equipment\.model,[\s\S]*equipment\.manufacturer,[\s\S]*equipment\.inventoryNumber,[\s\S]*equipment\.serialNumber,/);
   assert.match(equipmentHelpersSource, /fields\.some\(\(value\) => String\(value \?\? ''\)\.toLowerCase\(\)\.includes\(normalized\)\)/);
 
-  assert.match(equipmentHelpersSource, /if \(activeTab === 'for_sale'\) return isForSaleEquipment\(equipment\);/);
-  assert.match(equipmentHelpersSource, /if \(activeTab === 'sold'\) return isSoldEquipment\(equipment\);/);
-  assert.match(equipmentHelpersSource, /if \(activeTab === 'available'\) \{[\s\S]*equipment\.status === 'available'[\s\S]*registryOptions\.canEquipmentParticipateInRentals\(equipment\)[\s\S]*!hasCurrentRental\(equipment, activeRentalIndex\)/);
-  assert.match(equipmentHelpersSource, /if \(activeTab === 'rented'\) return !isSoldEquipment\(equipment\)/);
-  assert.match(equipmentHelpersSource, /if \(isSoldEquipment\(equipment\)\) return 'sold';[\s\S]*if \(isForSaleEquipment\(equipment\)\) return 'for_sale';/);
+  assert.match(equipmentHelpersSource, /const bucket = getEquipmentRegistryBucket\(equipment, activeRentalIndex\)/);
+  assert.match(equipmentHelpersSource, /if \(activeTab === 'available'\) \{[\s\S]*bucket === 'available'[\s\S]*registryOptions\.canEquipmentParticipateInRentals\(equipment\)[\s\S]*!hasCurrentRental\(equipment, activeRentalIndex\)/);
+  assert.match(equipmentHelpersSource, /activeTab === 'rented' \|\| activeTab === 'service' \|\| activeTab === 'written_off' \|\| activeTab === 'for_sale' \|\| activeTab === 'sold'/);
+  assert.match(equipmentHelpersSource, /return bucket === activeTab/);
+  assert.match(equipmentHelpersSource, /if \(isSoldEquipment\(equipment\)\) return 'sold';[\s\S]*if \(isForSaleEquipment\(equipment\)\) return 'for_sale';[\s\S]*if \(isWrittenOffEquipment\(equipment\)\) return 'written_off';/);
 
   assert.match(equipmentHelpersSource, /if \(statusFilter === 'for_sale'\) return matchesTabType\(equipment, 'for_sale', activeRentalIndex, options\);/);
   assert.match(equipmentHelpersSource, /if \(statusFilter === 'sold'\) return matchesTabType\(equipment, 'sold', activeRentalIndex, options\);/);

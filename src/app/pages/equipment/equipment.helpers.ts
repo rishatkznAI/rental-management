@@ -188,10 +188,11 @@ export function getRegistryPercent(value: number, total: number) {
 }
 
 export function getStatusKindFromBaseStatus(status: Equipment['status']): EquipmentRegistryStatusKind {
-  if (status === 'rented') return 'rented';
-  if (status === 'reserved') return 'reserved';
-  if (status === 'in_service') return 'service';
-  if (status === 'inactive') return 'written_off';
+  const normalized = lowerText(status);
+  if (normalized === 'rented') return 'rented';
+  if (normalized === 'reserved') return 'reserved';
+  if (normalized === 'in_service') return 'service';
+  if (['inactive', 'written_off', 'written-off', 'списан', 'списана', 'списанная'].includes(normalized)) return 'written_off';
   return 'available';
 }
 
@@ -205,6 +206,23 @@ export function getEquipmentSaleKind(equipment: Partial<Equipment> & Record<stri
   const kind = saleStatusKind(equipment);
   if (kind !== 'unknown') return kind;
   return hasExplicitSaleMode(equipment) || equipment.isForSale ? 'on_sale' : 'unknown';
+}
+
+function getExplicitSaleStatusKind(equipment: Partial<Equipment> & Record<string, unknown>) {
+  if (!cleanText(equipment.saleStatus) && !cleanText(equipment.salesStatus)) return 'unknown';
+  return saleStatusKind({
+    saleStatus: equipment.saleStatus,
+    salesStatus: equipment.salesStatus,
+    category: equipment.category,
+  });
+}
+
+function hasActiveSaleRegistrySignal(equipment: Partial<Equipment> & Record<string, unknown>) {
+  const explicitSaleKind = getExplicitSaleStatusKind(equipment);
+  return equipment.saleMode === true
+    || equipment.forSale === true
+    || equipment.isForSale === true
+    || ['on_sale', 'reserved', 'in_deal'].includes(explicitSaleKind);
 }
 
 export function isSaleRegistryEquipment(equipment: Partial<Equipment> & Record<string, unknown>) {
@@ -235,18 +253,24 @@ export function isHiddenRegistryRecord(equipment: Partial<Equipment> & Record<st
 }
 
 export function isSoldEquipment(equipment: Partial<Equipment> & Record<string, unknown>) {
-  return equipment.category === 'sold' || getEquipmentSaleKind(equipment) === 'sold';
+  return equipment.category === 'sold' || getExplicitSaleStatusKind(equipment) === 'sold' || lowerText(equipment.status) === 'sold';
 }
 
 export function isForSaleEquipment(equipment: Partial<Equipment> & Record<string, unknown>) {
-  const saleKind = getEquipmentSaleKind(equipment);
-  return isSaleRegistryEquipment(equipment)
-    && !isSoldEquipment(equipment)
-    && saleKind !== 'removed';
+  const explicitSaleKind = getExplicitSaleStatusKind(equipment);
+  return !isSoldEquipment(equipment)
+    && explicitSaleKind !== 'removed'
+    && hasActiveSaleRegistrySignal(equipment);
 }
 
 export function isWrittenOffEquipment(equipment: Partial<Equipment> & Record<string, unknown>) {
-  return equipment.status === 'inactive' && !isSoldEquipment(equipment);
+  if (isSoldEquipment(equipment) || isForSaleEquipment(equipment)) return false;
+  const statusKind = getStatusKindFromBaseStatus(equipment.status as Equipment['status']);
+  return statusKind === 'written_off'
+    || equipment.isWrittenOff === true
+    || equipment.disposed === true
+    || lowerText(equipment.writeOffStatus) === 'written_off'
+    || lowerText(equipment.writeOffStatus) === 'written-off';
 }
 
 function resolveRegistryOptions(options: RegistryMatchOptions = {}) {
@@ -257,11 +281,16 @@ function resolveRegistryOptions(options: RegistryMatchOptions = {}) {
   };
 }
 
-export function getRegistryStatusKind(equipment: Equipment, activeRentalIndex?: ActiveRentalIndex): EquipmentRegistryStatusKind {
+export function getEquipmentRegistryBucket(equipment: Equipment, activeRentalIndex?: ActiveRentalIndex): EquipmentRegistryStatusKind {
   if (isSoldEquipment(equipment)) return 'sold';
   if (isForSaleEquipment(equipment)) return 'for_sale';
+  if (isWrittenOffEquipment(equipment)) return 'written_off';
   if (activeRentalIndex && hasCurrentRental(equipment, activeRentalIndex)) return 'rented';
   return getStatusKindFromBaseStatus(equipment.status);
+}
+
+export function getRegistryStatusKind(equipment: Equipment, activeRentalIndex?: ActiveRentalIndex): EquipmentRegistryStatusKind {
+  return getEquipmentRegistryBucket(equipment, activeRentalIndex);
 }
 
 export function matchesTabType(
@@ -273,17 +302,16 @@ export function matchesTabType(
   if (isHiddenRegistryRecord(equipment)) return false;
   if (activeTab === 'all') return true;
   const registryOptions = resolveRegistryOptions(options);
+  const bucket = getEquipmentRegistryBucket(equipment, activeRentalIndex);
   if (activeTab === 'available') {
-    return equipment.status === 'available'
+    return bucket === 'available'
       && registryOptions.canEquipmentParticipateInRentals(equipment)
       && !hasCurrentRental(equipment, activeRentalIndex);
   }
-  if (activeTab === 'rented') return !isSoldEquipment(equipment) && (equipment.status === 'rented' || hasCurrentRental(equipment, activeRentalIndex));
-  if (activeTab === 'service') return equipment.status === 'in_service' && !isSoldEquipment(equipment);
-  if (activeTab === 'reserved') return equipment.status === 'reserved' && registryOptions.canEquipmentParticipateInRentals(equipment);
-  if (activeTab === 'written_off') return isWrittenOffEquipment(equipment);
-  if (activeTab === 'for_sale') return isForSaleEquipment(equipment);
-  if (activeTab === 'sold') return isSoldEquipment(equipment);
+  if (activeTab === 'reserved') return bucket === 'reserved' && registryOptions.canEquipmentParticipateInRentals(equipment);
+  if (activeTab === 'rented' || activeTab === 'service' || activeTab === 'written_off' || activeTab === 'for_sale' || activeTab === 'sold') {
+    return bucket === activeTab;
+  }
   return true;
 }
 

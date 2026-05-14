@@ -10,9 +10,11 @@ import {
   equipmentFilterReasons,
   equipmentMatchesInvestorBinding,
   getEquipmentGsmDisplay,
+  getEquipmentRegistryBucket,
   getRegistryStatusKind,
   hasEquipmentGsmData,
   isForSaleEquipment,
+  isWrittenOffEquipment,
   isEquipmentInventoryUnique,
   isSaleRegistryEquipment,
   isSoldEquipment,
@@ -114,6 +116,61 @@ test('equipment registry status filters reuse tab behavior for sales and active 
   assert.equal(matchesStatusFilter({ id: 'EQ-sale', status: 'available', saleMode: true }, 'for_sale', activeRentalIndex, options), true);
   assert.equal(matchesStatusFilter({ id: 'EQ-sold', status: 'inactive', category: 'sold' }, 'sold', activeRentalIndex, options), true);
   assert.equal(matchesStatusFilter({ id: 'EQ-rented', inventoryNumber: 'INV-rented', status: 'available' }, 'rented', activeRentalIndex, options), true);
+});
+
+test('equipment registry bucket gives active sale priority over stale written-off status', () => {
+  const activeRentalIndex = buildActiveRentalIndex([], []);
+  const options = { canEquipmentParticipateInRentals: canRentOwnOrPartner };
+  const staleWrittenOffSale = {
+    id: 'eq-1777010591211-6e060b',
+    model: 'Mantall XE140RT',
+    serialNumber: '03331938',
+    status: 'inactive',
+    category: 'own',
+    saleMode: true,
+    forSale: true,
+    isForSale: true,
+    saleStatus: 'На продаже',
+  };
+
+  assert.equal(getEquipmentRegistryBucket(staleWrittenOffSale, activeRentalIndex), 'for_sale');
+  assert.equal(getRegistryStatusKind(staleWrittenOffSale, activeRentalIndex), 'for_sale');
+  assert.equal(isForSaleEquipment(staleWrittenOffSale), true);
+  assert.equal(isWrittenOffEquipment(staleWrittenOffSale), false);
+  assert.equal(matchesTabType(staleWrittenOffSale, 'for_sale', activeRentalIndex, options), true);
+  assert.equal(matchesTabType(staleWrittenOffSale, 'written_off', activeRentalIndex, options), false);
+  assert.equal(matchesStatusFilter(staleWrittenOffSale, 'for_sale', activeRentalIndex, options), true);
+  assert.equal(matchesStatusFilter(staleWrittenOffSale, 'inactive', activeRentalIndex, options), false);
+});
+
+test('equipment registry keeps real written-off and sold priority classifications', () => {
+  const activeRentalIndex = buildActiveRentalIndex([], []);
+  const options = { canEquipmentParticipateInRentals: canRentOwnOrPartner };
+  const writtenOff = {
+    id: 'EQ-written-off',
+    status: 'Списанная',
+    category: 'own',
+    saleMode: false,
+    forSale: false,
+    isForSale: false,
+  };
+  const soldWithSaleFlags = {
+    id: 'EQ-sold',
+    status: 'inactive',
+    category: 'sold',
+    saleStatus: 'Продана',
+    saleMode: true,
+    forSale: true,
+    isForSale: true,
+  };
+
+  assert.equal(getEquipmentRegistryBucket(writtenOff, activeRentalIndex), 'written_off');
+  assert.equal(matchesTabType(writtenOff, 'written_off', activeRentalIndex, options), true);
+  assert.equal(matchesTabType(writtenOff, 'for_sale', activeRentalIndex, options), false);
+
+  assert.equal(getEquipmentRegistryBucket(soldWithSaleFlags, activeRentalIndex), 'sold');
+  assert.equal(matchesTabType(soldWithSaleFlags, 'sold', activeRentalIndex, options), true);
+  assert.equal(matchesTabType(soldWithSaleFlags, 'for_sale', activeRentalIndex, options), false);
 });
 
 test('equipment registry availability rules keep blocked states out of free tab', () => {
@@ -226,14 +283,39 @@ test('equipment registry tab counts preserve sale and fleet classification', () 
   const counts = buildEquipmentTabCounts(equipment, tabs, activeRentalIndex, { canEquipmentParticipateInRentals: canRentOwnOrPartner });
 
   assert.equal(counts.all, 8);
-  assert.equal(counts.available, 2);
+  assert.equal(counts.available, 1);
   assert.equal(counts.rented, 2);
   assert.equal(counts.service, 1);
   assert.equal(counts.reserved, 1);
   assert.equal(counts.written_off, 1);
-  assert.equal(counts.for_sale, 2);
+  assert.equal(counts.for_sale, 1);
   assert.equal(counts.sold, 1);
   assert.equal(matchesTabType(equipment.find(item => item.id === 'EQ-sold'), 'available', activeRentalIndex, { canEquipmentParticipateInRentals: canRentOwnOrPartner }), false);
+});
+
+test('equipment registry tab counts do not include active sale equipment in written-off totals', () => {
+  const equipment = [
+    { id: 'EQ-written-off', inventoryNumber: 'INV-written-off', status: 'inactive', category: 'own' },
+    {
+      id: 'eq-1777010591211-6e060b',
+      inventoryNumber: 'INV-sale',
+      status: 'inactive',
+      category: 'own',
+      saleMode: true,
+      forSale: true,
+      isForSale: true,
+      saleStatus: 'На продаже',
+    },
+  ];
+  const activeRentalIndex = buildActiveRentalIndex(equipment, []);
+  const tabs = [
+    { key: 'written_off' },
+    { key: 'for_sale' },
+  ];
+  const counts = buildEquipmentTabCounts(equipment, tabs, activeRentalIndex, { canEquipmentParticipateInRentals: canRentOwnOrPartner });
+
+  assert.equal(counts.written_off, 1);
+  assert.equal(counts.for_sale, 1);
 });
 
 test('equipment registry investor scope accepts only safe owner bindings', () => {

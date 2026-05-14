@@ -54,7 +54,7 @@ const DialogContent = React.forwardRef<
         ref={ref}
         data-slot="dialog-content"
         className={animatedModalClassName(cn(
-          "grid max-h-[min(90vh,760px)] overflow-hidden",
+          "grid max-h-[min(92dvh,calc(100dvh-2rem),760px)] overflow-hidden",
           className,
         ))}
         {...props}
@@ -87,7 +87,7 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="dialog-footer"
       className={cn(
-        "mt-2 flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end dark:border-gray-800",
+        "sticky bottom-0 z-10 mt-2 flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 pt-4 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:flex-row sm:justify-end dark:border-gray-800 dark:bg-gray-950/95",
         className,
       )}
       {...props}

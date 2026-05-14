@@ -2129,7 +2129,7 @@ export default function ServiceDetail({
       {revisionModalPresence.shouldRender && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div data-state={revisionModalPresence.dataState} className="app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px] dark:bg-black/60" />
-          <div data-state={revisionModalPresence.dataState} onAnimationEnd={revisionModalPresence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 flex max-h-[90vh] w-[calc(100vw-2rem)] max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl">
+          <div data-state={revisionModalPresence.dataState} onAnimationEnd={revisionModalPresence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl">
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
               <div>
                 <h2 className="text-xl font-semibold text-slate-950 dark:text-white">Вернуть механику на доработку</h2>
@@ -2186,7 +2186,7 @@ export default function ServiceDetail({
               </div>
               {revisionError && <p className="text-sm text-red-500">{revisionError}</p>}
             </div>
-            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 sm:flex-row sm:justify-end dark:border-gray-800 dark:bg-gray-950/95">
+            <div className="sticky bottom-0 z-10 flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:flex-row sm:justify-end dark:border-gray-800 dark:bg-gray-950/95">
               <Button variant="secondary" onClick={() => setRevisionModalOpen(false)}>Отмена</Button>
               <Button onClick={() => void returnForRevision()} disabled={revisionBusy || !revisionReason.trim()}>
                 Вернуть механику

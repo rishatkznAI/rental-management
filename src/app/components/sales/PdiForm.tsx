@@ -18,6 +18,7 @@ type PdiFormProps = {
   equipment: Equipment;
   onCancel: () => void;
   onCreated?: (ticket: ServiceTicket, status: EquipmentSalePdiStatus) => void | Promise<void>;
+  stickyActions?: boolean;
 };
 
 const CHECK_LABELS = {
@@ -73,7 +74,7 @@ function statusFromResult(result: PdiResult, current: EquipmentSalePdiStatus): E
   return current === 'not_started' ? 'in_progress' : current;
 }
 
-export function PdiForm({ equipment, onCancel, onCreated }: PdiFormProps) {
+export function PdiForm({ equipment, onCancel, onCreated, stickyActions = false }: PdiFormProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const createTicket = useCreateServiceTicket();
@@ -437,7 +438,7 @@ export function PdiForm({ equipment, onCancel, onCreated }: PdiFormProps) {
         </CardContent>
       </Card>
 
-      <div className="flex gap-3">
+      <div className={stickyActions ? 'sticky bottom-0 z-10 flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:flex-row dark:border-gray-800 dark:bg-gray-950/95' : 'flex gap-3'}>
         <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Сохраняем PDI...' : 'Сохранить PDI'}</Button>
         <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>Отмена</Button>
       </div>

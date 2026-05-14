@@ -88,10 +88,10 @@ const selectClass =
   'dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400';
 
 const modalOverlayClass = 'app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px] dark:bg-black/60';
-const modalSurfaceClass = 'app-animate-modal fixed left-1/2 top-1/2 z-10 flex w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl';
+const modalSurfaceClass = 'app-animate-modal fixed left-1/2 top-1/2 z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl';
 const modalHeaderClass = 'flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800';
 const modalBodyClass = 'min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5';
-const modalFooterClass = 'flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 sm:flex-row sm:justify-end dark:border-gray-800 dark:bg-gray-950/95';
+const modalFooterClass = 'sticky bottom-0 z-10 flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:flex-row sm:justify-end dark:border-gray-800 dark:bg-gray-950/95';
 const modalCloseClass = 'absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200';
 
 function getGanttRentalSourceId(rental: GanttRentalData): string {
@@ -852,7 +852,7 @@ export function NewRentalModal({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div data-state={presence.dataState} className={modalOverlayClass} onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className={`${modalSurfaceClass} max-h-[85vh] max-w-lg`}>
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className={`${modalSurfaceClass} max-w-lg`}>
         <div className={modalHeaderClass}>
           <div>
             <h3 className="text-xl font-semibold text-slate-950 dark:text-white">Новая аренда</h3>

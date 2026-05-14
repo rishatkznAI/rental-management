@@ -4970,8 +4970,8 @@ export default function EquipmentDetail() {
       <Dialog.Root open={showCreateServiceModal} onOpenChange={setShowCreateServiceModal}>
         <Dialog.Portal>
           <Dialog.Overlay className={animatedOverlayClassName()} />
-          <Dialog.Content className={animatedModalClassName('max-h-[92vh] w-[min(96vw,960px)] overflow-y-auto rounded-2xl border-slate-200/90 bg-white p-6 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950')}>
-            <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4 pr-10 dark:border-gray-800">
+          <Dialog.Content className={animatedModalClassName('flex max-h-[min(92dvh,calc(100dvh-2rem))] w-[min(96vw,960px)] flex-col overflow-hidden rounded-2xl border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950')}>
+            <div className="shrink-0 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
               <div>
                 <Dialog.Title className="text-xl font-semibold text-slate-950 dark:text-white">
                   {saleMode ? 'PDI / предпродажная подготовка' : 'Новая сервисная заявка'}
@@ -4988,51 +4988,55 @@ export default function EquipmentDetail() {
                 </button>
               </Dialog.Close>
             </div>
-            {saleMode ? (
-              <PdiForm
-                equipment={equipment}
-                onCancel={() => setShowCreateServiceModal(false)}
-                onCreated={(ticket, nextPdiStatus) => {
-                  setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
-                  const nextEquipment = allEquipment.map(item =>
-                    item.id === equipment.id
-                      ? appendAuditHistory(
-                          { ...item, salePdiStatus: nextPdiStatus },
-                          createAuditEntry(
-                            user?.name || 'Система',
-                            `Сохранена PDI / предпродажная подготовка ${ticket.id}: ${ticket.reason}`,
-                          ),
-                        )
-                      : item,
-                  );
-                  void persistEquipment(nextEquipment);
-                  setShowCreateServiceModal(false);
-                }}
-              />
-            ) : (
-              <ServiceTicketForm
-                initialEquipmentId={equipment.id}
-                lockEquipment
-                submitLabel="Создать заявку"
-                onCancel={() => setShowCreateServiceModal(false)}
-                onCreated={(ticket) => {
-                setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
-                const nextEquipment = allEquipment.map(item =>
-                  item.id === equipment.id
-                    ? appendAuditHistory(
-                        { ...item, status: 'in_service', currentClient: undefined, returnDate: undefined },
-                        createAuditEntry(
-                          user?.name || 'Система',
-                          `Создана сервисная заявка ${ticket.id}: ${ticket.reason}`,
-                        ),
-                      )
-                    : item,
-                );
-                void persistEquipment(nextEquipment);
-                setShowCreateServiceModal(false);
-              }}
-              />
-            )}
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+              {saleMode ? (
+                <PdiForm
+                  equipment={equipment}
+                  stickyActions
+                  onCancel={() => setShowCreateServiceModal(false)}
+                  onCreated={(ticket, nextPdiStatus) => {
+                    setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
+                    const nextEquipment = allEquipment.map(item =>
+                      item.id === equipment.id
+                        ? appendAuditHistory(
+                            { ...item, salePdiStatus: nextPdiStatus },
+                            createAuditEntry(
+                              user?.name || 'Система',
+                              `Сохранена PDI / предпродажная подготовка ${ticket.id}: ${ticket.reason}`,
+                            ),
+                          )
+                        : item,
+                    );
+                    void persistEquipment(nextEquipment);
+                    setShowCreateServiceModal(false);
+                  }}
+                />
+              ) : (
+                <ServiceTicketForm
+                  initialEquipmentId={equipment.id}
+                  lockEquipment
+                  stickyActions
+                  submitLabel="Создать заявку"
+                  onCancel={() => setShowCreateServiceModal(false)}
+                  onCreated={(ticket) => {
+                    setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
+                    const nextEquipment = allEquipment.map(item =>
+                      item.id === equipment.id
+                        ? appendAuditHistory(
+                            { ...item, status: 'in_service', currentClient: undefined, returnDate: undefined },
+                            createAuditEntry(
+                              user?.name || 'Система',
+                              `Создана сервисная заявка ${ticket.id}: ${ticket.reason}`,
+                            ),
+                          )
+                        : item,
+                    );
+                    void persistEquipment(nextEquipment);
+                    setShowCreateServiceModal(false);
+                  }}
+                />
+              )}
+            </div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -5683,10 +5687,10 @@ function EditEquipmentModal({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={animatedOverlayClassName()} />
-        <Dialog.Content className={animatedModalClassName('max-h-[92vh] max-w-2xl overflow-hidden rounded-2xl border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950')}>
+        <Dialog.Content className={animatedModalClassName('flex max-h-[min(92dvh,calc(100dvh-2rem))] max-w-2xl flex-col overflow-hidden rounded-2xl border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950')}>
 
           {/* Header */}
-          <div className="border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
+          <div className="shrink-0 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
             <Dialog.Title className="text-xl font-semibold text-slate-950 dark:text-white">
               Редактировать технику
             </Dialog.Title>
@@ -5696,7 +5700,7 @@ function EditEquipmentModal({
           </div>
 
           {/* Scrollable body */}
-          <div className="overflow-y-auto" style={{ maxHeight: 'calc(92vh - 130px)' }}>
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-6 px-6 py-5">
 
               {/* ── Блок 1: Идентификация ── */}
@@ -6247,7 +6251,7 @@ function EditEquipmentModal({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between gap-4 border-t border-slate-100 bg-white/95 px-6 py-4 dark:border-gray-800 dark:bg-gray-950/95">
+          <div className="sticky bottom-0 z-10 flex shrink-0 flex-col gap-3 border-t border-slate-100 bg-white/95 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:flex-row sm:items-center sm:justify-between dark:border-gray-800 dark:bg-gray-950/95">
             <div>
               <p className="text-xs text-gray-400 dark:text-gray-500">
                 Поля, отмеченные <span className="text-red-500">*</span>, обязательны
@@ -6256,7 +6260,7 @@ function EditEquipmentModal({
                 <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">{saveError}</p>
               )}
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">
               <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={isSaving}>Отмена</Button>
               <Button onClick={() => void onSave(form)} disabled={isSaving || (!canEditOperationalFields && !canEditSaleFields && !canEditAdminOnlyFields)}>
                 {isSaving ? 'Сохранение...' : 'Сохранить изменения'}

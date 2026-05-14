@@ -31,6 +31,7 @@ type ServiceTicketFormProps = {
   scenarioTitle?: string;
   scenarioDescription?: string;
   hideScenarioSelect?: boolean;
+  stickyActions?: boolean;
 };
 
 export function ServiceTicketForm({
@@ -44,6 +45,7 @@ export function ServiceTicketForm({
   scenarioTitle,
   scenarioDescription,
   hideScenarioSelect = false,
+  stickyActions = false,
 }: ServiceTicketFormProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -614,7 +616,7 @@ export function ServiceTicketForm({
         </CardContent>
       </Card>
 
-      <div className="flex gap-3">
+      <div className={stickyActions ? 'sticky bottom-0 z-10 flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:flex-row dark:border-gray-800 dark:bg-gray-950/95' : 'flex gap-3'}>
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? 'Создаём заявку…' : submitLabel}
         </Button>

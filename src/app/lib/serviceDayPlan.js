@@ -257,6 +257,7 @@ export function buildServiceDayPlan(input = {}) {
   const overdue = visibleTasks.filter(task => task.isOverdue).sort(ticketSort);
   const waitingParts = visibleTasks.filter(task => task.waitingParts).sort(ticketSort);
   const readyToClose = visibleTasks.filter(task => task.readyToClose).sort(ticketSort);
+  const scheduledToday = visibleTasks.filter(task => task.isToday);
   const inProgress = visibleTasks.filter(task => task.status === 'in_progress' || task.status === 'needs_revision');
   const newTasks = visibleTasks.filter(task => task.status === 'new');
   const freeMechanics = mechanics.filter(mechanic => mechanic.workloadStatus === 'free');
@@ -270,6 +271,7 @@ export function buildServiceDayPlan(input = {}) {
     problems: { unassigned, overdue, waitingParts, readyToClose },
     metrics: {
       total: visibleTasks.length,
+      scheduledToday: scheduledToday.length,
       inProgress: inProgress.length,
       new: newTasks.length,
       overdue: overdue.length,

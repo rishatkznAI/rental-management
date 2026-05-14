@@ -163,10 +163,10 @@ async function exerciseFilters(page: Page, label: string) {
 
 async function expectServiceDayPlan(page: Page) {
   await goToRoute(page, '/service');
-  await page.getByRole('tab', { name: 'План дня' }).click();
-  await expect(page.getByRole('heading', { name: 'Диспетчерская доска' })).toBeVisible();
-  await expect(page.getByText(/Задачи механиков на сегодня/)).toBeVisible();
-  await expect(page.getByText('Задач на сегодня')).toBeVisible();
+  await page.getByRole('tab', { name: 'Планировщик' }).click();
+  await expect(page.getByRole('heading', { name: 'Планировщик сервиса' })).toBeVisible();
+  await expect(page.getByText(/Загрузка механиков/)).toBeVisible();
+  await expect(page.getByText('Заявок на день')).toBeVisible();
   await expect(page.getByText('Без механика').first()).toBeVisible();
   await expect(page.getByLabel(/Открыть заявку/).first()).toBeVisible();
 }

@@ -1,12 +1,13 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, CalendarDays, Clock, ExternalLink, Plus, RefreshCw, UserRound, Wrench } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Clock, ExternalLink, Plus, RefreshCw, UserCheck, UserRound, Wrench } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge, getServicePriorityBadge, getServiceStatusBadge } from '../ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { useAuth, type AuthUser } from '../../contexts/AuthContext';
 import { isMechanicRole } from '../../lib/userStorage';
 import { buildServiceDayPlan, localDateKey } from '../../lib/serviceDayPlan.js';
+import { useUpdateServiceTicket } from '../../hooks/useServiceTickets';
 import type { Mechanic, ServiceTicket } from '../../types';
 
 type DayPlanFilter =
@@ -22,7 +23,6 @@ type DayPlanTask = ReturnType<typeof buildServiceDayPlan>['tasks'][number];
 
 const FILTERS: Array<{ value: DayPlanFilter; label: string }> = [
   { value: 'all', label: 'Все' },
-  { value: 'mine', label: 'Только мои' },
   { value: 'unassigned', label: 'Без механика' },
   { value: 'overdue', label: 'Просроченные' },
   { value: 'high', label: 'Высокий приоритет' },
@@ -89,22 +89,51 @@ function MetricCard({ label, value, tone }: { label: string; value: number; tone
   );
 }
 
+function mechanicAssignmentPayload(mechanicKey: string, mechanics: Mechanic[]) {
+  if (mechanicKey === 'unassigned') {
+    return {
+      assignedMechanicId: undefined,
+      assignedMechanicName: undefined,
+      assignedTo: undefined,
+      mechanicId: undefined,
+      assignedUserId: undefined,
+    };
+  }
+  const mechanic = mechanics.find(item => (item.id || item.name) === mechanicKey);
+  if (!mechanic) return null;
+  return {
+    assignedMechanicId: mechanic.id || undefined,
+    assignedMechanicName: mechanic.name || undefined,
+    assignedTo: mechanic.name || undefined,
+    mechanicId: mechanic.id || undefined,
+    assignedUserId: mechanic.userId || undefined,
+  };
+}
+
 function TaskRow({
   task,
+  mechanics,
   canEditService,
   canManageDayPlan,
   currentUser,
+  isAssigning = false,
+  onAssignMechanic,
   onOpenTicket,
 }: {
   task: DayPlanTask;
+  mechanics: Mechanic[];
   canEditService: boolean;
   canManageDayPlan: boolean;
   currentUser: AuthUser | null;
+  isAssigning?: boolean;
+  onAssignMechanic?: (ticketId: string, mechanicKey: string) => void;
   onOpenTicket?: (ticketId: string) => void;
 }) {
   const dateLabel = task.dueDate || task.planDate || '';
   const canUseAssignedWorkflow = canEditService && (canManageDayPlan || dayPlanTaskMatchesCurrentUser(task, currentUser));
   const canReschedule = canEditService && canManageDayPlan;
+  const canAssign = canEditService && canManageDayPlan && Boolean(onAssignMechanic);
+  const assignedValue = task.mechanicId || task.mechanicName || 'unassigned';
   const openTicket = () => onOpenTicket?.(task.id);
   return (
     <div className="border-b border-gray-100 px-3 py-3 last:border-b-0 dark:border-white/8">
@@ -141,7 +170,29 @@ function TaskRow({
         <span>{dateLabel ? `Срок: ${dateLabel}` : 'Без даты'}</span>
         {task.location && <span>Объект: {compactText(task.location, 44)}</span>}
         <span>{task.waitingParts ? 'Запчасти ожидаются' : task.hasParts ? 'Запчасти указаны' : 'Запчасти не указаны'}</span>
+        {task.readyToClose && <span>Готово к закрытию</span>}
       </div>
+      {canAssign && (
+        <div className="mt-3">
+          <Select
+            value={assignedValue}
+            disabled={isAssigning}
+            onValueChange={(value) => onAssignMechanic?.(task.id, value)}
+          >
+            <SelectTrigger className="h-9 w-full rounded-lg text-xs sm:w-[240px]" aria-label={`Назначить механика для заявки ${task.id}`}>
+              <SelectValue placeholder="Назначить механика" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unassigned">Без механика</SelectItem>
+              {mechanics.map(mechanic => (
+                <SelectItem key={mechanic.id || mechanic.name} value={mechanic.id || mechanic.name}>
+                  {mechanic.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap gap-2">
         {onOpenTicket ? (
           <Button type="button" size="sm" variant="secondary" onClick={openTicket}>Открыть</Button>
@@ -191,18 +242,24 @@ function ProblemList({
   items,
   empty,
   icon,
+  mechanics,
   canEditService,
   canManageDayPlan,
   currentUser,
+  isAssigning,
+  onAssignMechanic,
   onOpenTicket,
 }: {
   title: string;
   items: DayPlanTask[];
   empty: string;
   icon: React.ReactNode;
+  mechanics: Mechanic[];
   canEditService: boolean;
   canManageDayPlan: boolean;
   currentUser: AuthUser | null;
+  isAssigning: boolean;
+  onAssignMechanic?: (ticketId: string, mechanicKey: string) => void;
   onOpenTicket?: (ticketId: string) => void;
 }) {
   return (
@@ -220,9 +277,12 @@ function ProblemList({
             <TaskRow
               key={`${title}-${task.id}`}
               task={task}
+              mechanics={mechanics}
               canEditService={canEditService}
               canManageDayPlan={canManageDayPlan}
               currentUser={currentUser}
+              isAssigning={isAssigning}
+              onAssignMechanic={onAssignMechanic}
               onOpenTicket={onOpenTicket}
             />
           ))}
@@ -252,18 +312,23 @@ export function ServiceDayPlanBoard({
   onOpenTicket?: (ticketId: string) => void;
 }) {
   const { user } = useAuth();
+  const updateTicket = useUpdateServiceTicket();
   const today = React.useMemo(() => localDateKey(new Date()), []);
-  const [dateMode, setDateMode] = React.useState<'today' | 'tomorrow'>('today');
-  const [filter, setFilter] = React.useState<DayPlanFilter>(() => isMineDefault(user?.role) ? 'mine' : 'all');
+  const isPersonalMechanicView = isMineDefault(user?.role) && !canManageDayPlan;
+  const [targetDate, setTargetDate] = React.useState(today);
+  const [filter, setFilter] = React.useState<DayPlanFilter>(() => isPersonalMechanicView ? 'mine' : 'all');
   const [statusFilter, setStatusFilter] = React.useState<DayPlanFilter>('all');
   const [mechanicFilter, setMechanicFilter] = React.useState('all');
-  const targetDate = React.useMemo(() => {
-    if (dateMode === 'today') return today;
-    const date = new Date();
-    date.setDate(date.getDate() + 1);
-    return localDateKey(date);
-  }, [dateMode, today]);
-  const onlyMine = filter === 'mine' || isMineDefault(user?.role);
+  const onlyMine = filter === 'mine' || isPersonalMechanicView;
+  const visibleFilterOptions = React.useMemo(
+    () => isPersonalMechanicView
+      ? [{ value: 'mine' as DayPlanFilter, label: 'Только мои' }, ...FILTERS]
+      : FILTERS,
+    [isPersonalMechanicView],
+  );
+  React.useEffect(() => {
+    if (!isPersonalMechanicView && filter === 'mine') setFilter('all');
+  }, [filter, isPersonalMechanicView]);
   const plan = React.useMemo(() => buildServiceDayPlan({
     date: targetDate,
     tickets,
@@ -289,6 +354,15 @@ export function ServiceDayPlanBoard({
     waitingParts: plan.problems.waitingParts.filter(task => taskMatchesFilter(task, filter) && taskMatchesFilter(task, statusFilter)),
     readyToClose: plan.problems.readyToClose.filter(task => taskMatchesFilter(task, filter) && taskMatchesFilter(task, statusFilter)),
   }), [filter, plan.problems, statusFilter]);
+  const assignableMechanics = React.useMemo(
+    () => mechanics.filter(mechanic => mechanic.status !== 'inactive' && (mechanic.id || mechanic.name)),
+    [mechanics],
+  );
+  const handleAssignMechanic = React.useCallback((ticketId: string, mechanicKey: string) => {
+    const data = mechanicAssignmentPayload(mechanicKey, assignableMechanics);
+    if (!data) return;
+    updateTicket.mutate({ id: ticketId, data });
+  }, [assignableMechanics, updateTicket]);
 
   return (
     <div className="space-y-5">
@@ -297,16 +371,20 @@ export function ServiceDayPlanBoard({
           <div>
             <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-gray-500 dark:text-gray-400">
               <CalendarDays className="h-4 w-4" />
-              <span>План дня: {plan.displayDate}</span>
+              <span>Планировщик: {plan.displayDate}</span>
             </div>
-            <h2 className="mt-1 text-2xl font-black text-gray-900 dark:text-white">Диспетчерская доска</h2>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Задачи механиков на сегодня</p>
+            <h2 className="mt-1 text-2xl font-black text-gray-900 dark:text-white">Планировщик сервиса</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Загрузка механиков, заявки без ответственного и критичные статусы</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
-            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-white/10 dark:bg-white/[0.03]">
-              <button type="button" onClick={() => setDateMode('today')} className="app-filter-chip" data-active={String(dateMode === 'today')}>Сегодня</button>
-              <button type="button" onClick={() => setDateMode('tomorrow')} className="app-filter-chip" data-active={String(dateMode === 'tomorrow')}>Завтра</button>
-            </div>
+            <input
+              type="date"
+              value={targetDate}
+              onChange={(event) => setTargetDate(event.target.value || today)}
+              className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-white"
+              aria-label="Дата планировщика"
+            />
+            <Button type="button" variant="secondary" onClick={() => setTargetDate(today)} className="h-10">Сегодня</Button>
             <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
               <SelectTrigger className="h-10 w-full rounded-lg sm:w-[220px]">
                 <SelectValue placeholder="По механику" />
@@ -347,7 +425,7 @@ export function ServiceDayPlanBoard({
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          {FILTERS.map(option => (
+          {visibleFilterOptions.map(option => (
             <button
               key={option.value}
               type="button"
@@ -362,10 +440,10 @@ export function ServiceDayPlanBoard({
       </section>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label="Задач на сегодня" value={plan.metrics.total} tone="text-gray-900 dark:text-white" />
-        <MetricCard label="В работе" value={plan.metrics.inProgress} tone="text-blue-500" />
-        <MetricCard label="Просроченные" value={plan.metrics.overdue} tone="text-red-500" />
+        <MetricCard label="Заявок на день" value={plan.metrics.scheduledToday} tone="text-gray-900 dark:text-white" />
         <MetricCard label="Без механика" value={plan.metrics.unassigned} tone="text-amber-500" />
+        <MetricCard label="Просроченные" value={plan.metrics.overdue} tone="text-red-500" />
+        <MetricCard label="Ожидание запчастей" value={plan.metrics.waitingParts} tone="text-orange-500" />
         <MetricCard label="Готово к закрытию" value={plan.metrics.readyToClose} tone="text-emerald-500" />
       </div>
 
@@ -408,9 +486,12 @@ export function ServiceDayPlanBoard({
                   <TaskRow
                     key={task.id}
                     task={task}
+                    mechanics={assignableMechanics}
                     canEditService={canEditService}
                     canManageDayPlan={canManageDayPlan}
                     currentUser={user}
+                    isAssigning={updateTicket.isPending}
+                    onAssignMechanic={handleAssignMechanic}
                     onOpenTicket={onOpenTicket}
                   />
                 ))}
@@ -424,10 +505,10 @@ export function ServiceDayPlanBoard({
             <AlertTriangle className="h-5 w-5 text-red-500" />
             <h2 className="text-lg font-black text-gray-900 dark:text-white">Проблемы дня</h2>
           </div>
-          <ProblemList title="Без механика" items={problemTasks.unassigned} empty="Все задачи назначены." icon={<UserRound className="h-4 w-4 text-amber-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} onOpenTicket={onOpenTicket} />
-          <ProblemList title="Просроченные" items={problemTasks.overdue} empty="Просрочек нет." icon={<Clock className="h-4 w-4 text-red-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} onOpenTicket={onOpenTicket} />
-          <ProblemList title="Ожидают запчасти" items={problemTasks.waitingParts} empty="Нет задач в ожидании запчастей." icon={<Wrench className="h-4 w-4 text-orange-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} onOpenTicket={onOpenTicket} />
-          <ProblemList title="Готово к закрытию" items={problemTasks.readyToClose} empty="Нет заявок, готовых к закрытию." icon={<ExternalLink className="h-4 w-4 text-emerald-500" />} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} onOpenTicket={onOpenTicket} />
+          <ProblemList title="Без механика" items={problemTasks.unassigned} empty="Все задачи назначены." icon={<UserCheck className="h-4 w-4 text-amber-500" />} mechanics={assignableMechanics} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} isAssigning={updateTicket.isPending} onAssignMechanic={handleAssignMechanic} onOpenTicket={onOpenTicket} />
+          <ProblemList title="Просроченные" items={problemTasks.overdue} empty="Просрочек нет." icon={<Clock className="h-4 w-4 text-red-500" />} mechanics={assignableMechanics} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} isAssigning={updateTicket.isPending} onAssignMechanic={handleAssignMechanic} onOpenTicket={onOpenTicket} />
+          <ProblemList title="Ожидают запчасти" items={problemTasks.waitingParts} empty="Нет задач в ожидании запчастей." icon={<Wrench className="h-4 w-4 text-orange-500" />} mechanics={assignableMechanics} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} isAssigning={updateTicket.isPending} onAssignMechanic={handleAssignMechanic} onOpenTicket={onOpenTicket} />
+          <ProblemList title="Готово к закрытию" items={problemTasks.readyToClose} empty="Нет заявок, готовых к закрытию." icon={<ExternalLink className="h-4 w-4 text-emerald-500" />} mechanics={assignableMechanics} canEditService={canEditService} canManageDayPlan={canManageDayPlan} currentUser={user} isAssigning={updateTicket.isPending} onAssignMechanic={handleAssignMechanic} onOpenTicket={onOpenTicket} />
         </aside>
       </div>
     </div>

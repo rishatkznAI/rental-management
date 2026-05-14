@@ -1458,7 +1458,7 @@ export default function Service() {
               value="day-plan"
               className="flex-none rounded-none border-0 border-b-4 border-transparent bg-transparent px-0 pb-4 pt-0 text-xl font-black text-gray-500 data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:data-[state=active]:bg-transparent"
             >
-              План дня
+              Планировщик
             </TabsTrigger>
           )}
           {canManageWarrantyClaims && (

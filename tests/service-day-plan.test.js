@@ -31,10 +31,32 @@ test('service day plan includes planned due overdue unassigned and ready tickets
     'S-waiting',
   ]);
   assert.equal(plan.metrics.total, 6);
+  assert.equal(plan.metrics.scheduledToday, 2);
   assert.equal(plan.metrics.overdue, 1);
   assert.equal(plan.metrics.unassigned, 1);
   assert.equal(plan.metrics.waitingParts, 1);
   assert.equal(plan.metrics.readyToClose, 1);
+  assert.equal(plan.problems.waitingParts[0].id, 'S-waiting');
+  assert.equal(plan.problems.readyToClose[0].id, 'S-ready');
+});
+
+test('service day planner uses planned date first and selected date changes visible scheduled tickets', () => {
+  const mechanics = [{ id: 'M-1', name: 'Петров', status: 'active' }];
+  const tickets = [
+    { id: 'S-today', status: 'new', priority: 'medium', plannedDate: '2026-05-10', assignedMechanicId: 'M-1', reason: 'Сегодня' },
+    { id: 'S-other-day', status: 'new', priority: 'medium', plannedDate: '2026-05-11', assignedMechanicId: 'M-1', reason: 'Завтра' },
+    { id: 'S-scheduled', status: 'new', priority: 'medium', scheduledDate: '2026-05-11', assignedMechanicId: 'M-1', reason: 'Запланирована' },
+    { id: 'S-closed-today', status: 'closed', priority: 'critical', plannedDate: '2026-05-11', assignedMechanicId: 'M-1', reason: 'Архив' },
+  ];
+
+  const firstDay = buildServiceDayPlan({ date: '2026-05-10', mechanics, tickets });
+  const secondDay = buildServiceDayPlan({ date: '2026-05-11', mechanics, tickets });
+
+  assert.deepEqual(firstDay.tasks.map(task => task.id), ['S-today']);
+  assert.deepEqual(secondDay.tasks.map(task => task.id).sort(), ['S-other-day', 'S-scheduled', 'S-today']);
+  assert.equal(secondDay.metrics.scheduledToday, 2);
+  assert.equal(secondDay.metrics.overdue, 1);
+  assert.equal(secondDay.tasks.some(task => task.id === 'S-closed-today'), false);
 });
 
 test('service day plan groups tasks by mechanics and marks free and overloaded mechanics', () => {

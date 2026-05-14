@@ -70,6 +70,11 @@ const MASS_ASSIGNMENT_BLOCKED_FIELDS = new Set([
 const HEAD_REDACTED_FIELDS = new Set([
   'amount',
   'balance',
+  'carrierInvoiceReceived',
+  'carrierInvoiceReceivedAt',
+  'clientPaymentVerified',
+  'clientPaymentVerifiedAt',
+  'cost',
   'debt',
   'discount',
   'documents',
@@ -1121,6 +1126,7 @@ function canAccessEntity(collection, entity, user, readData) {
     }
     case 'deliveries':
       if (isOfficeManager(user)) return true;
+      if (isHead(user)) return true;
       if (isRentalManager(user) || isSalesManager(user)) return matchesUserManager(entity, user);
       if (isCarrier(user)) return isCarrierDelivery(entity, user);
       return false;
@@ -1277,7 +1283,7 @@ function redactHeadFields(value) {
 
 function sanitizeEntityForRead(collection, entity, user) {
   if (!entity) return entity;
-  if (isHead(user) && ['gantt_rentals', 'rentals'].includes(collection)) {
+  if (isHead(user) && ['deliveries', 'gantt_rentals', 'rentals'].includes(collection)) {
     return redactHeadFields(entity);
   }
   if (!isWarrantyMechanic(user)) return entity;

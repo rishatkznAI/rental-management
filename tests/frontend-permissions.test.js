@@ -95,7 +95,8 @@ test('frontend delivery create RBAC exposes active create only to operational ro
 
   assert.match(carrierBlock, /deliveries:\s+VIEW/);
   assert.doesNotMatch(carrierBlock, /create/);
-  assert.doesNotMatch(headBlock, /\bdeliveries:\s+/);
+  assert.match(headBlock, /deliveries:\s+VIEW/);
+  assert.doesNotMatch(headBlock, /create/);
   assert.doesNotMatch(investorBlock, /\bdeliveries:\s+/);
 });
 
@@ -178,7 +179,7 @@ test('frontend head role has read-only movement and equipment photo history view
   assert.doesNotMatch(block, /create/);
   assert.doesNotMatch(block, /delete/);
 
-  for (const section of ['dashboard', 'gsm', 'deliveries', 'planner', 'service', 'clients', 'documents', 'payments', 'finance', 'reports', 'admin_panel', 'bots']) {
+  for (const section of ['dashboard', 'gsm', 'planner', 'service', 'clients', 'documents', 'payments', 'finance', 'reports', 'admin_panel', 'bots']) {
     assert.doesNotMatch(block, new RegExp(`\\b${section}:\\s+`), `${section} must not be granted to head`);
   }
 

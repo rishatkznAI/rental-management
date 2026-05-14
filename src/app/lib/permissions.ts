@@ -88,6 +88,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
   },
   'Руководитель': {
     equipment: VIEW,
+    deliveries: VIEW,
     rentals: VIEW,
     profile_settings: ['view', 'edit'],
   },

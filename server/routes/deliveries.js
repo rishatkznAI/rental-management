@@ -883,7 +883,8 @@ function registerDeliveryRoutes(router, deps) {
       if (byDate !== 0) return byDate;
       return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
     });
-    res.json(deliveries.map(item => deliveryResponse(item, req)));
+    const sanitized = accessControl.sanitizeCollectionForRead('deliveries', deliveries, req.user);
+    res.json(sanitized.map(item => deliveryResponse(item, req)));
   });
 
   router.get('/deliveries/:id', requireAuth, requireRead('deliveries'), (req, res) => {
@@ -898,7 +899,7 @@ function registerDeliveryRoutes(router, deps) {
     if (isCarrierRequest(req) && isClosedDelivery(found)) {
       return res.status(403).json({ ok: false, error: 'Forbidden' });
     }
-    return res.json(deliveryResponse(found, req));
+    return res.json(deliveryResponse(accessControl.sanitizeEntityForRead('deliveries', found, req.user), req));
   });
 
   router.post('/deliveries', requireAuth, requireWrite('deliveries'), async (req, res) => {

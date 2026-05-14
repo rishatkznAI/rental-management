@@ -227,6 +227,29 @@ test('carrier delivery scope is tied to carrierId', () => {
   assert.equal(access.canMutateEntity('deliveries', { id: 'DL-1', status: 'sent', carrierId: 'carrier-1' }, carrier), false);
 });
 
+test('head can read delivery movement data but cannot mutate deliveries', () => {
+  const access = createAccess({});
+  const head = { userId: 'U-head', userName: 'Руководитель', userRole: 'Руководитель' };
+  const delivery = {
+    id: 'DL-1',
+    status: 'sent',
+    origin: 'Склад',
+    destination: 'Объект',
+    cost: 18000,
+    carrierInvoiceReceived: true,
+    clientPaymentVerified: true,
+  };
+
+  assert.equal(access.canAccessEntity('deliveries', delivery, head), true);
+  assert.deepEqual(access.filterCollectionByScope('deliveries', [delivery], head).map(item => item.id), ['DL-1']);
+  assert.equal(access.canMutateEntity('deliveries', delivery, head), false);
+
+  const safe = access.sanitizeEntityForRead('deliveries', delivery, head);
+  assert.equal(Object.hasOwn(safe, 'cost'), false);
+  assert.equal(Object.hasOwn(safe, 'carrierInvoiceReceived'), false);
+  assert.equal(Object.hasOwn(safe, 'clientPaymentVerified'), false);
+});
+
 test('non-admin cannot read app_settings or use generic payments mutation', () => {
   const access = createAccess({});
   const manager = { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' };

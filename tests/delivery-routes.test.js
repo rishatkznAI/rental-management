@@ -54,6 +54,13 @@ function createDeliveryApp(deliveryOverrides = {}) {
       phone: '+7 900 123-45-67',
       email: 'admin@example.test',
     }, {
+      id: 'U-head',
+      name: 'Руководитель',
+      role: 'Руководитель',
+      status: 'Активен',
+      phone: '+7 900 222-33-44',
+      email: 'head@example.test',
+    }, {
       id: 'U-carrier',
       name: 'ИП Сабитов Алмаз',
       role: 'Перевозчик',
@@ -107,7 +114,7 @@ function createDeliveryApp(deliveryOverrides = {}) {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const sessionUserId = token === 'admin-token'
       ? 'U-admin'
-      : (token === 'carrier-token' ? 'U-carrier' : null);
+      : (token === 'head-token' ? 'U-head' : (token === 'carrier-token' ? 'U-carrier' : null));
     if (!sessionUserId) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     const user = state.users.find(item => item.id === sessionUserId);
     if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
@@ -123,7 +130,7 @@ function createDeliveryApp(deliveryOverrides = {}) {
   function requireRead(collection) {
     return (req, res, next) => {
       const allowed = {
-        deliveries: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Перевозчик'],
+        deliveries: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Руководитель', 'Перевозчик'],
         delivery_carriers: ['Администратор'],
       }[collection] || ['Администратор'];
       return allowed.includes(req.user?.userRole) ? next() : res.status(403).json({ ok: false, error: 'Forbidden' });
@@ -270,6 +277,45 @@ test('admin reads every delivery including completed and cancelled records', asy
 
     assert.equal(list.status, 200);
     assert.deepEqual(new Set(list.body.map(item => item.id)), new Set(['DL-active', 'DL-completed', 'DL-cancelled']));
+  });
+});
+
+test('head reads deliveries as read-only movement data without financial fields', async () => {
+  const { app } = createDeliveryApp({
+    id: 'DL-head',
+    status: 'sent',
+    cost: 18000,
+    carrierInvoiceReceived: true,
+    carrierInvoiceReceivedAt: '2026-04-28T10:00:00.000Z',
+    clientPaymentVerified: true,
+    clientPaymentVerifiedAt: '2026-04-28T10:05:00.000Z',
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const list = await request(baseUrl, 'GET', '/api/deliveries', undefined, 'head-token');
+
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.map(item => item.id), ['DL-head']);
+    assert.equal(list.body[0].origin, 'Новая база');
+    assert.equal(list.body[0].destination, 'Аксубаево');
+    assert.equal(list.body[0].cargo, 'LGMG AS1413 L13000065');
+    for (const forbiddenField of [
+      'cost',
+      'carrierInvoiceReceived',
+      'carrierInvoiceReceivedAt',
+      'clientPaymentVerified',
+      'clientPaymentVerifiedAt',
+    ]) {
+      assert.equal(Object.hasOwn(list.body[0], forbiddenField), false, `${forbiddenField} must not be exposed`);
+    }
+
+    const detail = await request(baseUrl, 'GET', '/api/deliveries/DL-head', undefined, 'head-token');
+    assert.equal(detail.status, 200);
+    assert.equal(Object.hasOwn(detail.body, 'cost'), false);
+
+    assert.equal((await request(baseUrl, 'POST', '/api/deliveries', { id: 'DL-new' }, 'head-token')).status, 403);
+    assert.equal((await request(baseUrl, 'PATCH', '/api/deliveries/DL-head', { status: 'completed' }, 'head-token')).status, 403);
+    assert.equal((await request(baseUrl, 'DELETE', '/api/deliveries/DL-head', undefined, 'head-token')).status, 403);
   });
 });
 

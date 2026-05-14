@@ -517,7 +517,7 @@ const READ_PERMISSIONS = {
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES],
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
-  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Перевозчик'],
+  deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', HEAD_ROLE, 'Перевозчик'],
   delivery_carriers: ['Администратор'],
   service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   warranty_claims: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
